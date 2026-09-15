@@ -158,6 +158,29 @@ internal static class TaskXmlCheck
         return asUser.Count == 0 ? asUser : asSystem;
     }
 
+    // The principal and action a task's XML names, for display. Null fields were absent or unreadable.
+    internal sealed record Summary(string? UserId, string? LogonType, string? RunLevel, string? Command, string? Arguments, int Triggers);
+
+    public static Summary Describe(string? xml)
+    {
+        var ignored = new List<string>();
+        XElement? root = Load(xml, ignored);
+        if (root is null)
+        {
+            return new Summary(null, null, null, null, null, 0);
+        }
+
+        XElement? principal = root.Element(Ns + "Principals")?.Element(Ns + "Principal");
+        XElement? exec = root.Element(Ns + "Actions")?.Element(Ns + "Exec");
+        return new Summary(
+            principal?.Element(Ns + "UserId")?.Value ?? principal?.Element(Ns + "GroupId")?.Value,
+            principal?.Element(Ns + "LogonType")?.Value,
+            principal?.Element(Ns + "RunLevel")?.Value,
+            exec?.Element(Ns + "Command")?.Value,
+            exec?.Element(Ns + "Arguments")?.Value,
+            root.Element(Ns + "Triggers")?.Elements().Count() ?? 0);
+    }
+
     private static XElement? Load(string? xml, List<string> problems)
     {
         if (string.IsNullOrWhiteSpace(xml))
