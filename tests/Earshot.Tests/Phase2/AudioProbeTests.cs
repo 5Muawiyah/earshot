@@ -75,6 +75,18 @@ public sealed class AudioProbeTests
         }
     }
 
+    // A failed read is never reported as "none found".
+    [TestMethod]
+    public void TheDeviceLineSaysWhenTheDevicesCouldNotBeRead()
+    {
+        DeviceModel target = EndpointModelBuilder.Build(Machine(), "AirPods", Guid.Empty, DateTimeOffset.UnixEpoch).Snapshot.Target!;
+
+        Assert.AreEqual("Target: unknown, the audio devices could not be read", Program.DeviceLine(null, TargetResolution.ReadFailed));
+        Assert.AreEqual("Target: none found", Program.DeviceLine(null, TargetResolution.NotFound));
+        StringAssert.EndsWith(Program.DeviceLine(target, TargetResolution.ReadFailed), ", last known, the audio devices could not be read");
+        StringAssert.EndsWith(Program.DeviceLine(target, TargetResolution.NameMatch), ", matched by name");
+    }
+
     [TestMethod]
     public void AudioProbeSaysWhenThePinnedDeviceHasNoEndpoints()
     {

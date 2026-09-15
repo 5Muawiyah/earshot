@@ -13,6 +13,7 @@ namespace Earshot.Tests.Phase2;
 public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly DateTimeOffset Start = new(2026, 9, 15, 12, 0, 0, TimeSpan.Zero);
     private static readonly string[] SubscribeThenEnumerate = ["subscribe", "enumerate"];
 
     private CapturingLog _log = null!;
@@ -22,6 +23,7 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
     private ManualDelay _delay = null!;
     private List<DeviceSnapshot> _raised = null!;
     private int _posts;
+    private long _clockTicks;
     private CoreAudioDeviceMonitor _monitor = null!;
 
     [TestInitialize]
@@ -35,6 +37,7 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         _delay = new ManualDelay();
         _raised = new List<DeviceSnapshot>();
         _posts = 0;
+        _clockTicks = Start.UtcTicks;
         _monitor = NewMonitor(action =>
         {
             Interlocked.Increment(ref _posts);
@@ -52,7 +55,7 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
     {
         var monitor = new CoreAudioDeviceMonitor(
             _worker, _source, _settings, _log, uiPost, CoreAudioDeviceMonitor.DefaultCoalesceWindow, _delay.Delay,
-            () => DateTimeOffset.UtcNow);
+            () => new DateTimeOffset(Interlocked.Read(ref _clockTicks), TimeSpan.Zero));
         monitor.SnapshotChanged += (sender, e) =>
         {
             Assert.AreSame(monitor, sender);
@@ -63,6 +66,8 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         };
         return monitor;
     }
+
+    private void Advance(TimeSpan by) => Interlocked.Add(ref _clockTicks, by.Ticks);
 
     private int Raised
     {
@@ -315,7 +320,7 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         Assert.IsNull(refresh.Snapshot.Target);
         Assert.AreEqual(TargetResolution.PinnedAbsent, refresh.Resolution);
         Assert.AreEqual(TargetResolution.PinnedAbsent, _monitor.Resolution);
-        Assert.AreEqual(DeviceReadStatus.Ok, _monitor.ReadStatus);
+        Assert.AreEqual(SnapshotReadStatus.Ok, _monitor.ReadStatus);
         Assert.IsTrue(_log.Has(LogLevel.Info, "no target device, the pinned container {1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d} has no endpoints"));
 
         _source.SetReadings(Machine(EndpointState.Unplugged, EndpointState.Unplugged));
@@ -338,30 +343,53 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
     }
 
     [TestMethod]
-    public async Task AFailedEnumerationKeepsTheLastSnapshotAndIsReported()
+    public async Task AFailedEnumerationKeepsTheLastDevicesMarksThemFailedAndIsReported()
     {
         DeviceSnapshot good = await _monitor.RefreshAsync().WaitAsync(Timeout);
+        Advance(TimeSpan.FromSeconds(5));
         _source.EnumerationFailure = StepOutcomes.FromHResult(CoreAudioEndpointReader.EnumerateStep, CoreAudio.E_NOTFOUND);
 
         MonitorRefresh failed = await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
 
         Assert.IsFalse(failed.EnumerationOk);
-        Assert.AreSame(good, failed.Snapshot);
-        Assert.AreSame(good, _monitor.Current);
-        Assert.AreEqual(DeviceReadStatus.Failed, _monitor.ReadStatus);
-        Assert.AreEqual(TargetResolution.NameMatch, failed.Resolution, "The resolution of the snapshot that was kept.");
-        Assert.AreEqual(1, Raised);
+        Assert.AreSame(failed.Snapshot, _monitor.Current);
+        Assert.AreSame(good.Target, failed.Snapshot.Target, "The last known target is kept.");
+        Assert.AreSame(good.AllGroups, failed.Snapshot.AllGroups);
+        Assert.AreEqual(good.TakenUtc, failed.Snapshot.TakenUtc, "A failed read is not a newer observation.");
+        Assert.AreEqual(good.Sequence, failed.Snapshot.Sequence);
+        Assert.AreEqual(SnapshotReadStatus.Failed, failed.Snapshot.ReadStatus);
+        Assert.AreEqual(TargetResolution.ReadFailed, failed.Snapshot.Resolution);
+        Assert.AreEqual(TargetResolution.ReadFailed, failed.Resolution);
+        Assert.AreEqual(SnapshotReadStatus.Failed, _monitor.ReadStatus);
+        Assert.AreEqual(2, Raised, "The change to Failed is raised.");
+        Assert.AreSame(failed.Snapshot, LastRaised);
         StepOutcome step = failed.Steps.Single();
         Assert.AreEqual("E_NOTFOUND", step.CodeName);
         Assert.IsTrue(_log.Has(LogLevel.Error, "Could not read the audio devices (refresh): enumerate-endpoints E_NOTFOUND"));
+
+        MonitorRefresh again = await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
+
+        Assert.AreSame(failed.Snapshot, again.Snapshot);
+        Assert.AreEqual(2, Raised, "A second failure in a row changes nothing.");
+
+        _source.EnumerationFailure = null;
+        DeviceSnapshot recovered = await _monitor.RefreshAsync().WaitAsync(Timeout);
+
+        Assert.AreEqual(SnapshotReadStatus.Ok, recovered.ReadStatus);
+        Assert.AreEqual(TargetResolution.NameMatch, recovered.Resolution);
+        Assert.AreEqual(good.Sequence + 1, recovered.Sequence, "Only enumerations that worked take a sequence number.");
+        Assert.AreEqual(Start.AddSeconds(5), recovered.TakenUtc);
+        Assert.AreEqual(3, Raised, "The change back to Ok is raised.");
     }
 
     // Before anything was read, and after a first read that failed, Current has no target, the same as "not found".
-    // ReadStatus tells them apart.
+    // ReadStatus and Resolution tell them apart.
     [TestMethod]
     public async Task AFailedFirstReadIsReportedAsFailedNotAsNotFound()
     {
-        Assert.AreEqual(DeviceReadStatus.NotRead, _monitor.ReadStatus);
+        Assert.AreEqual(SnapshotReadStatus.NotStarted, _monitor.Current.ReadStatus);
+        Assert.AreEqual(TargetResolution.None, _monitor.Current.Resolution);
+        Assert.AreEqual(0L, _monitor.Current.Sequence);
         _source.EnumerationFailure = StepOutcomes.FromHResult(AudioWorker.Steps.CreateEnumerator, unchecked((int)0x80040154));
 
         MonitorRefresh failed = await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
@@ -369,17 +397,70 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         Assert.IsFalse(failed.EnumerationOk);
         Assert.IsNull(_monitor.Current.Target);
         Assert.IsEmpty(_monitor.Current.AllGroups);
-        Assert.AreEqual(DeviceReadStatus.Failed, _monitor.ReadStatus);
-        Assert.AreEqual(TargetResolution.None, _monitor.Resolution);
-        Assert.AreEqual(0, Raised);
+        Assert.AreEqual(SnapshotReadStatus.Failed, _monitor.ReadStatus);
+        Assert.AreEqual(TargetResolution.ReadFailed, _monitor.Resolution);
+        Assert.AreEqual(0L, _monitor.Current.Sequence, "Nothing was read, so the sequence stays unknown.");
+        Assert.AreEqual(1, Raised);
         Assert.IsTrue(_log.Has(LogLevel.Error, "Could not read the audio devices (refresh): create-enumerator REGDB_E_CLASSNOTREG"));
 
         _source.EnumerationFailure = null;
         await _monitor.RefreshAsync().WaitAsync(Timeout);
 
-        Assert.AreEqual(DeviceReadStatus.Ok, _monitor.ReadStatus);
+        Assert.AreEqual(SnapshotReadStatus.Ok, _monitor.ReadStatus);
+        Assert.AreEqual(TargetResolution.NameMatch, _monitor.Resolution);
+        Assert.AreEqual(1L, _monitor.Current.Sequence);
         Assert.AreEqual(AirPodsContainer, _monitor.Current.Target?.ContainerId);
-        Assert.AreEqual(1, Raised);
+        Assert.AreEqual(2, Raised);
+    }
+
+    [TestMethod]
+    public async Task EachEnumerationThatWorksTakesTheNextSequenceAndItsOwnTime()
+    {
+        DeviceSnapshot first = await _monitor.RefreshAsync().WaitAsync(Timeout);
+        Advance(TimeSpan.FromSeconds(1));
+        DeviceSnapshot second = await _monitor.RefreshAsync().WaitAsync(Timeout);
+
+        Assert.AreEqual(1L, first.Sequence);
+        Assert.AreEqual(Start, first.TakenUtc);
+        Assert.AreEqual(2L, second.Sequence);
+        Assert.AreEqual(Start.AddSeconds(1), second.TakenUtc);
+        Assert.AreEqual(SnapshotReadStatus.Ok, second.ReadStatus);
+        Assert.AreSame(second, _monitor.Current);
+        Assert.AreEqual(1, Raised, "Nothing material changed, so only the first snapshot was raised.");
+    }
+
+    // A rebuild after a settings change reads nothing new, so it keeps the number and time of the enumeration it was
+    // built from, and the status of the last enumeration.
+    [TestMethod]
+    public async Task ASettingsRebuildKeepsTheSequenceAndTimeOfItsEnumeration()
+    {
+        await StartAndSettle();
+        DeviceSnapshot read = _monitor.Current;
+        Advance(TimeSpan.FromMinutes(1));
+
+        _settings.Update(s => s.PinnedContainerId = MicrophoneContainer);
+        await Eventually.True(() => Raised == 2, "the pinned target");
+        await Drain();
+
+        DeviceSnapshot rebuilt = LastRaised;
+        Assert.AreEqual(MicrophoneContainer, rebuilt.Target?.ContainerId);
+        Assert.AreEqual(TargetResolution.Pinned, rebuilt.Resolution);
+        Assert.AreEqual(SnapshotReadStatus.Ok, rebuilt.ReadStatus);
+        Assert.AreEqual(read.Sequence, rebuilt.Sequence);
+        Assert.AreEqual(read.TakenUtc, rebuilt.TakenUtc);
+        Assert.AreEqual(1, _source.EnumerateCalls);
+
+        _source.EnumerationFailure = StepOutcomes.FromHResult(CoreAudioEndpointReader.EnumerateStep, CoreAudio.E_NOTFOUND);
+        await _monitor.RefreshAsync().WaitAsync(Timeout);
+        _settings.Update(s => s.PinnedContainerId = AirPodsContainer);
+        await Eventually.True(() => Raised == 4, "the failed read, then the rebuilt target");
+        await Drain();
+
+        Assert.AreEqual(AirPodsContainer, LastRaised.Target?.ContainerId);
+        Assert.AreEqual(SnapshotReadStatus.Failed, LastRaised.ReadStatus, "A rebuild does not hide a failed read.");
+        Assert.AreEqual(TargetResolution.ReadFailed, LastRaised.Resolution);
+        Assert.AreEqual(read.Sequence, LastRaised.Sequence);
+        Assert.AreEqual(read.TakenUtc, LastRaised.TakenUtc);
     }
 
     [TestMethod]

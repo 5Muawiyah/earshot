@@ -65,4 +65,13 @@ public interface IBatteryProvider
 // Card surface. The popup card implements it; everything else only calls Show and Hide.
 public enum CardAnchor { NearCursor, NearTray }
 public sealed record CardContent(string Title, string Status);   // Title = device name; no battery field in v1
-public interface ICardPresenter { void Show(CardContent content, CardAnchor anchor); void Hide(); }
+public interface ICardPresenter
+{
+    void Show(CardContent content, CardAnchor anchor);
+
+    // A card that follows a click at clickPoint, the cursor position in physical pixels read when the click
+    // happened. A presenter that cannot place a card at a point shows it as Show(content, anchor) does.
+    void Show(CardContent content, CardAnchor anchor, System.Drawing.Point clickPoint) => Show(content, anchor);
+
+    void Hide();
+}

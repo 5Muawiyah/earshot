@@ -106,7 +106,19 @@ public sealed class EndpointModelBuilderTests
 
         Assert.IsEmpty(model.Snapshot.AllGroups);
         Assert.IsNull(model.Snapshot.Target);
-        Assert.AreEqual(TargetResolution.None, model.Resolution);
+        Assert.AreEqual(TargetResolution.NotFound, model.Resolution);
+    }
+
+    // A built snapshot is a successful read that no monitor has numbered.
+    [TestMethod]
+    public void ABuiltSnapshotIsAnOkReadWithTheResolutionAndNoSequence()
+    {
+        foreach (EndpointModel model in new[] { Build(Machine()), Build(Machine(), pinned: AirPodsContainer), Build(Machine(), match: "Nothing") })
+        {
+            Assert.AreEqual(SnapshotReadStatus.Ok, model.Snapshot.ReadStatus);
+            Assert.AreEqual(model.Resolution, model.Snapshot.Resolution);
+            Assert.AreEqual(0L, model.Snapshot.Sequence);
+        }
     }
 
     // Display name
@@ -325,7 +337,7 @@ public sealed class EndpointModelBuilderTests
         EndpointModel model = Build(Machine(), match: match);
 
         Assert.IsNull(model.Snapshot.Target);
-        Assert.AreEqual(TargetResolution.None, model.Resolution);
+        Assert.AreEqual(TargetResolution.NotFound, model.Resolution);
     }
 
     [TestMethod]
@@ -535,10 +547,25 @@ public sealed class EndpointModelBuilderTests
     [TestMethod]
     public void AnEmptySnapshotEqualsAnEmptyBuild()
     {
-        var empty = new DeviceSnapshot(null, Array.Empty<DeviceModel>(), Taken);
+        var empty = new DeviceSnapshot(null, Array.Empty<DeviceModel>(), Taken) { ReadStatus = SnapshotReadStatus.Ok, Resolution = TargetResolution.NotFound };
 
         Assert.IsTrue(EndpointModelBuilder.AreEquivalent(empty, Build(Array.Empty<EndpointReading>()).Snapshot));
         Assert.IsFalse(EndpointModelBuilder.AreEquivalent(empty, Build(Machine()).Snapshot));
+    }
+
+    // The empty placeholder (nothing read) and an empty read (nothing found) look alike, but must not compare equal,
+    // or the change from "not read" to "not found" would never be raised.
+    [TestMethod]
+    public void AReadStatusOrResolutionChangeIsAMaterialChangeButTheSequenceIsNot()
+    {
+        var placeholder = new DeviceSnapshot(null, Array.Empty<DeviceModel>(), Taken);
+        DeviceSnapshot emptyRead = Build(Array.Empty<EndpointReading>()).Snapshot;
+        DeviceSnapshot read = Build(Machine()).Snapshot;
+
+        Assert.IsFalse(EndpointModelBuilder.AreEquivalent(placeholder, emptyRead));
+        Assert.IsFalse(EndpointModelBuilder.AreEquivalent(read, read with { ReadStatus = SnapshotReadStatus.Failed, Resolution = TargetResolution.ReadFailed }));
+        Assert.IsFalse(EndpointModelBuilder.AreEquivalent(read, read with { Resolution = TargetResolution.Pinned }));
+        Assert.IsTrue(EndpointModelBuilder.AreEquivalent(read, read with { Sequence = 7, TakenUtc = Taken.AddMinutes(1) }));
     }
 
     private static DeviceModel TargetOf(IReadOnlyList<EndpointReading> readings)

@@ -334,6 +334,22 @@ public sealed class CardPresenterTests
         Assert.AreEqual(new Rectangle(150, 940, 300, 80), h.Card.ShownAt.Last());
     }
 
+    // Callers hold the presenter as ICardPresenter, so the click point must reach it through the interface, not
+    // fall back to the interface's default that drops it.
+    [TestMethod]
+    public void AClickPointGivenThroughTheInterfaceAnchorsTheCard()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+        ICardPresenter cards = h.Presenter;
+
+        cards.Show(Connected, CardAnchor.NearCursor, new Point(960, 1056));
+        h.Ui.RunAll();
+
+        Assert.AreEqual(new Rectangle(810, 940, 300, 80), h.Card.ShownAt.Single());
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "anchored at the click (960,1056)"));
+    }
+
     [TestMethod]
     public void AClickPointFromTheCallerAnchorsTheCardWhereverTheCursorIsNow()
     {

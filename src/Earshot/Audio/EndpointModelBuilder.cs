@@ -11,15 +11,7 @@ internal sealed record EndpointReading(AudioEndpoint Endpoint, string? Interface
     public static EndpointReading Of(AudioEndpoint endpoint) => new(endpoint, InterfaceName: null);
 }
 
-// How the target device was chosen.
-internal enum TargetResolution
-{
-    None,          // nothing usable is pinned and no group's name contains DeviceMatch
-    Pinned,        // the pinned container is present
-    NameMatch,     // nothing usable is pinned; the first group whose name contains DeviceMatch
-    PinnedAbsent   // a container is pinned but has no endpoints; no other device is chosen
-}
-
+// Resolution is the same value as Snapshot.Resolution.
 internal sealed record EndpointModel(DeviceSnapshot Snapshot, TargetResolution Resolution);
 
 // Pure functions from endpoint readings to the device model. No Core Audio calls, no clock, no I/O.
@@ -62,7 +54,10 @@ internal sealed record EndpointModel(DeviceSnapshot Snapshot, TargetResolution R
 // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/container-ids-for-bluetooth-devices
 // When nothing usable is pinned, the first target-capable group whose display name, or the friendly name
 // of one of its endpoints, contains DeviceMatch (ordinal, ignoring case, never a wildcard); otherwise
-// none. A blank DeviceMatch matches nothing.
+// none (NotFound). A blank DeviceMatch matches nothing.
+//
+// A built snapshot is a successful read (ReadStatus Ok) with Sequence 0: only the device monitor numbers
+// its enumerations.
 internal static class EndpointModelBuilder
 {
     public static EndpointModel Build(
@@ -80,7 +75,8 @@ internal static class EndpointModelBuilder
             .ToList();
 
         (DeviceModel? target, TargetResolution resolution) = ResolveTarget(groups, deviceMatch, pinnedContainerId);
-        return new EndpointModel(new DeviceSnapshot(target, groups, takenUtc), resolution);
+        var snapshot = new DeviceSnapshot(target, groups, takenUtc) { ReadStatus = SnapshotReadStatus.Ok, Resolution = resolution };
+        return new EndpointModel(snapshot, resolution);
     }
 
     public static EndpointModel Build(
@@ -120,7 +116,7 @@ internal static class EndpointModelBuilder
             }
         }
 
-        return (null, TargetResolution.None);
+        return (null, TargetResolution.NotFound);
     }
 
     public static bool GroupMatches(DeviceModel group, string deviceMatch)
@@ -194,8 +190,8 @@ internal static class EndpointModelBuilder
         return inner.Length == 0 ? friendlyName : inner;
     }
 
-    // True when the two snapshots describe the same devices, ignoring TakenUtc. Relies on Build's
-    // deterministic order.
+    // True when the two snapshots describe the same devices with the same read status and resolution,
+    // ignoring TakenUtc and Sequence. Relies on Build's deterministic order.
     public static bool AreEquivalent(DeviceSnapshot? a, DeviceSnapshot? b)
     {
         if (ReferenceEquals(a, b))
@@ -208,7 +204,8 @@ internal static class EndpointModelBuilder
             return false;
         }
 
-        if (!SameModel(a.Target, b.Target) || a.AllGroups.Count != b.AllGroups.Count)
+        if (a.ReadStatus != b.ReadStatus || a.Resolution != b.Resolution ||
+            !SameModel(a.Target, b.Target) || a.AllGroups.Count != b.AllGroups.Count)
         {
             return false;
         }

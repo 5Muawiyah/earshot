@@ -155,15 +155,20 @@ internal sealed partial class GateStore
 
     // ---- protection.json ----
 
+    // PendingProtect is optional: a file without it (written before the member existed) reads as null. When
+    // present it must be a boolean; null is never written, the member is left out instead.
     public GateRead<ProtectionRecord> ReadProtection() => Read<ProtectionRecord>(ProtectionFile, "read-protection", root =>
     {
-        string? shape = RequireShape(root, ("DisabledServices", JsonValueKind.Array));
+        bool hasPending = root.TryGetProperty(PendingProtectMember, out JsonElement pending);
+        string? shape = hasPending
+            ? RequireShape(root, ("DisabledServices", JsonValueKind.Array), (PendingProtectMember, JsonValueKind.True))
+            : RequireShape(root, ("DisabledServices", JsonValueKind.Array));
         if (shape is not null)
         {
             return (null, shape);
         }
 
-        var record = new ProtectionRecord();
+        var record = new ProtectionRecord { PendingProtect = hasPending ? pending.GetBoolean() : null };
         foreach (JsonElement item in root.GetProperty("DisabledServices").EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.String || !Guid.TryParseExact(item.GetString(), "D", out Guid service))
@@ -197,9 +202,16 @@ internal sealed partial class GateStore
             }
 
             w.WriteEndArray();
+            if (record.PendingProtect is bool pendingProtect)
+            {
+                w.WriteBoolean(PendingProtectMember, pendingProtect);
+            }
+
             w.WriteEndObject();
         });
     }
+
+    private const string PendingProtectMember = "PendingProtect";
 
     internal static string? ValidateProtection(ProtectionRecord record) =>
         record.DisabledServices.Count > MaxProtectionServices ? "DisabledServices has too many entries."

@@ -60,14 +60,11 @@ internal sealed record ConfirmationResult(
 // stamps requestedUtc on the audio worker at the start of the work item that reads the endpoints and sends. The
 // monitor builds and stamps its snapshots on that worker too, one item at a time, and after an enumeration it
 // builds from that enumeration's readings, so the snapshot of an enumeration that ran before the request carries
-// an earlier time. A refresh whose enumeration failed hands back the current snapshot, which is ignored the same
-// way when it is older than the request. Two gaps remain, both outside this class:
-//   - a settings change (DeviceMatch or PinnedContainerId) makes the monitor rebuild its snapshot from the last
-//     readings it enumerated, stamped with the current time, so readings from before the request can arrive
-//     with a later stamp;
-//   - both times are wall-clock times, so a clock step while the operation runs can make a snapshot look newer
-//     or older than it is.
-// A monotonic enumeration sequence on the snapshot would close both.
+// an earlier time. A refresh whose enumeration failed hands back the current snapshot, which keeps the time of
+// the last enumeration that worked and is ignored the same way when it is older than the request. A rebuild
+// after a settings change keeps the time of the enumeration it was built from too. One gap remains: both times
+// are wall-clock times, so a clock step while the operation runs can make a snapshot look newer or older than
+// it is. DeviceSnapshot.Sequence, the monitor's monotonic enumeration number, would close it.
 //
 // Timeout and cancellation. The timeout is a CancellationTokenSource with CancelAfter; the caller's token is
 // linked to it. Either ends the wait only: a request already sent is never recalled. The timeout returns a

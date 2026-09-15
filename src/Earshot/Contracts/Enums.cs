@@ -8,6 +8,26 @@ public enum EndpointState { Active = 1, Disabled = 2, NotPresent = 4, Unplugged 
 
 public enum ConnectionState { Unknown, Disconnected, Connecting, Connected, Disconnecting }
 
+// How the last Core Audio enumeration behind a DeviceSnapshot went. NotStarted is the zero value, so a
+// snapshot nobody filled in never reads as a successful read.
+public enum SnapshotReadStatus
+{
+    NotStarted,  // nothing has been enumerated yet
+    Ok,          // the last enumeration worked: Target and AllGroups are what it read
+    Failed       // the last enumeration failed: Target and AllGroups are the last read (or empty) and are not current
+}
+
+// How DeviceSnapshot.Target was chosen.
+public enum TargetResolution
+{
+    None,          // not evaluated: nothing has been enumerated yet
+    Pinned,        // the pinned container is present
+    NameMatch,     // nothing usable is pinned; the first group whose name contains DeviceMatch
+    PinnedAbsent,  // a container is pinned but has no endpoints; no other device is chosen
+    NotFound,      // nothing usable is pinned and no group's name contains DeviceMatch
+    ReadFailed     // the last enumeration failed, so the target could not be chosen
+}
+
 // Task requirement: allowed/blocked/mixed/unknown/not-found/not-set-up.
 public enum BlockState
 {

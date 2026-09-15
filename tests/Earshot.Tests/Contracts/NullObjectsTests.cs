@@ -96,6 +96,32 @@ public sealed class NullObjectsTests
         Assert.IsEmpty(monitor.Current.AllGroups);
         Assert.AreSame(monitor.Current, refreshed);
         Assert.AreEqual(0, raised);
+        Assert.AreEqual(SnapshotReadStatus.NotStarted, monitor.Current.ReadStatus, "Nothing was read, so it is not an observation.");
+        Assert.AreEqual(TargetResolution.None, monitor.Current.Resolution, "Not evaluated, which is not the same as not found.");
+        Assert.AreEqual(0L, monitor.Current.Sequence);
+    }
+
+    [TestMethod]
+    public void ASnapshotNobodyFilledInIsNotARead()
+    {
+        var snapshot = new DeviceSnapshot(null, Array.Empty<DeviceModel>(), DateTimeOffset.UnixEpoch);
+
+        Assert.AreEqual(SnapshotReadStatus.NotStarted, snapshot.ReadStatus);
+        Assert.AreEqual(TargetResolution.None, snapshot.Resolution);
+        Assert.AreEqual(0L, snapshot.Sequence);
+    }
+
+    [TestMethod]
+    public void NullCardPresenterTakesAClickPointThroughTheInterfaceDefault()
+    {
+        var log = new CapturingLog();
+        ICardPresenter cards = new NullCardPresenter(log);
+
+        cards.Show(new CardContent("Owner’s AirPods Pro", "Connected"), CardAnchor.NearCursor, new System.Drawing.Point(960, 1056));
+
+        Assert.HasCount(1, log.Entries);
+        Assert.AreEqual(LogLevel.Debug, log.Entries[0].Level);
+        Assert.IsTrue(log.Entries[0].Message.Contains("Connected", StringComparison.Ordinal));
     }
 
     [TestMethod]

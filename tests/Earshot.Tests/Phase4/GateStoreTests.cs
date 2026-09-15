@@ -109,6 +109,55 @@ public sealed class GateStoreTests
     }
 
     [TestMethod]
+    [DataRow(null)]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void APendingProtectRequestRoundTripsAndIsLeftOutWhenNone(bool? pending)
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        var hfp = new Guid("0000111E-0000-1000-8000-00805F9B34FB");
+
+        Assert.IsTrue(store.WriteProtection(new ProtectionRecord { DisabledServices = { hfp }, PendingProtect = pending }).Ok);
+        GateRead<ProtectionRecord> read = store.ReadProtection();
+
+        Assert.IsTrue(read.IsOk);
+        Assert.AreEqual(pending, read.Value!.PendingProtect);
+        CollectionAssert.AreEqual(new[] { hfp }, read.Value.DisabledServices);
+        Assert.AreEqual(pending.HasValue, File.ReadAllText(store.ProtectionFile).Contains("PendingProtect", StringComparison.Ordinal));
+    }
+
+    // A record written before PendingProtect existed still reads, with no request pending.
+    [TestMethod]
+    public void AnOlderProtectionRecordWithoutPendingProtectReads()
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        File.WriteAllText(store.ProtectionFile, "{\"DisabledServices\":[\"0000111e-0000-1000-8000-00805f9b34fb\"]}");
+
+        GateRead<ProtectionRecord> read = store.ReadProtection();
+
+        Assert.IsTrue(read.IsOk);
+        Assert.IsNull(read.Value!.PendingProtect);
+        Assert.HasCount(1, read.Value.DisabledServices);
+    }
+
+    [TestMethod]
+    [DataRow("{\"DisabledServices\":[],\"PendingProtect\":null}")]
+    [DataRow("{\"DisabledServices\":[],\"PendingProtect\":\"true\"}")]
+    [DataRow("{\"DisabledServices\":[],\"PendingProtect\":1}")]
+    [DataRow("{\"DisabledServices\":[],\"PendingProtect\":true,\"PendingProtect\":false}")]
+    [DataRow("{\"PendingProtect\":true}")]
+    public void AnInvalidPendingProtectIsInvalid(string content)
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        File.WriteAllText(store.ProtectionFile, content);
+
+        Assert.AreEqual(GateReadStatus.Invalid, store.ReadProtection().Status);
+    }
+
+    [TestMethod]
     [DataRow("{\"DisabledServices\":[\"nope\"]}")]
     [DataRow("{\"DisabledServices\":[\"00000000-0000-0000-0000-000000000000\"]}")]
     [DataRow("{\"DisabledServices\":[\"0000111e-0000-1000-8000-00805f9b34fb\",\"0000111e-0000-1000-8000-00805f9b34fb\"]}")]

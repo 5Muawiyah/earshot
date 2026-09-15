@@ -13,10 +13,23 @@ public sealed record DeviceModel(
     ConnectionState Connection,
     IReadOnlyList<AudioEndpoint> Endpoints);
 
+// TakenUtc and Sequence describe the enumeration Target and AllGroups were built from. A rebuild after a
+// settings change, and a failed enumeration, keep both. Check ReadStatus before acting on Target: only an Ok
+// snapshot is an observation, and a null Target means "not found" only when Resolution is NotFound or
+// PinnedAbsent.
 public sealed record DeviceSnapshot(
     DeviceModel? Target,        // resolved target device, or null when not found
     IReadOnlyList<DeviceModel> AllGroups,
-    DateTimeOffset TakenUtc);
+    DateTimeOffset TakenUtc)
+{
+    // Monotonic number of the successful enumeration this snapshot was built from, set by the device monitor
+    // on the audio worker. 0 means unknown: nothing was enumerated, or the snapshot was not built by a monitor.
+    public long Sequence { get; init; }
+
+    public SnapshotReadStatus ReadStatus { get; init; } = SnapshotReadStatus.NotStarted;
+
+    public TargetResolution Resolution { get; init; } = TargetResolution.None;
+}
 
 public sealed class DeviceSnapshotEventArgs(DeviceSnapshot snapshot) : EventArgs
 {

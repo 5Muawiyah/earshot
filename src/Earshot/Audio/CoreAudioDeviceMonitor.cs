@@ -4,21 +4,13 @@ using Earshot.Contracts;
 namespace Earshot.Audio;
 
 // One evaluation of the audio devices: the snapshot it produced (or kept), whether the enumeration
-// worked, what was read, every step that failed, and how the target was chosen.
+// worked, what was read, every step that failed, and how the target was chosen (Snapshot.Resolution).
 internal sealed record MonitorRefresh(
     DeviceSnapshot Snapshot,
     bool EnumerationOk,
     IReadOnlyList<EndpointReading> Readings,
     IReadOnlyList<StepOutcome> Steps,
     TargetResolution Resolution);
-
-// Whether Current comes from a successful enumeration.
-internal enum DeviceReadStatus
-{
-    NotRead,   // nothing enumerated yet: Current is the empty placeholder
-    Ok,        // the last enumeration worked: Current is up to date
-    Failed     // the last enumeration failed: Current is the placeholder, or the last snapshot that was read
-}
 
 // IDeviceMonitor over Core Audio. Watches endpoint notifications and keeps the device snapshot current.
 //
@@ -29,9 +21,18 @@ internal enum DeviceReadStatus
 //                  endpoint) becomes one enumeration CoalesceWindow after its first notification.
 //   RefreshAsync   enumerates now and returns the snapshot. It works without Start.
 //   settings       a change of DeviceMatch or PinnedContainerId chooses the target again from the last
-//                  endpoints read, without enumerating.
-//   SnapshotChanged is raised through the UI post only when the snapshot changed materially (TakenUtc is
-//                  ignored). Current is updated after every successful enumeration.
+//                  endpoints read, without enumerating. The rebuilt snapshot keeps the Sequence and TakenUtc
+//                  of the enumeration it was built from, and the read status of the last enumeration.
+//   SnapshotChanged is raised through the UI post only when the snapshot changed materially (TakenUtc and
+//                  Sequence are ignored; ReadStatus and Resolution count). Current is updated after every
+//                  successful enumeration, and when an enumeration fails after one that did not.
+//
+// Snapshot fields. Each successful enumeration takes the next Sequence (from 1) and stamps TakenUtc, with
+// ReadStatus Ok and the Resolution the builder chose. A failed enumeration keeps Target, AllGroups, Sequence
+// and TakenUtc of the last snapshot (the empty placeholder, Sequence 0, when nothing was read) and sets
+// ReadStatus Failed and Resolution ReadFailed, so no caller mistakes it for a new observation or for "not
+// found". Before the first enumeration Current is the placeholder with ReadStatus NotStarted and Resolution
+// None.
 //
 // The UI post. uiPost is called on the audio worker thread, so it must queue the action and return at once
 // (SynchronizationContext.Post, Control.BeginInvoke). A post that waits for the UI thread
@@ -40,14 +41,15 @@ internal enum DeviceReadStatus
 // worker thread there and must not block either.
 //
 // Every enumeration, model build and publication runs on the audio worker, so they are serialised and
-// happen in order. A failed enumeration keeps the previous snapshot, is logged as an error and is reported
-// in the MonitorRefresh steps and in ReadStatus. A per-endpoint read failure is logged once, when first
-// seen: at Debug for a name read on a NOTPRESENT endpoint (0xE000020B there is expected), at Warn for every
-// other one, because an unreadable id, flow, state or container takes the endpoint out of its device.
+// happen in order. A failed enumeration keeps the previous devices, is logged as an error and is reported
+// in the MonitorRefresh steps and in the snapshot's ReadStatus. A per-endpoint read failure is logged once,
+// when first seen: at Debug for a name read on a NOTPRESENT endpoint (0xE000020B there is expected), at Warn
+// for every other one, because an unreadable id, flow, state or container takes the endpoint out of its
+// device.
 //
-// "Not found" or "could not read". DeviceSnapshot has no read status, so a null Target means any of:
-// nothing read yet, every enumeration so far failed, the pinned device has no endpoints, or no device
-// matched. ReadStatus and Resolution tell these apart; check them before showing "not found".
+// "Not found" or "could not read". A null Target means any of: nothing read yet (NotStarted, None), the
+// last enumeration failed (Failed, ReadFailed), the pinned device has no endpoints (PinnedAbsent), or no
+// device matched (NotFound). Check ReadStatus and Resolution before showing "not found".
 internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 {
     internal static readonly TimeSpan DefaultCoalesceWindow = TimeSpan.FromMilliseconds(150);
@@ -68,8 +70,6 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     private readonly Func<DateTimeOffset> _utcNow;
 
     private DeviceSnapshot _current;
-    private int _readStatus = (int)DeviceReadStatus.NotRead;
-    private int _resolution = (int)TargetResolution.None;
     private int _started;
     private int _disposed;
     private int _refreshPending;
@@ -78,6 +78,9 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 
     // Audio worker thread only.
     private IReadOnlyList<EndpointReading>? _lastReadings;
+    private long _lastSequence;
+    private DateTimeOffset _lastTakenUtc;
+    private bool _lastEnumerationFailed;
     private IReadOnlyList<StepOutcome> _lastSteps = Array.Empty<StepOutcome>();
     private string? _appliedMatch;
     private Guid _appliedPinned;
@@ -123,12 +126,11 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 
     public DeviceSnapshot Current => Volatile.Read(ref _current);
 
-    // How the last enumeration went. Until DeviceSnapshot carries it, this is how a caller tells "could not
-    // read" from "not found".
-    internal DeviceReadStatus ReadStatus => (DeviceReadStatus)Volatile.Read(ref _readStatus);
+    // How the last enumeration went: Current.ReadStatus.
+    internal SnapshotReadStatus ReadStatus => Current.ReadStatus;
 
-    // How the target in Current was chosen: PinnedAbsent when the pinned device has no endpoints.
-    internal TargetResolution Resolution => (TargetResolution)Volatile.Read(ref _resolution);
+    // How the target in Current was chosen: Current.Resolution.
+    internal TargetResolution Resolution => Current.Resolution;
 
     internal TimeSpan CoalesceWindow => _coalesceWindow;
 
@@ -248,7 +250,8 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     {
         if (IsDisposed)
         {
-            return new MonitorRefresh(Current, false, Array.Empty<EndpointReading>(), Array.Empty<StepOutcome>(), TargetResolution.None);
+            DeviceSnapshot current = Current;
+            return new MonitorRefresh(current, false, Array.Empty<EndpointReading>(), Array.Empty<StepOutcome>(), current.Resolution);
         }
 
         StepOutcome subscribe = _source.Subscribe(OnNotification);
@@ -303,13 +306,37 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
         if (!enumeration.Ok)
         {
             _lastSteps = steps;
-            Volatile.Write(ref _readStatus, (int)DeviceReadStatus.Failed);
-            return new MonitorRefresh(Current, false, _lastReadings ?? Array.Empty<EndpointReading>(), steps, Resolution);
+            _lastEnumerationFailed = true;
+            DeviceSnapshot kept = MarkFailedOnWorker();
+            return new MonitorRefresh(kept, false, _lastReadings ?? Array.Empty<EndpointReading>(), steps, kept.Resolution);
         }
 
-        Volatile.Write(ref _readStatus, (int)DeviceReadStatus.Ok);
+        _lastEnumerationFailed = false;
         _lastReadings = enumeration.Readings;
+        _lastSequence++;
+        _lastTakenUtc = _utcNow();
         return PublishOnWorker(enumeration.Readings, steps, reason);
+    }
+
+    // Keeps the devices, Sequence and TakenUtc of Current and marks the read as failed. Raised once, when the
+    // status changes, not on every failed enumeration in a row.
+    private DeviceSnapshot MarkFailedOnWorker()
+    {
+        DeviceSnapshot previous = Volatile.Read(ref _current);
+        if (previous.ReadStatus == SnapshotReadStatus.Failed)
+        {
+            return previous;
+        }
+
+        DeviceSnapshot failed = previous with { ReadStatus = SnapshotReadStatus.Failed, Resolution = TargetResolution.ReadFailed };
+        Volatile.Write(ref _current, failed);
+        // ReportSteps has already logged the failure as an error.
+        if (!IsDisposed)
+        {
+            _uiPost(() => RaiseSnapshotChanged(failed));
+        }
+
+        return failed;
     }
 
     private MonitorRefresh? ReapplySettingsOnWorker()
@@ -331,23 +358,28 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     private MonitorRefresh PublishOnWorker(IReadOnlyList<EndpointReading> readings, IReadOnlyList<StepOutcome> steps, string reason)
     {
         EarshotSettings settings = _settings.Current;
-        EndpointModel model = EndpointModelBuilder.Build(readings, settings.DeviceMatch, settings.PinnedContainerId, _utcNow());
+
+        // TakenUtc and Sequence are those of the enumeration that produced readings, also when this is a
+        // rebuild after a settings change, so a rebuild never looks like a newer observation.
+        EndpointModel model = EndpointModelBuilder.Build(readings, settings.DeviceMatch, settings.PinnedContainerId, _lastTakenUtc);
         _appliedMatch = settings.DeviceMatch;
         _appliedPinned = settings.PinnedContainerId;
         _lastSteps = steps;
 
         DeviceSnapshot previous = Volatile.Read(ref _current);
-        DeviceSnapshot snapshot = model.Snapshot;
-        Volatile.Write(ref _resolution, (int)model.Resolution);
+        DeviceSnapshot snapshot = _lastEnumerationFailed
+            ? model.Snapshot with { Sequence = _lastSequence, ReadStatus = SnapshotReadStatus.Failed, Resolution = TargetResolution.ReadFailed }
+            : model.Snapshot with { Sequence = _lastSequence };
         Volatile.Write(ref _current, snapshot);
 
         if (!EndpointModelBuilder.AreEquivalent(previous, snapshot) && !IsDisposed)
         {
-            _log.Info("Audio devices changed (" + reason + "): " + Describe(model, settings.PinnedContainerId));
+            _log.Info("Audio devices changed (" + reason + "): " + Describe(model, settings.PinnedContainerId) +
+                      (_lastEnumerationFailed ? " The last read failed; these are the last known devices." : ""));
             _uiPost(() => RaiseSnapshotChanged(snapshot));
         }
 
-        return new MonitorRefresh(snapshot, true, readings, steps, model.Resolution);
+        return new MonitorRefresh(snapshot, !_lastEnumerationFailed, readings, steps, snapshot.Resolution);
     }
 
     private void RaiseSnapshotChanged(DeviceSnapshot snapshot)

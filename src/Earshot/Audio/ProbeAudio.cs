@@ -130,13 +130,22 @@ internal static partial class Program
     {
         if (target is null)
         {
-            return resolution == TargetResolution.PinnedAbsent
-                ? "Target: none found, the pinned container has no endpoints"
-                : "Target: none found";
+            return resolution switch
+            {
+                TargetResolution.PinnedAbsent => "Target: none found, the pinned container has no endpoints",
+                TargetResolution.ReadFailed => "Target: unknown, the audio devices could not be read",
+                _ => "Target: none found",
+            };
         }
 
+        string chosenBy = resolution switch
+        {
+            TargetResolution.Pinned => "pinned",
+            TargetResolution.ReadFailed => "last known, the audio devices could not be read",
+            _ => "matched by name",
+        };
         return "Target: " + TopologyWalk.Format(target.ContainerId) + " \"" + target.DisplayName + "\", " + target.Connection +
-               ", " + (resolution == TargetResolution.Pinned ? "pinned" : "matched by name");
+               ", " + chosenBy;
     }
 
     internal static void WriteDevice(Utf8JsonWriter w, string name, DeviceModel? target, TargetResolution resolution)

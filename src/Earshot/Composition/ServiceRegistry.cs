@@ -37,7 +37,10 @@ internal sealed class ServiceRegistry
 
     public ISettingsStore Settings { get; }
 
-    // Runs an action on the UI thread.
+    // Runs an action on the UI thread. It must queue the action and return at once
+    // (SynchronizationContext.Post or Control.BeginInvoke) and never block waiting for it to run
+    // (SynchronizationContext.Send, Control.Invoke): the audio worker calls it, and a blocking post deadlocks
+    // as soon as the UI thread waits on work queued to that worker.
     public Action<Action> UiPost { get; }
 
     // True when EARSHOT_SAFE_MODE is set: live device actions are refused and nothing is
@@ -46,6 +49,10 @@ internal sealed class ServiceRegistry
 
     // The single MTA apartment for Core Audio work, created by the audio hook.
     public IAudioWorker? Worker { get; set; }
+
+    // The background thread for Task Scheduler runs and CfgMgr32 reads, for the block and protection
+    // controllers to share so their gate requests never overlap. Null until a hook creates it.
+    public Earshot.Boot.ISystemWorker? SystemWorker { get; set; }
 
     public IDeviceMonitor Monitor { get; set; } = new NullDeviceMonitor();
 

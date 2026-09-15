@@ -32,6 +32,10 @@ public sealed class DeviceIdentity
 public sealed class ProtectionRecord
 {
     public List<Guid> DisabledServices { get; set; } = new();
+
+    // A protect (true) or restore (false) request waiting to be applied; null when none is pending.
+    // Optional in the file: a record written before this member existed reads as null.
+    public bool? PendingProtect { get; set; }
 }
 
 public interface ISettingsStore
