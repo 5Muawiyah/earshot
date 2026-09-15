@@ -13,6 +13,15 @@ internal sealed record EndpointEnumeration(bool Ok, IReadOnlyList<EndpointReadin
     public static EndpointEnumeration Failed(StepOutcome step) => new(false, Array.Empty<EndpointReading>(), new[] { step });
 }
 
+// Releases an RCW that discovery created. Production code passes Rcw, which is Marshal.ReleaseComObject.
+// The endpoint reads and the topology walk take the release as a parameter so their guards and failure
+// paths can run against managed test doubles, for which Marshal.ReleaseComObject throws ArgumentException.
+// https://learn.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.marshal.releasecomobject
+internal static class ComRelease
+{
+    public static readonly Action<object> Rcw = static rcw => Marshal.ReleaseComObject(rcw);
+}
+
 // What the device monitor needs from Core Audio. Every member is called on the audio worker thread.
 internal interface IEndpointSource
 {
@@ -78,9 +87,13 @@ internal static class CoreAudioEndpointReader
     // EnumAudioEndpoints(eAll, DEVICE_STATEMASK_ALL): render and capture endpoints in every state, because a
     // disconnected device is UNPLUGGED and a blocked one NOTPRESENT.
     // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-enumaudioendpoints
-    public static EndpointEnumeration ReadAll(IMMDeviceEnumerator enumerator)
+    public static EndpointEnumeration ReadAll(IMMDeviceEnumerator enumerator) => ReadAll(enumerator, ComRelease.Rcw);
+
+    // release is called once for every COM object this read obtains.
+    internal static EndpointEnumeration ReadAll(IMMDeviceEnumerator enumerator, Action<object> release)
     {
         ArgumentNullException.ThrowIfNull(enumerator);
+        ArgumentNullException.ThrowIfNull(release);
         int hr = enumerator.EnumAudioEndpoints(CoreAudio.eAll, CoreAudio.DEVICE_STATEMASK_ALL, out IMMDeviceCollection? collection);
         if (hr < 0 || collection is null)
         {
@@ -108,7 +121,7 @@ internal static class CoreAudioEndpointReader
 
                 try
                 {
-                    EndpointReading? reading = ReadEndpoint(device, steps);
+                    EndpointReading? reading = ReadEndpoint(device, steps, release);
                     if (reading is not null)
                     {
                         readings.Add(reading);
@@ -116,13 +129,13 @@ internal static class CoreAudioEndpointReader
                 }
                 finally
                 {
-                    Marshal.ReleaseComObject(device);
+                    release(device);
                 }
             }
         }
         finally
         {
-            Marshal.ReleaseComObject(collection);
+            release(collection);
         }
 
         return new EndpointEnumeration(true, readings, steps);
@@ -131,10 +144,12 @@ internal static class CoreAudioEndpointReader
     // One endpoint. Returns null (with a step) only when the endpoint cannot be identified: no id or no
     // data flow. A failed state or property read leaves that value empty and adds a step; on NOTPRESENT
     // endpoints GetValue(PKEY_Device_FriendlyName) can fail with 0xE000020B, which is expected.
-    internal static EndpointReading? ReadEndpoint(IMMDevice device, List<StepOutcome> steps)
+    // The device stays the caller's to release; the property store opened here is released with release.
+    internal static EndpointReading? ReadEndpoint(IMMDevice device, List<StepOutcome> steps, Action<object> release)
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(release);
 
         // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdevice-getid
         int hr = device.GetId(out nint idPointer);
@@ -192,7 +207,7 @@ internal static class CoreAudioEndpointReader
             }
             finally
             {
-                Marshal.ReleaseComObject(store);
+                release(store);
             }
         }
 

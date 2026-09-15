@@ -44,6 +44,9 @@ internal sealed record FilterVisit(
 // https://learn.microsoft.com/en-us/windows/win32/coreaudio/using-the-ikscontrol-interface-to-access-audio-properties
 // https://learn.microsoft.com/en-us/windows/win32/api/devicetopology/nf-devicetopology-iconnector-getdeviceidconnectedto
 //
+// Every COM object obtained here is released through the release delegate (ComRelease.Rcw outside tests),
+// once, in a finally block in the method that obtained it.
+//
 // Nothing here changes a device. IConnector.ConnectTo and Disconnect (software topology edits) are never
 // called. The only kernel streaming request in this file is ReadPinCount, a KSPROPSETID_Pin Get.
 internal static class TopologyWalk
@@ -61,10 +64,15 @@ internal static class TopologyWalk
     internal const string PinCountStep = "pin-ctypes";
 
     // Steps 1 and 2. Endpoints outside the target container are skipped, so the caller cannot widen the walk.
-    public static AdapterDiscovery FindAdapters(IMMDeviceEnumerator enumerator, IEnumerable<AudioEndpoint> endpoints, Guid targetContainer)
+    public static AdapterDiscovery FindAdapters(IMMDeviceEnumerator enumerator, IEnumerable<AudioEndpoint> endpoints, Guid targetContainer) =>
+        FindAdapters(enumerator, endpoints, targetContainer, ComRelease.Rcw);
+
+    internal static AdapterDiscovery FindAdapters(
+        IMMDeviceEnumerator enumerator, IEnumerable<AudioEndpoint> endpoints, Guid targetContainer, Action<object> release)
     {
         ArgumentNullException.ThrowIfNull(enumerator);
         ArgumentNullException.ThrowIfNull(endpoints);
+        ArgumentNullException.ThrowIfNull(release);
 
         var steps = new List<StepOutcome>();
         if (!NodeMatch.IsValidTargetContainer(targetContainer))
@@ -82,7 +90,7 @@ internal static class TopologyWalk
                 continue;
             }
 
-            string? adapterId = AdapterIdOf(enumerator, endpoint.EndpointId, steps);
+            string? adapterId = AdapterIdOf(enumerator, endpoint.EndpointId, steps, release);
             if (adapterId is null)
             {
                 continue;
@@ -113,16 +121,25 @@ internal static class TopologyWalk
         IMMDeviceEnumerator enumerator,
         IEnumerable<AdapterPath> adapters,
         Guid targetContainer,
-        Func<AdapterPath, IKsControl, IReadOnlyList<StepOutcome>> use)
+        Func<AdapterPath, IKsControl, IReadOnlyList<StepOutcome>> use) =>
+        VisitFilters(enumerator, adapters, targetContainer, use, ComRelease.Rcw);
+
+    internal static IReadOnlyList<FilterVisit> VisitFilters(
+        IMMDeviceEnumerator enumerator,
+        IEnumerable<AdapterPath> adapters,
+        Guid targetContainer,
+        Func<AdapterPath, IKsControl, IReadOnlyList<StepOutcome>> use,
+        Action<object> release)
     {
         ArgumentNullException.ThrowIfNull(enumerator);
         ArgumentNullException.ThrowIfNull(adapters);
         ArgumentNullException.ThrowIfNull(use);
+        ArgumentNullException.ThrowIfNull(release);
 
         var visits = new List<FilterVisit>();
         foreach (AdapterPath adapter in adapters)
         {
-            visits.Add(VisitFilter(enumerator, adapter, targetContainer, use));
+            visits.Add(VisitFilter(enumerator, adapter, targetContainer, use, release));
         }
 
         return visits;
@@ -166,7 +183,7 @@ internal static class TopologyWalk
     internal static string Format(Guid container) =>
         container.ToString("B", CultureInfo.InvariantCulture).ToUpperInvariant();
 
-    private static string? AdapterIdOf(IMMDeviceEnumerator enumerator, string endpointId, List<StepOutcome> steps)
+    private static string? AdapterIdOf(IMMDeviceEnumerator enumerator, string endpointId, List<StepOutcome> steps, Action<object> release)
     {
         int hr = enumerator.GetDevice(endpointId, out IMMDevice? device);
         if (hr < 0 || device is null)
@@ -210,15 +227,15 @@ internal static class TopologyWalk
         {
             if (connector is not null)
             {
-                Marshal.ReleaseComObject(connector);
+                release(connector);
             }
 
             if (topology is not null)
             {
-                Marshal.ReleaseComObject(topology);
+                release(topology);
             }
 
-            Marshal.ReleaseComObject(device);
+            release(device);
         }
     }
 
@@ -226,7 +243,8 @@ internal static class TopologyWalk
         IMMDeviceEnumerator enumerator,
         AdapterPath adapter,
         Guid targetContainer,
-        Func<AdapterPath, IKsControl, IReadOnlyList<StepOutcome>> use)
+        Func<AdapterPath, IKsControl, IReadOnlyList<StepOutcome>> use,
+        Action<object> release)
     {
         string id = adapter.AdapterId;
         var steps = new List<StepOutcome>();
@@ -261,7 +279,7 @@ internal static class TopologyWalk
                 return new FilterVisit(adapter, state, null, false, false, steps);
             }
 
-            Guid? container = ReadAdapterContainer(device, id, steps);
+            Guid? container = ReadAdapterContainer(device, id, steps, release);
             if (container != targetContainer)
             {
                 steps.Add(StepOutcomes.NotAttempted(GuardStep + ":" + id,
@@ -283,18 +301,18 @@ internal static class TopologyWalk
             }
             finally
             {
-                Marshal.ReleaseComObject(control);
+                release(control);
             }
 
             return new FilterVisit(adapter, state, container, true, true, steps);
         }
         finally
         {
-            Marshal.ReleaseComObject(device);
+            release(device);
         }
     }
 
-    private static Guid? ReadAdapterContainer(IMMDevice device, string id, List<StepOutcome> steps)
+    private static Guid? ReadAdapterContainer(IMMDevice device, string id, List<StepOutcome> steps, Action<object> release)
     {
         int hr = device.OpenPropertyStore(CoreAudio.STGM_READ, out IPropertyStore? store);
         if (hr < 0 || store is null)
@@ -322,7 +340,7 @@ internal static class TopologyWalk
         }
         finally
         {
-            Marshal.ReleaseComObject(store);
+            release(store);
         }
     }
 }
