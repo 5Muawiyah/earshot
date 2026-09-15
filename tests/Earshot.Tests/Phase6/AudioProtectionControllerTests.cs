@@ -78,6 +78,33 @@ public sealed class AudioProtectionControllerTests
             }
         }
 
+        // A gate run that writes the given status instead of running the gate actions.
+        public void PlayAGateThatWrites(GateExitCode exit, params StepOutcome[] steps)
+        {
+            Tasks.OnRun = parameters =>
+            {
+                DateTimeOffset now = Time.GetUtcNow();
+                var status = new GateStatusFile(GateStore.SchemaVersion, parameters[1], parameters[0], now, now,
+                    GateExitCodes.ResultName(exit), (int)exit, nameof(BlockState.Allowed), steps, StepsTruncated: false);
+                Assert.IsTrue(Store.WriteStatus(status).Ok);
+                Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, (int)exit, Tasks.Current.LastRunTime + 1);
+            };
+        }
+
+        public ProtectionIntentFile Intent => new(Store.Folder);
+
+        public List<Guid> Recorded()
+        {
+            GateRead<ProtectionRecord> read = Store.ReadProtection();
+            if (read.Status == GateReadStatus.Missing)
+            {
+                return [];
+            }
+
+            Assert.IsTrue(read.IsOk, read.Step.Detail);
+            return read.Value!.DisabledServices;
+        }
+
         // What \Earshot\Protect does when started: the real gate actions, then the scheduler state moves on.
         private void PlayTheGate(string[] parameters)
         {
@@ -278,6 +305,149 @@ public sealed class AudioProtectionControllerTests
     }
 
     [TestMethod]
+    public async Task WhileBlockedARequestThatCannotBeSavedIsNotReportedAsSaved()
+    {
+        using var h = new Harness();
+        h.BlockAll();
+        Directory.CreateDirectory(h.Intent.FilePath);
+
+        ControllerResult result = await h.Controller.ApplyAsync(protect: true);
+
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        Assert.AreEqual(AudioProtectionController.SaveFailedMessage, result.UserMessage);
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "write-protection-intent" && !s.Ok));
+    }
+
+    [TestMethod]
+    public async Task AnotherDeviceChangeHoldingTheLockIsReportedAsBusy()
+    {
+        using var h = new Harness();
+        h.PlayAGateThatWrites(GateExitCode.Failed,
+            StepOutcomes.FromWin32(DeviceChangeLock.StepName, 32, "another Earshot device change was still running"));
+
+        ControllerResult result = await h.Controller.ApplyAsync(protect: true);
+
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        Assert.AreEqual(AudioProtectionController.BusyMessage, result.UserMessage);
+        Assert.HasCount(1, h.Tasks.Runs);
+    }
+
+    [TestMethod]
+    public async Task AKeptRequestThatDiffersIsReplacedEvenWhenTheServicesAlreadyMatch()
+    {
+        using var h = new Harness();
+        h.BlockAll();
+        Assert.AreEqual(AudioProtectionController.SavedForAllowMessage, (await h.Controller.ApplyAsync(protect: true)).UserMessage);
+
+        // Handsfree is still on, so off already matches, but the kept on request must not be applied later.
+        ControllerResult result = await h.Controller.ApplyAsync(protect: false);
+
+        Assert.AreEqual(AudioProtectionController.SavedForAllowMessage, result.UserMessage);
+        Assert.HasCount(2, h.Tasks.Runs);
+        Assert.AreEqual(GateVerbs.ProtectOff, h.Tasks.Runs[1][0]);
+        Assert.IsFalse(h.Intent.Read().Value!.Protect);
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
+    }
+
+    [TestMethod]
+    public async Task AKeptRequestThatMatchesStartsNothing()
+    {
+        using var h = new Harness();
+        Assert.IsTrue(h.Intent.Write(false).Ok);
+
+        ControllerResult result = await h.Controller.ApplyAsync(protect: false);
+
+        Assert.AreEqual(OpStatus.AlreadyInState, result.Status);
+        Assert.IsEmpty(h.Tasks.Runs);
+    }
+
+    [TestMethod]
+    public async Task AKeptRequestIsClearedWhenAnAllowedRequestCompletes()
+    {
+        using var h = new Harness();
+        Assert.IsTrue(h.Intent.Write(true).Ok);
+
+        ControllerResult result = await h.Controller.ApplyAsync(protect: false);
+
+        Assert.AreEqual(OpStatus.Success, result.Status, result.UserMessage);
+        Assert.AreEqual(AudioProtectionController.OffMessage, result.UserMessage);
+        Assert.HasCount(1, h.Tasks.Runs);
+        Assert.IsFalse(File.Exists(h.Intent.FilePath));
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
+        Assert.Contains(ProtectedServices.Handsfree, h.AirPods.Enabled);
+    }
+
+    [TestMethod]
+    public async Task AnEntryForAServiceWindowsTurnedBackOnIsDroppedWithoutACall()
+    {
+        using var h = new Harness();
+        Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord { DisabledServices = [ProtectedServices.Handsfree] }).Ok);
+
+        ControllerResult result = await h.Controller.ApplyAsync(protect: false);
+
+        Assert.AreEqual(OpStatus.Success, result.Status, result.UserMessage);
+        Assert.HasCount(1, h.Tasks.Runs);
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
+        Assert.IsEmpty(h.Recorded(), "A later off outside Earshot is never undone by a restore.");
+    }
+
+    [TestMethod]
+    public async Task AnInvalidRecordWithHandsfreeOnIsAlreadyOff()
+    {
+        using var h = new Harness();
+        File.WriteAllText(h.Store.ProtectionFile, "{}");
+
+        ControllerResult result = await h.Controller.ApplyAsync(protect: false);
+
+        Assert.AreEqual(OpStatus.AlreadyInState, result.Status);
+        Assert.IsEmpty(h.Tasks.Runs);
+    }
+
+    [TestMethod]
+    public async Task OffOutsideEarshotReplacesAKeptOnRequestAndLeavesHandsfreeOff()
+    {
+        using var h = new Harness();
+        h.AirPods.TurnOffOutside(ProtectedServices.Handsfree);
+        Assert.IsTrue(h.Intent.Write(true).Ok);
+
+        ControllerResult result = await h.Controller.ApplyAsync(protect: false);
+
+        Assert.AreEqual(OpStatus.NotAttempted, result.Status);
+        Assert.AreEqual(AudioProtectionController.OffOutsideEarshotMessage, result.UserMessage);
+        Assert.HasCount(1, h.Tasks.Runs);
+        Assert.IsFalse(File.Exists(h.Intent.FilePath));
+        Assert.DoesNotContain(ProtectedServices.Handsfree, h.AirPods.Enabled);
+    }
+
+    [TestMethod]
+    public async Task TheKeptRequestCanBeRead()
+    {
+        using var h = new Harness();
+        Assert.AreEqual(GateReadStatus.Missing, (await h.Controller.GetPendingIntentAsync()).Status);
+        h.BlockAll();
+        await h.Controller.ApplyAsync(protect: true);
+
+        GateRead<ProtectionIntent> pending = await h.Controller.GetPendingIntentAsync();
+
+        Assert.IsTrue(pending.IsOk, pending.Step.Detail);
+        Assert.IsTrue(pending.Value!.Protect);
+    }
+
+    [TestMethod]
+    public async Task ASharedWorkerOutlivesTheController()
+    {
+        using var temp = new TempFolder();
+        var log = new CapturingLog();
+        Paths paths = Paths.FromEnvironment(name => name == "EARSHOT_DATA_ROOT" ? temp.Path : null);
+        using var worker = new SystemWorker(log);
+
+        AudioProtectionController.Create(log, new FakeSettings(), paths, worker).Dispose();
+
+        Assert.AreEqual(7, await worker.RunAsync(_ => 7));
+    }
+
+    [TestMethod]
     public async Task AnUnpairedDeviceIsReportedAsNotFound()
     {
         using var h = new Harness();
@@ -307,6 +477,29 @@ public sealed class AudioProtectionControllerTests
     }
 
     [TestMethod]
+    [DataRow(true, AudioProtectionState.Protected, AudioProtectionController.ProtectedWithProblemMessage)]
+    [DataRow(false, AudioProtectionState.NotProtected, AudioProtectionController.OffWithProblemMessage)]
+    public void AMatchingReadBackAfterAGateThatReportedAFailureIsPartial(bool protect, AudioProtectionState state, string message)
+    {
+        DateTimeOffset now = DateTimeOffset.UnixEpoch;
+        foreach (GateExitCode exit in new[] { GateExitCode.Partial, GateExitCode.Failed })
+        {
+            var status = new GateStatusFile(GateStore.SchemaVersion, "0123456789abcdef0123456789abcdef", GateVerbs.ProtectOn, now, now,
+                GateExitCodes.ResultName(exit), (int)exit, null, [], StepsTruncated: false);
+            var run = new GateRunResult(GateRunOutcome.Completed, status, (int)exit, []);
+
+            ControllerResult result = AudioProtectionController.MapReadBack(protect, state, run, []);
+
+            Assert.AreEqual(OpStatus.Partial, result.Status);
+            Assert.AreEqual(message, result.UserMessage);
+        }
+
+        var clean = new GateStatusFile(GateStore.SchemaVersion, "0123456789abcdef0123456789abcdef", GateVerbs.ProtectOn, now, now,
+            "success", 0, null, [], StepsTruncated: false);
+        Assert.AreEqual(OpStatus.Success, AudioProtectionController.MapReadBack(protect, state, new GateRunResult(GateRunOutcome.Completed, clean, 0, []), []).Status);
+    }
+
+    [TestMethod]
     public void EveryMessageIsPlainBritishEnglish()
     {
         string[] messages =
@@ -316,6 +509,8 @@ public sealed class AudioProtectionControllerTests
             AudioProtectionController.AlreadyOffMessage, AudioProtectionController.SavedForAllowMessage, AudioProtectionController.OffOutsideEarshotMessage,
             AudioProtectionController.PartialMessage, AudioProtectionController.ProtectFailedMessage, AudioProtectionController.OffFailedMessage,
             AudioProtectionController.UnreadableMessage, AudioProtectionController.TimedOutMessage, AudioProtectionController.CancelledMessage,
+            AudioProtectionController.SaveFailedMessage, AudioProtectionController.BusyMessage,
+            AudioProtectionController.ProtectedWithProblemMessage, AudioProtectionController.OffWithProblemMessage,
         ];
 
         foreach (string message in messages)
