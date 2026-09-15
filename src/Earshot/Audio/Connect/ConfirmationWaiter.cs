@@ -4,23 +4,26 @@ namespace Earshot.Audio.Connect;
 
 internal enum ConfirmationSource
 {
-    None,          // nothing reached the wanted state
+    None,          // the wait ran to its timeout or was stopped
     Refresh,       // the refresh forced right after arming
     Notification,  // a SnapshotChanged event
 }
 
 // How one wait for a state change ended.
-//   Reached                 the container's render endpoint was seen in the wanted state
-//   Source                  what showed it
-//   Elapsed                 from arming to the observation, or to the end of the wait
-//   LastObserved            the newest snapshot taken after the request (the one that reached the state, when
-//                           reached), or null when nothing taken after the request was seen
+//   Reached                 the container's endpoints were seen in the wanted state
+//   Unreachable             the wait ended early: the newest snapshot taken after the request showed that the
+//                           wanted state could no longer come (IsUnreachable)
+//   Source                  what showed the state, or what showed it could not come
+//   Elapsed                 from arming to that observation, or to the end of the wait
+//   LastObserved            the newest snapshot taken after the request (the one the wait ended on, when it ended
+//                           on one), or null when nothing taken after the request was seen
 //   RenderEndpointObserved  LastObserved had at least one render endpoint in the container
 //   Notifications           SnapshotChanged events received while armed
 //   StaleIgnored            snapshots ignored because they were taken before the request
-//   ThreadId, Apartment     the thread that delivered the observation that reached the state
+//   ThreadId, Apartment     the thread that delivered the observation the wait ended on, or null at the timeout
 internal sealed record ConfirmationResult(
     bool Reached,
+    bool Unreachable,
     ConfirmationSource Source,
     TimeSpan Elapsed,
     DeviceSnapshot? LastObserved,
@@ -36,10 +39,16 @@ internal sealed record ConfirmationResult(
 // https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/ksproperty-oneshot-reconnect
 // https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/kernel-streaming-considerations
 //
-// Wanted state, from the container's render endpoints:
+// Wanted state, from the container's endpoints:
 //   connect      any render endpoint ACTIVE (only ACTIVE endpoints can stream)
-//   disconnect   at least one render endpoint, none ACTIVE, and one UNPLUGGED or NOTPRESENT
+//   disconnect   at least one render endpoint, none ACTIVE, one UNPLUGGED or NOTPRESENT, and no capture endpoint
+//                ACTIVE (an ACTIVE Hands-Free capture endpoint is a live link)
 // https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-state-xxx-constants
+//
+// Unreachable. A snapshot taken after the request can show that the wanted state cannot come: the container has
+// no render endpoint any more, or, for a connect, no render endpoint that could become ACTIVE (every one
+// NOTPRESENT, as when its adapter is removed or disabled, or DISABLED in Sound settings). When the newest
+// snapshot seen shows that, the wait ends at once rather than at the timeout.
 //
 // Race safety. The wait is armed first (a TaskCompletionSource plus the SnapshotChanged subscription), and
 // only then is the monitor refreshed. A state reached before arming shows in that refresh and completes the
@@ -47,10 +56,18 @@ internal sealed record ConfirmationResult(
 // between the two and turn into a false timeout.
 //
 // Stale evidence. SnapshotChanged is delivered through the UI post, so an event published before the request
-// can still arrive after arming. Only snapshots taken after requestedUtc count. The caller stamps requestedUtc
-// on the audio worker, in the same work item that reads the endpoints and sends; the monitor enumerates and
-// stamps its snapshots on that worker too, one item at a time, so a snapshot taken before that item cannot
-// carry a later time. A refresh whose enumeration failed returns the older snapshot and is ignored the same way.
+// can still arrive after arming. Only snapshots whose TakenUtc is later than requestedUtc count. The caller
+// stamps requestedUtc on the audio worker at the start of the work item that reads the endpoints and sends. The
+// monitor builds and stamps its snapshots on that worker too, one item at a time, and after an enumeration it
+// builds from that enumeration's readings, so the snapshot of an enumeration that ran before the request carries
+// an earlier time. A refresh whose enumeration failed hands back the current snapshot, which is ignored the same
+// way when it is older than the request. Two gaps remain, both outside this class:
+//   - a settings change (DeviceMatch or PinnedContainerId) makes the monitor rebuild its snapshot from the last
+//     readings it enumerated, stamped with the current time, so readings from before the request can arrive
+//     with a later stamp;
+//   - both times are wall-clock times, so a clock step while the operation runs can make a snapshot look newer
+//     or older than it is.
+// A monotonic enumeration sequence on the snapshot would close both.
 //
 // Timeout and cancellation. The timeout is a CancellationTokenSource with CancelAfter; the caller's token is
 // linked to it. Either ends the wait only: a request already sent is never recalled. The timeout returns a
@@ -92,15 +109,29 @@ internal sealed class ConfirmationWaiter
     public static bool IsReached(IEnumerable<AudioEndpoint> endpoints, ConnectAction action)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        List<AudioEndpoint> render = endpoints.Where(e => e.Flow == EndpointFlow.Render).ToList();
+        List<AudioEndpoint> all = endpoints.ToList();
+        List<AudioEndpoint> render = all.Where(e => e.Flow == EndpointFlow.Render).ToList();
         return action switch
         {
             ConnectAction.Connect => render.Any(e => e.State == EndpointState.Active),
             ConnectAction.Disconnect => render.Count > 0 &&
                                         render.All(e => e.State != EndpointState.Active) &&
-                                        render.Any(e => e.State is EndpointState.Unplugged or EndpointState.NotPresent),
+                                        render.Any(e => e.State is EndpointState.Unplugged or EndpointState.NotPresent) &&
+                                        !all.Any(e => e.Flow == EndpointFlow.Capture && e.State == EndpointState.Active),
             _ => false,
         };
+    }
+
+    // True when the endpoints show that the wanted state can no longer come: no render endpoint, or, for a
+    // connect, every render endpoint NOTPRESENT or DISABLED. Only an ACTIVE endpoint can stream, and only a present,
+    // enabled endpoint can become ACTIVE.
+    // https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-state-xxx-constants
+    public static bool IsUnreachable(IEnumerable<AudioEndpoint> endpoints, ConnectAction action)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        List<AudioEndpoint> render = endpoints.Where(e => e.Flow == EndpointFlow.Render).ToList();
+        return render.Count == 0 ||
+               (action == ConnectAction.Connect && render.All(e => e.State is EndpointState.NotPresent or EndpointState.Disabled));
     }
 
     // The container's endpoints in a snapshot, or none when the container is not in it.
@@ -133,13 +164,13 @@ internal sealed class ConfirmationWaiter
             // 2. Refresh. A state reached before arming completes the wait here.
             wait.Follow(_monitor.RefreshAsync(linked.Token));
 
-            Observation? reached = await wait.Completion.ConfigureAwait(false);
-            if (reached is null && ct.IsCancellationRequested)
+            Observation? ending = await wait.Completion.ConfigureAwait(false);
+            if (ending is null && ct.IsCancellationRequested)
             {
                 throw new OperationCanceledException("The wait for the device state was cancelled.", ct);
             }
 
-            return wait.Result(reached);
+            return wait.Result(ending);
         }
         finally
         {
@@ -147,7 +178,8 @@ internal sealed class ConfirmationWaiter
         }
     }
 
-    private sealed record Observation(DeviceSnapshot Snapshot, ConfirmationSource Source, long Timestamp, int ThreadId, ApartmentState Apartment);
+    // The snapshot a wait ended on: Reached when it showed the wanted state, otherwise it showed the state unreachable.
+    private sealed record Observation(DeviceSnapshot Snapshot, bool Reached, ConfirmationSource Source, long Timestamp, int ThreadId, ApartmentState Apartment);
 
     private sealed class Wait
     {
@@ -175,7 +207,7 @@ internal sealed class ConfirmationWaiter
             _armed = time.GetTimestamp();
         }
 
-        // Completes with the observation that reached the wanted state, or with null when the wait was stopped.
+        // Completes with the observation the wait ended on, or with null when the wait was stopped.
         public Task<Observation?> Completion => _completion.Task;
 
         // Raised on the UI thread in the tray and on the audio worker in the console modes. Never blocks.
@@ -199,7 +231,7 @@ internal sealed class ConfirmationWaiter
             _completion.TrySetResult(null);
         }
 
-        public ConfirmationResult Result(Observation? reached)
+        public ConfirmationResult Result(Observation? ending)
         {
             DeviceSnapshot? last;
             bool lastHasRender;
@@ -209,13 +241,17 @@ internal sealed class ConfirmationWaiter
                 lastHasRender = _lastHasRender;
             }
 
-            long end = reached?.Timestamp ?? Interlocked.Read(ref _stopped);
+            long end = ending?.Timestamp ?? Interlocked.Read(ref _stopped);
             TimeSpan elapsed = _time.GetElapsedTime(_armed, end == 0 ? _time.GetTimestamp() : end);
-            return reached is not null
-                ? new ConfirmationResult(true, reached.Source, elapsed, reached.Snapshot, true,
-                    Volatile.Read(ref _notifications), Volatile.Read(ref _stale), reached.ThreadId, reached.Apartment)
-                : new ConfirmationResult(false, ConfirmationSource.None, elapsed, last, lastHasRender,
+            if (ending is null)
+            {
+                return new ConfirmationResult(false, false, ConfirmationSource.None, elapsed, last, lastHasRender,
                     Volatile.Read(ref _notifications), Volatile.Read(ref _stale), null, null);
+            }
+
+            bool hasRender = EndpointsOf(ending.Snapshot, _container).Any(e => e.Flow == EndpointFlow.Render);
+            return new ConfirmationResult(ending.Reached, !ending.Reached, ending.Source, elapsed, ending.Snapshot, hasRender,
+                Volatile.Read(ref _notifications), Volatile.Read(ref _stale), ending.ThreadId, ending.Apartment);
         }
 
         private void Observe(DeviceSnapshot? snapshot, ConfirmationSource source)
@@ -232,9 +268,11 @@ internal sealed class ConfirmationWaiter
             }
 
             IReadOnlyList<AudioEndpoint> endpoints = EndpointsOf(snapshot, _container);
+            bool newest;
             lock (_gate)
             {
-                if (_last is null || snapshot.TakenUtc >= _last.TakenUtc)
+                newest = _last is null || snapshot.TakenUtc >= _last.TakenUtc;
+                if (newest)
                 {
                     _last = snapshot;
                     _lastHasRender = endpoints.Any(e => e.Flow == EndpointFlow.Render);
@@ -243,10 +281,18 @@ internal sealed class ConfirmationWaiter
 
             if (IsReached(endpoints, _action))
             {
-                _completion.TrySetResult(new Observation(snapshot, source, _time.GetTimestamp(),
-                    Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()));
+                End(snapshot, reached: true, source);
+            }
+            else if (newest && IsUnreachable(endpoints, _action))
+            {
+                // Only the newest snapshot seen can end the wait this way; an older one is already out of date.
+                End(snapshot, reached: false, source);
             }
         }
+
+        private void End(DeviceSnapshot snapshot, bool reached, ConfirmationSource source) =>
+            _completion.TrySetResult(new Observation(snapshot, reached, source, _time.GetTimestamp(),
+                Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()));
 
         private void OnRefreshDone(Task<DeviceSnapshot> refresh)
         {

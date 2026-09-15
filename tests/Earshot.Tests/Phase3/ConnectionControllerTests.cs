@@ -125,7 +125,7 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
         ConnectResult result = await _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard);
 
         Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
-        Assert.AreEqual(ConnectMessages.CouldNotReachDriver, result.UserMessage);
+        Assert.AreEqual(ConnectMessages.CouldNotReadDevices, result.UserMessage, "A read failure promises no other way.");
         Assert.AreEqual("E_OUTOFMEMORY", result.Steps.Single().CodeName);
         Assert.IsEmpty(_path.Sends);
     }
@@ -143,6 +143,37 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
         Assert.IsEmpty(_path.Sends, "A blocked device is never sent a request.");
         Assert.AreEqual(0, _monitor.RefreshCalls, "Nothing is waited for.");
         Assert.IsFalse(result.Confirmed);
+    }
+
+    [TestMethod]
+    [DataRow(EndpointState.Unplugged)]
+    [DataRow(EndpointState.Active)]
+    public async Task ConnectWithOnlyTheRenderEndpointNotPresentIsNodesBlockedAndSendsNothing(EndpointState capture)
+    {
+        // A partial block: the A2DP node is disabled but the Hands-Free node is not. A request to the Hands-Free
+        // filter alone could page the AirPods over Hands-Free, and no render endpoint could confirm it.
+        Device(Render(EndpointState.NotPresent), Capture(capture));
+        Filters(SOk, SOk);
+
+        ConnectResult result = await _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.NodesBlocked, result.Outcome);
+        Assert.IsEmpty(_path.Sends);
+        Assert.AreEqual(0, _monitor.RefreshCalls);
+    }
+
+    [TestMethod]
+    public async Task ConnectWithTheOutputTurnedOffSendsNothing()
+    {
+        Device(Render(EndpointState.Disabled), Capture(EndpointState.Unplugged));
+        Filters(SOk, SOk);
+
+        ConnectResult result = await _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.OutputTurnedOff, result.UserMessage);
+        Assert.IsEmpty(_path.Sends, "A DISABLED render endpoint can never confirm a connect.");
+        Assert.AreEqual(0, _monitor.RefreshCalls);
     }
 
     [TestMethod]
@@ -170,6 +201,24 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
         Assert.AreEqual(ConnectOutcome.Confirmed, result.Outcome);
         Assert.AreEqual(ConnectMessages.Disconnected, result.UserMessage);
         Assert.IsEmpty(_path.Sends);
+    }
+
+    [TestMethod]
+    public async Task DisconnectWithAnActiveHandsFreeLinkSendsAndWaitsForItToEnd()
+    {
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Active));
+        Filters(SOk, SOk);
+
+        Task<ConnectResult> disconnecting = _controller.DisconnectAsync(AirPodsContainer);
+        await Armed();
+        Assert.HasCount(1, _path.Sends, "An active capture endpoint is a live link, so the request is sent.");
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Unplugged), Capture(EndpointState.Active)));
+        Assert.IsFalse(disconnecting.IsCompleted, "Not disconnected while the capture endpoint is still active.");
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged)));
+        ConnectResult result = await disconnecting.WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Confirmed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.Disconnected, result.UserMessage);
     }
 
     // Sent and confirmed
@@ -334,6 +383,36 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
     }
 
     [TestMethod]
+    public async Task AnInvalidatedHandsFreeFilterWhileTheA2dpFilterRejectsIsNoFiltersResponded()
+    {
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(EFail, null, waveActivateHr: CoreAudio.AUDCLNT_E_DEVICE_INVALIDATED);
+
+        ConnectResult result = await _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.NoFiltersResponded, result.Outcome, "The Hands-Free filter can go without the device going.");
+        Assert.AreEqual(ConnectMessages.CouldNotReachDriver, result.UserMessage);
+        CollectionAssert.AreEqual(
+            new[] { ("ks-reconnect:src", "E_FAIL"), (TopologyWalk.ActivateControlStep + ":" + WaveAdapter, "AUDCLNT_E_DEVICE_INVALIDATED"), ("ks-reconnect:wave", "NOT_ATTEMPTED") },
+            result.Steps.Select(s => (s.Step, s.CodeName)).ToArray(),
+            "Every step is kept for the coordinator.");
+    }
+
+    [TestMethod]
+    public void AnInvalidatedRenderEndpointReadIsTheA2dpSide()
+    {
+        EndpointRead read = EndpointRead.From(new EndpointEnumeration(true,
+            new[] { Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged) }.Select(EndpointReading.Of).ToList(), []), AirPodsContainer);
+        var empty = new KsSendResult([], [], []);
+        var renderWalk = new KsSendResult([], [], [StepOutcomes.FromHResult(TopologyWalk.ActivateTopologyStep + ":" + AirPodsRenderId, CoreAudio.AUDCLNT_E_DEVICE_INVALIDATED)]);
+        var captureWalk = new KsSendResult([], [], [StepOutcomes.FromHResult(TopologyWalk.ActivateTopologyStep + ":" + AirPodsCaptureId, CoreAudio.AUDCLNT_E_DEVICE_INVALIDATED)]);
+
+        Assert.IsFalse(ConnectionController.RenderSideInvalidated(read, empty));
+        Assert.IsTrue(ConnectionController.RenderSideInvalidated(read, renderWalk));
+        Assert.IsFalse(ConnectionController.RenderSideInvalidated(read, captureWalk));
+    }
+
+    [TestMethod]
     public async Task ADeviceInvalidatedOnOneFilterStillWaitsWhenTheOtherAccepted()
     {
         Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
@@ -348,19 +427,95 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
     }
 
     [TestMethod]
-    public async Task ARenderEndpointThatGoesDuringTheWaitWentAway()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ARenderEndpointThatGoesDuringAConnectWentAwayWithoutWaitingForTheTimeout(bool notPresent)
     {
         Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
         Filters(SOk, SOk);
-        _path.DuringSend = () => _monitor.SetEndpoints(Capture(EndpointState.Unplugged));
+        _path.DuringSend = () =>
+        {
+            if (notPresent)
+            {
+                _monitor.SetEndpoints(Render(EndpointState.NotPresent), Capture(EndpointState.Unplugged));
+            }
+            else
+            {
+                _monitor.SetEndpoints(Capture(EndpointState.Unplugged));
+            }
+        };
 
-        Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer);
-        await Armed();
-        _time.Advance(ConfirmationWaiter.TimeoutFor(ConnectAction.Connect));
-        ConnectResult result = await connecting.WaitAsync(Guard);
+        ConnectResult result = await _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard);
 
         Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
         Assert.AreEqual(ConnectMessages.WentAway, result.UserMessage);
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "state can no longer come"));
+    }
+
+    [TestMethod]
+    public async Task ARenderEndpointTurnedOffDuringAConnectSaysSo()
+    {
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(SOk, SOk);
+
+        Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer);
+        await Armed();
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Disabled), Capture(EndpointState.Unplugged)));
+        ConnectResult result = await connecting.WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.OutputTurnedOff, result.UserMessage);
+    }
+
+    [TestMethod]
+    public async Task ADisconnectWhoseRenderEndpointGoesWentAway()
+    {
+        Device(Render(EndpointState.Active), Capture(EndpointState.Active));
+        Filters(SOk, SOk);
+        _path.DuringSend = () => _monitor.SetEndpoints(Capture(EndpointState.Unplugged));
+
+        ConnectResult result = await _controller.DisconnectAsync(AirPodsContainer).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.WentAway, result.UserMessage);
+    }
+
+    // An exception in the walk
+
+    [TestMethod]
+    public async Task AWalkThatThrowsAfterAnAcceptedRequestIsLoggedAndStillConfirmsFromTheState()
+    {
+        var error = new InvalidOperationException("walk failed");
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(SOk, null);
+        _path.Fault = error;
+
+        Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer);
+        await Armed();
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Active)));
+        ConnectResult result = await connecting.WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Confirmed, result.Outcome, "The A2DP filter accepted, so the state decides.");
+        Assert.AreEqual("ks-reconnect:src", result.Steps[0].Step);
+        LogEntry logged = _log.Entries.Single(e => e.Level == LogLevel.Error);
+        Assert.AreSame(error, logged.Exception);
+        Assert.IsTrue(logged.Message.Contains("ks-reconnect:src S_OK", StringComparison.Ordinal), "The request already sent is in the log.");
+    }
+
+    [TestMethod]
+    public async Task AWalkThatThrowsWithNothingAcceptedIsLoggedAndRethrown()
+    {
+        var error = new InvalidOperationException("walk failed");
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(EFail, null);
+        _path.Fault = error;
+
+        InvalidOperationException thrown = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard));
+
+        Assert.AreSame(error, thrown);
+        Assert.IsTrue(_log.Has(LogLevel.Error, "ks-reconnect:src E_FAIL"), "The rejected request is in the log before the exception leaves.");
+        Assert.AreEqual(0, _monitor.RefreshCalls);
     }
 
     // Cancellation
@@ -433,13 +588,24 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
 
         Assert.AreEqual(ConnectDecision.ReadFailed, ConnectionController.Decide(ConnectAction.Connect, EndpointRead.Failed([])));
         Assert.AreEqual(ConnectDecision.NotFound, ConnectionController.Decide(ConnectAction.Connect, Read(Phone())));
+        AudioEndpoint secondRender = Render(EndpointState.NotPresent) with { EndpointId = "{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516971}" };
+
         Assert.AreEqual(ConnectDecision.NodesBlocked, ConnectionController.Decide(ConnectAction.Connect, Read(Render(EndpointState.NotPresent))));
-        Assert.AreEqual(ConnectDecision.Send, ConnectionController.Decide(ConnectAction.Connect,
-            Read(Render(EndpointState.NotPresent), Capture(EndpointState.Unplugged))), "Not every endpoint is NOTPRESENT.");
-        Assert.AreEqual(ConnectDecision.Send, ConnectionController.Decide(ConnectAction.Connect, Read(Render(EndpointState.Disabled))));
+        Assert.AreEqual(ConnectDecision.NodesBlocked, ConnectionController.Decide(ConnectAction.Connect,
+            Read(Render(EndpointState.NotPresent), Capture(EndpointState.Unplugged))), "Every render endpoint is NOTPRESENT, whatever capture shows.");
+        Assert.AreEqual(ConnectDecision.NodesBlocked, ConnectionController.Decide(ConnectAction.Connect,
+            Read(Render(EndpointState.NotPresent), Capture(EndpointState.Active))));
+        Assert.AreEqual(ConnectDecision.OutputDisabled, ConnectionController.Decide(ConnectAction.Connect, Read(Render(EndpointState.Disabled))));
+        Assert.AreEqual(ConnectDecision.OutputDisabled, ConnectionController.Decide(ConnectAction.Connect, Read(Render(EndpointState.Disabled), secondRender)));
+        Assert.AreEqual(ConnectDecision.Send, ConnectionController.Decide(ConnectAction.Connect, Read(Render(EndpointState.Unplugged), secondRender)),
+            "One render endpoint that can become ACTIVE is enough.");
         Assert.AreEqual(ConnectDecision.AlreadyInState, ConnectionController.Decide(ConnectAction.Connect, Read(Render(EndpointState.Active))));
 
         Assert.AreEqual(ConnectDecision.AlreadyInState, ConnectionController.Decide(ConnectAction.Disconnect, Read(Render(EndpointState.NotPresent))));
+        Assert.AreEqual(ConnectDecision.AlreadyInState, ConnectionController.Decide(ConnectAction.Disconnect,
+            Read(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged))));
+        Assert.AreEqual(ConnectDecision.Send, ConnectionController.Decide(ConnectAction.Disconnect,
+            Read(Render(EndpointState.Unplugged), Capture(EndpointState.Active))), "An active Hands-Free link is not disconnected.");
         Assert.AreEqual(ConnectDecision.Send, ConnectionController.Decide(ConnectAction.Disconnect, Read(Render(EndpointState.Active))));
         Assert.AreEqual(ConnectDecision.NotFound, ConnectionController.Decide(ConnectAction.Disconnect, Read(Capture(EndpointState.Active))),
             "Without a render endpoint no state could confirm a request, so none is sent.");

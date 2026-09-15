@@ -1,16 +1,20 @@
 using System.Text.Json;
+using Earshot.App;
 using Earshot.Audio;
 using Earshot.Audio.Connect;
+using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Tests.Phase2;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase2.EndpointFixtures;
 using static Earshot.Tests.Phase3.ConnectFixtures;
 
 namespace Earshot.Tests.Phase3;
 
-// diag connect, disconnect and ks send live requests, so no test runs them. These tests cover their argument
-// handling and the evidence they write, built from plain data.
+// diag connect, disconnect and ks send live requests, so no test runs them with live services. These tests cover
+// their argument handling, their own safe-mode refusal (with safe-mode services that have no audio worker), and
+// the evidence they write, built from plain data.
 [TestClass]
 public sealed class DiagConnectTests
 {
@@ -29,6 +33,15 @@ public sealed class DiagConnectTests
 
         Assert.AreEqual((ConnectAction)expectedAction, parsed.Action);
         Assert.AreEqual((FilterChoice)expectedFilters, parsed.Filters);
+        Assert.AreEqual(KsPayload.None, parsed.Payload, "The documented request carries no buffer.");
+    }
+
+    [TestMethod]
+    public void TheBufferSwitchAsksForTheFourByteBuffer()
+    {
+        Assert.IsTrue(Program.TryParseDiagKs(["disconnect", "wave", "buffer4"], out Program.DiagKsArguments? parsed, out string? error), error);
+
+        Assert.AreEqual(new Program.DiagKsArguments(ConnectAction.Disconnect, FilterChoice.Wave, KsPayload.ZeroedFourBytes), parsed);
     }
 
     [TestMethod]
@@ -41,6 +54,9 @@ public sealed class DiagConnectTests
     [DataRow("reconnect", "phone")]
     [DataRow("disconnect", "")]
     [DataRow("reconnect", "src", "extra")]
+    [DataRow("reconnect", "src", "Buffer4")]
+    [DataRow("reconnect", "buffer4", "src")]
+    [DataRow("reconnect", "src", "buffer4", "buffer4")]
     public void AnythingElseIsRefused(params string[] args)
     {
         Assert.IsFalse(Program.TryParseDiagKs(args, out Program.DiagKsArguments? parsed, out string? error));
@@ -66,6 +82,66 @@ public sealed class DiagConnectTests
                 }
             }
         }
+    }
+
+    [TestMethod]
+    public void EachTargetRefusesSafeModeServicesItselfBeforeAnythingRuns()
+    {
+        using var folder = new TempFolder();
+        string evidence = Path.Combine(folder.Path, "livetest");
+        var log = new CapturingLog();
+        var registry = new ServiceRegistry(log, new FakeSettingsStore(), a => a(), safeMode: true);
+        int builds = 0;
+
+        var runs = new (string Target, string[] Args, Action<DiagContext> Run)[]
+        {
+            ("ks", new[] { "reconnect", "all" }, Program.RunDiagKs),
+            ("ks", new[] { "not", "valid" }, Program.RunDiagKs),
+            ("connect", Array.Empty<string>(), ctx => Program.RunDiagController(ctx, ConnectAction.Connect)),
+            ("disconnect", Array.Empty<string>(), ctx => Program.RunDiagController(ctx, ConnectAction.Disconnect)),
+        };
+
+        foreach ((string target, string[] args, Action<DiagContext> run) in runs)
+        {
+            using var output = new StringWriter();
+            var ctx = new DiagContext(target, args, evidence, output, () =>
+            {
+                builds++;
+                return registry;
+            });
+
+            run(ctx);
+
+            Assert.IsTrue(ctx.Handled, target);
+            Assert.AreEqual(ExitCodes.Refused, ctx.ExitCode, target);
+            Assert.AreEqual(SafeDecorators.Message, output.ToString().Trim(), target);
+        }
+
+        Assert.AreEqual(4, builds);
+        Assert.IsNull(registry.Worker, "No audio worker was made or asked for.");
+        Assert.IsFalse(Directory.Exists(evidence), "No evidence file was written.");
+        Assert.AreEqual(4, log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains(SafeDecorators.Message, StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void WhenNothingIsSentTheSummaryNamesEachFiltersOwnReason()
+    {
+        EndpointRead ok = EndpointRead.From(new EndpointEnumeration(true, [EndpointReading.Of(Render(EndpointState.Unplugged))], []), AirPodsContainer);
+        var src = new AdapterPath(SrcAdapter, [Render(EndpointState.Unplugged)]);
+        var wave = new AdapterPath(WaveAdapter, [Capture(EndpointState.Unplugged)]);
+        StepOutcome notSent = StepOutcomes.NotAttempted("ks-reconnect:src", "a2dp: x: no request was sent because y");
+        var activationFailed = new FilterSend(src, "src", FilterRole.A2dp, new FilterVisit(src, EndpointState.Active, AirPodsContainer, true, false, []),
+            null, 0, null, null, "IKsControl could not be activated.", notSent);
+        var guardRefused = new FilterSend(wave, "wave", FilterRole.HandsFree, new FilterVisit(wave, EndpointState.Unplugged, null, false, false, []),
+            null, 0, null, null, "the guard did not pass.", notSent with { Step = "ks-reconnect:wave" });
+
+        Assert.AreEqual("the endpoints could not be read.", Program.NothingSentReason(EndpointRead.Failed([]), null));
+        Assert.AreEqual("the device has no endpoints.", Program.NothingSentReason(EndpointRead.From(new EndpointEnumeration(true, [], []), AirPodsContainer), null));
+        Assert.AreEqual("the audio device enumerator could not be created (REGDB_E_CLASSNOTREG).", Program.NothingSentReason(ok,
+            KsSendResult.Failed(StepOutcomes.FromHResult(AudioWorker.Steps.CreateEnumerator, unchecked((int)0x80040154)))));
+        Assert.AreEqual("no chosen filter was found.", Program.NothingSentReason(ok, new KsSendResult([src], [], [])));
+        Assert.AreEqual("src: IKsControl could not be activated; wave: the guard did not pass.",
+            Program.NothingSentReason(ok, new KsSendResult([src, wave], [activationFailed, guardRefused], [])));
     }
 
     [TestMethod]
@@ -112,13 +188,13 @@ public sealed class DiagConnectTests
         };
         KsSendResult send = path.Send(AirPodsContainer, before.Target!.Endpoints, ConnectAction.Connect, FilterChoice.All);
         DeviceSnapshot after = monitor.Snapshot(Render(EndpointState.Active), Capture(EndpointState.Unplugged));
-        var confirmation = new ConfirmationResult(true, ConfirmationSource.Notification, TimeSpan.FromMilliseconds(1234), after, true, 2, 0, 9, ApartmentState.STA);
+        var confirmation = new ConfirmationResult(true, false, ConfirmationSource.Notification, TimeSpan.FromMilliseconds(1234), after, true, 2, 0, 9, ApartmentState.STA);
         RecordedNotification[] notifications =
         [
             Note(1, requested.AddMilliseconds(1200), EndpointNotificationKind.StateChanged, AirPodsRenderId, CoreAudio.DEVICE_STATE_ACTIVE, thread: 31),
         ];
         var evidence = new Program.DiagConnectEvidence("ks", ["reconnect", "all"], ConnectAction.Connect, FilterChoice.All,
-            requested.AddSeconds(-1), requested.AddSeconds(15), AirPodsContainer, before, after, null, null, send, confirmation, requested,
+            requested.AddSeconds(-1), requested.AddSeconds(15), AirPodsContainer, KsPayload.None, before, after, null, null, send, confirmation, requested,
             notifications, [StepOutcomes.FromHResult(NotificationRecorder.RegisterStep, 0)], null);
 
         using JsonDocument json = JsonDocument.Parse(Program.DiagConnectJson(evidence));
@@ -126,6 +202,8 @@ public sealed class DiagConnectTests
 
         Assert.AreEqual("reconnect", root.GetProperty("action").GetString());
         Assert.AreEqual("all", root.GetProperty("filterChoice").GetString());
+        Assert.AreEqual("none", root.GetProperty("payload").GetString());
+        Assert.AreEqual(JsonValueKind.Null, root.GetProperty("sendFault").ValueKind);
         Assert.IsTrue(root.GetProperty("requestedUtc").GetString()!.EndsWith("+00:00", StringComparison.Ordinal), "Timestamps are UTC.");
         Assert.AreEqual(2, root.GetProperty("filtersFound").GetArrayLength());
         Assert.AreEqual(1, root.EnumerateObject().Count(p => p.Name == "filters"), "Each property name appears once.");
@@ -135,9 +213,16 @@ public sealed class DiagConnectTests
             sent[0].GetProperty("hrName").GetString(), sent[0].GetProperty("accepted").GetBoolean()));
         Assert.AreEqual(("wave", "0x80070490", "E_NOTFOUND", false), (sent[1].GetProperty("name").GetString(), sent[1].GetProperty("hr").GetString(),
             sent[1].GetProperty("hrName").GetString(), sent[1].GetProperty("accepted").GetBoolean()));
+        Assert.AreEqual(("a2dp", "hands-free"), (sent[0].GetProperty("role").GetString(), sent[1].GetProperty("role").GetString()));
+        Assert.AreEqual(1.0, sent[0].GetProperty("callMilliseconds").GetDouble(), "The time KsProperty took to return.");
+        Assert.AreEqual(
+            DateTimeOffset.Parse(sent[0].GetProperty("sentUtc").GetString()!, System.Globalization.CultureInfo.InvariantCulture).AddMilliseconds(1),
+            DateTimeOffset.Parse(sent[0].GetProperty("returnedUtc").GetString()!, System.Globalization.CultureInfo.InvariantCulture));
+        Assert.AreEqual("a2dp", root.GetProperty("filtersFound")[0].GetProperty("role").GetString());
 
         JsonElement confirmed = root.GetProperty("confirmation");
         Assert.IsTrue(confirmed.GetProperty("reached").GetBoolean());
+        Assert.IsFalse(confirmed.GetProperty("unreachable").GetBoolean());
         Assert.AreEqual(1234, confirmed.GetProperty("elapsedMilliseconds").GetInt64());
         Assert.AreEqual(9, confirmed.GetProperty("observedOnThreadId").GetInt32());
         Assert.AreEqual("STA", confirmed.GetProperty("observedOnApartment").GetString());

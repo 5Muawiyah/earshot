@@ -168,6 +168,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
         ConfirmationResult result = await waiting.WaitAsync(Guard);
 
         Assert.IsFalse(result.Reached);
+        Assert.IsFalse(result.Unreachable);
         Assert.AreEqual(ConfirmationSource.None, result.Source);
         Assert.IsNotNull(result.LastObserved);
         Assert.IsTrue(result.RenderEndpointObserved);
@@ -176,19 +177,62 @@ public sealed class ConfirmationWaiterTests : IDisposable
     }
 
     [TestMethod]
-    public async Task ARenderEndpointThatHasGoneIsReportedAtTheTimeout()
+    [DataRow((int)ConnectAction.Connect)]
+    [DataRow((int)ConnectAction.Disconnect)]
+    public async Task ARenderEndpointThatHasGoneEndsTheWaitWithoutTheTimeout(int action)
     {
         DateTimeOffset requested = _time.GetUtcNow();
         _monitor.SetEndpoints(Capture(EndpointState.Unplugged));
+
+        ConfirmationResult result = await Wait((ConnectAction)action, requested).WaitAsync(Guard);
+
+        Assert.IsFalse(result.Reached);
+        Assert.IsTrue(result.Unreachable);
+        Assert.AreEqual(ConfirmationSource.Refresh, result.Source);
+        Assert.IsNotNull(result.LastObserved);
+        Assert.IsFalse(result.RenderEndpointObserved);
+        Assert.IsNotNull(result.ThreadId);
+    }
+
+    [TestMethod]
+    [DataRow(EndpointState.NotPresent)]
+    [DataRow(EndpointState.Disabled)]
+    public async Task AConnectEndsWhenNoRenderEndpointCanBecomeActive(EndpointState state)
+    {
+        DateTimeOffset requested = _time.GetUtcNow();
+        _monitor.SetEndpoints(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
         await Armed();
+        Assert.IsFalse(waiting.IsCompleted);
 
+        _monitor.Raise(_monitor.Snapshot(Render(state), Capture(EndpointState.Unplugged)));
+        ConfirmationResult result = await waiting.WaitAsync(Guard);
+
+        Assert.IsFalse(result.Reached);
+        Assert.IsTrue(result.Unreachable);
+        Assert.AreEqual(ConfirmationSource.Notification, result.Source);
+        Assert.AreEqual(state, ConfirmationWaiter.EndpointsOf(result.LastObserved!, AirPodsContainer).Single(e => e.Flow == EndpointFlow.Render).State);
+    }
+
+    [TestMethod]
+    public async Task AnOlderSnapshotWithoutARenderEndpointDoesNotEndTheWait()
+    {
+        DateTimeOffset requested = _time.GetUtcNow();
+        DeviceSnapshot older = _monitor.Snapshot(Capture(EndpointState.Unplugged));
+        _monitor.SetEndpoints(Render(EndpointState.Unplugged));
+        Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
+        await Armed();
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Unplugged)));
+
+        // Taken after the request but before the newest snapshot seen, and delivered after it.
+        _monitor.Raise(older);
+        Assert.IsFalse(waiting.IsCompleted, "Only the newest snapshot seen can end the wait early.");
         _time.Advance(ConnectTimeout);
         ConfirmationResult result = await waiting.WaitAsync(Guard);
 
         Assert.IsFalse(result.Reached);
-        Assert.IsNotNull(result.LastObserved);
-        Assert.IsFalse(result.RenderEndpointObserved);
+        Assert.IsFalse(result.Unreachable);
+        Assert.IsTrue(result.RenderEndpointObserved);
     }
 
     [TestMethod]
@@ -275,12 +319,32 @@ public sealed class ConfirmationWaiterTests : IDisposable
 
         Assert.IsTrue(ConfirmationWaiter.IsReached([Render(EndpointState.Unplugged)], ConnectAction.Disconnect));
         Assert.IsTrue(ConfirmationWaiter.IsReached([Render(EndpointState.NotPresent), Capture(EndpointState.NotPresent)], ConnectAction.Disconnect));
+        Assert.IsFalse(ConfirmationWaiter.IsReached([Render(EndpointState.Unplugged), Capture(EndpointState.Active)], ConnectAction.Disconnect),
+            "An active Hands-Free capture endpoint is a live link.");
+        Assert.IsTrue(ConfirmationWaiter.IsReached([Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged)], ConnectAction.Disconnect));
         Assert.IsFalse(ConfirmationWaiter.IsReached([Render(EndpointState.Active), secondRender], ConnectAction.Disconnect),
             "Any render endpoint still active is not a disconnect.");
         Assert.IsFalse(ConfirmationWaiter.IsReached([Render(EndpointState.Disabled)], ConnectAction.Disconnect));
         Assert.IsFalse(ConfirmationWaiter.IsReached([Capture(EndpointState.Unplugged)], ConnectAction.Disconnect),
             "Without a render endpoint nothing was observed.");
         Assert.IsFalse(ConfirmationWaiter.IsReached([], ConnectAction.Disconnect));
+    }
+
+    [TestMethod]
+    public void TheStateIsUnreachableWhenNoRenderEndpointCanGetThere()
+    {
+        AudioEndpoint secondRender = Render(EndpointState.Unplugged) with { EndpointId = "{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516971}" };
+
+        Assert.IsTrue(ConfirmationWaiter.IsUnreachable([], ConnectAction.Connect));
+        Assert.IsTrue(ConfirmationWaiter.IsUnreachable([Capture(EndpointState.Active)], ConnectAction.Connect));
+        Assert.IsTrue(ConfirmationWaiter.IsUnreachable([Capture(EndpointState.Active)], ConnectAction.Disconnect));
+        Assert.IsTrue(ConfirmationWaiter.IsUnreachable([Render(EndpointState.NotPresent), Capture(EndpointState.Unplugged)], ConnectAction.Connect));
+        Assert.IsTrue(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Disabled)], ConnectAction.Connect));
+        Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.NotPresent), secondRender], ConnectAction.Connect));
+        Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Unplugged)], ConnectAction.Connect));
+        Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.NotPresent)], ConnectAction.Disconnect),
+            "NOTPRESENT is where a disconnect is going.");
+        Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Disabled)], ConnectAction.Disconnect));
     }
 
     [TestMethod]

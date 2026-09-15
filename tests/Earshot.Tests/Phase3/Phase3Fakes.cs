@@ -257,6 +257,9 @@ internal sealed class FakeConnectPath : IKsConnectPath
     // Runs inside Send, on the worker, after the requests are recorded.
     public Action? DuringSend { get; set; }
 
+    // Reported as the send's Fault: the walk stopped with this exception after the filters above.
+    public Exception? Fault { get; set; }
+
     public IReadOnlyList<(Guid Container, ConnectAction Action, FilterChoice Choice, int ThreadId)> Sends
     {
         get { lock (_gate) { return _sends.ToArray(); } }
@@ -298,6 +301,8 @@ internal sealed class FakeConnectPath : IKsConnectPath
         {
             var adapter = new AdapterPath(filter.AdapterId, new[] { filter.From });
             string name = KsConnectPath.FilterName(filter.AdapterId);
+            FilterRole role = KsConnectPath.RoleOf(adapter);
+            string label = KsConnectPath.RoleName(role) + ": " + filter.AdapterId;
             var visitSteps = new List<StepOutcome>();
             if (filter.ActivateHr is int activateHr)
             {
@@ -305,40 +310,68 @@ internal sealed class FakeConnectPath : IKsConnectPath
             }
 
             bool sent = filter.Hr is not null;
-            var visit = new FilterVisit(adapter, EndpointState.Active, container, true, sent, visitSteps);
+            bool activated = filter.ActivateHr is null;
+            var visit = new FilterVisit(adapter, EndpointState.Active, container, true, activated, visitSteps);
+            string? reason = sent ? null : activated ? "the guard did not pass." : "IKsControl could not be activated.";
             StepOutcome step = filter.Hr is int hr
-                ? StepOutcomes.FromHResult(prefix + ":" + name, hr, detail: filter.AdapterId, ok: hr == 0)
-                : StepOutcomes.NotAttempted(prefix + ":" + name, "No request was sent to " + filter.AdapterId + ".");
+                ? StepOutcomes.FromHResult(prefix + ":" + name, hr, detail: label, ok: hr == 0)
+                : StepOutcomes.NotAttempted(prefix + ":" + name, label + ": no request was sent because " + reason);
             steps.AddRange(visitSteps);
             steps.Add(step);
-            sends.Add(new FilterSend(adapter, name, visit, filter.Hr, 0, sent ? DateTimeOffset.UtcNow : null, step));
+            sends.Add(new FilterSend(adapter, name, role, visit, filter.Hr, 0, sent ? DateTimeOffset.UtcNow : null,
+                sent ? TimeSpan.FromMilliseconds(1) : null, reason, step));
         }
 
         DuringSend?.Invoke();
-        return new KsSendResult(Filters.Select(f => new AdapterPath(f.AdapterId, new[] { f.From })).ToList(), sends, steps);
+        return new KsSendResult(Filters.Select(f => new AdapterPath(f.AdapterId, new[] { f.From })).ToList(), sends, steps, Fault);
     }
 }
 
-// Answers each request with the HRESULT set for its control, and records the order the controls were reached in.
+// Answers each request with the HRESULT set for its control, or throws the exception set for it, and records the
+// order the controls were reached in.
 internal sealed class FakeKsSender : IKsPropertySender
 {
     private readonly Dictionary<object, int> _hrByControl = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object, Exception> _throwByControl = new(ReferenceEqualityComparer.Instance);
 
-    public List<(object Control, ConnectAction Action)> Calls { get; } = new();
+    public List<(object Control, ConnectAction Action, KsPayload Payload)> Calls { get; } = new();
 
     public void Answer(object control, int hr) => _hrByControl[control] = hr;
 
-    public int Send(IKsControl control, ConnectAction action, out uint bytesReturned)
+    public void Throw(object control, Exception error) => _throwByControl[control] = error;
+
+    // Runs inside each call, after it is recorded: a test can move a manual clock to time the call.
+    public Action? OnSend { get; set; }
+
+    public int Send(IKsControl control, ConnectAction action, KsPayload payload, out uint bytesReturned)
     {
-        Calls.Add((control, action));
+        Calls.Add((control, action, payload));
+        OnSend?.Invoke();
+        if (_throwByControl.TryGetValue(control, out Exception? error))
+        {
+            throw error;
+        }
+
         bytesReturned = 0;
         return _hrByControl.TryGetValue(control, out int hr) ? hr : 0;
     }
 }
 
-internal sealed record KsCall(Guid Set, uint Id, uint Flags, uint PropertyLength, nint PropertyData, uint DataLength);
+// An adapter whose GetState throws, as a released wrapper does during a device transition. Every other member is
+// the ordinary fake's.
+internal sealed class ThrowingStateDevice(ReleaseLedger ledger, string id, Exception error) : FakeDevice(ledger, id), IMMDevice
+{
+    int IMMDevice.GetState(out uint pdwState)
+    {
+        pdwState = 0;
+        throw error;
+    }
+}
 
-// An IKsControl called directly (no COM wrapper), recording every argument of every call.
+internal sealed record KsCall(Guid Set, uint Id, uint Flags, uint PropertyLength, nint PropertyData, uint DataLength, int? BufferValue);
+
+// An IKsControl called directly (no COM wrapper), recording every argument of every call and, when a data buffer
+// of at least four bytes is passed, the value it held.
 internal sealed class RecordingKsControl : IKsControl
 {
     public int Hr { get; set; }
@@ -349,7 +382,8 @@ internal sealed class RecordingKsControl : IKsControl
 
     public int KsProperty(ref KSIDENTIFIER property, uint propertyLength, nint propertyData, uint dataLength, out uint bytesReturned)
     {
-        Properties.Add(new KsCall(property.Set, property.Id, property.Flags, propertyLength, propertyData, dataLength));
+        int? value = propertyData != 0 && dataLength >= sizeof(int) ? System.Runtime.InteropServices.Marshal.ReadInt32(propertyData) : null;
+        Properties.Add(new KsCall(property.Set, property.Id, property.Flags, propertyLength, propertyData, dataLength, value));
         bytesReturned = 0;
         return Hr;
     }

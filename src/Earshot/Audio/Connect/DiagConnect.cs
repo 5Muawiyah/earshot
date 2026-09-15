@@ -11,25 +11,32 @@ using Earshot.Interop;
 
 namespace Earshot;
 
-// diag connect | diag disconnect | diag ks <reconnect|disconnect> <src|wave|all>
+// diag connect | diag disconnect | diag ks <reconnect|disconnect> <src|wave|all> [buffer4]
 //
 // LIVE. These send KSPROPSETID_BtAudio requests to the owner's device and exist only for the owner's live tests
-// (research unknowns: whether the A2DP filter honours the one-shot requests, the HRESULTs, the latency to the
-// endpoint state change, and the thread and apartment of the notification callbacks). Program.RunDiag refuses
-// every target in safe mode before these run. They are never run by a build or a test.
+// (research unknowns: whether the A2DP filter honours the one-shot requests, the HRESULTs, whether a driver wants
+// a data buffer, the latency to the endpoint state change, and the thread and apartment of the notification
+// callbacks). Program.RunDiag refuses every target in safe mode before these run, and each target refuses again
+// on its own when the services it is given are in safe mode, before any worker item is queued. They are never
+// run by a build, and a test only ever calls them with safe-mode services.
 //
 //   connect, disconnect   the full controller path (ConnectionController), exactly as a left click runs it
 //   ks                    the request only, to the chosen filters, through the same walk and guard; no decision
 //                         about the current state is made, so a request can be sent in the "wrong" state on
-//                         purpose. The endpoint state is then observed for the connect timeout.
+//                         purpose. The endpoint state is then observed for the connect timeout. src is the
+//                         filter reached from a render endpoint (A2DP), wave the one reached only from a capture
+//                         endpoint (Hands-Free). buffer4 sends a 4-byte zeroed data buffer instead of none.
 //
-// Each writes one JSON evidence file (UTC timestamps, per-filter HRESULT and name, time to the state change, and
-// every endpoint notification with the thread id and apartment it arrived on) and a short summary to Out.
+// Each writes one JSON evidence file (UTC timestamps, per-filter HRESULT, name, role and call duration, time to
+// the state change, and every endpoint notification with the thread id and apartment it arrived on) and a short
+// summary to Out.
 // The notifications are recorded by a second notification client registered on the audio worker's enumerator
 // for the length of the run; the monitor is started too, so the confirmation wait sees SnapshotChanged.
 internal static partial class Program
 {
-    internal sealed record DiagKsArguments(ConnectAction Action, FilterChoice Filters);
+    internal const string DiagBufferSwitch = "buffer4";
+
+    internal sealed record DiagKsArguments(ConnectAction Action, FilterChoice Filters, KsPayload Payload = KsPayload.None);
 
     // Everything one diag connect, disconnect or ks run saw.
     internal sealed record DiagConnectEvidence(
@@ -40,6 +47,7 @@ internal static partial class Program
         DateTimeOffset StartedUtc,
         DateTimeOffset FinishedUtc,
         Guid Container,
+        KsPayload Payload,
         DeviceSnapshot? Before,
         DeviceSnapshot? After,
         ConnectReport? Report,
@@ -55,9 +63,18 @@ internal static partial class Program
 
     static partial void DiagDisconnect(DiagContext ctx) => RunDiagController(ctx, ConnectAction.Disconnect);
 
-    static partial void DiagKs(DiagContext ctx)
+    static partial void DiagKs(DiagContext ctx) => RunDiagKs(ctx);
+
+    internal static void RunDiagKs(DiagContext ctx)
     {
+        ArgumentNullException.ThrowIfNull(ctx);
         ctx.Handled = true;
+        ServiceRegistry services = ctx.Services;
+        if (RefuseDiagInSafeMode(ctx, services))
+        {
+            return;
+        }
+
         if (!TryParseDiagKs(ctx.Args, out DiagKsArguments? arguments, out string? error))
         {
             ctx.Out.WriteLine(error);
@@ -65,7 +82,6 @@ internal static partial class Program
             return;
         }
 
-        ServiceRegistry services = ctx.Services;
         if (services.Worker is not AudioWorker worker)
         {
             ReportDiagUnavailable(ctx, services.Log, "the audio worker is not part of this build");
@@ -105,10 +121,16 @@ internal static partial class Program
                     DateTimeOffset at = DateTimeOffset.UtcNow;
                     EndpointRead endpoints = path.ReadEndpoints(container);
                     KsSendResult? sent = endpoints.Ok && endpoints.Endpoints.Count > 0
-                        ? path.Send(container, endpoints.Endpoints, arguments.Action, arguments.Filters)
+                        ? path.Send(container, endpoints.Endpoints, arguments.Action, arguments.Filters, arguments.Payload)
                         : null;
                     return (endpoints, sent, (DateTimeOffset?)at);
                 }).GetAwaiter().GetResult();
+
+                if (send?.Fault is Exception fault)
+                {
+                    log.Error("diag ks " + string.Join(' ', ctx.Args) + ": the walk to the filters stopped with an exception. Steps: " +
+                              ConnectionController.Describe(send.Steps), fault);
+                }
 
                 if (send is not null && send.Filters.Any(f => f.Sent))
                 {
@@ -124,9 +146,7 @@ internal static partial class Program
                 }
                 else
                 {
-                    failure = "No request was sent: " + (read is { Ok: false } ? "the endpoints could not be read." :
-                        read is { Endpoints.Count: 0 } ? "the device has no endpoints." :
-                        send is { Filters.Count: 0 } ? "no chosen filter was found." : "no chosen filter passed the guard.");
+                    failure = "No request was sent: " + NothingSentReason(read, send);
                 }
             }
 
@@ -143,25 +163,77 @@ internal static partial class Program
         }
 
         var evidence = new DiagConnectEvidence("ks", ctx.Args, arguments.Action, arguments.Filters, started, DateTimeOffset.UtcNow,
-            container, before, after, null, read, send, confirmation, requested, recorder.Entries, recorderSteps, failure);
+            container, arguments.Payload, before, after, null, read, send, confirmation, requested, recorder.Entries, recorderSteps, failure);
         string file = ctx.NewEvidenceFile("ks-" + string.Join('-', ctx.Args));
         File.WriteAllText(file, DiagConnectJson(evidence));
 
         foreach (FilterSend filter in send?.Filters ?? Array.Empty<FilterSend>())
         {
-            ctx.Out.WriteLine(filter.Step.Step + ": " + filter.Step.CodeName);
+            ctx.Out.WriteLine(filter.Step.Step + " (" + KsConnectPath.RoleName(filter.Role) + "): " + filter.Step.CodeName);
+        }
+
+        if (send?.Fault is Exception stopped)
+        {
+            ctx.Out.WriteLine("The walk stopped: " + stopped.GetType().Name + ": " + stopped.Message);
         }
 
         ctx.Out.WriteLine(failure ?? (confirmation is { Reached: true }
             ? "State reached after " + Milliseconds(confirmation.Elapsed) + " ms."
-            : "No state change within the window."));
+            : confirmation is { Unreachable: true }
+                ? "The state could no longer be reached after " + Milliseconds(confirmation.Elapsed) + " ms."
+                : "No state change within the window."));
         ctx.Out.WriteLine("Evidence: " + file);
         log.Info("diag ks " + string.Join(' ', ctx.Args) + ": evidence " + file);
-        ctx.ExitCode = failure is null && send is not null && send.Filters.Any(f => f.Sent) ? ExitCodes.Ok : ExitCodes.Software;
+        ctx.ExitCode = failure is null && send is { Fault: null } && send.Filters.Any(f => f.Sent) ? ExitCodes.Ok : ExitCodes.Software;
     }
 
-    // diag ks arguments: <reconnect|disconnect> <src|wave|all>. Program.TryParseDiagArgs has already checked the
-    // grammar; this turns the words into the request and refuses anything else again rather than guess.
+    // Refuses a diag target when the services are in safe mode. Program.RunDiag already refuses every target in
+    // safe mode; this is the target's own check, so a live request never rests on one check alone.
+    internal static bool RefuseDiagInSafeMode(DiagContext ctx, ServiceRegistry services)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+        ArgumentNullException.ThrowIfNull(services);
+        if (!services.SafeMode)
+        {
+            return false;
+        }
+
+        services.Log.Warn(SafeDecorators.Message + " Refused: diag " + ctx.Target + ".");
+        ctx.Out.WriteLine(SafeDecorators.Message);
+        ctx.ExitCode = ExitCodes.Refused;
+        return true;
+    }
+
+    // Why diag ks sent nothing, from what it saw. Per chosen filter the reason the walk recorded, so a filter whose
+    // IKsControl could not be activated is not reported as refused by the guard.
+    internal static string NothingSentReason(EndpointRead? read, KsSendResult? send)
+    {
+        if (read is { Ok: false })
+        {
+            return "the endpoints could not be read.";
+        }
+
+        if (send is null)
+        {
+            return "the device has no endpoints.";
+        }
+
+        StepOutcome? enumerator = send.Steps.FirstOrDefault(s => s.Step == AudioWorker.Steps.CreateEnumerator);
+        if (enumerator is not null)
+        {
+            return "the audio device enumerator could not be created (" + enumerator.CodeName + ").";
+        }
+
+        if (send.Filters.Count == 0)
+        {
+            return "no chosen filter was found.";
+        }
+
+        return string.Join("; ", send.Filters.Select(f => f.Name + ": " + (f.NotSentReason ?? "the request was not made.").TrimEnd('.'))) + ".";
+    }
+
+    // diag ks arguments: <reconnect|disconnect> <src|wave|all> [buffer4]. Program.TryParseDiagArgs checks the
+    // grammar first; this turns the words into the request and refuses anything else again rather than guess.
     internal static bool TryParseDiagKs(
         IReadOnlyList<string> args,
         [NotNullWhen(true)] out DiagKsArguments? parsed,
@@ -169,9 +241,15 @@ internal static partial class Program
     {
         ArgumentNullException.ThrowIfNull(args);
         parsed = null;
-        if (args.Count != 2)
+        if (args.Count is not (2 or 3))
         {
-            error = "diag ks needs <reconnect|disconnect> <src|wave|all>.";
+            error = "diag ks needs <reconnect|disconnect> <src|wave|all> [buffer4].";
+            return false;
+        }
+
+        if (args.Count == 3 && args[2] != DiagBufferSwitch)
+        {
+            error = "diag ks only takes buffer4 after the filter.";
             return false;
         }
 
@@ -202,7 +280,7 @@ internal static partial class Program
             return false;
         }
 
-        parsed = new DiagKsArguments(action.Value, filters.Value);
+        parsed = new DiagKsArguments(action.Value, filters.Value, args.Count == 3 ? KsPayload.ZeroedFourBytes : KsPayload.None);
         error = null;
         return true;
     }
@@ -215,10 +293,17 @@ internal static partial class Program
         return error is null;
     }
 
-    private static void RunDiagController(DiagContext ctx, ConnectAction action)
+    internal static void RunDiagController(DiagContext ctx, ConnectAction action)
     {
+        ArgumentNullException.ThrowIfNull(ctx);
         ctx.Handled = true;
         string target = action == ConnectAction.Connect ? "connect" : "disconnect";
+        ServiceRegistry services = ctx.Services;
+        if (RefuseDiagInSafeMode(ctx, services))
+        {
+            return;
+        }
+
         if (!TryParseDiagController(ctx.Args, out string? error))
         {
             ctx.Out.WriteLine(error);
@@ -226,7 +311,6 @@ internal static partial class Program
             return;
         }
 
-        ServiceRegistry services = ctx.Services;
         if (services.Worker is not AudioWorker worker || services.Connection is not ConnectionController controller)
         {
             ReportDiagUnavailable(ctx, services.Log, "the connection controller is not part of this build");
@@ -264,7 +348,7 @@ internal static partial class Program
         }
 
         var evidence = new DiagConnectEvidence(target, ctx.Args, action, FilterChoice.All, started, DateTimeOffset.UtcNow,
-            container, before, after, report, report?.Before, report?.Send, report?.Confirmation, report?.RequestedUtc,
+            container, KsPayload.None, before, after, report, report?.Before, report?.Send, report?.Confirmation, report?.RequestedUtc,
             recorder.Entries, recorderSteps, failure);
         string file = ctx.NewEvidenceFile(target);
         File.WriteAllText(file, DiagConnectJson(evidence));
@@ -336,6 +420,7 @@ internal static partial class Program
                 FilterChoice.Wave => "wave",
                 _ => "all",
             });
+            w.WriteString("payload", e.Payload == KsPayload.ZeroedFourBytes ? DiagBufferSwitch : "none");
             w.WriteString("startedUtc", Utc(e.StartedUtc));
             w.WriteString("finishedUtc", Utc(e.FinishedUtc));
             w.WriteString("containerId", e.Container);
@@ -363,6 +448,7 @@ internal static partial class Program
             }
 
             WriteDiagFilters(w, e.Send, e.RequestedUtc);
+            w.WriteString("sendFault", e.Send?.Fault is Exception fault ? fault.GetType().Name + ": " + fault.Message : null);
             WriteDiagConfirmation(w, e.Confirmation);
 
             if (first is not null && e.RequestedUtc is DateTimeOffset requestedAt)
@@ -432,6 +518,7 @@ internal static partial class Program
             w.WriteStartObject();
             w.WriteString("adapterId", adapter.AdapterId);
             w.WriteString("name", KsConnectPath.FilterName(adapter.AdapterId));
+            w.WriteString("role", KsConnectPath.RoleName(KsConnectPath.RoleOf(adapter)));
             w.WriteBoolean("fromRender", adapter.FromRender);
             w.WriteEndObject();
         }
@@ -443,6 +530,7 @@ internal static partial class Program
             w.WriteStartObject();
             w.WriteString("adapterId", filter.Adapter.AdapterId);
             w.WriteString("name", filter.Name);
+            w.WriteString("role", KsConnectPath.RoleName(filter.Role));
             w.WriteBoolean("fromRender", filter.Adapter.FromRender);
             w.WriteString("adapterState", filter.Visit.State is EndpointState state ? StateText(state) : null);
             if (filter.Visit.ContainerId is Guid adapterContainer)
@@ -462,6 +550,20 @@ internal static partial class Program
             {
                 w.WriteNumber("millisecondsAfterRequest", Milliseconds(sentAt - requestedAt));
             }
+
+            // How long KsProperty took to return: the call runs on the single audio worker, so a driver that blocks
+            // inside it stalls every refresh.
+            WriteNullableUtc(w, "returnedUtc", filter.SentUtc is DateTimeOffset at && filter.CallDuration is TimeSpan took ? at + took : null);
+            if (filter.CallDuration is TimeSpan duration)
+            {
+                w.WriteNumber("callMilliseconds", Math.Round(duration.TotalMilliseconds, 3));
+            }
+            else
+            {
+                w.WriteNull("callMilliseconds");
+            }
+
+            w.WriteString("notSentReason", filter.NotSentReason);
 
             w.WriteString("hr", filter.Sent ? "0x" + unchecked((uint)filter.Step.Code).ToString("X8", CultureInfo.InvariantCulture) : null);
             w.WriteString("hrName", filter.Step.CodeName);
@@ -485,6 +587,7 @@ internal static partial class Program
 
         w.WriteStartObject("confirmation");
         w.WriteBoolean("reached", confirmation.Reached);
+        w.WriteBoolean("unreachable", confirmation.Unreachable);
         w.WriteString("source", confirmation.Source.ToString());
         w.WriteNumber("elapsedMilliseconds", Milliseconds(confirmation.Elapsed));
         w.WriteNumber("snapshotChangedEvents", confirmation.Notifications);

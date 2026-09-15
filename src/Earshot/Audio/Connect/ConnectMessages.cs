@@ -14,12 +14,20 @@ internal static class ConnectMessages
     // A request was accepted but no state change came in time (connect).
     public const string StillConnecting = "Still connecting. Check your AirPods.";
 
-    // No filter accepted the request, or the audio devices could not be read. The block coordinator owns
-    // the other way (Allow then reconnect, or Block).
+    // No filter accepted the request. The block coordinator owns the other way (Allow then reconnect, or
+    // Block), so it replaces this message when it does not take one.
     public const string CouldNotReachDriver = "Could not reach the AirPods audio driver. Trying another way.";
 
-    // Every endpoint is NOTPRESENT. The block coordinator allows the device nodes first, then connects.
+    // Connect, and every render endpoint is NOTPRESENT. The block coordinator allows the device nodes first,
+    // then connects, and replaces this message when it does not.
     public const string AllowingFirst = "Allowing first, then connecting.";
+
+    // The audio endpoints could not be enumerated, so nothing was decided or sent.
+    public const string CouldNotReadDevices = "Could not read the audio devices. Try again.";
+
+    // Connect, and every render endpoint is DISABLED (or NOTPRESENT with at least one DISABLED), so no request
+    // could turn into an ACTIVE endpoint.
+    public const string OutputTurnedOff = "The AirPods output is turned off in Sound settings.";
 
     // No endpoint in the device's container.
     public const string NotFound = "AirPods not found. Connect them to this PC once from Windows Bluetooth settings.";
@@ -27,7 +35,8 @@ internal static class ConnectMessages
     // Blocked and the Allow could not run because the gate task is missing. Used by the block coordinator.
     public const string BootBlockNotSetUp = "Boot block is not set up yet. Choose Set up Earshot.";
 
-    // The device changed mid-operation (AUDCLNT_E_DEVICE_INVALIDATED), or its render endpoint went.
+    // The device changed mid-operation (AUDCLNT_E_DEVICE_INVALIDATED on the A2DP side), or its render endpoint
+    // went, or became NOTPRESENT during a connect.
     public const string WentAway = "The AirPods went away. Try again.";
 
     // A request was accepted but no state change came in time (disconnect).

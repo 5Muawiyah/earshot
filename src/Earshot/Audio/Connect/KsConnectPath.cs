@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
 
@@ -9,14 +11,38 @@ internal enum ConnectAction
     Disconnect,  // KSPROPERTY_ONESHOT_DISCONNECT
 }
 
-// Which of the device's filters a request goes to. The controller always uses All; diag ks can pick one.
-// A filter is named by the reference string at the end of its adapter id: "src" for the A2DP filter and
-// "wave" for the Hands-Free filter on the owner's machine.
+// What a filter is for, taken from the flow of the device's endpoints that lead to it, never from the reference
+// string a driver chose for it. On Windows 11 a Bluetooth headset's output endpoint plays over A2DP unless an app
+// asks for Hands-Free, and on the owner's machine the render endpoint leads to the A2DP filter (\src) and the
+// capture endpoint to the Hands-Free filter (\wave).
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio
+//   A2dp       reached from a render endpoint
+//   HandsFree  reached only from capture endpoints
+internal enum FilterRole
+{
+    A2dp,
+    HandsFree,
+}
+
+// Which of the device's filters a request goes to. The controller always uses All; diag ks can pick one by role.
+//   Src   the A2DP filter (FilterRole.A2dp)
+//   Wave  the Hands-Free filter (FilterRole.HandsFree)
 internal enum FilterChoice
 {
     All,
     Src,
     Wave,
+}
+
+// The data buffer sent with a one-shot request.
+//   None             PropertyData null and DataLength 0: the documented request (property value type NULL). The
+//                    controller only ever sends this.
+//   ZeroedFourBytes  a 4-byte zeroed buffer. diag ks only, for the owner's live test of whether a driver answers
+//                    the documented request with a buffer error.
+internal enum KsPayload
+{
+    None,
+    ZeroedFourBytes,
 }
 
 // The worker's enumerator, or the HRESULT of creating it. AudioWorker.TryGetEnumerator outside tests.
@@ -69,18 +95,27 @@ internal sealed record EndpointRead(
 }
 
 // One filter a request was meant for, and what happened to it.
-//   Name           the reference string at the end of the adapter id ("src", "wave")
+//   Name           the reference string at the end of the adapter id ("src", "wave"), with "#2", "#3" added when
+//                  two chosen filters share one, so every step name is unique
+//   Role           from the endpoints that lead to the filter (FilterRole)
 //   Visit          the guard and activation, from TopologyWalk.VisitFilters
-//   Hr             the KsProperty HRESULT, or null when no request was sent (the guard or activation failed)
-//   Step           exactly one "ks-reconnect:<name>" or "ks-disconnect:<name>" step, with the adapter id as
-//                  detail: the raw HRESULT when a request was sent, NOT_ATTEMPTED when none was
+//   Hr             the KsProperty HRESULT, or null when no request was sent
+//   SentUtc        when KsProperty was called, or null
+//   CallDuration   how long KsProperty took to return, or null
+//   NotSentReason  why no request was sent, or null when one was
+//   Step           exactly one "ks-reconnect:<name>" or "ks-disconnect:<name>" step. Its detail starts with the
+//                  role and the adapter id ("a2dp: <id>", "hands-free: <id>"), see RoleOfStep. The code is the
+//                  raw HRESULT when a request was sent, NOT_ATTEMPTED when none was.
 internal sealed record FilterSend(
     AdapterPath Adapter,
     string Name,
+    FilterRole Role,
     FilterVisit Visit,
     int? Hr,
     uint BytesReturned,
     DateTimeOffset? SentUtc,
+    TimeSpan? CallDuration,
+    string? NotSentReason,
     StepOutcome Step)
 {
     public bool Sent => Hr is not null;
@@ -93,10 +128,14 @@ internal sealed record FilterSend(
 
 // Every filter found from the endpoints, the filters a request was meant for (in send order), and every step:
 // discovery failures, then per filter its guard or activation failures followed by its ks step.
+//   Fault  the exception that stopped the walk, or null. The filter it was thrown for carries a "visit-filter"
+//          step with the exception's HResult, filters after it are sent nothing, and requests already sent keep
+//          their steps. The caller logs it and surfaces it.
 internal sealed record KsSendResult(
     IReadOnlyList<AdapterPath> Adapters,
     IReadOnlyList<FilterSend> Filters,
-    IReadOnlyList<StepOutcome> Steps)
+    IReadOnlyList<StepOutcome> Steps,
+    Exception? Fault = null)
 {
     public bool AnyAccepted => Filters.Any(f => f.Accepted);
 
@@ -108,7 +147,7 @@ internal sealed record KsSendResult(
 // can be exercised against fakes; no test and no build step sends a real request.
 internal interface IKsPropertySender
 {
-    int Send(IKsControl control, ConnectAction action, out uint bytesReturned);
+    int Send(IKsControl control, ConnectAction action, KsPayload payload, out uint bytesReturned);
 }
 
 // KSPROPERTY_ONESHOT_RECONNECT and KSPROPERTY_ONESHOT_DISCONNECT. Both are Get requests on the filter:
@@ -121,11 +160,30 @@ internal interface IKsPropertySender
 // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ksproxy/nf-ksproxy-ikscontrol-ksproperty
 internal sealed class KsPropertySender : IKsPropertySender
 {
-    public int Send(IKsControl control, ConnectAction action, out uint bytesReturned)
+    public int Send(IKsControl control, ConnectAction action, KsPayload payload, out uint bytesReturned)
     {
         ArgumentNullException.ThrowIfNull(control);
         var property = new KSPROPERTY(KsControl.KSPROPSETID_BtAudio, PropertyId(action), KsControl.KSPROPERTY_TYPE_GET);
-        return control.KsProperty(ref property, (uint)InteropLayout.KsIdentifierBytes, 0, 0, out bytesReturned);
+        switch (payload)
+        {
+            case KsPayload.None:
+                return control.KsProperty(ref property, (uint)InteropLayout.KsIdentifierBytes, 0, 0, out bytesReturned);
+
+            case KsPayload.ZeroedFourBytes:
+                nint buffer = Marshal.AllocHGlobal(sizeof(uint));
+                try
+                {
+                    Marshal.WriteInt32(buffer, 0);
+                    return control.KsProperty(ref property, (uint)InteropLayout.KsIdentifierBytes, buffer, sizeof(uint), out bytesReturned);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(payload), payload, "Unknown payload.");
+        }
     }
 
     internal static uint PropertyId(ConnectAction action) => action switch
@@ -142,8 +200,8 @@ internal interface IKsConnectPath
     // Enumerates every endpoint in every state and keeps the container's.
     EndpointRead ReadEndpoints(Guid container);
 
-    // Walks the endpoints to their filters, applies the guard and sends the request to each chosen filter
-    // that passes it, in order.
+    // Walks the endpoints to their filters, applies the guard and sends the documented request (no buffer) to
+    // each chosen filter that passes it, in order.
     KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice);
 }
 
@@ -159,10 +217,19 @@ internal interface IKsConnectPath
 // Every COM object is released once, in a finally block, by the method that obtained it (TopologyWalk and
 // CoreAudioEndpointReader do that with the release passed here). Nothing is kept between calls: each click
 // walks and activates afresh. The enumerator belongs to the audio worker and is never released here.
+//
+// An exception from one filter's walk or request (a marshalling failure, a released wrapper during a device
+// transition) is not allowed to lose what was already sent: it becomes that filter's "visit-filter" step with
+// the exception's HResult, the filters after it are sent nothing, and the partial result carries the exception
+// as Fault for the caller to log and surface.
 internal sealed class KsConnectPath : IKsConnectPath
 {
     internal const string ReconnectStep = "ks-reconnect";
     internal const string DisconnectStep = "ks-disconnect";
+    internal const string VisitFailedStep = "visit-filter";
+
+    private const string A2dpRoleName = "a2dp";
+    private const string HandsFreeRoleName = "hands-free";
 
     private readonly EnumeratorSource _enumerators;
     private readonly IKsPropertySender _sender;
@@ -199,7 +266,10 @@ internal sealed class KsConnectPath : IKsConnectPath
         return EndpointRead.From(CoreAudioEndpointReader.ReadAll(enumerator, _release), container);
     }
 
-    public KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice)
+    public KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice) =>
+        Send(container, endpoints, action, choice, KsPayload.None);
+
+    internal KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice, KsPayload payload)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         string stepPrefix = StepPrefix(action);
@@ -212,44 +282,70 @@ internal sealed class KsConnectPath : IKsConnectPath
 
         AdapterDiscovery discovery = TopologyWalk.FindAdapters(enumerator, endpoints, container, _release);
         var steps = new List<StepOutcome>(discovery.Steps);
-        List<AdapterPath> chosen = discovery.Adapters.Where(a => IsChosen(choice, FilterName(a.AdapterId))).ToList();
+        List<AdapterPath> chosen = discovery.Adapters.Where(a => IsChosen(choice, a)).ToList();
+        IReadOnlyList<string> names = UniqueNames(chosen);
 
-        var calls = new Dictionary<string, (int Hr, uint Bytes, DateTimeOffset At)>(StringComparer.OrdinalIgnoreCase);
-        IReadOnlyList<FilterVisit> visits = TopologyWalk.VisitFilters(enumerator, chosen, container, (adapter, control) =>
+        var filters = new List<FilterSend>(chosen.Count);
+        Exception? fault = null;
+        for (int i = 0; i < chosen.Count; i++)
         {
-            // Lent for this call only. The request is sent once; nothing here retries or waits.
-            DateTimeOffset at = _time.GetUtcNow();
-            int ksHr = _sender.Send(control, action, out uint bytes);
-            calls[adapter.AdapterId] = (ksHr, bytes, at);
-            return Array.Empty<StepOutcome>();
-        }, _release);
+            AdapterPath adapter = chosen[i];
+            FilterRole role = RoleOf(adapter);
+            string stepName = stepPrefix + ":" + names[i];
+            string label = RoleName(role) + ": " + adapter.AdapterId;
 
-        var filters = new List<FilterSend>(visits.Count);
-        foreach (FilterVisit visit in visits)
-        {
-            string id = visit.Adapter.AdapterId;
-            string name = FilterName(id);
-            steps.AddRange(visit.Steps);
-
-            StepOutcome step;
-            FilterSend filter;
-            if (calls.TryGetValue(id, out (int Hr, uint Bytes, DateTimeOffset At) call))
+            if (fault is not null)
             {
-                step = StepOutcomes.FromHResult(stepPrefix + ":" + name, call.Hr, detail: id, ok: call.Hr == 0);
-                filter = new FilterSend(visit.Adapter, name, visit, call.Hr, call.Bytes, call.At, step);
+                const string Stopped = "the walk stopped at an earlier filter.";
+                StepOutcome skipped = StepOutcomes.NotAttempted(stepName, label + ": no request was sent because " + Stopped);
+                steps.Add(skipped);
+                filters.Add(new FilterSend(adapter, names[i], role, NotVisited(adapter), null, 0, null, null, Stopped, skipped));
+                continue;
+            }
+
+            SentRequest? sent = null;
+            FilterVisit visit;
+            try
+            {
+                visit = TopologyWalk.VisitFilters(enumerator, new[] { adapter }, container, (_, control) =>
+                {
+                    // Lent for this call only. The request is sent once; nothing here retries or waits.
+                    DateTimeOffset sentUtc = _time.GetUtcNow();
+                    long started = _time.GetTimestamp();
+                    int ksHr = _sender.Send(control, action, payload, out uint bytes);
+                    sent = new SentRequest(ksHr, bytes, sentUtc, _time.GetElapsedTime(started));
+                    return Array.Empty<StepOutcome>();
+                }, _release).Single();
+            }
+            catch (Exception ex)
+            {
+                // Recorded, never swallowed: the exception stays on the result as Fault, which the caller logs
+                // and surfaces. The COM objects were released by the walk's finally blocks as it unwound.
+                fault = ex;
+                StepOutcome failed = StepOutcomes.FromHResult(VisitFailedStep + ":" + adapter.AdapterId, ex.HResult,
+                    detail: ex.GetType().Name + ": " + ex.Message, ok: false);
+                visit = new FilterVisit(adapter, null, null, false, false, new[] { failed });
+            }
+
+            steps.AddRange(visit.Steps);
+            FilterSend filter;
+            if (sent is not null)
+            {
+                StepOutcome step = StepOutcomes.FromHResult(stepName, sent.Hr, detail: label, ok: sent.Hr == 0);
+                filter = new FilterSend(adapter, names[i], role, visit, sent.Hr, sent.BytesReturned, sent.SentUtc, sent.Duration, null, step);
             }
             else
             {
-                step = StepOutcomes.NotAttempted(stepPrefix + ":" + name,
-                    "No request was sent to " + id + " because " + (visit.GuardPassed ? "IKsControl could not be activated." : "the guard did not pass."));
-                filter = new FilterSend(visit.Adapter, name, visit, null, 0, null, step);
+                string reason = fault is not null ? "the walk of this filter stopped with an exception." : NotSentReason(visit);
+                StepOutcome step = StepOutcomes.NotAttempted(stepName, label + ": no request was sent because " + reason);
+                filter = new FilterSend(adapter, names[i], role, visit, null, 0, null, null, reason, step);
             }
 
-            steps.Add(step);
+            steps.Add(filter.Step);
             filters.Add(filter);
         }
 
-        return new KsSendResult(discovery.Adapters, filters, steps);
+        return new KsSendResult(discovery.Adapters, filters, steps, fault);
     }
 
     private static EnumeratorSource EnumeratorsOf(AudioWorker worker)
@@ -265,6 +361,36 @@ internal sealed class KsConnectPath : IKsConnectPath
         _ => throw new ArgumentOutOfRangeException(nameof(action), action, null),
     };
 
+    internal static FilterRole RoleOf(AdapterPath adapter)
+    {
+        ArgumentNullException.ThrowIfNull(adapter);
+        return adapter.FromRender ? FilterRole.A2dp : FilterRole.HandsFree;
+    }
+
+    internal static string RoleName(FilterRole role) => role switch
+    {
+        FilterRole.A2dp => A2dpRoleName,
+        FilterRole.HandsFree => HandsFreeRoleName,
+        _ => throw new ArgumentOutOfRangeException(nameof(role), role, null),
+    };
+
+    // The role a ks step's detail starts with, or null for any other step. Lets a caller of IConnectionController,
+    // which sees only the steps, tell the A2DP filter's outcome from the Hands-Free filter's without relying on
+    // the driver-chosen reference string in the step name.
+    internal static FilterRole? RoleOfStep(StepOutcome step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        if (!(step.Step.StartsWith(ReconnectStep + ":", StringComparison.Ordinal) ||
+              step.Step.StartsWith(DisconnectStep + ":", StringComparison.Ordinal)) || step.Detail is null)
+        {
+            return null;
+        }
+
+        return step.Detail.StartsWith(A2dpRoleName + ": ", StringComparison.Ordinal) ? FilterRole.A2dp
+            : step.Detail.StartsWith(HandsFreeRoleName + ": ", StringComparison.Ordinal) ? FilterRole.HandsFree
+            : null;
+    }
+
     // The KS filter reference string, the part of the adapter id after its last backslash: "src" and "wave"
     // on the owner's machine. Adapter ids are otherwise opaque. An id without one is used whole.
     internal static string FilterName(string adapterId)
@@ -274,11 +400,64 @@ internal sealed class KsConnectPath : IKsConnectPath
         return slash >= 0 && slash < adapterId.Length - 1 ? adapterId[(slash + 1)..] : adapterId;
     }
 
-    internal static bool IsChosen(FilterChoice choice, string filterName) => choice switch
+    // Filter names in order, with "#2", "#3" added to a name already used, so no two ks steps share a name.
+    internal static IReadOnlyList<string> UniqueNames(IEnumerable<AdapterPath> adapters)
+    {
+        ArgumentNullException.ThrowIfNull(adapters);
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>();
+        foreach (AdapterPath adapter in adapters)
+        {
+            string name = FilterName(adapter.AdapterId);
+            int count = seen.GetValueOrDefault(name) + 1;
+            seen[name] = count;
+            names.Add(count == 1 ? name : name + "#" + count.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return names;
+    }
+
+    internal static bool IsChosen(FilterChoice choice, AdapterPath adapter) => choice switch
     {
         FilterChoice.All => true,
-        FilterChoice.Src => string.Equals(filterName, "src", StringComparison.OrdinalIgnoreCase),
-        FilterChoice.Wave => string.Equals(filterName, "wave", StringComparison.OrdinalIgnoreCase),
+        FilterChoice.Src => RoleOf(adapter) == FilterRole.A2dp,
+        FilterChoice.Wave => RoleOf(adapter) == FilterRole.HandsFree,
         _ => false,
     };
+
+    // Why the walk sent nothing to a filter it visited. TopologyWalk leaves State null when the filter could not
+    // be opened (GetDevice failed, 0xE0000225 when it has gone) or its state could not be read, and records that
+    // step; it sets State when the guard itself refused the filter.
+    internal static string NotSentReason(FilterVisit visit)
+    {
+        ArgumentNullException.ThrowIfNull(visit);
+        string id = visit.Adapter.AdapterId;
+        if (visit.ControlActivated)
+        {
+            return "the request was not made.";
+        }
+
+        if (visit.GuardPassed)
+        {
+            return "IKsControl could not be activated.";
+        }
+
+        if (visit.State is null && visit.Steps.Any(s => s.Step == TopologyWalk.GetAdapterStep + ":" + id))
+        {
+            return "the filter could not be opened.";
+        }
+
+        if (visit.State is null && visit.Steps.Any(s => s.Step == TopologyWalk.AdapterStateStep + ":" + id))
+        {
+            return "the filter state could not be read.";
+        }
+
+        return "the guard did not pass.";
+    }
+
+    private static FilterVisit NotVisited(AdapterPath adapter) =>
+        new(adapter, null, null, false, false, Array.Empty<StepOutcome>());
+
+    // Plain data from inside the walk's callback.
+    private sealed record SentRequest(int Hr, uint BytesReturned, DateTimeOffset SentUtc, TimeSpan Duration);
 }
