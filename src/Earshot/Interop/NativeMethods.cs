@@ -7,10 +7,12 @@ using System.Runtime.InteropServices;
 
 namespace Earshot.Interop;
 
-// kernel32 calls made before any run mode starts.
+// kernel32 calls made before any run mode starts, plus the user32 window calls and message constants
+// shared by the tray, the shell message window and the popup card.
 internal static partial class NativeMethods
 {
     private const string Kernel32 = "kernel32.dll";
+    private const string User32 = "user32.dll";
 
     // SetDefaultDllDirectories flags.
     // https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-setdefaultdlldirectories
@@ -24,6 +26,67 @@ internal static partial class NativeMethods
     // AttachConsole fails with this when the process already has a console.
     internal const int ERROR_ACCESS_DENIED = 5;
 
+    // Window messages (WinUser.h).
+    // WM_QUERYENDSESSION: return TRUE at once and defer work; a windowless app is killed about 5 s in and
+    // EWX_FORCE sends no query at all.
+    // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession
+    internal const int WM_QUERYENDSESSION = 0x0011;
+
+    // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession
+    internal const int WM_ENDSESSION = 0x0016;
+
+    // WM_SETTINGCHANGE is WM_WININICHANGE. Broadcast to top-level windows only, never message-only ones.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-settingchange
+    internal const int WM_SETTINGCHANGE = 0x001A;
+
+    // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mouseactivate
+    internal const int WM_MOUSEACTIVATE = 0x0021;
+
+    // https://learn.microsoft.com/en-us/windows/win32/gdi/wm-displaychange
+    internal const int WM_DISPLAYCHANGE = 0x007E;
+
+    // https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged
+    internal const int WM_DPICHANGED = 0x02E0;
+
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-themechanged
+    internal const int WM_THEMECHANGED = 0x031A;
+
+    // WM_QUERYENDSESSION / WM_ENDSESSION lParam bits. 0 means shutdown or restart.
+    internal const uint ENDSESSION_CLOSEAPP = 0x00000001;
+    internal const uint ENDSESSION_CRITICAL = 0x40000000;
+    internal const uint ENDSESSION_LOGOFF = 0x80000000;
+
+    // WM_MOUSEACTIVATE results. The card answers MA_NOACTIVATE so a click never takes focus.
+    internal const int MA_ACTIVATE = 1;
+    internal const int MA_ACTIVATEANDEAT = 2;
+    internal const int MA_NOACTIVATE = 3;
+    internal const int MA_NOACTIVATEANDEAT = 4;
+
+    // Extended window styles for the card's CreateParams. WS_EX_TOPMOST goes in CreateParams, never through
+    // the Form.TopMost setter, which activates the window.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles
+    internal const int WS_EX_TOPMOST = 0x00000008;
+    internal const int WS_EX_TOOLWINDOW = 0x00000080;
+    internal const int WS_EX_NOACTIVATE = 0x08000000;
+
+    // ShowWindow command that shows without activating.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow
+    internal const int SW_SHOWNOACTIVATE = 4;
+
+    // SetWindowPos insert-after handles and flags. Without SWP_NOACTIVATE the window is activated.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos
+    internal const nint HWND_TOPMOST = -1;
+    internal const nint HWND_NOTOPMOST = -2;
+    internal const uint SWP_NOSIZE = 0x0001;
+    internal const uint SWP_NOMOVE = 0x0002;
+    internal const uint SWP_NOZORDER = 0x0004;
+    internal const uint SWP_NOREDRAW = 0x0008;
+    internal const uint SWP_NOACTIVATE = 0x0010;
+    internal const uint SWP_FRAMECHANGED = 0x0020;
+    internal const uint SWP_SHOWWINDOW = 0x0040;
+    internal const uint SWP_HIDEWINDOW = 0x0080;
+    internal const uint SWP_NOOWNERZORDER = 0x0200;
+
     // Removes the current directory and PATH from the DLL search order for every later load.
     [LibraryImport(Kernel32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -32,4 +95,14 @@ internal static partial class NativeMethods
     [LibraryImport(Kernel32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool AttachConsole(uint processId);
+
+    // Closes a kernel handle, such as a Bluetooth radio handle from BluetoothFindFirstRadio.
+    // https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle
+    [LibraryImport(Kernel32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CloseHandle(nint hObject);
+
+    [LibraryImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 }
