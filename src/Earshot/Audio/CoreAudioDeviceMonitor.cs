@@ -12,6 +12,14 @@ internal sealed record MonitorRefresh(
     IReadOnlyList<StepOutcome> Steps,
     TargetResolution Resolution);
 
+// Whether Current comes from a successful enumeration.
+internal enum DeviceReadStatus
+{
+    NotRead,   // nothing enumerated yet: Current is the empty placeholder
+    Ok,        // the last enumeration worked: Current is up to date
+    Failed     // the last enumeration failed: Current is the placeholder, or the last snapshot that was read
+}
+
 // IDeviceMonitor over Core Audio. Watches endpoint notifications and keeps the device snapshot current.
 //
 //   Start          registers the notification client on the audio worker, then enumerates, so no change
@@ -25,13 +33,30 @@ internal sealed record MonitorRefresh(
 //   SnapshotChanged is raised through the UI post only when the snapshot changed materially (TakenUtc is
 //                  ignored). Current is updated after every successful enumeration.
 //
+// The UI post. uiPost is called on the audio worker thread, so it must queue the action and return at once
+// (SynchronizationContext.Post, Control.BeginInvoke). A post that waits for the UI thread
+// (SynchronizationContext.Send, Control.Invoke) deadlocks as soon as the UI thread waits on RefreshAsync or
+// on anything else queued to the worker. The console run modes post inline, so the handlers run on the
+// worker thread there and must not block either.
+//
 // Every enumeration, model build and publication runs on the audio worker, so they are serialised and
 // happen in order. A failed enumeration keeps the previous snapshot, is logged as an error and is reported
-// in the MonitorRefresh steps; per-endpoint property failures (0xE000020B on NOTPRESENT endpoints) are
-// logged at Debug once each, when first seen.
+// in the MonitorRefresh steps and in ReadStatus. A per-endpoint read failure is logged once, when first
+// seen: at Debug for a name read on a NOTPRESENT endpoint (0xE000020B there is expected), at Warn for every
+// other one, because an unreadable id, flow, state or container takes the endpoint out of its device.
+//
+// "Not found" or "could not read". DeviceSnapshot has no read status, so a null Target means any of:
+// nothing read yet, every enumeration so far failed, the pinned device has no endpoints, or no device
+// matched. ReadStatus and Resolution tell these apart; check them before showing "not found".
 internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 {
     internal static readonly TimeSpan DefaultCoalesceWindow = TimeSpan.FromMilliseconds(150);
+
+    private static readonly string[] NameStepPrefixes =
+    [
+        CoreAudioEndpointReader.FriendlyNameStep + ":",
+        CoreAudioEndpointReader.InterfaceNameStep + ":",
+    ];
 
     private readonly IAudioWorker _worker;
     private readonly IEndpointSource _source;
@@ -43,6 +68,8 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     private readonly Func<DateTimeOffset> _utcNow;
 
     private DeviceSnapshot _current;
+    private int _readStatus = (int)DeviceReadStatus.NotRead;
+    private int _resolution = (int)TargetResolution.None;
     private int _started;
     private int _disposed;
     private int _refreshPending;
@@ -56,6 +83,7 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     private Guid _appliedPinned;
     private HashSet<string> _reportedFailures = new(StringComparer.Ordinal);
 
+    // uiPost must queue the action and never wait for it to run: see the class comment.
     public CoreAudioDeviceMonitor(IAudioWorker worker, IEndpointSource source, ISettingsStore settings, ILog log, Action<Action> uiPost)
         : this(worker, source, settings, log, uiPost, DefaultCoalesceWindow, static window => Task.Delay(window), static () => DateTimeOffset.UtcNow)
     {
@@ -94,6 +122,13 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     public event EventHandler<DeviceSnapshotEventArgs>? SnapshotChanged;
 
     public DeviceSnapshot Current => Volatile.Read(ref _current);
+
+    // How the last enumeration went. Until DeviceSnapshot carries it, this is how a caller tells "could not
+    // read" from "not found".
+    internal DeviceReadStatus ReadStatus => (DeviceReadStatus)Volatile.Read(ref _readStatus);
+
+    // How the target in Current was chosen: PinnedAbsent when the pinned device has no endpoints.
+    internal TargetResolution Resolution => (TargetResolution)Volatile.Read(ref _resolution);
 
     internal TimeSpan CoalesceWindow => _coalesceWindow;
 
@@ -268,9 +303,11 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
         if (!enumeration.Ok)
         {
             _lastSteps = steps;
-            return new MonitorRefresh(Current, false, _lastReadings ?? Array.Empty<EndpointReading>(), steps, TargetResolution.None);
+            Volatile.Write(ref _readStatus, (int)DeviceReadStatus.Failed);
+            return new MonitorRefresh(Current, false, _lastReadings ?? Array.Empty<EndpointReading>(), steps, Resolution);
         }
 
+        Volatile.Write(ref _readStatus, (int)DeviceReadStatus.Ok);
         _lastReadings = enumeration.Readings;
         return PublishOnWorker(enumeration.Readings, steps, reason);
     }
@@ -301,11 +338,12 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 
         DeviceSnapshot previous = Volatile.Read(ref _current);
         DeviceSnapshot snapshot = model.Snapshot;
+        Volatile.Write(ref _resolution, (int)model.Resolution);
         Volatile.Write(ref _current, snapshot);
 
         if (!EndpointModelBuilder.AreEquivalent(previous, snapshot) && !IsDisposed)
         {
-            _log.Info("Audio devices changed (" + reason + "): " + Describe(model));
+            _log.Info("Audio devices changed (" + reason + "): " + Describe(model, settings.PinnedContainerId));
             _uiPost(() => RaiseSnapshotChanged(snapshot));
         }
 
@@ -334,6 +372,12 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
             return;
         }
 
+        var states = new Dictionary<string, EndpointState>(StringComparer.Ordinal);
+        foreach (EndpointReading reading in enumeration.Readings)
+        {
+            states[reading.Endpoint.EndpointId] = reading.Endpoint.State;
+        }
+
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (StepOutcome step in enumeration.Steps)
         {
@@ -346,11 +390,41 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
             seen.Add(key);
             if (!_reportedFailures.Contains(key))
             {
-                _log.Write(LogLevel.Debug, "Audio endpoint read failed: " + Describe(step));
+                _log.Write(ReadFailureLevel(step, states), "Audio endpoint read failed: " + Describe(step));
             }
         }
 
         _reportedFailures = seen;
+    }
+
+    // Debug only for a failed name read on a NOTPRESENT endpoint, where GetValue(PKEY_Device_FriendlyName)
+    // failing with 0xE000020B is expected. Every other failure can change the model, so it is a warning: an
+    // unreadable id or flow drops the endpoint, an unreadable state leaves it without one, an unreadable
+    // property store or container id moves it out of its device (into the Guid.Empty group, never a target),
+    // and a name that cannot be read on a present endpoint can stop the name match.
+    // https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-state-xxx-constants
+    internal static LogLevel ReadFailureLevel(StepOutcome step, IReadOnlyDictionary<string, EndpointState> states)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(states);
+        string? endpointId = NameStepEndpoint(step.Step);
+        return endpointId is not null && states.TryGetValue(endpointId, out EndpointState state) && state == EndpointState.NotPresent
+            ? LogLevel.Debug
+            : LogLevel.Warn;
+    }
+
+    // The endpoint id of a "friendly-name:<id>" or "interface-name:<id>" step, or null for any other step.
+    private static string? NameStepEndpoint(string step)
+    {
+        foreach (string prefix in NameStepPrefixes)
+        {
+            if (step.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return step[prefix.Length..];
+            }
+        }
+
+        return null;
     }
 
     private void ReportCallbackFailures()
@@ -398,14 +472,16 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     internal static string Describe(StepOutcome step) =>
         step.Step + " " + step.CodeName + (step.Detail is null ? "" : " (" + step.Detail + ")");
 
-    private static string Describe(EndpointModel model)
+    private static string Describe(EndpointModel model, Guid pinnedContainerId)
     {
         DeviceSnapshot snapshot = model.Snapshot;
         int endpoints = snapshot.AllGroups.Sum(g => g.Endpoints.Count);
         string groups = snapshot.AllGroups.Count + " groups, " + endpoints + " endpoints";
         if (snapshot.Target is not DeviceModel target)
         {
-            return "no target device; " + groups + ".";
+            return model.Resolution == TargetResolution.PinnedAbsent
+                ? "no target device, the pinned container " + pinnedContainerId.ToString("B", CultureInfo.InvariantCulture) + " has no endpoints; " + groups + "."
+                : "no target device; " + groups + ".";
         }
 
         return "target " + target.ContainerId.ToString("B", CultureInfo.InvariantCulture) + " \"" + target.DisplayName + "\" " + target.Connection +

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Earshot.Audio;
 using Earshot.Contracts;
 using Earshot.Interop;
@@ -155,6 +156,44 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         }
     }
 
+    // The UI post contract: the monitor calls uiPost on the worker and must not hold the worker while the post
+    // waits for the UI thread. A handler on the UI thread that waits for a refresh then finishes, and the snapshot
+    // that refresh produces is posted and raised after it.
+    [TestMethod]
+    public async Task AHandlerOnTheUiThreadCanWaitForARefresh()
+    {
+        using var ui = new PostQueueThread();
+        CoreAudioDeviceMonitor monitor = NewMonitor(ui.Post);
+        var waited = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int handlerThread = 0;
+        monitor.SnapshotChanged += (_, e) =>
+        {
+            if (e.Snapshot.Target?.Connection != ConnectionState.Connected)
+            {
+                return;
+            }
+
+            handlerThread = Environment.CurrentManagedThreadId;
+            _source.SetReadings(Machine(EndpointState.Unplugged, EndpointState.Unplugged));
+            waited.TrySetResult(monitor.RefreshAsync().Wait(Timeout));
+        };
+
+        try
+        {
+            await monitor.RefreshAsync().WaitAsync(Timeout);
+
+            Assert.IsTrue(await waited.Task.WaitAsync(Timeout), "The refresh a UI handler waited for did not finish.");
+            await Eventually.True(() => Raised == 2, "the second snapshot, raised on the UI thread");
+            Assert.AreEqual(ui.ThreadId, handlerThread);
+            Assert.AreEqual(ConnectionState.Disconnected, LastRaised.Target?.Connection);
+            Assert.IsNull(ui.Failure);
+        }
+        finally
+        {
+            monitor.Dispose();
+        }
+    }
+
     [TestMethod]
     public async Task ABurstOfNotificationsBecomesOneEnumeration()
     {
@@ -262,6 +301,31 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
     }
 
     [TestMethod]
+    public async Task APinnedDeviceWithoutEndpointsLeavesNoTargetEvenWhenAnotherDeviceMatches()
+    {
+        _settings.Update(s =>
+        {
+            s.PinnedContainerId = AirPodsContainer;
+            s.DeviceMatch = "Seiren";
+        });
+        _source.SetReadings(Machine().Where(r => r.Endpoint.ContainerId != AirPodsContainer));
+
+        MonitorRefresh refresh = await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
+
+        Assert.IsNull(refresh.Snapshot.Target);
+        Assert.AreEqual(TargetResolution.PinnedAbsent, refresh.Resolution);
+        Assert.AreEqual(TargetResolution.PinnedAbsent, _monitor.Resolution);
+        Assert.AreEqual(DeviceReadStatus.Ok, _monitor.ReadStatus);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "no target device, the pinned container {1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d} has no endpoints"));
+
+        _source.SetReadings(Machine(EndpointState.Unplugged, EndpointState.Unplugged));
+        await _monitor.RefreshAsync().WaitAsync(Timeout);
+
+        Assert.AreEqual(AirPodsContainer, _monitor.Current.Target?.ContainerId);
+        Assert.AreEqual(TargetResolution.Pinned, _monitor.Resolution);
+    }
+
+    [TestMethod]
     public async Task BlockedEndpointsDisappearingLeaveNoTarget()
     {
         await _monitor.RefreshAsync().WaitAsync(Timeout);
@@ -284,16 +348,44 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         Assert.IsFalse(failed.EnumerationOk);
         Assert.AreSame(good, failed.Snapshot);
         Assert.AreSame(good, _monitor.Current);
+        Assert.AreEqual(DeviceReadStatus.Failed, _monitor.ReadStatus);
+        Assert.AreEqual(TargetResolution.NameMatch, failed.Resolution, "The resolution of the snapshot that was kept.");
         Assert.AreEqual(1, Raised);
         StepOutcome step = failed.Steps.Single();
         Assert.AreEqual("E_NOTFOUND", step.CodeName);
         Assert.IsTrue(_log.Has(LogLevel.Error, "Could not read the audio devices (refresh): enumerate-endpoints E_NOTFOUND"));
     }
 
+    // Before anything was read, and after a first read that failed, Current has no target, the same as "not found".
+    // ReadStatus tells them apart.
+    [TestMethod]
+    public async Task AFailedFirstReadIsReportedAsFailedNotAsNotFound()
+    {
+        Assert.AreEqual(DeviceReadStatus.NotRead, _monitor.ReadStatus);
+        _source.EnumerationFailure = StepOutcomes.FromHResult(AudioWorker.Steps.CreateEnumerator, unchecked((int)0x80040154));
+
+        MonitorRefresh failed = await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
+
+        Assert.IsFalse(failed.EnumerationOk);
+        Assert.IsNull(_monitor.Current.Target);
+        Assert.IsEmpty(_monitor.Current.AllGroups);
+        Assert.AreEqual(DeviceReadStatus.Failed, _monitor.ReadStatus);
+        Assert.AreEqual(TargetResolution.None, _monitor.Resolution);
+        Assert.AreEqual(0, Raised);
+        Assert.IsTrue(_log.Has(LogLevel.Error, "Could not read the audio devices (refresh): create-enumerator REGDB_E_CLASSNOTREG"));
+
+        _source.EnumerationFailure = null;
+        await _monitor.RefreshAsync().WaitAsync(Timeout);
+
+        Assert.AreEqual(DeviceReadStatus.Ok, _monitor.ReadStatus);
+        Assert.AreEqual(AirPodsContainer, _monitor.Current.Target?.ContainerId);
+        Assert.AreEqual(1, Raised);
+    }
+
     [TestMethod]
     public async Task PropertyReadFailuresAreLoggedAtDebugOnceEach()
     {
-        StepOutcome unreadable = StepOutcomes.FromHResult(CoreAudioEndpointReader.FriendlyNameStep + ":" + "{0.0.0.00000000}.{hdmi}", CoreAudio.ERROR_NO_SUCH_DEVINST);
+        StepOutcome unreadable = StepOutcomes.FromHResult(CoreAudioEndpointReader.FriendlyNameStep + ":" + AmdHdmiUnreadable(1).Endpoint.EndpointId, CoreAudio.ERROR_NO_SUCH_DEVINST);
         _source.SetReadings(Machine(), new[] { unreadable });
 
         MonitorRefresh first = await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
@@ -302,7 +394,7 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         Assert.IsTrue(first.EnumerationOk);
         Assert.AreEqual("ERROR_NO_SUCH_DEVINST", first.Steps.Single().CodeName);
         Assert.AreEqual(1, _log.Entries.Count(e => e.Level == LogLevel.Debug && e.Message.Contains("ERROR_NO_SUCH_DEVINST", StringComparison.Ordinal)));
-        Assert.IsFalse(_log.Entries.Any(e => e.Level >= LogLevel.Warn), "An expected property failure is not a warning.");
+        Assert.IsFalse(_log.Entries.Any(e => e.Level >= LogLevel.Warn), "A name read failing on a NOTPRESENT endpoint is expected, not a warning.");
 
         // Gone, then back: logged again.
         _source.SetReadings(Machine());
@@ -310,6 +402,46 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         _source.SetReadings(Machine(), new[] { unreadable });
         await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
         Assert.AreEqual(2, _log.Entries.Count(e => e.Level == LogLevel.Debug && e.Message.Contains("ERROR_NO_SUCH_DEVINST", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task ReadFailuresThatCanChangeTheModelAreWarnings()
+    {
+        const int EFail = unchecked((int)0x80004005);
+        StepOutcome container = StepOutcomes.FromHResult(CoreAudioEndpointReader.ContainerStep + ":" + AirPodsRenderId, EFail);
+        StepOutcome state = StepOutcomes.FromHResult(CoreAudioEndpointReader.StateStep + ":" + AirPodsCaptureId, EFail);
+        StepOutcome presentName = StepOutcomes.FromHResult(CoreAudioEndpointReader.FriendlyNameStep + ":" + UsbMicrophone().Endpoint.EndpointId, CoreAudio.ERROR_NO_SUCH_DEVINST);
+        StepOutcome absentName = StepOutcomes.FromHResult(CoreAudioEndpointReader.InterfaceNameStep + ":" + AmdHdmiUnreadable(2).Endpoint.EndpointId, CoreAudio.ERROR_NO_SUCH_DEVINST);
+        _source.SetReadings(Machine(), new[] { container, state, presentName, absentName });
+
+        await _monitor.RefreshDetailedAsync().WaitAsync(Timeout);
+
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "Audio endpoint read failed: " + container.Step + " E_FAIL"));
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "Audio endpoint read failed: " + state.Step + " E_FAIL"));
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "Audio endpoint read failed: " + presentName.Step + " ERROR_NO_SUCH_DEVINST"));
+        Assert.IsTrue(_log.Has(LogLevel.Debug, "Audio endpoint read failed: " + absentName.Step + " ERROR_NO_SUCH_DEVINST"));
+        Assert.AreEqual(3, _log.Entries.Count(e => e.Level == LogLevel.Warn));
+    }
+
+    [TestMethod]
+    [DataRow("endpoint-id")]
+    [DataRow("endpoint-item:3")]
+    [DataRow("endpoint-flow:{0.0.0.00000000}.{aaaaaaaa-bbbb-4ccc-8ddd-000000000001}")]
+    [DataRow("endpoint-state:{0.0.0.00000000}.{aaaaaaaa-bbbb-4ccc-8ddd-000000000001}")]
+    [DataRow("open-property-store:{0.0.0.00000000}.{aaaaaaaa-bbbb-4ccc-8ddd-000000000001}")]
+    [DataRow("container-id:{0.0.0.00000000}.{aaaaaaaa-bbbb-4ccc-8ddd-000000000001}")]
+    [DataRow("clear-propvariant:friendly-name:{0.0.0.00000000}.{aaaaaaaa-bbbb-4ccc-8ddd-000000000001}")]
+    [DataRow("friendly-name:{0.0.0.00000000}.{not-read}")]
+    public void OnlyANameReadOnANotPresentEndpointIsLoggedAtDebug(string step)
+    {
+        var states = new Dictionary<string, EndpointState>(StringComparer.Ordinal)
+        {
+            [AmdHdmiUnreadable(1).Endpoint.EndpointId] = EndpointState.NotPresent,
+        };
+
+        Assert.AreEqual(LogLevel.Warn, CoreAudioDeviceMonitor.ReadFailureLevel(StepOutcomes.FromHResult(step, CoreAudio.ERROR_NO_SUCH_DEVINST), states));
+        Assert.AreEqual(LogLevel.Debug, CoreAudioDeviceMonitor.ReadFailureLevel(
+            StepOutcomes.FromHResult(CoreAudioEndpointReader.FriendlyNameStep + ":" + AmdHdmiUnreadable(1).Endpoint.EndpointId, CoreAudio.ERROR_NO_SUCH_DEVINST), states));
     }
 
     [TestMethod]
@@ -441,5 +573,49 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         _monitor.Start();
 
         await Eventually.True(() => _log.Has(LogLevel.Error, "Could not start watching audio devices."), "the logged failure");
+    }
+}
+
+// A thread that runs posted actions one at a time, the way a UI thread runs SynchronizationContext.Post
+// callbacks. An action that throws is kept in Failure for the test to assert on.
+internal sealed class PostQueueThread : IDisposable
+{
+    private readonly BlockingCollection<Action> _queue = new();
+    private readonly Thread _thread;
+    private Exception? _failure;
+
+    public PostQueueThread()
+    {
+        _thread = new Thread(Run) { IsBackground = true, Name = "Test UI thread" };
+        _thread.Start();
+    }
+
+    public int ThreadId => _thread.ManagedThreadId;
+
+    public Exception? Failure => Volatile.Read(ref _failure);
+
+    // Queues the action and returns at once.
+    public void Post(Action action) => _queue.Add(action);
+
+    public void Dispose()
+    {
+        _queue.CompleteAdding();
+        _thread.Join(TimeSpan.FromSeconds(10));
+        _queue.Dispose();
+    }
+
+    private void Run()
+    {
+        foreach (Action action in _queue.GetConsumingEnumerable())
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                Interlocked.CompareExchange(ref _failure, ex, null);
+            }
+        }
     }
 }
