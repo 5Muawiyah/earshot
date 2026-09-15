@@ -35,7 +35,9 @@ public interface IConnectionController                            // pure Core A
 
 public interface IBlockController
 {
-    bool IsSetUp { get; }                                          // \Earshot\Gate present + DACL verified
+    // \Earshot\Gate present and its DACL verified, as of the last status read or change; false before either.
+    // The tray decides setup from GetStatusAsync (BlockState.NotSetUp), never from this.
+    bool IsSetUp { get; }
     Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default);   // read-only, non-admin
     Task<ControllerResult> BlockAsync(CancellationToken ct = default);      // RunEx "block"
     Task<ControllerResult> AllowAsync(CancellationToken ct = default);      // RunEx "allow"
@@ -52,6 +54,11 @@ public interface IAudioProtectionController
 {
     Task<AudioProtectionSnapshot> GetStatusAsync(CancellationToken ct = default); // read-only, non-admin
     Task<ControllerResult> ApplyAsync(bool protect, CancellationToken ct = default); // via SYSTEM gate only
+
+    // A protection request kept while the device was blocked and not applied yet: true to protect, false to
+    // restore. Null when none is kept or the record could not be read. Read-only, non-admin. A controller that
+    // keeps no request has nothing to report.
+    Task<bool?> GetPendingProtectAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
 }
 
 // Phase 0 resolved: no battery source on this hardware. Kept so a future AACP/WinRT source

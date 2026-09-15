@@ -1,0 +1,62 @@
+using System.Drawing;
+using Earshot.Contracts;
+
+namespace Earshot.App;
+
+// Where the cards for one operation go. A card that follows the user's own click is anchored at the point
+// the cursor was at when the click happened, read before anything was awaited; any other card goes near the
+// notification area.
+// https://learn.microsoft.com/en-us/windows/win32/shell/notification-area
+internal readonly record struct CardPlace(CardAnchor Anchor, Point? ClickPoint)
+{
+    public static CardPlace NearTray => new(CardAnchor.NearTray, null);
+
+    // A card that follows the user's action when no click point is known (a second copy of Earshot started).
+    public static CardPlace NearCursor => new(CardAnchor.NearCursor, null);
+
+    public static CardPlace AtClick(Point clickPoint) => new(CardAnchor.NearCursor, clickPoint);
+
+    public void Show(ICardPresenter cards, string title, string status)
+    {
+        ArgumentNullException.ThrowIfNull(cards);
+        var content = new CardContent(title, status);
+        if (ClickPoint is { } point)
+        {
+            cards.Show(content, Anchor, point);
+        }
+        else
+        {
+            cards.Show(content, Anchor);
+        }
+    }
+}
+
+// A connect or disconnect handed to the block coordinator: which container, the name for its cards and
+// where those cards go.
+internal sealed record ToggleRequest(bool Connect, Guid Container, string DeviceName, CardPlace Place);
+
+// How a connect or disconnect ended, after every clean-up it needed.
+//   Status       Success when the wanted state was observed; Partial when it was, but a follow-up (protection
+//                re-applied, nodes blocked) did not work; Failed otherwise
+//   UserMessage  the last card the operation showed, or what it would have said
+//   Steps        every native step, in order: connect, allow, block and protection
+//   Cancelled    the caller's token was cancelled; the clean-up still ran before the report was returned
+internal sealed record ToggleReport(bool Connect, OpStatus Status, string UserMessage, IReadOnlyList<StepOutcome> Steps, bool Cancelled)
+{
+    public bool IsSuccess => Status is OpStatus.Success or OpStatus.AlreadyInState;
+}
+
+// How the block coordinator was started.
+//   SafeMode        EARSHOT_SAFE_MODE: every live action is refused by the Safe decorators, so no progress card
+//                   is shown for an action that cannot follow
+//   StartedAtLogon  the tray was started by its Run value (--startup), so render ACTIVE at the first check is
+//                   evidence that the boot block did not hold
+internal sealed record CoordinatorOptions(bool SafeMode, bool StartedAtLogon);
+
+// The render side of the device as one snapshot observed it.
+internal enum RenderState
+{
+    Unknown,    // nothing to act on: the enumeration failed or has not run, or no device container is known
+    Active,     // a render endpoint in the container is ACTIVE: the AirPods are in use on this PC
+    NotActive,  // the enumeration worked and no render endpoint in the container is ACTIVE
+}
