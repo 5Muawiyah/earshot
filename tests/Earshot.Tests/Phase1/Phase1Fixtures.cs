@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using Earshot.Contracts;
+using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase1;
@@ -34,6 +35,64 @@ internal static class Phase1Fixtures
         var settings = new EarshotSettings();
         change?.Invoke(settings);
         return settings;
+    }
+}
+
+// The Run and StartupApproved values in memory. The real HKCU is never read or written by the tests.
+internal sealed class FakeStartupRegistry : IStartupRegistry
+{
+    public Dictionary<string, string> Run { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Dictionary<string, byte[]> Approved { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public int Writes { get; private set; }
+
+    public int Deletes { get; private set; }
+
+    public Exception? ReadFailure { get; set; }
+
+    public Exception? WriteFailure { get; set; }
+
+    public string? ReadRunValue(string name)
+    {
+        if (ReadFailure is not null)
+        {
+            throw ReadFailure;
+        }
+
+        return Run.TryGetValue(name, out string? value) ? value : null;
+    }
+
+    public byte[]? ReadStartupApproved(string name)
+    {
+        if (ReadFailure is not null)
+        {
+            throw ReadFailure;
+        }
+
+        return Approved.TryGetValue(name, out byte[]? value) ? value : null;
+    }
+
+    public void WriteRunValue(string name, string command)
+    {
+        if (WriteFailure is not null)
+        {
+            throw WriteFailure;
+        }
+
+        Writes++;
+        Run[name] = command;
+    }
+
+    public void DeleteRunValue(string name)
+    {
+        if (WriteFailure is not null)
+        {
+            throw WriteFailure;
+        }
+
+        Deletes++;
+        Run.Remove(name);
     }
 }
 

@@ -15,64 +15,7 @@ public sealed class StartupRegistrationTests
     private static readonly byte[] EnabledInWindows = [0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     private static readonly byte[] DisabledInWindows = [0x03, 0, 0, 0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x01];
 
-    private sealed class FakeRegistry : IStartupRegistry
-    {
-        public Dictionary<string, string> Run { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public Dictionary<string, byte[]> Approved { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public int Writes { get; private set; }
-
-        public int Deletes { get; private set; }
-
-        public Exception? ReadFailure { get; set; }
-
-        public Exception? WriteFailure { get; set; }
-
-        public string? ReadRunValue(string name)
-        {
-            if (ReadFailure is not null)
-            {
-                throw ReadFailure;
-            }
-
-            return Run.TryGetValue(name, out string? value) ? value : null;
-        }
-
-        public byte[]? ReadStartupApproved(string name)
-        {
-            if (ReadFailure is not null)
-            {
-                throw ReadFailure;
-            }
-
-            return Approved.TryGetValue(name, out byte[]? value) ? value : null;
-        }
-
-        public void WriteRunValue(string name, string command)
-        {
-            if (WriteFailure is not null)
-            {
-                throw WriteFailure;
-            }
-
-            Writes++;
-            Run[name] = command;
-        }
-
-        public void DeleteRunValue(string name)
-        {
-            if (WriteFailure is not null)
-            {
-                throw WriteFailure;
-            }
-
-            Deletes++;
-            Run.Remove(name);
-        }
-    }
-
-    private static StartupRegistration Create(FakeRegistry registry, CapturingLog log, bool safeMode = false, string? exePath = ExePath) =>
+    private static StartupRegistration Create(FakeStartupRegistry registry, CapturingLog log, bool safeMode = false, string? exePath = ExePath) =>
         new(registry, log, safeMode, exePath);
 
     [TestMethod]
@@ -98,7 +41,7 @@ public sealed class StartupRegistrationTests
     [TestMethod]
     public void ReadReportsOffOnAndTurnedOffInWindows()
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
         var log = new CapturingLog();
         StartupRegistration startup = Create(registry, log);
 
@@ -120,7 +63,7 @@ public sealed class StartupRegistrationTests
     [TestMethod]
     public void AnUnreadableRegistryIsUnknownAndLogged()
     {
-        var registry = new FakeRegistry { ReadFailure = new SecurityException("denied") };
+        var registry = new FakeStartupRegistry { ReadFailure = new SecurityException("denied") };
         var log = new CapturingLog();
 
         Assert.AreEqual(StartupState.Unknown, Create(registry, log).Read());
@@ -130,7 +73,7 @@ public sealed class StartupRegistrationTests
     [TestMethod]
     public void TurningOnWritesTheQuotedCommandOnce()
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
         var log = new CapturingLog();
         StartupRegistration startup = Create(registry, log);
 
@@ -147,7 +90,7 @@ public sealed class StartupRegistrationTests
     [TestMethod]
     public void TurningOnReplacesAValueThatPointsElsewhere()
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
         registry.Run["Earshot"] = "\"D:\\Old\\Earshot.exe\" --startup";
 
         ControllerResult result = Create(registry, new CapturingLog()).Apply(true);
@@ -159,7 +102,7 @@ public sealed class StartupRegistrationTests
     [TestMethod]
     public void TurningOffDeletesTheValueOnlyWhenPresent()
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
         StartupRegistration startup = Create(registry, new CapturingLog());
 
         Assert.AreEqual(OpStatus.AlreadyInState, startup.Apply(false).Status);
@@ -176,7 +119,7 @@ public sealed class StartupRegistrationTests
     [DataRow(false)]
     public void SafeModeWritesNothingAndLogsInstead(bool openOnStartup)
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
         registry.Run["Earshot"] = "\"D:\\Old\\Earshot.exe\" --startup";
         var log = new CapturingLog();
 
@@ -195,7 +138,7 @@ public sealed class StartupRegistrationTests
     [TestMethod]
     public void AnEntryTurnedOffInWindowsIsLeftForTheUser()
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
         registry.Run["Earshot"] = Command;
         registry.Approved["Earshot"] = DisabledInWindows;
 
@@ -208,9 +151,85 @@ public sealed class StartupRegistrationTests
     }
 
     [TestMethod]
+    public void ALeftoverTurnedOffEntryWithoutARunValueIsNotReportedAsOn()
+    {
+        // Windows keeps the StartupApproved entry after the Run value is removed, and applies it again
+        // once the value is back.
+        var registry = new FakeStartupRegistry();
+        registry.Approved["Earshot"] = DisabledInWindows;
+        StartupRegistration startup = Create(registry, new CapturingLog());
+        Assert.AreEqual(StartupState.Off, startup.Read());
+
+        ControllerResult result = startup.Apply(true);
+
+        Assert.AreEqual(OpStatus.Partial, result.Status);
+        Assert.IsFalse(result.IsSuccess, "A partial result is shown on a card.");
+        Assert.AreEqual(StartupRegistration.TurnedOffInWindowsMessage, result.UserMessage);
+        Assert.HasCount(1, result.Steps);
+        Assert.AreEqual(NativeCodes.NotAttempted, result.Steps[0].Code);
+        Assert.AreEqual(1, registry.Writes, "The command is written so it is current when the user turns the entry on.");
+        Assert.AreEqual(Command, registry.Run["Earshot"]);
+        Assert.AreEqual(StartupState.DisabledInWindows, startup.Read());
+        CollectionAssert.AreEqual(DisabledInWindows, registry.Approved["Earshot"], "StartupApproved is never written.");
+    }
+
+    [TestMethod]
+    public void AStalePathTurnedOffInWindowsIsUpdatedButNotReportedAsOn()
+    {
+        var registry = new FakeStartupRegistry();
+        registry.Run["Earshot"] = "\"D:\\Old\\Earshot.exe\" --startup";
+        registry.Approved["Earshot"] = DisabledInWindows;
+
+        ControllerResult result = Create(registry, new CapturingLog()).Apply(true);
+
+        Assert.AreEqual(OpStatus.Partial, result.Status);
+        Assert.AreEqual(Command, registry.Run["Earshot"]);
+        CollectionAssert.AreEqual(DisabledInWindows, registry.Approved["Earshot"]);
+    }
+
+    [TestMethod]
+    public void TheRunValueNeedsRepairWhenMissingOrStartingAnotherFile()
+    {
+        var registry = new FakeStartupRegistry();
+        StartupRegistration startup = Create(registry, new CapturingLog());
+
+        Assert.IsTrue(startup.RunValueNeedsRepair(), "Missing.");
+
+        registry.Run["Earshot"] = "\"D:\\Unzipped\\Earshot\\Earshot.exe\" --startup";
+        Assert.IsTrue(startup.RunValueNeedsRepair(), "Another file.");
+
+        registry.Run["Earshot"] = Command;
+        Assert.IsFalse(startup.RunValueNeedsRepair(), "This file.");
+
+        registry.Run["Earshot"] = Command.ToUpperInvariant().Replace("--STARTUP", "--startup", StringComparison.Ordinal);
+        Assert.IsFalse(startup.RunValueNeedsRepair(), "Paths differ only in case.");
+
+        registry.Run["Earshot"] = Command.Replace("--startup", "--STARTUP", StringComparison.Ordinal);
+        Assert.IsTrue(startup.RunValueNeedsRepair(), "The tray rejects any other spelling of the argument.");
+
+        registry.Run.Remove("Earshot");
+        registry.Approved["Earshot"] = DisabledInWindows;
+        Assert.IsFalse(startup.RunValueNeedsRepair(), "Turned off in Windows: nothing written would start it.");
+        Assert.AreEqual(0, registry.Writes, "Checking never writes.");
+    }
+
+    [TestMethod]
+    public void TheRepairCheckLogsAndDeclinesWhenItCannotRead()
+    {
+        var log = new CapturingLog();
+        var unreadable = new FakeStartupRegistry { ReadFailure = new SecurityException("denied") };
+
+        Assert.IsFalse(Create(unreadable, log).RunValueNeedsRepair());
+        Assert.IsTrue(log.Has(LogLevel.Warn, "Open on startup could not be checked"));
+
+        Assert.IsFalse(Create(new FakeStartupRegistry(), log, exePath: null).RunValueNeedsRepair());
+        Assert.IsTrue(log.Has(LogLevel.Warn, "was not checked"));
+    }
+
+    [TestMethod]
     public void ACommandLongerThan260CharactersIsRefused()
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
         string longPath = @"C:\" + new string('x', 250) + @"\Earshot.exe";
 
         ControllerResult result = Create(registry, new CapturingLog(), exePath: longPath).Apply(true);
@@ -225,7 +244,7 @@ public sealed class StartupRegistrationTests
     [DataRow("")]
     public void WithoutAnExePathNothingIsWritten(string? exePath)
     {
-        var registry = new FakeRegistry();
+        var registry = new FakeStartupRegistry();
 
         ControllerResult result = Create(registry, new CapturingLog(), exePath: exePath).Apply(true);
 
@@ -237,7 +256,7 @@ public sealed class StartupRegistrationTests
     public void AWriteFailureIsReportedWithItsCodeAndLogged()
     {
         var denied = new UnauthorizedAccessException("Access to the registry key is denied.");
-        var registry = new FakeRegistry { WriteFailure = denied };
+        var registry = new FakeStartupRegistry { WriteFailure = denied };
         var log = new CapturingLog();
 
         ControllerResult result = Create(registry, log).Apply(true);

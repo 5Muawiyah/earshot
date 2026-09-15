@@ -125,6 +125,38 @@ internal sealed class StartupRegistration
         }
     }
 
+    // True when the Run value is missing or starts a different file than this copy of Earshot, for
+    // example after the Earshot folder moved, and the entry is not turned off in Windows. The path is
+    // compared ignoring case, as Windows does; the argument must match exactly, because the tray accepts
+    // only "--startup". Reads only; a registry error is logged and gives false.
+    public bool RunValueNeedsRepair()
+    {
+        if (string.IsNullOrWhiteSpace(_exePath))
+        {
+            _log.Warn(NoExePathMessage + " The Open on startup Run value was not checked.");
+            return false;
+        }
+
+        try
+        {
+            if (IsTurnedOffInWindows(_registry.ReadStartupApproved(ValueName)))
+            {
+                return false;
+            }
+
+            string? current = _registry.ReadRunValue(ValueName);
+            bool startsThisFile = current is not null &&
+                                  current.EndsWith("\" " + StartupArgument, StringComparison.Ordinal) &&
+                                  string.Equals(current, CommandFor(_exePath), StringComparison.OrdinalIgnoreCase);
+            return !startsThisFile;
+        }
+        catch (Exception ex) when (IsRegistryError(ex))
+        {
+            _log.Warn("Open on startup could not be checked in HKCU.", ex);
+            return false;
+        }
+    }
+
     // Turns Open on startup on or off. Never touches StartupApproved.
     public ControllerResult Apply(bool openOnStartup)
     {
@@ -158,14 +190,28 @@ internal sealed class StartupRegistration
         try
         {
             string? current = _registry.ReadRunValue(ValueName);
-            if (!string.IsNullOrWhiteSpace(current) && IsTurnedOffInWindows(_registry.ReadStartupApproved(ValueName)))
+            bool upToDate = string.Equals(current, command, StringComparison.Ordinal);
+
+            // StartupApproved is checked whether or not a Run value exists. An entry the user turned off
+            // stays behind when the Run value is removed, and it still applies once the value is back.
+            if (IsTurnedOffInWindows(_registry.ReadStartupApproved(ValueName)))
             {
-                _log.Warn("Open on startup is turned off in Windows; Earshot does not change that setting.");
-                return new ControllerResult(OpStatus.NotAttempted, TurnedOffInWindowsMessage,
-                    [StepOutcomes.NotAttempted(action, TurnedOffInWindowsMessage)]);
+                StepOutcome turnedOff = StepOutcomes.NotAttempted("startup-approved:turned-off", TurnedOffInWindowsMessage);
+                if (upToDate)
+                {
+                    _log.Warn("Open on startup is turned off in Windows; Earshot does not change that setting.");
+                    return new ControllerResult(OpStatus.NotAttempted, TurnedOffInWindowsMessage, [turnedOff]);
+                }
+
+                // The command is still written, so it starts this copy of Earshot once the user turns the
+                // entry back on in Windows. Windows will not start it until then, so this is not a success.
+                _registry.WriteRunValue(ValueName, command);
+                _log.Warn("Open on startup: HKCU\\" + CurrentUserStartupRegistry.RunKey + "\\" + ValueName + " = " + command +
+                    " written, but the entry is turned off in Windows, so Windows will not start it.");
+                return new ControllerResult(OpStatus.Partial, TurnedOffInWindowsMessage, [turnedOff]);
             }
 
-            if (string.Equals(current, command, StringComparison.Ordinal))
+            if (upToDate)
             {
                 return ControllerResult.Already(OnMessage);
             }
