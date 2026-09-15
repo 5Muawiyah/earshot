@@ -496,6 +496,31 @@ public sealed class CardPresenterTests
         Assert.IsFalse(h.Card.OnScreen);
     }
 
+    // A card that cannot be drawn must not reach the message loop, whatever the failure was: the tray answers
+    // an unhandled error with another card, through this same path. System.Drawing raises several types for
+    // GDI+ statuses, OutOfMemoryException among them.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.drawing.image.fromfile
+    [TestMethod]
+    public void ACardThatCannotBeDrawnIsLoggedAndDropped()
+    {
+        using var h = new Harness();
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        h.Card.PrepareFailure = new IOException("The font could not be read.");
+
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        Assert.HasCount(1, h.Card.ShownAt, "The card that could not be drawn was never shown.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "Not shown: NearCursor card"));
+
+        // The next card still works.
+        h.Card.PrepareFailure = null;
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        Assert.HasCount(2, h.Card.ShownAt);
+    }
+
     [TestMethod]
     public void ACardClosedFromOutsideIsReplaced()
     {

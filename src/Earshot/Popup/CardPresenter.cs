@@ -35,8 +35,8 @@ namespace Earshot.Popup;
 // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shqueryusernotificationstate
 // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ne-shellapi-query_user_notification_state
 //
-// Failures. A card that cannot be placed or shown is logged with its native code and dropped; nothing is
-// thrown back into the message loop, where the tray would report it on another card.
+// Failures. A card that cannot be placed, drawn or shown is logged with its native code and dropped; nothing
+// is thrown back into the message loop, where the tray would report it on another card.
 //
 // Dispose on the UI thread, after the tray stops posting.
 internal sealed class CardPresenter : ICardPresenter, IDisposable
@@ -199,8 +199,14 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
             _log.Write(LogLevel.Debug, string.Create(CultureInfo.InvariantCulture,
                 $"Shown at {bounds.X},{bounds.Y} {bounds.Width}x{bounds.Height}, {dpi} DPI, taskbar {target.Edge}, {where}: {what}."));
         }
-        catch (Exception ex) when (ex is ExternalException or InvalidOperationException or ArgumentException)
+        catch (Exception ex)
         {
+            // Every failure while a card is measured, drawn or shown is logged here with what it was for, and
+            // the card is dropped. The net is this wide on purpose: System.Drawing turns several GDI+ statuses
+            // into exceptions that are not ExternalException (OutOfMemoryException for the GDI+ OutOfMemory
+            // status, say), and anything that reached the message loop would be answered by the tray with
+            // another card, through this same path.
+            // https://learn.microsoft.com/en-us/dotnet/api/system.drawing.image.fromfile
             _log.Error("Not shown: " + what + ".", ex);
         }
     }

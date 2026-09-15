@@ -46,9 +46,13 @@ internal readonly record struct CardTarget(DisplayArea Display, TaskbarEdge Edge
 // over it when it appears.
 // https://learn.microsoft.com/en-us/windows/win32/shell/abm-getstate
 //
-// NearCursor. The popup is aligned to the cursor and moved off the taskbar band the way
-// CalculatePopupWindowPosition does for these flags: centred on the cursor and above a bottom taskbar
-// (below a top one), vertically centred and beside a left or right taskbar, kept inside the work area.
+// NearCursor. The popup is aligned to the cursor and moved off the taskbar band: centred on the cursor and
+// above a bottom taskbar (below a top one), vertically centred and beside a left or right taskbar, kept
+// inside the work area. The Microsoft page for CalculatePopupWindowPosition does not say how it resolves an
+// overlap with the exclude rectangle, so this is Earshot's own rule, checked against the real calculation
+// for every taskbar edge with that edge's band (CardPlacementTests). The two agree there. They part where
+// the flags and the band are for different edges, which Earshot never asks for: the real calculation then
+// moves the popup along whichever axis clears the rectangle, while this one follows the axis the flags name.
 // The notification area guidance asks for a popup raised by a click to sit near the click.
 // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-calculatepopupwindowposition
 // https://learn.microsoft.com/en-us/windows/win32/shell/notification-area
@@ -266,10 +270,9 @@ internal static class CardPlacement
         _ => Shell.TPM_CENTERALIGN | Shell.TPM_BOTTOMALIGN | Shell.TPM_VERTICAL,
     };
 
-    // CalculatePopupWindowPosition for the flags above, restricted to area as TPM_WORKAREA restricts it:
-    // align the popup to anchor; if it overlaps exclude, move it off along the axis TPM_VERTICAL or
-    // TPM_HORIZONTAL names, to the side the alignment points at when that side has room; then keep it
-    // inside area.
+    // Align the popup to anchor; if it overlaps exclude, move it off along the axis TPM_VERTICAL or
+    // TPM_HORIZONTAL names, to the side the alignment points at when that side has room; then keep it inside
+    // area, as TPM_WORKAREA restricts CalculatePopupWindowPosition to the work area.
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-calculatepopupwindowposition
     public static Rectangle CalculatePopup(Point anchor, Size size, uint flags, Rectangle exclude, Rectangle area)
     {
