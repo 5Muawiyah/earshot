@@ -23,7 +23,9 @@ namespace Earshot.Audio;
 //   - Cancellation removes an item that has not started (its task is cancelled). Once started, the work
 //     sees the token and decides; it is never torn down mid-call. An OperationCanceledException for the
 //     item's own token cancels the task; any other exception faults it, so the awaiting caller sees it.
-//   - Task continuations never run on the worker thread.
+//   - Continuations on a queued item's task never run on the worker thread, so awaiting callers never
+//     occupy it. Never block the worker waiting for a device notification: notifications are processed
+//     by later work items, so a blocked worker would never see them.
 //   - DisposeAsync lets queued items finish, then on the worker unregisters the notification client (if
 //     one is registered) and releases the enumerator, then stops the thread. RunAsync after that returns
 //     a faulted task (ObjectDisposedException).
