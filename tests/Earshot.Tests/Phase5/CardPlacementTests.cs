@@ -129,6 +129,89 @@ public sealed class CardPlacementTests
     }
 
     [TestMethod]
+    public void AnAutoHiddenTaskbarOnTheEdgeSharedWithADisplayBelowStaysOnThePrimaryDisplay()
+    {
+        var below = new Rectangle(0, 1080, 1920, 1080);
+        DisplayArea[] displays = [new(Primary, Primary, IsPrimary: true), new(below, below, IsPrimary: false)];
+
+        // Whether the rectangle is where the taskbar slid to (mostly on the display below) or where it shows,
+        // the card goes to the bottom right of the primary display.
+        foreach (Rectangle taskbar in new[] { Rectangle.FromLTRB(0, 1078, 1920, 1126), Rectangle.FromLTRB(0, 1032, 1920, 1080) })
+        {
+            var scene = new PlacementScene(new Point(1800, 1079), displays, taskbar, TaskbarAutoHide: true);
+            CardTarget target = CardPlacement.TargetFor(CardAnchor.NearTray, scene);
+            Assert.AreEqual(Primary, target.Display.Bounds, "Taskbar " + taskbar);
+            Assert.AreEqual(TaskbarEdge.Bottom, target.Edge, "Taskbar " + taskbar);
+            Assert.AreEqual(Rectangle.FromLTRB(0, 1032, 1920, 1080), target.TaskbarBand);
+            Assert.AreEqual(new Rectangle(1608, 940, 300, 80), PlaceAt96(CardAnchor.NearTray, scene));
+            Assert.AreEqual(new Rectangle(1608, 940, 300, 80), PlaceAt96(CardAnchor.NearCursor, scene));
+        }
+
+        // The same hidden rectangle without auto-hide goes by overlap, as a shown taskbar does.
+        Assert.AreEqual(1, CardPlacement.TaskbarDisplayFor(Rectangle.FromLTRB(0, 1078, 1920, 1126), autoHide: false, displays));
+        Assert.AreEqual(0, CardPlacement.TaskbarDisplayFor(Rectangle.FromLTRB(0, 1078, 1920, 1126), autoHide: true, displays));
+    }
+
+    [TestMethod]
+    public void AnAutoHiddenTaskbarOnTheEdgeSharedWithADisplayAboveStaysOnThePrimaryDisplay()
+    {
+        var above = new Rectangle(0, -1080, 1920, 1080);
+        var scene = new PlacementScene(
+            new Point(1800, 0),
+            [new DisplayArea(above, above, IsPrimary: false), new DisplayArea(Primary, Primary, IsPrimary: true)],
+            Taskbar: Rectangle.FromLTRB(0, -46, 1920, 2),
+            TaskbarAutoHide: true);
+
+        CardTarget target = CardPlacement.TargetFor(CardAnchor.NearTray, scene);
+        Assert.AreEqual(Primary, target.Display.Bounds);
+        Assert.AreEqual(TaskbarEdge.Top, target.Edge);
+        Assert.AreEqual(new Rectangle(1608, 60, 300, 80), PlaceAt96(CardAnchor.NearTray, scene));
+    }
+
+    [TestMethod]
+    public void AnAutoHiddenTaskbarAwayFromThePrimaryDisplayGoesByOverlap()
+    {
+        var scene = new PlacementScene(
+            new Point(10, 10),
+            [new DisplayArea(Primary, Primary, IsPrimary: true), new DisplayArea(Secondary, Secondary, IsPrimary: false)],
+            Taskbar: Rectangle.FromLTRB(1920, 1078, 3840, 1126),
+            TaskbarAutoHide: true);
+
+        CardTarget target = CardPlacement.TargetFor(CardAnchor.NearTray, scene);
+        Assert.AreEqual(Secondary, target.Display.Bounds);
+        Assert.AreEqual(TaskbarEdge.Bottom, target.Edge);
+        Assert.AreEqual(new Rectangle(3528, 940, 300, 80), PlaceAt96(CardAnchor.NearTray, scene));
+    }
+
+    [TestMethod]
+    public void APointIsOnTheTaskbarOnlyInsideTheTaskbarBandOfItsDisplay()
+    {
+        Assert.IsTrue(CardPlacement.IsOnTaskbar(BottomTaskbar(), new Point(1800, 1056)));
+        Assert.IsTrue(CardPlacement.IsOnTaskbar(BottomTaskbar(), new Point(0, 1079)));
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(BottomTaskbar(), new Point(1800, 1031)), "A menu just above the taskbar is not on it.");
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(BottomTaskbar(), new Point(750, 0)));
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(BottomTaskbar(), new Point(1800, 1080)), "Off every display.");
+        Assert.IsTrue(CardPlacement.IsOnTaskbar(TopTaskbar(), new Point(750, 0)));
+        Assert.IsTrue(CardPlacement.IsOnTaskbar(LeftTaskbar(), new Point(31, 500)));
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(LeftTaskbar(), new Point(62, 500)));
+        Assert.IsTrue(CardPlacement.IsOnTaskbar(RightTaskbar(), new Point(1858, 500)));
+
+        // A secondary display's own taskbar, known from its work area.
+        Assert.IsTrue(CardPlacement.IsOnTaskbar(TwoDisplays(Point.Empty), new Point(3700, 1056)));
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(TwoDisplays(Point.Empty), new Point(3700, 1000)));
+
+        // An auto-hidden taskbar keeps its band even though the work area covers it.
+        var hidden = new PlacementScene(Point.Empty, [new DisplayArea(Primary, Primary, IsPrimary: true)], Rectangle.FromLTRB(0, 1078, 1920, 1126), TaskbarAutoHide: true);
+        Assert.IsTrue(CardPlacement.IsOnTaskbar(hidden, new Point(1800, 1079)));
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(hidden, new Point(1800, 1000)));
+
+        // No taskbar anywhere.
+        var bare = new PlacementScene(Point.Empty, [new DisplayArea(Primary, Primary, IsPrimary: true)], null, false);
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(bare, new Point(1800, 1079)));
+        Assert.IsFalse(CardPlacement.IsOnTaskbar(new PlacementScene(Point.Empty, [], null, false), Point.Empty));
+    }
+
+    [TestMethod]
     public void AClickOnASecondaryDisplayPlacesTheCardOnThatDisplay()
     {
         PlacementScene scene = TwoDisplays(new Point(3700, 1056));

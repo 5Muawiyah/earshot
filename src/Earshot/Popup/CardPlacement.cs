@@ -10,7 +10,8 @@ internal enum TaskbarEdge { Bottom, Top, Left, Right }
 internal readonly record struct DisplayArea(Rectangle Bounds, Rectangle WorkArea, bool IsPrimary);
 
 // What placement reads from the desktop, once per card, all in physical pixels.
-//   Cursor           the cursor position when the card was asked for
+//   Cursor           the point a NearCursor card is anchored at: the cursor position when the scene is
+//                    read, which the presenter replaces with the click point it chose
 //   Displays         every display
 //   Taskbar          the SHAppBarMessage(ABM_GETTASKBARPOS) rectangle, or null when the call failed
 //   TaskbarAutoHide  ABM_GETSTATE reported ABS_AUTOHIDE
@@ -26,12 +27,19 @@ internal readonly record struct CardTarget(DisplayArea Display, TaskbarEdge Edge
 // for (NearTray) goes on the display the taskbar with the notification area is on, or the primary
 // display when the taskbar rectangle could not be read.
 //
-// Edge. Derived from geometry, never from APPBARDATA.uEdge, which ABM_GETTASKBARPOS does not document as
-// an output: a taskbar wider than it is tall is at the top or bottom, whichever half of the display its
-// centre is in; otherwise at the left or right. This also holds for an auto-hidden taskbar whose rectangle
-// lies mostly off the display. On a display without that taskbar the edge is the side where the work area
-// is inset (a taskbar on a secondary display), and failing that the main taskbar's edge.
+// Taskbar display. A shown taskbar lies on one display, the one its rectangle overlaps most. What
+// ABM_GETTASKBARPOS reports for an auto-hidden taskbar is not documented: the rectangle may be where the
+// taskbar slid to, partly past the edge of its display and so partly on a display next to that edge. An
+// auto-hidden rectangle that overlaps the primary display at all is therefore taken to be on the primary
+// display, where the main taskbar lives; any other still goes by overlap.
 // https://learn.microsoft.com/en-us/windows/win32/shell/abm-gettaskbarpos
+// https://learn.microsoft.com/en-us/windows/win32/shell/abm-getstate
+//
+// Edge. Derived from geometry, never from APPBARDATA.uEdge, which ABM_GETTASKBARPOS does not document as
+// an output: a taskbar wider than it is tall is at the top or bottom, whichever half of its display its
+// centre is in; otherwise at the left or right. That holds whether an auto-hidden rectangle lies on the
+// display or mostly past its edge. On a display without that taskbar the edge is the side where the work
+// area is inset (a taskbar on a secondary display), and failing that the main taskbar's edge.
 //
 // Taskbar band. A strip along the edge as thick as the taskbar. It is taken out of the work area, which
 // matters when the taskbar auto-hides: the work area then covers the whole display and the taskbar slides
@@ -75,7 +83,7 @@ internal static class CardPlacement
             throw new ArgumentException("A card needs at least one display.", nameof(scene));
         }
 
-        int taskbarDisplay = scene.Taskbar is { } bar ? DisplayFor(bar, displays) : -1;
+        int taskbarDisplay = scene.Taskbar is { } bar ? TaskbarDisplayFor(bar, scene.TaskbarAutoHide, displays) : -1;
         int index = anchor == CardAnchor.NearCursor
             ? DisplayFor(scene.Cursor, displays)
             : taskbarDisplay >= 0 ? taskbarDisplay : PrimaryIndex(displays);
@@ -122,6 +130,50 @@ internal static class CardPlacement
     // The widest a card may be on target: the usable area less the margin on both sides.
     public static int AvailableWidth(CardTarget target, int dpi) =>
         Math.Max(1, Deflate(target.Area, Scale(MarginAt96, dpi)).Width);
+
+    // True when point is on a display and inside the taskbar band of that display: where a click on a
+    // notification area icon happens. A point in a menu or flyout above the taskbar is not on it.
+    public static bool IsOnTaskbar(PlacementScene scene, Point point)
+    {
+        ArgumentNullException.ThrowIfNull(scene);
+        if (!IsOnADisplay(point, scene.Displays))
+        {
+            return false;
+        }
+
+        return TargetFor(CardAnchor.NearCursor, scene with { Cursor = point }).TaskbarBand.Contains(point);
+    }
+
+    // True when point is inside the bounds of any display.
+    public static bool IsOnADisplay(Point point, IReadOnlyList<DisplayArea> displays)
+    {
+        ArgumentNullException.ThrowIfNull(displays);
+        for (int i = 0; i < displays.Count; i++)
+        {
+            if (displays[i].Bounds.Contains(point))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Index of the display the taskbar rectangle belongs to. See "Taskbar display" above.
+    public static int TaskbarDisplayFor(Rectangle taskbar, bool autoHide, IReadOnlyList<DisplayArea> displays)
+    {
+        ArgumentNullException.ThrowIfNull(displays);
+        if (autoHide)
+        {
+            int primary = PrimaryIndex(displays);
+            if (displays.Count > 0 && displays[primary].IsPrimary && taskbar.IntersectsWith(displays[primary].Bounds))
+            {
+                return primary;
+            }
+        }
+
+        return DisplayFor(taskbar, displays);
+    }
 
     // Index of the display that overlaps rect the most, or the nearest display when none overlaps.
     public static int DisplayFor(Rectangle rect, IReadOnlyList<DisplayArea> displays)

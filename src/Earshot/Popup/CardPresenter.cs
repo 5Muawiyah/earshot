@@ -16,6 +16,18 @@ namespace Earshot.Popup;
 // Show. A newer card replaces the content of the one on screen, moves it if needed, and restarts the
 // dismiss timer. The card goes away after DismissAfter, when it is clicked, or on Hide.
 //
+// Where a card after a click goes. The notification area guidance asks for a popup raised by a click to
+// sit near the click, but a result card often comes long after the click (a connect waits for the
+// device), when the cursor may be anywhere. So a NearCursor card is anchored at the first of:
+//   1. the click point the caller captured when the click happened, when it is on a display;
+//   2. the point the last NearCursor card was anchored at, when a card was shown there within
+//      ClickAnchorLifetime and it is still on a display, so a result card lands where the card for the
+//      same click did and a replaced card does not jump;
+//   3. the cursor, when it is on the taskbar, where a click on the icon happens;
+// and otherwise it goes to the corner near the notification area, like a NearTray card but without the
+// notification state check.
+// https://learn.microsoft.com/en-us/windows/win32/shell/notification-area
+//
 // Cards nobody clicked for. A NearTray card (a notice, a background result) is shown only while
 // SHQueryUserNotificationState reports QUNS_ACCEPTS_NOTIFICATIONS or QUNS_APP; in a full-screen app, a
 // presentation or quiet time it is logged and skipped. A NearCursor card follows the user's own click, the
@@ -32,38 +44,58 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     // How long a card stays up. A UI timing choice, not a measurement.
     public static readonly TimeSpan DismissAfter = TimeSpan.FromSeconds(4);
 
+    // How long after a card was last shown at a click point that point still anchors the next card after
+    // a click. A UI timing choice, not a measurement: meant to outlast the wait of a connect or disconnect,
+    // including one that allows the device first, while an older click's point is not reused. A result
+    // that comes later still goes to the cursor on the taskbar or the corner near the notification area.
+    public static readonly TimeSpan ClickAnchorLifetime = TimeSpan.FromSeconds(60);
+
     private readonly ILog _log;
     private readonly Action<Action> _uiPost;
     private readonly ICardEnvironment _environment;
     private readonly Func<ICardSurface> _createCard;
     private readonly Func<ICardTimer> _createTimer;
+    private readonly TimeProvider _time;
     private ICardSurface? _card;
     private ICardTimer? _timer;
+    private Point? _clickAnchor;
+    private long _clickAnchorShownAt;
     private bool _disposed;
 
     public CardPresenter(ILog log, Action<Action> uiPost)
-        : this(log, uiPost, new SystemCardEnvironment(log), () => new ConnectCard(log), static () => new FormsCardTimer())
+        : this(log, uiPost, new SystemCardEnvironment(log), () => new ConnectCard(log), static () => new FormsCardTimer(), TimeProvider.System)
     {
     }
 
-    internal CardPresenter(ILog log, Action<Action> uiPost, ICardEnvironment environment, Func<ICardSurface> createCard, Func<ICardTimer> createTimer)
+    internal CardPresenter(ILog log, Action<Action> uiPost, ICardEnvironment environment, Func<ICardSurface> createCard, Func<ICardTimer> createTimer, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(uiPost);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(createTimer);
+        ArgumentNullException.ThrowIfNull(time);
         _log = log;
         _uiPost = uiPost;
         _environment = environment;
         _createCard = createCard;
         _createTimer = createTimer;
+        _time = time;
     }
 
     public void Show(CardContent content, CardAnchor anchor)
     {
         ArgumentNullException.ThrowIfNull(content);
-        _uiPost(() => ShowOnUiThread(content, anchor));
+        _uiPost(() => ShowOnUiThread(content, anchor, clickPoint: null));
+    }
+
+    // Show for a card that follows a click at clickPoint: the cursor position in physical pixels, read
+    // when the click happened rather than when the card is shown. It anchors a NearCursor card; a NearTray
+    // card ignores it.
+    public void Show(CardContent content, CardAnchor anchor, Point clickPoint)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        _uiPost(() => ShowOnUiThread(content, anchor, clickPoint));
     }
 
     public void Hide() => _uiPost(HideOnUiThread);
@@ -107,7 +139,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         _ => "QUNS " + state.ToString(CultureInfo.InvariantCulture),
     };
 
-    private void ShowOnUiThread(CardContent content, CardAnchor anchor)
+    private void ShowOnUiThread(CardContent content, CardAnchor anchor, Point? clickPoint)
     {
         string what = anchor + " card \"" + content.Title + ": " + content.Status + "\"";
         _log.Write(LogLevel.Debug, "Show " + what + ".");
@@ -128,10 +160,25 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
             ICardSurface card = EnsureCard();
             ICardTimer timer = EnsureTimer();
             PlacementScene scene = _environment.ReadScene();
-            CardTarget target = CardPlacement.TargetFor(anchor, scene);
+
+            // Any anchor other than NearCursor is placed as NearTray.
+            CardAnchor placement = CardAnchor.NearTray;
+            Point? anchoredAt = null;
+            string where = "near the notification area";
+            if (anchor == CardAnchor.NearCursor)
+            {
+                (anchoredAt, where) = ClickAnchorFor(scene, clickPoint);
+                if (anchoredAt is { } point)
+                {
+                    placement = CardAnchor.NearCursor;
+                    scene = scene with { Cursor = point };
+                }
+            }
+
+            CardTarget target = CardPlacement.TargetFor(placement, scene);
             int dpi = _environment.DpiFor(target.Display);
             Size size = card.Prepare(content, dpi, _environment.ReadPalette(), CardPlacement.AvailableWidth(target, dpi));
-            Rectangle bounds = CardPlacement.Place(anchor, scene, target, size, dpi);
+            Rectangle bounds = CardPlacement.Place(placement, scene, target, size, dpi);
 
             StepOutcome shown = card.ShowAt(bounds);
             if (!shown.Ok)
@@ -142,15 +189,48 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
                 return;
             }
 
+            if (anchoredAt is { } used)
+            {
+                _clickAnchor = used;
+                _clickAnchorShownAt = _time.GetTimestamp();
+            }
+
             timer.Restart(DismissAfter);
             _log.Write(LogLevel.Debug, string.Create(CultureInfo.InvariantCulture,
-                $"Shown at {bounds.X},{bounds.Y} {bounds.Width}x{bounds.Height}, {dpi} DPI, taskbar {target.Edge}: {what}."));
+                $"Shown at {bounds.X},{bounds.Y} {bounds.Width}x{bounds.Height}, {dpi} DPI, taskbar {target.Edge}, {where}: {what}."));
         }
         catch (Exception ex) when (ex is ExternalException or InvalidOperationException or ArgumentException)
         {
             _log.Error("Not shown: " + what + ".", ex);
         }
     }
+
+    // The point a NearCursor card is anchored at, in the order the class comment gives, and how it was
+    // chosen for the log. Null sends the card to the corner near the notification area.
+    private (Point? Point, string Where) ClickAnchorFor(PlacementScene scene, Point? clickPoint)
+    {
+        if (clickPoint is { } click && CardPlacement.IsOnADisplay(click, scene.Displays))
+        {
+            return (click, Describe("anchored at the click", click));
+        }
+
+        if (_clickAnchor is { } last &&
+            _time.GetElapsedTime(_clickAnchorShownAt) <= ClickAnchorLifetime &&
+            CardPlacement.IsOnADisplay(last, scene.Displays))
+        {
+            return (last, Describe("anchored where the last card after a click was", last));
+        }
+
+        if (CardPlacement.IsOnTaskbar(scene, scene.Cursor))
+        {
+            return (scene.Cursor, Describe("anchored at the cursor on the taskbar", scene.Cursor));
+        }
+
+        return (null, Describe("near the notification area, because the cursor is away from the taskbar", scene.Cursor));
+    }
+
+    private static string Describe(string where, Point point) =>
+        string.Create(CultureInfo.InvariantCulture, $"{where} ({point.X},{point.Y})");
 
     private bool NotificationsAccepted(string what)
     {

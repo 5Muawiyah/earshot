@@ -15,15 +15,18 @@ public sealed class CardPresenterTests
     private const string AirPodsName = "Owner\u2019s AirPods Pro";
     private static readonly CardContent Connecting = new(AirPodsName, "Connecting");
     private static readonly CardContent Connected = new(AirPodsName, "Connected");
+    private static readonly TimeSpan ClickAnchorExpired = CardPresenter.ClickAnchorLifetime + TimeSpan.FromTicks(1);
 
     private sealed class Harness : IDisposable
     {
         public Harness()
         {
-            Presenter = new CardPresenter(Log, Ui.Post, Environment, CreateCard, CreateTimer);
+            Presenter = new CardPresenter(Log, Ui.Post, Environment, CreateCard, CreateTimer, Clock);
         }
 
         public CapturingLog Log { get; } = new();
+
+        public CardClock Clock { get; } = new();
 
         public QueuedUi Ui { get; } = new();
 
@@ -241,6 +244,189 @@ public sealed class CardPresenterTests
 
         Assert.AreEqual(0, h.Environment.NotificationQueries, "A click is the user's own action, so the state is not asked.");
         Assert.HasCount(1, h.Card.ShownAt);
+    }
+
+    [TestMethod]
+    public void AResultCardLandsWhereTheCardForTheSameClickDidAfterTheCursorMoved()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(960, 1056));
+
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        h.Timer.Elapse();
+
+        // The connect takes a while; meanwhile the pointer went to the top of the screen.
+        h.Clock.Advance(TimeSpan.FromSeconds(15));
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        CollectionAssert.AreEqual(new[] { new Rectangle(810, 940, 300, 80), new Rectangle(810, 940, 300, 80) }, h.Card.ShownAt);
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "anchored at the cursor on the taskbar (960,1056): NearCursor card \"" + AirPodsName + ": Connecting\""));
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "anchored where the last card after a click was (960,1056): NearCursor card \"" + AirPodsName + ": Connected\""));
+    }
+
+    [TestMethod]
+    public void AReplacedCardDoesNotFollowTheCursorAlongTheTaskbar()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(1800, 1056));
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        h.Clock.Advance(TimeSpan.FromSeconds(1));
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(100, 1056));
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        CollectionAssert.AreEqual(new[] { new Rectangle(1608, 940, 300, 80), new Rectangle(1608, 940, 300, 80) }, h.Card.ShownAt);
+    }
+
+    [TestMethod]
+    public void ACardAfterAClickWithTheCursorAwayFromTheTaskbarGoesNearTheNotificationArea()
+    {
+        using var h = new Harness();
+        h.Environment.Notifications = new NotificationStateReading(0, Shell.QUNS_BUSY);
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+
+        h.Presenter.Show(new CardContent(AirPodsName, "Disconnected"), CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        Assert.AreEqual(new Rectangle(1608, 940, 300, 80), h.Card.ShownAt.Single());
+        Assert.AreEqual(0, h.Environment.NotificationQueries, "It still follows a click, so the notification state is not asked.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "near the notification area, because the cursor is away from the taskbar (750,0)"));
+
+        // A menu or flyout sits just above the taskbar, which is not on it either.
+        h.Environment.Scene = Desktops.TwoDisplays(new Point(3700, 1000));
+        h.Clock.Advance(ClickAnchorExpired);
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        Assert.AreEqual(new Rectangle(1608, 940, 300, 80), h.Card.ShownAt.Last(), "The corner is on the display with the notification area.");
+    }
+
+    [TestMethod]
+    public void TheLastClickPointIsForgottenAfterItsLifetime()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(960, 1056));
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        // Still within the lifetime: reused.
+        h.Clock.Advance(CardPresenter.ClickAnchorLifetime);
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        Assert.AreEqual(new Rectangle(810, 940, 300, 80), h.Card.ShownAt.Last());
+
+        // Each card shown there starts the lifetime again; past it, the point is not reused.
+        h.Clock.Advance(ClickAnchorExpired);
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        Assert.AreEqual(new Rectangle(1608, 940, 300, 80), h.Card.ShownAt.Last());
+
+        // A cursor on the taskbar is used again and becomes the new point.
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(300, 1056));
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        Assert.AreEqual(new Rectangle(150, 940, 300, 80), h.Card.ShownAt.Last());
+    }
+
+    [TestMethod]
+    public void AClickPointFromTheCallerAnchorsTheCardWhereverTheCursorIsNow()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+
+        h.Presenter.Show(Connected, CardAnchor.NearCursor, new Point(960, 1056));
+        h.Ui.RunAll();
+
+        Assert.AreEqual(new Rectangle(810, 940, 300, 80), h.Card.ShownAt.Single());
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "anchored at the click (960,1056)"));
+
+        // The click point also anchors a later card after a click that has none.
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        Assert.AreEqual(new Rectangle(810, 940, 300, 80), h.Card.ShownAt.Last());
+
+        // A newer click point wins over the remembered one.
+        h.Presenter.Show(Connected, CardAnchor.NearCursor, new Point(1800, 1056));
+        h.Ui.RunAll();
+        Assert.AreEqual(new Rectangle(1608, 940, 300, 80), h.Card.ShownAt.Last());
+    }
+
+    [TestMethod]
+    public void AClickPointOffEveryDisplayIsNotUsed()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(960, 1056));
+
+        h.Presenter.Show(Connected, CardAnchor.NearCursor, new Point(5000, 5000));
+        h.Ui.RunAll();
+
+        Assert.AreEqual(new Rectangle(810, 940, 300, 80), h.Card.ShownAt.Single(), "The cursor on the taskbar is used instead.");
+    }
+
+    [TestMethod]
+    public void ACardNobodyClickedForIgnoresAClickPointAndIsStillChecked()
+    {
+        using var h = new Harness();
+        h.Environment.Notifications = new NotificationStateReading(0, Shell.QUNS_QUIET_TIME);
+
+        h.Presenter.Show(Connected, CardAnchor.NearTray, new Point(960, 1056));
+        h.Ui.RunAll();
+        Assert.IsEmpty(h.Cards);
+
+        h.Environment.Notifications = new NotificationStateReading(0, Shell.QUNS_ACCEPTS_NOTIFICATIONS);
+        h.Presenter.Show(Connected, CardAnchor.NearTray, new Point(960, 1056));
+        h.Ui.RunAll();
+        Assert.AreEqual(new Rectangle(1608, 940, 300, 80), h.Card.ShownAt.Single());
+
+        // Nor does it become the point for the next card after a click.
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "because the cursor is away from the taskbar"));
+    }
+
+    [TestMethod]
+    public void ACardThatFailedToShowDoesNotBecomeTheClickPoint()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(960, 1056));
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        h.Card.ShowResult = StepOutcomes.FromWin32("set-window-pos:show-card", 5);
+        h.Clock.Advance(TimeSpan.FromSeconds(1));
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(1800, 1056));
+        h.Presenter.Show(Connected, CardAnchor.NearCursor, new Point(1800, 1056));
+        h.Ui.RunAll();
+
+        h.Card.ShowResult = StepOutcomes.FromWin32("set-window-pos:show-card", 0);
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        Assert.AreEqual(new Rectangle(810, 940, 300, 80), h.Card.ShownAt.Last(), "The last card that did show was anchored at 960,1056.");
+    }
+
+    [TestMethod]
+    public void AClickPointOnADisplayThatWentAwayIsNotReused()
+    {
+        using var h = new Harness();
+        h.Environment.Scene = Desktops.TwoDisplays(new Point(3700, 1056));
+        h.Presenter.Show(Connecting, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+        Assert.AreEqual(new Rectangle(3528, 940, 300, 80), h.Card.ShownAt.Last());
+
+        h.Environment.Scene = Desktops.BottomTaskbar(new Point(750, 0));
+        h.Presenter.Show(Connected, CardAnchor.NearCursor);
+        h.Ui.RunAll();
+
+        Assert.AreEqual(new Rectangle(1608, 940, 300, 80), h.Card.ShownAt.Last());
     }
 
     [TestMethod]
