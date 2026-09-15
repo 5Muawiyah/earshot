@@ -68,6 +68,22 @@ public sealed class EndpointModelBuilderTests
     }
 
     [TestMethod]
+    public void NamelessGroupsFollowNamedOnes()
+    {
+        var nameless = new Guid("9a64ec90-3049-5710-96f2-493b2cff6b57");
+        var readings = new List<EndpointReading>
+        {
+            new(Endpoint("{0.0.0.00000000}.{n}", EndpointFlow.Render, EndpointState.NotPresent, nameless, name: null), null),
+            UsbMicrophone(),
+            AirPodsRender(),
+        };
+
+        Guid[] order = Build(readings).Snapshot.AllGroups.Select(g => g.ContainerId).ToArray();
+
+        CollectionAssert.AreEqual(new[] { AirPodsContainer, MicrophoneContainer, nameless }, order);
+    }
+
+    [TestMethod]
     public void EndpointsInAGroupAreRenderFirstThenById()
     {
         var readings = new List<EndpointReading>

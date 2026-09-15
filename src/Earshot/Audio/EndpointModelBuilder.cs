@@ -30,8 +30,8 @@ internal sealed record EndpointModel(DeviceSnapshot Snapshot, TargetResolution R
 // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/container-ids
 // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/container-ids-for-bluetooth-devices
 //
-// Order. Groups that can be a target come first, by display name (ordinal, ignoring case) and then
-// container id; the PC container and Guid.Empty groups follow. Endpoints within a group are ordered
+// Order. Groups that can be a target come first, named before nameless, by display name (ordinal,
+// ignoring case) and then container id; the PC container and Guid.Empty groups follow. Endpoints within a group are ordered
 // render first, then by endpoint id. The order is deterministic, so two snapshots of the same devices
 // compare equal and "the first matching group" is stable across enumerations.
 //
@@ -68,6 +68,7 @@ internal static class EndpointModelBuilder
             .GroupBy(r => r.Endpoint.ContainerId)
             .Select(BuildGroup)
             .OrderBy(g => NodeMatch.IsValidTargetContainer(g.ContainerId) ? 0 : 1)
+            .ThenBy(g => g.DisplayName.Length == 0 ? 1 : 0)
             .ThenBy(g => g.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(g => g.ContainerId)
             .ToList();
