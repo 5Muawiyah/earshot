@@ -59,8 +59,7 @@ public interface IBatteryProvider
     BatteryReading Read(Guid containerId);
 }
 
-// Card surface (integrator addendum L4). The real card belongs to the popup phase; everything
-// else only calls Show and Hide.
+// Card surface. The popup card implements it; everything else only calls Show and Hide.
 public enum CardAnchor { NearCursor, NearTray }
 public sealed record CardContent(string Title, string Status);   // Title = device name; no battery field in v1
 public interface ICardPresenter { void Show(CardContent content, CardAnchor anchor); void Hide(); }

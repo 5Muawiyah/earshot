@@ -12,7 +12,7 @@
                                                                 closes DOTNET_STARTUP_HOOKS in the gate -->
     <!-- SelfContained + RuntimeIdentifier are intentionally NOT set here.
          Setting them makes tests\Earshot.Tests fail to reference this exe (NETSDK1151).
-         They are supplied on the publish command line only (section A, publish). -->
+         They are supplied on the dotnet publish command line only. -->
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Earshot.Tests" />
