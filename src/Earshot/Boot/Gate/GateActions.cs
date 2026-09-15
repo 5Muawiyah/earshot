@@ -1,0 +1,604 @@
+using Earshot.Contracts;
+using Earshot.Contracts.Null;
+using Earshot.Interop;
+
+namespace Earshot.Boot.Gate;
+
+// Node reads plus the two calls only the elevated side makes. The tray never holds one of these.
+internal interface INodeApi : INodeReader
+{
+    // CM_Disable_DevNode. https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_disable_devnode
+    uint Disable(uint devInst, uint flags);
+
+    // CM_Enable_DevNode with ulFlags 0. https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_enable_devnode
+    uint Enable(uint devInst);
+}
+
+internal sealed class CfgMgr32NodeApi : CfgMgr32NodeReader, INodeApi
+{
+    public uint Disable(uint devInst, uint flags) => CfgMgr32.CM_Disable_DevNode(devInst, flags);
+
+    public uint Enable(uint devInst) => CfgMgr32.CM_Enable_DevNode(devInst, 0);
+}
+
+// Exit codes of gate, install and uninstall. They stay clear of the sysexits values in ExitCodes, and the
+// name of each is written to the status file. LastTaskResult may carry them back to the tray, but that
+// is undocumented, so the tray only reports them.
+internal enum GateExitCode
+{
+    Success = 0,
+    Partial = 2,             // some target nodes (or install or uninstall steps) failed
+    Failed = 3,
+    NotPresent = 4,          // every target node is non-present, so none could be changed
+    NotFound = 5,            // no node matched the pinned device
+    NoIdentity = 6,          // device.json is missing or not valid
+    NotAvailable = 7,        // protect-on or protect-off in a build without protection
+    OtherDeviceBlocked = 8,  // set-device while the device pinned now is still disabled
+    StatusNotWritten = 9,    // the action succeeded but its status file could not be written
+    FolderNotSecure = 10,    // %ProgramData%\Earshot is missing or its ACL fails the check
+    Rejected = 20,           // the command line did not validate; nothing was done
+    NotElevated = 21,        // not SYSTEM or an elevated administrator
+    RunningAsSystem = 22,    // install or uninstall started as SYSTEM
+}
+
+internal static class GateExitCodes
+{
+    private static readonly Dictionary<GateExitCode, string> Names = new()
+    {
+        [GateExitCode.Success] = "success",
+        [GateExitCode.Partial] = "partial",
+        [GateExitCode.Failed] = "failed",
+        [GateExitCode.NotPresent] = "not-present",
+        [GateExitCode.NotFound] = "not-found",
+        [GateExitCode.NoIdentity] = "no-identity",
+        [GateExitCode.NotAvailable] = "not-available",
+        [GateExitCode.OtherDeviceBlocked] = "other-device-blocked",
+        [GateExitCode.StatusNotWritten] = "status-not-written",
+        [GateExitCode.FolderNotSecure] = "folder-not-secure",
+        [GateExitCode.Rejected] = "rejected",
+        [GateExitCode.NotElevated] = "not-elevated",
+        [GateExitCode.RunningAsSystem] = "running-as-system",
+    };
+
+    public static string ResultName(GateExitCode code) =>
+        Names.TryGetValue(code, out string? name) ? name : "failed";
+
+    public static bool IsResultName(string name) => Names.ContainsValue(name);
+
+    // The name for a raw exit code, or null when it is not one of these.
+    public static string? NameOf(int exitCode) =>
+        Enum.IsDefined((GateExitCode)exitCode) ? Names[(GateExitCode)exitCode] : null;
+}
+
+internal sealed record GateRequest(string Verb, string Nonce, string? Address);
+
+// What a gate verb implemented elsewhere receives (the protect verbs and the protection restore hook).
+// Identity is the validated device.json. Every native call is appended to Steps as a StepOutcome; the
+// implementation sets Handled, Outcome and, when it read one, State.
+internal sealed class GateRunContext
+{
+    public GateRunContext(string verb, string nonce, DeviceIdentity identity, INodeApi nodes, GateStore store, ILog log, IList<StepOutcome> steps)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(verb);
+        ArgumentException.ThrowIfNullOrWhiteSpace(nonce);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(steps);
+        Verb = verb;
+        Nonce = nonce;
+        Identity = identity;
+        Nodes = nodes;
+        Store = store;
+        Log = log;
+        Steps = steps;
+    }
+
+    public string Verb { get; }
+
+    public string Nonce { get; }
+
+    public DeviceIdentity Identity { get; }
+
+    public INodeApi Nodes { get; }
+
+    public GateStore Store { get; }
+
+    public ILog Log { get; }
+
+    public IList<StepOutcome> Steps { get; }
+
+    public bool Handled { get; set; }
+
+    public GateExitCode Outcome { get; set; } = GateExitCode.Failed;
+
+    public string? State { get; set; }
+}
+
+internal sealed record NodeChangeSummary(int Total, int Changed, int Already, int NotPresent, int Failed)
+{
+    public GateExitCode Outcome =>
+        Total == 0 ? GateExitCode.NotFound
+        : Changed + Already == Total ? GateExitCode.Success
+        : Changed + Already > 0 ? GateExitCode.Partial
+        : NotPresent == Total ? GateExitCode.NotPresent
+        : GateExitCode.Failed;
+}
+
+// The elevated action behind \Earshot\Gate and \Earshot\BootBlock: gate <verb> <nonce> [address].
+//
+// Runs as SYSTEM. The request has already been validated (GateArguments). The identity for every verb
+// except set-device comes only from device.json, never from the command line. Before anything is read,
+// %ProgramData%\Earshot must pass the machine folder ACL check, so a folder a user could write is never
+// trusted. Each run writes status-<nonce>.json with every step and returns an exit code for the result.
+internal sealed partial class GateActions
+{
+    // CM_DISABLE_PERSIST is what makes the disable survive a reboot; without it the acceptance test fails
+    // silently. CM_DISABLE_UI_NOT_OK keeps any failure UI away from a SYSTEM session.
+    // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_disable_devnode
+    public const uint BlockDisableFlags = CfgMgr32.CM_DISABLE_PERSIST | CfgMgr32.CM_DISABLE_UI_NOT_OK;
+
+    private readonly INodeApi _nodes;
+    private readonly GateStore _store;
+    private readonly IFolderSecurity _folders;
+    private readonly ILog _log;
+    private readonly TimeProvider _time;
+
+    public GateActions(INodeApi nodes, GateStore store, IFolderSecurity folders, ILog log, TimeProvider time)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(time);
+        _nodes = nodes;
+        _store = store;
+        _folders = folders;
+        _log = log;
+        _time = time;
+    }
+
+    public static GateActions ForMachine(string machineFolder, ILog log) =>
+        new(new CfgMgr32NodeApi(), new GateStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System);
+
+    private sealed record VerbResult(GateExitCode Outcome, string? State);
+
+    public GateExitCode Run(GateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        DateTimeOffset started = _time.GetUtcNow();
+        var steps = new List<StepOutcome>();
+
+        if (!FolderIsSecure(steps))
+        {
+            foreach (StepOutcome step in steps)
+            {
+                _log.Error("gate " + request.Verb + ": " + Describe(step));
+            }
+
+            return GateExitCode.FolderNotSecure;
+        }
+
+        VerbResult result = request.Verb switch
+        {
+            GateVerbs.Block => Block(steps),
+            GateVerbs.Allow => Allow(steps),
+            GateVerbs.Status => Status(steps),
+            GateVerbs.SetBootOn => SetBoot(true, steps),
+            GateVerbs.SetBootOff => SetBoot(false, steps),
+            GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
+            GateVerbs.Boot => Boot(steps),
+            GateVerbs.ProtectOn => Protect(request, protect: true, steps),
+            GateVerbs.ProtectOff => Protect(request, protect: false, steps),
+            _ => new VerbResult(GateExitCode.Rejected, null),
+        };
+
+        steps.AddRange(_store.PruneStatusFiles(_time.GetUtcNow()));
+        GateExitCode outcome = result.Outcome;
+        var status = new GateStatusFile(
+            GateStore.SchemaVersion, request.Nonce, request.Verb, started, _time.GetUtcNow(),
+            GateExitCodes.ResultName(outcome), (int)outcome, result.State, steps, StepsTruncated: false);
+        StepOutcome written = _store.WriteStatus(status);
+        if (!written.Ok)
+        {
+            _log.Error("gate " + request.Verb + ": " + Describe(written));
+            if (outcome == GateExitCode.Success)
+            {
+                outcome = GateExitCode.StatusNotWritten;
+            }
+        }
+
+        foreach (StepOutcome step in steps.Where(s => !s.Ok))
+        {
+            _log.Warn("gate " + request.Verb + " " + request.Nonce + ": " + Describe(step));
+        }
+
+        _log.Info("gate " + request.Verb + " " + request.Nonce + ": " + GateExitCodes.ResultName(outcome) +
+                  " (" + (int)outcome + ")" + (result.State is null ? "" : ", state " + result.State) + ".");
+        return outcome;
+    }
+
+    private bool FolderIsSecure(List<StepOutcome> steps)
+    {
+        StepOutcome read = _folders.ReadSddl(_store.Folder, out string? sddl);
+        steps.Add(read);
+        if (!read.Ok)
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> problems = AclCheck.CheckMachineFolder(sddl);
+        foreach (string problem in problems)
+        {
+            steps.Add(StepOutcomes.NotAttempted("machine-folder-acl", problem));
+        }
+
+        return problems.Count == 0;
+    }
+
+    private DeviceIdentity? ReadIdentity(List<StepOutcome> steps)
+    {
+        GateRead<DeviceIdentity> read = _store.ReadDevice();
+        steps.Add(read.Step);
+        return read.IsOk ? read.Value : null;
+    }
+
+    private VerbResult Block(List<StepOutcome> steps)
+    {
+        DeviceIdentity? identity = ReadIdentity(steps);
+        if (identity is null)
+        {
+            return new VerbResult(GateExitCode.NoIdentity, null);
+        }
+
+        NodeScanResult scan = NodeScan.FindTargets(_nodes, identity.ContainerId, identity.Address);
+        steps.AddRange(scan.Steps);
+        if (!scan.Listed)
+        {
+            return new VerbResult(GateExitCode.Failed, nameof(BlockState.Unknown));
+        }
+
+        if (scan.Targets.Count == 0)
+        {
+            return new VerbResult(GateExitCode.NotFound, nameof(BlockState.NotFound));
+        }
+
+        NodeChangeSummary summary = ApplyBlock(_nodes, scan.Targets, steps);
+        return new VerbResult(summary.Outcome, ReadState(identity));
+    }
+
+    private VerbResult Allow(List<StepOutcome> steps)
+    {
+        DeviceIdentity? identity = ReadIdentity(steps);
+        if (identity is null)
+        {
+            return new VerbResult(GateExitCode.NoIdentity, null);
+        }
+
+        NodeScanResult scan = NodeScan.FindTargets(_nodes, identity.ContainerId, identity.Address);
+        steps.AddRange(scan.Steps);
+        if (!scan.Listed)
+        {
+            return new VerbResult(GateExitCode.Failed, nameof(BlockState.Unknown));
+        }
+
+        if (scan.Targets.Count == 0)
+        {
+            return new VerbResult(GateExitCode.NotFound, nameof(BlockState.NotFound));
+        }
+
+        NodeChangeSummary summary = ApplyAllow(_nodes, scan.Targets, steps);
+        return new VerbResult(summary.Outcome, ReadState(identity));
+    }
+
+    private VerbResult Status(List<StepOutcome> steps)
+    {
+        DeviceIdentity? identity = ReadIdentity(steps);
+        if (identity is null)
+        {
+            return new VerbResult(GateExitCode.NoIdentity, null);
+        }
+
+        NodeReadResult read = new NodeStateReader(_nodes).Read(identity.ContainerId, identity.Address);
+        steps.AddRange(read.Steps);
+        BlockState state = BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, read);
+        return new VerbResult(read.Listed ? GateExitCode.Success : GateExitCode.Failed, state.ToString());
+    }
+
+    private VerbResult SetBoot(bool blockAtBoot, List<StepOutcome> steps)
+    {
+        StepOutcome written = _store.WriteConfig(new GateConfig { BlockAtBoot = blockAtBoot });
+        steps.Add(written);
+        return new VerbResult(written.Ok ? GateExitCode.Success : GateExitCode.Failed, null);
+    }
+
+    // Re-pins device.json to the device with this address. The address is validated, but it is still
+    // attacker-controlled: it only ever selects a BTHENUM\DEV_<address> node, and the container is read from
+    // that node, never taken from the command line.
+    private VerbResult SetDevice(string address, List<StepOutcome> steps)
+    {
+        if (!BoundaryValidation.IsAddress12(address))
+        {
+            steps.Add(StepOutcomes.NotAttempted("set-device", "The address is not 12 upper-case hex characters."));
+            return new VerbResult(GateExitCode.Rejected, null);
+        }
+
+        uint cr = _nodes.ListDeviceIds(out string[] ids);
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet("cm-list", cr, "The device list could not be read."));
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        string prefix = @"BTHENUM\DEV_" + address + @"\";
+        List<string> matches = ids.Where(id => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (matches.Count == 0)
+        {
+            steps.Add(StepOutcomes.FromConfigRet("set-device-find", CfgMgr32.CR_NO_SUCH_DEVNODE, "No Bluetooth device node has this address."));
+            return new VerbResult(GateExitCode.NotFound, nameof(BlockState.NotFound));
+        }
+
+        if (matches.Count > 1)
+        {
+            steps.Add(StepOutcomes.NotAttempted("set-device-find", "More than one device node has this address."));
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        string deviceId = matches[0];
+        cr = _nodes.Locate(deviceId, includeNonPresent: true, out uint devInst);
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + deviceId, cr));
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        cr = _nodes.GetContainerId(devInst, out Guid container);
+        steps.Add(StepOutcomes.FromConfigRet("cm-container:" + deviceId, cr));
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        if (!NodeMatch.IsDisableTarget(deviceId, container, container, address))
+        {
+            steps.Add(StepOutcomes.NotAttempted("set-device", "The node's container is empty or the PC container."));
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        GateRead<DeviceIdentity> current = _store.ReadDevice();
+        if (current.Status == GateReadStatus.Unreadable)
+        {
+            steps.Add(current.Step);
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        if (current.Status == GateReadStatus.Invalid)
+        {
+            steps.Add(current.Step);
+        }
+
+        if (current.IsOk && current.Value is { } pinned &&
+            (!string.Equals(pinned.Address, address, StringComparison.Ordinal) || pinned.ContainerId != container))
+        {
+            // Moving the pin away from a device that is still disabled would leave it disabled with nothing
+            // in Earshot able to allow it again.
+            NodeReadResult old = new NodeStateReader(_nodes).Read(pinned.ContainerId, pinned.Address);
+            if (!old.Listed)
+            {
+                steps.AddRange(old.Steps);
+                return new VerbResult(GateExitCode.Failed, null);
+            }
+
+            if (old.Nodes.Any(n => n.Status == NodeBlockStatus.Disabled || n.ConfigFlagsDisabledBit))
+            {
+                steps.Add(StepOutcomes.NotAttempted("set-device", "The device pinned now is still blocked. Allow it first."));
+                return new VerbResult(GateExitCode.OtherDeviceBlocked, null);
+            }
+        }
+
+        StepOutcome written = _store.WriteDevice(new DeviceIdentity { Address = address, ContainerId = container });
+        steps.Add(written);
+        return new VerbResult(written.Ok ? GateExitCode.Success : GateExitCode.Failed, null);
+    }
+
+    // The BootBlock task. Blocks only when config.json says BlockAtBoot is true; a missing or invalid
+    // config is not taken as permission.
+    // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iboottrigger
+    private VerbResult Boot(List<StepOutcome> steps)
+    {
+        GateRead<GateConfig> config = _store.ReadConfig();
+        steps.Add(config.Step);
+        if (!config.IsOk || config.Value is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        if (!config.Value.BlockAtBoot)
+        {
+            steps.Add(StepOutcomes.NotAttempted("boot-block", "Block at boot is off."));
+            return new VerbResult(GateExitCode.Success, null);
+        }
+
+        return Block(steps);
+    }
+
+    private VerbResult Protect(GateRequest request, bool protect, List<StepOutcome> steps)
+    {
+        DeviceIdentity? identity = ReadIdentity(steps);
+        if (identity is null)
+        {
+            return new VerbResult(GateExitCode.NoIdentity, null);
+        }
+
+        var ctx = new GateRunContext(request.Verb, request.Nonce, identity, _nodes, _store, _log, steps);
+        RunProtectVerb(ctx, protect);
+        if (!ctx.Handled)
+        {
+            steps.Add(StepOutcomes.NotAvailable(request.Verb, NullResults.NotAvailableMessage));
+            return new VerbResult(GateExitCode.NotAvailable, null);
+        }
+
+        return new VerbResult(ctx.Outcome, ctx.State);
+    }
+
+    // Runs the protection restore hook for uninstall. False when this build has no protection feature.
+    public static bool TryRestoreProtection(GateRunContext ctx)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+        RunProtectionRestore(ctx);
+        return ctx.Handled;
+    }
+
+    // Implemented by the audio protection feature in its own file (a part of this class). protect-on and
+    // protect-off change the Handsfree and Headset service state; without an implementation they exit with
+    // GateExitCode.NotAvailable.
+    static partial void RunProtectVerb(GateRunContext ctx, bool protect);
+
+    // Implemented by the audio protection feature: re-enables the services listed in protection.json.
+    static partial void RunProtectionRestore(GateRunContext ctx);
+
+    private string ReadState(DeviceIdentity identity)
+    {
+        NodeReadResult after = new NodeStateReader(_nodes).Read(identity.ContainerId, identity.Address);
+        return BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, after).ToString();
+    }
+
+    // Persistently disables each target. Service nodes go first and the device node last; that order is a
+    // choice (the device node stays up while its services go), not a documented requirement. A node already
+    // disabled with the persistent flag is left alone; one disabled without it is disabled again with
+    // CM_DISABLE_PERSIST.
+    public static NodeChangeSummary ApplyBlock(INodeApi nodes, IReadOnlyList<TargetNode> targets, IList<StepOutcome> steps)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(targets);
+        ArgumentNullException.ThrowIfNull(steps);
+        int changed = 0, already = 0, notPresent = 0, failed = 0;
+        foreach (TargetNode target in targets.OrderBy(t => t.IsDeviceNode).ThenBy(t => t.InstanceId, StringComparer.Ordinal))
+        {
+            string id = target.InstanceId;
+            if (!TryLocatePresent(nodes, id, "cm-disable:", steps, ref notPresent, ref failed, out uint devInst, out bool disabled))
+            {
+                continue;
+            }
+
+            if (disabled)
+            {
+                uint flagsCr = nodes.GetConfigFlags(devInst, out uint flags);
+                if (flagsCr == CfgMgr32.CR_SUCCESS && (flags & CfgMgr32.CONFIGFLAG_DISABLED) != 0)
+                {
+                    steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, flagsCr, "Already disabled."));
+                    already++;
+                    continue;
+                }
+            }
+
+            uint cr = nodes.Disable(devInst, BlockDisableFlags);
+            steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, cr, DescribeDisable(cr)));
+            if (cr == CfgMgr32.CR_SUCCESS)
+            {
+                changed++;
+            }
+            else
+            {
+                failed++;
+            }
+        }
+
+        return new NodeChangeSummary(targets.Count, changed, already, notPresent, failed);
+    }
+
+    // Enables each target at problem 22 (CM_PROB_DISABLED). The device node goes first, then its services.
+    public static NodeChangeSummary ApplyAllow(INodeApi nodes, IReadOnlyList<TargetNode> targets, IList<StepOutcome> steps)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(targets);
+        ArgumentNullException.ThrowIfNull(steps);
+        int changed = 0, already = 0, notPresent = 0, failed = 0;
+        foreach (TargetNode target in targets.OrderBy(t => !t.IsDeviceNode).ThenBy(t => t.InstanceId, StringComparer.Ordinal))
+        {
+            string id = target.InstanceId;
+            if (!TryLocatePresent(nodes, id, "cm-enable:", steps, ref notPresent, ref failed, out uint devInst, out bool disabled))
+            {
+                continue;
+            }
+
+            if (!disabled)
+            {
+                steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, CfgMgr32.CR_SUCCESS, "Already enabled."));
+                already++;
+                continue;
+            }
+
+            uint cr = nodes.Enable(devInst);
+            steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, cr, DescribeEnable(cr)));
+            if (cr == CfgMgr32.CR_SUCCESS)
+            {
+                changed++;
+            }
+            else
+            {
+                failed++;
+            }
+        }
+
+        return new NodeChangeSummary(targets.Count, changed, already, notPresent, failed);
+    }
+
+    // Locates a target in the live tree and reads whether it is at CM_PROB_DISABLED. A node that is not
+    // present (CR_NO_SUCH_DEVNODE with CM_LOCATE_DEVNODE_NORMAL) cannot be changed and is reported as such.
+    private static bool TryLocatePresent(
+        INodeApi nodes, string id, string stepPrefix, IList<StepOutcome> steps,
+        ref int notPresent, ref int failed, out uint devInst, out bool disabled)
+    {
+        disabled = false;
+        uint cr = nodes.Locate(id, includeNonPresent: false, out devInst);
+        if (cr == CfgMgr32.CR_NO_SUCH_DEVNODE)
+        {
+            steps.Add(StepOutcomes.FromConfigRet(stepPrefix + id, cr, "Not present, so it cannot be changed. Connect the device to this PC once."));
+            notPresent++;
+            return false;
+        }
+
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet(stepPrefix + id, cr, "Could not be located."));
+            failed++;
+            return false;
+        }
+
+        cr = nodes.GetStatus(devInst, out uint status, out uint problem);
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet(stepPrefix + id, cr, "Status unreadable, so it was not changed."));
+            failed++;
+            return false;
+        }
+
+        disabled = (status & CfgMgr32.DN_HAS_PROBLEM) != 0 && problem == CfgMgr32.CM_PROB_DISABLED;
+        return true;
+    }
+
+    internal static string? DescribeDisable(uint cr) => cr switch
+    {
+        CfgMgr32.CR_SUCCESS => "Disabled until it is allowed again.",
+        CfgMgr32.CR_NO_SUCH_DEVNODE => "Not present, so it cannot be disabled.",
+        CfgMgr32.CR_NOT_DISABLEABLE => "Windows does not allow this node to be disabled.",
+        CfgMgr32.CR_REMOVE_VETOED => "A driver or app refused to let the node go.",
+        CfgMgr32.CR_ACCESS_DENIED => "Access denied.",
+        CfgMgr32.CR_NEED_RESTART => "Windows needs a restart to finish.",
+        _ => null,
+    };
+
+    internal static string? DescribeEnable(uint cr) => cr switch
+    {
+        CfgMgr32.CR_SUCCESS => "Enabled.",
+        CfgMgr32.CR_NO_SUCH_DEVNODE => "Not present, so it cannot be enabled.",
+        CfgMgr32.CR_ACCESS_DENIED => "Access denied.",
+        CfgMgr32.CR_NEED_RESTART => "Windows needs a restart to finish.",
+        _ => null,
+    };
+
+    internal static string Describe(StepOutcome step) =>
+        step.Step + " " + step.CodeName + (step.Detail is null ? "" : " (" + step.Detail + ")");
+}
