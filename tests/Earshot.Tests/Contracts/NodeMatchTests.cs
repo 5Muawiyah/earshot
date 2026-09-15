@@ -125,6 +125,18 @@ public sealed class NodeMatchTests
         }
     }
 
+    // The container guard alone keeps the radio out above. Reported in the pinned AirPods container, it
+    // passes the container and prefix guards, so only the address guard refuses it.
+    [TestMethod]
+    public void TheRadioReportedInTheAirPodsContainerIsStillExcludedByAddress()
+    {
+        foreach (Node radio in RadioNodes)
+        {
+            Assert.IsTrue(NodeMatch.IsValidTargetContainer(AirPodsContainer));
+            Assert.IsFalse(NodeMatch.IsDisableTarget(radio.InstanceId, AirPodsContainer, AirPodsContainer, AirPodsAddress));
+        }
+    }
+
     [TestMethod]
     public void AnIPhoneNodeReportedInTheAirPodsContainerIsStillExcludedByAddress()
     {
