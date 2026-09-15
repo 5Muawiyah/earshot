@@ -359,6 +359,55 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.IsEmpty(Quarantined());
     }
 
+    // A newer build may change a member's type or allow a null this build rejects. The file must still
+    // be recognised as newer and left exactly as it is.
+    [TestMethod]
+    [DataRow("{ \"SchemaVersion\": 2, \"DeviceMatch\": 5 }")]
+    [DataRow("{ \"SchemaVersion\": 2, \"PinnedAddress\": null }")]
+    [DataRow("{ \"SchemaVersion\": 2, \"OpenOnStartup\": \"yes\", \"New\": [1, 2] }")]
+    [DataRow("{ \"DeviceMatch\": { \"SchemaVersion\": 1, \"Name\": \"Beats\" }, \"SchemaVersion\": 3 }")]
+    [DataRow("{ \"SchemaVersion\": 9999999999 }")]
+    [DataRow("{ \"SchemaVersion\": 2, \"DeviceMatch\": \"Bea")]
+    public void ANewerSchemaThisBuildCannotDeserialiseIsNeverMovedOrRewritten(string content)
+    {
+        File.WriteAllText(SettingsPath, content);
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.NewerSchema, store.LastLoadStatus);
+        Assert.IsTrue(store.IsReadOnly);
+        AssertDefaults(store.Current);
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "from a newer version of Earshot"));
+
+        store.Update(s => s.OpenOnStartup = false);
+        store.Reload();
+
+        Assert.AreEqual(content, File.ReadAllText(SettingsPath));
+        Assert.IsFalse(File.Exists(store.BackupPath));
+        Assert.IsFalse(File.Exists(store.TempPath));
+        Assert.IsEmpty(Quarantined());
+    }
+
+    // Only a whole-number SchemaVersion member of the top-level object, above this build's, marks a file
+    // as newer. Anything else that fails the typed read is still unusable.
+    [TestMethod]
+    [DataRow("{ \"Nested\": { \"SchemaVersion\": 2 }, \"DeviceMatch\": 5 }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"DeviceMatch\": 5 }")]
+    [DataRow("{ \"SchemaVersion\": \"2\", \"DeviceMatch\": 5 }")]
+    [DataRow("{ \"SchemaVersion\": 2.5 }")]
+    [DataRow("[ { \"SchemaVersion\": 2 } ]")]
+    [DataRow("{ \"DeviceMatch\": \"Bea")]
+    public void AVersionThatIsNotATopLevelWholeNumberAboveThisBuildsIsNotNewer(string content)
+    {
+        File.WriteAllText(SettingsPath, content);
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.ResetAfterCorruption, store.LastLoadStatus);
+        Assert.IsFalse(store.IsReadOnly);
+        Assert.HasCount(1, Quarantined());
+    }
+
     [TestMethod]
     public void AReadOnlyStoreDoesNotCreateAMissingFile()
     {
@@ -448,5 +497,123 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.IsTrue(_log.Entries.Any(e => e.Level == LogLevel.Error));
         Assert.AreEqual(ValidJson, File.ReadAllText(SettingsPath));
         Assert.IsEmpty(Quarantined());
+    }
+
+    // A lock that outlasts the load retries must not turn the next Update into a reset: the first
+    // change after it (pinning the device, say) is applied to the values in the file.
+    [TestMethod]
+    public void AfterALockedLoadUpdateReadsTheFileAgainBeforeSaving()
+    {
+        File.WriteAllText(SettingsPath, ValidJson);
+        JsonSettingsStore store;
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            store = Open();
+        }
+
+        Assert.AreEqual(SettingsLoadStatus.ReadFailed, store.LastLoadStatus);
+        int changed = 0;
+        store.Changed += (_, _) => changed++;
+
+        store.Update(s => s.OpenOnStartup = false);
+
+        Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
+        Assert.IsGreaterThan(0, changed);
+        foreach (EarshotSettings s in new[] { store.Current, Open().Current })
+        {
+            Assert.AreEqual("Beats", s.DeviceMatch);
+            Assert.IsFalse(s.ProtectAudioQuality, "The user's choice survives.");
+            Assert.AreEqual("5A6B7C8D9EAF", s.PinnedAddress);
+            Assert.IsFalse(s.OpenOnStartup, "The change is saved.");
+        }
+
+        Assert.AreEqual(ValidJson, File.ReadAllText(store.BackupPath));
+        Assert.IsEmpty(Quarantined());
+    }
+
+    [TestMethod]
+    public void AnUpdateWhileTheFileIsStillLockedWritesNothing()
+    {
+        File.WriteAllText(SettingsPath, ValidJson);
+        JsonSettingsStore store;
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            store = Open();
+            store.Update(s => s.OpenOnStartup = false);
+
+            Assert.AreEqual(SettingsLoadStatus.ReadFailed, store.LastLoadStatus);
+            Assert.IsFalse(store.Current.OpenOnStartup, "The change holds for this run.");
+            Assert.IsTrue(_log.Has(LogLevel.Warn, "not saved"));
+        }
+
+        Assert.AreEqual(ValidJson, File.ReadAllText(SettingsPath));
+        Assert.IsFalse(File.Exists(store.BackupPath));
+        Assert.IsFalse(File.Exists(store.TempPath));
+        Assert.IsEmpty(Quarantined());
+    }
+
+    // Reading is allowed but moving is not, so the unusable file cannot be put aside. Saving then would
+    // push it over the good backup, so nothing is saved until a later load can move it.
+    [TestMethod]
+    public void AnUnusableFileThatCannotBeMovedIsLoadedAgainBeforeSaving()
+    {
+        JsonSettingsStore writer = Open();
+        writer.Update(s => s.DeviceMatch = "Backup value");
+        writer.Update(s => s.DeviceMatch = "Latest value");
+        const string truncated = "{ \"DeviceMatch\": \"Lat";
+        File.WriteAllText(SettingsPath, truncated);
+        string backupBefore = File.ReadAllText(SettingsPath + ".bak");
+
+        JsonSettingsStore store;
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            store = Open();
+
+            Assert.AreEqual(SettingsLoadStatus.RestoredFromBackup, store.LastLoadStatus);
+            Assert.IsNull(store.QuarantinedFile);
+            Assert.AreEqual("Backup value", store.Current.DeviceMatch);
+        }
+
+        Assert.AreEqual(truncated, File.ReadAllText(SettingsPath));
+        Assert.AreEqual(backupBefore, File.ReadAllText(SettingsPath + ".bak"));
+
+        store.Update(s => s.OpenOnStartup = false);
+
+        string[] quarantined = Quarantined();
+        Assert.HasCount(1, quarantined);
+        Assert.AreEqual(truncated, File.ReadAllText(quarantined[0]));
+        EarshotSettings reopened = Open().Current;
+        Assert.AreEqual("Backup value", reopened.DeviceMatch);
+        Assert.IsFalse(reopened.OpenOnStartup);
+    }
+
+    [TestMethod]
+    public void AnUnusableFileWithALockedBackupIsLeftAloneUntilTheBackupCanBeRead()
+    {
+        const string truncated = "{ \"DeviceMatch\": \"Lat";
+        File.WriteAllText(SettingsPath, truncated);
+        File.WriteAllText(SettingsPath + ".bak", ValidJson);
+
+        JsonSettingsStore store;
+        using (new FileStream(SettingsPath + ".bak", FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            store = Open();
+
+            Assert.AreEqual(SettingsLoadStatus.ReadFailed, store.LastLoadStatus);
+            AssertDefaults(store.Current);
+            Assert.IsTrue(_log.Has(LogLevel.Error, "its backup could not be opened"));
+        }
+
+        Assert.AreEqual(truncated, File.ReadAllText(SettingsPath));
+        Assert.AreEqual(ValidJson, File.ReadAllText(SettingsPath + ".bak"));
+        Assert.IsEmpty(Quarantined());
+
+        store.Update(s => s.OpenOnStartup = false);
+
+        Assert.HasCount(1, Quarantined());
+        EarshotSettings reopened = Open().Current;
+        Assert.AreEqual("Beats", reopened.DeviceMatch);
+        Assert.IsFalse(reopened.ProtectAudioQuality);
+        Assert.IsFalse(reopened.OpenOnStartup);
     }
 }
