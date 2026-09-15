@@ -39,6 +39,9 @@ public interface IBlockController
     Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default);   // read-only, non-admin
     Task<ControllerResult> BlockAsync(CancellationToken ct = default);      // RunEx "block"
     Task<ControllerResult> AllowAsync(CancellationToken ct = default);      // RunEx "allow"
+    // The parameter is blockAtBoot rather than on: CA1716 rejects a parameter of an interface member
+    // named after a language keyword, and On is a Visual Basic keyword.
+    // https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/ca1716
     Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default);
     Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default); // RunEx "set-device"
     Task<ControllerResult> RunSetupAsync(CancellationToken ct = default);   // ShellExecute runas (one UAC)

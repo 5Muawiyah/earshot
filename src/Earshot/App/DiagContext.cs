@@ -4,8 +4,8 @@ using Earshot.Composition;
 
 namespace Earshot.App;
 
-// What a diag target gets. diag performs live single-shot actions for the owner's live tests and
-// is refused outright in safe mode (except read-only targets) before a target runs. A target
+// What a diag target gets. diag performs live single-shot actions for the owner's live tests. In
+// safe mode every target is refused, battery-sweep included, before any target runs. A target
 // implementation must set Handled = true, set ExitCode when it fails, write a short human summary
 // to Out and its JSON evidence to a file from NewEvidenceFile.
 internal sealed class DiagContext
