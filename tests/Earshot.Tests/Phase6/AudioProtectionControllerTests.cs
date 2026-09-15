@@ -113,7 +113,7 @@ public sealed class AudioProtectionControllerTests
             if (GateActs)
             {
                 exit = (int)new GateActions(Nodes, Store, new FakeFolderSecurity(), Log, Time)
-                    .Run(new GateRequest(parameters[0], parameters[1], null));
+                    .Run(new GateRequest(parameters[0], parameters[1], null, GateMode.Protect));
             }
 
             Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, exit, Tasks.Current.LastRunTime + 1);

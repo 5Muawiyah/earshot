@@ -8,15 +8,16 @@ using Earshot.Infra;
 
 namespace Earshot;
 
-// The three elevated run modes.
+// The elevated run modes.
 //
-//   gate <verb> <nonce>                 run by \Earshot\Gate or \Earshot\Protect as SYSTEM
+//   gate <verb> <nonce>                 run by \Earshot\Gate as SYSTEM; every verb except protect-on and protect-off
 //   gate set-device <nonce> <address>   the only verb that carries an address
 //   gate boot                           run by \Earshot\BootBlock at boot
+//   gate-protect <verb> <nonce>         run by \Earshot\Protect; protect-on and protect-off only
 //   install <userSid> <address> <containerGuid> [--principal user]
 //   uninstall
 //
-// Program.Dispatch has already refused all three in safe mode and while EARSHOT_DATA_ROOT is set. The
+// Program.Dispatch has already refused all of them in safe mode and while EARSHOT_DATA_ROOT is set. The
 // command line is attacker-controlled (anyone who may start the gate task chooses $(Arg0) to $(Arg2)), so
 // it is matched exactly and never used in a shell, a path or a query. A command line that does not match
 // exits with GateExitCode.Rejected and does nothing else.
@@ -68,7 +69,8 @@ internal static partial class Program
 
         if (!TryParseGateArgs(args, out GateRequest? request, out string? problem))
         {
-            log.Warn("gate: rejected (" + problem + "): " + DescribeArgs(args));
+            log.Warn((args.Count > 0 && args[0] == GateModes.ProtectToken ? GateModes.ProtectToken : GateModes.GateToken) +
+                     ": rejected (" + problem + "): " + DescribeArgs(args));
             return GateExitCode.Rejected;
         }
 
@@ -149,9 +151,14 @@ internal static partial class Program
         return null;
     }
 
-    // Exactly [gate, verb, nonce], [gate, set-device, nonce, address] or [gate, boot]. Task Scheduler may pass
-    // an unsupplied $(Arg2) as the literal placeholder or as an empty string, so a fourth argument that
-    // normalises to empty is dropped for the verbs without an address.
+    // Exactly [gate, verb, nonce], [gate, set-device, nonce, address], [gate, boot] or
+    // [gate-protect, protect-on|protect-off, nonce]. Task Scheduler may pass an unsupplied $(Arg2) as the literal
+    // placeholder or as an empty string, so a fourth gate argument that normalises to empty is dropped for the
+    // verbs without an address. The Protect task's action has no $(Arg2), so gate-protect takes no fourth one.
+    //
+    // A protect verb is refused in gate mode and every other verb in gate-protect mode: BluetoothSetServiceState
+    // installs or removes drivers for an undocumented time, so it runs only under \Earshot\Protect's longer time
+    // limit, and a node change never runs under it.
     //
     // [gate, boot] is accepted whoever started the gate. \Earshot\BootBlock passes it, but a caller allowed to
     // start \Earshot\Gate can produce the same command line too: RunEx(["boot"]) with $(Arg1) and $(Arg2)
@@ -169,10 +176,15 @@ internal static partial class Program
         ArgumentNullException.ThrowIfNull(args);
         request = null;
 
-        if (args.Count == 0 || args[0] != "gate")
+        if (args.Count == 0 || args[0] is not (GateModes.GateToken or GateModes.ProtectToken))
         {
             problem = "not a gate command line";
             return false;
+        }
+
+        if (args[0] == GateModes.ProtectToken)
+        {
+            return TryParseGateProtectArgs(args, out request, out problem);
         }
 
         if (args.Count == 2 && args[1] == GateVerbs.Boot)
@@ -195,6 +207,12 @@ internal static partial class Program
         if (!GateVerbs.All.Contains(verb) || verb == GateVerbs.Boot)
         {
             problem = "unknown verb";
+            return false;
+        }
+
+        if (GateModes.IsProtectVerb(verb))
+        {
+            problem = "protect verbs run only through the Protect task";
             return false;
         }
 
@@ -224,6 +242,35 @@ internal static partial class Program
         }
 
         request = new GateRequest(verb, nonce, null);
+        problem = null;
+        return true;
+    }
+
+    private static bool TryParseGateProtectArgs(
+        IReadOnlyList<string> args,
+        [NotNullWhen(true)] out GateRequest? request,
+        [NotNullWhen(false)] out string? problem)
+    {
+        request = null;
+        if (args.Count != 3)
+        {
+            problem = "wrong number of arguments";
+            return false;
+        }
+
+        if (!GateModes.IsProtectVerb(args[1]))
+        {
+            problem = "gate-protect takes only protect-on or protect-off";
+            return false;
+        }
+
+        if (!BoundaryValidation.IsNonce(args[2]))
+        {
+            problem = "bad nonce";
+            return false;
+        }
+
+        request = new GateRequest(args[1], args[2], null, GateMode.Protect);
         problem = null;
         return true;
     }

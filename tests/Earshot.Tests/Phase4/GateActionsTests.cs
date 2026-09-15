@@ -32,8 +32,10 @@ public sealed class GateActionsTests
 
         public CapturingLog Log { get; } = new();
 
+        // Each verb in the mode its task runs it in.
         public GateExitCode Run(string verb, string? address = null) =>
-            new GateActions(Nodes, Store, Folders, Log, new ManualTime()).Run(new GateRequest(verb, Nonce, address));
+            new GateActions(Nodes, Store, Folders, Log, new ManualTime())
+                .Run(new GateRequest(verb, Nonce, address, GateModes.IsProtectVerb(verb) ? GateMode.Protect : GateMode.Gate));
 
         public GateStatusFile Status()
         {
@@ -368,6 +370,27 @@ public sealed class GateActionsTests
         Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.Boot));
         Assert.HasCount(9, h.Nodes.Calls);
         Assert.IsTrue(h.Nodes.Calls.All(c => c.Flags == GateActions.BlockDisableFlags));
+    }
+
+    [TestMethod]
+    [DataRow(GateVerbs.ProtectOn, false)]
+    [DataRow(GateVerbs.ProtectOff, false)]
+    [DataRow(GateVerbs.Block, true)]
+    [DataRow(GateVerbs.Allow, true)]
+    [DataRow(GateVerbs.SetBootOn, true)]
+    [DataRow(GateVerbs.Boot, true)]
+    public void AVerbInTheWrongModeIsRejectedBeforeAnythingIsRead(string verb, bool protectMode)
+    {
+        GateMode mode = protectMode ? GateMode.Protect : GateMode.Gate;
+        using var h = new Harness();
+        h.Pin(RecordedNodes.AirPods());
+
+        GateExitCode exit = new GateActions(h.Nodes, h.Store, h.Folders, h.Log, new ManualTime()).Run(new GateRequest(verb, Nonce, null, mode));
+
+        Assert.AreEqual(GateExitCode.Rejected, exit);
+        Assert.IsEmpty(h.Nodes.Calls);
+        Assert.IsFalse(File.Exists(h.Store.StatusFile(Nonce)), "Nothing is read or written for a request in the wrong mode.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "does not run in this mode"));
     }
 
     [TestMethod]

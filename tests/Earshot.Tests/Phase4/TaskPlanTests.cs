@@ -36,7 +36,7 @@ public sealed class TaskPlanTests
         Assert.AreEqual(Sddl.RunnableTask(TestUsers.Sid), gate.Sddl);
 
         Assert.AreEqual(@"\Earshot\Protect", protect.Path);
-        Assert.AreEqual("gate $(Arg0) $(Arg1) $(Arg2)", protect.Arguments);
+        Assert.AreEqual("gate-protect $(Arg0) $(Arg1)", protect.Arguments, "The Protect task runs only the protect verbs.");
         Assert.AreEqual("PT5M", protect.ExecutionTimeLimit);
         Assert.AreEqual(Sddl.RunnableTask(TestUsers.Sid), protect.Sddl);
 
@@ -49,7 +49,8 @@ public sealed class TaskPlanTests
         foreach (TaskSpec spec in plan)
         {
             Assert.AreEqual(new TaskPrincipal("S-1-5-18", TaskSchedulerCom.TASK_LOGON_SERVICE_ACCOUNT, TaskSchedulerCom.TASK_RUNLEVEL_HIGHEST), spec.Principal);
-            StringAssert.StartsWith(spec.Arguments, "gate ", "The literal gate token comes first.");
+            Assert.IsTrue(spec.Arguments.StartsWith("gate ", StringComparison.Ordinal) || spec.Arguments.StartsWith("gate-protect ", StringComparison.Ordinal),
+                "The literal gate or gate-protect token comes first.");
         }
     }
 

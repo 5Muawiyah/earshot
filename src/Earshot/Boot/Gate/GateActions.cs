@@ -70,7 +70,30 @@ internal static class GateExitCodes
         Enum.IsDefined((GateExitCode)exitCode) ? Names[(GateExitCode)exitCode] : null;
 }
 
-internal sealed record GateRequest(string Verb, string Nonce, string? Address);
+// Which command line started the gate. \Earshot\Gate and \Earshot\BootBlock run "gate"; \Earshot\Protect runs
+// "gate-protect", so a Bluetooth service change only ever runs under the Protect task's longer time limit and a
+// node change never does. Each mode accepts only its own verbs.
+internal enum GateMode
+{
+    Gate,     // gate <verb> <nonce> [address]: every verb except protect-on and protect-off
+    Protect,  // gate-protect <verb> <nonce>: protect-on and protect-off only
+}
+
+internal static class GateModes
+{
+    public const string GateToken = "gate";
+    public const string ProtectToken = "gate-protect";
+
+    public static bool IsProtectVerb(string verb) => verb is GateVerbs.ProtectOn or GateVerbs.ProtectOff;
+
+    // True when the verb may run in the mode.
+    public static bool Allows(GateMode mode, string verb) =>
+        mode == GateMode.Protect ? IsProtectVerb(verb) : !IsProtectVerb(verb);
+
+    public static string TokenOf(GateMode mode) => mode == GateMode.Protect ? ProtectToken : GateToken;
+}
+
+internal sealed record GateRequest(string Verb, string Nonce, string? Address, GateMode Mode = GateMode.Gate);
 
 // What a gate verb implemented elsewhere receives (the protect verbs and the protection restore hook).
 // Identity is the validated device.json. Every native call is appended to Steps as a StepOutcome; the
@@ -126,7 +149,8 @@ internal sealed record NodeChangeSummary(int Total, int Changed, int Already, in
         : GateExitCode.Failed;
 }
 
-// The elevated action behind \Earshot\Gate and \Earshot\BootBlock: gate <verb> <nonce> [address].
+// The elevated action behind \Earshot\Gate and \Earshot\BootBlock (gate <verb> <nonce> [address]) and
+// \Earshot\Protect (gate-protect <verb> <nonce>).
 //
 // Runs as SYSTEM. The request has already been validated (GateArguments). The identity for every verb
 // except set-device comes only from device.json, never from the command line. Before anything is read,
@@ -167,6 +191,14 @@ internal sealed partial class GateActions
     public GateExitCode Run(GateRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (!GateModes.Allows(request.Mode, request.Verb))
+        {
+            // The command line parser refuses this already; the check is repeated so no caller of Run can send a
+            // service change through the Gate task or a node change through the Protect task.
+            _log.Warn(GateModes.TokenOf(request.Mode) + " " + request.Verb + ": rejected, this verb does not run in this mode.");
+            return GateExitCode.Rejected;
+        }
+
         DateTimeOffset started = _time.GetUtcNow();
         var steps = new List<StepOutcome>();
 

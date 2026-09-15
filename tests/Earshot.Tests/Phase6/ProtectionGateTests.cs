@@ -52,7 +52,7 @@ public sealed class ProtectionGateTests
         public ProtectionIntentFile Intent => new(Machine);
 
         public GateExitCode Run(string verb) =>
-            new GateActions(Nodes, Store, new FakeFolderSecurity(), Log, new ManualTime()).Run(new GateRequest(verb, Nonce, null));
+            new GateActions(Nodes, Store, new FakeFolderSecurity(), Log, new ManualTime()).Run(new GateRequest(verb, Nonce, null, GateMode.Protect));
 
         public GateStatusFile Status()
         {
