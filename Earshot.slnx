@@ -5,4 +5,7 @@
   <Folder Name="/src/">
     <Project Path="src/Earshot/Earshot.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Earshot.Tests/Earshot.Tests.csproj" />
+  </Folder>
 </Solution>
