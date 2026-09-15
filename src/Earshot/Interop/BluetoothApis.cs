@@ -26,6 +26,8 @@ internal static unsafe partial class BluetoothApis
 
     // Win32 codes these functions return (winerror.h). BluetoothSetServiceState and
     // BluetoothEnumerateInstalledServices return them directly; the find functions set last error.
+    // Decode them with NativeCodes.Win32 (StepOutcomes.FromWin32), never NativeCodes.Name: 5 is also
+    // the CONFIGRET CR_INVALID_DEVNODE.
     // https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes
     internal const uint ERROR_SUCCESS = 0;
     internal const uint ERROR_ACCESS_DENIED = 5;

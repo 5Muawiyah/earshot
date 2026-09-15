@@ -21,7 +21,7 @@ public sealed class NullObjectsTests
             Assert.IsFalse(result.Confirmed);
             Assert.AreEqual(NullResults.NotAvailableMessage, result.UserMessage);
             Assert.HasCount(1, result.Steps);
-            Assert.IsFalse(result.Steps[0].Ok);
+            AssertNotAvailableStep(result.Steps[0]);
         }
     }
 
@@ -52,7 +52,20 @@ public sealed class NullObjectsTests
             Assert.AreEqual(OpStatus.NotAttempted, result.Status);
             Assert.IsFalse(result.IsSuccess);
             Assert.AreEqual(NullResults.NotAvailableMessage, result.UserMessage);
+            Assert.HasCount(1, result.Steps);
+            AssertNotAvailableStep(result.Steps[0]);
         }
+    }
+
+    // No native call was made, so the code must never read as S_OK or as any Windows code.
+    private static void AssertNotAvailableStep(StepOutcome step)
+    {
+        Assert.IsFalse(step.Ok);
+        Assert.AreEqual(NativeCodes.NotAvailable, step.Code);
+        Assert.IsLessThan(0, step.Code);
+        Assert.AreEqual("NOT_AVAILABLE", step.CodeName);
+        Assert.AreEqual(NativeCodes.Name(step.Code), step.CodeName);
+        Assert.AreEqual(NullResults.NotAvailableMessage, step.Detail);
     }
 
     [TestMethod]

@@ -46,7 +46,7 @@ internal static class DeviceTopology
         ArgumentNullException.ThrowIfNull(part);
         Guid iid = typeof(T).GUID;
         int hr = part.Activate(CLSCTX_ALL, ref iid, out nint pointer);
-        return CoreAudio.TakeInterface(hr, pointer, out result);
+        return ComActivation.TakeInterface(hr, pointer, out result);
     }
 }
 

@@ -3,7 +3,9 @@ using System.Runtime.InteropServices;
 namespace Earshot.Interop;
 
 // Configuration Manager (CfgMgr32) declarations for device-node reads and the gate's disable/enable.
-// Every function returns a CONFIGRET, which is a raw code (not an HRESULT): record it with NativeCodes.
+// Every function returns a CONFIGRET, which is a raw code (not an HRESULT): record it with
+// NativeCodes.ConfigRet (StepOutcomes.FromConfigRet), never NativeCodes.Name, whose small values are
+// shared with Win32 codes (0x5 is CR_INVALID_DEVNODE here but ERROR_ACCESS_DENIED there).
 // DEVINST is a DWORD. Strings are UTF-16.
 //
 // CM_Disable_DevNode and CM_Enable_DevNode are declared here for the SYSTEM gate only. Nothing in this

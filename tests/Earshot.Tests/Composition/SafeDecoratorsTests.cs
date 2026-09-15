@@ -92,7 +92,18 @@ public sealed class SafeDecoratorsTests
         Assert.AreEqual("Safe mode: no device actions.", result.UserMessage);
         Assert.IsFalse(result.IsSuccess);
         Assert.HasCount(1, result.Steps);
-        Assert.IsFalse(result.Steps[0].Ok);
+        AssertNotAttemptedStep(result.Steps[0]);
+    }
+
+    // A refusal made no native call, so its code must never read as S_OK or as any Windows code.
+    private static void AssertNotAttemptedStep(StepOutcome step)
+    {
+        Assert.IsFalse(step.Ok);
+        Assert.AreEqual(NativeCodes.NotAttempted, step.Code);
+        Assert.IsLessThan(0, step.Code);
+        Assert.AreEqual("NOT_ATTEMPTED", step.CodeName);
+        Assert.AreEqual(NativeCodes.Name(step.Code), step.CodeName);
+        Assert.IsTrue(step.Step.StartsWith("safe-mode:", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -129,6 +140,8 @@ public sealed class SafeDecoratorsTests
             Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
             Assert.AreEqual("Safe mode: no device actions.", result.UserMessage);
             Assert.IsFalse(result.Confirmed);
+            Assert.HasCount(1, result.Steps);
+            AssertNotAttemptedStep(result.Steps[0]);
         }
 
         Assert.AreEqual(0, inner.Calls);

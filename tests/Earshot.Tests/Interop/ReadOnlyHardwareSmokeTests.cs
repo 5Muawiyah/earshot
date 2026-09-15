@@ -27,7 +27,9 @@ public sealed class ReadOnlyHardwareSmokeTests
     {
         RunAndReport(report =>
         {
-            IMMDeviceEnumerator enumerator = CoreAudio.CreateEnumerator();
+            int createHr = CoreAudio.TryCreateEnumerator(out IMMDeviceEnumerator? enumerator);
+            Assert.AreEqual(0, createHr, "CoCreateInstance(MMDeviceEnumerator) " + NativeCodes.Name(createHr));
+            Assert.IsNotNull(enumerator);
             IMMDeviceCollection? collection = null;
             try
             {
@@ -112,7 +114,9 @@ public sealed class ReadOnlyHardwareSmokeTests
     {
         RunAndReport(report =>
         {
-            IMMDeviceEnumerator enumerator = CoreAudio.CreateEnumerator();
+            int createHr = CoreAudio.TryCreateEnumerator(out IMMDeviceEnumerator? enumerator);
+            Assert.AreEqual(0, createHr, "CoCreateInstance(MMDeviceEnumerator) " + NativeCodes.Name(createHr));
+            Assert.IsNotNull(enumerator);
             try
             {
                 var adapters = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -162,11 +166,11 @@ public sealed class ReadOnlyHardwareSmokeTests
         RunAndReport(report =>
         {
             uint cr = CfgMgr32.GetDeviceIdList(null, CfgMgr32.CM_GETIDLIST_FILTER_NONE, out string[] all);
-            Assert.AreEqual(CfgMgr32.CR_SUCCESS, cr, "CM_Get_Device_ID_ListW(FILTER_NONE) " + NativeCodes.Name((int)cr));
+            Assert.AreEqual(CfgMgr32.CR_SUCCESS, cr, "CM_Get_Device_ID_ListW(FILTER_NONE) " + NativeCodes.ConfigRet(cr));
             uint presentCr = CfgMgr32.GetDeviceIdList(null, CfgMgr32.CM_GETIDLIST_FILTER_PRESENT, out string[] present);
             uint enumCr = CfgMgr32.GetDeviceIdList("BTHENUM", CfgMgr32.CM_GETIDLIST_FILTER_ENUMERATOR, out string[] bthenum);
-            report.Add("Devnodes: " + all.Length + " (FILTER_NONE), " + present.Length + " present (" + NativeCodes.Name((int)presentCr) +
-                       "), " + bthenum.Length + " BTHENUM (" + NativeCodes.Name((int)enumCr) + ")");
+            report.Add("Devnodes: " + all.Length + " (FILTER_NONE), " + present.Length + " present (" + NativeCodes.ConfigRet(presentCr) +
+                       "), " + bthenum.Length + " BTHENUM (" + NativeCodes.ConfigRet(enumCr) + ")");
 
             string[] bluetooth = all.Where(IsBluetoothInstance).OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToArray();
             report.Add("Bluetooth devnodes (BTHENUM, BTHHFENUM, BTH, BTHLE, BTHLEDEVICE): " + bluetooth.Length);
@@ -183,7 +187,7 @@ public sealed class ReadOnlyHardwareSmokeTests
                 uint locate = CfgMgr32.LocateDevNode(id, CfgMgr32.CM_LOCATE_DEVNODE_PHANTOM, out uint devInst);
                 if (locate != CfgMgr32.CR_SUCCESS)
                 {
-                    report.Add("  " + id + " | locate PHANTOM " + NativeCodes.Name((int)locate));
+                    report.Add("  " + id + " | locate PHANTOM " + NativeCodes.ConfigRet(locate));
                     continue;
                 }
 
@@ -208,12 +212,12 @@ public sealed class ReadOnlyHardwareSmokeTests
                     }
                     else
                     {
-                        status = "status " + NativeCodes.Name((int)statusCr);
+                        status = "status " + NativeCodes.ConfigRet(statusCr);
                     }
                 }
                 else
                 {
-                    status = "locate NORMAL " + NativeCodes.Name((int)normal);
+                    status = "locate NORMAL " + NativeCodes.ConfigRet(normal);
                 }
 
                 report.Add("  " + id + " | " + name + " | container " + container + " | present " + isPresent +
@@ -232,7 +236,7 @@ public sealed class ReadOnlyHardwareSmokeTests
         RunAndReport(report =>
         {
             uint radioError = BluetoothApis.CountRadios(out int radios, out uint radioCloseError);
-            report.Add("Radios: " + radios + " (" + NativeCodes.Name((int)radioError) + ", close " + NativeCodes.Name((int)radioCloseError) + ")");
+            report.Add("Radios: " + radios + " (" + NativeCodes.Win32(radioError) + ", close " + NativeCodes.Win32(radioCloseError) + ")");
             Assert.AreEqual(BluetoothApis.ERROR_SUCCESS, radioError, "BluetoothFindFirstRadio/NextRadio");
             Assert.AreEqual(BluetoothApis.ERROR_SUCCESS, radioCloseError, "Closing radio handles");
             if (radios == 0)
@@ -241,8 +245,8 @@ public sealed class ReadOnlyHardwareSmokeTests
             }
 
             uint findError = BluetoothApis.FindPairedDevices(out List<BLUETOOTH_DEVICE_INFO> devices, out uint findCloseError);
-            report.Add("Paired Classic devices (no inquiry): " + devices.Count + " (" + NativeCodes.Name((int)findError) +
-                       ", close " + NativeCodes.Name((int)findCloseError) + ")");
+            report.Add("Paired Classic devices (no inquiry): " + devices.Count + " (" + NativeCodes.Win32(findError) +
+                       ", close " + NativeCodes.Win32(findCloseError) + ")");
             Assert.AreEqual(BluetoothApis.ERROR_SUCCESS, findError, "BluetoothFindFirstDevice/NextDevice");
             Assert.AreEqual(BluetoothApis.ERROR_SUCCESS, findCloseError, "BluetoothFindDeviceClose");
             if (devices.Count == 0)
@@ -264,7 +268,7 @@ public sealed class ReadOnlyHardwareSmokeTests
                            " CoD 0x" + device.ulClassofDevice.ToString("X6", CultureInfo.InvariantCulture) +
                            " connected " + (device.fConnected != 0) + " (raw " + device.fConnected + ")" +
                            " remembered " + (device.fRemembered != 0) + " authenticated " + (device.fAuthenticated != 0));
-                report.Add("    installed services (" + NativeCodes.Name((int)rc) + "): " + services.Length + " " +
+                report.Add("    installed services (" + NativeCodes.Win32(rc) + "): " + services.Length + " " +
                            string.Join(" ", services.Select(DescribeService)));
             }
 
@@ -316,7 +320,7 @@ public sealed class ReadOnlyHardwareSmokeTests
         uint cr = CfgMgr32.GetDevNodeProperty(devInst, key, out uint type, out byte[] data);
         if (cr != CfgMgr32.CR_SUCCESS)
         {
-            return NativeCodes.Name((int)cr);
+            return NativeCodes.ConfigRet(cr);
         }
 
         if (CfgMgr32.TryDecodeString(type, data, out string? value))
@@ -333,7 +337,7 @@ public sealed class ReadOnlyHardwareSmokeTests
         uint cr = CfgMgr32.GetDevNodeProperty(devInst, key, out uint type, out byte[] data);
         if (cr != CfgMgr32.CR_SUCCESS)
         {
-            return NativeCodes.Name((int)cr);
+            return NativeCodes.ConfigRet(cr);
         }
 
         return CfgMgr32.TryDecodeGuid(type, data, out Guid value)
@@ -346,7 +350,7 @@ public sealed class ReadOnlyHardwareSmokeTests
         uint cr = CfgMgr32.GetDevNodeProperty(devInst, key, out uint type, out byte[] data);
         if (cr != CfgMgr32.CR_SUCCESS)
         {
-            return NativeCodes.Name((int)cr);
+            return NativeCodes.ConfigRet(cr);
         }
 
         return CfgMgr32.TryDecodeBoolean(type, data, out bool value)
@@ -359,7 +363,7 @@ public sealed class ReadOnlyHardwareSmokeTests
         uint cr = CfgMgr32.GetDevNodeProperty(devInst, key, out uint type, out byte[] data);
         if (cr != CfgMgr32.CR_SUCCESS)
         {
-            return NativeCodes.Name((int)cr);
+            return NativeCodes.ConfigRet(cr);
         }
 
         return CfgMgr32.TryDecodeUInt32(type, data, out uint value)

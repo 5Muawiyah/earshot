@@ -20,8 +20,9 @@ internal static class SafeDecorators
     public static IAudioProtectionController Wrap(IAudioProtectionController inner, ILog log) =>
         inner as SafeAudioProtectionController ?? new SafeAudioProtectionController(inner, log);
 
+    // No native call was made, so the step carries NativeCodes.NotAttempted rather than 0 (S_OK).
     internal static StepOutcome RefusedStep(string action) =>
-        new("safe-mode:" + action, Ok: false, Code: 0, CodeName: "NOT_ATTEMPTED", Detail: Message);
+        StepOutcomes.NotAttempted("safe-mode:" + action, Message);
 
     internal static ControllerResult Refuse(ILog log, string action)
     {

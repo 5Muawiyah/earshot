@@ -11,6 +11,8 @@ namespace Earshot.Interop;
 //
 // Methods keep their HRESULT ([PreserveSig]) so every failure is recorded as a StepOutcome rather than
 // thrown. Several failures are raw SetupAPI codes (0xE0000225, 0xE000020B), not HRESULT_FROM_WIN32.
+// Objects are created and interface pointers wrapped through ComActivation, which also returns the
+// HRESULT instead of throwing.
 internal static class CoreAudio
 {
     // EDataFlow
@@ -71,9 +73,11 @@ internal static class CoreAudio
     internal static readonly PROPERTYKEY PKEY_AudioEndpoint_FormFactor =
         new(new Guid("1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E"), 0);
 
-    // Creates the enumerator with CoCreateInstance. Call it on the thread that will use the RCW.
+    // Creates the enumerator with CoCreateInstance and CLSCTX_INPROC_SERVER, as Microsoft's sample does.
+    // Call it on the thread that will use the RCW. Returns the HRESULT; enumerator is null on failure.
     // https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-events
-    internal static IMMDeviceEnumerator CreateEnumerator() => (IMMDeviceEnumerator)new MMDeviceEnumerator();
+    internal static int TryCreateEnumerator(out IMMDeviceEnumerator? enumerator) =>
+        ComActivation.Create(CLSID_MMDeviceEnumerator, ComActivation.CLSCTX_INPROC_SERVER, out enumerator);
 
     // Reads and frees a CoTaskMem string returned through an LPWSTR* out parameter (GetId,
     // GetDeviceIdConnectedTo, GetName). Returns null for a null pointer.
@@ -104,36 +108,8 @@ internal static class CoreAudio
         ArgumentNullException.ThrowIfNull(device);
         Guid iid = typeof(T).GUID;
         int hr = device.Activate(ref iid, DeviceTopology.CLSCTX_ALL, 0, out nint pointer);
-        return TakeInterface(hr, pointer, out result);
+        return ComActivation.TakeInterface(hr, pointer, out result);
     }
-
-    // Wraps an owned interface pointer from a void** out parameter in an RCW of type T and releases the
-    // raw reference. A pointer returned with a failing HRESULT is released and discarded. A success
-    // with a null pointer is reported as E_POINTER.
-    internal static int TakeInterface<T>(int hr, nint pointer, out T? result)
-        where T : class
-    {
-        result = null;
-        if (pointer == 0)
-        {
-            return hr < 0 ? hr : E_POINTER;
-        }
-
-        try
-        {
-            if (hr >= 0)
-            {
-                result = (T)Marshal.GetObjectForIUnknown(pointer);
-            }
-        }
-        finally
-        {
-            Marshal.Release(pointer);
-        }
-
-        return hr;
-    }
-
 }
 
 // PROPERTYKEY { GUID fmtid; DWORD pid; }, 20 bytes.
@@ -149,13 +125,6 @@ internal struct PROPERTYKEY
         this.fmtid = fmtid;
         this.pid = pid;
     }
-}
-
-// coclass MMDeviceEnumerator. "new" on this class calls CoCreateInstance.
-[ComImport]
-[Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-internal class MMDeviceEnumerator
-{
 }
 
 // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immdeviceenumerator

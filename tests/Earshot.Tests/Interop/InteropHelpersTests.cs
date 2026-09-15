@@ -120,15 +120,6 @@ public sealed class InteropHelpersTests
     }
 
     [TestMethod]
-    public void TakeInterfaceReportsASuccessWithoutAnObject()
-    {
-        Assert.AreEqual(CoreAudio.E_POINTER, CoreAudio.TakeInterface<IKsControl>(0, 0, out IKsControl? result));
-        Assert.IsNull(result);
-        Assert.AreEqual(CoreAudio.E_NOINTERFACE, CoreAudio.TakeInterface<IKsControl>(CoreAudio.E_NOINTERFACE, 0, out result));
-        Assert.IsNull(result);
-    }
-
-    [TestMethod]
     public void ParseMultiSzSplitsTheList()
     {
         string[] ids = CfgMgr32.ParseMultiSz("BTHENUM\\DEV_5A6B7C8D9EAF\\X\0BTH\\MS_BTHBRB\\a&3c4d5e6&0&1\0\0".AsSpan());

@@ -6,8 +6,10 @@ namespace Earshot.Contracts;
 public sealed record StepOutcome(
     string Step,        // "activate-topology", "ks-reconnect:src", "cm-disable:BTHENUM\\..."
     bool Ok,
-    int Code,           // raw HRESULT/CONFIGRET/Win32; 0 on success
-    string CodeName,    // "S_OK", "E_NOTFOUND", "CR_ACCESS_DENIED", "ERROR_SERVICE_DOES_NOT_EXIST"
+    int Code,           // raw HRESULT/CONFIGRET/Win32; 0 on success; NativeCodes.NotAttempted or
+                        // NativeCodes.NotAvailable when no native call was made
+    string CodeName,    // "S_OK", "E_NOTFOUND", "CR_ACCESS_DENIED", "ERROR_SERVICE_DOES_NOT_EXIST"; build
+                        // with StepOutcomes so the name comes from the code's own family
     string? Detail);
 
 public sealed record ControllerResult(

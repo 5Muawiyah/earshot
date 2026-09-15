@@ -106,16 +106,13 @@ internal static class TaskSchedulerCom
     // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-itaskfolder-createfolder
     internal const int HRESULT_ERROR_ALREADY_EXISTS = unchecked((int)0x800700B7);
 
-    // Creates the Task Scheduler service object. Call Connect before anything else.
+    // Creates the Task Scheduler service object with CoCreateInstance and CLSCTX_INPROC_SERVER, as
+    // Microsoft's sample does, on a thread that has initialised COM. Call Connect before anything else.
+    // Returns the HRESULT; service is null on failure.
+    // https://learn.microsoft.com/en-us/windows/win32/taskschd/boot-trigger-example--c---
     // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-itaskservice-connect
-    internal static ITaskService CreateService() => (ITaskService)new TaskSchedulerClass();
-}
-
-// coclass TaskScheduler. "new" on this class calls CoCreateInstance.
-[ComImport]
-[Guid("0F87369F-A4E5-4CFC-BD3E-73E6154572DD")]
-internal class TaskSchedulerClass
-{
+    internal static int TryCreateService(out ITaskService? service) =>
+        ComActivation.Create(CLSID_TaskScheduler, ComActivation.CLSCTX_INPROC_SERVER, out service);
 }
 
 // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itaskservice

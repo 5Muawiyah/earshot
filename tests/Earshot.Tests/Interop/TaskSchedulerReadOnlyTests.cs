@@ -27,7 +27,9 @@ public sealed class TaskSchedulerReadOnlyTests
     {
         RunAndReport(report =>
         {
-            ITaskService service = TaskSchedulerCom.CreateService();
+            int createHr = TaskSchedulerCom.TryCreateService(out ITaskService? service);
+            Assert.AreEqual(0, createHr, "CoCreateInstance(TaskScheduler) " + NativeCodes.Name(createHr));
+            Assert.IsNotNull(service);
             ITaskFolder? root = null;
             try
             {
@@ -97,7 +99,9 @@ public sealed class TaskSchedulerReadOnlyTests
     {
         RunAndReport(report =>
         {
-            ITaskService service = TaskSchedulerCom.CreateService();
+            int createHr = TaskSchedulerCom.TryCreateService(out ITaskService? service);
+            Assert.AreEqual(0, createHr, "CoCreateInstance(TaskScheduler) " + NativeCodes.Name(createHr));
+            Assert.IsNotNull(service);
             var created = new List<object>();
             try
             {

@@ -46,9 +46,7 @@ public sealed class InteropConstantsTests
     [TestMethod]
     public void ClassIdsMatchTheSdk()
     {
-        Assert.AreEqual(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"), typeof(MMDeviceEnumerator).GUID);
         Assert.AreEqual(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"), CoreAudio.CLSID_MMDeviceEnumerator);
-        Assert.AreEqual(new Guid("0F87369F-A4E5-4CFC-BD3E-73E6154572DD"), typeof(TaskSchedulerClass).GUID);
         Assert.AreEqual(new Guid("0F87369F-A4E5-4CFC-BD3E-73E6154572DD"), TaskSchedulerCom.CLSID_TaskScheduler);
     }
 
@@ -229,12 +227,40 @@ public sealed class InteropConstantsTests
     [TestMethod]
     public void RawCodesDecodeThroughNativeCodes()
     {
-        Assert.AreEqual("CR_BUFFER_SMALL", NativeCodes.Name(unchecked((int)ReadConstant(typeof(CfgMgr32), "CR_BUFFER_SMALL"))));
-        Assert.AreEqual("CR_NO_SUCH_DEVNODE", NativeCodes.Name(unchecked((int)ReadConstant(typeof(CfgMgr32), "CR_NO_SUCH_DEVNODE"))));
-        Assert.AreEqual("CR_ACCESS_DENIED", NativeCodes.Name(unchecked((int)ReadConstant(typeof(CfgMgr32), "CR_ACCESS_DENIED"))));
-        Assert.AreEqual("E_INVALIDARG", NativeCodes.Name(unchecked((int)ReadConstant(typeof(BluetoothApis), "E_INVALIDARG"))));
         Assert.AreEqual("ERROR_NO_SUCH_DEVICE_INTERFACE", NativeCodes.Name(unchecked((int)ReadConstant(typeof(CoreAudio), "ERROR_NO_SUCH_DEVICE_INTERFACE"))));
+        Assert.AreEqual("E_INVALIDARG", NativeCodes.Win32(BluetoothApis.E_INVALIDARG));
     }
+
+    // Every CONFIGRET constant decodes to its own name through ConfigRet, and every Win32 constant the
+    // Bluetooth declarations use decodes to its own name through Win32, including the values the two
+    // families share (CR_INVALID_DEVNODE and ERROR_ACCESS_DENIED are both 0x5).
+    [TestMethod]
+    public void EveryDeclaredCodeDecodesThroughItsOwnFamily()
+    {
+        string[] configRets = DeclaredConstantNames(typeof(CfgMgr32), "CR_");
+        Assert.IsGreaterThan(10, configRets.Length);
+        foreach (string name in configRets)
+        {
+            string expected = name == "CR_NO_SUCH_DEVINST" ? "CR_NO_SUCH_DEVNODE" : name;
+            Assert.AreEqual(expected, NativeCodes.ConfigRet((uint)ReadConstant(typeof(CfgMgr32), name)), name);
+        }
+
+        string[] win32 = DeclaredConstantNames(typeof(BluetoothApis), "ERROR_");
+        Assert.IsGreaterThan(5, win32.Length);
+        foreach (string name in win32)
+        {
+            Assert.AreEqual(name, NativeCodes.Win32((uint)ReadConstant(typeof(BluetoothApis), name)), name);
+        }
+
+        Assert.AreEqual("CR_INVALID_DEVNODE", NativeCodes.ConfigRet(CfgMgr32.CR_INVALID_DEVNODE));
+        Assert.AreEqual("ERROR_ACCESS_DENIED", NativeCodes.Win32(BluetoothApis.ERROR_ACCESS_DENIED));
+    }
+
+    private static string[] DeclaredConstantNames(Type owner, string prefix) =>
+        owner.GetFields(AnyStatic)
+             .Where(f => f.IsLiteral && f.Name.StartsWith(prefix, StringComparison.Ordinal) && f.FieldType == typeof(uint))
+             .Select(f => f.Name)
+             .ToArray();
 
     private const BindingFlags AnyStatic = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
 

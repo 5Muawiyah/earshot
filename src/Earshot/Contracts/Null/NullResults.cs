@@ -5,8 +5,9 @@ public static class NullResults
 {
     public const string NotAvailableMessage = "Not available in this build.";
 
+    // No native call was made, so the step carries NativeCodes.NotAvailable rather than 0 (S_OK).
     public static StepOutcome NotAvailableStep(string step) =>
-        new(step, Ok: false, Code: 0, CodeName: "NOT_AVAILABLE", Detail: NotAvailableMessage);
+        StepOutcomes.NotAvailable(step, NotAvailableMessage);
 
     public static ControllerResult NotAttempted(string step) =>
         new(OpStatus.NotAttempted, NotAvailableMessage, new[] { NotAvailableStep(step) });
