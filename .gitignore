@@ -1,0 +1,24 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+*.user
+*.suo
+.vs/
+.vscode/
+TestResults/
+
+# Local notes and working files, kept out of the repository
+CLAUDE.md
+CLAUDE.local.md
+PROMPTING_RESPONSES.md
+BUILD_PROMPT.md
+.claude/
+.worktrees/
+scratch/
+*.scratch.*
+*.log
+
+# Third-party icon of unconfirmed licence, kept local only
+airpods-pro-svgrepo-com.svg
