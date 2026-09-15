@@ -44,9 +44,12 @@ internal static class GateBluetooth
 // protect-on, protect-off and the uninstall restore, inside the gate (SYSTEM, or the elevated uninstall).
 // Identity is only ever the validated device.json in the context.
 //
+//   0. Take the device change lock (DeviceChangeLock), so no block, allow or other service change runs
+//      beside this one. If another change still holds it after the wait, change nothing.
 //   1. Read the target device nodes. If any is disabled, change nothing: nothing documents
 //      BluetoothSetServiceState while the device node is disabled. A protect verb then stores the wanted
-//      state in protection-intent.json for the next allow and exits with BlockedExit.
+//      state in protection-intent.json for the next allow and exits with BlockedExit, or with Failed when
+//      that file could not be written.
 //   2. Find the remembered device and read its installed services (0 and 234 are success).
 //   3. protect-on: turn off Handsfree (0000111E) and Headset (00001108) where they are on; A2DP sink
 //      (0000110B) is never touched. Each GUID is written to protection.json before its call, and taken out
@@ -59,20 +62,44 @@ internal static class GateBluetooth
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothenumerateinstalledservices
 internal sealed class ProtectionGateRunner
 {
-    // The exit code for a request refused because the device is blocked. It is the code set-device uses for
-    // "the pinned device is still disabled"; the tray reads it together with the protect verb.
+    // The exit code for a request refused because the device is blocked and kept for the next allow. It is
+    // the code set-device uses for "the pinned device is still disabled", so the status file names it
+    // other-device-blocked; the tray reads it together with the protect verb. It is only returned once the
+    // request has been written to protection-intent.json.
     public const GateExitCode BlockedExit = GateExitCode.OtherDeviceBlocked;
 
     public const string RefusedStep = "protect-refused";
     public const string DeviceNodeStep = "protect-device-node";
     public const string ServicesAfterStep = "bt-installed-services-after";
 
+    // How long a protect verb waits for the device change lock: longer than \Earshot\Gate's PT2M limit, so a
+    // block, allow or boot block that holds it has finished or been stopped by the scheduler. What is left
+    // of \Earshot\Protect's PT5M is for the service calls.
+    public static readonly TimeSpan ProtectLockTimeout = TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15);
+
+    // How long the uninstall restore waits: longer than \Earshot\Protect's PT5M limit, so a protect verb
+    // that holds it has finished or been stopped.
+    public static readonly TimeSpan RestoreLockTimeout = TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(15);
+
     private readonly IBluetoothServiceApi _api;
+    private readonly Func<TimeSpan, bool> _wait;
+    private readonly TimeSpan _protectLockTimeout;
+    private readonly TimeSpan _restoreLockTimeout;
 
     public ProtectionGateRunner(IBluetoothServiceApi api)
+        : this(api, DeviceChangeLock.SleepAndContinue, ProtectLockTimeout, RestoreLockTimeout)
+    {
+    }
+
+    // For tests: the wait between lock attempts and the lock timeouts.
+    internal ProtectionGateRunner(IBluetoothServiceApi api, Func<TimeSpan, bool> wait, TimeSpan protectLockTimeout, TimeSpan restoreLockTimeout)
     {
         ArgumentNullException.ThrowIfNull(api);
+        ArgumentNullException.ThrowIfNull(wait);
         _api = api;
+        _wait = wait;
+        _protectLockTimeout = protectLockTimeout;
+        _restoreLockTimeout = restoreLockTimeout;
     }
 
     // protect-on (protect true) or protect-off.
@@ -80,14 +107,25 @@ internal sealed class ProtectionGateRunner
     {
         ArgumentNullException.ThrowIfNull(ctx);
         ctx.Handled = true;
-        var intent = new ProtectionIntentFile(ctx.Store.Folder);
+        using DeviceChangeLock? held = DeviceChangeLock.TryAcquire(ctx.Store.Folder, _protectLockTimeout, _wait, ctx.Steps);
+        if (held is null)
+        {
+            ctx.Outcome = GateExitCode.Failed;
+            return;
+        }
 
+        var intent = new ProtectionIntentFile(ctx.Store.Folder);
         GateExitCode? refused = CheckNodes(ctx);
         if (refused is not null)
         {
             if (refused == BlockedExit)
             {
-                ctx.Steps.Add(intent.Write(protect));
+                StepOutcome kept = intent.Write(protect);
+                ctx.Steps.Add(kept);
+
+                // Only a request that is really kept may be reported as saved for the next allow.
+                ctx.Outcome = kept.Ok ? BlockedExit : GateExitCode.Failed;
+                return;
             }
 
             ctx.Outcome = refused.Value;
@@ -125,6 +163,13 @@ internal sealed class ProtectionGateRunner
     {
         ArgumentNullException.ThrowIfNull(ctx);
         ctx.Handled = true;
+        using DeviceChangeLock? held = DeviceChangeLock.TryAcquire(ctx.Store.Folder, _restoreLockTimeout, _wait, ctx.Steps);
+        if (held is null)
+        {
+            ctx.Outcome = GateExitCode.Failed;
+            return;
+        }
+
         StepOutcome? cleared = new ProtectionIntentFile(ctx.Store.Folder).Clear();
         if (cleared is not null)
         {
@@ -276,7 +321,7 @@ internal sealed class ProtectionGateRunner
             if (complete && !before.Contains(service))
             {
                 // Not counted: a skipped service must not turn a failed Handsfree change into a partial result.
-                ctx.Steps.Add(StepOutcomes.FromWin32(step, BluetoothApis.ERROR_SUCCESS,
+                ctx.Steps.Add(ServiceStateResults.Skipped(service, enable: false,
                     "Not in the complete installed service list, so it is already off and was not called."));
                 continue;
             }
@@ -341,7 +386,7 @@ internal sealed class ProtectionGateRunner
             bool on;
             if (before.Contains(service))
             {
-                ctx.Steps.Add(StepOutcomes.FromWin32(step, BluetoothApis.ERROR_SUCCESS,
+                ctx.Steps.Add(ServiceStateResults.Skipped(service, enable: true,
                     "Already in the installed service list, so it is on and was not called."));
                 on = true;
             }

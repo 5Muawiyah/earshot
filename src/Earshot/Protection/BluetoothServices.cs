@@ -137,6 +137,14 @@ internal static class ServiceStateResults
     public static string StepName(Guid service, bool enable) =>
         (enable ? "bt-service-enable:" : "bt-service-disable:") + ProtectedServices.Label(service);
 
+    public static string SkipStepName(Guid service, bool enable) =>
+        (enable ? "bt-service-enable-skip:" : "bt-service-disable-skip:") + ProtectedServices.Label(service);
+
+    // A service already in the wanted state, so BluetoothSetServiceState was not called. It is a success, but
+    // it carries NOT_ATTEMPTED rather than 0, so it can never be read as a result the call returned.
+    public static StepOutcome Skipped(Guid service, bool enable, string detail) =>
+        new(SkipStepName(service, enable), Ok: true, NativeCodes.NotAttempted, NativeCodes.Name(NativeCodes.NotAttempted), detail);
+
     public static StepOutcome Step(Guid service, bool enable, uint rc, TimeSpan took)
     {
         ServiceChange change = Map(rc);

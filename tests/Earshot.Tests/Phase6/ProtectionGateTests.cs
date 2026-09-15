@@ -119,8 +119,11 @@ public sealed class ProtectionGateTests
         StepOutcome handsfree = Step(status, "bt-service-disable:Handsfree");
         Assert.IsTrue(handsfree.Ok);
         Assert.AreEqual("ERROR_SUCCESS", handsfree.CodeName);
-        StepOutcome headset = Step(status, "bt-service-disable:Headset");
+        Assert.IsFalse(status.Steps.Any(s => s.Step == "bt-service-disable:Headset"), "Headset was not called, so it has no call step.");
+        StepOutcome headset = Step(status, "bt-service-disable-skip:Headset");
         Assert.IsTrue(headset.Ok);
+        Assert.AreEqual(NativeCodes.NotAttempted, headset.Code, "A call that was not made never carries 0.");
+        Assert.AreEqual("NOT_ATTEMPTED", headset.CodeName);
         Assert.Contains("was not called", headset.Detail!);
         Assert.StartsWith("Protection Protected.", Step(status, ProtectionGateRunner.ServicesAfterStep).Detail!);
         Assert.IsEmpty(h.Nodes.Calls, "No node is changed by a protect verb.");
@@ -252,6 +255,23 @@ public sealed class ProtectionGateTests
     }
 
     [TestMethod]
+    public void ARequestThatCannotBeKeptWhileBlockedIsAFailureNotSaved()
+    {
+        using var h = new Harness();
+        h.BlockAll();
+        Directory.CreateDirectory(h.Intent.FilePath);
+
+        GateExitCode exit = h.Run(GateVerbs.ProtectOn);
+
+        Assert.AreEqual(GateExitCode.Failed, exit);
+        Assert.IsEmpty(h.Bluetooth.Calls);
+        GateStatusFile status = h.Status();
+        Assert.AreEqual("failed", status.Result);
+        Assert.IsFalse(Step(status, "write-protection-intent").Ok);
+        Assert.IsFalse(Step(status, ProtectionGateRunner.RefusedStep).Ok);
+    }
+
+    [TestMethod]
     public void ARequestWhileBlockedAtBootKeepsTheOffRequestToo()
     {
         using var h = new Harness();
@@ -334,6 +354,10 @@ public sealed class ProtectionGateTests
 
         Assert.IsEmpty(h.Bluetooth.SetCalls);
         Assert.IsEmpty(h.Recorded());
+        StepOutcome skipped = Step(h.Status(), "bt-service-enable-skip:Handsfree");
+        Assert.IsTrue(skipped.Ok);
+        Assert.AreEqual(NativeCodes.NotAttempted, skipped.Code);
+        Assert.IsFalse(h.Status().Steps.Any(s => s.Step == "bt-service-enable:Handsfree"));
     }
 
     [TestMethod]
@@ -412,6 +436,93 @@ public sealed class ProtectionGateTests
         Assert.IsEmpty(h.Bluetooth.Calls);
         CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, h.Recorded());
     }
+
+    [TestMethod]
+    public void AProtectVerbChangesNothingWhileAnotherDeviceChangeHoldsTheLock()
+    {
+        using var h = new Harness();
+        using FileStream other = HoldLock(h);
+        int waits = 0;
+        var runner = new ProtectionGateRunner(h.Bluetooth, _ => ++waits > 0, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        var steps = new List<StepOutcome>();
+        var ctx = new GateRunContext(GateVerbs.ProtectOn, Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+
+        runner.Run(ctx, protect: true);
+
+        Assert.AreEqual(GateExitCode.Failed, ctx.Outcome);
+        Assert.AreEqual(4, waits, "One second in 250 ms polls.");
+        Assert.IsEmpty(h.Bluetooth.Calls);
+        Assert.IsFalse(File.Exists(h.Intent.FilePath));
+        StepOutcome busy = steps.Single(s => s.Step == DeviceChangeLock.StepName);
+        Assert.IsTrue(DeviceChangeLock.IsBusy(busy), busy.Detail);
+        Assert.AreEqual("ERROR_SHARING_VIOLATION", busy.CodeName);
+        Assert.IsFalse(steps.Any(s => s.Step == ProtectionGateRunner.RefusedStep), "The nodes are not even read without the lock.");
+    }
+
+    [TestMethod]
+    public void AProtectVerbGoesAheadOnceTheOtherChangeReleasesTheLock()
+    {
+        using var h = new Harness();
+        using FileStream other = HoldLock(h);
+        var runner = new ProtectionGateRunner(h.Bluetooth, _ =>
+        {
+            other.Dispose();
+            return true;
+        }, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        var steps = new List<StepOutcome>();
+        var ctx = new GateRunContext(GateVerbs.ProtectOn, Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+
+        runner.Run(ctx, protect: true);
+
+        Assert.AreEqual(GateExitCode.Success, ctx.Outcome);
+        Assert.DoesNotContain(ProtectedServices.Handsfree, h.AirPods.Enabled);
+        StepOutcome taken = steps.Single(s => s.Step == DeviceChangeLock.StepName);
+        Assert.IsTrue(taken.Ok);
+        Assert.Contains("after waiting 0.25 s", taken.Detail!);
+        using FileStream again = HoldLock(h);
+    }
+
+    [TestMethod]
+    public void TheRestoreAlsoWaitsForTheLock()
+    {
+        using var h = new Harness();
+        h.Record(ProtectedServices.Handsfree);
+        h.AirPods.TurnOffOutside(ProtectedServices.Handsfree);
+        using FileStream other = HoldLock(h);
+        var runner = new ProtectionGateRunner(h.Bluetooth, _ => true, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        var steps = new List<StepOutcome>();
+        var ctx = new GateRunContext("uninstall", Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+
+        runner.Restore(ctx);
+
+        Assert.AreEqual(GateExitCode.Failed, ctx.Outcome);
+        Assert.IsEmpty(h.Bluetooth.Calls);
+        CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, h.Recorded());
+        Assert.IsTrue(steps.Any(DeviceChangeLock.IsBusy));
+    }
+
+    [TestMethod]
+    public void TheVerbTakesTheLockThroughTheGateAndReleasesIt()
+    {
+        using var h = new Harness();
+
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.ProtectOn));
+
+        Assert.IsTrue(Step(h.Status(), DeviceChangeLock.StepName).Ok);
+        using FileStream after = HoldLock(h);
+    }
+
+    [TestMethod]
+    public void TheLockTimeoutsOutlastTheOtherTasksTimeLimits()
+    {
+        Assert.IsGreaterThan(System.Xml.XmlConvert.ToTimeSpan(TaskPlan.GateTimeLimit), ProtectionGateRunner.ProtectLockTimeout);
+        Assert.IsLessThan(System.Xml.XmlConvert.ToTimeSpan(TaskPlan.ProtectTimeLimit), ProtectionGateRunner.ProtectLockTimeout, "Time is left for the service calls.");
+        Assert.IsGreaterThan(System.Xml.XmlConvert.ToTimeSpan(TaskPlan.ProtectTimeLimit), ProtectionGateRunner.RestoreLockTimeout);
+    }
+
+    // What a block or allow holding the lock looks like from here: a write open that shares only read.
+    private static FileStream HoldLock(Harness h) =>
+        new(Path.Combine(h.Machine, DeviceChangeLock.FileName), FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
 
     [TestMethod]
     public void WithoutAPairedBluetoothApiTheVerbsStayNotAvailable()
