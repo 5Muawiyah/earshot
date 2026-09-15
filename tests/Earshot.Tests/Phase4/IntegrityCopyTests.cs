@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Earshot.Boot.Gate;
+using Earshot.Contracts;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase4;
@@ -107,7 +108,117 @@ public sealed class IntegrityCopyTests
         IntegrityCopyResult result = IntegrityCopy.Copy(temp.File("absent"), temp.File("destination"));
 
         Assert.IsFalse(result.Ok);
-        Assert.AreEqual("ERROR_PATH_NOT_FOUND", result.Steps.Single().CodeName);
+        Assert.AreEqual("ERROR_FILE_NOT_FOUND", result.Steps.Single().CodeName, "CreateFileW on the source folder.");
+    }
+
+    [TestMethod]
+    public void AJunctionInsideTheSourceFailsTheCopy()
+    {
+        using var temp = new TempFolder();
+        string source = MakeSource(temp);
+        string outside = temp.File("outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "secret.txt"), "outside");
+        using IDisposable junction = TestLinks.CreateJunction(Path.Combine(source, "a", "link"), outside);
+        string destination = temp.File("destination");
+
+        IntegrityCopyResult result = IntegrityCopy.Copy(source, destination);
+
+        Assert.IsFalse(result.Ok);
+        StringAssert.Contains(result.Steps.Single().Detail, "reparse point");
+        Assert.IsFalse(Directory.Exists(destination));
+    }
+
+    [TestMethod]
+    public void ASourceFolderThatIsAJunctionFailsTheCopy()
+    {
+        using var temp = new TempFolder();
+        string real = MakeSource(temp);
+        string source = temp.File("unzip");
+        using IDisposable junction = TestLinks.CreateJunction(source, real);
+
+        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"));
+
+        Assert.IsFalse(result.Ok);
+        StringAssert.Contains(result.Steps.Single().Detail, "reparse point");
+    }
+
+    // The window the listing check alone left open: a subfolder is swapped for a junction after the source
+    // was listed and before its files are opened. The open follows the junction; the handle's final path
+    // shows it and the copy stops before anything is read or written.
+    [TestMethod]
+    public void ASubfolderSwappedForAJunctionAfterListingFailsTheCopy()
+    {
+        using var temp = new TempFolder();
+        string source = MakeSource(temp);
+        string outside = temp.File("outside");
+        Directory.CreateDirectory(Path.Combine(outside, "b"));
+        File.WriteAllText(Path.Combine(outside, "one.dll"), "outside");
+        File.WriteAllText(Path.Combine(outside, "b", "empty.json"), "outside");
+        string destination = temp.File("destination");
+        IDisposable? junction = null;
+        try
+        {
+            IntegrityCopyResult result = IntegrityCopy.Copy(source, destination, afterListing: () =>
+            {
+                Directory.Move(Path.Combine(source, "a"), Path.Combine(source, "a-old"));
+                junction = TestLinks.CreateJunction(Path.Combine(source, "a"), outside);
+            });
+
+            Assert.IsNotNull(junction, "The swap ran.");
+            Assert.IsFalse(result.Ok);
+            StepOutcome step = result.Steps.Single();
+            StringAssert.StartsWith(step.Step, "copy-app:a");
+            StringAssert.Contains(step.Detail, "not the one listed");
+            StringAssert.Contains(step.Detail, "outside");
+            Assert.IsEmpty(result.Files);
+            Assert.IsFalse(Directory.Exists(destination), "Nothing is written.");
+        }
+        finally
+        {
+            junction?.Dispose();
+        }
+    }
+
+    [TestMethod]
+    public void ASourceFileWithASecondHardLinkFailsTheCopy()
+    {
+        using var temp = new TempFolder();
+        string source = MakeSource(temp);
+        string outside = temp.File("outside.bin");
+        File.WriteAllText(outside, "outside");
+        TestLinks.CreateHardLink(Path.Combine(source, "a", "linked.dll"), outside);
+
+        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"));
+
+        Assert.IsFalse(result.Ok);
+        StepOutcome step = result.Steps.Single();
+        Assert.AreEqual(@"copy-app:a\linked.dll", step.Step);
+        StringAssert.Contains(step.Detail, "2 hard links");
+    }
+
+    [TestMethod]
+    public void WhileTheCopyRunsTheSourceFolderCannotBeRenamed()
+    {
+        using var temp = new TempFolder();
+        string source = MakeSource(temp);
+        Exception? renameError = null;
+
+        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"), afterListing: () =>
+        {
+            try
+            {
+                Directory.Move(source, temp.File("renamed"));
+            }
+            catch (IOException ex)
+            {
+                renameError = ex;
+            }
+        });
+
+        Assert.IsNotNull(renameError, "The held folder handle denies the rename.");
+        Assert.AreEqual(unchecked((int)0x80070020), renameError.HResult, "ERROR_SHARING_VIOLATION as an HRESULT.");
+        Assert.IsTrue(result.Ok, string.Join(" | ", result.Steps.Select(s => s.Detail)));
     }
 
     [TestMethod]

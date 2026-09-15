@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Earshot.Contracts;
+using Microsoft.Win32.SafeHandles;
 
 namespace Earshot.Boot.Gate;
 
@@ -16,15 +18,42 @@ internal sealed record IntegrityCopyResult(bool Ok, IReadOnlyList<CopiedFile> Fi
 // is hashed with SHA-256 from its open handle, copied from the same handle while the bytes are hashed
 // again, and the destination is re-read and hashed a third time. Any difference, a reparse point anywhere
 // in the source, or any I/O failure fails the whole copy; the caller then removes the destination.
+//
+// Listing the source and opening each file are separate steps, and an open by path follows links, so a
+// subfolder swapped for a junction in between would make the elevated copy read a file from somewhere else.
+// The source folder itself is held open (without FILE_SHARE_DELETE, so it cannot be renamed away) and must
+// not be a reparse point, and after each file is opened its handle's final path must be exactly the source
+// folder's final path plus the listed relative path, with one link. Anything else fails the copy before a
+// byte is read.
 // https://learn.microsoft.com/en-us/dotnet/api/system.io.fileshare
 // https://learn.microsoft.com/en-us/windows/win32/fileio/creating-and-opening-files
+// https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew
 // https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.sha256
-internal static class IntegrityCopy
+internal static unsafe partial class IntegrityCopy
 {
     public const int MaxFiles = 5000;
     private const int BufferSize = 81920;
 
-    public static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder)
+    // CreateFileW and GetFileInformationByHandle values (fileapi.h, winnt.h).
+    private const uint FILE_LIST_DIRECTORY = 0x00000001;
+    private const uint FILE_READ_ATTRIBUTES = 0x00000080;
+    private const uint FILE_SHARE_READ = 0x00000001;
+    private const uint FILE_SHARE_WRITE = 0x00000002;
+    private const uint OPEN_EXISTING = 3;
+    private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+    private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+    private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
+
+    // GetFinalPathNameByHandleW flags: FILE_NAME_NORMALIZED | VOLUME_NAME_DOS.
+    private const uint FinalPathFlags = 0;
+
+    public static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder) =>
+        Copy(sourceFolder, destinationFolder, afterListing: null);
+
+    // afterListing runs after the source is listed and before its files are opened. Tests use it to change
+    // the source in that window.
+    internal static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, Action? afterListing)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationFolder);
@@ -33,6 +62,7 @@ internal static class IntegrityCopy
         var steps = new List<StepOutcome>();
         var copied = new List<CopiedFile>();
         var opened = new List<(string Relative, FileStream Stream)>();
+        SafeFileHandle? root = null;
 
         try
         {
@@ -42,16 +72,26 @@ internal static class IntegrityCopy
                 return new IntegrityCopyResult(false, copied, steps);
             }
 
-            if (!TryListFiles(source, steps, out List<string> relativeFiles))
+            if (!TryHoldSourceFolder(source, steps, out root, out string? rootFinal) ||
+                !TryListFiles(source, steps, out List<string> relativeFiles))
             {
                 return new IntegrityCopyResult(false, copied, steps);
             }
 
-            // Hold every source file before reading any of them.
+            afterListing?.Invoke();
+
+            // Hold every source file before reading any of them, and check where each handle really is.
             foreach (string relative in relativeFiles)
             {
                 string path = Path.Combine(source, relative);
-                opened.Add((relative, new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, FileOptions.SequentialScan)));
+                var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, FileOptions.SequentialScan);
+                opened.Add((relative, stream));
+                StepOutcome? problem = CheckOpenedFile(stream.SafeFileHandle, rootFinal, relative);
+                if (problem is not null)
+                {
+                    steps.Add(problem);
+                    return new IntegrityCopyResult(false, copied, steps);
+                }
             }
 
             Directory.CreateDirectory(destination);
@@ -136,9 +176,119 @@ internal static class IntegrityCopy
             {
                 stream.Dispose();
             }
+
+            root?.Dispose();
         }
 
         return new IntegrityCopyResult(false, copied, steps);
+    }
+
+    // Opens the source folder itself (not what it may point to) for listing and attributes with no
+    // FILE_SHARE_DELETE, so it cannot be renamed or replaced while the copy runs, and reads its final path.
+    // (An open for attributes alone would not take part in share checks.) A folder that is missing, is not a
+    // directory or is a reparse point fails.
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileinformationbyhandle
+    private static bool TryHoldSourceFolder(string source, List<StepOutcome> steps, out SafeFileHandle? handle, out string? finalPath)
+    {
+        finalPath = null;
+        handle = CreateFile(source, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+        if (handle.IsInvalid)
+        {
+            uint error = unchecked((uint)Marshal.GetLastPInvokeError());
+            handle.Dispose();
+            handle = null;
+            steps.Add(StepOutcomes.FromWin32("copy-app", error, "The source folder could not be opened: " + source));
+            return false;
+        }
+
+        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+        {
+            steps.Add(StepOutcomes.FromWin32("copy-app", unchecked((uint)Marshal.GetLastPInvokeError()), "The source folder could not be read: " + source));
+            return false;
+        }
+
+        if ((info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        {
+            steps.Add(StepOutcomes.NotAttempted("copy-app", "The source folder is a reparse point."));
+            return false;
+        }
+
+        if ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        {
+            steps.Add(StepOutcomes.NotAttempted("copy-app", "The source is not a folder: " + source));
+            return false;
+        }
+
+        return TryGetFinalPath(handle, "copy-app", steps, out finalPath);
+    }
+
+    // Null when the opened file is the listed one: its final path is the source folder's final path plus the
+    // relative path, it is not a folder, and it has exactly one link (a hard link could be a second name for
+    // a file outside the source).
+    private static StepOutcome? CheckOpenedFile(SafeFileHandle handle, string? rootFinal, string relative)
+    {
+        string step = "copy-app:" + relative;
+        var steps = new List<StepOutcome>();
+        if (rootFinal is null || !TryGetFinalPath(handle, step, steps, out string? final))
+        {
+            return steps.Count > 0 ? steps[0] : StepOutcomes.NotAttempted(step, "The source folder path is unknown.");
+        }
+
+        string expected = rootFinal + Path.DirectorySeparatorChar + relative;
+        if (!string.Equals(final, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            return StepOutcomes.NotAttempted(step, "The file opened is not the one listed; the source changed after it was listed: " + final);
+        }
+
+        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+        {
+            return StepOutcomes.FromWin32(step, unchecked((uint)Marshal.GetLastPInvokeError()), "The file could not be read.");
+        }
+
+        if ((info.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+        {
+            return StepOutcomes.NotAttempted(step, "The file opened is a folder or a reparse point.");
+        }
+
+        return info.NumberOfLinks == 1
+            ? null
+            : StepOutcomes.NotAttempted(step, "The file has " + info.NumberOfLinks.ToString(CultureInfo.InvariantCulture) + " hard links; only a file with one is copied.");
+    }
+
+    // GetFinalPathNameByHandleW returns the length without the terminator when the buffer is big enough, the
+    // size needed (with the terminator) when it is not, and 0 on failure.
+    private static bool TryGetFinalPath(SafeFileHandle handle, string step, List<StepOutcome> steps, out string? finalPath)
+    {
+        finalPath = null;
+        uint capacity = 512;
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            char[] buffer = new char[capacity];
+            uint length;
+            fixed (char* p = buffer)
+            {
+                length = GetFinalPathNameByHandle(handle, p, capacity, FinalPathFlags);
+            }
+
+            if (length == 0)
+            {
+                steps.Add(StepOutcomes.FromWin32(step, unchecked((uint)Marshal.GetLastPInvokeError()), "The final path could not be read."));
+                return false;
+            }
+
+            if (length < capacity)
+            {
+                finalPath = new string(buffer, 0, (int)length);
+                return true;
+            }
+
+            capacity = length;
+        }
+
+        steps.Add(StepOutcomes.NotAttempted(step, "The final path kept growing while it was read."));
+        return false;
     }
 
     // Lists every file under root as a relative path. Fails on any reparse point (a junction or link could
@@ -207,4 +357,36 @@ internal static class IntegrityCopy
         return p.Equals(f, StringComparison.OrdinalIgnoreCase) ||
                p.StartsWith(f + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
+
+    // BY_HANDLE_FILE_INFORMATION, 52 bytes.
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-by_handle_file_information
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public uint CreationTimeLow;
+        public uint CreationTimeHigh;
+        public uint LastAccessTimeLow;
+        public uint LastAccessTimeHigh;
+        public uint LastWriteTimeLow;
+        public uint LastWriteTimeHigh;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial SafeFileHandle CreateFile(
+        string lpFileName, uint dwDesiredAccess, uint dwShareMode, nint lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, nint hTemplateFile);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetFileInformationByHandle(SafeFileHandle hFile, out ByHandleFileInformation lpFileInformation);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true)]
+    private static partial uint GetFinalPathNameByHandle(SafeFileHandle hFile, char* lpszFilePath, uint cchFilePath, uint dwFlags);
 }
