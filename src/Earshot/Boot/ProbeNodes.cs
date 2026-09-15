@@ -60,7 +60,7 @@ internal static partial class Program
         string? usedFrom = device.IsOk ? "device.json" : used is null ? null : "settings";
         if (used is null)
         {
-            return new NodesProbeReport(settings.PinnedContainerId, settings.PinnedAddress, device.Status.ToString(),
+            return new NodesProbeReport(PinnedOrNull(settings.PinnedContainerId), settings.PinnedAddress, device.Status.ToString(),
                 device.Value?.ContainerId, device.Value?.Address, null, null, null, false, [], null, steps);
         }
 
@@ -92,7 +92,7 @@ internal static partial class Program
         BlockState? state = scan.Listed
             ? BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, new NodeReadResult(true, targets, []))
             : null;
-        return new NodesProbeReport(settings.PinnedContainerId, settings.PinnedAddress, device.Status.ToString(),
+        return new NodesProbeReport(PinnedOrNull(settings.PinnedContainerId), settings.PinnedAddress, device.Status.ToString(),
             device.Value?.ContainerId, device.Value?.Address, used.ContainerId, used.Address, usedFrom, scan.Listed, rows, state, steps);
     }
 
@@ -167,6 +167,8 @@ internal static partial class Program
             o.WriteLine("  " + GateActions.Describe(step));
         }
     }
+
+    private static Guid? PinnedOrNull(Guid container) => container == Guid.Empty ? null : container;
 
     private static string Hex(uint? value) =>
         value is null ? "unreadable" : "0x" + value.Value.ToString("X8", CultureInfo.InvariantCulture);

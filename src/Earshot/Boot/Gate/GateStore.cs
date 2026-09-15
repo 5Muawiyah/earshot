@@ -293,39 +293,53 @@ internal sealed partial class GateStore
         });
     }
 
+    // Writes the status file within MaxFileBytes. Steps beyond MaxStatusSteps are dropped and StepsTruncated
+    // is set; if the result is still too large (long or escaped details), details are shortened and then
+    // fewer steps are kept, so a status file is always written.
     public StepOutcome WriteStatus(GateStatusFile status)
     {
         ArgumentNullException.ThrowIfNull(status);
         string path = StatusFile(status.Nonce);
-        bool truncated = status.StepsTruncated || status.Steps.Count > MaxStatusSteps;
-        IEnumerable<StepOutcome> steps = status.Steps.Take(MaxStatusSteps);
-        return Write(path, "write-status", w =>
+        (int Detail, int Steps)[] tiers = [(MaxStepText, MaxStatusSteps), (80, MaxStatusSteps), (80, 16), (0, 4)];
+        byte[] bytes = [];
+        foreach ((int detailLimit, int stepLimit) in tiers)
         {
-            w.WriteStartObject();
-            w.WriteNumber("SchemaVersion", SchemaVersion);
-            w.WriteString("Nonce", status.Nonce);
-            w.WriteString("Verb", status.Verb);
-            w.WriteString("StartedUtc", FormatTime(status.StartedUtc));
-            w.WriteString("FinishedUtc", FormatTime(status.FinishedUtc));
-            w.WriteString("Result", status.Result);
-            w.WriteNumber("ExitCode", status.ExitCode);
-            w.WriteString("State", status.State ?? "");
-            w.WriteStartArray("Steps");
-            foreach (StepOutcome step in steps)
+            bool truncated = status.StepsTruncated || status.Steps.Count > stepLimit || detailLimit < MaxStepText;
+            IEnumerable<StepOutcome> steps = status.Steps.Take(stepLimit);
+            bytes = Serialize(w =>
             {
                 w.WriteStartObject();
-                w.WriteString("Step", Bound(step.Step));
-                w.WriteBoolean("Ok", step.Ok);
-                w.WriteNumber("Code", step.Code);
-                w.WriteString("CodeName", Bound(step.CodeName));
-                w.WriteString("Detail", Bound(step.Detail ?? ""));
-                w.WriteEndObject();
-            }
+                w.WriteNumber("SchemaVersion", SchemaVersion);
+                w.WriteString("Nonce", status.Nonce);
+                w.WriteString("Verb", status.Verb);
+                w.WriteString("StartedUtc", FormatTime(status.StartedUtc));
+                w.WriteString("FinishedUtc", FormatTime(status.FinishedUtc));
+                w.WriteString("Result", status.Result);
+                w.WriteNumber("ExitCode", status.ExitCode);
+                w.WriteString("State", status.State ?? "");
+                w.WriteStartArray("Steps");
+                foreach (StepOutcome step in steps)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("Step", Bound(step.Step));
+                    w.WriteBoolean("Ok", step.Ok);
+                    w.WriteNumber("Code", step.Code);
+                    w.WriteString("CodeName", Bound(step.CodeName));
+                    w.WriteString("Detail", Bound(step.Detail ?? "", detailLimit));
+                    w.WriteEndObject();
+                }
 
-            w.WriteEndArray();
-            w.WriteBoolean("StepsTruncated", truncated);
-            w.WriteEndObject();
-        });
+                w.WriteEndArray();
+                w.WriteBoolean("StepsTruncated", truncated);
+                w.WriteEndObject();
+            });
+            if (bytes.Length <= MaxFileBytes)
+            {
+                break;
+            }
+        }
+
+        return WriteBytes(path, "write-status", bytes);
     }
 
     // Deletes status files beyond the newest MaxStatusFilesKept - 1 (leaving room for the one about to be
@@ -465,19 +479,22 @@ internal sealed partial class GateStore
         where T : class =>
         new(GateReadStatus.Invalid, null, StepOutcomes.FromHResult(step, HResultInvalidData, path + ": " + problem));
 
-    private static StepOutcome Write(string path, string step, Action<Utf8JsonWriter> write)
-    {
-        byte[] bytes;
-        using (var buffer = new MemoryStream())
-        {
-            using (var writer = new Utf8JsonWriter(buffer, WriterOptions))
-            {
-                write(writer);
-            }
+    private static StepOutcome Write(string path, string step, Action<Utf8JsonWriter> write) =>
+        WriteBytes(path, step, Serialize(write));
 
-            bytes = buffer.ToArray();
+    private static byte[] Serialize(Action<Utf8JsonWriter> write)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            write(writer);
         }
 
+        return buffer.ToArray();
+    }
+
+    private static StepOutcome WriteBytes(string path, string step, byte[] bytes)
+    {
         if (bytes.Length > MaxFileBytes)
         {
             return StepOutcomes.NotAttempted(step, "The content is larger than " + MaxFileBytes + " bytes.");
@@ -492,7 +509,7 @@ internal sealed partial class GateStore
                 stream.Flush(flushToDisk: true);
             }
 
-            File.Move(temp, path, overwrite: true);
+            MoveIntoPlace(temp, path);
             return new StepOutcome(step, true, 0, "S_OK", path);
         }
         catch (IOException ex)
@@ -502,6 +519,32 @@ internal sealed partial class GateStore
         catch (UnauthorizedAccessException ex)
         {
             return WriteFailed(step, path, temp, ex);
+        }
+    }
+
+    // Replacing a file fails while another process has it open, and a reader (the tray, the probe) holds
+    // one for a moment. The move is retried briefly; if it still fails, the last error is what the caller
+    // records.
+    private const int MoveAttempts = 10;
+    private static readonly TimeSpan MoveRetryDelay = TimeSpan.FromMilliseconds(25);
+
+    private static void MoveIntoPlace(string temp, string path)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temp, path, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < MoveAttempts)
+            {
+                Thread.Sleep(MoveRetryDelay);
+            }
+            catch (UnauthorizedAccessException) when (attempt < MoveAttempts)
+            {
+                Thread.Sleep(MoveRetryDelay);
+            }
         }
     }
 
@@ -624,18 +667,19 @@ internal sealed partial class GateStore
     private static string FormatTime(DateTimeOffset value) =>
         value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
 
-    // Keeps a text within MaxStepText characters and free of control characters.
-    internal static string Bound(string text)
+    // Keeps a text within limit characters (MaxStepText by default), with control characters as spaces and
+    // any surrogate as '?', so it is always valid text for the JSON writer.
+    internal static string Bound(string text, int limit = MaxStepText)
     {
-        var sb = new StringBuilder(Math.Min(text.Length, MaxStepText));
+        var sb = new StringBuilder(Math.Min(text.Length, limit));
         foreach (char c in text)
         {
-            if (sb.Length == MaxStepText)
+            if (sb.Length >= limit)
             {
                 break;
             }
 
-            sb.Append(char.IsControl(c) ? ' ' : c);
+            sb.Append(char.IsControl(c) ? ' ' : char.IsSurrogate(c) ? '?' : c);
         }
 
         return sb.ToString();

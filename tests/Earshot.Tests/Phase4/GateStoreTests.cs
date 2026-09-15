@@ -193,6 +193,33 @@ public sealed class GateStoreTests
     }
 
     [TestMethod]
+    public void AStatusThatWouldBeTooLargeIsShortenedNotLost()
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        List<StepOutcome> escaped = Enumerable.Range(0, GateStore.MaxStatusSteps)
+            .Select(i => StepOutcomes.FromConfigRet("step-" + i.ToString(CultureInfo.InvariantCulture), 0, new string('’', 1000) + "😀"))
+            .ToList();
+
+        StepOutcome written = store.WriteStatus(Status(Nonce, escaped));
+        GateRead<GateStatusFile> read = store.ReadStatus(Nonce);
+
+        Assert.IsTrue(written.Ok, written.Detail);
+        Assert.IsTrue(read.IsOk, read.Step.Detail);
+        Assert.IsTrue(read.Value!.StepsTruncated);
+        Assert.HasCount(GateStore.MaxStatusSteps, read.Value.Steps);
+        Assert.IsTrue(read.Value.Steps.All(s => s.Detail!.Length == 80));
+    }
+
+    [TestMethod]
+    public void SurrogatesAndControlCharactersNeverBreakTheJson()
+    {
+        Assert.AreEqual("a b??c", GateStore.Bound("a\nb😀c"));
+        Assert.AreEqual("ab?", GateStore.Bound("ab😀", limit: 3));
+        Assert.AreEqual("?", GateStore.Bound("\uDE00"));
+    }
+
+    [TestMethod]
     public void AStatusFileForAnotherNonceOrVerbIsInvalid()
     {
         using var temp = new TempFolder();
@@ -255,6 +282,22 @@ public sealed class GateStoreTests
         Assert.IsTrue(File.Exists(Path.Combine(temp.Path, "config.json")));
         Assert.IsFalse(File.Exists(staleTemp));
         Assert.IsTrue(File.Exists(freshTemp));
+    }
+
+    [TestMethod]
+    public void AReaderHoldingTheFileDoesNotBlockTheReplace()
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        Assert.IsTrue(store.WriteConfig(new GateConfig { BlockAtBoot = true }).Ok);
+
+        // A reader holds the file (with the share mode the store reads with) for a moment while the write runs.
+        var reader = new FileStream(store.ConfigFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var release = new Timer(_ => reader.Dispose(), null, TimeSpan.FromMilliseconds(40), Timeout.InfiniteTimeSpan);
+
+        Assert.IsTrue(store.WriteConfig(new GateConfig { BlockAtBoot = false }).Ok);
+
+        Assert.IsFalse(store.ReadConfig().Value!.BlockAtBoot);
     }
 
     [TestMethod]

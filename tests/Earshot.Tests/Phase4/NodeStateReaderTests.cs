@@ -107,6 +107,21 @@ public sealed class NodeStateReaderTests
         NodeScanResult scan = NodeScan.FindContainerNodes(RecordedNodes.Table(), RecordedNodes.AirPodsContainer);
 
         Assert.HasCount(13, scan.Targets);
+        Assert.IsEmpty(scan.Steps);
+    }
+
+    [TestMethod]
+    public void AContainerDumpReportsUnexpectedReadFailuresButNotMissingContainers()
+    {
+        FakeNodeApi table = RecordedNodes.Table();
+        table[RecordedNodes.RadioNode].ContainerReadResult = CfgMgr32.CR_NO_SUCH_VALUE;
+        table[RecordedNodes.IPhoneDeviceNode].ContainerReadResult = 0x1Du;
+
+        NodeScanResult scan = NodeScan.FindContainerNodes(table, RecordedNodes.AirPodsContainer);
+
+        Assert.HasCount(13, scan.Targets);
+        Assert.AreEqual("cm-container:" + RecordedNodes.IPhoneDeviceNode, scan.Steps.Single().Step);
+        Assert.AreEqual("CR_REGISTRY_ERROR", scan.Steps.Single().CodeName);
     }
 
     [TestMethod]

@@ -162,12 +162,19 @@ internal static class NodeScan
             uint locate = nodes.Locate(id, includeNonPresent: true, out uint devInst);
             if (locate != CfgMgr32.CR_SUCCESS)
             {
+                steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + id, locate, "Listed but could not be located."));
                 continue;
             }
 
-            if (nodes.GetContainerId(devInst, out Guid nodeContainer) == CfgMgr32.CR_SUCCESS && nodeContainer == container)
+            uint read = nodes.GetContainerId(devInst, out Guid nodeContainer);
+            if (read == CfgMgr32.CR_SUCCESS && nodeContainer == container)
             {
                 found.Add(new TargetNode(id, nodeContainer, devInst));
+            }
+            else if (read is not (CfgMgr32.CR_SUCCESS or CfgMgr32.CR_NO_SUCH_VALUE))
+            {
+                // A node with no container is common and not a failure; anything else is reported.
+                steps.Add(StepOutcomes.FromConfigRet("cm-container:" + id, read));
             }
         }
 
