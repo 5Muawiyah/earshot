@@ -1,0 +1,274 @@
+using Earshot.Boot;
+using Earshot.Boot.Gate;
+using Earshot.Contracts;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace Earshot.Tests.Phase4;
+
+// The command lines of the elevated modes. Nothing here runs a real action: the action factories are
+// test doubles that fail the test if a refused command line reaches them.
+[TestClass]
+public sealed class GateCommandLineTests
+{
+    private const string Nonce = "0123456789abcdef0123456789abcdef";
+    private const string Container = "1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d";
+
+    [TestMethod]
+    [DataRow("block")]
+    [DataRow("allow")]
+    [DataRow("status")]
+    [DataRow("setboot-on")]
+    [DataRow("setboot-off")]
+    [DataRow("protect-on")]
+    [DataRow("protect-off")]
+    public void AcceptsEachVerbWithANonce(string verb)
+    {
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", verb, Nonce], out GateRequest? request, out string? problem), problem);
+        Assert.AreEqual(new GateRequest(verb, Nonce, null), request);
+    }
+
+    [TestMethod]
+    [DataRow("$(Arg2)")]
+    [DataRow("")]
+    public void AnUnsuppliedThirdTaskArgumentIsIgnored(string placeholder)
+    {
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", "block", Nonce, placeholder], out GateRequest? request, out _));
+        Assert.IsNull(request.Address);
+    }
+
+    [TestMethod]
+    public void SetDeviceCarriesTheAddress()
+    {
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", "set-device", Nonce, "5A6B7C8D9EAF"], out GateRequest? request, out _));
+        Assert.AreEqual("5A6B7C8D9EAF", request.Address);
+    }
+
+    [TestMethod]
+    public void BootTakesNothingAndGetsItsOwnNonce()
+    {
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", "boot"], out GateRequest? first, out _));
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", "boot"], out GateRequest? second, out _));
+        Assert.AreEqual(GateVerbs.Boot, first.Verb);
+        Assert.IsTrue(BoundaryValidation.IsNonce(first.Nonce));
+        Assert.AreNotEqual(first.Nonce, second.Nonce);
+        Assert.IsNull(first.Address);
+    }
+
+    [TestMethod]
+    [DataRow("gate")]
+    [DataRow("gate", "block")]
+    [DataRow("gate", "block", Nonce, "5A6B7C8D9EAF")]
+    [DataRow("gate", "block", Nonce, "", "")]
+    [DataRow("gate", "Block", Nonce)]
+    [DataRow("gate", "BLOCK", Nonce)]
+    [DataRow("gate", " block", Nonce)]
+    [DataRow("gate", "install", Nonce)]
+    [DataRow("gate", "uninstall", Nonce)]
+    [DataRow("gate", "probe", Nonce)]
+    [DataRow("gate", "diag", Nonce)]
+    [DataRow("gate", "", Nonce)]
+    [DataRow("gate", "$(Arg0)", "$(Arg1)", "$(Arg2)")]
+    [DataRow("gate", "block", "$(Arg1)", "$(Arg2)")]
+    [DataRow("gate", "block", "0123456789ABCDEF0123456789ABCDEF")]
+    [DataRow("gate", "block", "0123456789abcdef0123456789abcde")]
+    [DataRow("gate", "block", "0123456789abcdef0123456789abcdef0")]
+    [DataRow("gate", "block", "..\\..\\windows\\system32\\x.json")]
+    [DataRow("gate", "block", "0123456789abcdef0123456789abcdeg")]
+    [DataRow("gate", "boot", Nonce)]
+    [DataRow("gate", "boot", "$(Arg1)", "$(Arg2)")]
+    [DataRow("gate", "boot", "")]
+    [DataRow("gate", "set-device", Nonce)]
+    [DataRow("gate", "set-device", Nonce, "$(Arg2)")]
+    [DataRow("gate", "set-device", Nonce, "5A6b7C8d9Eaf")]
+    [DataRow("gate", "set-device", Nonce, "300E431D048")]
+    [DataRow("gate", "set-device", Nonce, "5A6B7C8D9EAF\"")]
+    [DataRow("gate", "set-device", Nonce, "5A6B7C8D9EAF & calc")]
+    [DataRow("gate", "set-device", "bad", "5A6B7C8D9EAF")]
+    [DataRow("gate", "set-device", Nonce, "5A6B7C8D9EAF", "extra")]
+    [DataRow("install", "block", Nonce)]
+    [DataRow("Gate", "block", Nonce)]
+    public void RejectsEverythingElse(params string[] args)
+    {
+        Assert.IsFalse(Program.TryParseGateArgs(args, out GateRequest? request, out string? problem));
+        Assert.IsNull(request);
+        Assert.IsFalse(string.IsNullOrEmpty(problem));
+    }
+
+    [TestMethod]
+    public void FuzzedVerbsNeverParse()
+    {
+        var random = new Random(20260915);
+        const string alphabet = "abcdefghijklmnopqrstuvwxyz-_$()\"' ;&|0123456789ABCDEF";
+        for (int i = 0; i < 5000; i++)
+        {
+            char[] chars = new char[random.Next(0, 14)];
+            for (int c = 0; c < chars.Length; c++)
+            {
+                chars[c] = alphabet[random.Next(alphabet.Length)];
+            }
+
+            string verb = new(chars);
+            bool parsed = Program.TryParseGateArgs(["gate", verb, Nonce], out _, out _);
+            bool expected = GateVerbs.All.Contains(verb) && verb is not (GateVerbs.Boot or GateVerbs.SetDevice);
+            Assert.AreEqual(expected, parsed, verb);
+        }
+    }
+
+    [TestMethod]
+    public void ARejectedGateCommandLineNeverBuildsTheActions()
+    {
+        var log = new CapturingLog();
+
+        GateExitCode exit = Program.RunGate(["gate", "install", Nonce], FakeToken.System, log, NeverBuilt);
+
+        Assert.AreEqual(GateExitCode.Rejected, exit);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "gate: rejected"));
+    }
+
+    [TestMethod]
+    public void TheGateRefusesAnUnelevatedToken()
+    {
+        var log = new CapturingLog();
+
+        GateExitCode exit = Program.RunGate(["gate", "block", Nonce], FakeToken.PlainUser, log, NeverBuilt);
+
+        Assert.AreEqual(GateExitCode.NotElevated, exit);
+    }
+
+    [TestMethod]
+    public void AnAcceptedCommandLineRunsTheRequestAsTheTaskSendsIt()
+    {
+        using var temp = new TempFolder();
+        string machine = Path.Combine(temp.Path, "ProgramData", "Earshot");
+        Directory.CreateDirectory(machine);
+        var store = new GateStore(machine);
+        Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        FakeNodeApi nodes = RecordedNodes.Table();
+        var log = new CapturingLog();
+
+        // What "gate $(Arg0) $(Arg1) $(Arg2)" becomes when RunEx passes two parameters.
+        GateExitCode exit = Program.RunGate(["gate", "block", Nonce, "$(Arg2)"], FakeToken.System, log,
+            () => new GateActions(nodes, store, new FakeFolderSecurity(), log, new ManualTime()));
+
+        Assert.AreEqual(GateExitCode.Success, exit);
+        Assert.HasCount(9, nodes.Calls);
+        Assert.AreEqual("success", store.ReadStatus(Nonce).Value!.Result);
+    }
+
+    // [gate, boot] is also what RunEx(["boot"]) on \Earshot\Gate may become when Task Scheduler substitutes
+    // the unsupplied $(Arg1) and $(Arg2) as empty, so the gate cannot tell which task sent it. Pinned as
+    // accepted: boot does nothing while Block at boot is off, and otherwise exactly what block does.
+    [TestMethod]
+    public void BootFromEitherTaskDoesNoMoreThanBlock()
+    {
+        using var temp = new TempFolder();
+        string machine = Path.Combine(temp.Path, "ProgramData", "Earshot");
+        Directory.CreateDirectory(machine);
+        var store = new GateStore(machine);
+        Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        Assert.IsTrue(store.WriteConfig(new GateConfig { BlockAtBoot = false }).Ok);
+        FakeNodeApi bootNodes = RecordedNodes.Table();
+        FakeNodeApi blockNodes = RecordedNodes.Table();
+        var log = new CapturingLog();
+
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", "boot"], out GateRequest? parsed, out _));
+        Assert.AreEqual(GateVerbs.Boot, parsed.Verb);
+        Assert.AreEqual(GateExitCode.Success, Program.RunGate(["gate", "boot"], FakeToken.System, log,
+            () => new GateActions(bootNodes, store, new FakeFolderSecurity(), log, new ManualTime())));
+        Assert.IsEmpty(bootNodes.Calls, "With Block at boot off, boot changes nothing.");
+
+        Assert.IsTrue(store.WriteConfig(new GateConfig { BlockAtBoot = true }).Ok);
+        Assert.AreEqual(GateExitCode.Success, Program.RunGate(["gate", "boot"], FakeToken.System, log,
+            () => new GateActions(bootNodes, store, new FakeFolderSecurity(), log, new ManualTime())));
+        Assert.AreEqual(GateExitCode.Success, Program.RunGate(["gate", "block", Nonce], FakeToken.System, log,
+            () => new GateActions(blockNodes, store, new FakeFolderSecurity(), log, new ManualTime())));
+
+        CollectionAssert.AreEqual(blockNodes.Calls, bootNodes.Calls, "Boot makes the same calls as block.");
+        Assert.HasCount(9, bootNodes.Calls);
+    }
+
+    [TestMethod]
+    public void TheLoggedCommandLineIsBoundedAndPrintable()
+    {
+        string described = Program.DescribeArgs(["gate", "block\r\n\u0000" + new string('x', 500), "a", "b", "c", "d", "e", "f", "g", "h"]);
+
+        Assert.IsLessThan(700, described.Length);
+        Assert.IsFalse(described.Any(char.IsControl));
+        StringAssert.StartsWith(described, "10 args:");
+    }
+
+    private static GateActions NeverBuilt() => throw new AssertFailedException("A refused command line must not reach the gate actions.");
+
+    private static InstallResult NeverRun(InstallRequest request) => throw new AssertFailedException("A refused install must not run.");
+
+    private static InstallResult NeverRunUninstall() => throw new AssertFailedException("A refused uninstall must not run.");
+
+    [TestMethod]
+    public void InstallParsesTheIdentityAndThePrincipal()
+    {
+        Assert.IsTrue(Program.TryParseInstallArgs(["install", TestUsers.Sid, "5A6B7C8D9EAF", Container], out InstallRequest? request, out string? problem), problem);
+        Assert.AreEqual(new InstallRequest(TestUsers.Sid, "5A6B7C8D9EAF", RecordedNodes.AirPodsContainer, TaskPrincipalMode.System), request);
+
+        Assert.IsTrue(Program.TryParseInstallArgs(["install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "user"], out request, out _));
+        Assert.AreEqual(TaskPrincipalMode.InteractiveUser, request.Principal);
+    }
+
+    [TestMethod]
+    [DataRow("install")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "system")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "User")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--elevate", "user")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "user", "x")]
+    [DataRow("install", "S-1-5-18", "5A6B7C8D9EAF", Container)]
+    [DataRow("install", "S-1-1-0", "5A6B7C8D9EAF", Container)]
+    [DataRow("install", TestUsers.Sid, "5A6b7C8d9Eaf", Container)]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "{1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d}")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "bfbe83037d9b522cab7ee6a0a93ae36f")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "00000000-0000-0000-0000-000000000000")]
+    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "00000000-0000-0000-ffff-ffffffffffff")]
+    [DataRow("uninstall", TestUsers.Sid, "5A6B7C8D9EAF", Container)]
+    public void InstallRejectsAnythingElse(params string[] args)
+    {
+        Assert.IsFalse(Program.TryParseInstallArgs(args, out InstallRequest? request, out string? problem));
+        Assert.IsNull(request);
+        Assert.IsFalse(string.IsNullOrEmpty(problem));
+    }
+
+    [TestMethod]
+    public void InstallAndUninstallRefuseSystemAndUnelevatedTokens()
+    {
+        string[] install = ["install", TestUsers.Sid, "5A6B7C8D9EAF", Container];
+        var log = new CapturingLog();
+
+        Assert.AreEqual(GateExitCode.RunningAsSystem, Program.RunInstall(install, FakeToken.System, log, NeverRun));
+        Assert.AreEqual(GateExitCode.NotElevated, Program.RunInstall(install, FakeToken.PlainUser, log, NeverRun));
+        Assert.AreEqual(GateExitCode.Rejected, Program.RunInstall(["install", TestUsers.Sid], FakeToken.ElevatedUser, log, NeverRun));
+        Assert.AreEqual(GateExitCode.RunningAsSystem, Program.RunUninstall(["uninstall"], FakeToken.System, log, NeverRunUninstall));
+        Assert.AreEqual(GateExitCode.NotElevated, Program.RunUninstall(["uninstall"], FakeToken.PlainUser, log, NeverRunUninstall));
+        Assert.AreEqual(GateExitCode.Rejected, Program.RunUninstall(["uninstall", "now"], FakeToken.ElevatedUser, log, NeverRunUninstall));
+    }
+
+    [TestMethod]
+    public void AnAcceptedInstallRunsWithTheParsedRequestAndReturnsItsOutcome()
+    {
+        InstallRequest? seen = null;
+        var log = new CapturingLog();
+
+        GateExitCode exit = Program.RunInstall(
+            ["install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "user"],
+            FakeToken.ElevatedUser,
+            log,
+            request =>
+            {
+                seen = request;
+                return new InstallResult(GateExitCode.Partial, [StepOutcomes.FromHResult("x", unchecked((int)0x80070005))]);
+            });
+
+        Assert.AreEqual(GateExitCode.Partial, exit);
+        Assert.AreEqual(TaskPrincipalMode.InteractiveUser, seen!.Principal);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "install: x E_ACCESSDENIED"));
+        Assert.IsTrue(log.Has(LogLevel.Info, "install: partial (2)."));
+    }
+}
