@@ -13,8 +13,11 @@ namespace Earshot.Infra;
 // ProgramData subfolders) so tests and smoke runs never touch real data. InstallFolder is not a
 // data folder and is never moved. EARSHOT_SAFE_MODE turns device actions off (see SafeDecorators).
 //
-// A scheduled task running as SYSTEM gets SYSTEM's environment, which only an administrator can
-// change, so a user cannot redirect the gate's paths with these variables.
+// Both variables are for tests and smoke runs only. A scheduled task running as SYSTEM gets
+// SYSTEM's environment, which only an administrator can change, so a user cannot redirect the gate's
+// paths with them. An elevated install or uninstall started from a user session may inherit variables
+// that user set, so Program.Main refuses gate, install and uninstall while either variable is set
+// rather than let their machine-wide writes follow a user-chosen folder.
 // https://learn.microsoft.com/en-us/dotnet/api/system.environment.specialfolder
 internal sealed class Paths
 {

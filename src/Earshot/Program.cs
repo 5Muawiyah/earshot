@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
 using Earshot.Infra;
@@ -19,16 +20,22 @@ namespace Earshot;
 //
 // Dispatch runs before WinForms is initialised and before the single-instance mutex, so the
 // headless modes never touch WinForms and install is never mistaken for a second tray.
-// A hook that is not implemented is removed by the compiler; the mode then reports
-// "Not available in this build." and exits with ExitCodes.Unavailable.
+// A hook that is not implemented is removed by the compiler; the mode then logs
+// "Not available in this build." and exits with ExitCodes.Unavailable. That includes the tray.
+//
+// gate, install and uninstall change device nodes, Bluetooth services, scheduled tasks and machine
+// folders. They are refused before dispatch in safe mode (EARSHOT_SAFE_MODE) and whenever
+// EARSHOT_DATA_ROOT is set, because an elevated process started from a user session may inherit a
+// variable that user set, which would move install's writes to a folder the user controls while the
+// gate kept reading %ProgramData%. The SYSTEM task never has either variable, so this costs nothing.
 internal static partial class Program
 {
     internal sealed class RunContext
     {
         public required string[] Args { get; init; }
 
-        // Set by the hook that ran, including 0 for success. A headless mode that leaves it null
-        // was not implemented in this build.
+        // Set by the hook that ran, including 0 for success. Every hook sets it, the tray included;
+        // a mode that leaves it null was not implemented in this build.
         public int? ExitCode { get; set; }
     }
 
@@ -56,34 +63,90 @@ internal static partial class Program
             return StartupFailure(ExitCodes.Software, ex.Message);
         }
 
+        Paths paths;
         try
         {
-            _ = Paths.Current;
+            paths = Paths.Current;
         }
         catch (InvalidOperationException ex)
         {
             return StartupFailure(ExitCodes.Config, ex.Message);
         }
 
-        var ctx = new RunContext { Args = args };
+        return Dispatch(args, paths, new FileLog(paths.LogFolder));
+    }
+
+    // Runs the mode named by args[0] and returns the process exit code.
+    internal static int Dispatch(string[] args, Paths paths, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(log);
+
         string mode = args.Length == 0 ? "" : args[0];
+        string? refusal = PrivilegedModeRefusal(mode, paths);
+        if (refusal is not null)
+        {
+            log.Warn(refusal);
+            return ExitCodes.Refused;
+        }
+
+        var ctx = new RunContext { Args = args };
+        string label;
         switch (mode)
         {
-            case "gate":      TryRunGate(ctx); break;
-            case "install":   TryRunInstall(ctx); break;
-            case "uninstall": TryRunUninstall(ctx); break;
-            case "probe":     TryRunProbe(ctx); break;
-            case "diag":      TryRunDiag(ctx); break;
-            default:          TryRunTray(ctx); return ctx.ExitCode ?? ExitCodes.Ok;
+            case "gate":      label = mode; TryRunGate(ctx); break;
+            case "install":   label = mode; TryRunInstall(ctx); break;
+            case "uninstall": label = mode; TryRunUninstall(ctx); break;
+            case "probe":     label = mode; TryRunProbe(ctx); break;
+            case "diag":      label = mode; TryRunDiag(ctx); break;
+            default:          label = "tray"; TryRunTray(ctx); break;
         }
+
+        return ExitCodeFor(label, ctx, log);
+    }
+
+    // The exit code a hook set, or ExitCodes.Unavailable (logged) when no hook ran for the mode.
+    internal static int ExitCodeFor(string label, RunContext ctx, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+        ArgumentNullException.ThrowIfNull(log);
 
         if (ctx.ExitCode is int code)
         {
             return code;
         }
 
-        new FileLog(Paths.Current.LogFolder).Error("'" + mode + "': " + NotAvailableMessage);
+        log.Error("'" + label + "': " + NotAvailableMessage);
         return ExitCodes.Unavailable;
+    }
+
+    internal static readonly IReadOnlySet<string> PrivilegedModes =
+        new HashSet<string>(StringComparer.Ordinal) { "gate", "install", "uninstall" };
+
+    // Why a privileged mode must not run with these paths, or null when it may (or the mode is not
+    // privileged). See the header comment.
+    internal static string? PrivilegedModeRefusal(string mode, Paths paths)
+    {
+        ArgumentNullException.ThrowIfNull(mode);
+        ArgumentNullException.ThrowIfNull(paths);
+
+        if (!PrivilegedModes.Contains(mode))
+        {
+            return null;
+        }
+
+        if (paths.IsSafeMode)
+        {
+            return SafeDecorators.Message + " Refused: " + mode + ".";
+        }
+
+        if (paths.IsRedirected)
+        {
+            return "Refused: " + mode + " does not run while " + Paths.DataRootVariable + " is set.";
+        }
+
+        return null;
     }
 
     internal const string NotAvailableMessage = NullResults.NotAvailableMessage;

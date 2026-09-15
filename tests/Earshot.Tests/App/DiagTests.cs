@@ -5,7 +5,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.App;
 
 // Only argument parsing and the safe-mode refusal are tested. No test ever runs a diag target
-// outside safe mode, because the targets perform live device actions.
+// outside safe mode, because the targets perform live device actions. In safe mode every target is
+// refused, battery-sweep included.
 [TestClass]
 public sealed class DiagTests
 {
@@ -79,7 +80,8 @@ public sealed class DiagTests
     [DataRow("gate", "allow")]
     [DataRow("gate", "set-device", "5A6B7C8D9EAF")]
     [DataRow("protect-unelevated", "on")]
-    public void SafeModeRefusesLiveTargetsBeforeTheyRun(params string[] targetAndArgs)
+    [DataRow("battery-sweep")]
+    public void SafeModeRefusesEveryTargetBeforeItRuns(params string[] targetAndArgs)
     {
         var request = new Program.DiagRequest(targetAndArgs[0], targetAndArgs.Skip(1).ToArray(), OutPath: null);
         using var output = new StringWriter(CultureInfo.InvariantCulture);

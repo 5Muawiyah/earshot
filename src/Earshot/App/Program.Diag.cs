@@ -17,8 +17,9 @@ namespace Earshot;
 //
 // LIVE single-shot actions for the owner's live tests, with JSON evidence written under
 // %LOCALAPPDATA%\Earshot\livetest. Each target is one elidable partial implemented in its
-// feature's folder. In safe mode every target that can change something is refused here, before
-// its implementation runs; only battery-sweep, which only reads, is allowed.
+// feature's folder. diag exists only for the owner's live tests, so in safe mode every target is
+// refused here, before its implementation runs and before any service is built, battery-sweep
+// included.
 internal static partial class Program
 {
     internal const string DiagUsage =
@@ -174,7 +175,7 @@ internal static partial class Program
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(services);
 
-        if (safeMode && request.Target != DiagBatterySweepName)
+        if (safeMode)
         {
             log.Warn(SafeDecorators.Message + " Refused: diag " + request.Target + ".");
             output.WriteLine(SafeDecorators.Message);
