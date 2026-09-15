@@ -11,7 +11,7 @@ namespace Earshot.Tests.Phase6;
 
 // gate protect-on, protect-off and the uninstall restore, run through the real GateActions over the recorded
 // node table and an in-memory Bluetooth service stack. No real Bluetooth call, node change or machine folder
-// is involved: the fake node table is paired with the fake Bluetooth stack, and nothing else.
+// is involved: the fake node table is given the fake Bluetooth stack, and the gate refuses the real one for it.
 [TestClass]
 public sealed class ProtectionGateTests
 {
@@ -21,16 +21,14 @@ public sealed class ProtectionGateTests
     {
         private readonly TempFolder _temp = new();
 
+        private readonly bool _withBluetooth;
+
         public Harness(bool pair = true, bool pin = true)
         {
             Machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
             Directory.CreateDirectory(Machine);
             Store = new GateStore(Machine);
-            if (pair)
-            {
-                GateBluetooth.Pair(Nodes, Bluetooth);
-            }
-
+            _withBluetooth = pair;
             if (pin)
             {
                 Assert.IsTrue(Store.WriteDevice(RecordedNodes.AirPods()).Ok);
@@ -51,8 +49,13 @@ public sealed class ProtectionGateTests
 
         public ProtectionIntentFile Intent => new(Machine);
 
+        public IBluetoothServiceApi? Api => _withBluetooth ? Bluetooth : null;
+
         public GateExitCode Run(string verb) =>
-            new GateActions(Nodes, Store, new FakeFolderSecurity(), Log, new ManualTime()).Run(new GateRequest(verb, Nonce, null, GateMode.Protect));
+            new GateActions(Nodes, Store, new FakeFolderSecurity(), Log, new ManualTime(), bluetooth: Api).Run(new GateRequest(verb, Nonce, null, GateMode.Protect));
+
+        public GateRunContext Context(string verb, List<StepOutcome> steps) =>
+            new(verb, Nonce, RecordedNodes.AirPods(), Nodes, Store, Log, steps, Api);
 
         public GateStatusFile Status()
         {
@@ -541,7 +544,7 @@ public sealed class ProtectionGateTests
         string install = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(h.Machine)!)!, "ProgramFiles", "Earshot");
 
         InstallResult result = new UninstallActions(new InstallLayout(source, install, h.Machine), new FakeFolderSecurity(), h.Nodes,
-            new FakeTaskRegistrar(), new RebootDeleteRecorder(), h.Log).Run();
+            new FakeTaskRegistrar(), new RebootDeleteRecorder(), h.Log, bluetooth: h.Bluetooth).Run();
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome, string.Join(Environment.NewLine, result.Steps.Where(s => !s.Ok).Select(GateActions.Describe)));
         CollectionAssert.AreEqual(new[] { new BluetoothCall("set", ProtectedServices.Handsfree, true) }, h.Bluetooth.SetCalls.ToArray());
@@ -555,7 +558,7 @@ public sealed class ProtectionGateTests
         using var h = new Harness();
         h.BlockAll();
         var steps = new List<StepOutcome>();
-        var ctx = new GateRunContext("uninstall", Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+        GateRunContext ctx = h.Context("uninstall", steps);
 
         Assert.IsTrue(GateActions.TryRestoreProtection(ctx));
 
@@ -571,7 +574,7 @@ public sealed class ProtectionGateTests
         h.AirPods.TurnOffOutside(ProtectedServices.Handsfree);
         h.BlockAll();
         var steps = new List<StepOutcome>();
-        var ctx = new GateRunContext("uninstall", Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+        GateRunContext ctx = h.Context("uninstall", steps);
 
         Assert.IsTrue(GateActions.TryRestoreProtection(ctx));
 
@@ -588,7 +591,7 @@ public sealed class ProtectionGateTests
         int waits = 0;
         var runner = new ProtectionGateRunner(h.Bluetooth, _ => ++waits > 0, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         var steps = new List<StepOutcome>();
-        var ctx = new GateRunContext(GateVerbs.ProtectOn, Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+        GateRunContext ctx = h.Context(GateVerbs.ProtectOn, steps);
 
         runner.Run(ctx, protect: true);
 
@@ -613,7 +616,7 @@ public sealed class ProtectionGateTests
             return true;
         }, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         var steps = new List<StepOutcome>();
-        var ctx = new GateRunContext(GateVerbs.ProtectOn, Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+        GateRunContext ctx = h.Context(GateVerbs.ProtectOn, steps);
 
         runner.Run(ctx, protect: true);
 
@@ -634,7 +637,7 @@ public sealed class ProtectionGateTests
         using FileStream other = HoldLock(h);
         var runner = new ProtectionGateRunner(h.Bluetooth, _ => true, TimeSpan.FromSeconds(1), TimeSpan.Zero);
         var steps = new List<StepOutcome>();
-        var ctx = new GateRunContext("uninstall", Nonce, RecordedNodes.AirPods(), h.Nodes, h.Store, h.Log, steps);
+        GateRunContext ctx = h.Context("uninstall", steps);
 
         runner.Restore(ctx);
 
@@ -668,7 +671,7 @@ public sealed class ProtectionGateTests
         new(Path.Combine(h.Machine, DeviceChangeLock.FileName), FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
 
     [TestMethod]
-    public void WithoutAPairedBluetoothApiTheVerbsStayNotAvailable()
+    public void WithoutABluetoothApiTheVerbsStayNotAvailable()
     {
         using var h = new Harness(pair: false);
 
@@ -676,15 +679,22 @@ public sealed class ProtectionGateTests
         Assert.AreEqual(GateExitCode.NotAvailable, h.Run(GateVerbs.ProtectOff));
 
         Assert.IsEmpty(h.Bluetooth.Calls);
-        Assert.IsNull(GateBluetooth.For(RecordedNodes.Table()));
     }
 
     [TestMethod]
-    public void OnlyTheRealNodeApiGetsTheRealBluetoothApi()
+    public void OnlyTheRealNodeApiGoesWithTheRealBluetoothApi()
     {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        var log = new CapturingLog();
+
         // Constructing either API makes no native call.
-        Assert.IsInstanceOfType<BluetoothServiceApi>(GateBluetooth.For(new CfgMgr32NodeApi()));
-        Assert.ThrowsExactly<ArgumentException>(() => GateBluetooth.Pair(new CfgMgr32NodeApi(), FakeBluetoothServices.AirPods()));
+        Assert.IsInstanceOfType<BluetoothServiceApi>(GateActions.ForMachine(temp.Path, log).Bluetooth);
+        Assert.ThrowsExactly<ArgumentException>(() => new GateActions(RecordedNodes.Table(), store, new FakeFolderSecurity(), log, new ManualTime(), bluetooth: new BluetoothServiceApi()));
+        Assert.ThrowsExactly<ArgumentException>(() => new GateActions(new CfgMgr32NodeApi(), store, new FakeFolderSecurity(), log, new ManualTime(), bluetooth: FakeBluetoothServices.AirPods()));
+        Assert.ThrowsExactly<ArgumentException>(() => new GateRunContext("uninstall", Nonce, RecordedNodes.AirPods(), RecordedNodes.Table(), store, log, [], new BluetoothServiceApi()));
+        Assert.ThrowsExactly<ArgumentException>(() => new UninstallActions(new InstallLayout(temp.Path, temp.Path, temp.Path), new FakeFolderSecurity(),
+            RecordedNodes.Table(), new FakeTaskRegistrar(), new RebootDeleteRecorder(), log, bluetooth: new BluetoothServiceApi()));
     }
 
     [TestMethod]

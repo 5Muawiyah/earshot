@@ -183,17 +183,34 @@ public sealed class NodeStateReaderTests
     }
 
     [TestMethod]
-    public void FullyBlockedNeedsThePersistentFlagOnEveryPresentNode()
+    public void FullyBlockedNeedsThePersistentFlagOnEveryNode()
     {
         BluetoothNode persistent = Node(true, NodeBlockStatus.Disabled, persist: true);
         BluetoothNode temporary = Node(true, NodeBlockStatus.Disabled, persist: false);
         BluetoothNode gone = Node(false, NodeBlockStatus.Unknown);
+        BluetoothNode goneFlagged = Node(false, NodeBlockStatus.Unknown, persist: true);
 
-        Assert.IsTrue(BlockStateClassifier.IsFullyBlocked(Read(persistent, persistent, gone)));
+        Assert.IsTrue(BlockStateClassifier.IsFullyBlocked(Read(persistent, persistent, goneFlagged)));
         Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(Read(persistent, temporary)));
+        Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(Read(persistent, gone)), "A node that is not present and not flagged comes back enabled.");
         Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(Read(gone)));
         Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(new NodeReadResult(false, [persistent], [])));
         Assert.IsTrue(BlockStateClassifier.IsFullyAllowed(Read(Node(true, NodeBlockStatus.Enabled), gone)));
+        Assert.IsFalse(BlockStateClassifier.IsFullyAllowed(Read(Node(true, NodeBlockStatus.Enabled), goneFlagged)), "It would come back disabled.");
         Assert.IsFalse(BlockStateClassifier.IsFullyAllowed(Read(Node(true, NodeBlockStatus.Enabled, persist: true))));
+    }
+
+    // One rule for the check before a change and the read after it: the same nodes always give the same answer.
+    [TestMethod]
+    public void AnUnresolvedNodeIsOneThatComesBackInTheWrongState()
+    {
+        BluetoothNode gone = Node(false, NodeBlockStatus.Unknown);
+        BluetoothNode goneFlagged = Node(false, NodeBlockStatus.Unknown, persist: true);
+        BluetoothNode present = Node(true, NodeBlockStatus.Enabled);
+
+        Assert.IsTrue(BlockStateClassifier.AnyUnresolvedForBlock(Read(present, gone)));
+        Assert.IsFalse(BlockStateClassifier.AnyUnresolvedForBlock(Read(present, goneFlagged)));
+        Assert.IsTrue(BlockStateClassifier.AnyUnresolvedForAllow(Read(present, goneFlagged)));
+        Assert.IsFalse(BlockStateClassifier.AnyUnresolvedForAllow(Read(present, gone)));
     }
 }

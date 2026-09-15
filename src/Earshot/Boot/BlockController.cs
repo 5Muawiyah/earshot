@@ -75,6 +75,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string BlockedMessage = "Blocked at boot";
     internal const string AlreadyBlockedMessage = "Already blocked at boot";
     internal const string NotPersistentMessage = "Blocked for now, but it may not last a restart. Try again.";
+    internal const string AllowNotPersistentMessage = "Allowed for now, but the AirPods may be blocked again after a restart. Try again.";
     internal const string AllowedMessage = "Allowed";
     internal const string AlreadyAllowedMessage = "Already allowed";
     internal const string PartialBlockMessage = "Only part of the AirPods could be blocked. Try again.";
@@ -90,6 +91,8 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string InvalidAddressMessage = "That device address is not valid.";
     internal const string DeviceChosenMessage = "Device chosen";
     internal const string OtherDeviceBlockedMessage = "Allow the current AirPods first, then choose another device.";
+    internal const string OtherDeviceProtectedMessage = "Turn Protect audio quality off first, then choose another device.";
+    internal const string NotAudioSinkMessage = "That device cannot play audio from this PC. Choose headphones or speakers.";
     internal const string DeviceFailedMessage = "Could not choose that device. Try again.";
     internal const string NothingPinnedMessage = "Choose your AirPods first, then set up Earshot.";
     internal const string NoUserMessage = "Setup needs a signed-in Windows user.";
@@ -388,9 +391,11 @@ internal sealed class BlockController : IBlockController, IDisposable
         return Finish(verb, MapNodeResult(block, state, after, run.Outcome, steps));
     }
 
+    // The result of a block or an allow, from the node state read afterwards. A target that is not present is
+    // only in the way when the persistent disable flag says it would come back in the wrong state
+    // (BlockStateClassifier), so the same nodes always give the same answer.
     internal static ControllerResult MapNodeResult(bool block, BlockState state, NodeReadResult after, GateRunOutcome run, IReadOnlyList<StepOutcome> steps)
     {
-        bool anyNotPresent = after.Nodes.Any(n => !n.IsPresent);
         string failed = run switch
         {
             GateRunOutcome.TimedOut => TimedOutMessage,
@@ -414,19 +419,24 @@ internal sealed class BlockController : IBlockController, IDisposable
                 return new ControllerResult(OpStatus.Partial, block ? PartialBlockMessage : PartialAllowMessage, steps);
 
             case BlockState.Blocked when block:
-                if (!BlockStateClassifier.IsFullyBlocked(after))
+                if (BlockStateClassifier.AnyUnresolvedForBlock(after))
                 {
-                    return new ControllerResult(OpStatus.Partial, NotPersistentMessage, steps);
+                    return new ControllerResult(OpStatus.Partial, NotPresentBlockMessage, steps);
                 }
 
-                return anyNotPresent
-                    ? new ControllerResult(OpStatus.Partial, NotPresentBlockMessage, steps)
-                    : ControllerResult.Ok(BlockedMessage, steps);
+                return BlockStateClassifier.IsFullyBlocked(after)
+                    ? ControllerResult.Ok(BlockedMessage, steps)
+                    : new ControllerResult(OpStatus.Partial, NotPersistentMessage, steps);
 
             case BlockState.Allowed when !block:
-                return anyNotPresent
-                    ? new ControllerResult(OpStatus.Partial, NotPresentAllowMessage, steps)
-                    : ControllerResult.Ok(AllowedMessage, steps);
+                if (BlockStateClassifier.AnyUnresolvedForAllow(after))
+                {
+                    return new ControllerResult(OpStatus.Partial, NotPresentAllowMessage, steps);
+                }
+
+                return BlockStateClassifier.IsFullyAllowed(after)
+                    ? ControllerResult.Ok(AllowedMessage, steps)
+                    : new ControllerResult(OpStatus.Partial, AllowNotPersistentMessage, steps);
 
             default:
                 return ControllerResult.Fail(failed, steps);
@@ -508,6 +518,8 @@ internal sealed class BlockController : IBlockController, IDisposable
         string message = run.Status?.ExitCode switch
         {
             (int)GateExitCode.OtherDeviceBlocked => OtherDeviceBlockedMessage,
+            (int)GateExitCode.OtherDeviceProtected => OtherDeviceProtectedMessage,
+            (int)GateExitCode.NotAudioSink => NotAudioSinkMessage,
             (int)GateExitCode.NotFound => NotFoundMessage,
             _ => run.Outcome == GateRunOutcome.TimedOut ? TimedOutMessage : DeviceFailedMessage,
         };

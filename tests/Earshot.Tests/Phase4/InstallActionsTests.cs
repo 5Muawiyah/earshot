@@ -78,6 +78,12 @@ public sealed class InstallActionsTests
             .Where(d => Path.GetFileName(d).StartsWith("Earshot.", StringComparison.Ordinal))
             .ToArray();
 
+    private static readonly Guid Handsfree = new("0000111E-0000-1000-8000-00805F9B34FB");
+
+    private static readonly string[] KeptRecordFiles = ["device.json", "protection.json"];
+
+    private static readonly string[] ProtectionRecordOnly = ["protection.json"];
+
     private static string Fail(InstallResult result) =>
         string.Join(Environment.NewLine, result.Steps.Where(s => !s.Ok).Select(GateActions.Describe));
 
@@ -443,24 +449,32 @@ public sealed class InstallActionsTests
         Assert.IsFalse(h.Tasks.FolderExists, "The rest still runs.");
     }
 
+    // Without a Bluetooth service API in the context the restore hook reports not available, whatever the node
+    // table is; the record is then kept.
     [TestMethod]
-    public void UninstallCannotRestoreRecordedServicesWithoutTheProtectionFeature()
+    public void UninstallCannotRestoreRecordedServicesWithoutABluetoothApi()
     {
         using var h = new Harness();
         Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
-        Assert.IsTrue(new GateStore(h.Machine).WriteProtection(new ProtectionRecord { DisabledServices = { new Guid("0000111E-0000-1000-8000-00805F9B34FB") } }).Ok);
+        Assert.IsTrue(new GateStore(h.Machine).WriteProtection(new ProtectionRecord { DisabledServices = { Handsfree } }).Ok);
 
         InstallResult result = h.RunUninstall();
 
         Assert.AreEqual(GateExitCode.Partial, result.Outcome);
         Assert.AreEqual(NativeCodes.NotAvailable, result.Steps.Single(s => s.Step == "protection-restore").Code);
+        CollectionAssert.AreEquivalent(KeptRecordFiles, Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray(),
+            "Only the records stay; the status files and config go.");
     }
 
+    // The only record of what to allow and what to turn back on is in the machine folder, so a reversal that
+    // did not finish keeps it (and nothing else) for another try.
     [TestMethod]
-    public void UninstallReportsANodeThatWouldNotEnable()
+    public void UninstallReportsANodeThatWouldNotEnableAndKeepsTheRecords()
     {
         using var h = new Harness();
         Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        var store = new GateStore(h.Machine);
+        Assert.IsTrue(store.WriteProtection(new ProtectionRecord { DisabledServices = { Handsfree } }).Ok);
         h.Nodes[RecordedNodes.AirPodsDeviceNode].MarkDisabled(persistent: true);
         h.Nodes[RecordedNodes.AirPodsDeviceNode].EnableResult = CfgMgr32.CR_ACCESS_DENIED;
 
@@ -468,6 +482,28 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Partial, result.Outcome);
         Assert.AreEqual("CR_ACCESS_DENIED", result.Steps.Single(s => s.Step == "cm-enable:" + RecordedNodes.AirPodsDeviceNode).CodeName);
+        Assert.IsTrue(Directory.Exists(h.Machine));
+        CollectionAssert.AreEquivalent(KeptRecordFiles, Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray());
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, store.ReadDevice().Value!.Address);
+        CollectionAssert.AreEqual(new[] { Handsfree }, store.ReadProtection().Value!.DisabledServices);
+        StringAssert.Contains(result.Steps.Last(s => s.Step == "remove-machine-folder").Detail, "is kept with device.json and protection.json");
+        Assert.IsFalse(h.Tasks.FolderExists, "The tasks are still removed.");
+        Assert.IsFalse(Directory.Exists(h.Install), "The install folder is still removed.");
+    }
+
+    [TestMethod]
+    public void UninstallKeepsTheProtectionRecordEvenWithoutADeviceFile()
+    {
+        using var h = new Harness();
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        Assert.IsTrue(new GateStore(h.Machine).WriteProtection(new ProtectionRecord { DisabledServices = { Handsfree } }).Ok);
+        File.Delete(new GateStore(h.Machine).DeviceFile);
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome);
+        CollectionAssert.AreEquivalent(ProtectionRecordOnly, Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray());
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "protection-restore").Detail, "device.json is missing");
     }
 
     [TestMethod]

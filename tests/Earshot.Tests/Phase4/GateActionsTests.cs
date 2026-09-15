@@ -15,18 +15,19 @@ public sealed class GateActionsTests
     {
         private readonly TempFolder _temp = new();
 
-        public Harness()
+        public Harness(FakeNodeApi? nodes = null)
         {
             Machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
             Directory.CreateDirectory(Machine);
             Store = new GateStore(Machine);
+            Nodes = nodes ?? RecordedNodes.Table();
         }
 
         public string Machine { get; }
 
         public GateStore Store { get; }
 
-        public FakeNodeApi Nodes { get; } = RecordedNodes.Table();
+        public FakeNodeApi Nodes { get; }
 
         public FakeFolderSecurity Folders { get; } = new();
 
@@ -237,6 +238,54 @@ public sealed class GateActionsTests
         Assert.AreEqual(nameof(BlockState.Allowed), h.Status().State);
     }
 
+    // CM_DISABLE_PERSIST works by setting CONFIGFLAG_DISABLED, so a node that is enabled now but still carries
+    // the flag would come back disabled at the next restart. Allow clears it rather than call it already enabled.
+    [TestMethod]
+    public void AllowAlsoEnablesANodeThatIsEnabledButStillMarkedDisabled()
+    {
+        using var h = new Harness();
+        h.Pin(RecordedNodes.AirPods());
+        h.Nodes[RecordedNodes.AirPodsDeviceNode].ConfigFlags |= CfgMgr32.CONFIGFLAG_DISABLED;
+
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.Allow));
+
+        Assert.HasCount(1, h.Nodes.Calls);
+        Assert.AreEqual(RecordedNodes.AirPodsDeviceNode, h.Nodes.Calls[0].InstanceId);
+        Assert.AreEqual("enable", h.Nodes.Calls[0].Kind);
+        Assert.AreEqual(0u, h.Nodes[RecordedNodes.AirPodsDeviceNode].ConfigFlags);
+        Assert.AreEqual(nameof(BlockState.Allowed), h.Status().State);
+    }
+
+    [TestMethod]
+    public void AnEnableThatLeavesTheNodeMarkedDisabledIsAFailure()
+    {
+        using var h = new Harness();
+        h.Pin(RecordedNodes.AirPods());
+        FakeNode node = h.Nodes[RecordedNodes.AirPodsDeviceNode];
+        node.MarkDisabled(persistent: true);
+        node.KeepConfigFlagsOnEnable = true;
+
+        Assert.AreEqual(GateExitCode.Partial, h.Run(GateVerbs.Allow));
+
+        StepOutcome kept = h.Status().Steps.Last(s => s.Step == "cm-enable:" + RecordedNodes.AirPodsDeviceNode);
+        Assert.IsFalse(kept.Ok);
+        Assert.Contains("still marked disabled", kept.Detail!);
+    }
+
+    [TestMethod]
+    public void AllowCountsANonPresentNodeThatIsStillMarkedDisabledAsAFailure()
+    {
+        using var h = new Harness();
+        h.Pin(RecordedNodes.AirPods());
+        FakeNode node = h.Nodes[RecordedNodes.AirPodsTargets[2]];
+        node.MarkDisabled(persistent: true);
+        node.Present = false;
+
+        Assert.AreEqual(GateExitCode.Partial, h.Run(GateVerbs.Allow));
+
+        Assert.Contains("may come back disabled", h.Status().Steps.Last(s => s.Step == "cm-enable:" + node.InstanceId).Detail!);
+    }
+
     [TestMethod]
     public void AllowReportsAnEnableFailure()
     {
@@ -294,10 +343,63 @@ public sealed class GateActionsTests
     [TestMethod]
     public void SetDeviceMatchesTheDeviceNodeWhateverItsCase()
     {
-        using var h = new Harness();
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
 
-        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.IPhoneAddress));
-        Assert.AreEqual(RecordedNodes.IPhoneContainer, h.Store.ReadDevice().Value!.ContainerId);
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+        Assert.AreEqual(RecordedNodes.HeadphonesContainer, h.Store.ReadDevice().Value!.ContainerId, "The lower-case node ids match.");
+    }
+
+    // A phone has no A2DP sink node, so the gate never pins one even though it has BTHENUM nodes with its
+    // address: blocking it would take it away from the PC it is paired with.
+    [TestMethod]
+    public void SetDeviceRefusesADeviceThatCannotReceiveAudio()
+    {
+        using var h = new Harness();
+        h.Pin(RecordedNodes.AirPods());
+
+        Assert.AreEqual(GateExitCode.NotAudioSink, h.Run(GateVerbs.SetDevice, RecordedNodes.IPhoneAddress));
+
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address, "The pin is unchanged.");
+        Assert.Contains("not headphones or speakers", h.Status().Steps.Last(s => s.Step == "set-device").Detail!);
+        Assert.IsEmpty(h.Nodes.Calls);
+    }
+
+    [TestMethod]
+    public void SetDeviceRefusesToMoveThePinWhileProtectionListsServices()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        h.Pin(RecordedNodes.AirPods());
+        Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord { DisabledServices = { new Guid("0000111E-0000-1000-8000-00805F9B34FB") } }).Ok);
+
+        Assert.AreEqual(GateExitCode.OtherDeviceProtected, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
+        Assert.Contains("Turn Protect audio quality off first", h.Status().Steps.Last(s => s.Step == "set-device").Detail!);
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.AirPodsAddress), "Re-pinning the same device is fine.");
+    }
+
+    [TestMethod]
+    public void SetDeviceRefusesToMoveThePinWhileProtectionCannotBeRead()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        h.Pin(RecordedNodes.AirPods());
+        File.WriteAllText(h.Store.ProtectionFile, "{ not json");
+
+        Assert.AreEqual(GateExitCode.OtherDeviceProtected, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
+    }
+
+    [TestMethod]
+    public void SetDeviceMovesThePinWhenNothingIsRecordedOrBlocked()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        h.Pin(RecordedNodes.AirPods());
+        Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord()).Ok);
+
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+
+        Assert.AreEqual(RecordedNodes.HeadphonesContainer, h.Store.ReadDevice().Value!.ContainerId);
     }
 
     [TestMethod]
@@ -322,11 +424,11 @@ public sealed class GateActionsTests
     [TestMethod]
     public void SetDeviceRefusesToLeaveTheCurrentDeviceBlocked()
     {
-        using var h = new Harness();
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
         h.Pin(RecordedNodes.AirPods());
         h.Nodes[RecordedNodes.AirPodsTargets[3]].MarkDisabled(persistent: true);
 
-        Assert.AreEqual(GateExitCode.OtherDeviceBlocked, h.Run(GateVerbs.SetDevice, RecordedNodes.IPhoneAddress));
+        Assert.AreEqual(GateExitCode.OtherDeviceBlocked, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
         Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
 
         Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.AirPodsAddress), "Re-pinning the same device is fine.");

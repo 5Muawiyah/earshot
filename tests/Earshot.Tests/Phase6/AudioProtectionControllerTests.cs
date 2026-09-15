@@ -31,7 +31,6 @@ public sealed class AudioProtectionControllerTests
             Store = new GateStore(machine);
             Settings.Current.PinnedAddress = RecordedNodes.AirPodsAddress;
             Settings.Current.PinnedContainerId = RecordedNodes.AirPodsContainer;
-            GateBluetooth.Pair(Nodes, Bluetooth);
             if (setUp)
             {
                 Tasks.InstallAll(InstallFolder);
@@ -112,7 +111,7 @@ public sealed class AudioProtectionControllerTests
             int exit = 0;
             if (GateActs)
             {
-                exit = (int)new GateActions(Nodes, Store, new FakeFolderSecurity(), Log, Time)
+                exit = (int)new GateActions(Nodes, Store, new FakeFolderSecurity(), Log, Time, bluetooth: Bluetooth)
                     .Run(new GateRequest(parameters[0], parameters[1], null, GateMode.Protect));
             }
 

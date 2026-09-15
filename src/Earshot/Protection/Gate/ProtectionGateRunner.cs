@@ -1,45 +1,11 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Interop;
 
 namespace Earshot.AudioProtection.Gate;
-
-// Which Bluetooth service API goes with a gate's node API. The gate checks the device nodes through its node
-// API before any service call, so the two must describe the same machine: the real CfgMgr32 node API gets the
-// real Bluetooth API, and any other node API (a test's fake node table) gets only the Bluetooth API paired
-// with it. A gate built over fake nodes therefore can never reach a real BluetoothSetServiceState call; with
-// nothing paired, the protect verbs stay not available.
-internal static class GateBluetooth
-{
-    private static readonly ConditionalWeakTable<INodeApi, IBluetoothServiceApi> Paired = new();
-
-    public static IBluetoothServiceApi? For(INodeApi nodes)
-    {
-        ArgumentNullException.ThrowIfNull(nodes);
-        if (nodes is CfgMgr32NodeApi)
-        {
-            return new BluetoothServiceApi();
-        }
-
-        return Paired.TryGetValue(nodes, out IBluetoothServiceApi? services) ? services : null;
-    }
-
-    public static void Pair(INodeApi nodes, IBluetoothServiceApi services)
-    {
-        ArgumentNullException.ThrowIfNull(nodes);
-        ArgumentNullException.ThrowIfNull(services);
-        if (nodes is CfgMgr32NodeApi)
-        {
-            throw new ArgumentException("The real node API always uses the real Bluetooth API.", nameof(nodes));
-        }
-
-        Paired.AddOrUpdate(nodes, services);
-    }
-}
 
 // protect-on, protect-off and the uninstall restore, inside the gate (SYSTEM, or the elevated uninstall).
 // Identity is only ever the validated device.json in the context.

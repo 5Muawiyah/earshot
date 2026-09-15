@@ -359,22 +359,40 @@ internal static class BlockStateClassifier
         return disabled > 0 ? BlockState.Blocked : BlockState.Allowed;
     }
 
-    // True when every present target is disabled with the persistent flag and none is enabled or unreadable,
-    // so a block request has nothing to do.
+    // True when every target would come up disabled after a restart: every present one disabled with the
+    // persistent flag, and every non-present one carrying the flag. One rule for the check before a block and
+    // for the result read after it, so repeated blocks cannot alternate between "already blocked" and a
+    // failure over the same nodes.
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-device-configflags
     public static bool IsFullyBlocked(NodeReadResult read)
     {
         ArgumentNullException.ThrowIfNull(read);
-        var present = read.Nodes.Where(n => n.IsPresent).ToList();
-        return read.Listed && present.Count > 0 &&
-               present.All(n => n.Status == NodeBlockStatus.Disabled && n.ConfigFlagsDisabledBit);
+        return read.Listed && read.Nodes.Count > 0 &&
+               read.Nodes.All(n => n.IsPresent ? n.Status == NodeBlockStatus.Disabled && n.ConfigFlagsDisabledBit : n.ConfigFlagsDisabledBit);
     }
 
-    // True when every present target is enabled and none carries the persistent disable flag.
+    // True when every target would come up enabled after a restart: every present one enabled, and no target,
+    // present or not, carrying the persistent disable flag.
     public static bool IsFullyAllowed(NodeReadResult read)
     {
         ArgumentNullException.ThrowIfNull(read);
-        var present = read.Nodes.Where(n => n.IsPresent).ToList();
-        return read.Listed && present.Count > 0 &&
-               present.All(n => n.Status == NodeBlockStatus.Enabled && !n.ConfigFlagsDisabledBit);
+        return read.Listed && read.Nodes.Count > 0 &&
+               read.Nodes.All(n => n.IsPresent ? n.Status == NodeBlockStatus.Enabled && !n.ConfigFlagsDisabledBit : !n.ConfigFlagsDisabledBit);
+    }
+
+    // A target that is not present and does not carry the persistent disable flag: it cannot be changed now,
+    // and it comes back in the state the flag says, so a block cannot finish while one is there.
+    public static bool AnyUnresolvedForBlock(NodeReadResult read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        return read.Nodes.Any(n => !n.IsPresent && !n.ConfigFlagsDisabledBit);
+    }
+
+    // A target that is not present and still carries the flag: an allow cannot reach it, so it would come back
+    // disabled.
+    public static bool AnyUnresolvedForAllow(NodeReadResult read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        return read.Nodes.Any(n => !n.IsPresent && n.ConfigFlagsDisabledBit);
     }
 }

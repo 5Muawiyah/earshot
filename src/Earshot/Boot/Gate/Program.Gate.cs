@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
+using Earshot.AudioProtection;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
@@ -55,7 +56,7 @@ internal static partial class Program
         ctx.ExitCode = (int)RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
         {
             using var worker = new SystemWorker(log);
-            return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex()).Run())
+            return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(), new BluetoothServiceApi()).Run())
                 .GetAwaiter().GetResult();
         });
     }

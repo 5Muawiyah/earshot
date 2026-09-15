@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Interop;
 
@@ -36,12 +37,15 @@ internal sealed partial class MoveFileRebootDelete : IRebootDelete
 // stop the ones after it, so as much as possible is undone:
 //   1. read %ProgramData%\Earshot's security back; a folder that fails the check is not trusted, so its
 //      files are not read, no node or service is changed from them, and the folder is not deleted;
-//   2. enable every target node at problem 22, using the identity in device.json;
+//   2. enable every target node that is disabled or still carries the persistent disable flag, using the
+//      identity in device.json;
 //   3. re-enable the Bluetooth services protection.json lists (the protection feature's hook);
 //      steps 2 and 3 run inside the machine-wide gate run lock and the device change lock, so they never
 //      overlap a gate run, a node change or a service change; without both locks neither step runs;
 //   4. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder;
-//   5. remove %ProgramData%\Earshot;
+//   5. remove %ProgramData%\Earshot, unless step 2 or 3 did not finish: then device.json and protection.json are
+//      the only record of what to allow and turn back on, so the folder (still protected) is kept with those
+//      two files and everything else in it is removed, and uninstall can be run again;
 //   6. remove %ProgramFiles%\Earshot after the same kind of check, or schedule it for the next restart when
 //      it is in use (for example when uninstall runs from that copy).
 // A folder is only deleted from this elevated process after its security shows no one but administrators
@@ -64,18 +68,25 @@ internal sealed class UninstallActions
     // PT5M limit, so a protect verb that holds either has finished or been stopped by the scheduler.
     public static readonly TimeSpan LockWait = TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(15);
 
-    // runLock null: no machine-wide lock, for a test's fake node table. Program passes the mutex.
+    private readonly IBluetoothServiceApi? _bluetooth;
+
+    // The files kept when a node or a service could not be restored.
+    internal static readonly IReadOnlySet<string> KeptRecords =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "device.json", "protection.json" };
+
+    // runLock null: no machine-wide lock, for a test's fake node table. bluetooth null: the protection restore is
+    // not available. Program passes the mutex and the real Bluetooth API.
     public UninstallActions(
         InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log,
-        IGateRunLock? runLock = null)
-        : this(layout, folders, nodes, tasks, rebootDelete, log, runLock, DeviceChangeLock.SleepAndContinue, LockWait)
+        IGateRunLock? runLock = null, IBluetoothServiceApi? bluetooth = null)
+        : this(layout, folders, nodes, tasks, rebootDelete, log, runLock, DeviceChangeLock.SleepAndContinue, LockWait, bluetooth)
     {
     }
 
     // For tests: the wait between device change lock attempts and how long to wait.
     internal UninstallActions(
         InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log,
-        IGateRunLock? runLock, Func<TimeSpan, bool> wait, TimeSpan lockWait)
+        IGateRunLock? runLock, Func<TimeSpan, bool> wait, TimeSpan lockWait, IBluetoothServiceApi? bluetooth = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(folders);
@@ -84,6 +95,7 @@ internal sealed class UninstallActions
         ArgumentNullException.ThrowIfNull(rebootDelete);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(wait);
+        GateActions.RequireSameMachine(nodes, bluetooth);
         _layout = layout;
         _folders = folders;
         _nodes = nodes;
@@ -93,6 +105,7 @@ internal sealed class UninstallActions
         _runLock = runLock ?? NoGateRunLock.Instance;
         _wait = wait;
         _lockWait = lockWait;
+        _bluetooth = bluetooth;
     }
 
     internal IGateRunLock RunLock => _runLock;
@@ -106,6 +119,9 @@ internal sealed class UninstallActions
         bool machineTrusted = machineExists &&
                               FolderTrust.IsTrusted(_folders, machine, AclCheck.CheckMachineFolder, "machine-folder-acl", steps);
 
+        // False when a node or a service may still need restoring, so its record must stay.
+        bool nodesRestored = true;
+        bool servicesRestored = true;
         if (machineTrusted)
         {
             var store = new GateStore(machine);
@@ -122,12 +138,13 @@ internal sealed class UninstallActions
                 {
                     steps.Add(StepOutcomes.NotAttempted("allow-nodes",
                         "The Earshot change locks could not be taken, so no node or service was changed. Run uninstall again."));
-                    complete = false;
+                    nodesRestored = false;
+                    servicesRestored = ProtectionRecordIsEmpty(store, steps);
                 }
                 else
                 {
-                    complete &= AllowNodes(identity.Value, steps);
-                    complete &= RestoreProtection(identity.Value, store, steps);
+                    nodesRestored = AllowNodes(identity.Value, steps);
+                    servicesRestored = RestoreProtection(identity.Value, store, steps);
                 }
             }
             else if (identity.Status != GateReadStatus.Missing)
@@ -135,7 +152,22 @@ internal sealed class UninstallActions
                 // Without a trusted identity no node is changed; say so rather than guess.
                 steps.Add(StepOutcomes.NotAttempted("allow-nodes", "device.json is not valid, so no node was enabled."));
                 complete = false;
+                servicesRestored = ProtectionRecordIsEmpty(store, steps);
+                if (!servicesRestored)
+                {
+                    steps.Add(StepOutcomes.NotAttempted("protection-restore", "device.json is not valid, so no service was turned back on."));
+                }
             }
+            else
+            {
+                servicesRestored = ProtectionRecordIsEmpty(store, steps);
+                if (!servicesRestored)
+                {
+                    steps.Add(StepOutcomes.NotAttempted("protection-restore", "device.json is missing, so no service was turned back on."));
+                }
+            }
+
+            complete &= nodesRestored && servicesRestored;
         }
         else if (machineExists)
         {
@@ -146,9 +178,14 @@ internal sealed class UninstallActions
 
         complete &= RemoveTasks(steps);
 
-        if (machineTrusted)
+        if (machineTrusted && nodesRestored && servicesRestored)
         {
             complete &= FileSteps.DeleteTree(machine, "remove-machine-folder", steps);
+        }
+        else if (machineTrusted)
+        {
+            KeepRecords(machine, steps);
+            complete = false;
         }
         else if (machineExists)
         {
@@ -162,6 +199,7 @@ internal sealed class UninstallActions
         return new InstallResult(complete ? GateExitCode.Success : GateExitCode.Partial, steps);
     }
 
+    // Complete when every target is enabled without the persistent disable flag, or not present without it.
     private bool AllowNodes(DeviceIdentity identity, List<StepOutcome> steps)
     {
         NodeScanResult scan = NodeScan.FindTargets(_nodes, identity.ContainerId, identity.Address);
@@ -178,31 +216,95 @@ internal sealed class UninstallActions
         }
 
         NodeChangeSummary summary = GateActions.ApplyAllow(_nodes, scan.Targets, steps);
-        return summary.Outcome == GateExitCode.Success;
+        return summary.Failed == 0;
     }
 
     private bool RestoreProtection(DeviceIdentity identity, GateStore store, List<StepOutcome> steps)
     {
-        var ctx = new GateRunContext("uninstall", Guid.NewGuid().ToString("N"), identity, _nodes, store, _log, steps);
+        var ctx = new GateRunContext("uninstall", Guid.NewGuid().ToString("N"), identity, _nodes, store, _log, steps, _bluetooth);
         if (GateActions.TryRestoreProtection(ctx))
         {
             return ctx.Outcome == GateExitCode.Success;
         }
 
-        GateRead<ProtectionRecord> record = store.ReadProtection();
-        if (record.Status == GateReadStatus.Missing)
-        {
-            return true;
-        }
-
-        steps.Add(record.Step);
-        if (record.IsOk && record.Value is { DisabledServices.Count: 0 })
+        if (ProtectionRecordIsEmpty(store, steps))
         {
             return true;
         }
 
         steps.Add(StepOutcomes.NotAvailable("protection-restore", "This build cannot re-enable the services in protection.json."));
         return false;
+    }
+
+    // True when protection.json is missing or lists no service. An unreadable or invalid file is not empty: it
+    // may be the only record of what to turn back on.
+    private static bool ProtectionRecordIsEmpty(GateStore store, List<StepOutcome> steps)
+    {
+        GateRead<ProtectionRecord> record = store.ReadProtection();
+        if (record.Status == GateReadStatus.Missing)
+        {
+            return true;
+        }
+
+        if (record.IsOk && record.Value is { DisabledServices.Count: 0 })
+        {
+            return true;
+        }
+
+        steps.Add(record.Step);
+        return false;
+    }
+
+    // Keeps the machine folder with device.json and protection.json and removes everything else in it. The
+    // folder's security was read back, so nobody but administrators can swap an entry while this runs.
+    private static void KeepRecords(string machine, List<StepOutcome> steps)
+    {
+        List<FileSystemInfo> entries;
+        try
+        {
+            entries = new DirectoryInfo(machine).EnumerateFileSystemInfos().ToList();
+        }
+        catch (IOException ex)
+        {
+            steps.Add(StepOutcomes.FromHResult("remove-machine-folder", ex.HResult, machine + ": " + ex.Message));
+            entries = [];
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            steps.Add(StepOutcomes.FromHResult("remove-machine-folder", ex.HResult, machine + ": " + ex.Message));
+            entries = [];
+        }
+
+        foreach (FileSystemInfo entry in entries)
+        {
+            if (entry is DirectoryInfo folder)
+            {
+                FileSteps.DeleteTree(folder.FullName, "remove-machine-folder", steps);
+                continue;
+            }
+
+            if (KeptRecords.Contains(entry.Name))
+            {
+                continue;
+            }
+
+            try
+            {
+                entry.Delete();
+            }
+            catch (IOException ex)
+            {
+                steps.Add(StepOutcomes.FromHResult("remove-machine-folder", ex.HResult, entry.FullName + ": " + ex.Message));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                steps.Add(StepOutcomes.FromHResult("remove-machine-folder", ex.HResult, entry.FullName + ": " + ex.Message));
+            }
+        }
+
+        steps.Add(StepOutcomes.NotAttempted("remove-machine-folder",
+            machine + " is kept with device.json and protection.json, because a device node or a Bluetooth service could not be " +
+            "restored. Run uninstall again, or turn Handsfree back on in Windows Bluetooth settings."));
     }
 
     private bool RemoveTasks(List<StepOutcome> steps)
