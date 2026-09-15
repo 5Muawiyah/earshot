@@ -26,6 +26,21 @@ internal static partial class NativeMethods
     // AttachConsole fails with this when the process already has a console.
     internal const int ERROR_ACCESS_DENIED = 5;
 
+    // GetStdHandle: standard output is (DWORD)-11. The call returns NULL when the process has no
+    // standard handle (a Windows-subsystem program started without redirection) and
+    // INVALID_HANDLE_VALUE when it fails.
+    // https://learn.microsoft.com/en-us/windows/console/getstdhandle
+    internal const uint STD_OUTPUT_HANDLE = 0xFFFFFFF5;
+    internal const nint INVALID_HANDLE_VALUE = -1;
+
+    // GetFileType results. FILE_TYPE_UNKNOWN is also returned when the call fails.
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfiletype
+    internal const uint FILE_TYPE_UNKNOWN = 0x0000;
+    internal const uint FILE_TYPE_DISK = 0x0001;
+    internal const uint FILE_TYPE_CHAR = 0x0002;
+    internal const uint FILE_TYPE_PIPE = 0x0003;
+    internal const uint FILE_TYPE_REMOTE = 0x8000;
+
     // Window messages (WinUser.h).
     // WM_QUERYENDSESSION: return TRUE at once and defer work; a windowless app is killed about 5 s in and
     // EWX_FORCE sends no query at all.
@@ -95,6 +110,14 @@ internal static partial class NativeMethods
     [LibraryImport(Kernel32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool AttachConsole(uint processId);
+
+    // https://learn.microsoft.com/en-us/windows/console/getstdhandle
+    [LibraryImport(Kernel32, SetLastError = true)]
+    internal static partial nint GetStdHandle(uint nStdHandle);
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfiletype
+    [LibraryImport(Kernel32, SetLastError = true)]
+    internal static partial uint GetFileType(nint hFile);
 
     // Closes a kernel handle, such as a Bluetooth radio handle from BluetoothFindFirstRadio.
     // https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle

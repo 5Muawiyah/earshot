@@ -185,6 +185,14 @@ public sealed class InteropConstantsTests
     [DataRow(typeof(NativeMethods), "WS_EX_TOPMOST", 0x00000008L)]
     [DataRow(typeof(NativeMethods), "SWP_NOACTIVATE", 0x0010L)]
     [DataRow(typeof(NativeMethods), "SWP_NOZORDER", 0x0004L)]
+    [DataRow(typeof(NativeMethods), "ATTACH_PARENT_PROCESS", 4294967295L)]
+    [DataRow(typeof(NativeMethods), "ERROR_ACCESS_DENIED", 5L)]
+    [DataRow(typeof(NativeMethods), "STD_OUTPUT_HANDLE", 4294967285L)]
+    [DataRow(typeof(NativeMethods), "FILE_TYPE_UNKNOWN", 0x0000L)]
+    [DataRow(typeof(NativeMethods), "FILE_TYPE_DISK", 0x0001L)]
+    [DataRow(typeof(NativeMethods), "FILE_TYPE_CHAR", 0x0002L)]
+    [DataRow(typeof(NativeMethods), "FILE_TYPE_PIPE", 0x0003L)]
+    [DataRow(typeof(NativeMethods), "FILE_TYPE_REMOTE", 0x8000L)]
     [DataRow(typeof(Shell), "ABM_GETTASKBARPOS", 5L)]
     [DataRow(typeof(Shell), "SM_CXSMICON", 49L)]
     [DataRow(typeof(Shell), "MDT_EFFECTIVE_DPI", 0L)]
@@ -214,6 +222,13 @@ public sealed class InteropConstantsTests
         nint notTopmost = NativeMethods.HWND_NOTOPMOST;
         Assert.AreEqual(-1L, (long)topmost);
         Assert.AreEqual(-2L, (long)notTopmost);
+    }
+
+    [TestMethod]
+    public void InvalidHandleValueIsMinusOne()
+    {
+        nint invalid = NativeMethods.INVALID_HANDLE_VALUE;
+        Assert.AreEqual(-1L, (long)invalid);
     }
 
     [TestMethod]
