@@ -247,3 +247,106 @@ internal sealed class RebootDeleteRecorder : IRebootDelete
         return StepOutcomes.FromWin32("delete-at-restart", 0, path);
     }
 }
+
+// An in-memory Task Scheduler for the tray side. ReadRunState returns the queued states in turn and then
+// repeats the last one; Run records the parameters and calls OnRun, which a test uses to play the gate.
+internal sealed class FakeScheduledTasks : IScheduledTasks
+{
+    public Dictionary<string, TaskReadback> Tasks { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public int ReadResult { get; set; }
+
+    public int RunResult { get; set; }
+
+    public List<string[]> Runs { get; } = new();
+
+    public Action<string[]>? OnRun { get; set; }
+
+    public Queue<TaskRunState> States { get; } = new();
+
+    public TaskRunState Current { get; set; } = new(TaskSchedulerCom.TASK_STATE_READY, 0, 1000);
+
+    public static TaskReadback Healthy(string taskName, string installFolder, TaskPrincipalMode mode = TaskPrincipalMode.System)
+    {
+        TaskSpec spec = TaskPlan.Spec(taskName, installFolder, TestUsers.Sid, mode);
+        return new TaskReadback(spec.Sddl, TaskXml.For(spec), TaskSchedulerCom.TASK_STATE_READY, 0, 1000, []);
+    }
+
+    public void InstallAll(string installFolder)
+    {
+        foreach (string name in TaskPlan.TaskNames)
+        {
+            Tasks[TaskPlan.TaskPath(name)] = Healthy(name, installFolder);
+        }
+    }
+
+    public int ReadTask(string taskPath, out TaskReadback? task)
+    {
+        task = null;
+        if (ReadResult < 0)
+        {
+            return ReadResult;
+        }
+
+        if (!Tasks.TryGetValue(taskPath, out TaskReadback? found))
+        {
+            return FakeTaskRegistrar.NotFound;
+        }
+
+        task = found with { State = Current.State, LastTaskResult = Current.LastTaskResult, LastRunTime = Current.LastRunTime };
+        return 0;
+    }
+
+    public int ReadRunState(string taskPath, out TaskRunState? state)
+    {
+        if (States.Count > 0)
+        {
+            Current = States.Dequeue();
+        }
+
+        state = Current;
+        return Tasks.ContainsKey(taskPath) ? 0 : FakeTaskRegistrar.NotFound;
+    }
+
+    public int Run(string taskPath, string[] parameters)
+    {
+        Runs.Add(parameters);
+        if (RunResult < 0)
+        {
+            return RunResult;
+        }
+
+        OnRun?.Invoke(parameters);
+        return RunResult;
+    }
+}
+
+internal sealed class FakeSettings : ISettingsStore
+{
+    public EarshotSettings Current { get; set; } = new();
+
+    public event EventHandler<EarshotSettings>? Changed
+    {
+        add { }
+        remove { }
+    }
+
+    public void Update(Action<EarshotSettings> mutate) => mutate(Current);
+
+    public void Reload()
+    {
+    }
+}
+
+internal sealed class FakeLauncher : IElevatedLauncher
+{
+    public List<(string Executable, string Arguments)> Launches { get; } = new();
+
+    public Func<string, ElevatedRun> Result { get; set; } = _ => new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0));
+
+    public Task<ElevatedRun> RunAsync(string executable, string arguments, CancellationToken ct)
+    {
+        Launches.Add((executable, arguments));
+        return Task.FromResult(Result(arguments));
+    }
+}
