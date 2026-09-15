@@ -20,7 +20,17 @@ internal enum ProtectionAction
     ProtectOff,     // gate protect-off
     BlockNodes,     // gate block
     AllowNodes,     // gate allow
-    StoreIntent,    // keep the wanted protection state for the next allow
+
+    // A target node is disabled (Blocked or Mixed). Run the protect verb for the wanted state anyway: the gate
+    // reads the nodes again and, while one is still disabled, changes no service and keeps the wanted state
+    // in protection-intent.json (GetPendingIntentAsync reports it) for the next allow. If the nodes were
+    // allowed in the meantime, the gate applies the change there and then.
+    StoreIntent,
+
+    // The node state could not be read (Unknown). The gate is not asked, since it would change nothing and
+    // keep nothing while the nodes are unreadable or not present. The caller keeps the wanted state (the
+    // user's setting) as pending itself and passes IntentPending true until an Allow or Reverify applies it.
+    KeepIntent,
 }
 
 // The device nodes as far as protection cares. Mixed means at least one target node is disabled, which is
@@ -28,7 +38,8 @@ internal enum ProtectionAction
 internal enum NodePhase { Allowed, Blocked, Mixed, Unknown }
 
 // What is known now. Nodes and Services are the latest reads; Protect is the user's intent; IntentPending
-// is true when that intent was stored while blocked and has not been applied yet.
+// is true when that intent was kept while it could not be applied (in protection-intent.json after
+// StoreIntent, or by the caller after KeepIntent) and has not been applied yet.
 internal sealed record ProtectionFacts(NodePhase Nodes, AudioProtectionState Services, bool Protect, bool IntentPending);
 
 // What this sequence has already done. Each device change runs at most once per sequence, so a change
@@ -40,7 +51,7 @@ internal readonly record struct ProtectionProgress(bool ServicesFresh, bool Serv
         ProtectionAction.ReadServices => this with { ServicesFresh = true },
         ProtectionAction.ProtectOn or ProtectionAction.ProtectOff => this with { ServicesFresh = false, ServiceChangeTried = true },
         ProtectionAction.BlockNodes or ProtectionAction.AllowNodes => this with { ServicesFresh = false, NodeChangeTried = true },
-        ProtectionAction.StoreIntent => this with { IntentStored = true },
+        ProtectionAction.StoreIntent or ProtectionAction.KeepIntent => this with { IntentStored = true },
         _ => this,
     };
 }
@@ -54,9 +65,10 @@ internal readonly record struct ProtectionProgress(bool ServicesFresh, bool Serv
 //   Block with protection on   turn Handsfree off first while the nodes are enabled, read the services
 //                              again (the Handsfree node and its children may have gone), then block.
 //   Allow                      enable the nodes first, then turn Handsfree off again if it came back.
-//   SetProtection while blocked  store the wanted state and apply it on the next allow.
+//   SetProtection while blocked  have the gate keep the wanted state (StoreIntent); while the nodes are
+//                                unknown, keep it in the caller (KeepIntent). The next allow applies it.
 //   Reverify                   after a connect or a boot, turn Handsfree off again only if it came back.
-// Allow and Reverify only turn protection back on; they turn it off only for an intent stored while blocked.
+// Allow and Reverify only turn protection back on; they turn it off only for a kept intent.
 // An Unknown service read never starts an automatic change.
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothsetservicestate
 internal static class ProtectionPolicy
@@ -104,7 +116,9 @@ internal static class ProtectionPolicy
             case ProtectionGoal.SetProtection:
                 if (!MayChangeServices(facts.Nodes))
                 {
-                    return progress.IntentStored ? ProtectionAction.Done : ProtectionAction.StoreIntent;
+                    return progress.IntentStored ? ProtectionAction.Done
+                        : facts.Nodes == NodePhase.Unknown ? ProtectionAction.KeepIntent
+                        : ProtectionAction.StoreIntent;
                 }
 
                 return NextServiceChange(facts, progress, bothWays: true, whenUnknown: true);

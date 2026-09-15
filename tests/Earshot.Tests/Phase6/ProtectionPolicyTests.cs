@@ -33,6 +33,10 @@ public sealed class ProtectionPolicyTests
 
         public NodePhase NodesDuringServiceChange { get; private set; } = NodePhase.Allowed;
 
+        // Set when StoreIntent ran without a disabled node for the gate to see, or KeepIntent ran while the
+        // nodes were known.
+        public string? IntentActionMismatch { get; private set; }
+
         public List<ProtectionAction> Run(ProtectionGoal goal)
         {
             var actions = new List<ProtectionAction>();
@@ -85,7 +89,25 @@ public sealed class ProtectionPolicyTests
 
                     break;
                 case ProtectionAction.StoreIntent:
+                    // The gate keeps the request only while it sees a disabled node.
+                    if (Nodes is NodePhase.Blocked or NodePhase.Mixed)
+                    {
+                        IntentPending = true;
+                    }
+                    else
+                    {
+                        IntentActionMismatch = "StoreIntent with nodes " + Nodes;
+                    }
+
+                    break;
+                case ProtectionAction.KeepIntent:
+                    // The caller keeps it.
                     IntentPending = true;
+                    if (Nodes != NodePhase.Unknown)
+                    {
+                        IntentActionMismatch = "KeepIntent with nodes " + Nodes;
+                    }
+
                     break;
             }
         }
@@ -231,6 +253,45 @@ public sealed class ProtectionPolicyTests
     }
 
     [TestMethod]
+    public void TurningProtectionOnWhileMixedHasTheGateKeepIt()
+    {
+        var world = new World { Nodes = NodePhase.Mixed, Protect = true };
+
+        CollectionAssert.AreEqual(Seq(ProtectionAction.StoreIntent), world.Run(ProtectionGoal.SetProtection));
+        Assert.IsTrue(world.IntentPending);
+        Assert.IsNull(world.IntentActionMismatch);
+    }
+
+    [TestMethod]
+    public void TurningProtectionOffWhileTheNodesAreUnknownIsKeptByTheCallerAndTheNextAllowAppliesIt()
+    {
+        var world = new World { Nodes = NodePhase.Unknown, RealServices = AudioProtectionState.Protected, Protect = false };
+
+        CollectionAssert.AreEqual(Seq(ProtectionAction.KeepIntent), world.Run(ProtectionGoal.SetProtection));
+        Assert.IsTrue(world.IntentPending, "Not lost: the caller holds it as pending.");
+        Assert.AreEqual(AudioProtectionState.Protected, world.RealServices, "Nothing is asked of the gate while the nodes are unknown.");
+
+        world.ServicesAfterAllow = AudioProtectionState.Protected;
+        CollectionAssert.AreEqual(
+            Seq(ProtectionAction.AllowNodes, ProtectionAction.ReadServices, ProtectionAction.ProtectOff, ProtectionAction.ReadServices),
+            world.Run(ProtectionGoal.Allow));
+        Assert.AreEqual(AudioProtectionState.NotProtected, world.RealServices);
+    }
+
+    [TestMethod]
+    public void AnOffRequestKeptWhileUnknownIsAppliedByTheReverifyAfterAConnect()
+    {
+        var world = new World { Nodes = NodePhase.Unknown, RealServices = AudioProtectionState.Protected, Protect = false };
+        world.Run(ProtectionGoal.SetProtection);
+
+        world.Nodes = NodePhase.Allowed;
+        CollectionAssert.AreEqual(
+            Seq(ProtectionAction.ReadServices, ProtectionAction.ProtectOff, ProtectionAction.ReadServices),
+            world.Run(ProtectionGoal.Reverify));
+        Assert.AreEqual(AudioProtectionState.NotProtected, world.RealServices);
+    }
+
+    [TestMethod]
     public void TurningProtectionOnWhileAllowedAppliesItAtOnce()
     {
         var world = new World();
@@ -305,6 +366,7 @@ public sealed class ProtectionPolicyTests
             sequences++;
 
             Assert.AreEqual(NodePhase.Allowed, world.NodesDuringServiceChange, label);
+            Assert.IsNull(world.IntentActionMismatch, label);
             Assert.IsLessThanOrEqualTo(1, actions.Count(a => a is ProtectionAction.ProtectOn or ProtectionAction.ProtectOff), label);
             Assert.IsLessThanOrEqualTo(1, actions.Count(a => a is ProtectionAction.BlockNodes or ProtectionAction.AllowNodes), label);
             if (goal == ProtectionGoal.Block)
@@ -338,5 +400,6 @@ public sealed class ProtectionPolicyTests
         Assert.IsTrue(ProtectionPolicy.IsDeviceChange(ProtectionAction.ProtectOn));
         Assert.IsFalse(ProtectionPolicy.IsDeviceChange(ProtectionAction.ReadServices));
         Assert.IsFalse(ProtectionPolicy.IsDeviceChange(ProtectionAction.StoreIntent));
+        Assert.IsFalse(ProtectionPolicy.IsDeviceChange(ProtectionAction.KeepIntent));
     }
 }
