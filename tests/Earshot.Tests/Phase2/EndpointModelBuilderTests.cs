@@ -353,12 +353,58 @@ public sealed class EndpointModelBuilderTests
     }
 
     [TestMethod]
-    public void AnAbsentPinnedContainerFallsBackToTheName()
+    public void AnAbsentPinnedContainerChoosesNoOtherDevice()
     {
         EndpointModel model = Build(Machine(), pinned: new Guid("0d5c1e2f-3a4b-4c5d-8e6f-708192a3b4c5"));
 
-        Assert.AreEqual(AirPodsContainer, model.Snapshot.Target?.ContainerId);
-        Assert.AreEqual(TargetResolution.NameMatch, model.Resolution);
+        Assert.IsNull(model.Snapshot.Target, "The AirPods match by name, but they are not the pinned device.");
+        Assert.AreEqual(TargetResolution.PinnedAbsent, model.Resolution);
+        Assert.HasCount(3, model.Snapshot.AllGroups);
+    }
+
+    // A container id is seeded from the Bluetooth address, so another container is another device. With the
+    // pinned AirPods absent, a phone whose name contains the match string must not become the target.
+    [TestMethod]
+    public void AnotherMatchingDeviceIsNeverChosenWhileThePinnedOneIsAbsent()
+    {
+        var phone = new EndpointReading(
+            new AudioEndpoint("{0.0.1.00000000}.{44444444-5555-4666-8777-888888888802}", EndpointFlow.Capture, EndpointState.Active,
+                "Headset (Muawiyah’s iPhone)", IPhoneContainer),
+            "Muawiyah’s iPhone");
+        var otherBuds = new EndpointReading(
+            new AudioEndpoint("{0.0.0.00000000}.{55555555-6666-4777-8888-999999999901}", EndpointFlow.Render, EndpointState.Active,
+                "Headphones (Owner’s AirPods)", new Guid("7e2a9c40-1b3d-4f5e-8a6b-0c1d2e3f4a5b")),
+            "Owner’s AirPods");
+        List<EndpointReading> airPodsAbsent = Machine().Where(r => r.Endpoint.ContainerId != AirPodsContainer).ToList();
+        airPodsAbsent.Add(phone);
+        airPodsAbsent.Add(otherBuds);
+
+        foreach (string match in new[] { "Muawiyah", "AirPods", "iPhone" })
+        {
+            Assert.IsNotNull(Build(airPodsAbsent, match: match).Snapshot.Target, "Unpinned, the name matches another device: " + match);
+
+            EndpointModel pinned = Build(airPodsAbsent, match: match, pinned: AirPodsContainer);
+            Assert.IsNull(pinned.Snapshot.Target, match);
+            Assert.AreEqual(TargetResolution.PinnedAbsent, pinned.Resolution, match);
+        }
+
+        // The pinned AirPods coming back are chosen again, ahead of the other matching devices.
+        airPodsAbsent.Add(AirPodsRender(EndpointState.Unplugged));
+        EndpointModel back = Build(airPodsAbsent, match: "Muawiyah", pinned: AirPodsContainer);
+        Assert.AreEqual(AirPodsContainer, back.Snapshot.Target?.ContainerId);
+        Assert.AreEqual(TargetResolution.Pinned, back.Resolution);
+    }
+
+    [TestMethod]
+    public void AnInvalidPinnedContainerFallsBackToTheName()
+    {
+        foreach (Guid pinned in new[] { Guid.Empty, PcContainer })
+        {
+            EndpointModel model = Build(Machine(), pinned: pinned);
+
+            Assert.AreEqual(AirPodsContainer, model.Snapshot.Target?.ContainerId);
+            Assert.AreEqual(TargetResolution.NameMatch, model.Resolution);
+        }
     }
 
     [TestMethod]
@@ -401,7 +447,9 @@ public sealed class EndpointModelBuilderTests
         // With the AirPods endpoints gone (a boot block removes them), the match still never lands on the phone.
         List<EndpointReading> blocked = machine.Where(r => r.Endpoint.ContainerId != AirPodsContainer).ToList();
         Assert.IsNull(Build(blocked).Snapshot.Target);
-        Assert.IsNull(Build(blocked, pinned: AirPodsContainer).Snapshot.Target);
+        EndpointModel pinned = Build(blocked, pinned: AirPodsContainer);
+        Assert.IsNull(pinned.Snapshot.Target);
+        Assert.AreEqual(TargetResolution.PinnedAbsent, pinned.Resolution);
     }
 
     [TestMethod]

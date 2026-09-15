@@ -14,9 +14,10 @@ internal sealed record EndpointReading(AudioEndpoint Endpoint, string? Interface
 // How the target device was chosen.
 internal enum TargetResolution
 {
-    None,        // no group was chosen
-    Pinned,      // the pinned container is present
-    NameMatch    // no usable pinned container; the first group whose name contains DeviceMatch
+    None,          // nothing usable is pinned and no group's name contains DeviceMatch
+    Pinned,        // the pinned container is present
+    NameMatch,     // nothing usable is pinned; the first group whose name contains DeviceMatch
+    PinnedAbsent   // a container is pinned but has no endpoints; no other device is chosen
 }
 
 internal sealed record EndpointModel(DeviceSnapshot Snapshot, TargetResolution Resolution);
@@ -53,10 +54,15 @@ internal sealed record EndpointModel(DeviceSnapshot Snapshot, TargetResolution R
 // the Handsfree profile) never changes a state read from the render endpoint.
 // https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-state-xxx-constants
 //
-// Target. The pinned container when it is a valid target container and present in the groups;
-// otherwise the first target-capable group whose display name, or the friendly name of one of its
-// endpoints, contains DeviceMatch (ordinal, ignoring case, never a wildcard); otherwise none. A blank
-// DeviceMatch matches nothing.
+// Target. When the pinned container is a valid target container, that container and nothing else: if
+// none of its endpoints is present there is no target (PinnedAbsent), and the name is not tried. A
+// Bluetooth device's container id is seeded from its MAC address, so a different container is always
+// a different physical device, and a name match could only pick some other device (a phone whose name
+// shares the match string) and report its state as the pinned one's.
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/install/container-ids-for-bluetooth-devices
+// When nothing usable is pinned, the first target-capable group whose display name, or the friendly name
+// of one of its endpoints, contains DeviceMatch (ordinal, ignoring case, never a wildcard); otherwise
+// none. A blank DeviceMatch matches nothing.
 internal static class EndpointModelBuilder
 {
     public static EndpointModel Build(
@@ -98,6 +104,9 @@ internal static class EndpointModelBuilder
                     return (group, TargetResolution.Pinned);
                 }
             }
+
+            // Never fall back to the name: see the class comment.
+            return (null, TargetResolution.PinnedAbsent);
         }
 
         if (!string.IsNullOrWhiteSpace(deviceMatch))

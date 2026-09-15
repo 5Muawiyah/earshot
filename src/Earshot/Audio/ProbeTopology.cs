@@ -110,6 +110,7 @@ internal static partial class Program
                 w.WriteString("target", "topology");
                 w.WriteBoolean("enumerationOk", report.EnumerationOk);
                 WriteDevice(w, "device", report.Target, report.Resolution);
+                w.WriteString("resolution", report.Resolution.ToString());
                 w.WriteStartArray("adapters");
                 foreach (TopologyAdapterReport adapter in report.Adapters)
                 {

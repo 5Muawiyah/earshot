@@ -88,6 +88,7 @@ internal static partial class Program
 
                 w.WriteEndArray();
                 WriteDevice(w, "device", snapshot.Target, refresh.Resolution);
+                w.WriteString("resolution", refresh.Resolution.ToString());
                 WriteSteps(w, "failedSteps", failed);
                 w.WriteEndObject();
             });
@@ -129,7 +130,9 @@ internal static partial class Program
     {
         if (target is null)
         {
-            return "Target: none found";
+            return resolution == TargetResolution.PinnedAbsent
+                ? "Target: none found, the pinned container has no endpoints"
+                : "Target: none found";
         }
 
         return "Target: " + TopologyWalk.Format(target.ContainerId) + " \"" + target.DisplayName + "\", " + target.Connection +

@@ -76,6 +76,34 @@ public sealed class AudioProbeTests
     }
 
     [TestMethod]
+    public void AudioProbeSaysWhenThePinnedDeviceHasNoEndpoints()
+    {
+        List<EndpointReading> withoutAirPods = Machine().Where(r => r.Endpoint.ContainerId != AirPodsContainer).ToList();
+        EndpointModel model = EndpointModelBuilder.Build(withoutAirPods, "Seiren", AirPodsContainer, DateTimeOffset.UnixEpoch);
+        var refresh = new MonitorRefresh(model.Snapshot, true, withoutAirPods, Array.Empty<StepOutcome>(), model.Resolution);
+        var settings = new EarshotSettings { DeviceMatch = "Seiren", PinnedContainerId = AirPodsContainer };
+
+        (ProbeContext text, StringWriter textOutput) = Context("audio", json: false);
+        using (textOutput)
+        {
+            Program.WriteAudioProbe(text, refresh, settings);
+
+            StringAssert.Contains(textOutput.ToString(), "Pinned container: {1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D}");
+            StringAssert.Contains(textOutput.ToString(), "Target: none found, the pinned container has no endpoints");
+        }
+
+        (ProbeContext json, StringWriter jsonOutput) = Context("audio", json: true);
+        using (jsonOutput)
+        {
+            Program.WriteAudioProbe(json, refresh, settings);
+
+            using JsonDocument doc = JsonDocument.Parse(jsonOutput.ToString());
+            Assert.AreEqual(JsonValueKind.Null, doc.RootElement.GetProperty("device").ValueKind);
+            Assert.AreEqual("PinnedAbsent", doc.RootElement.GetProperty("resolution").GetString());
+        }
+    }
+
+    [TestMethod]
     public void AudioJsonIsOneObjectWithEveryEndpoint()
     {
         (ProbeContext ctx, StringWriter output) = Context("audio", json: true);
@@ -111,6 +139,7 @@ public sealed class AudioProbeTests
             Assert.AreEqual(AirPodsContainer, device.GetProperty("containerId").GetGuid());
             Assert.AreEqual("Connected", device.GetProperty("connection").GetString());
             Assert.AreEqual("NameMatch", device.GetProperty("chosenBy").GetString());
+            Assert.AreEqual("NameMatch", root.GetProperty("resolution").GetString());
 
             JsonElement step = root.GetProperty("failedSteps")[0];
             Assert.AreEqual("ERROR_NO_SUCH_DEVINST", step.GetProperty("codeName").GetString());
