@@ -152,6 +152,15 @@ internal static partial class Program
     // Exactly [gate, verb, nonce], [gate, set-device, nonce, address] or [gate, boot]. Task Scheduler may pass
     // an unsupplied $(Arg2) as the literal placeholder or as an empty string, so a fourth argument that
     // normalises to empty is dropped for the verbs without an address.
+    //
+    // [gate, boot] is accepted whoever started the gate. \Earshot\BootBlock passes it, but a caller allowed to
+    // start \Earshot\Gate can produce the same command line too: RunEx(["boot"]) with $(Arg1) and $(Arg2)
+    // substituted as empty strings, and a value holding spaces may split into several arguments, because how
+    // Task Scheduler quotes substituted values is undocumented. So no fixed BootBlock token could be kept out
+    // of reach. This is accepted: boot does no more than block (and nothing when BlockAtBoot is off), takes its
+    // identity only from device.json, and writes a status file under a fresh random nonce that is size-capped
+    // and pruned like every other.
+    // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iregisteredtask-runex
     internal static bool TryParseGateArgs(
         IReadOnlyList<string> args,
         [NotNullWhen(true)] out GateRequest? request,

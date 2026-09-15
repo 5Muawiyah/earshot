@@ -155,6 +155,38 @@ public sealed class GateCommandLineTests
         Assert.AreEqual("success", store.ReadStatus(Nonce).Value!.Result);
     }
 
+    // [gate, boot] is also what RunEx(["boot"]) on \Earshot\Gate may become when Task Scheduler substitutes
+    // the unsupplied $(Arg1) and $(Arg2) as empty, so the gate cannot tell which task sent it. Pinned as
+    // accepted: boot does nothing while Block at boot is off, and otherwise exactly what block does.
+    [TestMethod]
+    public void BootFromEitherTaskDoesNoMoreThanBlock()
+    {
+        using var temp = new TempFolder();
+        string machine = Path.Combine(temp.Path, "ProgramData", "Earshot");
+        Directory.CreateDirectory(machine);
+        var store = new GateStore(machine);
+        Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        Assert.IsTrue(store.WriteConfig(new GateConfig { BlockAtBoot = false }).Ok);
+        FakeNodeApi bootNodes = RecordedNodes.Table();
+        FakeNodeApi blockNodes = RecordedNodes.Table();
+        var log = new CapturingLog();
+
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", "boot"], out GateRequest? parsed, out _));
+        Assert.AreEqual(GateVerbs.Boot, parsed.Verb);
+        Assert.AreEqual(GateExitCode.Success, Program.RunGate(["gate", "boot"], FakeToken.System, log,
+            () => new GateActions(bootNodes, store, new FakeFolderSecurity(), log, new ManualTime())));
+        Assert.IsEmpty(bootNodes.Calls, "With Block at boot off, boot changes nothing.");
+
+        Assert.IsTrue(store.WriteConfig(new GateConfig { BlockAtBoot = true }).Ok);
+        Assert.AreEqual(GateExitCode.Success, Program.RunGate(["gate", "boot"], FakeToken.System, log,
+            () => new GateActions(bootNodes, store, new FakeFolderSecurity(), log, new ManualTime())));
+        Assert.AreEqual(GateExitCode.Success, Program.RunGate(["gate", "block", Nonce], FakeToken.System, log,
+            () => new GateActions(blockNodes, store, new FakeFolderSecurity(), log, new ManualTime())));
+
+        CollectionAssert.AreEqual(blockNodes.Calls, bootNodes.Calls, "Boot makes the same calls as block.");
+        Assert.HasCount(9, bootNodes.Calls);
+    }
+
     [TestMethod]
     public void TheLoggedCommandLineIsBoundedAndPrintable()
     {
