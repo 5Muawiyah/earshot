@@ -253,29 +253,47 @@ internal sealed class WindowsProcessToken : IProcessToken
     }
 }
 
-// Resolves an account name from task XML to its SID. Null when the name does not map; the caller reports
-// that as a principal mismatch.
+// The SID an account name resolved to, or null with the failure in Step (its native code included).
+internal sealed record AccountLookup(string? Sid, StepOutcome Step);
+
+// Resolves an account name from task XML to its SID. A name that does not resolve is reported by the caller
+// as a principal mismatch, next to this step. Translate throws IdentityNotMappedException for a name with
+// no SID, Win32Exception (with the Win32 error) when the lookup itself fails, and ArgumentException for a
+// name it cannot take; each keeps its code in the step.
 // https://learn.microsoft.com/en-us/dotnet/api/system.security.principal.ntaccount.translate
+// https://learn.microsoft.com/en-us/dotnet/api/system.security.principal.ntaccount.-ctor
 internal static class AccountSids
 {
-    public static string? Translate(string account)
+    public const string Step = "account-lookup";
+
+    public static AccountLookup Translate(string account)
     {
         if (string.IsNullOrWhiteSpace(account))
         {
-            return null;
+            return new AccountLookup(null, StepOutcomes.NotAttempted(Step, "No account name to look up."));
         }
 
+        string detail = "'" + account + "'";
         try
         {
-            return new NTAccount(account).Translate(typeof(SecurityIdentifier)).Value;
+            string sid = new NTAccount(account).Translate(typeof(SecurityIdentifier)).Value;
+            return new AccountLookup(sid, StepOutcomes.FromHResult(Step, 0, detail));
         }
-        catch (IdentityNotMappedException)
+        catch (IdentityNotMappedException ex)
         {
-            return null;
+            return new AccountLookup(null, StepOutcomes.FromHResult(Step, ex.HResult, detail + " has no SID: " + ex.Message, ok: false));
         }
-        catch (SystemException ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (System.ComponentModel.Win32Exception ex)
         {
-            return null;
+            return new AccountLookup(null, StepOutcomes.FromWin32(Step, unchecked((uint)ex.NativeErrorCode), detail + ": " + ex.Message, ok: false));
+        }
+        catch (ArgumentException ex)
+        {
+            return new AccountLookup(null, StepOutcomes.FromHResult(Step, ex.HResult, detail + ": " + ex.Message, ok: false));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new AccountLookup(null, StepOutcomes.FromHResult(Step, ex.HResult, detail + ": " + ex.Message, ok: false));
         }
     }
 }
@@ -294,7 +312,7 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 //   1. copy the application to %ProgramFiles%\Earshot with IntegrityCopy (staged, then swapped in), and
 //      check the install folder grants no one but administrators write;
 //   2. create %ProgramData%\Earshot with the protected DACL, read it back and fail closed; a folder that
-//      already existed and fails the check is removed and created again once;
+//      already existed and fails the check stops install and is left for the user to remove;
 //   3. write device.json (the validated identity) and config.json (BlockAtBoot kept from a valid existing
 //      config, otherwise the default, on);
 //   4. delete any existing \Earshot task folder and its tasks, then create it with its SDDL and read it back;
@@ -306,10 +324,10 @@ internal sealed class InstallActions
     private readonly InstallLayout _layout;
     private readonly IFolderSecurity _folders;
     private readonly ITaskRegistrar _tasks;
-    private readonly Func<string, string?> _accountToSid;
+    private readonly Func<string, AccountLookup> _accountToSid;
     private readonly ILog _log;
 
-    public InstallActions(InstallLayout layout, IFolderSecurity folders, ITaskRegistrar tasks, Func<string, string?> accountToSid, ILog log)
+    public InstallActions(InstallLayout layout, IFolderSecurity folders, ITaskRegistrar tasks, Func<string, AccountLookup> accountToSid, ILog log)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(folders);
@@ -403,39 +421,34 @@ internal sealed class InstallActions
             return false;
         }
 
+        // Leaving the old copy behind is not unsafe (it sits under Program Files), so neither a failed check nor
+        // a failed delete stops install. A copy others could change is left for the user to remove.
         if (old is not null)
         {
-            // Leaving the old copy behind is not unsafe (it sits under Program Files), so it does not stop install.
-            FileSteps.DeleteTree(old, "remove-old-install", steps);
+            if (FolderTrust.IsTrusted(_folders, old, AclCheck.CheckInstallFolder, "old-install-folder-acl", steps))
+            {
+                FileSteps.DeleteTree(old, "remove-old-install", steps);
+            }
+            else
+            {
+                steps.Add(StepOutcomes.NotAttempted("remove-old-install", "Remove " + old + " by hand."));
+            }
         }
 
         return CheckInstallFolder(install, steps);
     }
 
-    private bool CheckInstallFolder(string install, List<StepOutcome> steps)
-    {
-        StepOutcome read = _folders.ReadSddl(install, out string? sddl);
-        steps.Add(read);
-        if (!read.Ok)
-        {
-            return false;
-        }
+    private bool CheckInstallFolder(string install, List<StepOutcome> steps) =>
+        FolderTrust.IsTrusted(_folders, install, AclCheck.CheckInstallFolder, "install-folder-acl", steps);
 
-        IReadOnlyList<string> problems = AclCheck.CheckInstallFolder(sddl);
-        foreach (string problem in problems)
-        {
-            steps.Add(StepOutcomes.NotAttempted("install-folder-acl", problem));
-        }
-
-        return problems.Count == 0;
-    }
-
+    // Any standard user can create %ProgramData%\Earshot first and owns what they create there, so a folder
+    // that already exists and fails the check is never trusted and never deleted from this elevated process:
+    // a recursive delete goes by path, and a subfolder swapped for a junction part way would send it outside
+    // the folder. Install stops and asks for the folder to be removed by hand.
     private bool PrepareMachineFolder(List<StepOutcome> steps)
     {
         string machine = _layout.MachineFolder;
-        bool existed = Directory.Exists(machine) || File.Exists(machine);
-
-        if (existed && !RemoveIfNotAPlainFolder(machine, steps))
+        if ((Directory.Exists(machine) || File.Exists(machine)) && !RemoveIfNotAPlainFolder(machine, steps))
         {
             return false;
         }
@@ -450,53 +463,19 @@ internal sealed class InstallActions
             }
         }
 
-        IReadOnlyList<string> problems = ReadMachineFolderProblems(machine, steps);
-        if (problems.Count == 0)
+        if (FolderTrust.IsTrusted(_folders, machine, AclCheck.CheckMachineFolder, "machine-folder-acl", steps))
         {
             return true;
         }
 
-        foreach (string problem in problems)
-        {
-            steps.Add(StepOutcomes.NotAttempted("machine-folder-acl", problem));
-        }
-
-        if (!existed)
-        {
-            return false;
-        }
-
-        // A folder someone else created first: remove it with whatever it holds and create it once more.
-        if (!FileSteps.DeleteTree(machine, "remove-untrusted-machine-folder", steps))
-        {
-            return false;
-        }
-
-        StepOutcome again = _folders.CreateHardened(machine);
-        steps.Add(again);
-        if (!again.Ok)
-        {
-            return false;
-        }
-
-        problems = ReadMachineFolderProblems(machine, steps);
-        foreach (string problem in problems)
-        {
-            steps.Add(StepOutcomes.NotAttempted("machine-folder-acl", problem));
-        }
-
-        return problems.Count == 0;
+        steps.Add(StepOutcomes.NotAttempted("machine-folder-existing", "Remove " + machine + " by hand, then set up again."));
+        return false;
     }
 
-    private IReadOnlyList<string> ReadMachineFolderProblems(string machine, List<StepOutcome> steps)
-    {
-        StepOutcome read = _folders.ReadSddl(machine, out string? sddl);
-        steps.Add(read);
-        return read.Ok ? AclCheck.CheckMachineFolder(sddl) : ["The folder security could not be read."];
-    }
-
-    // A file, or a junction or link, where the machine folder should be is removed (the link itself, never
-    // its target) so a real folder can be created.
+    // A file, or a junction or link, where the machine folder should be is removed (that one entry, never
+    // anything it points to) so a real folder can be created. RemoveDirectoryW removes a junction whatever
+    // its target holds, and fails on a real folder that is not empty.
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-removedirectoryw
     private static bool RemoveIfNotAPlainFolder(string path, List<StepOutcome> steps)
     {
         try
@@ -595,7 +574,7 @@ internal sealed class InstallActions
             steps.Add(StepOutcomes.FromHResult("task-read:" + spec.Name, hr));
             problems = hr < 0
                 ? ["The task could not be read back."]
-                : AclCheck.CheckTask(sddl, request.UserSid, spec.UserMayRun).Concat(TaskXmlCheck.Verify(xml, spec, _accountToSid)).ToList();
+                : AclCheck.CheckTask(sddl, request.UserSid, spec.UserMayRun).Concat(TaskXmlCheck.Verify(xml, spec, _accountToSid, steps)).ToList();
             if (!Accept("task-verify:" + spec.Name, problems, steps))
             {
                 RemoveTasks(steps);
@@ -670,11 +649,40 @@ internal sealed class InstallActions
     }
 }
 
+// Reads a folder's security back and applies one of the AclCheck rules. Each problem becomes a step; a
+// folder whose security cannot be read is not trusted.
+internal static class FolderTrust
+{
+    public static bool IsTrusted(
+        IFolderSecurity folders, string path, Func<string?, IReadOnlyList<string>> check, string step, IList<StepOutcome> steps)
+    {
+        ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(check);
+        ArgumentNullException.ThrowIfNull(steps);
+        StepOutcome read = folders.ReadSddl(path, out string? sddl);
+        steps.Add(read);
+        if (!read.Ok)
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> problems = check(sddl);
+        foreach (string problem in problems)
+        {
+            steps.Add(StepOutcomes.NotAttempted(step, problem));
+        }
+
+        return problems.Count == 0;
+    }
+}
+
 // File operations shared by install and uninstall, each recorded as a step.
 internal static class FileSteps
 {
     // Deletes a folder and everything in it. Directory.Delete removes a junction or link inside the tree
-    // without following it. A folder that does not exist counts as deleted.
+    // without following it, but it works by path, so it is only used on staging folders install created and
+    // on folders whose security was read back and grants no one but administrators write (nobody else can
+    // swap a subfolder part way). A folder that does not exist counts as deleted.
     // https://learn.microsoft.com/en-us/dotnet/api/system.io.directory.delete
     public static bool DeleteTree(string path, string step, IList<StepOutcome> steps)
     {

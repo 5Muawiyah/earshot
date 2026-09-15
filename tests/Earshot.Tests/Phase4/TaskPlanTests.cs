@@ -73,7 +73,7 @@ public sealed class TaskPlanTests
         {
             foreach (TaskSpec spec in TaskPlan.Build(InstallFolder, TestUsers.Sid, mode))
             {
-                IReadOnlyList<string> problems = TaskXmlCheck.Verify(TaskXml.For(spec), spec, _ => null);
+                IReadOnlyList<string> problems = TaskXmlCheck.Verify(TaskXml.For(spec), spec, Lookups.None, null);
                 Assert.IsEmpty(problems, spec.Name + " " + mode + ": " + string.Join(" | ", problems));
             }
         }
@@ -87,7 +87,7 @@ public sealed class TaskPlanTests
     {
         TaskSpec spec = Spec(TaskPlan.GateTaskName);
 
-        Assert.IsEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, userId: userId), spec, _ => null));
+        Assert.IsEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, userId: userId), spec, Lookups.None, null));
     }
 
     [TestMethod]
@@ -95,8 +95,61 @@ public sealed class TaskPlanTests
     {
         TaskSpec spec = Spec(TaskPlan.GateTaskName, TaskPrincipalMode.InteractiveUser);
 
-        Assert.IsEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, userId: @"PC\owner"), spec, name => name == @"PC\owner" ? TestUsers.Sid : null));
-        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, userId: @"PC\other"), spec, name => name == @"PC\owner" ? TestUsers.Sid : null));
+        Assert.IsEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, userId: @"PC\owner"), spec, Lookups.Only(@"PC\owner", TestUsers.Sid), null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, userId: @"PC\other"), spec, Lookups.Only(@"PC\owner", TestUsers.Sid), null));
+    }
+
+    // A name that does not resolve keeps its native code: the problem names it and the lookup step is
+    // recorded next to it, so a failed lookup is never only "not the user".
+    [TestMethod]
+    public void AUserPrincipalWhoseNameDoesNotResolveRecordsTheLookupCode()
+    {
+        TaskSpec spec = Spec(TaskPlan.GateTaskName, TaskPrincipalMode.InteractiveUser);
+        StepOutcome failure = StepOutcomes.FromWin32(AccountSids.Step, 1789, "'PC\\gone'", ok: false);
+        var steps = new List<StepOutcome>();
+
+        IReadOnlyList<string> problems = TaskXmlCheck.Verify(TaskXml.For(spec, userId: @"PC\gone"), spec, _ => new AccountLookup(null, failure), steps);
+
+        Assert.HasCount(1, problems);
+        StringAssert.Contains(problems[0], "not the user " + TestUsers.Sid);
+        StringAssert.Contains(problems[0], failure.CodeName);
+        Assert.AreEqual(failure, steps.Single());
+    }
+
+    [TestMethod]
+    public void VerifyInstalledKeepsTheLookupStepWhenNeitherPrincipalMatches()
+    {
+        TaskSpec userGate = Spec(TaskPlan.GateTaskName, TaskPrincipalMode.InteractiveUser);
+        StepOutcome failure = StepOutcomes.FromHResult(AccountSids.Step, unchecked((int)0x80131501), "'PC\\gone'", ok: false);
+        var steps = new List<StepOutcome>();
+
+        IReadOnlyList<string> problems = TaskXmlCheck.VerifyInstalled(
+            TaskXml.For(userGate, userId: @"PC\gone"), TaskPlan.GateTaskName, InstallFolder, TestUsers.Sid, _ => new AccountLookup(null, failure), steps);
+
+        Assert.IsNotEmpty(problems);
+        Assert.AreEqual(failure, steps.Single());
+    }
+
+    // Read-only: resolves this account's own name and a name no account has, through the local security
+    // authority. Nothing is changed.
+    [TestMethod]
+    [TestCategory("ReadOnlySystem")]
+    public void AccountSidsReportsTheCodeOfAFailedLookup()
+    {
+        using WindowsIdentity current = WindowsIdentity.GetCurrent();
+
+        AccountLookup self = AccountSids.Translate(current.Name);
+        AccountLookup missing = AccountSids.Translate("Earshot-no-such-account-" + Guid.NewGuid().ToString("N")[..8]);
+        AccountLookup empty = AccountSids.Translate(" ");
+
+        Assert.AreEqual(current.User?.Value, self.Sid, GateActions.Describe(self.Step));
+        Assert.IsTrue(self.Step.Ok);
+        Assert.IsNull(missing.Sid);
+        Assert.IsFalse(missing.Step.Ok);
+        Assert.AreNotEqual(0, missing.Step.Code, GateActions.Describe(missing.Step));
+        Assert.AreEqual(AccountSids.Step, missing.Step.Step);
+        Assert.IsNull(empty.Sid);
+        Assert.AreEqual(NativeCodes.NotAttempted, empty.Step.Code);
     }
 
     [TestMethod]
@@ -104,7 +157,7 @@ public sealed class TaskPlanTests
     {
         TaskSpec spec = Spec(TaskPlan.GateTaskName);
 
-        Assert.IsEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, command: "\"C:\\PROGRAM FILES\\Earshot\\Earshot.exe\""), spec, _ => null));
+        Assert.IsEmpty(TaskXmlCheck.Verify(TaskXml.For(spec, command: "\"C:\\PROGRAM FILES\\Earshot\\Earshot.exe\""), spec, Lookups.None, null));
     }
 
     [TestMethod]
@@ -137,14 +190,14 @@ public sealed class TaskPlanTests
         ];
         foreach (string xml in bad)
         {
-            Assert.IsNotEmpty(TaskXmlCheck.Verify(xml, gate, _ => null), xml);
+            Assert.IsNotEmpty(TaskXmlCheck.Verify(xml, gate, Lookups.None, null), xml);
         }
 
-        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(boot, includeTrigger: false), boot, _ => null));
-        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(boot).Replace("<Enabled>true</Enabled></BootTrigger>", "<Enabled>false</Enabled></BootTrigger>", StringComparison.Ordinal), boot, _ => null));
-        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(userGate, logonType: "S4U"), userGate, _ => null));
-        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(userGate, runLevel: "LeastPrivilege"), userGate, _ => null));
-        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(userGate, userId: "S-1-5-21-1-2-3-1002"), userGate, _ => null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(boot, includeTrigger: false), boot, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(boot).Replace("<Enabled>true</Enabled></BootTrigger>", "<Enabled>false</Enabled></BootTrigger>", StringComparison.Ordinal), boot, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(userGate, logonType: "S4U"), userGate, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(userGate, runLevel: "LeastPrivilege"), userGate, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(userGate, userId: "S-1-5-21-1-2-3-1002"), userGate, Lookups.None, null));
     }
 
     [TestMethod]
@@ -155,12 +208,12 @@ public sealed class TaskPlanTests
         TaskSpec boot = Spec(TaskPlan.BootTaskName);
         TaskSpec userBoot = boot with { Principal = userGate.Principal };
 
-        Assert.IsEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(systemGate), TaskPlan.GateTaskName, InstallFolder, TestUsers.Sid, _ => null));
-        Assert.IsEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(userGate), TaskPlan.GateTaskName, InstallFolder, TestUsers.Sid, _ => null));
-        Assert.IsEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(boot), TaskPlan.BootTaskName, InstallFolder, TestUsers.Sid, _ => null));
-        Assert.IsNotEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(userBoot), TaskPlan.BootTaskName, InstallFolder, TestUsers.Sid, _ => null));
-        Assert.IsNotEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(userGate), TaskPlan.GateTaskName, InstallFolder, "S-1-5-21-1-2-3-1002", _ => null));
-        Assert.IsNotEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(systemGate), TaskPlan.GateTaskName, InstallFolder, "", _ => null));
+        Assert.IsEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(systemGate), TaskPlan.GateTaskName, InstallFolder, TestUsers.Sid, Lookups.None, null));
+        Assert.IsEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(userGate), TaskPlan.GateTaskName, InstallFolder, TestUsers.Sid, Lookups.None, null));
+        Assert.IsEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(boot), TaskPlan.BootTaskName, InstallFolder, TestUsers.Sid, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(userBoot), TaskPlan.BootTaskName, InstallFolder, TestUsers.Sid, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(userGate), TaskPlan.GateTaskName, InstallFolder, "S-1-5-21-1-2-3-1002", Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.VerifyInstalled(TaskXml.For(systemGate), TaskPlan.GateTaskName, InstallFolder, "", Lookups.None, null));
     }
 
     // Read-only against the local Task Scheduler: builds each task definition in memory with NewTask and the
@@ -197,7 +250,7 @@ public sealed class TaskPlanTests
                                 Assert.AreEqual(0, applied, string.Join(" | ", steps.Select(GateActions.Describe)));
                                 Assert.AreEqual(0, definition.get_XmlText(out string? xml));
                                 report.Add(spec.Name + " " + mode + ":" + Environment.NewLine + xml);
-                                IReadOnlyList<string> problems = TaskXmlCheck.Verify(xml, spec, AccountSids.Translate);
+                                IReadOnlyList<string> problems = TaskXmlCheck.Verify(xml, spec, AccountSids.Translate, steps);
                                 Assert.IsEmpty(problems, spec.Name + " " + mode + ": " + string.Join(" | ", problems));
                             }
                             finally

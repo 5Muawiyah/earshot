@@ -54,7 +54,7 @@ internal static partial class Program
         ctx.ExitCode = (int)RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
         {
             using var worker = new SystemWorker(log);
-            return worker.RunAsync(_ => new UninstallActions(layout, new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log).Run())
+            return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log).Run())
                 .GetAwaiter().GetResult();
         });
     }

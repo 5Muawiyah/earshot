@@ -12,6 +12,18 @@ internal static class TestUsers
     public const string Sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
 }
 
+// Account name lookups for the task XML checks, without the local security authority.
+internal static class Lookups
+{
+    public static AccountLookup None(string account) =>
+        new(null, StepOutcomes.NotAttempted(AccountSids.Step, "No lookup in this test: " + account));
+
+    public static Func<string, AccountLookup> Only(string name, string sid) =>
+        account => string.Equals(account, name, StringComparison.Ordinal)
+            ? new AccountLookup(sid, StepOutcomes.FromHResult(AccountSids.Step, 0))
+            : None(account);
+}
+
 // Creates plain folders (no ACL) and returns the SDDL a test chooses for each path.
 internal sealed class FakeFolderSecurity : IFolderSecurity
 {
@@ -25,6 +37,9 @@ internal sealed class FakeFolderSecurity : IFolderSecurity
     public List<string> Created { get; } = new();
 
     public bool FailCreate { get; set; }
+
+    // Checked before the queues and defaults; null means no override for that path.
+    public Func<string, string?>? SddlFor { get; set; }
 
     // Each read of path returns the next queued SDDL; the last one repeats.
     public void Queue(string path, params string[] sddl) => _sddl[path] = new Queue<string>(sddl);
@@ -49,7 +64,11 @@ internal sealed class FakeFolderSecurity : IFolderSecurity
             return StepOutcomes.FromHResult("folder-acl-read", unchecked((int)0x80070003), path);
         }
 
-        if (_sddl.TryGetValue(path, out Queue<string>? queue) && queue.Count > 0)
+        if (SddlFor?.Invoke(path) is { } overridden)
+        {
+            sddl = overridden;
+        }
+        else if (_sddl.TryGetValue(path, out Queue<string>? queue) && queue.Count > 0)
         {
             sddl = queue.Count > 1 ? queue.Dequeue() : queue.Peek();
         }

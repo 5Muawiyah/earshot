@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Xml;
 using System.Xml.Linq;
+using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Interop;
 
@@ -121,7 +122,8 @@ internal static class TaskXmlCheck
         MaxCharactersInDocument = 1024 * 1024,
     };
 
-    public static IReadOnlyList<string> Verify(string? xml, TaskSpec expected, Func<string, string?> accountToSid)
+    // steps, when given, receives the account lookup step when a principal name does not resolve.
+    public static IReadOnlyList<string> Verify(string? xml, TaskSpec expected, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps)
     {
         ArgumentNullException.ThrowIfNull(expected);
         ArgumentNullException.ThrowIfNull(accountToSid);
@@ -132,7 +134,7 @@ internal static class TaskXmlCheck
             return problems;
         }
 
-        CheckPrincipal(root, expected, accountToSid, problems);
+        CheckPrincipal(root, expected, accountToSid, problems, steps);
         CheckAction(root, expected, problems);
         CheckTriggers(root, expected, problems);
         CheckSettings(root, expected, problems);
@@ -141,20 +143,23 @@ internal static class TaskXmlCheck
 
     // For a reader that does not know which principal install chose: the SYSTEM form, or for Gate and
     // Protect the interactive user form, must match in full.
-    public static IReadOnlyList<string> VerifyInstalled(string? xml, string taskName, string installFolder, string userSid, Func<string, string?> accountToSid)
+    public static IReadOnlyList<string> VerifyInstalled(
+        string? xml, string taskName, string installFolder, string userSid, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps)
     {
         if (!Sddl.IsUserSid(userSid))
         {
             return ["The current user has no usable SID."];
         }
 
-        IReadOnlyList<string> asSystem = Verify(xml, TaskPlan.Spec(taskName, installFolder, userSid, TaskPrincipalMode.System), accountToSid);
+        IReadOnlyList<string> asSystem = Verify(xml, TaskPlan.Spec(taskName, installFolder, userSid, TaskPrincipalMode.System), accountToSid, steps);
         if (asSystem.Count == 0 || string.Equals(taskName, TaskPlan.BootTaskName, StringComparison.Ordinal))
         {
             return asSystem;
         }
 
-        IReadOnlyList<string> asUser = Verify(xml, TaskPlan.Spec(taskName, installFolder, userSid, TaskPrincipalMode.InteractiveUser), accountToSid);
+        // A principal name that does not resolve adds its lookup step here even though the SYSTEM form's
+        // problems are the ones returned.
+        IReadOnlyList<string> asUser = Verify(xml, TaskPlan.Spec(taskName, installFolder, userSid, TaskPrincipalMode.InteractiveUser), accountToSid, steps);
         return asUser.Count == 0 ? asUser : asSystem;
     }
 
@@ -208,7 +213,8 @@ internal static class TaskXmlCheck
         }
     }
 
-    private static void CheckPrincipal(XElement root, TaskSpec expected, Func<string, string?> accountToSid, List<string> problems)
+    private static void CheckPrincipal(
+        XElement root, TaskSpec expected, Func<string, AccountLookup> accountToSid, List<string> problems, IList<StepOutcome>? steps)
     {
         List<XElement> principals = root.Element(Ns + "Principals")?.Elements(Ns + "Principal").ToList() ?? [];
         if (principals.Count != 1)
@@ -245,10 +251,23 @@ internal static class TaskXmlCheck
             return;
         }
 
-        string? sid = userId.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase) ? userId : accountToSid(userId);
+        string? sid = userId;
+        StepOutcome? failedLookup = null;
+        if (!userId.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase))
+        {
+            AccountLookup lookup = accountToSid(userId);
+            sid = lookup.Sid;
+            if (sid is null)
+            {
+                failedLookup = lookup.Step;
+                steps?.Add(lookup.Step);
+            }
+        }
+
         if (!string.Equals(sid, expected.Principal.UserId, StringComparison.OrdinalIgnoreCase))
         {
-            problems.Add("The principal is " + userId + ", not the user " + expected.Principal.UserId + ".");
+            problems.Add("The principal is " + userId + ", not the user " + expected.Principal.UserId +
+                         (failedLookup is null ? "." : " (the name did not resolve: " + failedLookup.CodeName + ")."));
         }
 
         if (!string.Equals(logonType, "InteractiveToken", StringComparison.Ordinal))

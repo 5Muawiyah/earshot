@@ -20,7 +20,7 @@ public sealed class TaskSchedulerGateTests
         {
             Store = new GateStore(_temp.Path);
             Tasks.InstallAll(InstallFolder);
-            Gate = new TaskSchedulerGate(Tasks, Store, InstallFolder, userSid, _ => null, Time, (delay, ct) =>
+            Gate = new TaskSchedulerGate(Tasks, Store, InstallFolder, userSid, Lookups.None, Time, (delay, ct) =>
             {
                 Polls++;
                 Time.Advance(delay);
@@ -168,6 +168,83 @@ public sealed class TaskSchedulerGateTests
         StepOutcome last = result.Steps.Single(s => s.Step == "task-last-result");
         Assert.AreEqual("failed", last.CodeName);
         Assert.IsFalse(last.Ok);
+    }
+
+    // A LastRunTime that could not be read after RunEx is not a new run time. Without a status file the wait
+    // runs to the timeout instead of taking a run that never started as finished.
+    [TestMethod]
+    public void AnUnreadableLastRunTimeNeverEndsTheWait()
+    {
+        using var h = new Harness();
+        StepOutcome readFailure = StepOutcomes.FromHResult(@"task-last-run-time-read:\Earshot\Gate", unchecked((int)0x80070005));
+        h.Tasks.OnRun = _ => h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, 0, null) { Steps = [readFailure] };
+
+        GateRunResult result = h.Run();
+
+        Assert.AreEqual(GateRunOutcome.TimedOut, result.Outcome);
+        Assert.IsGreaterThan(10, h.Polls);
+        Assert.AreEqual(readFailure, result.Steps.Single(s => s.Step.StartsWith("task-last-run-time-read:", StringComparison.Ordinal)),
+            "Recorded once, not once per poll.");
+    }
+
+    [TestMethod]
+    public void WithoutALastRunTimeFromBeforeTheRunOnlyTheStatusFileEndsTheWait()
+    {
+        using var h = new Harness();
+        h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, 0, null);
+        h.OnPoll = poll =>
+        {
+            if (poll == 2)
+            {
+                h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, 0, 1001);
+            }
+
+            if (poll == 6)
+            {
+                h.WriteStatus(Nonce);
+            }
+        };
+
+        GateRunResult result = h.Run();
+
+        Assert.AreEqual(GateRunOutcome.Completed, result.Outcome);
+        Assert.AreEqual(6, h.Polls, "A run time with nothing to compare against is not taken as a new run.");
+        Assert.IsNotNull(result.Status);
+    }
+
+    [TestMethod]
+    public void AnUnreadableLastTaskResultIsUnavailableNotSuccess()
+    {
+        using var h = new Harness();
+        h.Tasks.OnRun = _ =>
+        {
+            h.WriteStatus(Nonce);
+            h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, null, 1001)
+            {
+                Steps = [StepOutcomes.FromHResult(@"task-last-result-read:\Earshot\Gate", unchecked((int)0x80070005))],
+            };
+        };
+
+        GateRunResult result = h.Run();
+
+        Assert.AreEqual(GateRunOutcome.Completed, result.Outcome);
+        Assert.IsNull(result.LastTaskResult);
+        StepOutcome last = result.Steps.Single(s => s.Step == "task-last-result");
+        Assert.IsFalse(last.Ok);
+        Assert.AreEqual(NativeCodes.NotAvailable, last.Code);
+        Assert.AreEqual("E_ACCESSDENIED", result.Steps.Single(s => s.Step.StartsWith("task-last-result-read:", StringComparison.Ordinal)).CodeName);
+    }
+
+    [TestMethod]
+    public void AGateRefusedByItsEnvironmentIsNamedApartFromAFailure()
+    {
+        StepOutcome refused = TaskSchedulerGate.LastResultStep(ExitCodes.Refused);
+
+        Assert.IsFalse(refused.Ok);
+        Assert.AreEqual("refused-by-environment", refused.CodeName);
+        Assert.AreEqual(ExitCodes.Refused, refused.Code);
+        Assert.AreEqual("success", TaskSchedulerGate.LastResultStep(0).CodeName);
+        Assert.AreEqual("folder-not-secure", TaskSchedulerGate.LastResultStep((int)GateExitCode.FolderNotSecure).CodeName);
     }
 
     [TestMethod]

@@ -80,7 +80,7 @@ internal static partial class Program
                 bool mayRun = name != TaskPlan.BootTaskName;
                 problems = Sddl.IsUserSid(userSid)
                     ? AclCheck.CheckTask(task.Sddl, userSid!, mayRun)
-                        .Concat(TaskXmlCheck.VerifyInstalled(task.Xml, name, installFolder, userSid!, AccountSids.Translate)).ToList()
+                        .Concat(TaskXmlCheck.VerifyInstalled(task.Xml, name, installFolder, userSid!, AccountSids.Translate, steps: null)).ToList()
                     : ["The current user has no usable SID."];
                 mask = Sddl.IsUserSid(userSid) ? AclCheck.UserAllowedMask(task.Sddl, userSid!) : 0;
             }
@@ -90,6 +90,10 @@ internal static partial class Program
 
         return new TaskProbeReport(installFolder, userSid, folderHr, folderSddl, folderProblems, rows);
     }
+
+    // Null when LastTaskResult could not be read; the read failure is in the task's steps.
+    private static string? LastResultName(int? lastTaskResult) =>
+        lastTaskResult is int last ? GateExitCodes.NameOf(last) ?? NativeCodes.Name(last) : null;
 
     private static string Presence(int hr) =>
         hr == 0 ? "present" : hr == TaskSchedulerCom.HRESULT_ERROR_FILE_NOT_FOUND ? "absent (" + NativeCodes.Name(hr) + ")" : "unreadable (" + NativeCodes.Name(hr) + ")";
@@ -133,7 +137,7 @@ internal static partial class Program
                     if (row.Task is not null)
                     {
                         w.WriteNumber("state", row.Task.State);
-                        w.WriteString("lastTaskResult", GateExitCodes.NameOf(row.Task.LastTaskResult) ?? NativeCodes.Name(row.Task.LastTaskResult));
+                        w.WriteString("lastTaskResult", LastResultName(row.Task.LastTaskResult));
                     }
 
                     w.WriteString("userMask", "0x" + row.UserMask.ToString("X8", CultureInfo.InvariantCulture));
@@ -177,7 +181,7 @@ internal static partial class Program
                         (row.Summary.RunLevel is null ? "" : ", " + row.Summary.RunLevel));
             o.WriteLine("  Action " + (row.Summary.Command ?? "?") + " " + (row.Summary.Arguments ?? ""));
             o.WriteLine("  State " + row.Task.State.ToString(CultureInfo.InvariantCulture) + ", last result " +
-                        (GateExitCodes.NameOf(row.Task.LastTaskResult) ?? NativeCodes.Name(row.Task.LastTaskResult)));
+                        (LastResultName(row.Task.LastTaskResult) ?? "unreadable"));
             o.WriteLine("  This user may start it: " + ((row.UserMask & Sddl.FileExecute) != 0 ? "yes" : "no") +
                         " (0x" + row.UserMask.ToString("X8", CultureInfo.InvariantCulture) + ")");
             o.WriteLine("  Check: " + (row.Problems.Count == 0 ? "ok" : string.Join(" ", row.Problems)));

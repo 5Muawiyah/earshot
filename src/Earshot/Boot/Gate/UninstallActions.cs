@@ -34,29 +34,37 @@ internal sealed partial class MoveFileRebootDelete : IRebootDelete
 
 // uninstall, run elevated from the tray with one UAC prompt. Each reversal is a step and a failure does not
 // stop the ones after it, so as much as possible is undone:
-//   1. enable every target node at problem 22, using the identity in device.json;
-//   2. re-enable the Bluetooth services protection.json lists (the protection feature's hook);
-//   3. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder;
-//   4. remove %ProgramData%\Earshot;
-//   5. remove %ProgramFiles%\Earshot, or schedule it for the next restart when it is in use (for example
-//      when uninstall runs from that copy).
-// Pairing is never touched, and %APPDATA%\Earshot stays for the user. The tray removes its own startup value.
+//   1. read %ProgramData%\Earshot's security back; a folder that fails the check is not trusted, so its
+//      files are not read, no node or service is changed from them, and the folder is not deleted;
+//   2. enable every target node at problem 22, using the identity in device.json;
+//   3. re-enable the Bluetooth services protection.json lists (the protection feature's hook);
+//   4. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder;
+//   5. remove %ProgramData%\Earshot;
+//   6. remove %ProgramFiles%\Earshot after the same kind of check, or schedule it for the next restart when
+//      it is in use (for example when uninstall runs from that copy).
+// A folder is only deleted from this elevated process after its security shows no one but administrators
+// can change what is inside, because a recursive delete goes by path. A folder that fails is left for the
+// user to remove and the result is partial. Pairing is never touched, and %APPDATA%\Earshot stays for the
+// user. The tray removes its own startup value.
 internal sealed class UninstallActions
 {
     private readonly InstallLayout _layout;
+    private readonly IFolderSecurity _folders;
     private readonly INodeApi _nodes;
     private readonly ITaskRegistrar _tasks;
     private readonly IRebootDelete _rebootDelete;
     private readonly ILog _log;
 
-    public UninstallActions(InstallLayout layout, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log)
+    public UninstallActions(InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log)
     {
         ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(folders);
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(tasks);
         ArgumentNullException.ThrowIfNull(rebootDelete);
         ArgumentNullException.ThrowIfNull(log);
         _layout = layout;
+        _folders = folders;
         _nodes = nodes;
         _tasks = tasks;
         _rebootDelete = rebootDelete;
@@ -67,24 +75,47 @@ internal sealed class UninstallActions
     {
         var steps = new List<StepOutcome>();
         bool complete = true;
-        var store = new GateStore(_layout.MachineFolder);
+        string machine = _layout.MachineFolder;
+        bool machineExists = Directory.Exists(machine) || File.Exists(machine);
+        bool machineTrusted = machineExists &&
+                              FolderTrust.IsTrusted(_folders, machine, AclCheck.CheckMachineFolder, "machine-folder-acl", steps);
 
-        GateRead<DeviceIdentity> identity = store.ReadDevice();
-        steps.Add(identity.Step);
-        if (identity.IsOk && identity.Value is not null)
+        if (machineTrusted)
         {
-            complete &= AllowNodes(identity.Value, steps);
-            complete &= RestoreProtection(identity.Value, store, steps);
+            var store = new GateStore(machine);
+            GateRead<DeviceIdentity> identity = store.ReadDevice();
+            steps.Add(identity.Step);
+            if (identity.IsOk && identity.Value is not null)
+            {
+                complete &= AllowNodes(identity.Value, steps);
+                complete &= RestoreProtection(identity.Value, store, steps);
+            }
+            else if (identity.Status != GateReadStatus.Missing)
+            {
+                // Without a trusted identity no node is changed; say so rather than guess.
+                steps.Add(StepOutcomes.NotAttempted("allow-nodes", "device.json is not valid, so no node was enabled."));
+                complete = false;
+            }
         }
-        else if (identity.Status != GateReadStatus.Missing)
+        else if (machineExists)
         {
-            // Without a trusted identity no node is changed; say so rather than guess.
-            steps.Add(StepOutcomes.NotAttempted("allow-nodes", "device.json is not valid, so no node was enabled."));
+            steps.Add(StepOutcomes.NotAttempted("allow-nodes",
+                machine + " is not safe, so device.json and protection.json were not used and no node or service was changed."));
             complete = false;
         }
 
         complete &= RemoveTasks(steps);
-        complete &= FileSteps.DeleteTree(_layout.MachineFolder, "remove-machine-folder", steps);
+
+        if (machineTrusted)
+        {
+            complete &= FileSteps.DeleteTree(machine, "remove-machine-folder", steps);
+        }
+        else if (machineExists)
+        {
+            steps.Add(StepOutcomes.NotAttempted("remove-machine-folder", "Remove " + machine + " by hand."));
+            complete = false;
+        }
+
         complete &= RemoveInstallFolder(steps);
 
         _log.Info("uninstall: " + (complete ? "complete" : "partial") + ".");
@@ -169,6 +200,13 @@ internal sealed class UninstallActions
         if (!Directory.Exists(install))
         {
             return true;
+        }
+
+        // Deleting at restart goes by path too, so the same check comes before either kind of delete.
+        if (!FolderTrust.IsTrusted(_folders, install, AclCheck.CheckInstallFolder, "install-folder-acl", steps))
+        {
+            steps.Add(StepOutcomes.NotAttempted("remove-install-folder", "Remove " + install + " by hand."));
+            return false;
         }
 
         if (!IntegrityCopy.IsInside(running, install) && FileSteps.DeleteTree(install, "remove-install-folder", steps))

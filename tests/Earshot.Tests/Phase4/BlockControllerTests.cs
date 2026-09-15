@@ -35,7 +35,7 @@ public sealed class BlockControllerTests
             }
 
             Tasks.OnRun = PlayTheGate;
-            var gate = new TaskSchedulerGate(Tasks, Store, InstallFolder, TestUsers.Sid, _ => null, Time, (delay, ct) =>
+            var gate = new TaskSchedulerGate(Tasks, Store, InstallFolder, TestUsers.Sid, Lookups.None, Time, (delay, ct) =>
             {
                 Time.Advance(delay);
                 return !ct.IsCancellationRequested;

@@ -50,10 +50,14 @@ public sealed class InstallActionsTests
         public InstallLayout Layout => new(Source, Install, Machine);
 
         public InstallResult RunInstall(TaskPrincipalMode mode = TaskPrincipalMode.System) =>
-            new InstallActions(Layout, Folders, Tasks, _ => null, Log)
+            new InstallActions(Layout, Folders, Tasks, NoLookup, Log)
                 .Run(new InstallRequest(TestUsers.Sid, RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer, mode));
 
-        public InstallResult RunUninstall() => new UninstallActions(Layout, Nodes, Tasks, Reboot, Log).Run();
+        public InstallResult RunUninstall() => new UninstallActions(Layout, Folders, Nodes, Tasks, Reboot, Log).Run();
+
+        // The fake registrar reads principals back as SIDs, so no name is ever looked up.
+        private static AccountLookup NoLookup(string account) =>
+            throw new AssertFailedException("No account name should be looked up: " + account);
 
         public void Dispose() => _temp.Dispose();
     }
@@ -180,22 +184,66 @@ public sealed class InstallActionsTests
         Assert.IsEmpty(h.Tasks.Calls);
     }
 
+    // Any user can create %ProgramData%\Earshot first. Install never trusts it and never deletes it: a
+    // recursive delete from the elevated process could be sent outside the folder by a junction.
     [TestMethod]
-    public void AMachineFolderSomeoneElseCreatedIsRemovedAndCreatedAgain()
+    public void AMachineFolderSomeoneElseCreatedStopsInstallAndIsLeftAlone()
     {
         using var h = new Harness();
-        Directory.CreateDirectory(h.Machine);
+        Directory.CreateDirectory(Path.Combine(h.Machine, "sub"));
         File.WriteAllText(Path.Combine(h.Machine, "device.json"), "{\"planted\":true}");
+        File.WriteAllText(Path.Combine(h.Machine, "sub", "keep.txt"), "user file");
         h.Folders.Queue(h.Machine,
             "O:" + TestUsers.Sid + "G:SYD:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;CIID;0x116;;;BU)",
             Sddl.MachineFolder);
 
         InstallResult result = h.RunInstall();
 
+        Assert.AreEqual(GateExitCode.FolderNotSecure, result.Outcome);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "machine-folder-acl" && s.Detail!.Contains("owner", StringComparison.Ordinal)));
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "machine-folder-existing").Detail, "by hand");
+        Assert.IsEmpty(h.Folders.Created);
+        Assert.AreEqual("{\"planted\":true}", File.ReadAllText(Path.Combine(h.Machine, "device.json")), "Nothing in it is written.");
+        Assert.IsTrue(File.Exists(Path.Combine(h.Machine, "sub", "keep.txt")), "Nothing in it is deleted.");
+        Assert.IsEmpty(h.Tasks.Calls);
+    }
+
+    [TestMethod]
+    public void AJunctionWhereTheMachineFolderGoesIsRemovedWithoutTouchingItsTarget()
+    {
+        using var h = new Harness();
+        string elsewhere = Path.Combine(h.Root, "elsewhere");
+        Directory.CreateDirectory(elsewhere);
+        File.WriteAllText(Path.Combine(elsewhere, "important.txt"), "keep");
+        using IDisposable junction = TestLinks.CreateJunction(h.Machine, elsewhere);
+
+        InstallResult result = h.RunInstall();
+
         Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
-        Assert.IsTrue(result.Steps.Any(s => s.Step == "remove-untrusted-machine-folder" && s.Ok));
-        CollectionAssert.AreEqual(new[] { h.Machine }, h.Folders.Created);
-        Assert.AreEqual(RecordedNodes.AirPodsAddress, new GateStore(h.Machine).ReadDevice().Value!.Address);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "remove-machine-folder-link" && s.Ok));
+        Assert.IsFalse(new DirectoryInfo(h.Machine).Attributes.HasFlag(FileAttributes.ReparsePoint));
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(elsewhere, "important.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(elsewhere, "device.json")), "Nothing is written through the link.");
+    }
+
+    [TestMethod]
+    public void AnEarlierInstallOthersCouldChangeIsMovedAsideButNotDeleted()
+    {
+        using var h = new Harness();
+        Directory.CreateDirectory(Path.Combine(h.Install, "sub"));
+        File.WriteAllText(Path.Combine(h.Install, "sub", "stale.dll"), "old");
+        h.Folders.SddlFor = path => path.Contains(".old-", StringComparison.Ordinal)
+            ? "O:BAG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;OICIID;0x1301bf;;;BU)"
+            : null;
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        Assert.IsTrue(File.Exists(Path.Combine(h.Install, "Earshot.exe")));
+        string old = LeftOvers(h.Install).Single();
+        StringAssert.Contains(old, ".old-");
+        Assert.IsTrue(File.Exists(Path.Combine(old, "sub", "stale.dll")));
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "remove-old-install").Detail, "by hand");
     }
 
     [TestMethod]
@@ -420,6 +468,48 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Partial, result.Outcome);
         Assert.AreEqual("CR_ACCESS_DENIED", result.Steps.Single(s => s.Step == "cm-enable:" + RecordedNodes.AirPodsDeviceNode).CodeName);
+    }
+
+    [TestMethod]
+    public void UninstallDoesNotTrustOrDeleteAMachineFolderOthersCanChange()
+    {
+        using var h = new Harness();
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        File.WriteAllText(Path.Combine(h.Machine, "planted.txt"), "user file");
+        h.Folders.Queue(h.Machine, "O:" + TestUsers.Sid + "G:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)");
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome);
+        Assert.IsEmpty(h.Nodes.Calls, "No node is changed from a file in an untrusted folder.");
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "machine-folder-acl"));
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "allow-nodes").Detail, "not safe");
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "remove-machine-folder").Detail, "by hand");
+        Assert.IsTrue(File.Exists(Path.Combine(h.Machine, "planted.txt")), "The folder is not deleted.");
+        Assert.IsFalse(h.Tasks.FolderExists, "The tasks are still removed.");
+        Assert.IsFalse(Directory.Exists(h.Install), "The install folder is still removed.");
+    }
+
+    [TestMethod]
+    public void UninstallLeavesAnInstallFolderOthersCanChange()
+    {
+        using var h = new Harness();
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Folders.DefaultInstallSddl = "O:BAG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;OICIID;0x1301bf;;;BU)";
+        h.Source = h.Install;
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome);
+        Assert.IsTrue(Directory.Exists(h.Install));
+        Assert.IsEmpty(h.Reboot.Scheduled, "Nothing is scheduled for deletion at restart either.");
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "remove-install-folder").Detail, "by hand");
+        Assert.IsFalse(Directory.Exists(h.Machine));
     }
 
     [TestMethod]

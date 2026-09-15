@@ -6,10 +6,16 @@ using Earshot.Interop;
 
 namespace Earshot.Boot;
 
-// What a read of a registered task returned. Sddl or Xml is null when that read failed (see Steps).
-internal sealed record TaskReadback(string? Sddl, string? Xml, int State, int LastTaskResult, double LastRunTime, IReadOnlyList<StepOutcome> Steps);
+// What a read of a registered task returned. Sddl, Xml, LastTaskResult or LastRunTime is null when that
+// read failed, and Steps holds the failure with its HRESULT.
+internal sealed record TaskReadback(string? Sddl, string? Xml, int State, int? LastTaskResult, double? LastRunTime, IReadOnlyList<StepOutcome> Steps);
 
-internal sealed record TaskRunState(int State, int LastTaskResult, double LastRunTime);
+// The state read while waiting for a run. LastTaskResult or LastRunTime is null when that read failed, and
+// Steps holds the failure with its HRESULT.
+internal sealed record TaskRunState(int State, int? LastTaskResult, double? LastRunTime)
+{
+    public IReadOnlyList<StepOutcome> Steps { get; init; } = [];
+}
 
 // Task Scheduler reads and RunEx as the tray uses them, non-elevated. Every method returns the HRESULT; a
 // missing task is 0x80070002.
@@ -117,18 +123,34 @@ internal static class ComTaskScheduler
                 state = TaskSchedulerCom.TASK_STATE_UNKNOWN;
             }
 
-            int lastHr = task.get_LastTaskResult(out int last);
-            int runHr = task.get_LastRunTime(out double lastRun);
-            if (lastHr < 0 || runHr < 0)
-            {
-                steps.Add(StepOutcomes.FromHResult("task-last-run:" + taskPath, lastHr < 0 ? lastHr : runHr));
-            }
-
+            (int? last, double? lastRun) = ReadLastRun(task, taskPath, steps);
             result = new TaskReadback(sddl, xml, state, last, lastRun, steps);
             return 0;
         });
         readback = result;
         return hr;
+    }
+
+    // LastTaskResult and LastRunTime, each null with its own step when the read fails. A failed read is
+    // never shown as 0: 0 would read as a successful result, or as a run time the wait compares against.
+    // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iregisteredtask-get_lastruntime
+    public static (int? LastTaskResult, double? LastRunTime) ReadLastRun(IRegisteredTask task, string taskPath, IList<StepOutcome> steps)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(steps);
+        int lastHr = task.get_LastTaskResult(out int last);
+        if (lastHr < 0)
+        {
+            steps.Add(StepOutcomes.FromHResult("task-last-result-read:" + taskPath, lastHr));
+        }
+
+        int runHr = task.get_LastRunTime(out double lastRun);
+        if (runHr < 0)
+        {
+            steps.Add(StepOutcomes.FromHResult("task-last-run-time-read:" + taskPath, runHr));
+        }
+
+        return (lastHr < 0 ? null : last, runHr < 0 ? null : lastRun);
     }
 }
 
@@ -147,9 +169,9 @@ internal sealed class ComScheduledTasks : IScheduledTasks
                 return stateHr;
             }
 
-            int lastHr = task.get_LastTaskResult(out int last);
-            int runHr = task.get_LastRunTime(out double lastRun);
-            result = new TaskRunState(taskState, lastHr < 0 ? 0 : last, runHr < 0 ? 0 : lastRun);
+            var steps = new List<StepOutcome>();
+            (int? last, double? lastRun) = ComTaskScheduler.ReadLastRun(task, taskPath, steps);
+            result = new TaskRunState(taskState, last, lastRun) { Steps = steps };
             return 0;
         });
         state = result;
@@ -215,7 +237,7 @@ internal sealed class TaskSchedulerGate
     private readonly GateStore _store;
     private readonly string _installFolder;
     private readonly string? _userSid;
-    private readonly Func<string, string?> _accountToSid;
+    private readonly Func<string, AccountLookup> _accountToSid;
     private readonly TimeProvider _time;
     private readonly Func<TimeSpan, CancellationToken, bool> _wait;
 
@@ -225,7 +247,7 @@ internal sealed class TaskSchedulerGate
         GateStore store,
         string installFolder,
         string? userSid,
-        Func<string, string?> accountToSid,
+        Func<string, AccountLookup> accountToSid,
         TimeProvider time,
         Func<TimeSpan, CancellationToken, bool> wait)
     {
@@ -271,7 +293,7 @@ internal sealed class TaskSchedulerGate
 
         bool userMayRun = !string.Equals(taskName, TaskPlan.BootTaskName, StringComparison.Ordinal);
         var problems = AclCheck.CheckTask(task.Sddl, _userSid!, userMayRun)
-            .Concat(TaskXmlCheck.VerifyInstalled(task.Xml, taskName, _installFolder, _userSid!, _accountToSid))
+            .Concat(TaskXmlCheck.VerifyInstalled(task.Xml, taskName, _installFolder, _userSid!, _accountToSid, steps))
             .ToList();
         return new TaskVerification(taskName, problems.Count == 0 ? TaskHealth.Ready : TaskHealth.NeedsRepair, problems, steps, task);
     }
@@ -320,7 +342,10 @@ internal sealed class TaskSchedulerGate
                 null, null, steps);
         }
 
+        // A LastRunTime that could not be read, before the run or now, is never compared: the run is then seen
+        // only through its status file, and a gate that exits without one ends at the timeout.
         long started = _time.GetTimestamp();
+        var readFailures = new HashSet<(string Step, int Code)>();
         while (true)
         {
             GateRead<GateStatusFile> status = _store.ReadStatus(nonce);
@@ -331,8 +356,12 @@ internal sealed class TaskSchedulerGate
                 return new GateRunResult(GateRunOutcome.RunFailed, status.Value, null, steps);
             }
 
+            // Each distinct failed read is recorded once, not once per poll.
+            steps.AddRange(state.Steps.Where(s => readFailures.Add((s.Step, s.Code))));
+
             bool running = state.State is TaskSchedulerCom.TASK_STATE_QUEUED or TaskSchedulerCom.TASK_STATE_RUNNING;
-            bool ran = status.Status != GateReadStatus.Missing || state.LastRunTime != before.LastRunTime;
+            bool newRunTime = before.LastRunTime is double was && state.LastRunTime is double now && now != was;
+            bool ran = status.Status != GateReadStatus.Missing || newRunTime;
             if (!running && ran)
             {
                 if (status.Status is GateReadStatus.Invalid or GateReadStatus.Unreadable)
@@ -365,10 +394,23 @@ internal sealed class TaskSchedulerGate
         }
     }
 
-    // LastTaskResult is advisory: that it carries the gate's exit code is undocumented.
-    private static StepOutcome LastResultStep(int lastTaskResult)
+    // LastTaskResult is advisory: that it carries the gate's exit code is undocumented. ExitCodes.Refused is
+    // what Program.Dispatch returns when EARSHOT_SAFE_MODE or EARSHOT_DATA_ROOT reaches the gate's
+    // environment, so it is named apart from a gate failure.
+    internal static StepOutcome LastResultStep(int? lastTaskResult)
     {
-        string name = GateExitCodes.NameOf(lastTaskResult) ?? NativeCodes.Name(lastTaskResult);
-        return new StepOutcome("task-last-result", lastTaskResult == 0, lastTaskResult, name, "Advisory only.");
+        if (lastTaskResult is not int last)
+        {
+            return StepOutcomes.NotAvailable("task-last-result", "LastTaskResult could not be read. Advisory only.");
+        }
+
+        if (last == ExitCodes.Refused)
+        {
+            return new StepOutcome("task-last-result", false, last, "refused-by-environment",
+                "Earshot refuses gate runs while EARSHOT_SAFE_MODE or EARSHOT_DATA_ROOT is set. Advisory only.");
+        }
+
+        string name = GateExitCodes.NameOf(last) ?? NativeCodes.Name(last);
+        return new StepOutcome("task-last-result", last == 0, last, name, "Advisory only.");
     }
 }
