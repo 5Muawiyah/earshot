@@ -13,8 +13,6 @@ namespace Earshot.Tray;
 internal sealed class TrayMenu : IDisposable
 {
     private readonly Func<MenuState> _state;
-    private readonly ToolStripMenuItem _safeModeCaption = new();
-    private readonly ToolStripSeparator _safeModeSeparator = new();
     private readonly ToolStripMenuItem _toggle = new();
     private readonly ToolStripMenuItem _blockAtBoot = new();
     private readonly ToolStripMenuItem _protectAudio = new();
@@ -32,8 +30,6 @@ internal sealed class TrayMenu : IDisposable
         Strip = new ContextMenuStrip();
         Strip.Items.AddRange(
         [
-            _safeModeCaption,
-            _safeModeSeparator,
             _toggle,
             new ToolStripSeparator(),
             _blockAtBoot,
@@ -81,8 +77,6 @@ internal sealed class TrayMenu : IDisposable
     internal void Apply(MenuState state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        Set(_safeModeCaption, state.SafeModeCaption);
-        _safeModeSeparator.Available = state.SafeModeCaption.Visible;
         Set(_toggle, state.Toggle);
         Set(_blockAtBoot, state.BlockAtBoot);
         Set(_protectAudio, state.ProtectAudio);
@@ -95,7 +89,10 @@ internal sealed class TrayMenu : IDisposable
 
     public void Dispose() => Strip.Dispose();
 
-    private void OnOpening(object? sender, CancelEventArgs e) => Apply(_state());
+    // What Opening does, for tests that cannot open the menu on screen.
+    internal void Refresh() => Apply(_state());
+
+    private void OnOpening(object? sender, CancelEventArgs e) => Refresh();
 
     private static void Set(ToolStripMenuItem item, MenuItemState state)
     {

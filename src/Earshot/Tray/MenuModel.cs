@@ -1,4 +1,3 @@
-using Earshot.Composition;
 using Earshot.Contracts;
 
 namespace Earshot.Tray;
@@ -15,9 +14,8 @@ internal enum StartupState
 // How one menu item looks.
 internal readonly record struct MenuItemState(string Text, bool Checked, bool Enabled, bool Visible, bool Indeterminate = false);
 
-// How the whole tray menu looks, top to bottom. The two separators that are not listed are always shown.
+// How the whole tray menu looks, top to bottom. The separators are always shown.
 internal sealed record MenuState(
-    MenuItemState SafeModeCaption,
     MenuItemState Toggle,
     MenuItemState BlockAtBoot,
     MenuItemState ProtectAudio,
@@ -41,22 +39,19 @@ internal static class MenuModel
     public const string SetUpEarshot = "Set up Earshot...";
     public const string Exit = "Exit";
 
-    // Shown at the top only in safe mode, so a test run cannot be mistaken for a real one.
-    public static readonly string SafeModeCaption = SafeDecorators.Message.TrimEnd('.');
-
     public static MenuState Build(
         DeviceSnapshot snapshot,
         BootBlockStatus? block,
         AudioProtectionSnapshot? protection,
         EarshotSettings settings,
         bool busy,
-        bool safeMode,
         StartupState startup)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
 
-        ConnectionState connection = snapshot.Target?.Connection ?? ConnectionState.Unknown;
+        // The same target rule as the left click, so the label always names what the click would do.
+        ConnectionState connection = TrayStatus.ActiveTarget(snapshot, settings)?.Connection ?? ConnectionState.Unknown;
         bool changing = connection is ConnectionState.Connecting or ConnectionState.Disconnecting;
         bool connected = connection == ConnectionState.Connected;
 
@@ -64,7 +59,6 @@ internal static class MenuModel
         bool blockAtBoot = block?.BlockAtBoot ?? new GateConfig().BlockAtBoot;
 
         return new MenuState(
-            SafeModeCaption: new MenuItemState(SafeModeCaption, Checked: false, Enabled: false, Visible: safeMode),
             Toggle: new MenuItemState(connected ? Disconnect : Connect, Checked: false, Enabled: !busy && !changing, Visible: true),
             BlockAtBoot: new MenuItemState(BlockAtBoot, Checked: blockAtBoot, Enabled: !busy, Visible: true),
             ProtectAudio: new MenuItemState(
@@ -76,7 +70,7 @@ internal static class MenuModel
             ProtectCaveat: new MenuItemState(ProtectCaveat, Checked: false, Enabled: false, Visible: true),
             OpenOnStartup: new MenuItemState(OpenOnStartup, Checked: startup == StartupState.On, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
-            SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: block?.State == BlockState.NotSetUp),
+            SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.NeedsSetUp(block)),
             Exit: new MenuItemState(Exit, Checked: false, Enabled: true, Visible: true));
     }
 

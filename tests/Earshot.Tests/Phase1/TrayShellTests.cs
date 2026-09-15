@@ -115,5 +115,33 @@ public sealed class TrayShellTests
         Assert.IsFalse(Program.TrayInstanceName.Contains('\\', StringComparison.Ordinal));
         Assert.IsTrue(Program.TrayInstanceOptions.CurrentUserOnly);
         Assert.IsTrue(Program.TrayInstanceOptions.CurrentSessionOnly);
+        Assert.AreEqual(Program.TrayInstanceName + ".show", Program.ShowEventName(Program.TrayInstanceName));
+    }
+
+    // Each test uses its own instance name, so a real running tray is never signalled.
+    private static string TestInstanceName() => "Earshot.test." + Guid.NewGuid().ToString("N");
+
+    [TestMethod]
+    public void ASecondCopySetsTheRunningTraysShowEvent()
+    {
+        string name = TestInstanceName();
+        var log = new CapturingLog();
+        using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ShowEventName(name), Program.TrayInstanceOptions, out bool created);
+        Assert.IsTrue(created);
+        Assert.IsFalse(showEvent.WaitOne(0));
+
+        Assert.IsTrue(Program.SignalRunningTray(log, name));
+
+        Assert.IsTrue(showEvent.WaitOne(0), "The running tray's show event was not set.");
+        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Info, "asked to show its card"));
+    }
+
+    [TestMethod]
+    public void WithoutAShowEventNothingIsSignalledAndItIsLogged()
+    {
+        var log = new CapturingLog();
+
+        Assert.IsFalse(Program.SignalRunningTray(log, TestInstanceName()));
+        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "has no show event yet"));
     }
 }

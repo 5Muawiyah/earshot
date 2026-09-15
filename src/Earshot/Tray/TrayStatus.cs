@@ -25,12 +25,28 @@ internal static class TrayStatus
     public const string CardBlockedAtBoot = "Blocked at boot";
     public const string MicrophoneNotice = "This turns off the AirPods microphone.";
 
-    // The device name to show: the resolved target's name, or the match string when nothing is found.
-    public static string DeviceName(DeviceSnapshot snapshot, EarshotSettings settings)
+    // The target the tray acts on and shows. When a container is pinned, only a target in that container
+    // counts; a target in any other container is not the pinned device, so it is treated as not found.
+    // With nothing pinned, the resolved target counts. The left click, menu, tooltip, icon and cards all
+    // go through this, so the menu can never say "Disconnect" while the click would connect.
+    public static DeviceModel? ActiveTarget(DeviceSnapshot snapshot, EarshotSettings settings)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
-        string? name = snapshot.Target?.DisplayName;
+        DeviceModel? target = snapshot.Target;
+        return target is not null &&
+               (settings.PinnedContainerId == Guid.Empty || target.ContainerId == settings.PinnedContainerId)
+            ? target
+            : null;
+    }
+
+    // True when the boot block status says the gate task is missing. Unknown (null) is not "not set up".
+    public static bool NeedsSetUp(BootBlockStatus? block) => block?.State == BlockState.NotSetUp;
+
+    // The device name to show: the active target's name, or the match string when nothing is found.
+    public static string DeviceName(DeviceSnapshot snapshot, EarshotSettings settings)
+    {
+        string? name = ActiveTarget(snapshot, settings)?.DisplayName;
         return string.IsNullOrWhiteSpace(name) ? settings.DeviceMatch : name;
     }
 
@@ -38,18 +54,17 @@ internal static class TrayStatus
     // whole text fits in 127 characters.
     public static string Tooltip(DeviceSnapshot snapshot, BootBlockStatus? block, EarshotSettings settings)
     {
-        string state = StateWord(snapshot, block);
+        string state = StateWord(snapshot, block, settings);
         string prefix = AppName + ": ";
         string suffix = " - " + state;
         string name = Truncate(DeviceName(snapshot, settings), MaxTooltipLength - prefix.Length - suffix.Length);
         return prefix + name + suffix;
     }
 
-    public static string StateWord(DeviceSnapshot snapshot, BootBlockStatus? block)
+    public static string StateWord(DeviceSnapshot snapshot, BootBlockStatus? block, EarshotSettings settings)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        ConnectionState? connection = snapshot.Target?.Connection;
-        if (connection is ConnectionState.Connected or ConnectionState.Disconnecting)
+        DeviceModel? target = ActiveTarget(snapshot, settings);
+        if (target?.Connection is ConnectionState.Connected or ConnectionState.Disconnecting)
         {
             return Connected;
         }
@@ -59,13 +74,12 @@ internal static class TrayStatus
             return Blocked;
         }
 
-        return snapshot.Target is null ? NotFound : Disconnected;
+        return target is null ? NotFound : Disconnected;
     }
 
-    public static GlyphState Glyph(DeviceSnapshot snapshot, BootBlockStatus? block, bool toggleInFlight)
+    public static GlyphState Glyph(DeviceSnapshot snapshot, BootBlockStatus? block, EarshotSettings settings, bool toggleInFlight)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        ConnectionState? connection = snapshot.Target?.Connection;
+        ConnectionState? connection = ActiveTarget(snapshot, settings)?.Connection;
         if (toggleInFlight || connection is ConnectionState.Connecting or ConnectionState.Disconnecting)
         {
             return GlyphState.Busy;
@@ -82,7 +96,7 @@ internal static class TrayStatus
     // The status line for a card that reports the current state (for example when a second copy of
     // Earshot is started).
     public static string CardStatus(DeviceSnapshot snapshot, BootBlockStatus? block, EarshotSettings settings) =>
-        StateWord(snapshot, block) switch
+        StateWord(snapshot, block, settings) switch
         {
             Connected => CardConnected,
             Blocked => CardBlockedAtBoot,
@@ -100,18 +114,16 @@ internal static class TrayStatus
     // resolved target's. Null when neither is a valid device container.
     public static ToggleIntent? Intent(DeviceSnapshot snapshot, EarshotSettings settings)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        ArgumentNullException.ThrowIfNull(settings);
-
+        DeviceModel? target = ActiveTarget(snapshot, settings);
         Guid container = settings.PinnedContainerId != Guid.Empty
             ? settings.PinnedContainerId
-            : snapshot.Target?.ContainerId ?? Guid.Empty;
+            : target?.ContainerId ?? Guid.Empty;
         if (!NodeMatch.IsValidTargetContainer(container))
         {
             return null;
         }
 
-        bool connected = snapshot.Target is { } target &&
+        bool connected = target is not null &&
                          target.ContainerId == container &&
                          target.Connection is ConnectionState.Connected or ConnectionState.Disconnecting;
         return new ToggleIntent(Connect: !connected, container, DeviceName(snapshot, settings));

@@ -82,21 +82,56 @@ public sealed class TrayStatusTests
     [TestMethod]
     public void GlyphShowsBusyWhileAToggleIsInFlightOrTheLinkIsChanging()
     {
-        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(NoDevice(), null, toggleInFlight: true));
-        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(Target(ConnectionState.Connected), null, toggleInFlight: true));
-        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(Target(ConnectionState.Connecting), null, toggleInFlight: false));
-        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(Target(ConnectionState.Disconnecting), null, toggleInFlight: false));
+        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(NoDevice(), null, Settings(), toggleInFlight: true));
+        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(Target(ConnectionState.Connected), null, Settings(), toggleInFlight: true));
+        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(Target(ConnectionState.Connecting), null, Settings(), toggleInFlight: false));
+        Assert.AreEqual(GlyphState.Busy, TrayStatus.Glyph(Target(ConnectionState.Disconnecting), null, Settings(), toggleInFlight: false));
     }
 
     [TestMethod]
     public void GlyphFollowsConnectionThenBlock()
     {
-        Assert.AreEqual(GlyphState.Connected, TrayStatus.Glyph(Target(ConnectionState.Connected), Block(BlockState.Blocked), false));
-        Assert.AreEqual(GlyphState.Blocked, TrayStatus.Glyph(NoDevice(), Block(BlockState.Blocked), false));
-        Assert.AreEqual(GlyphState.Blocked, TrayStatus.Glyph(Target(ConnectionState.Disconnected), Block(BlockState.Blocked), false));
-        Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(Target(ConnectionState.Disconnected), Block(BlockState.Allowed), false));
-        Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(NoDevice(), Block(BlockState.NotSetUp), false));
-        Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(NoDevice(), Block(BlockState.Mixed), false));
+        Assert.AreEqual(GlyphState.Connected, TrayStatus.Glyph(Target(ConnectionState.Connected), Block(BlockState.Blocked), Settings(), false));
+        Assert.AreEqual(GlyphState.Blocked, TrayStatus.Glyph(NoDevice(), Block(BlockState.Blocked), Settings(), false));
+        Assert.AreEqual(GlyphState.Blocked, TrayStatus.Glyph(Target(ConnectionState.Disconnected), Block(BlockState.Blocked), Settings(), false));
+        Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(Target(ConnectionState.Disconnected), Block(BlockState.Allowed), Settings(), false));
+        Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(NoDevice(), Block(BlockState.NotSetUp), Settings(), false));
+        Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(NoDevice(), Block(BlockState.Mixed), Settings(), false));
+    }
+
+    [TestMethod]
+    public void ATargetOutsideThePinnedContainerIsShownAsNotFound()
+    {
+        EarshotSettings pinned = Settings(s => s.PinnedContainerId = AirPodsContainer);
+        DeviceSnapshot iPhone = Target(ConnectionState.Connected, IPhoneContainer, "iPhone");
+
+        Assert.IsNull(TrayStatus.ActiveTarget(iPhone, pinned));
+        Assert.AreEqual("Earshot: AirPods - not found", TrayStatus.Tooltip(iPhone, null, pinned));
+        Assert.AreEqual("Earshot: AirPods - blocked", TrayStatus.Tooltip(iPhone, Block(BlockState.Blocked), pinned));
+        Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(iPhone, null, pinned, toggleInFlight: false));
+        Assert.AreEqual("AirPods", TrayStatus.DeviceName(iPhone, pinned));
+        Assert.AreEqual(TrayStatus.NotFoundMessage(pinned), TrayStatus.CardStatus(iPhone, null, pinned));
+    }
+
+    [TestMethod]
+    public void ATargetInThePinnedContainerOrWithNothingPinnedIsActive()
+    {
+        DeviceSnapshot airPods = Target(ConnectionState.Connected);
+
+        Assert.AreSame(airPods.Target, TrayStatus.ActiveTarget(airPods, Settings(s => s.PinnedContainerId = AirPodsContainer)));
+        Assert.AreSame(airPods.Target, TrayStatus.ActiveTarget(airPods, Settings()));
+        Assert.IsNull(TrayStatus.ActiveTarget(NoDevice(), Settings()));
+    }
+
+    [TestMethod]
+    public void OnlyNotSetUpNeedsSetUp()
+    {
+        Assert.IsTrue(TrayStatus.NeedsSetUp(Block(BlockState.NotSetUp)));
+        Assert.IsFalse(TrayStatus.NeedsSetUp(null));
+        foreach (BlockState state in new[] { BlockState.Allowed, BlockState.Blocked, BlockState.Mixed, BlockState.Unknown, BlockState.NotFound })
+        {
+            Assert.IsFalse(TrayStatus.NeedsSetUp(Block(state)), state.ToString());
+        }
     }
 
     [TestMethod]

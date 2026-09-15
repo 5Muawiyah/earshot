@@ -1,4 +1,3 @@
-using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
 using Earshot.Tray;
@@ -16,9 +15,8 @@ public sealed class MenuModelTests
         AudioProtectionSnapshot? protection = null,
         EarshotSettings? settings = null,
         bool busy = false,
-        bool safeMode = false,
         StartupState startup = StartupState.Off) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, safeMode, startup);
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup);
 
     [TestMethod]
     public void TheCopyIsExactlyAsDesigned()
@@ -35,15 +33,14 @@ public sealed class MenuModelTests
         Assert.AreEqual("Choose device...", state.ChooseDevice.Text);
         Assert.AreEqual("Set up Earshot...", state.SetUp.Text);
         Assert.AreEqual("Exit", state.Exit.Text);
-        Assert.AreEqual("Safe mode: no device actions", state.SafeModeCaption.Text);
     }
 
     [TestMethod]
     public void NoTextHasAnEmDash()
     {
-        MenuState state = Build(block: Block(BlockState.NotSetUp), safeMode: true);
+        MenuState state = Build(block: Block(BlockState.NotSetUp));
         MenuItemState[] items =
-            [state.SafeModeCaption, state.Toggle, state.BlockAtBoot, state.ProtectAudio, state.ProtectCaveat,
+            [state.Toggle, state.BlockAtBoot, state.ProtectAudio, state.ProtectCaveat,
              state.OpenOnStartup, state.ChooseDevice, state.SetUp, state.Exit];
 
         foreach (MenuItemState item in items)
@@ -68,7 +65,6 @@ public sealed class MenuModelTests
         Assert.IsFalse(state.ProtectAudio.Indeterminate, "An unknown read-back never overrides the intent.");
         Assert.IsTrue(state.SetUp.Visible);
         Assert.IsTrue(state.SetUp.Enabled);
-        Assert.IsFalse(state.SafeModeCaption.Visible);
         Assert.IsTrue(state.ChooseDevice.Enabled);
         Assert.IsTrue(state.Exit.Enabled);
     }
@@ -96,6 +92,38 @@ public sealed class MenuModelTests
         Assert.AreEqual(enabled, toggle.Enabled);
         Assert.IsTrue(toggle.Visible);
         Assert.IsFalse(toggle.Checked);
+    }
+
+    [TestMethod]
+    public void AConnectedTargetThatIsNotThePinnedDeviceOffersConnect()
+    {
+        // The left click connects the pinned AirPods, so the menu must not offer to disconnect the iPhone.
+        EarshotSettings pinned = Settings(s => s.PinnedContainerId = AirPodsContainer);
+        DeviceSnapshot otherConnected = Target(ConnectionState.Connected, IPhoneContainer, "iPhone");
+
+        MenuItemState toggle = Build(snapshot: otherConnected, settings: pinned).Toggle;
+        ToggleIntent? intent = TrayStatus.Intent(otherConnected, pinned);
+
+        Assert.AreEqual(MenuModel.Connect, toggle.Text);
+        Assert.IsTrue(toggle.Enabled);
+        Assert.IsNotNull(intent);
+        Assert.IsTrue(intent.Connect);
+    }
+
+    [TestMethod]
+    [DataRow(ConnectionState.Connected)]
+    [DataRow(ConnectionState.Disconnected)]
+    public void TheToggleLabelAndTheClickAlwaysAgree(ConnectionState connection)
+    {
+        EarshotSettings pinned = Settings(s => s.PinnedContainerId = AirPodsContainer);
+        foreach (Guid container in new[] { AirPodsContainer, IPhoneContainer })
+        {
+            DeviceSnapshot snapshot = Target(connection, container);
+
+            bool labelSaysConnect = Build(snapshot: snapshot, settings: pinned).Toggle.Text == MenuModel.Connect;
+
+            Assert.AreEqual(TrayStatus.Intent(snapshot, pinned)!.Connect, labelSaysConnect, container + " " + connection);
+        }
     }
 
     [TestMethod]
@@ -158,16 +186,6 @@ public sealed class MenuModelTests
 
         Assert.AreEqual(expected, item.Checked);
         Assert.IsTrue(item.Enabled);
-    }
-
-    [TestMethod]
-    public void SafeModeShowsItsCaption()
-    {
-        MenuItemState caption = Build(safeMode: true).SafeModeCaption;
-
-        Assert.IsTrue(caption.Visible);
-        Assert.IsFalse(caption.Enabled);
-        Assert.AreEqual(SafeDecorators.Message.TrimEnd('.'), caption.Text);
     }
 
     [TestMethod]

@@ -23,8 +23,9 @@ namespace Earshot;
 //      https://learn.microsoft.com/en-us/dotnet/api/microsoft.win32.systemevents.userpreferencechanged
 //   4. Settings (writable store), then the ServiceRegistry, then the TrayContext, then Monitor.Start, so
 //      the tray is subscribed before the first snapshot can arrive.
-//   5. Application.Run, then an orderly shutdown: the tray (icon and message window), the monitor, the
-//      audio worker, the show event and the mutex.
+//   5. Application.Run. Exit cancels the actions in flight and waits for them, with a limit, while the
+//      loop still runs, so their continuations can complete. Then an orderly shutdown: the tray (icon and
+//      message window), the monitor, the audio worker, the show event and the mutex.
 internal static partial class Program
 {
     internal const string TrayUsage = "Usage: Earshot.exe [--startup]";
@@ -88,7 +89,7 @@ internal static partial class Program
         if (!createdNew)
         {
             mutex.Dispose();
-            SignalRunningTray(log);
+            SignalRunningTray(log, TrayInstanceName);
             return ExitCodes.Ok;
         }
 
@@ -105,11 +106,16 @@ internal static partial class Program
         }
     }
 
-    private static void SignalRunningTray(ILog log)
+    // The name of the event a second copy sets to ask the running tray for its card.
+    internal static string ShowEventName(string instanceName) => instanceName + ".show";
+
+    // Sets the running tray's show event. Returns true when it was set. The instance name is a parameter
+    // so tests can use their own and never signal a real tray.
+    internal static bool SignalRunningTray(ILog log, string instanceName)
     {
         try
         {
-            if (EventWaitHandle.TryOpenExisting(TrayInstanceName + ".show", TrayInstanceOptions, out EventWaitHandle? showEvent))
+            if (EventWaitHandle.TryOpenExisting(ShowEventName(instanceName), TrayInstanceOptions, out EventWaitHandle? showEvent))
             {
                 using (showEvent)
                 {
@@ -117,15 +123,16 @@ internal static partial class Program
                 }
 
                 log.Info("Earshot is already running; it was asked to show its card.");
+                return true;
             }
-            else
-            {
-                log.Warn("Earshot is already running but has no show event yet, so it was not signalled.");
-            }
+
+            log.Warn("Earshot is already running but has no show event yet, so it was not signalled.");
+            return false;
         }
         catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
         {
             log.Error("Earshot is already running but could not be signalled.", ex);
+            return false;
         }
     }
 
@@ -134,7 +141,7 @@ internal static partial class Program
         EventWaitHandle showEvent;
         try
         {
-            showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, TrayInstanceName + ".show", TrayInstanceOptions, out _);
+            showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName(TrayInstanceName), TrayInstanceOptions, out _);
         }
         catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
         {
@@ -194,7 +201,11 @@ internal static partial class Program
                 registry.Monitor.Start();
                 log.Info("Tray started" + (paths.IsSafeMode ? " in safe mode" : "") + ". Settings: " + settings.FilePath + " (" + settings.LastLoadStatus + ").");
                 Application.Run(context);
-                log.Info("Tray message loop ended.");
+
+                // Exit waits for actions in flight before it ends the loop; anything left here outlived that wait.
+                log.Info("Tray message loop ended." + (context.PendingActions > 0
+                    ? " " + context.PendingActions.ToString(System.Globalization.CultureInfo.InvariantCulture) + " action(s) were still in flight and are abandoned."
+                    : ""));
                 return ExitCodes.Ok;
             }
             catch (Exception ex)

@@ -24,10 +24,9 @@ public sealed class TrayMenuTests
         DeviceSnapshot? snapshot = null,
         BootBlockStatus? block = null,
         bool busy = false,
-        bool safeMode = false,
         EarshotSettings? settings = null,
         AudioProtectionSnapshot? protection = null) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, safeMode, StartupState.Off);
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, StartupState.Off);
 
     private static string[] AvailableTexts(TrayMenu menu) =>
         menu.Items.Where(i => i.Available).Select(i => i is ToolStripSeparator ? "-" : i.Text ?? "").ToArray();
@@ -44,20 +43,18 @@ public sealed class TrayMenuTests
     }
 
     [TestMethod]
-    public void SetUpAndTheSafeModeCaptionComeAndGoWithTheState()
+    public void SetUpComesAndGoesWithTheState()
     {
         StaThread.Run(() =>
         {
-            using var menu = new TrayMenu(() => State(block: Block(BlockState.Allowed)));
+            BootBlockStatus block = Block(BlockState.Allowed);
+            using var menu = new TrayMenu(() => State(block: block));
             CollectionAssert.DoesNotContain(AvailableTexts(menu), "Set up Earshot...");
-            CollectionAssert.DoesNotContain(AvailableTexts(menu), "Safe mode: no device actions");
 
-            menu.Apply(State(block: Block(BlockState.NotSetUp), safeMode: true));
-            string[] texts = AvailableTexts(menu);
+            block = Block(BlockState.NotSetUp);
+            menu.Refresh();
 
-            Assert.AreEqual("Safe mode: no device actions", texts[0]);
-            Assert.AreEqual("-", texts[1]);
-            CollectionAssert.Contains(texts, "Set up Earshot...");
+            CollectionAssert.AreEqual(DesignedOrder, AvailableTexts(menu));
         });
     }
 
