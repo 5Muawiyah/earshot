@@ -50,6 +50,8 @@ internal sealed class RunServices : IDisposable
             worker.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 
+        (_registry.SystemWorker as IDisposable)?.Dispose();
+
         _registry = null;
     }
 }

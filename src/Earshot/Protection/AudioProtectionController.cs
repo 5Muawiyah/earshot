@@ -109,6 +109,9 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
     public Task<ControllerResult> ApplyAsync(bool protect, CancellationToken ct = default) =>
         _worker.RunAsync(token => Apply(protect, token), ct);
 
+    // The thread its gate requests run on, shared with the block controller by the composition root.
+    internal ISystemWorker Worker => _worker;
+
     // The protection state asked for while the device was blocked and not applied yet (protection-intent.json,
     // written only by the gate). Missing when nothing is pending. A read, so it runs on the thread pool. What
     // applies it after an allow is the caller's: see ProtectionPolicy (IntentPending).

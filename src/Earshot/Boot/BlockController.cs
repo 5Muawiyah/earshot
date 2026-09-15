@@ -119,6 +119,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     private readonly string? _executable;
     private readonly ISystemWorker _worker;
     private readonly IDisposable? _ownedWorker;
+    private readonly Lock _statusLock = new();
     private volatile bool _isSetUp;
     private string _lastStatusProblems = "";
 
@@ -153,31 +154,50 @@ internal sealed class BlockController : IBlockController, IDisposable
         _ownedWorker = ownedWorker;
     }
 
-    // The real controller. Constructing it reads the current user's SID and nothing else; the worker thread
-    // starts on first use.
+    // The real controller with a worker of its own. Constructing it reads the current user's SID and nothing
+    // else; the worker thread starts on first use.
     public static BlockController Create(ILog log, ISettingsStore settings, Paths paths)
     {
+        var worker = new SystemWorker(log);
+        return Create(log, settings, paths, worker, worker);
+    }
+
+    // The real controller on a worker shared with the protection controller, so a block or allow and a
+    // protect-on or protect-off requested by this tray queue behind each other rather than run side by side.
+    // The caller owns the worker and disposes it.
+    public static BlockController Create(ILog log, ISettingsStore settings, Paths paths, ISystemWorker sharedWorker) =>
+        Create(log, settings, paths, sharedWorker, ownedWorker: null);
+
+    private static BlockController Create(ILog log, ISettingsStore settings, Paths paths, ISystemWorker worker, IDisposable? ownedWorker)
+    {
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(worker);
         string? sid;
         using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
         {
             sid = identity.User?.Value;
         }
 
-        var worker = new SystemWorker(log);
         var store = new GateStore(paths.MachineFolder);
         var gate = new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid,
             AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled);
         return new BlockController(log, settings, store, new CfgMgr32NodeReader(), gate, new ShellRunasLauncher(),
-            sid, Environment.ProcessPath, worker, worker);
+            sid, Environment.ProcessPath, worker, ownedWorker);
     }
 
     // \Earshot\Gate, \Earshot\Protect and \Earshot\BootBlock present and verified, as of the last status
     // read or change. False until one has run; reading it does no I/O.
     public bool IsSetUp => _isSetUp;
 
+    // The thread its gate requests run on, shared with the protection controller by the composition root.
+    internal ISystemWorker Worker => _worker;
+
+    // Task Scheduler reads and CfgMgr32 reads, neither of which changes anything, so this runs on the thread
+    // pool (whose threads are in the multithreaded apartment, which Task Scheduler COM needs) rather than on
+    // the system worker, where it would queue behind a protection change that can take minutes.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.thread.setapartmentstate
     public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default) =>
-        _worker.RunAsync(_ => ReadStatus(), ct);
+        Task.Run(ReadStatus, ct);
 
     public Task<ControllerResult> BlockAsync(CancellationToken ct = default) =>
         _worker.RunAsync(token => ChangeNodes(block: true, token), ct);
@@ -294,13 +314,17 @@ internal sealed class BlockController : IBlockController, IDisposable
         steps.AddRange(read.Steps);
         BlockState state = BlockStateClassifier.Classify(installed, identity is not null, read);
 
+        // Status reads run on the thread pool, so more than one can be in flight.
         string problems = string.Join(" | ", steps.Where(s => !s.Ok).Select(GateActions.Describe));
-        if (!string.Equals(problems, _lastStatusProblems, StringComparison.Ordinal))
+        lock (_statusLock)
         {
-            _lastStatusProblems = problems;
-            if (problems.Length > 0)
+            if (!string.Equals(problems, _lastStatusProblems, StringComparison.Ordinal))
             {
-                _log.Warn("boot block status " + state + ": " + problems);
+                _lastStatusProblems = problems;
+                if (problems.Length > 0)
+                {
+                    _log.Warn("boot block status " + state + ": " + problems);
+                }
             }
         }
 
