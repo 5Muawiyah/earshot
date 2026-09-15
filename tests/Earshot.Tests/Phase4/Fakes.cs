@@ -106,11 +106,15 @@ internal sealed class FakeTaskRegistrar : ITaskRegistrar
 
     public int RegisterFailsFor { get; set; } = -1;
 
+    // Thrown by every call, for the paths that must not end a run without a record.
+    public Exception? Throw { get; set; }
+
     public bool FolderExists => FolderSddl is not null;
 
     public int ReadFolderSddl(string folderPath, out string? sddl)
     {
         Calls.Add("read-folder " + folderPath);
+        Fail();
         sddl = FolderSddl is null ? null : FolderSddlReadBack ?? FolderSddl;
         return FolderExists ? 0 : NotFound;
     }
@@ -118,6 +122,7 @@ internal sealed class FakeTaskRegistrar : ITaskRegistrar
     public int ListTasks(string folderPath, out IReadOnlyList<string> names)
     {
         Calls.Add("list " + folderPath);
+        Fail();
         names = Tasks.Keys.Select(k => k[(TaskPlan.FolderPath.Length + 1)..]).ToList();
         return FolderExists ? 0 : NotFound;
     }
@@ -167,6 +172,14 @@ internal sealed class FakeTaskRegistrar : ITaskRegistrar
         return 0;
     }
 
+    private void Fail()
+    {
+        if (Throw is not null)
+        {
+            throw Throw;
+        }
+    }
+
     public int Register(string folderPath, TaskSpec spec, IList<StepOutcome> steps)
     {
         Calls.Add("register " + spec.Name + " " + spec.Principal.UserId + " " + spec.Principal.LogonType.ToString(CultureInfo.InvariantCulture));
@@ -182,6 +195,7 @@ internal sealed class FakeTaskRegistrar : ITaskRegistrar
     public int ReadTask(string taskPath, out string? sddl, out string? xml)
     {
         Calls.Add("read-task " + taskPath);
+        Fail();
         if (Tasks.TryGetValue(taskPath, out var task))
         {
             sddl = task.Sddl;

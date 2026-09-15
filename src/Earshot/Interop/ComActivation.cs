@@ -36,6 +36,16 @@ internal static partial class ComActivation
         return TakeInterface(hr, pointer, out result);
     }
 
+    // Asks an object Earshot already holds for another interface, without an InvalidCastException: the same
+    // QueryInterface path as TakeInterface, so an object without T gives E_NOINTERFACE as a code.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.marshal.getiunknownforobject
+    internal static int AsInterface<T>(object comObject, out T? result)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(comObject);
+        return TakeInterface(S_OK, Marshal.GetIUnknownForObject(comObject), out result);
+    }
+
     // Wraps an owned interface pointer from a void** out parameter in an RCW of type T and releases the
     // raw reference. A pointer returned with a failing HRESULT is released and discarded. A success
     // with a null pointer is reported as E_POINTER. The object is asked for T with QueryInterface

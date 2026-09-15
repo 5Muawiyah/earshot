@@ -35,12 +35,11 @@ internal sealed class NtfsFolderSecurity : IFolderSecurity
             new DirectoryInfo(path).Create(security);
             return new StepOutcome("machine-folder-create", true, 0, "S_OK", path);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException)
         {
-            return StepOutcomes.FromHResult("machine-folder-create", ex.HResult, path + ": " + ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
+            // PrivilegeNotHeldException is an UnauthorizedAccessException; the rest are what the security
+            // classes throw for a descriptor or a path they cannot use.
+            // https://learn.microsoft.com/en-us/dotnet/api/system.io.filesystemaclextensions.create
             return StepOutcomes.FromHResult("machine-folder-create", ex.HResult, path + ": " + ex.Message);
         }
     }
@@ -64,12 +63,10 @@ internal sealed class NtfsFolderSecurity : IFolderSecurity
             sddl = info.GetAccessControl(Sections).GetSecurityDescriptorSddlForm(Sections);
             return new StepOutcome("folder-acl-read", true, 0, "S_OK", path);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException)
         {
-            return StepOutcomes.FromHResult("folder-acl-read", ex.HResult, path + ": " + ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
+            // A folder whose security cannot be read is never trusted, whichever way the read failed.
+            // https://learn.microsoft.com/en-us/dotnet/api/system.io.filesysteminfo.getaccesscontrol
             return StepOutcomes.FromHResult("folder-acl-read", ex.HResult, path + ": " + ex.Message);
         }
     }
@@ -341,11 +338,26 @@ internal sealed class InstallActions
         _log = log;
     }
 
+    // Nothing here is allowed to end the process without a record: an unexpected failure is logged and
+    // returned with the steps taken so far, so a half-finished install is visible in the log and the exit code.
     public InstallResult Run(InstallRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var steps = new List<StepOutcome>();
+        try
+        {
+            return RunSteps(request, steps);
+        }
+        catch (Exception ex)
+        {
+            steps.Add(ElevatedFailure.Step("install", ex));
+            _log.Error("install stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
+            return new InstallResult(GateExitCode.Failed, steps);
+        }
+    }
 
+    private InstallResult RunSteps(InstallRequest request, List<StepOutcome> steps)
+    {
         if (!CopyApplication(steps))
         {
             return new InstallResult(GateExitCode.Failed, steps);

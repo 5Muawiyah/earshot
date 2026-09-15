@@ -328,6 +328,45 @@ public sealed class TaskSchedulerGateTests
         Assert.IsEmpty(h.Tasks.Runs);
     }
 
+    // The status file is read before the run state, so a gate that writes it and exits in between would
+    // otherwise be completed with no steps at all.
+    [TestMethod]
+    public void AStatusFileWrittenBetweenTheTwoReadsOfAPollIsStillRead()
+    {
+        using var h = new Harness();
+        h.Tasks.OnRun = _ => { };
+        var racing = new RacingTasks(h.Tasks, () =>
+        {
+            h.WriteStatus(Nonce, GateExitCode.Partial);
+            h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, (int)GateExitCode.Partial, h.Tasks.Current.LastRunTime!.Value + 1);
+        });
+        var gate = new TaskSchedulerGate(racing, h.Store, InstallFolder, TestUsers.Sid, Lookups.None, h.Time, (delay, ct) =>
+        {
+            h.Time.Advance(delay);
+            return !ct.IsCancellationRequested;
+        });
+
+        GateRunResult run = gate.Run(TaskPlan.GateTaskName, GateVerbs.Block, Nonce, null, TaskSchedulerGate.GateTimeout, CancellationToken.None);
+
+        Assert.AreEqual(GateRunOutcome.Completed, run.Outcome);
+        Assert.IsNotNull(run.Status, "The file written between the two reads is found on the same poll.");
+        Assert.AreEqual((int)GateExitCode.Partial, run.Status.ExitCode);
+    }
+
+    // The gate writes its status file while the run state is being read, which is the race the poll must cover.
+    private sealed class RacingTasks(IScheduledTasks inner, Action onReadRunState) : IScheduledTasks
+    {
+        public int ReadTask(string taskPath, out TaskReadback? task) => inner.ReadTask(taskPath, out task);
+
+        public int ReadRunState(string taskPath, out TaskRunState? state)
+        {
+            onReadRunState();
+            return inner.ReadRunState(taskPath, out state);
+        }
+
+        public int Run(string taskPath, string[] parameters) => inner.Run(taskPath, parameters);
+    }
+
     [TestMethod]
     public void TheTimeoutsCoverTheTaskLimits()
     {

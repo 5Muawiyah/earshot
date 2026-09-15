@@ -275,20 +275,31 @@ internal sealed partial class GateActions
         }
 
         // Without the run lock nothing is changed or pruned; the status file, named by this run's own nonce,
-        // still says why.
-        VerbResult result = held is null ? new VerbResult(GateExitCode.Failed, null) : request.Verb switch
+        // still says why. An unexpected failure inside a verb is recorded the same way rather than ending the
+        // process without a status file.
+        VerbResult result;
+        try
         {
-            GateVerbs.Block => Block(steps),
-            GateVerbs.Allow => Allow(steps),
-            GateVerbs.Status => Status(steps),
-            GateVerbs.SetBootOn => SetBoot(true, steps),
-            GateVerbs.SetBootOff => SetBoot(false, steps),
-            GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
-            GateVerbs.Boot => Boot(steps),
-            GateVerbs.ProtectOn => Protect(request, protect: true, steps),
-            GateVerbs.ProtectOff => Protect(request, protect: false, steps),
-            _ => new VerbResult(GateExitCode.Rejected, null),
-        };
+            result = held is null ? new VerbResult(GateExitCode.Failed, null) : request.Verb switch
+            {
+                GateVerbs.Block => Block(steps),
+                GateVerbs.Allow => Allow(steps),
+                GateVerbs.Status => Status(steps),
+                GateVerbs.SetBootOn => SetBoot(true, steps),
+                GateVerbs.SetBootOff => SetBoot(false, steps),
+                GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
+                GateVerbs.Boot => Boot(steps),
+                GateVerbs.ProtectOn => Protect(request, protect: true, steps),
+                GateVerbs.ProtectOff => Protect(request, protect: false, steps),
+                _ => new VerbResult(GateExitCode.Rejected, null),
+            };
+        }
+        catch (Exception ex)
+        {
+            steps.Add(ElevatedFailure.Step(request.Verb, ex));
+            _log.Error("gate " + request.Verb + " stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
+            result = new VerbResult(GateExitCode.Failed, null);
+        }
 
         if (held is not null)
         {

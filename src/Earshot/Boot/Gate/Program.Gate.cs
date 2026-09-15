@@ -31,7 +31,8 @@ internal static partial class Program
     {
         Paths paths = Paths.Current;
         var log = new FileLog(paths.LogFolder);
-        ctx.ExitCode = (int)RunGate(ctx.Args, WindowsProcessToken.Current(), log, () => GateActions.ForMachine(paths.MachineFolder, log));
+        ctx.ExitCode = (int)Guarded(log, "gate", () =>
+            RunGate(ctx.Args, WindowsProcessToken.Current(), log, () => GateActions.ForMachine(paths.MachineFolder, log)));
     }
 
     static partial void TryRunInstall(RunContext ctx)
@@ -39,13 +40,13 @@ internal static partial class Program
         Paths paths = Paths.Current;
         var log = new FileLog(paths.LogFolder);
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
-        ctx.ExitCode = (int)RunInstall(ctx.Args, WindowsProcessToken.Current(), log, request =>
+        ctx.ExitCode = (int)Guarded(log, "install", () => RunInstall(ctx.Args, WindowsProcessToken.Current(), log, request =>
         {
             // Task Scheduler COM runs on an MTA thread, as it does in the tray.
             using var worker = new SystemWorker(log);
             return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new ComTaskRegistrar(), AccountSids.Translate, log).Run(request))
                 .GetAwaiter().GetResult();
-        });
+        }));
     }
 
     static partial void TryRunUninstall(RunContext ctx)
@@ -53,12 +54,27 @@ internal static partial class Program
         Paths paths = Paths.Current;
         var log = new FileLog(paths.LogFolder);
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
-        ctx.ExitCode = (int)RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
+        ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
         {
             using var worker = new SystemWorker(log);
             return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(), new BluetoothServiceApi()).Run())
                 .GetAwaiter().GetResult();
-        });
+        }));
+    }
+
+    // The actions record their own failures; this is the last resort for anything around them (the worker, the
+    // COM connection, a token read), so an elevated mode never ends without a line in the log.
+    private static GateExitCode Guarded(ILog log, string mode, Func<GateExitCode> run)
+    {
+        try
+        {
+            return run();
+        }
+        catch (Exception ex)
+        {
+            log.Error(mode + ": " + GateActions.Describe(ElevatedFailure.Step(mode, ex)), ex);
+            return GateExitCode.Failed;
+        }
     }
 
     internal static GateExitCode RunGate(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<GateActions> actions)

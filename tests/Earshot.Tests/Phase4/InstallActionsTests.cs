@@ -80,6 +80,14 @@ public sealed class InstallActionsTests
 
     private static readonly Guid Handsfree = new("0000111E-0000-1000-8000-00805F9B34FB");
 
+    // What a Task Scheduler call throws when its service is stopped, with the HRESULT of ERROR_SERVICE_DISABLED.
+    private sealed class SchedulerUnavailable : InvalidOperationException
+    {
+        public SchedulerUnavailable()
+            : base("The Task Scheduler service is not available.") =>
+            HResult = unchecked((int)0x80070422);
+    }
+
     private static readonly string[] KeptRecordFiles = ["device.json", "protection.json"];
 
     private static readonly string[] ProtectionRecordOnly = ["protection.json"];
@@ -546,6 +554,38 @@ public sealed class InstallActionsTests
         Assert.IsEmpty(h.Reboot.Scheduled, "Nothing is scheduled for deletion at restart either.");
         StringAssert.Contains(result.Steps.Single(s => s.Step == "remove-install-folder").Detail, "by hand");
         Assert.IsFalse(Directory.Exists(h.Machine));
+    }
+
+    // A crash part way through install or uninstall must still leave the steps taken so far and a log line.
+    [TestMethod]
+    public void AnInstallThatStopsWithAnExceptionKeepsItsStepsAndIsLogged()
+    {
+        using var h = new Harness();
+        h.Tasks.Throw = new SchedulerUnavailable();
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok), "The steps before it are kept.");
+        StepOutcome stopped = result.Steps.Single(s => s.Step == "install" + ElevatedFailure.StepSuffix);
+        Assert.IsFalse(stopped.Ok);
+        Assert.AreEqual(unchecked((int)0x80070422), stopped.Code);
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "install stopped with SchedulerUnavailable"));
+    }
+
+    [TestMethod]
+    public void AnUninstallThatStopsWithAnExceptionKeepsItsStepsAndIsLogged()
+    {
+        using var h = new Harness();
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Tasks.Throw = new SchedulerUnavailable();
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        StepOutcome stopped = result.Steps.Single(s => s.Step == "uninstall" + ElevatedFailure.StepSuffix);
+        Assert.AreEqual(unchecked((int)0x80070422), stopped.Code);
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "uninstall stopped with SchedulerUnavailable"));
     }
 
     [TestMethod]

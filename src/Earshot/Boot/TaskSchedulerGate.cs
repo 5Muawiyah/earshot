@@ -371,6 +371,13 @@ internal sealed class TaskSchedulerGate
             bool ran = status.Status != GateReadStatus.Missing || newRunTime;
             if (!running && ran)
             {
+                if (status.Status == GateReadStatus.Missing)
+                {
+                    // The status file is read before the run state, so a gate that wrote it and exited between
+                    // those two reads would otherwise lose its per-node outcomes.
+                    status = _store.ReadStatus(nonce);
+                }
+
                 if (status.Status is GateReadStatus.Invalid or GateReadStatus.Unreadable)
                 {
                     steps.Add(status.Step);

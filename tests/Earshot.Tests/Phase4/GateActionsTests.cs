@@ -531,6 +531,45 @@ public sealed class GateActionsTests
         Assert.HasCount(GateStore.MaxStatusFilesKept, Directory.GetFiles(h.Machine, "status-*.json"));
     }
 
+    // Nothing may end the gate without a status file: an unexpected failure is a step with its own code.
+    [TestMethod]
+    public void AVerbThatStopsWithAnExceptionStillWritesItsStatusFile()
+    {
+        using var h = new Harness();
+        h.Pin(RecordedNodes.AirPods());
+        var actions = new GateActions(new ThrowingNodes(), h.Store, h.Folders, h.Log, new ManualTime());
+
+        GateExitCode exit = actions.Run(new GateRequest(GateVerbs.Block, Nonce, null));
+
+        Assert.AreEqual(GateExitCode.Failed, exit);
+        GateStatusFile status = h.Status();
+        Assert.AreEqual("failed", status.Result);
+        StepOutcome stopped = status.Steps.Single(s => s.Step == GateVerbs.Block + ElevatedFailure.StepSuffix);
+        Assert.IsFalse(stopped.Ok);
+        Assert.Contains("InvalidOperationException", stopped.Detail!);
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "stopped with InvalidOperationException"));
+    }
+
+    // Every read throws, so a verb that does not guard would take the process down with it.
+    private sealed class ThrowingNodes : INodeApi
+    {
+        public uint ListDeviceIds(out string[] ids) => throw new InvalidOperationException("The device list is unavailable in this test.");
+
+        public uint Locate(string instanceId, bool includeNonPresent, out uint devInst) => throw new InvalidOperationException("no locate");
+
+        public uint GetStatus(uint devInst, out uint status, out uint problem) => throw new InvalidOperationException("no status");
+
+        public uint GetContainerId(uint devInst, out Guid containerId) => throw new InvalidOperationException("no container");
+
+        public uint GetConfigFlags(uint devInst, out uint configFlags) => throw new InvalidOperationException("no flags");
+
+        public uint GetName(uint devInst, out string? name) => throw new InvalidOperationException("no name");
+
+        public uint Disable(uint devInst, uint flags) => throw new InvalidOperationException("no disable");
+
+        public uint Enable(uint devInst) => throw new InvalidOperationException("no enable");
+    }
+
     [TestMethod]
     public void ExitCodesAreDistinctAndNamed()
     {

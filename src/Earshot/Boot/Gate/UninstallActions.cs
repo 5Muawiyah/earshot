@@ -110,9 +110,24 @@ internal sealed class UninstallActions
 
     internal IGateRunLock RunLock => _runLock;
 
+    // As in install, an unexpected failure is logged and returned with the steps taken so far.
     public InstallResult Run()
     {
         var steps = new List<StepOutcome>();
+        try
+        {
+            return RunSteps(steps);
+        }
+        catch (Exception ex)
+        {
+            steps.Add(ElevatedFailure.Step("uninstall", ex));
+            _log.Error("uninstall stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
+            return new InstallResult(GateExitCode.Failed, steps);
+        }
+    }
+
+    private InstallResult RunSteps(List<StepOutcome> steps)
+    {
         bool complete = true;
         string machine = _layout.MachineFolder;
         bool machineExists = Directory.Exists(machine) || File.Exists(machine);

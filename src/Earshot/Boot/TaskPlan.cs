@@ -437,7 +437,14 @@ internal static class TaskDefinitionWriter
                 return Failed(hr);
             }
 
-            var exec = (IExecAction)action;
+            // A cast would throw InvalidCastException when the action does not carry IExecAction; the QI path
+            // records E_NOINTERFACE as a step instead.
+            hr = ComActivation.AsInterface(action, out IExecAction? exec);
+            if (!Track(steps, step + ":exec-interface", hr, exec, created) || exec is null)
+            {
+                return Failed(hr);
+            }
+
             if (!Put(steps, step + ":path", hr = exec.put_Path(spec.ExecutablePath)) ||
                 !Put(steps, step + ":arguments", hr = exec.put_Arguments(spec.Arguments)) ||
                 !Put(steps, step + ":working-directory", hr = exec.put_WorkingDirectory(spec.WorkingDirectory)))
