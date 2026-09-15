@@ -296,6 +296,25 @@ public sealed class ConnectSequenceTests
     }
 
     [TestMethod]
+    public void AConnectThatThrowsAfterAnAllowBlocksAgainBeforeTheErrorIsReported()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        h.Connection.Connects.Enqueue(_ => throw new InvalidOperationException("The walk to the filters failed."));
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsFaulted, "The error was swallowed.");
+        Assert.IsInstanceOfType<InvalidOperationException>(toggle.Exception!.InnerException);
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The nodes were left enabled after an error.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "connect: unexpected error; cleaning up"));
+    }
+
+    [TestMethod]
     public void InSafeModeNoCardPromisesSomethingThatCannotHappen()
     {
         using var h = new CoordinatorHarness(safeMode: true);

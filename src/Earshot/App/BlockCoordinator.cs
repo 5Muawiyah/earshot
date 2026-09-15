@@ -814,11 +814,11 @@ internal sealed class BlockCoordinator : IDisposable
             return await RunProtectionAsync(ProtectionGoal.Block, Settings.ProtectAudioQuality, place, notice: true, ct);
         }
 
+        // No status read after it either: the block result is the evidence, and Earshot is on its way out.
         var run = new ProtectionRun();
         ControllerResult block = await _block.BlockAsync(ct);
         Record(run.Steps, "block (closing)", block);
         run.NodeChange = block;
-        run.Status = await ReadBlockStatusAsync(ct);
         return run;
     }
 

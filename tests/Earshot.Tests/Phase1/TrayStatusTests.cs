@@ -221,6 +221,13 @@ public sealed class TrayStatusTests
     }
 
     [TestMethod]
+    public void NothingIsPinnedFromAReadThatDidNotWork()
+    {
+        Assert.IsNull(TrayStatus.PinCandidate(ReadFailed(), Settings()), "A failed read is not a sighting.");
+        Assert.IsNull(TrayStatus.PinCandidate(NoDevice(), Settings()), "Nothing has been read yet.");
+    }
+
+    [TestMethod]
     public void APinnedContainerWithoutAnAddressIsCompleted()
     {
         EarshotSettings settings = Settings(s => s.PinnedContainerId = AirPodsContainer);
