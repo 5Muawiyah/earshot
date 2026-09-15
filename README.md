@@ -44,8 +44,10 @@ build." and exits with code 69.
 
 For testing, `EARSHOT_DATA_ROOT=<absolute folder>` moves every data folder
 under that folder, and `EARSHOT_SAFE_MODE=1` turns off every device action.
-While either is set, `install`, `uninstall` and `gate` refuse to run, and in
-safe mode every `diag` target is refused.
+Safe mode is on for any value of `EARSHOT_SAFE_MODE` except empty, `0` or
+`false`. The data root counts as set when `EARSHOT_DATA_ROOT` is not blank.
+`install`, `uninstall` and `gate` refuse to run in safe mode or while the
+data root is set, and in safe mode every `diag` target is refused.
 
 ## Battery
 
