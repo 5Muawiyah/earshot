@@ -125,7 +125,8 @@ internal static partial class Program
                 else
                 {
                     failure = "No request was sent: " + (read is { Ok: false } ? "the endpoints could not be read." :
-                        read is { Endpoints.Count: 0 } ? "the device has no endpoints." : "no chosen filter passed the guard.");
+                        read is { Endpoints.Count: 0 } ? "the device has no endpoints." :
+                        send is { Filters.Count: 0 } ? "no chosen filter was found." : "no chosen filter passed the guard.");
                 }
             }
 
