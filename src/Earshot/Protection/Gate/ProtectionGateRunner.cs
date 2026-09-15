@@ -44,18 +44,22 @@ internal static class GateBluetooth
 // protect-on, protect-off and the uninstall restore, inside the gate (SYSTEM, or the elevated uninstall).
 // Identity is only ever the validated device.json in the context.
 //
-//   0. Take the device change lock (DeviceChangeLock), so no block, allow or other service change runs
-//      beside this one. If another change still holds it after the wait, change nothing.
-//   1. Read the target device nodes. If any is disabled, change nothing: nothing documents
-//      BluetoothSetServiceState while the device node is disabled. A protect verb then stores the wanted
-//      state in protection-intent.json for the next allow and exits with BlockedExit, or with Failed when
-//      that file could not be written.
+//   0. Take the device change lock (DeviceChangeLock), so two protect verbs, or a protect verb and the
+//      restore, never run side by side. If another holder still has it after the wait, change nothing. The
+//      block, allow, boot and set-device verbs do not take the lock yet, so it does not keep them out; until
+//      they do, only the node check in step 1 stands between a service change and a disabled device node,
+//      and it cannot stop a block that starts after it.
+//   1. Read the target device nodes. If any counts as blocked (BlockedNodes), change nothing: nothing
+//      documents BluetoothSetServiceState while the device node is disabled. A protect verb then stores the
+//      wanted state in protection-intent.json for the next allow and exits with BlockedExit, or with Failed
+//      when that file could not be written.
 //   2. Find the remembered device and read its installed services (0 and 234 are success).
 //   3. protect-on: turn off Handsfree (0000111E) and Headset (00001108) where they are on; A2DP sink
-//      (0000110B) is never touched. Each GUID is written to protection.json before its call, and taken out
-//      again when the call did not change it, so protection.json lists exactly what Earshot turned off.
+//      (0000110B) is never touched. Each GUID is written to protection.json before its call, so protection.json
+//      lists what Earshot turned off. An entry is taken out again when the call reports the service already
+//      off or not on the device, or when the call failed and the read-back in step 4 still lists the service.
 //      protect-off and restore: turn back on only what protection.json lists, and take each out once on.
-//   4. Read the services again and record the protection state.
+//   4. Read the services again, record the protection state, and settle the entries of failed calls.
 // A service whose state already matches is not called, so nothing depends on the already-in-state result,
 // but that result (E_INVALIDARG) is still taken as success when an incomplete list made a call necessary.
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothsetservicestate
@@ -71,10 +75,11 @@ internal sealed class ProtectionGateRunner
     public const string RefusedStep = "protect-refused";
     public const string DeviceNodeStep = "protect-device-node";
     public const string ServicesAfterStep = "bt-installed-services-after";
+    public const string RecordKeptStepPrefix = "protection-record-kept:";
 
     // How long a protect verb waits for the device change lock: longer than \Earshot\Gate's PT2M limit, so a
-    // block, allow or boot block that holds it has finished or been stopped by the scheduler. What is left
-    // of \Earshot\Protect's PT5M is for the service calls.
+    // block, allow or boot block that holds it (once those verbs take it) has finished or been stopped by the
+    // scheduler. What is left of \Earshot\Protect's PT5M is for the service calls.
     public static readonly TimeSpan ProtectLockTimeout = TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15);
 
     // How long the uninstall restore waits: longer than \Earshot\Protect's PT5M limit, so a protect verb
@@ -107,7 +112,7 @@ internal sealed class ProtectionGateRunner
     {
         ArgumentNullException.ThrowIfNull(ctx);
         ctx.Handled = true;
-        using DeviceChangeLock? held = DeviceChangeLock.TryAcquire(ctx.Store.Folder, _protectLockTimeout, _wait, ctx.Steps);
+        using DeviceChangeLock? held = DeviceChangeLock.TryAcquire(ctx.Store.Folder, DeviceChangeLockAccess.For(ctx.Nodes), _protectLockTimeout, _wait, ctx.Steps);
         if (held is null)
         {
             ctx.Outcome = GateExitCode.Failed;
@@ -151,11 +156,19 @@ internal sealed class ProtectionGateRunner
             return;
         }
 
-        (int ok, int failed) = protect
-            ? TurnOff(ctx, device, record, before, complete)
-            : TurnBackOn(ctx, device, record, before);
-        ReadBack(ctx, device);
-        Finish(ctx, intent, Summarise(ok, failed));
+        if (protect)
+        {
+            (int ok, int failed, List<Guid> unsettled) = TurnOff(ctx, device, record, before, complete);
+            ServicesAfter after = ReadBack(ctx, device);
+            failed += SettleFailedDisables(ctx, record, unsettled, after);
+            Finish(ctx, intent, Summarise(ok, failed));
+        }
+        else
+        {
+            (int ok, int failed) = TurnBackOn(ctx, device, record, before);
+            ReadBack(ctx, device);
+            Finish(ctx, intent, Summarise(ok, failed));
+        }
     }
 
     // Uninstall: turn back on the services protection.json lists. Nothing else is turned on.
@@ -163,7 +176,7 @@ internal sealed class ProtectionGateRunner
     {
         ArgumentNullException.ThrowIfNull(ctx);
         ctx.Handled = true;
-        using DeviceChangeLock? held = DeviceChangeLock.TryAcquire(ctx.Store.Folder, _restoreLockTimeout, _wait, ctx.Steps);
+        using DeviceChangeLock? held = DeviceChangeLock.TryAcquire(ctx.Store.Folder, DeviceChangeLockAccess.For(ctx.Nodes), _restoreLockTimeout, _wait, ctx.Steps);
         if (held is null)
         {
             ctx.Outcome = GateExitCode.Failed;
@@ -227,7 +240,7 @@ internal sealed class ProtectionGateRunner
             return GateExitCode.Failed;
         }
 
-        BluetoothNode? deviceNode = read.Nodes.FirstOrDefault(n => n.InstanceId.StartsWith(@"BTHENUM\DEV_", StringComparison.OrdinalIgnoreCase));
+        BluetoothNode? deviceNode = read.Nodes.FirstOrDefault(IsDeviceNode);
         if (deviceNode is null)
         {
             ctx.Steps.Add(StepOutcomes.NotAttempted(DeviceNodeStep,
@@ -235,7 +248,7 @@ internal sealed class ProtectionGateRunner
             return GateExitCode.NotFound;
         }
 
-        List<BluetoothNode> blocked = read.Nodes.Where(n => n.Status == NodeBlockStatus.Disabled || n.ConfigFlagsDisabledBit).ToList();
+        IReadOnlyList<BluetoothNode> blocked = BlockedNodes(read.Nodes);
         if (blocked.Count > 0)
         {
             string what = blocked.Contains(deviceNode) ? "The device node is blocked"
@@ -259,6 +272,26 @@ internal sealed class ProtectionGateRunner
         }
 
         return null;
+    }
+
+    // The target nodes that rule out a service change. A present node counts when it is at problem 22
+    // (CM_PROB_DISABLED), the test BlockStateClassifier uses for Blocked and Mixed, whatever its config flags
+    // say. The device node also counts when it is not present but carries CONFIGFLAG_DISABLED, since it comes
+    // back disabled. A service node that is not present never counts: the tray ignores it and allow cannot
+    // enable it, so counting its flag would refuse every request while the tray shows the AirPods allowed.
+    // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_get_devnode_status
+    internal static IReadOnlyList<BluetoothNode> BlockedNodes(IReadOnlyList<BluetoothNode> nodes)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        return nodes.Where(n => n.IsPresent
+            ? n.Status == NodeBlockStatus.Disabled
+            : n.ConfigFlagsDisabledBit && IsDeviceNode(n)).ToList();
+    }
+
+    internal static bool IsDeviceNode(BluetoothNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        return node.InstanceId.StartsWith(@"BTHENUM\DEV_", StringComparison.OrdinalIgnoreCase);
     }
 
     // protection.json, or an empty record when there is none. An invalid or unreadable file is never
@@ -310,9 +343,12 @@ internal sealed class ProtectionGateRunner
         return true;
     }
 
-    private (int Ok, int Failed) TurnOff(GateRunContext ctx, BluetoothDeviceEntry device, ProtectionRecord record, IReadOnlyList<Guid> before, bool complete)
+    // Unsettled: services added to protection.json for this call whose call failed. Whether their entries
+    // stay is decided after the read-back (SettleFailedDisables).
+    private (int Ok, int Failed, List<Guid> Unsettled) TurnOff(GateRunContext ctx, BluetoothDeviceEntry device, ProtectionRecord record, IReadOnlyList<Guid> before, bool complete)
     {
         int ok = 0, failed = 0;
+        var unsettled = new List<Guid>();
         foreach (Guid service in ProtectedServices.TurnedOff)
         {
             string step = ServiceStateResults.StepName(service, enable: false);
@@ -353,20 +389,62 @@ internal sealed class ProtectionGateRunner
                 failed++;
             }
 
-            if (added && change != ServiceChange.Changed)
+            if (!added || change == ServiceChange.Changed)
+            {
+                continue;
+            }
+
+            if (change is ServiceChange.AlreadyInState or ServiceChange.NotSupported)
             {
                 // Earshot did not turn it off, so a restore must not turn it on.
-                record.DisabledServices.Remove(service);
-                StepOutcome undone = ctx.Store.WriteProtection(record);
-                ctx.Steps.Add(undone);
-                if (!undone.Ok)
-                {
-                    failed++;
-                }
+                failed += RemoveEntry(ctx, record, service);
+            }
+            else
+            {
+                // The call may have removed the driver and still returned an error (the SDK header allows
+                // "other WIN32 error"), so the read-back decides.
+                unsettled.Add(service);
             }
         }
 
-        return (ok, failed);
+        return (ok, failed, unsettled);
+    }
+
+    // For each disable that failed: the entry is taken out of protection.json only when the read-back lists
+    // the service, which proves it is still on. When the read-back does not list it (it may be off because of
+    // this call) or could not be read, the entry stays, so a restore still turns it back on. A kept entry for
+    // a service that turns out to be on costs nothing: turning back on skips a service the list shows as on,
+    // and takes an already-on result as success, and either way drops the entry. Returns the failed writes.
+    private static int SettleFailedDisables(GateRunContext ctx, ProtectionRecord record, IReadOnlyList<Guid> unsettled, ServicesAfter after)
+    {
+        int failed = 0;
+        foreach (Guid service in unsettled)
+        {
+            if (after.Listed && after.Services.Contains(service))
+            {
+                failed += RemoveEntry(ctx, record, service);
+                continue;
+            }
+
+            string why = !after.Listed ? "the services could not be read again"
+                : after.Complete ? "the complete list read again no longer has it"
+                : "the incomplete list read again does not show it";
+            string detail = "Its disable call failed, but " + why + ", so Earshot may have turned it off. It stays in protection.json for the restore.";
+            ctx.Steps.Add(new StepOutcome(RecordKeptStepPrefix + ProtectedServices.Label(service), Ok: true,
+                NativeCodes.NotAttempted, NativeCodes.Name(NativeCodes.NotAttempted), detail));
+            ctx.Log.Info(ctx.Verb + ": " + ProtectedServices.Label(service) + ": " + detail);
+        }
+
+        return failed;
+    }
+
+    // Takes a service out of protection.json. Returns 1 when the write failed.
+    private static int RemoveEntry(GateRunContext ctx, ProtectionRecord record, Guid service)
+    {
+        record.DisabledServices.Remove(service);
+        StepOutcome written = ctx.Store.WriteProtection(record);
+        ctx.Steps.Add(written);
+        return written.Ok ? 0 : 1;
     }
 
     private (int Ok, int Failed) TurnBackOn(GateRunContext ctx, BluetoothDeviceEntry device, ProtectionRecord record, IReadOnlyList<Guid> before)
@@ -429,17 +507,23 @@ internal sealed class ProtectionGateRunner
         return ServiceStateResults.Map(rc);
     }
 
-    private void ReadBack(GateRunContext ctx, BluetoothDeviceEntry device)
+    private ServicesAfter ReadBack(GateRunContext ctx, BluetoothDeviceEntry device)
     {
         var steps = new List<StepOutcome>();
         uint rc = ServiceStateReader.ReadServices(_api, device, ServicesAfterStep, steps, out IReadOnlyList<Guid> after);
         bool listed = rc is BluetoothApis.ERROR_SUCCESS or BluetoothApis.ERROR_MORE_DATA;
-        AudioProtectionState state = ProtectionClassifier.Classify(listed, rc == BluetoothApis.ERROR_SUCCESS, after);
+        bool complete = rc == BluetoothApis.ERROR_SUCCESS;
+        AudioProtectionState state = ProtectionClassifier.Classify(listed, complete, after);
         foreach (StepOutcome step in steps)
         {
             ctx.Steps.Add(step with { Detail = "Protection " + state + ". " + step.Detail });
         }
+
+        return new ServicesAfter(listed, complete, listed ? after : []);
     }
+
+    // The services read after the calls. Listed: 0 or ERROR_MORE_DATA; Complete: 0.
+    private sealed record ServicesAfter(bool Listed, bool Complete, IReadOnlyList<Guid> Services);
 
     private static void Finish(GateRunContext ctx, ProtectionIntentFile intent, GateExitCode outcome)
     {

@@ -211,6 +211,50 @@ public sealed class ProbeAndDiagTests
     }
 
     [TestMethod]
+    public void DiagKeepsTheGatesRuleForAServiceNodeThatIsGone()
+    {
+        FakeNodeApi nodes = RecordedNodes.Table();
+        FakeNode handsfree = nodes[RecordedNodes.AirPodsTargets.Single(id => id.Contains("{0000111E", StringComparison.Ordinal))];
+        handsfree.MarkDisabled(persistent: true);
+        handsfree.Present = false;
+
+        Assert.IsNull(Program.DiagProtectNodeRefusal(new NodeStateReader(nodes).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress)));
+    }
+
+    [TestMethod]
+    public void EvidenceThatCannotBeWrittenGoesToTheLogAndTheOutput()
+    {
+        using var temp = new TempFolder();
+        string blocked = Path.Combine(temp.Path, "evidence.json");
+        Directory.CreateDirectory(blocked);
+        var log = new CapturingLog();
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+        const string json = "{\"target\":\"protect-unelevated\",\"calls\":[{\"returnValue\":0}]}";
+
+        Assert.IsFalse(Program.WriteDiagEvidence(blocked, json, log, output));
+
+        LogEntry warning = log.Entries.Single(e => e.Level == LogLevel.Warn);
+        Assert.Contains(json, warning.Message, "The whole evidence is in the log.");
+        Assert.Contains(blocked, warning.Message);
+        Assert.Contains(json, output.ToString());
+    }
+
+    [TestMethod]
+    public void EvidenceIsWrittenWhenItCanBe()
+    {
+        using var temp = new TempFolder();
+        string path = Path.Combine(temp.Path, "evidence.json");
+        var log = new CapturingLog();
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+
+        Assert.IsTrue(Program.WriteDiagEvidence(path, "{}", log, output));
+
+        Assert.AreEqual("{}", File.ReadAllText(path));
+        Assert.IsEmpty(log.Entries);
+        Assert.AreEqual("", output.ToString());
+    }
+
+    [TestMethod]
     public void DiagInSafeModeIsRefusedBeforeThisTargetRuns()
     {
         var request = new Program.DiagRequest("protect-unelevated", ["on"], OutPath: null);

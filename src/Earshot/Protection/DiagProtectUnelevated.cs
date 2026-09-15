@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using Earshot.App;
 using Earshot.AudioProtection;
+using Earshot.AudioProtection.Gate;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
@@ -22,9 +23,11 @@ namespace Earshot;
 // return is the evidence (0, 5, 1060 or E_INVALIDARG). The JSON evidence holds each raw return with its name
 // and duration, and the installed services and node state before and after.
 //
-// It refuses to run elevated or as SYSTEM (the evidence would not be unelevated), and refuses while any
-// target node of the device is disabled, the same rule the gate keeps. Program.RunDiag refuses every diag
-// target in safe mode before this runs.
+// It refuses to run elevated or as SYSTEM (the evidence would not be unelevated), and refuses while the
+// device counts as blocked by the rule the gate keeps (ProtectionGateRunner.BlockedNodes). Program.RunDiag
+// refuses every diag target in safe mode before this runs. The evidence file's folder is made before any
+// call, so a folder that cannot be made stops the run with nothing called; if the file itself cannot be
+// written after the calls, the whole JSON goes to the log and to the output instead.
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothsetservicestate
 internal static partial class Program
 {
@@ -70,6 +73,22 @@ internal static partial class Program
             return;
         }
 
+        string evidence;
+        try
+        {
+            evidence = ctx.NewEvidenceFile("protect-unelevated-" + ctx.Args[0]);
+        }
+        catch (IOException ex)
+        {
+            ctx.ExitCode = ReportEvidenceFolderProblem(ctx, log, ex);
+            return;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            ctx.ExitCode = ReportEvidenceFolderProblem(ctx, log, ex);
+            return;
+        }
+
         var steps = new List<StepOutcome>();
         var reader = new NodeStateReader(new CfgMgr32NodeReader());
         var api = new BluetoothServiceApi();
@@ -111,7 +130,6 @@ internal static partial class Program
         }
 
         DateTimeOffset finished = DateTimeOffset.UtcNow;
-        string evidence = ctx.NewEvidenceFile("protect-unelevated-" + ctx.Args[0]);
         string json = ProbeContext.JsonText(w =>
         {
             w.WriteStartObject();
@@ -150,7 +168,7 @@ internal static partial class Program
             WriteSteps(w, "steps", steps);
             w.WriteEndObject();
         });
-        File.WriteAllText(evidence, json);
+        bool saved = WriteDiagEvidence(evidence, json, log, ctx.Out);
 
         if (nodeRefusal is not null)
         {
@@ -163,9 +181,14 @@ internal static partial class Program
                               NativeCodes.Win32(result.Code) + " in " + result.Milliseconds.ToString(CultureInfo.InvariantCulture) + " ms");
         }
 
-        ctx.Out.WriteLine("Evidence: " + evidence);
-        log.Info("diag protect-unelevated " + ctx.Args[0] + ": " + results.Count + " calls, evidence " + evidence);
-        ctx.ExitCode = nodeRefusal is not null ? ExitCodes.Refused
+        if (saved)
+        {
+            ctx.Out.WriteLine("Evidence: " + evidence);
+        }
+
+        log.Info("diag protect-unelevated " + ctx.Args[0] + ": " + results.Count + " calls, evidence " + (saved ? evidence : "in the log only"));
+        ctx.ExitCode = !saved ? ExitCodes.IoError
+            : nodeRefusal is not null ? ExitCodes.Refused
             : entry is null ? ExitCodes.OsError
             : results.All(r => ServiceStateResults.IsOk(ServiceStateResults.Map(r.Code))) ? ExitCodes.Ok
             : ExitCodes.Software;
@@ -193,6 +216,43 @@ internal static partial class Program
         return true;
     }
 
+    // Writes the evidence JSON. When the file cannot be written, the whole JSON is logged at Warn with the
+    // failure and written to the output, so the record of a single-shot live call is never lost. False then.
+    internal static bool WriteDiagEvidence(string path, string json, ILog log, TextWriter output)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(json);
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(output);
+        string problem;
+        try
+        {
+            File.WriteAllText(path, json);
+            return true;
+        }
+        catch (IOException ex)
+        {
+            problem = NativeCodes.Name(ex.HResult) + " " + ex.Message;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            problem = NativeCodes.Name(ex.HResult) + " " + ex.Message;
+        }
+
+        log.Warn("diag protect-unelevated: the evidence could not be written to " + path + " (" + problem + "). Evidence: " + json);
+        output.WriteLine("The evidence could not be written to " + path + ". It is in the log and below.");
+        output.WriteLine(json);
+        return false;
+    }
+
+    private static int ReportEvidenceFolderProblem(DiagContext ctx, ILog log, Exception ex)
+    {
+        string message = "The evidence folder " + ctx.EvidenceFolder + " could not be made, so no service was called.";
+        log.Error("diag protect-unelevated: " + message + " " + NativeCodes.Name(ex.HResult) + " " + ex.Message);
+        ctx.Out.WriteLine(message);
+        return ExitCodes.IoError;
+    }
+
     // Why this process must not make the unelevated call, or null when it may.
     internal static string? DiagProtectRefusal(IProcessToken token)
     {
@@ -207,7 +267,8 @@ internal static partial class Program
             : null;
     }
 
-    // Why the device's nodes rule the call out, or null when every target node is enabled and present.
+    // Why the device's nodes rule the call out, or null when none counts as blocked and the device node is
+    // present and enabled.
     internal static string? DiagProtectNodeRefusal(NodeReadResult nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
@@ -216,13 +277,13 @@ internal static partial class Program
             return "The device nodes could not be read, so no service was called.";
         }
 
-        BluetoothNode? deviceNode = nodes.Nodes.FirstOrDefault(n => n.InstanceId.StartsWith(@"BTHENUM\DEV_", StringComparison.OrdinalIgnoreCase));
+        BluetoothNode? deviceNode = nodes.Nodes.FirstOrDefault(ProtectionGateRunner.IsDeviceNode);
         if (deviceNode is null)
         {
             return "No device node matched the pinned device, so no service was called.";
         }
 
-        if (nodes.Nodes.Any(n => n.Status == NodeBlockStatus.Disabled || n.ConfigFlagsDisabledBit))
+        if (ProtectionGateRunner.BlockedNodes(nodes.Nodes).Count > 0)
         {
             return "The AirPods are blocked, so no service was called. Allow them first.";
         }

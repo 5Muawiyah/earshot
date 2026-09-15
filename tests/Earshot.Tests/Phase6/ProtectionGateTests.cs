@@ -205,6 +205,70 @@ public sealed class ProtectionGateTests
     }
 
     [TestMethod]
+    [DataRow(0x0000048Fu)]
+    [DataRow(0x00000005u)]
+    [DataRow(0x00000057u)]
+    public void AFailedDisableThatStillTookStaysRecordedAndProtectOffTurnsItBackOn(uint rc)
+    {
+        using var h = new Harness();
+        h.Bluetooth.OnSet = (service, enable) =>
+        {
+            if (service == ProtectedServices.Handsfree && !enable)
+            {
+                h.AirPods.Apply(service, enable);
+            }
+        };
+        h.Bluetooth.SetResult = (service, enable) => service == ProtectedServices.Handsfree && !enable ? rc : null;
+
+        Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.ProtectOn));
+
+        Assert.DoesNotContain(ProtectedServices.Handsfree, h.AirPods.Enabled, "The driver went although the call failed.");
+        CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, h.Recorded(), "Earshot may have turned it off, so restore must know.");
+        GateStatusFile status = h.Status();
+        Assert.IsFalse(Step(status, "bt-service-disable:Handsfree").Ok);
+        StepOutcome kept = Step(status, ProtectionGateRunner.RecordKeptStepPrefix + "Handsfree");
+        Assert.IsTrue(kept.Ok);
+        Assert.AreEqual(NativeCodes.NotAttempted, kept.Code);
+        Assert.Contains("no longer has it", kept.Detail!);
+
+        h.Bluetooth.OnSet = null;
+        h.Bluetooth.SetResult = null;
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.ProtectOff));
+
+        Assert.Contains(ProtectedServices.Handsfree, h.AirPods.Enabled);
+        Assert.IsEmpty(h.Recorded());
+    }
+
+    [TestMethod]
+    public void AFailedDisableIsKeptWhenTheServicesCannotBeReadAgain()
+    {
+        using var h = new Harness();
+        h.Bluetooth.OnSet = (_, _) => h.Bluetooth.ServicesResult = 1167;
+        h.Bluetooth.SetResult = (service, _) => service == ProtectedServices.Handsfree ? BluetoothApis.ERROR_ACCESS_DENIED : null;
+
+        Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.ProtectOn));
+
+        CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, h.Recorded());
+        GateStatusFile status = h.Status();
+        Assert.IsFalse(Step(status, ProtectionGateRunner.ServicesAfterStep).Ok);
+        Assert.Contains("could not be read again", Step(status, ProtectionGateRunner.RecordKeptStepPrefix + "Handsfree").Detail!);
+    }
+
+    [TestMethod]
+    public void AFailedDisableThatAnIncompleteReadBackStillListsIsTakenOut()
+    {
+        using var h = new Harness();
+        h.Bluetooth.ServicesResult = BluetoothApis.ERROR_MORE_DATA;
+        h.Bluetooth.IncompleteList = [ProtectedServices.Handsfree];
+        h.Bluetooth.SetResult = (service, _) => service == ProtectedServices.Handsfree ? BluetoothApis.ERROR_ACCESS_DENIED : null;
+
+        Assert.AreEqual(GateExitCode.Partial, h.Run(GateVerbs.ProtectOn), "Headset was called on the incomplete list and is not on the device.");
+
+        Assert.IsEmpty(h.Recorded(), "The list shows it is still on, so Earshot did not turn it off.");
+        Assert.IsFalse(h.Status().Steps.Any(st => st.Step.StartsWith(ProtectionGateRunner.RecordKeptStepPrefix, StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     public void HeadsetIsTurnedOffWhenADeviceHasIt()
     {
         using var h = new Harness();
@@ -297,6 +361,85 @@ public sealed class ProtectionGateTests
 
         Assert.IsEmpty(h.Bluetooth.Calls);
         Assert.StartsWith("A service node is blocked", Step(h.Status(), ProtectionGateRunner.RefusedStep).Detail!);
+    }
+
+    [TestMethod]
+    public void ANonPresentServiceNodeStillFlaggedDisabledDoesNotStopTheRequest()
+    {
+        using var h = new Harness();
+        string handsfreeNode = RecordedNodes.AirPodsTargets.Single(id => id.Contains("{0000111E", StringComparison.Ordinal));
+        FakeNode node = h.Nodes[handsfreeNode];
+        node.MarkDisabled(persistent: true);
+        node.Present = false;
+
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.ProtectOn));
+
+        Assert.DoesNotContain(ProtectedServices.Handsfree, h.AirPods.Enabled);
+        GateStatusFile status = h.Status();
+        Assert.AreEqual(nameof(BlockState.Allowed), status.State, "The gate reads the AirPods as allowed, as the tray does.");
+        Assert.IsFalse(status.Steps.Any(st => st.Step == ProtectionGateRunner.RefusedStep));
+        Assert.IsFalse(File.Exists(h.Intent.FilePath), "Nothing is kept for an allow that is not needed.");
+    }
+
+    [TestMethod]
+    public void AGoneDeviceNodeStillFlaggedDisabledKeepsTheRequest()
+    {
+        using var h = new Harness();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].Present = false;
+        }
+
+        h.Nodes[RecordedNodes.AirPodsDeviceNode].ConfigFlags |= CfgMgr32.CONFIGFLAG_DISABLED;
+
+        Assert.AreEqual(ProtectionGateRunner.BlockedExit, h.Run(GateVerbs.ProtectOn));
+
+        Assert.IsEmpty(h.Bluetooth.Calls);
+        Assert.StartsWith("The device node is blocked", Step(h.Status(), ProtectionGateRunner.RefusedStep).Detail!);
+        Assert.IsTrue(h.Intent.Read().Value!.Protect);
+    }
+
+    [TestMethod]
+    public void AGoneDeviceNodeWithoutTheFlagIsNotPresentRatherThanBlocked()
+    {
+        using var h = new Harness();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].Present = false;
+        }
+
+        Assert.AreEqual(GateExitCode.NotPresent, h.Run(GateVerbs.ProtectOn));
+
+        Assert.IsEmpty(h.Bluetooth.Calls);
+        Assert.IsFalse(File.Exists(h.Intent.FilePath));
+    }
+
+    [TestMethod]
+    public void TheBlockedRuleCountsWhatTheTrayCounts()
+    {
+        const string service = @"BTHENUM\{0000111E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000";
+        static BluetoothNode Node(string id, bool present, NodeBlockStatus status, bool flag) =>
+            new(id, "BTHENUM", null, present, status, status == NodeBlockStatus.Disabled ? CfgMgr32.CM_PROB_DISABLED : 0, flag);
+
+        BluetoothNode presentDisabled = Node(service, present: true, NodeBlockStatus.Disabled, flag: false);
+        BluetoothNode presentEnabledFlagged = Node(service, present: true, NodeBlockStatus.Enabled, flag: true);
+        BluetoothNode goneServiceFlagged = Node(service, present: false, NodeBlockStatus.Unknown, flag: true);
+        BluetoothNode goneDeviceFlagged = Node(RecordedNodes.AirPodsDeviceNode, present: false, NodeBlockStatus.Unknown, flag: true);
+        BluetoothNode goneDevice = Node(RecordedNodes.AirPodsDeviceNode, present: false, NodeBlockStatus.Unknown, flag: false);
+
+        CollectionAssert.AreEqual(
+            new[] { presentDisabled, goneDeviceFlagged },
+            ProtectionGateRunner.BlockedNodes([presentDisabled, presentEnabledFlagged, goneServiceFlagged, goneDeviceFlagged, goneDevice]).ToArray());
+
+        // Wherever the gate refuses a present device, the tray does not read Allowed.
+        BluetoothNode device = Node(RecordedNodes.AirPodsDeviceNode, present: true, NodeBlockStatus.Enabled, flag: true);
+        foreach (BluetoothNode other in new[] { presentDisabled, presentEnabledFlagged, goneServiceFlagged })
+        {
+            var read = new NodeReadResult(true, [device, other], []);
+            bool refused = ProtectionGateRunner.BlockedNodes(read.Nodes).Count > 0;
+            BlockState tray = BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, read);
+            Assert.AreEqual(refused, tray != BlockState.Allowed, other + " " + tray);
+        }
     }
 
     [TestMethod]
