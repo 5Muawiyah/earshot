@@ -1,0 +1,105 @@
+<#
+.SYNOPSIS
+    Builds the solution, runs the tests and scans the source for suppressed
+    diagnostics and em-dashes. Prints a short summary and writes full logs
+    to the given log folder.
+
+.PARAMETER Root
+    Repository root. Defaults to the folder above this script.
+
+.PARAMETER LogDir
+    Where full build and test logs go. Defaults to %TEMP%\earshot-check.
+
+.PARAMETER NoTest
+    Build and scan only.
+#>
+[CmdletBinding()]
+param(
+    [string]$Root = '',
+    [string]$LogDir = (Join-Path $env:TEMP 'earshot-check'),
+    [switch]$NoTest
+)
+
+$ErrorActionPreference = 'Stop'
+if (-not $Root) { $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path) }
+$Root = (Resolve-Path $Root).Path.TrimEnd('\')
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$sln = Join-Path $Root 'Earshot.slnx'
+$result = [ordered]@{
+    root = $Root; build_ok = $false; build_warnings = -1; build_errors = -1
+    tests_ok = $null; tests_passed = 0; tests_failed = 0; tests_skipped = 0
+    suppressions = @(); em_dashes = @(); problems = @()
+}
+
+if (-not (Test-Path $sln)) {
+    $result.problems += "Solution not found: $sln"
+    $result | ConvertTo-Json -Depth 4
+    exit 2
+}
+
+# Keep smoke runs and tests away from the owner's real data and devices.
+$env:EARSHOT_SAFE_MODE = '1'
+if (-not $env:EARSHOT_DATA_ROOT) { $env:EARSHOT_DATA_ROOT = Join-Path $LogDir 'data' }
+
+$buildLog = Join-Path $LogDir 'build.log'
+& dotnet build $sln -c Debug -nologo -v:minimal -clp:NoSummary *> $buildLog
+$buildExit = $LASTEXITCODE
+$buildText = Get-Content $buildLog -Raw
+$warnLines = @(Select-String -Path $buildLog -Pattern ': warning [A-Z]+[0-9]+' | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique)
+$errLines  = @(Select-String -Path $buildLog -Pattern ': error [A-Z]+[0-9]+|error MSB|error NETSDK' | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique)
+$result.build_warnings = $warnLines.Count
+$result.build_errors = $errLines.Count
+$result.build_ok = ($buildExit -eq 0 -and $errLines.Count -eq 0 -and $warnLines.Count -eq 0)
+if ($warnLines.Count) { $result.problems += ($warnLines | Select-Object -First 25) }
+if ($errLines.Count)  { $result.problems += ($errLines  | Select-Object -First 40) }
+if ($buildExit -ne 0 -and -not $errLines.Count) {
+    $result.problems += ($buildText -split "`r?`n" | Where-Object { $_ -match 'error|failed' } | Select-Object -First 20)
+}
+
+if (-not $NoTest -and $result.build_ok) {
+    $testLog = Join-Path $LogDir 'test.log'
+    & dotnet test $sln -c Debug --no-build -nologo -v:minimal *> $testLog
+    $testExit = $LASTEXITCODE
+    $testText = Get-Content $testLog -Raw
+    $m = [regex]::Matches($testText, '(?i)(Passed|Failed|Skipped)!?\s*-\s*Failed:\s*(\d+),\s*Passed:\s*(\d+),\s*Skipped:\s*(\d+)')
+    foreach ($x in $m) {
+        $result.tests_failed  += [int]$x.Groups[2].Value
+        $result.tests_passed  += [int]$x.Groups[3].Value
+        $result.tests_skipped += [int]$x.Groups[4].Value
+    }
+    if (-not $m.Count) {
+        $m2 = [regex]::Match($testText, '(?i)total:\s*(\d+).*?failed:\s*(\d+).*?succeeded:\s*(\d+).*?skipped:\s*(\d+)', 'Singleline')
+        if ($m2.Success) {
+            $result.tests_failed  = [int]$m2.Groups[2].Value
+            $result.tests_passed  = [int]$m2.Groups[3].Value
+            $result.tests_skipped = [int]$m2.Groups[4].Value
+        }
+    }
+    $result.tests_ok = ($testExit -eq 0 -and $result.tests_failed -eq 0)
+    if (-not $result.tests_ok) {
+        $result.problems += ($testText -split "`r?`n" | Where-Object { $_ -match '(?i)failed |error|assert' } | Select-Object -First 30)
+    }
+}
+
+# Suppressed diagnostics are not allowed anywhere.
+$codeFiles = Get-ChildItem -Path (Join-Path $Root 'src'), (Join-Path $Root 'tests') -Recurse -File -Include *.cs, *.csproj, *.props, *.targets -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }
+$extra = @(Get-ChildItem -Path $Root -File -Include Directory.Build.props, Directory.Build.targets, .editorconfig -ErrorAction SilentlyContinue)
+$scan = @($codeFiles) + $extra
+$supPattern = '#pragma\s+warning\s+disable|SuppressMessage|<NoWarn>|WarningsNotAsErrors|dotnet_diagnostic\.[^=]+=\s*(none|silent|suggestion)|<TreatWarningsAsErrors>\s*false'
+foreach ($f in $scan) {
+    Select-String -Path $f.FullName -Pattern $supPattern | ForEach-Object {
+        $result.suppressions += ('{0}:{1}: {2}' -f $_.Path.Substring($Root.Length).TrimStart('\'), $_.LineNumber, $_.Line.Trim())
+    }
+}
+$emDash = [string][char]0x2014
+foreach ($f in @($codeFiles)) {
+    Select-String -Path $f.FullName -SimpleMatch -Pattern $emDash | ForEach-Object {
+        $result.em_dashes += ('{0}:{1}' -f $_.Path.Substring($Root.Length).TrimStart('\'), $_.LineNumber)
+    }
+}
+
+$ok = $result.build_ok -and ($NoTest -or $result.tests_ok) -and -not $result.suppressions.Count -and -not $result.em_dashes.Count
+$result.ok = $ok
+$result | ConvertTo-Json -Depth 4
+if ($ok) { exit 0 } else { exit 1 }
