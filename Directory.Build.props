@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- No NoWarn, no #pragma warning disable, no [SuppressMessage] to hide a diagnostic,
+         anywhere in the solution. The three analyzers that bite are fixed in code:
+         WFO1000 (public props on Control/Form get [DefaultValue] or are kept non-public),
+         WFDEV004 (use OnFormClosing/OnFormClosed, never OnClosing/OnClosed),
+         CA1416   (guard Win11-only managed APIs with OperatingSystem.IsWindowsVersionAtLeast). -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

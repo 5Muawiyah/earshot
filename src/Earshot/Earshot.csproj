@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>Earshot</AssemblyName>
+    <RootNamespace>Earshot</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>            <!-- [LibraryImport] needs it (SYSLIB1062) -->
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <StartupHookSupport>false</StartupHookSupport>        <!-- writes IsSupported=false to runtimeconfig;
+                                                                closes DOTNET_STARTUP_HOOKS in the gate -->
+    <!-- SelfContained + RuntimeIdentifier are intentionally NOT set here.
+         Setting them makes tests\Earshot.Tests fail to reference this exe (NETSDK1151).
+         They are supplied on the publish command line only (section A, publish). -->
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Earshot.Tests" />
+  </ItemGroup>
+</Project>
