@@ -56,6 +56,86 @@ internal static class CardSta
     }
 }
 
+// Runs window work on its own thread attached to a new, private desktop, and rethrows its exception on the
+// caller. Windows there are never on the input desktop, so a test can show, activate and focus its own
+// windows without drawing on the screen or taking the foreground from whatever the user is doing.
+//
+// The thread is not STA: starting an STA thread creates a COM window on it, and SetThreadDesktop fails
+// for a thread that already has a window. Activation and focus belong to the window manager, not COM.
+// https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createdesktopw
+// https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddesktop
+internal static class CardDesktop
+{
+    // DESKTOP_READOBJECTS | DESKTOP_CREATEWINDOW | DESKTOP_CREATEMENU | DESKTOP_WRITEOBJECTS
+    // https://learn.microsoft.com/en-us/windows/win32/winstation/desktop-security-and-access-rights
+    private const uint DesktopAccess = 0x0001 | 0x0002 | 0x0004 | 0x0080;
+
+    public static void Run(Action work)
+    {
+        ExceptionDispatchInfo? failure = null;
+        nint desktop = CreateDesktopW("EarshotCardTest-" + Guid.NewGuid().ToString("N"), 0, 0, 0, DesktopAccess, 0);
+        if (desktop == 0)
+        {
+            throw new AssertFailedException("CreateDesktopW failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+        }
+
+        try
+        {
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    if (!SetThreadDesktop(desktop))
+                    {
+                        throw new AssertFailedException("SetThreadDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+                    }
+
+                    Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
+                    work();
+                }
+                catch (Exception ex)
+                {
+                    failure = ExceptionDispatchInfo.Capture(ex);
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "Earshot card test desktop",
+            };
+            thread.Start();
+            if (!thread.Join(TimeSpan.FromSeconds(60)))
+            {
+                throw new AssertFailedException("The desktop work did not finish within 60 seconds.");
+            }
+        }
+        finally
+        {
+            // The thread has ended, so nothing is attached to the desktop any more.
+            if (!CloseDesktop(desktop))
+            {
+                failure ??= ExceptionDispatchInfo.Capture(new AssertFailedException(
+                    "CloseDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + "."));
+            }
+        }
+
+        failure?.Throw();
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern nint CreateDesktopW(string lpszDesktop, nint lpszDevice, nint pDevmode, uint dwFlags, uint dwDesiredAccess, nint lpsa);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetThreadDesktop(nint hDesktop);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseDesktop(nint hDesktop);
+}
+
 // Read-only window queries for the card tests. Nothing here changes a window other than the test's own.
 internal static class TestWindows
 {
@@ -77,6 +157,17 @@ internal static class TestWindows
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsWindowVisible(nint hWnd);
+
+    // The active window and the focus window of the calling thread's message queue.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getactivewindow
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getfocus
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    public static extern nint GetActiveWindow();
+
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    public static extern nint GetFocus();
 
     [DllImport("user32.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

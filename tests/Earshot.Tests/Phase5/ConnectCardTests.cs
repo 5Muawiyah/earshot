@@ -15,8 +15,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase5;
 
-// The real card window on an STA thread. The window is created but never shown: every check reads the
-// hidden window or renders it with DrawToBitmap.
+// The real card window. Most checks run on an STA thread, where the window is created but never shown:
+// they read the hidden window or render it with DrawToBitmap. The activation check shows the card, on a
+// private desktop that is never on screen.
 [TestClass]
 public sealed class ConnectCardTests
 {
@@ -59,6 +60,63 @@ public sealed class ConnectCardTests
             Assert.IsTrue((bool)showWithoutActivation.GetValue(card)!);
 
             Assert.AreEqual((nint)NativeMethods.MA_NOACTIVATE, TestWindows.Send(hwnd, NativeMethods.WM_MOUSEACTIVATE));
+        });
+    }
+
+    [TestMethod]
+    public void ShowingReplacingAndHidingTheCardLeavesTheActiveWindowAndFocusAlone()
+    {
+        CardDesktop.Run(() =>
+        {
+            using var host = new Form
+            {
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(100, 100),
+                Size = new Size(320, 200),
+                ShowInTaskbar = false,
+            };
+            var box = new TextBox();
+            host.Controls.Add(box);
+            host.Show();
+            host.Activate();
+            box.Focus();
+            Application.DoEvents();
+            Assert.AreEqual(host.Handle, TestWindows.GetActiveWindow(), "The host window is active before any card.");
+            Assert.AreEqual(box.Handle, TestWindows.GetFocus(), "The host's text box has the focus before any card.");
+
+            using var card = new ConnectCard(new CapturingLog());
+            Size size = card.Prepare(new CardContent(Desktops.AirPodsName, TrayStatus.CardConnecting), 96, CardTheme.Dark, WideEnough);
+            StepOutcome shown = card.ShowAt(new Rectangle(new Point(600, 400), size));
+            Application.DoEvents();
+            Assert.IsTrue(shown.Ok, TrayReport.DescribeStep(shown));
+            Assert.IsTrue(TestWindows.IsWindowVisible(card.Handle), "The card is shown.");
+            AssertHostKeepsActivationAndFocus(host, box, card, "after the card is shown");
+
+            // A newer card replaces the content and moves the window that is already on screen.
+            size = card.Prepare(new CardContent(Desktops.AirPodsName, TrayStatus.MicrophoneNotice), 96, CardTheme.Light, WideEnough);
+            shown = card.ShowAt(new Rectangle(new Point(500, 380), size));
+            Application.DoEvents();
+            Assert.IsTrue(shown.Ok, TrayReport.DescribeStep(shown));
+            Assert.IsTrue(TestWindows.IsWindowVisible(card.Handle));
+            AssertHostKeepsActivationAndFocus(host, box, card, "after the card is replaced");
+
+            StepOutcome? hidden = card.HideCard();
+            Application.DoEvents();
+            Assert.IsNotNull(hidden);
+            Assert.IsTrue(hidden.Ok, TrayReport.DescribeStep(hidden));
+            Assert.IsFalse(TestWindows.IsWindowVisible(card.Handle), "The card is hidden.");
+            Assert.IsFalse(card.IsShownOnScreen());
+            AssertHostKeepsActivationAndFocus(host, box, card, "after the card is hidden");
+
+            // Control: the same kind of window, still WS_EX_NOACTIVATE and answering MA_NOACTIVATE, shown by
+            // SetWindowPos without SWP_NOACTIVATE takes the activation and the focus. So the checks above can
+            // see an activation, and ShowAt's SWP_NOACTIVATE is what prevents one.
+            using var control = new ConnectCard(new CapturingLog());
+            Size controlSize = control.Prepare(new CardContent(Desktops.AirPodsName, TrayStatus.CardConnected), 96, CardTheme.Dark, WideEnough);
+            Assert.IsTrue(NativeMethods.SetWindowPos(control.Handle, NativeMethods.HWND_TOPMOST, 600, 600, controlSize.Width, controlSize.Height, NativeMethods.SWP_SHOWWINDOW));
+            Application.DoEvents();
+            Assert.AreEqual(control.Handle, TestWindows.GetActiveWindow(), "Without SWP_NOACTIVATE the window is activated.");
+            Assert.AreNotEqual(box.Handle, TestWindows.GetFocus(), "Without SWP_NOACTIVATE the host loses the focus.");
         });
     }
 
@@ -297,6 +355,15 @@ public sealed class ConnectCardTests
 
         Assert.IsGreaterThan(0, inkInTitle, "The name was drawn.");
         Assert.IsGreaterThan(0, inkInStatus, "The status was drawn.");
+    }
+
+    private static void AssertHostKeepsActivationAndFocus(Form host, TextBox box, ConnectCard card, string when)
+    {
+        nint active = TestWindows.GetActiveWindow();
+        nint focus = TestWindows.GetFocus();
+        Assert.AreNotEqual(card.Handle, active, "The card was activated " + when + ".");
+        Assert.AreEqual(host.Handle, active, "The host window lost the activation " + when + ".");
+        Assert.AreEqual(box.Handle, focus, "The host's text box lost the focus " + when + ".");
     }
 
     private static void AssertScaled(int at96, int scaled, double factor)
