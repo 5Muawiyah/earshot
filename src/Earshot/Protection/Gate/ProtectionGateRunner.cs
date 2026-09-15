@@ -44,11 +44,9 @@ internal static class GateBluetooth
 // protect-on, protect-off and the uninstall restore, inside the gate (SYSTEM, or the elevated uninstall).
 // Identity is only ever the validated device.json in the context.
 //
-//   0. Take the device change lock (DeviceChangeLock), so two protect verbs, or a protect verb and the
-//      restore, never run side by side. If another holder still has it after the wait, change nothing. The
-//      block, allow, boot and set-device verbs do not take the lock yet, so it does not keep them out; until
-//      they do, only the node check in step 1 stands between a service change and a disabled device node,
-//      and it cannot stop a block that starts after it.
+//   0. Take the device change lock (DeviceChangeLock), which the block, allow, boot and set-device verbs and
+//      uninstall's node allow take too, so no node change runs while a service changes. If another holder
+//      still has it after the wait, change nothing.
 //   1. Read the target device nodes. If any counts as blocked (BlockedNodes), change nothing: nothing
 //      documents BluetoothSetServiceState while the device node is disabled. A protect verb then stores the
 //      wanted state in protection-intent.json for the next allow and exits with BlockedExit, or with Failed
@@ -66,11 +64,10 @@ internal static class GateBluetooth
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothenumerateinstalledservices
 internal sealed class ProtectionGateRunner
 {
-    // The exit code for a request refused because the device is blocked and kept for the next allow. It is
-    // the code set-device uses for "the pinned device is still disabled", so the status file names it
-    // other-device-blocked; the tray reads it together with the protect verb. It is only returned once the
-    // request has been written to protection-intent.json.
-    public const GateExitCode BlockedExit = GateExitCode.OtherDeviceBlocked;
+    // The exit code for a request refused because the device is blocked and kept for the next allow
+    // (device-blocked in the status file). It is only returned once the request has been written to
+    // protection-intent.json.
+    public const GateExitCode BlockedExit = GateExitCode.DeviceBlocked;
 
     public const string RefusedStep = "protect-refused";
     public const string DeviceNodeStep = "protect-device-node";
@@ -78,8 +75,8 @@ internal sealed class ProtectionGateRunner
     public const string RecordKeptStepPrefix = "protection-record-kept:";
 
     // How long a protect verb waits for the device change lock: longer than \Earshot\Gate's PT2M limit, so a
-    // block, allow or boot block that holds it (once those verbs take it) has finished or been stopped by the
-    // scheduler. What is left of \Earshot\Protect's PT5M is for the service calls.
+    // block, allow or boot block that holds it has finished or been stopped by the scheduler. What is left of
+    // \Earshot\Protect's PT5M is for the service calls.
     public static readonly TimeSpan ProtectLockTimeout = TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15);
 
     // How long the uninstall restore waits: longer than \Earshot\Protect's PT5M limit, so a protect verb

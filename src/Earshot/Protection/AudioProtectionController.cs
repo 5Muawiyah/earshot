@@ -244,7 +244,7 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
 
             // The gate changed nothing: another device change held the lock, or the device was blocked and
             // the request could not be kept.
-            if (status.Steps.Any(DeviceChangeLock.IsBusy))
+            if (BlockController.IsBusy(run))
             {
                 return Finish(verb, ControllerResult.Fail(BusyMessage, steps));
             }

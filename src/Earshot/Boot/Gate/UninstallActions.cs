@@ -38,6 +38,8 @@ internal sealed partial class MoveFileRebootDelete : IRebootDelete
 //      files are not read, no node or service is changed from them, and the folder is not deleted;
 //   2. enable every target node at problem 22, using the identity in device.json;
 //   3. re-enable the Bluetooth services protection.json lists (the protection feature's hook);
+//      steps 2 and 3 run inside the machine-wide gate run lock and the device change lock, so they never
+//      overlap a gate run, a node change or a service change; without both locks neither step runs;
 //   4. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder;
 //   5. remove %ProgramData%\Earshot;
 //   6. remove %ProgramFiles%\Earshot after the same kind of check, or schedule it for the next restart when
@@ -54,8 +56,26 @@ internal sealed class UninstallActions
     private readonly ITaskRegistrar _tasks;
     private readonly IRebootDelete _rebootDelete;
     private readonly ILog _log;
+    private readonly IGateRunLock _runLock;
+    private readonly Func<TimeSpan, bool> _wait;
+    private readonly TimeSpan _lockWait;
 
-    public UninstallActions(InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log)
+    // How long uninstall waits for the gate run lock and the device change lock: longer than \Earshot\Protect's
+    // PT5M limit, so a protect verb that holds either has finished or been stopped by the scheduler.
+    public static readonly TimeSpan LockWait = TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(15);
+
+    // runLock null: no machine-wide lock, for a test's fake node table. Program passes the mutex.
+    public UninstallActions(
+        InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log,
+        IGateRunLock? runLock = null)
+        : this(layout, folders, nodes, tasks, rebootDelete, log, runLock, DeviceChangeLock.SleepAndContinue, LockWait)
+    {
+    }
+
+    // For tests: the wait between device change lock attempts and how long to wait.
+    internal UninstallActions(
+        InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log,
+        IGateRunLock? runLock, Func<TimeSpan, bool> wait, TimeSpan lockWait)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(folders);
@@ -63,13 +83,19 @@ internal sealed class UninstallActions
         ArgumentNullException.ThrowIfNull(tasks);
         ArgumentNullException.ThrowIfNull(rebootDelete);
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(wait);
         _layout = layout;
         _folders = folders;
         _nodes = nodes;
         _tasks = tasks;
         _rebootDelete = rebootDelete;
         _log = log;
+        _runLock = runLock ?? NoGateRunLock.Instance;
+        _wait = wait;
+        _lockWait = lockWait;
     }
+
+    internal IGateRunLock RunLock => _runLock;
 
     public InstallResult Run()
     {
@@ -87,8 +113,22 @@ internal sealed class UninstallActions
             steps.Add(identity.Step);
             if (identity.IsOk && identity.Value is not null)
             {
-                complete &= AllowNodes(identity.Value, steps);
-                complete &= RestoreProtection(identity.Value, store, steps);
+                // Both locks are released before the machine folder is deleted, since that deletes the lock file.
+                using IDisposable? running = _runLock.TryEnter(_lockWait, steps);
+                using DeviceChangeLock? changing = running is null
+                    ? null
+                    : DeviceChangeLock.TryAcquire(machine, DeviceChangeLockAccess.For(_nodes), _lockWait, _wait, steps);
+                if (changing is null)
+                {
+                    steps.Add(StepOutcomes.NotAttempted("allow-nodes",
+                        "The Earshot change locks could not be taken, so no node or service was changed. Run uninstall again."));
+                    complete = false;
+                }
+                else
+                {
+                    complete &= AllowNodes(identity.Value, steps);
+                    complete &= RestoreProtection(identity.Value, store, steps);
+                }
             }
             else if (identity.Status != GateReadStatus.Missing)
             {

@@ -36,6 +36,7 @@ internal enum GateExitCode
     OtherDeviceBlocked = 8,  // set-device while the device pinned now is still disabled
     StatusNotWritten = 9,    // the action succeeded but its status file could not be written
     FolderNotSecure = 10,    // %ProgramData%\Earshot is missing or its ACL fails the check
+    DeviceBlocked = 11,      // protect-on or protect-off while the device is blocked; the request is kept for the next allow
     Rejected = 20,           // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
@@ -55,6 +56,7 @@ internal static class GateExitCodes
         [GateExitCode.OtherDeviceBlocked] = "other-device-blocked",
         [GateExitCode.StatusNotWritten] = "status-not-written",
         [GateExitCode.FolderNotSecure] = "folder-not-secure",
+        [GateExitCode.DeviceBlocked] = "device-blocked",
         [GateExitCode.Rejected] = "rejected",
         [GateExitCode.NotElevated] = "not-elevated",
         [GateExitCode.RunningAsSystem] = "running-as-system",
@@ -156,6 +158,12 @@ internal sealed record NodeChangeSummary(int Total, int Changed, int Already, in
 // except set-device comes only from device.json, never from the command line. Before anything is read,
 // %ProgramData%\Earshot must pass the machine folder ACL check, so a folder a user could write is never
 // trusted. Each run writes status-<nonce>.json with every step and returns an exit code for the result.
+//
+// Serialisation. A run first enters the machine-wide gate run lock (IGateRunLock), so no two elevated Earshot
+// runs overlap whichever task started them; a run that cannot enter it within its wait changes nothing and
+// reports the busy step. Every node change (block, allow, the boot block, set-device) also takes the device
+// change lock before it reads the nodes, as the protect verbs do, so the rule holds for any process that takes
+// that lock too.
 internal sealed partial class GateActions
 {
     // CM_DISABLE_PERSIST is what makes the disable survive a reboot; without it the acceptance test fails
@@ -166,10 +174,18 @@ internal sealed partial class GateActions
     private readonly INodeApi _nodes;
     private readonly GateStore _store;
     private readonly IFolderSecurity _folders;
+    // How long a run waits to enter the gate run lock. A gate run waits no longer than a node change waits for
+    // the device change lock, inside \Earshot\Gate's PT2M limit. A protect run may wait for a whole gate run
+    // (PT2M) and still leave most of \Earshot\Protect's PT5M for the service calls.
+    public static readonly TimeSpan GateRunWait = DeviceChangeLock.NodeChangeLockTimeout;
+    public static readonly TimeSpan ProtectRunWait = TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15);
+
     private readonly ILog _log;
     private readonly TimeProvider _time;
+    private readonly IGateRunLock _runLock;
 
-    public GateActions(INodeApi nodes, GateStore store, IFolderSecurity folders, ILog log, TimeProvider time)
+    // runLock null: no machine-wide lock, for a gate over a test's fake node table. ForMachine passes the mutex.
+    public GateActions(INodeApi nodes, GateStore store, IFolderSecurity folders, ILog log, TimeProvider time, IGateRunLock? runLock = null)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(store);
@@ -181,10 +197,16 @@ internal sealed partial class GateActions
         _folders = folders;
         _log = log;
         _time = time;
+        _runLock = runLock ?? NoGateRunLock.Instance;
     }
 
     public static GateActions ForMachine(string machineFolder, ILog log) =>
-        new(new CfgMgr32NodeApi(), new GateStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System);
+        new(new CfgMgr32NodeApi(), new GateStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System, new MachineGateMutex());
+
+    internal IGateRunLock RunLock => _runLock;
+
+    // For tests: the wait between device change lock attempts. Returning false stops waiting at once.
+    internal Func<TimeSpan, bool> LockWait { get; init; } = DeviceChangeLock.SleepAndContinue;
 
     private sealed record VerbResult(GateExitCode Outcome, string? State);
 
@@ -201,10 +223,11 @@ internal sealed partial class GateActions
 
         DateTimeOffset started = _time.GetUtcNow();
         var steps = new List<StepOutcome>();
+        using IDisposable? held = _runLock.TryEnter(request.Mode == GateMode.Protect ? ProtectRunWait : GateRunWait, steps);
 
         if (!FolderIsSecure(steps))
         {
-            foreach (StepOutcome step in steps)
+            foreach (StepOutcome step in steps.Where(s => !s.Ok))
             {
                 _log.Error("gate " + request.Verb + ": " + Describe(step));
             }
@@ -212,7 +235,9 @@ internal sealed partial class GateActions
             return GateExitCode.FolderNotSecure;
         }
 
-        VerbResult result = request.Verb switch
+        // Without the run lock nothing is changed or pruned; the status file, named by this run's own nonce,
+        // still says why.
+        VerbResult result = held is null ? new VerbResult(GateExitCode.Failed, null) : request.Verb switch
         {
             GateVerbs.Block => Block(steps),
             GateVerbs.Allow => Allow(steps),
@@ -226,7 +251,11 @@ internal sealed partial class GateActions
             _ => new VerbResult(GateExitCode.Rejected, null),
         };
 
-        steps.AddRange(_store.PruneStatusFiles(_time.GetUtcNow()));
+        if (held is not null)
+        {
+            steps.AddRange(_store.PruneStatusFiles(_time.GetUtcNow()));
+        }
+
         GateExitCode outcome = result.Outcome;
         var status = new GateStatusFile(
             GateStore.SchemaVersion, request.Nonce, request.Verb, started, _time.GetUtcNow(),
@@ -278,6 +307,12 @@ internal sealed partial class GateActions
 
     private VerbResult Block(List<StepOutcome> steps)
     {
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
         DeviceIdentity? identity = ReadIdentity(steps);
         if (identity is null)
         {
@@ -302,6 +337,12 @@ internal sealed partial class GateActions
 
     private VerbResult Allow(List<StepOutcome> steps)
     {
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
         DeviceIdentity? identity = ReadIdentity(steps);
         if (identity is null)
         {
@@ -354,6 +395,12 @@ internal sealed partial class GateActions
         {
             steps.Add(StepOutcomes.NotAttempted("set-device", "The address is not 12 upper-case hex characters."));
             return new VerbResult(GateExitCode.Rejected, null);
+        }
+
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
         }
 
         uint cr = _nodes.ListDeviceIds(out string[] ids);
@@ -473,6 +520,11 @@ internal sealed partial class GateActions
 
         return new VerbResult(ctx.Outcome, ctx.State);
     }
+
+    // The device change lock for a node change, waiting DeviceChangeLock.NodeChangeLockTimeout. Null (with a
+    // failed step) means change nothing.
+    private DeviceChangeLock? AcquireForNodeChange(List<StepOutcome> steps) =>
+        DeviceChangeLock.TryAcquire(_store.Folder, DeviceChangeLockAccess.For(_nodes), DeviceChangeLock.NodeChangeLockTimeout, LockWait, steps);
 
     // Runs the protection restore hook for uninstall. False when this build has no protection feature.
     public static bool TryRestoreProtection(GateRunContext ctx)

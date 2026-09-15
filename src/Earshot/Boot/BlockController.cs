@@ -83,6 +83,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string AllowFailedMessage = "Could not allow the AirPods. Try again.";
     internal const string TimedOutMessage = "The boot block did not finish in time. Try again.";
     internal const string CancelledMessage = "Stopped waiting for the boot block.";
+    internal const string BusyMessage = "Another change to the AirPods is still running. Try again.";
     internal const string BlockAtBootOnMessage = "Block at boot is on";
     internal const string BlockAtBootOffMessage = "Block at boot is off";
     internal const string BlockAtBootFailedMessage = "Could not change Block at boot. Try again.";
@@ -375,6 +376,11 @@ internal sealed class BlockController : IBlockController, IDisposable
             return Finish(verb, refused with { Steps = steps });
         }
 
+        if (IsBusy(run))
+        {
+            return Finish(verb, ControllerResult.Fail(BusyMessage, steps));
+        }
+
         // Ground truth: the node state read now, not the task's result.
         NodeReadResult after = _reader.Read(identity.ContainerId, identity.Address);
         steps.AddRange(after.Steps);
@@ -452,6 +458,11 @@ internal sealed class BlockController : IBlockController, IDisposable
             return Finish(verb, refused with { Steps = steps });
         }
 
+        if (IsBusy(run))
+        {
+            return Finish(verb, ControllerResult.Fail(BusyMessage, steps));
+        }
+
         GateRead<GateConfig> after = _store.ReadConfig();
         steps.Add(after.Step);
         bool applied = after.IsOk && after.Value is not null && after.Value.BlockAtBoot == blockAtBoot;
@@ -482,6 +493,11 @@ internal sealed class BlockController : IBlockController, IDisposable
             return Finish(GateVerbs.SetDevice, refused with { Steps = steps });
         }
 
+        if (IsBusy(run))
+        {
+            return Finish(GateVerbs.SetDevice, ControllerResult.Fail(BusyMessage, steps));
+        }
+
         GateRead<DeviceIdentity> after = _store.ReadDevice();
         steps.Add(after.Step);
         if (after.IsOk && after.Value is not null && string.Equals(after.Value.Address, address12, StringComparison.Ordinal))
@@ -496,6 +512,13 @@ internal sealed class BlockController : IBlockController, IDisposable
             _ => run.Outcome == GateRunOutcome.TimedOut ? TimedOutMessage : DeviceFailedMessage,
         };
         return Finish(GateVerbs.SetDevice, ControllerResult.Fail(message, steps));
+    }
+
+    // The gate changed nothing because another elevated run held the gate run lock or the device change lock.
+    internal static bool IsBusy(GateRunResult run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return run.Status is { } status && status.Steps.Any(s => DeviceChangeLock.IsBusy(s) || MachineGateMutex.IsBusy(s));
     }
 
     private ControllerResult? RunRefusal(GateRunResult run)
