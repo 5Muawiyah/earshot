@@ -18,11 +18,13 @@ internal static class TrayStatus
     public const string Disconnected = "disconnected";
     public const string Blocked = "blocked";
     public const string NotFound = "not found";
+    public const string NotKnown = "unknown";
 
     public const string CardConnecting = "Connecting";
     public const string CardConnected = "Connected";
     public const string CardDisconnected = "Disconnected";
     public const string CardBlockedAtBoot = "Blocked at boot";
+    public const string CardNotKnown = "Still looking for the AirPods.";
     public const string MicrophoneNotice = "This turns off the AirPods microphone.";
 
     // The target the tray acts on and shows. When a container is pinned, only a target in that container
@@ -61,8 +63,11 @@ internal static class TrayStatus
         return prefix + name + suffix;
     }
 
+    // "not found" is only said of a good read that found nothing. A read that failed, or that has not run, is
+    // unknown; a pinned device with no endpoints (its nodes blocked, say) is disconnected, not missing.
     public static string StateWord(DeviceSnapshot snapshot, BootBlockStatus? block, EarshotSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
         DeviceModel? target = ActiveTarget(snapshot, settings);
         if (target?.Connection is ConnectionState.Connected or ConnectionState.Disconnecting)
         {
@@ -74,7 +79,17 @@ internal static class TrayStatus
             return Blocked;
         }
 
-        return target is null ? NotFound : Disconnected;
+        if (target is not null)
+        {
+            return Disconnected;
+        }
+
+        if (snapshot.ReadStatus != SnapshotReadStatus.Ok)
+        {
+            return NotKnown;
+        }
+
+        return snapshot.Resolution == TargetResolution.PinnedAbsent ? Disconnected : NotFound;
     }
 
     public static GlyphState Glyph(DeviceSnapshot snapshot, BootBlockStatus? block, EarshotSettings settings, bool toggleInFlight)
@@ -101,6 +116,7 @@ internal static class TrayStatus
             Connected => CardConnected,
             Blocked => CardBlockedAtBoot,
             NotFound => NotFoundMessage(settings),
+            NotKnown => CardNotKnown,
             _ => CardDisconnected,
         };
 
@@ -136,7 +152,9 @@ internal static class TrayStatus
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (snapshot.Target is not { } target ||
+        // Only an enumeration that worked is evidence of a device to pin.
+        if (snapshot.ReadStatus != SnapshotReadStatus.Ok ||
+            snapshot.Target is not { } target ||
             !NodeMatch.IsValidTargetContainer(target.ContainerId) ||
             !NodeMatch.NameMatches(target.DisplayName, settings.DeviceMatch))
         {

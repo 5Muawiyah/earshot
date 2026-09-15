@@ -16,6 +16,7 @@ internal readonly record struct MenuItemState(string Text, bool Checked, bool En
 
 // How the whole tray menu looks, top to bottom. The separators are always shown.
 internal sealed record MenuState(
+    MenuItemState SafeMode,
     MenuItemState Toggle,
     MenuItemState BlockAtBoot,
     MenuItemState ProtectAudio,
@@ -29,6 +30,7 @@ internal sealed record MenuState(
 // does no I/O and makes no device calls.
 internal static class MenuModel
 {
+    public const string SafeMode = "Safe mode: no device actions";
     public const string Connect = "Connect";
     public const string Disconnect = "Disconnect";
     public const string BlockAtBoot = "Block at boot";
@@ -39,13 +41,16 @@ internal static class MenuModel
     public const string SetUpEarshot = "Set up Earshot...";
     public const string Exit = "Exit";
 
+    // safeMode (EARSHOT_SAFE_MODE) adds one caption at the top and changes nothing else: every item stays as it
+    // is, and each action reports the refusal on its own card, so the menu that is tested is the menu that ships.
     public static MenuState Build(
         DeviceSnapshot snapshot,
         BootBlockStatus? block,
         AudioProtectionSnapshot? protection,
         EarshotSettings settings,
         bool busy,
-        StartupState startup)
+        StartupState startup,
+        bool safeMode = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -59,6 +64,7 @@ internal static class MenuModel
         bool blockAtBoot = block?.BlockAtBoot ?? new GateConfig().BlockAtBoot;
 
         return new MenuState(
+            SafeMode: new MenuItemState(SafeMode, Checked: false, Enabled: false, Visible: safeMode),
             Toggle: new MenuItemState(connected ? Disconnect : Connect, Checked: false, Enabled: !busy && !changing, Visible: true),
             BlockAtBoot: new MenuItemState(BlockAtBoot, Checked: blockAtBoot, Enabled: !busy, Visible: true),
             ProtectAudio: new MenuItemState(

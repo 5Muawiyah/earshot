@@ -15,8 +15,9 @@ public sealed class MenuModelTests
         AudioProtectionSnapshot? protection = null,
         EarshotSettings? settings = null,
         bool busy = false,
-        StartupState startup = StartupState.Off) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup);
+        StartupState startup = StartupState.Off,
+        bool safeMode = false) =>
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup, safeMode);
 
     [TestMethod]
     public void TheCopyIsExactlyAsDesigned()
@@ -203,6 +204,26 @@ public sealed class MenuModelTests
 
         Assert.AreEqual(intent, item.Checked);
         Assert.AreEqual(indeterminate, item.Indeterminate);
+    }
+
+    [TestMethod]
+    public void SafeModeAddsOneCaptionAndChangesNothingElse()
+    {
+        MenuState normal = Build(snapshot: Target(ConnectionState.Disconnected), block: Block(BlockState.NotSetUp));
+        MenuState safe = Build(snapshot: Target(ConnectionState.Disconnected), block: Block(BlockState.NotSetUp), safeMode: true);
+
+        Assert.IsFalse(normal.SafeMode.Visible);
+        Assert.IsTrue(safe.SafeMode.Visible);
+        Assert.AreEqual("Safe mode: no device actions", safe.SafeMode.Text);
+        Assert.IsFalse(safe.SafeMode.Enabled, "The caption is a caption, not a command.");
+
+        // Every action stays exactly as it is: each one reports its own refusal on a card.
+        Assert.AreEqual(normal with { SafeMode = safe.SafeMode }, safe);
+        Assert.IsTrue(safe.Toggle.Enabled);
+        Assert.IsTrue(safe.BlockAtBoot.Enabled);
+        Assert.IsTrue(safe.ProtectAudio.Enabled);
+        Assert.IsTrue(safe.OpenOnStartup.Enabled);
+        Assert.IsTrue(safe.SetUp.Enabled);
     }
 
     [TestMethod]

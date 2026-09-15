@@ -21,11 +21,13 @@ namespace Earshot;
 //   3. A WindowsFormsSynchronizationContext, installed before anything subscribes to SystemEvents, so
 //      those callbacks and every await in the tray come back to the UI thread.
 //      https://learn.microsoft.com/en-us/dotnet/api/microsoft.win32.systemevents.userpreferencechanged
-//   4. Settings (writable store), then the ServiceRegistry, then the TrayContext, then Monitor.Start, so
-//      the tray is subscribed before the first snapshot can arrive.
+//   4. Settings (writable store), then the ServiceRegistry, the BlockCoordinator and the TrayContext, then
+//      the coordinator and the monitor are started, so both are subscribed before the first snapshot can
+//      arrive.
 //   5. Application.Run. Exit cancels the actions in flight and waits for them, with a limit, while the
-//      loop still runs, so their continuations can complete. Then an orderly shutdown: the tray (icon and
-//      message window), the monitor, the audio worker, the show event and the mutex.
+//      loop still runs, so their continuations can complete. Then an orderly shutdown, on this thread: the
+//      tray (icon and message window) and the card window, then the coordinator, the monitor, the audio
+//      worker, the system worker, the show event and the mutex.
 internal static partial class Program
 {
     internal const string TrayUsage = "Usage: Earshot.exe [--startup]";
@@ -53,7 +55,8 @@ internal static partial class Program
             return;
         }
 
-        ctx.ExitCode = RunTray(paths, log);
+        bool startedAtLogon = ctx.Args.Length == 1 && ctx.Args[0] == StartupRegistration.StartupArgument;
+        ctx.ExitCode = RunTray(paths, log, startedAtLogon);
     }
 
     // No arguments, or only --startup (the Run value adds it).
@@ -72,7 +75,7 @@ internal static partial class Program
         return false;
     }
 
-    private static int RunTray(Paths paths, ILog log)
+    private static int RunTray(Paths paths, ILog log, bool startedAtLogon)
     {
         Mutex mutex;
         bool createdNew;
@@ -96,7 +99,7 @@ internal static partial class Program
         _trayInstance = mutex;
         try
         {
-            return RunPrimaryTray(paths, log);
+            return RunPrimaryTray(paths, log, startedAtLogon);
         }
         finally
         {
@@ -136,7 +139,7 @@ internal static partial class Program
         }
     }
 
-    private static int RunPrimaryTray(Paths paths, ILog log)
+    private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon)
     {
         EventWaitHandle showEvent;
         try
@@ -162,7 +165,7 @@ internal static partial class Program
             {
                 if (context is not null)
                 {
-                    context.ReportUnexpected("tray", e.Exception, CardAnchor.NearTray);
+                    context.ReportUnexpected("tray", e.Exception, CardPlace.NearTray);
                 }
                 else
                 {
@@ -179,16 +182,25 @@ internal static partial class Program
             TaskScheduler.UnobservedTaskException += onUnobserved;
 
             ServiceRegistry? registry = null;
+            BlockCoordinator? coordinator = null;
             RegisteredWaitHandle? showWait = null;
             try
             {
                 var settings = new JsonSettingsStore(paths.SettingsFile, log);
                 registry = CompositionRoot.Build(log, settings, action => ui.Post(static state => ((Action)state!)(), action), paths.IsSafeMode);
-                context = new TrayContext(registry, new TrayStartOptions(
+                coordinator = new BlockCoordinator(
+                    registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
+                    registry.Cards, log, TimeProvider.System,
+                    new CoordinatorOptions(paths.IsSafeMode, startedAtLogon));
+                context = new TrayContext(registry, coordinator, new TrayStartOptions(
                     FirstRun: settings.LastLoadStatus == SettingsLoadStatus.CreatedDefaults,
                     SettingsStatus: settings.LastLoadStatus,
                     ExePath: Environment.ProcessPath,
-                    StartupRegistry: new CurrentUserStartupRegistry()));
+                    StartupRegistry: new CurrentUserStartupRegistry())
+                {
+                    StartedAtLogon = startedAtLogon,
+                    DataRootRedirected = paths.IsRedirected,
+                });
 
                 TrayContext shown = context;
                 showWait = ThreadPool.RegisterWaitForSingleObject(
@@ -198,6 +210,7 @@ internal static partial class Program
                     Timeout.Infinite,
                     executeOnlyOnce: false);
 
+                coordinator.Start();
                 registry.Monitor.Start();
                 log.Info("Tray started" + (paths.IsSafeMode ? " in safe mode" : "") + ". Settings: " + settings.FilePath + " (" + settings.LastLoadStatus + ").");
                 Application.Run(context);
@@ -225,14 +238,19 @@ internal static partial class Program
                     }
                 }
 
-                // Nothing after this point may resume on the UI thread: its message loop has ended.
+                // Nothing after this point may resume on the UI thread: its message loop has ended. The card
+                // window and its timer belong to this thread, so the presenter is disposed here too.
                 SynchronizationContext.SetSynchronizationContext(null);
                 context?.Dispose();
+                (registry?.Cards as IDisposable)?.Dispose();
+                coordinator?.Dispose();
                 registry?.Monitor.Dispose();
                 if (registry?.Worker is { } worker)
                 {
                     worker.DisposeAsync().AsTask().GetAwaiter().GetResult();
                 }
+
+                (registry?.SystemWorker as IDisposable)?.Dispose();
 
                 Application.ThreadException -= onThreadException;
                 AppDomain.CurrentDomain.UnhandledException -= onUnhandled;

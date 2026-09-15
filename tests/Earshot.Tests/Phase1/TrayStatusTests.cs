@@ -12,7 +12,11 @@ public sealed class TrayStatusTests
     [TestMethod]
     public void TooltipWithNoDeviceSaysNotFoundWithTheMatchString()
     {
-        Assert.AreEqual("Earshot: AirPods - not found", TrayStatus.Tooltip(NoDevice(), block: null, Settings()));
+        Assert.AreEqual("Earshot: AirPods - not found", TrayStatus.Tooltip(NotFound(), block: null, Settings()));
+        Assert.AreEqual("Earshot: AirPods - unknown", TrayStatus.Tooltip(NoDevice(), block: null, Settings()),
+            "Nothing has been read yet, so nothing is claimed.");
+        Assert.AreEqual("Earshot: AirPods - unknown", TrayStatus.Tooltip(ReadFailed(), block: null, Settings()),
+            "The read failed, so nothing is claimed.");
     }
 
     [TestMethod]
@@ -142,10 +146,12 @@ public sealed class TrayStatusTests
         Assert.AreEqual("Blocked at boot", TrayStatus.CardStatus(NoDevice(), Block(BlockState.Blocked), Settings()));
         Assert.AreEqual(
             "AirPods not found. Connect them once, or choose your device from the menu.",
-            TrayStatus.CardStatus(NoDevice(), null, Settings()));
+            TrayStatus.CardStatus(NotFound(), null, Settings()));
         Assert.AreEqual(
             "Buds not found. Connect them once, or choose your device from the menu.",
-            TrayStatus.CardStatus(NoDevice(), null, Settings(s => s.DeviceMatch = "Buds")));
+            TrayStatus.CardStatus(NotFound(), null, Settings(s => s.DeviceMatch = "Buds")));
+        Assert.AreEqual(TrayStatus.CardNotKnown, TrayStatus.CardStatus(NoDevice(), null, Settings()),
+            "Nothing has been read yet, so the card does not say the AirPods are missing.");
     }
 
     [TestMethod]

@@ -13,6 +13,7 @@ namespace Earshot.Tray;
 internal sealed class TrayMenu : IDisposable
 {
     private readonly Func<MenuState> _state;
+    private readonly ToolStripMenuItem _safeMode = new();
     private readonly ToolStripMenuItem _toggle = new();
     private readonly ToolStripMenuItem _blockAtBoot = new();
     private readonly ToolStripMenuItem _protectAudio = new();
@@ -30,6 +31,7 @@ internal sealed class TrayMenu : IDisposable
         Strip = new ContextMenuStrip();
         Strip.Items.AddRange(
         [
+            _safeMode,
             _toggle,
             new ToolStripSeparator(),
             _blockAtBoot,
@@ -77,6 +79,7 @@ internal sealed class TrayMenu : IDisposable
     internal void Apply(MenuState state)
     {
         ArgumentNullException.ThrowIfNull(state);
+        Set(_safeMode, state.SafeMode);
         Set(_toggle, state.Toggle);
         Set(_blockAtBoot, state.BlockAtBoot);
         Set(_protectAudio, state.ProtectAudio);

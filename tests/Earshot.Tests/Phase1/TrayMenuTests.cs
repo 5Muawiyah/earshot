@@ -25,8 +25,9 @@ public sealed class TrayMenuTests
         BootBlockStatus? block = null,
         bool busy = false,
         EarshotSettings? settings = null,
-        AudioProtectionSnapshot? protection = null) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, StartupState.Off);
+        AudioProtectionSnapshot? protection = null,
+        bool safeMode = false) =>
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, StartupState.Off, safeMode);
 
     private static string[] AvailableTexts(TrayMenu menu) =>
         menu.Items.Where(i => i.Available).Select(i => i is ToolStripSeparator ? "-" : i.Text ?? "").ToArray();
@@ -39,6 +40,17 @@ public sealed class TrayMenuTests
             using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp)));
 
             CollectionAssert.AreEqual(DesignedOrder, AvailableTexts(menu));
+        });
+    }
+
+    [TestMethod]
+    public void SafeModeShowsItsCaptionAboveTheDesignedItems()
+    {
+        StaThread.Run(() =>
+        {
+            using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp), safeMode: true));
+
+            CollectionAssert.AreEqual(DesignedOrder.Prepend("Safe mode: no device actions").ToArray(), AvailableTexts(menu));
         });
     }
 

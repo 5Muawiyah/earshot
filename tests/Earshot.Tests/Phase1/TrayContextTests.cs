@@ -5,6 +5,7 @@ using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Tray;
+using Earshot.Tests.Integration.Coordinator;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
 
@@ -105,7 +106,7 @@ public sealed class TrayContextTests
             tray.PumpUntilIdle();
 
             CollectionAssert.AreEqual(new[] { TrayStatus.CardConnecting, "Still connecting. Check your AirPods." }, tray.Cards.Statuses);
-            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "connect AttemptedTimedOut: Failed."));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "connect: Failed. Still connecting. Check your AirPods."));
         });
     }
 
@@ -176,7 +177,9 @@ public sealed class TrayContextTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, tray.Cards.Shown.Count(s => s.Content.Status == TrayStatus.MicrophoneNotice));
-            Assert.AreEqual(CardAnchor.NearTray, tray.Cards.Shown.Single(s => s.Content.Status == TrayStatus.MicrophoneNotice).Anchor);
+            CardShown notice = tray.Cards.Shown.Single(s => s.Content.Status == TrayStatus.MicrophoneNotice);
+            Assert.AreEqual(CardAnchor.NearCursor, notice.Anchor);
+            Assert.AreEqual(TrayHarness.ClickPoint, notice.ClickPoint, "The notice follows the click that asked for protection.");
             Assert.IsTrue(tray.Settings.Current.ProtectAudioNoticeShown);
             EarshotSettings onDisk = new JsonSettingsStore(tray.SettingsPath, new CapturingLog(), readOnly: true).Current;
             Assert.IsTrue(onDisk.ProtectAudioNoticeShown, "The latch was not saved.");
@@ -229,9 +232,11 @@ public sealed class TrayContextTests
             Assert.IsEmpty(tray.Connection.Calls);
             Assert.IsEmpty(tray.Protection.Calls);
             Assert.IsEmpty(tray.Block.Calls);
-            CollectionAssert.AreEqual(
-                new[] { TrayStatus.CardConnecting, SafeDecorators.Message, SafeDecorators.Message, SafeDecorators.Message },
-                tray.Cards.Statuses);
+            // Four refusals: the start-up check, the click, the protection change and Block at boot. No card
+            // promises an action first.
+            Assert.IsTrue(tray.Cards.Statuses.All(s => s == SafeDecorators.Message), string.Join(" | ", tray.Cards.Statuses));
+            Assert.HasCount(4, tray.Cards.Shown);
+            Assert.AreEqual(CardAnchor.NearTray, tray.Cards.Shown[0].Anchor, "The start-up block is not a click.");
             Assert.IsFalse(tray.Settings.Current.ProtectAudioNoticeShown);
             Assert.AreEqual(0, tray.Startup.Writes);
             Assert.AreEqual(0, tray.Startup.Deletes);
@@ -399,7 +404,101 @@ public sealed class TrayContextTests
 
             Assert.HasCount(1, tray.Cards.Shown);
             Assert.AreEqual(new CardContent(AirPodsName, TrayStatus.CardConnected), tray.Cards.Shown[0].Content);
-            Assert.AreEqual(CardAnchor.NearTray, tray.Cards.Shown[0].Anchor);
+            Assert.AreEqual(CardAnchor.NearCursor, tray.Cards.Shown[0].Anchor, "Starting a second copy is the user's own action.");
+        });
+    }
+
+    [TestMethod]
+    [DataRow(ConnectionState.Connecting)]
+    [DataRow(ConnectionState.Disconnecting)]
+    public void AClickIsIgnoredWhileTheLinkIsAlreadyChanging(ConnectionState connection)
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(connection));
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            Assert.IsEmpty(tray.Connection.Calls, "The click acted while the menu item for it was disabled.");
+            Assert.IsEmpty(tray.Cards.Shown);
+            tray.Context.Menu.Refresh();
+            Assert.IsFalse(tray.MenuItem(MenuModel.Connect).Enabled, "The label and the click must agree.");
+        });
+    }
+
+    [TestMethod]
+    public void TheCardsOfAConnectAreAnchoredAtTheClick()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(tray.Cards.Shown.All(c => c.Anchor == CardAnchor.NearCursor && c.ClickPoint == TrayHarness.ClickPoint),
+                "A card that comes after the click must still land at the click.");
+        });
+    }
+
+    [TestMethod]
+    public void TheEndOfTheSessionReachesTheCoordinator()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            bool raised = false;
+            tray.Context.SessionEnding += (_, _) => raised = true;
+
+            tray.Context.OnSessionEnding(null, new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(raised);
+            CollectionAssert.Contains(tray.Block.Calls, "block");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Session ending: block issued at "));
+        });
+    }
+
+    [TestMethod]
+    public void TheRunValueIsLeftAloneWhenTheSettingsCouldNotBeRead()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                startup: _ => { },
+                settingsStatus: SettingsLoadStatus.ReadFailed);
+
+            Assert.AreEqual(0, tray.Startup.Writes, "Defaults in memory are not the user's choice.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Settings could not be read"));
+        });
+    }
+
+    [TestMethod]
+    public void TheRunValueIsLeftAloneWhenWindowsStartedEarshotFromIt()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                startup: r => r.Run[StartupRegistration.ValueName] = "\"D:\\Unzipped\\Earshot\\Earshot.exe\" --startup",
+                startedAtLogon: true);
+
+            Assert.AreEqual(0, tray.Startup.Writes);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "started by its Run value"));
+        });
+    }
+
+    [TestMethod]
+    public void ARunAgainstATestDataFolderWritesNoStartupValue()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(firstRun: true, startup: _ => { }, dataRootRedirected: true);
+
+            Assert.AreEqual(0, tray.Startup.Writes);
+            Assert.AreEqual(0, tray.Startup.Deletes);
+            Assert.IsEmpty(tray.Startup.Run);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "First run against a test data folder"));
         });
     }
 
@@ -461,8 +560,8 @@ public sealed class TrayContextTests
             Assert.IsTrue(finished, "The message loop ended before the cancelled connect finished.");
             Assert.AreEqual(1, tray.Cards.Hides);
             CollectionAssert.Contains(tray.Cards.Statuses, TrayContext.ClosingMessage);
-            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Waiting for 1 action(s) (toggle) to finish before closing."));
-            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "connect (cancelled because Earshot is closing) Failed"));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Waiting for 1 action(s) (toggle)"));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "connect (cancelled because Earshot is closing)"));
         });
     }
 
@@ -497,6 +596,9 @@ internal sealed class TrayHarness : IDisposable
 {
     public const string ExePath = @"C:\Program Files\Earshot\Earshot.exe";
 
+    // Where the tests pretend the pointer was when a click arrived.
+    public static readonly System.Drawing.Point ClickPoint = new(1200, 1400);
+
     private readonly TempFolder _folder = new();
 
     public TrayHarness(
@@ -506,7 +608,10 @@ internal sealed class TrayHarness : IDisposable
         Action<EarshotSettings>? settings = null,
         Action<FakeStartupRegistry>? startup = null,
         TimeSpan? exitWaitLimit = null,
-        Action<TrayHarness>? arrange = null)
+        Action<TrayHarness>? arrange = null,
+        bool startedAtLogon = false,
+        bool dataRootRedirected = false,
+        SettingsLoadStatus? settingsStatus = null)
     {
         // An exception in a posted callback fails the test instead of opening the WinForms error dialog.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
@@ -542,13 +647,23 @@ internal sealed class TrayHarness : IDisposable
         };
 
         arrange?.Invoke(this);
-        var options = new TrayStartOptions(firstRun, Settings.LastLoadStatus, ExePath, Startup) { ShowIcon = false };
+        var options = new TrayStartOptions(firstRun, settingsStatus ?? Settings.LastLoadStatus, ExePath, Startup)
+        {
+            ShowIcon = false,
+            CursorPosition = () => ClickPoint,
+            StartedAtLogon = startedAtLogon,
+            DataRootRedirected = dataRootRedirected,
+        };
         if (exitWaitLimit is { } limit)
         {
             options = options with { ExitWaitLimit = limit };
         }
 
-        Context = new TrayContext(Registry, options);
+        // The registry's controllers, so safe mode wraps what the coordinator calls, exactly as the tray does.
+        Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,
+            Registry.Settings, Registry.Cards, Log, Time, new CoordinatorOptions(safeMode, StartedAtLogon: false));
+        Context = new TrayContext(Registry, Coordinator, options);
+        Coordinator.Start();
         PumpUntilIdle();
     }
 
@@ -568,11 +683,15 @@ internal sealed class TrayHarness : IDisposable
 
     public FakeAudioProtectionController Protection { get; } = new();
 
-    public RecordingCardPresenter Cards { get; } = new();
+    public RecordingCards Cards { get; } = new();
 
     public FakeStartupRegistry Startup { get; } = new();
 
     public ServiceRegistry Registry { get; }
+
+    public ManualTime Time { get; } = new();
+
+    public BlockCoordinator Coordinator { get; }
 
     public TrayContext Context { get; }
 
@@ -592,7 +711,7 @@ internal sealed class TrayHarness : IDisposable
     public void PumpUntilIdle()
     {
         var watch = Stopwatch.StartNew();
-        while (Context.IsBusy || Context.PendingActions > 0)
+        while (Context.IsWorking)
         {
             if (watch.Elapsed > TimeSpan.FromSeconds(10))
             {
@@ -609,6 +728,7 @@ internal sealed class TrayHarness : IDisposable
     public void Dispose()
     {
         Context.Dispose();
+        Coordinator.Dispose();
         SynchronizationContext.SetSynchronizationContext(null);
         Ui.Dispose();
         _folder.Dispose();
@@ -719,17 +839,4 @@ internal sealed class FakeAudioProtectionController : IAudioProtectionController
         Calls.Add(protect);
         return OnApply(protect, ct);
     }
-}
-
-internal sealed class RecordingCardPresenter : ICardPresenter
-{
-    public List<(CardContent Content, CardAnchor Anchor)> Shown { get; } = new();
-
-    public List<string> Statuses => Shown.Select(s => s.Content.Status).ToList();
-
-    public int Hides { get; private set; }
-
-    public void Show(CardContent content, CardAnchor anchor) => Shown.Add((content, anchor));
-
-    public void Hide() => Hides++;
 }

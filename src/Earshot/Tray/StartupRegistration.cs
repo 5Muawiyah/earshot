@@ -64,7 +64,9 @@ internal sealed class CurrentUserStartupRegistry : IStartupRegistry
 // off). That format is undocumented, so Earshot only reads it, treats bit 0x1 as "turned off in
 // Windows", and never writes it.
 //
-// In safe mode nothing is written: the change is logged instead.
+// In safe mode, and whenever EARSHOT_DATA_ROOT redirects Earshot's folders, nothing is written: the change is
+// logged instead. A run against a test data folder is always a first run, whose default would otherwise point
+// the owner's real Open on startup at that build.
 internal sealed class StartupRegistration
 {
     public const string ValueName = "Earshot";
@@ -72,6 +74,7 @@ internal sealed class StartupRegistration
     public const int MaxCommandLength = 260;
 
     public const string SafeModeMessage = "Safe mode: startup setting not changed.";
+    public const string TestFolderMessage = "Test data folder: startup setting not changed.";
     public const string TurnedOffInWindowsMessage = "Turned off in Windows. Turn it on in Settings > Apps > Startup.";
     public const string PathTooLongMessage = "The Earshot folder path is too long to open on startup.";
     public const string NoExePathMessage = "Earshot could not find its own program file.";
@@ -82,17 +85,25 @@ internal sealed class StartupRegistration
     private readonly IStartupRegistry _registry;
     private readonly ILog _log;
     private readonly bool _safeMode;
+    private readonly bool _redirected;
     private readonly string? _exePath;
 
-    public StartupRegistration(IStartupRegistry registry, ILog log, bool safeMode, string? exePath)
+    public StartupRegistration(IStartupRegistry registry, ILog log, bool safeMode, string? exePath, bool redirected = false)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(log);
         _registry = registry;
         _log = log;
         _safeMode = safeMode;
+        _redirected = redirected;
         _exePath = exePath;
     }
+
+    // True when this run must not write the Run value at all.
+    public bool WritesBlocked => _safeMode || _redirected;
+
+    // Why nothing is written, for the log and the card.
+    public string BlockedMessage => _safeMode ? SafeModeMessage : TestFolderMessage;
 
     public static string CommandFor(string exePath)
     {
@@ -161,12 +172,12 @@ internal sealed class StartupRegistration
     public ControllerResult Apply(bool openOnStartup)
     {
         string action = openOnStartup ? "hkcu-run-write" : "hkcu-run-delete";
-        if (_safeMode)
+        if (WritesBlocked)
         {
-            _log.Warn(SafeModeMessage + " Open on startup " + (openOnStartup ? "on" : "off") + " was not written to HKCU\\" +
+            _log.Warn(BlockedMessage + " Open on startup " + (openOnStartup ? "on" : "off") + " was not written to HKCU\\" +
                 CurrentUserStartupRegistry.RunKey + ".");
-            return new ControllerResult(OpStatus.NotAttempted, SafeModeMessage,
-                [StepOutcomes.NotAttempted("safe-mode:" + action, SafeModeMessage)]);
+            return new ControllerResult(OpStatus.NotAttempted, BlockedMessage,
+                [StepOutcomes.NotAttempted((_safeMode ? "safe-mode:" : "test-data-root:") + action, BlockedMessage)]);
         }
 
         return openOnStartup ? TurnOn(action) : TurnOff(action);
