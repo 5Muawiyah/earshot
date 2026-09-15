@@ -10,7 +10,11 @@ internal sealed record CopiedFile(string RelativePath, long Length, string Sha25
 
 internal sealed record IntegrityCopyResult(bool Ok, IReadOnlyList<CopiedFile> Files, IReadOnlyList<StepOutcome> Steps);
 
-// Copies the application folder for install and proves the copy is what was read.
+// Copies the published files of the application folder for install and proves the copy is what was read.
+//
+// What is copied is the list install read from the publish manifest (Earshot.files.json), never whatever the
+// folder happens to hold: a release unzipped into a busy folder (Downloads, say) must not put unrelated files
+// into %ProgramFiles%\Earshot, which is the elevated gate's DLL search folder.
 //
 // The unzip folder is user-writable, so a process running as the user could swap a file while the elevated
 // install copies it. Every source file is opened first and held open with FileShare.Read for the whole
@@ -48,13 +52,15 @@ internal static unsafe partial class IntegrityCopy
     // GetFinalPathNameByHandleW flags: FILE_NAME_NORMALIZED | VOLUME_NAME_DOS.
     private const uint FinalPathFlags = 0;
 
-    public static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder) =>
-        Copy(sourceFolder, destinationFolder, afterListing: null);
+    // files: the relative paths to copy, in the order they were listed. Every one must be there.
+    public static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, IReadOnlyList<string> files) =>
+        Copy(sourceFolder, destinationFolder, files, afterListing: null);
 
-    // afterListing runs after the source is listed and before its files are opened. Tests use it to change
-    // the source in that window.
-    internal static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, Action? afterListing)
+    // afterListing runs after the source list is settled and before its files are opened. Tests use it to
+    // change the source in that window.
+    internal static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, IReadOnlyList<string> files, Action? afterListing)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationFolder);
         string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceFolder));
@@ -72,11 +78,18 @@ internal static unsafe partial class IntegrityCopy
                 return new IntegrityCopyResult(false, copied, steps);
             }
 
-            if (!TryHoldSourceFolder(source, steps, out root, out string? rootFinal) ||
-                !TryListFiles(source, steps, out List<string> relativeFiles))
+            if (!TryHoldSourceFolder(source, steps, out root, out string? rootFinal))
             {
                 return new IntegrityCopyResult(false, copied, steps);
             }
+
+            if (files.Count == 0 || files.Count > MaxFiles)
+            {
+                steps.Add(StepOutcomes.NotAttempted("copy-app", "The file list is empty or holds more than " + MaxFiles + " files."));
+                return new IntegrityCopyResult(false, copied, steps);
+            }
+
+            List<string> relativeFiles = files.ToList();
 
             afterListing?.Invoke();
 
@@ -159,7 +172,7 @@ internal static unsafe partial class IntegrityCopy
             }
 
             steps.Add(new StepOutcome("copy-app", true, 0, "S_OK",
-                copied.Count.ToString(CultureInfo.InvariantCulture) + " files copied and verified with SHA-256."));
+                copied.Count.ToString(CultureInfo.InvariantCulture) + " published files copied and verified with SHA-256."));
             return new IntegrityCopyResult(true, copied, steps);
         }
         catch (IOException ex)
@@ -289,65 +302,6 @@ internal static unsafe partial class IntegrityCopy
 
         steps.Add(StepOutcomes.NotAttempted(step, "The final path kept growing while it was read."));
         return false;
-    }
-
-    // Lists every file under root as a relative path. Fails on any reparse point (a junction or link could
-    // make the copy read from somewhere else) and on more than MaxFiles files.
-    private static bool TryListFiles(string root, List<StepOutcome> steps, out List<string> files)
-    {
-        files = [];
-        var rootInfo = new DirectoryInfo(root);
-        if (!rootInfo.Exists)
-        {
-            steps.Add(StepOutcomes.FromHResult("copy-app", unchecked((int)0x80070003), "The source folder does not exist: " + root));
-            return false;
-        }
-
-        if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0)
-        {
-            steps.Add(StepOutcomes.NotAttempted("copy-app", "The source folder is a reparse point."));
-            return false;
-        }
-
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0,
-            IgnoreInaccessible = false,
-            ReturnSpecialDirectories = false,
-        };
-        var pending = new Stack<DirectoryInfo>();
-        pending.Push(rootInfo);
-        while (pending.Count > 0)
-        {
-            DirectoryInfo current = pending.Pop();
-            foreach (FileSystemInfo entry in current.EnumerateFileSystemInfos("*", options))
-            {
-                string relative = Path.GetRelativePath(root, entry.FullName);
-                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    steps.Add(StepOutcomes.NotAttempted("copy-app:" + relative, "A reparse point in the source is not copied."));
-                    return false;
-                }
-
-                if (entry is DirectoryInfo directory)
-                {
-                    pending.Push(directory);
-                }
-                else
-                {
-                    files.Add(relative);
-                    if (files.Count > MaxFiles)
-                    {
-                        steps.Add(StepOutcomes.NotAttempted("copy-app", "The source has more than " + MaxFiles + " files."));
-                        return false;
-                    }
-                }
-            }
-        }
-
-        files.Sort(StringComparer.OrdinalIgnoreCase);
-        return true;
     }
 
     internal static bool IsInside(string path, string folder)

@@ -40,6 +40,7 @@ internal enum GateExitCode
     DeviceBlocked = 11,      // protect-on or protect-off while the device is blocked; the request is kept for the next allow
     NotAudioSink = 12,       // set-device for a device with no A2DP sink node, such as a phone
     OtherDeviceProtected = 13, // set-device while protection.json lists services turned off on the device pinned now
+    NoManifest = 14,         // install without a valid Earshot.files.json next to the running exe
     Rejected = 20,           // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
@@ -62,6 +63,7 @@ internal static class GateExitCodes
         [GateExitCode.DeviceBlocked] = "device-blocked",
         [GateExitCode.NotAudioSink] = "not-audio-sink",
         [GateExitCode.OtherDeviceProtected] = "other-device-protected",
+        [GateExitCode.NoManifest] = "no-manifest",
         [GateExitCode.Rejected] = "rejected",
         [GateExitCode.NotElevated] = "not-elevated",
         [GateExitCode.RunningAsSystem] = "running-as-system",

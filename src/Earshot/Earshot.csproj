@@ -17,4 +17,35 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Earshot.Tests" />
   </ItemGroup>
+  <!-- Writes Earshot.files.json beside the published files: the path (relative, with "/" separators) and the
+       SHA-256 of every published file except the manifest itself. install copies only what this lists and
+       checks each copy against these hashes, so a release installs exactly what was published and nothing
+       else out of the folder it was unzipped into. Hashes come from the built-in GetFileHash task.
+       https://learn.microsoft.com/en-us/visualstudio/msbuild/getfilehash-task
+       https://learn.microsoft.com/en-us/visualstudio/msbuild/writelinestofile-task -->
+  <Target Name="WriteEarshotFileManifest" AfterTargets="Publish">
+    <PropertyGroup>
+      <EarshotPublishRoot>$([System.IO.Path]::GetFullPath('$(PublishDir)'))</EarshotPublishRoot>
+      <EarshotManifestPath>$(EarshotPublishRoot)Earshot.files.json</EarshotManifestPath>
+    </PropertyGroup>
+    <ItemGroup>
+      <EarshotPublishedFile Include="$(EarshotPublishRoot)**\*" Exclude="$(EarshotManifestPath)" />
+    </ItemGroup>
+    <GetFileHash Files="@(EarshotPublishedFile)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="EarshotHashedFile" />
+    </GetFileHash>
+    <ItemGroup>
+      <!-- The manifest records "/" whatever the build ran on, so the reader never meets an escaped backslash. -->
+      <EarshotHashedFile>
+        <ManifestPath>$([System.String]::Copy('%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '/'))</ManifestPath>
+      </EarshotHashedFile>
+    </ItemGroup>
+    <PropertyGroup>
+      <EarshotManifestEntries>@(EarshotHashedFile->'    { "Path": "%(ManifestPath)", "Sha256": "%(FileHash)" }', ',%0D%0A')</EarshotManifestEntries>
+      <EarshotManifestText>{%0D%0A  "SchemaVersion": 1,%0D%0A  "Files": [%0D%0A$(EarshotManifestEntries)%0D%0A  ]%0D%0A}</EarshotManifestText>
+    </PropertyGroup>
+    <Error Condition="'@(EarshotHashedFile)' == ''" Text="Nothing was published, so no file manifest was written." />
+    <WriteLinesToFile File="$(EarshotManifestPath)" Lines="$(EarshotManifestText)" Overwrite="true" WriteOnlyWhenDifferent="false" Encoding="UTF-8" />
+    <Message Importance="high" Text="Earshot: wrote $(EarshotManifestPath) for @(EarshotHashedFile->Count()) published files." />
+  </Target>
 </Project>

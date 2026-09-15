@@ -27,6 +27,22 @@ public sealed class InstallActionsTests
             File.WriteAllBytes(Path.Combine(Source, "Earshot.exe"), RandomNumberGenerator.GetBytes(4096));
             File.WriteAllBytes(Path.Combine(Source, "Earshot.dll"), RandomNumberGenerator.GetBytes(100_000));
             File.WriteAllText(Path.Combine(Source, "runtimes", "native.txt"), "native");
+            WriteManifest("Earshot.exe", "Earshot.dll", "runtimes/native.txt");
+        }
+
+        // The publish manifest as the publish step writes it: the relative path and hash of every published
+        // file, with "/" separators.
+        public void WriteManifest(params string[] relativePaths)
+        {
+            IEnumerable<string> entries = relativePaths.Select(relative =>
+            {
+                string path = Path.Combine(Source, relative.Replace('/', Path.DirectorySeparatorChar));
+                string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+                return "    { \"Path\": \"" + relative + "\", \"Sha256\": \"" + hash + "\" }";
+            });
+            File.WriteAllText(
+                Path.Combine(Source, FileManifest.FileName),
+                "{\r\n  \"SchemaVersion\": 1,\r\n  \"Files\": [\r\n" + string.Join(",\r\n", entries) + "\r\n  ]\r\n}\r\n");
         }
 
         public string Root => _temp.Path;
@@ -78,6 +94,8 @@ public sealed class InstallActionsTests
             .Where(d => Path.GetFileName(d).StartsWith("Earshot.", StringComparison.Ordinal))
             .ToArray();
 
+    private const string SampleHash = "0000000000000000000000000000000000000000000000000000000000000000";
+
     private static readonly Guid Handsfree = new("0000111E-0000-1000-8000-00805F9B34FB");
 
     // What a Task Scheduler call throws when its service is stopped, with the HRESULT of ERROR_SERVICE_DISABLED.
@@ -120,7 +138,7 @@ public sealed class InstallActionsTests
         Assert.AreEqual(Sddl.RunnableTask(TestUsers.Sid), h.Tasks.Tasks[@"\Earshot\Gate"].Sddl);
         Assert.AreEqual(Sddl.ReadableTask(TestUsers.Sid), h.Tasks.Tasks[@"\Earshot\BootBlock"].Sddl);
         CollectionAssert.AreEqual(FreshInstallCalls, h.Tasks.Calls);
-        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok && s.Detail!.Contains("3 files", StringComparison.Ordinal)));
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok && s.Detail!.Contains("3 published files", StringComparison.Ordinal)));
     }
 
     [TestMethod]
@@ -173,11 +191,13 @@ public sealed class InstallActionsTests
     public void AnApplicationFolderWithoutTheExeIsNotInstalled()
     {
         using var h = new Harness();
+        h.WriteManifest("Earshot.dll", "runtimes/native.txt");
         File.Delete(Path.Combine(h.Source, "Earshot.exe"));
 
         InstallResult result = h.RunInstall();
 
         Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Detail!.Contains("not in the published file list", StringComparison.Ordinal)));
         Assert.IsFalse(Directory.Exists(h.Install));
         Assert.IsEmpty(Directory.GetDirectories(Path.GetDirectoryName(h.Install)!));
         Assert.IsEmpty(h.Tasks.Calls);
@@ -557,6 +577,76 @@ public sealed class InstallActionsTests
     }
 
     // A crash part way through install or uninstall must still leave the steps taken so far and a log line.
+    // Install only ever runs from a published folder: without the manifest it copies nothing and says so.
+    [TestMethod]
+    public void WithoutThePublishManifestNothingIsCopied()
+    {
+        using var h = new Harness();
+        File.Delete(Path.Combine(h.Source, FileManifest.FileName));
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.NoManifest, result.Outcome);
+        Assert.AreEqual("no-manifest", GateExitCodes.ResultName(result.Outcome));
+        StringAssert.Contains(result.Steps.Single(s => s.Step == FileManifest.ReadStep).Detail, "Install from a release build.");
+        Assert.IsFalse(Directory.Exists(h.Install));
+        Assert.IsEmpty(h.Tasks.Calls);
+        Assert.IsFalse(Directory.Exists(h.Machine));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("not json")]
+    [DataRow("{ \"SchemaVersion\": 2, \"Files\": [] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [] }")]
+    [DataRow("{ \"SchemaVersion\": 1 }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"..\\\\Earshot.exe\", \"Sha256\": \"" + SampleHash + "\" } ] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"C:/Earshot.exe\", \"Sha256\": \"" + SampleHash + "\" } ] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"Earshot.exe\", \"Sha256\": \"short\" } ] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"Earshot.exe\" } ] }")]
+    public void AnUnusableManifestIsRefused(string content)
+    {
+        using var h = new Harness();
+        File.WriteAllText(Path.Combine(h.Source, FileManifest.FileName), content);
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.NoManifest, result.Outcome);
+        Assert.IsFalse(Directory.Exists(h.Install));
+    }
+
+    [TestMethod]
+    public void AFileChangedAfterItWasPublishedIsRefused()
+    {
+        using var h = new Harness();
+        File.WriteAllBytes(Path.Combine(h.Source, "Earshot.dll"), RandomNumberGenerator.GetBytes(100_000));
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "verify-manifest:Earshot.dll").Detail, "does not match the hash recorded when it was published");
+        Assert.IsFalse(Directory.Exists(h.Install), "Nothing is left behind.");
+        Assert.IsEmpty(LeftOvers(h.Install));
+        Assert.IsEmpty(h.Tasks.Calls);
+    }
+
+    [TestMethod]
+    public void OnlyThePublishedFilesAreCopiedOutOfTheFolderTheReleaseWasUnzippedInto()
+    {
+        using var h = new Harness();
+        File.WriteAllText(Path.Combine(h.Source, "someone-elses.dll"), "not part of the release");
+        Directory.CreateDirectory(Path.Combine(h.Source, "Downloads"));
+        File.WriteAllText(Path.Combine(h.Source, "Downloads", "invoice.pdf"), "not part of the release");
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        CollectionAssert.AreEquivalent(
+            new[] { "Earshot.exe", "Earshot.dll", Path.Combine("runtimes", "native.txt") },
+            Directory.GetFiles(h.Install, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(h.Install, f)).ToArray());
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "verify-manifest" && s.Ok));
+    }
+
     [TestMethod]
     public void AnInstallThatStopsWithAnExceptionKeepsItsStepsAndIsLogged()
     {

@@ -306,8 +306,10 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 // install <userSid> <addr12> <containerGuid> [--principal user], run elevated from the tray with one UAC
 // prompt. The request is already validated. Each step is a StepOutcome and install stops at the first
 // failure that would leave something unsafe (fail closed):
-//   1. copy the application to %ProgramFiles%\Earshot with IntegrityCopy (staged, then swapped in), and
-//      check the install folder grants no one but administrators write;
+//   1. read the publish manifest (Earshot.files.json) next to the running exe, copy exactly the files it lists
+//      to %ProgramFiles%\Earshot with IntegrityCopy (staged, then swapped in), check each copy against the hash
+//      the manifest records, and check the install folder grants no one but administrators write. Without a
+//      valid manifest nothing is copied: install runs from a release build;
 //   2. create %ProgramData%\Earshot with the protected DACL, read it back and fail closed; a folder that
 //      already existed and fails the check stops install and is left for the user to remove;
 //   3. write device.json (the validated identity) and config.json (BlockAtBoot kept from a valid existing
@@ -323,6 +325,7 @@ internal sealed class InstallActions
     private readonly ITaskRegistrar _tasks;
     private readonly Func<string, AccountLookup> _accountToSid;
     private readonly ILog _log;
+    private bool _manifestMissing;
 
     public InstallActions(InstallLayout layout, IFolderSecurity folders, ITaskRegistrar tasks, Func<string, AccountLookup> accountToSid, ILog log)
     {
@@ -360,7 +363,7 @@ internal sealed class InstallActions
     {
         if (!CopyApplication(steps))
         {
-            return new InstallResult(GateExitCode.Failed, steps);
+            return new InstallResult(_manifestMissing ? GateExitCode.NoManifest : GateExitCode.Failed, steps);
         }
 
         if (!PrepareMachineFolder(steps))
@@ -392,11 +395,19 @@ internal sealed class InstallActions
             return CheckInstallFolder(install, steps);
         }
 
+        FileManifest? manifest = FileManifest.Read(source, out StepOutcome manifestStep);
+        steps.Add(manifestStep);
+        if (manifest is null)
+        {
+            _manifestMissing = true;
+            return false;
+        }
+
         string parent = Path.GetDirectoryName(install) ?? install;
         string suffix = Guid.NewGuid().ToString("N");
         string staging = Path.Combine(parent, Path.GetFileName(install) + ".staging-" + suffix);
 
-        IntegrityCopyResult copy = IntegrityCopy.Copy(source, staging);
+        IntegrityCopyResult copy = IntegrityCopy.Copy(source, staging, manifest.Files.Select(f => f.RelativePath).ToList());
         steps.AddRange(copy.Steps);
         if (!copy.Ok)
         {
@@ -404,9 +415,15 @@ internal sealed class InstallActions
             return false;
         }
 
+        if (!MatchesManifest(manifest, copy, steps))
+        {
+            FileSteps.DeleteTree(staging, "remove-staging", steps);
+            return false;
+        }
+
         if (!copy.Files.Any(f => string.Equals(f.RelativePath, TaskPlan.ExecutableName, StringComparison.OrdinalIgnoreCase)))
         {
-            steps.Add(StepOutcomes.NotAttempted("copy-app", TaskPlan.ExecutableName + " is not in the application folder."));
+            steps.Add(StepOutcomes.NotAttempted("copy-app", TaskPlan.ExecutableName + " is not in the published file list."));
             FileSteps.DeleteTree(staging, "remove-staging", steps);
             return false;
         }
@@ -448,6 +465,27 @@ internal sealed class InstallActions
         }
 
         return CheckInstallFolder(install, steps);
+    }
+
+    // Every copied file matches the hash the manifest recorded when it was published, so a file changed
+    // between publishing and installing is refused even though the copy itself was faithful.
+    private static bool MatchesManifest(FileManifest manifest, IntegrityCopyResult copy, List<StepOutcome> steps)
+    {
+        foreach (CopiedFile file in copy.Files)
+        {
+            string? expected = manifest.HashOf(file.RelativePath);
+            if (expected is null || !string.Equals(expected, file.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(StepOutcomes.NotAttempted("verify-manifest:" + file.RelativePath,
+                    expected is null
+                        ? "The published file list does not hold this file."
+                        : "The file does not match the hash recorded when it was published. " + FileManifest.MissingMessage));
+                return false;
+            }
+        }
+
+        steps.Add(new StepOutcome("verify-manifest", true, 0, "S_OK", copy.Files.Count + " files match the published hashes."));
+        return true;
     }
 
     private bool CheckInstallFolder(string install, List<StepOutcome> steps) =>
