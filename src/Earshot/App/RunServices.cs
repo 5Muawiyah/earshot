@@ -7,6 +7,9 @@ namespace Earshot.App;
 // The ServiceRegistry for a console run mode (probe, diag), built the way the tray builds it but
 // only when a target first asks for it. There is no UI thread in these modes, so UiPost runs the
 // action on the calling thread. Disposes the monitor and the audio worker at the end.
+//
+// Settings are opened read-only: probe must change nothing, so a missing or unusable settings file
+// is neither created, saved nor moved aside here.
 internal sealed class RunServices : IDisposable
 {
     private readonly Paths _paths;
@@ -27,7 +30,7 @@ internal sealed class RunServices : IDisposable
     {
         if (_registry is null)
         {
-            var settings = new JsonSettingsStore(_paths.SettingsFile, _log);
+            var settings = new JsonSettingsStore(_paths.SettingsFile, _log, readOnly: true);
             _registry = CompositionRoot.Build(_log, settings, static action => action(), _paths.IsSafeMode);
         }
 

@@ -256,7 +256,13 @@ public sealed class JsonSettingsStoreTests : IDisposable
     [DataRow("{ \"PinnedAddress\": null }")]
     [DataRow("null")]
     [DataRow("[]")]
-    [DataRow("{ \"SchemaVersion\": 2 }")]
+    [DataRow("{ \"SchemaVersion\": 0 }")]
+    [DataRow("{ \"SchemaVersion\": -1 }")]
+    [DataRow("{ \"PinnedAddress\": \"5A6b7C8d9Eaf\" }")]
+    [DataRow("{ \"PinnedAddress\": \"300E431D048\" }")]
+    [DataRow("{ \"PinnedAddress\": \"5A6B:7C8D:9EAF\" }")]
+    [DataRow("{ \"PinnedAddress\": \" \" }")]
+    [DataRow("{ \"PinnedContainerId\": \"00000000-0000-0000-ffff-ffffffffffff\" }")]
     [DataRow("{ \"SchemaVersion\": \"1\" }")]
     [DataRow("{ \"DeviceMatch\": \"   \" }")]
     [DataRow("{ \"DeviceMatch\": \"Beats\" } trailing")]
@@ -271,6 +277,133 @@ public sealed class JsonSettingsStoreTests : IDisposable
         string[] quarantined = Quarantined();
         Assert.HasCount(1, quarantined);
         Assert.AreEqual(content, File.ReadAllText(quarantined[0]));
+    }
+
+    [TestMethod]
+    public void WellFormedPinsLoad()
+    {
+        File.WriteAllText(SettingsPath, "{ \"PinnedAddress\": \"5A6B7C8D9EAF\", \"PinnedContainerId\": \"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\" }");
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
+        Assert.AreEqual("5A6B7C8D9EAF", store.Current.PinnedAddress);
+        Assert.AreEqual(new Guid("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D"), store.Current.PinnedContainerId);
+    }
+
+    [TestMethod]
+    [DataRow("5A6b7C8d9Eaf")]
+    [DataRow("300E431D048")]
+    [DataRow("5A6B7C8D9EAF0")]
+    [DataRow("not an address")]
+    public void UpdateRejectsAMalformedPinnedAddress(string address)
+    {
+        JsonSettingsStore store = Open();
+        string before = File.ReadAllText(store.FilePath);
+
+        Assert.ThrowsExactly<ArgumentException>(() => store.Update(s => s.PinnedAddress = address));
+
+        Assert.AreEqual("", store.Current.PinnedAddress);
+        Assert.AreEqual(before, File.ReadAllText(store.FilePath));
+    }
+
+    [TestMethod]
+    public void UpdateRejectsThePcContainerAsThePin()
+    {
+        JsonSettingsStore store = Open();
+
+        Assert.ThrowsExactly<ArgumentException>(() => store.Update(s => s.PinnedContainerId = NodeMatch.PcContainer));
+
+        Assert.AreEqual(Guid.Empty, Open().Current.PinnedContainerId);
+    }
+
+    [TestMethod]
+    public void ANewerSchemaIsReadButNeverRewrittenOrMoved()
+    {
+        const string newer = "{ \"SchemaVersion\": 2, \"DeviceMatch\": \"Beats\", \"OpenOnStartup\": false, \"SomethingNew\": { \"x\": 1 } }";
+        File.WriteAllText(SettingsPath, newer);
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.NewerSchema, store.LastLoadStatus);
+        Assert.IsTrue(store.IsReadOnly);
+        Assert.AreEqual("Beats", store.Current.DeviceMatch);
+        Assert.IsFalse(store.Current.OpenOnStartup);
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "from a newer version of Earshot"));
+
+        int changed = 0;
+        store.Changed += (_, _) => changed++;
+        store.Update(s => s.DeviceMatch = "Changed here");
+
+        Assert.AreEqual("Changed here", store.Current.DeviceMatch);
+        Assert.AreEqual(1, changed);
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "not saved"));
+        Assert.AreEqual(newer, File.ReadAllText(SettingsPath));
+        Assert.IsFalse(File.Exists(store.BackupPath));
+        Assert.IsFalse(File.Exists(store.TempPath));
+        Assert.IsEmpty(Quarantined());
+    }
+
+    [TestMethod]
+    public void ANewerSchemaWithUnusableValuesUsesDefaultsAndLeavesTheFile()
+    {
+        const string newer = "{ \"SchemaVersion\": 3, \"DeviceMatch\": \"\" }";
+        File.WriteAllText(SettingsPath, newer);
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.NewerSchema, store.LastLoadStatus);
+        Assert.IsTrue(store.IsReadOnly);
+        AssertDefaults(store.Current);
+        Assert.AreEqual(newer, File.ReadAllText(SettingsPath));
+        Assert.IsEmpty(Quarantined());
+    }
+
+    [TestMethod]
+    public void AReadOnlyStoreDoesNotCreateAMissingFile()
+    {
+        var store = new JsonSettingsStore(SettingsPath, _log, readOnly: true);
+
+        Assert.AreEqual(SettingsLoadStatus.DefaultsReadOnly, store.LastLoadStatus);
+        Assert.IsTrue(store.IsReadOnly);
+        AssertDefaults(store.Current);
+
+        store.Update(s => s.DeviceMatch = "Beats");
+        store.Reload();
+
+        Assert.IsEmpty(Directory.GetFileSystemEntries(_temp.Path));
+    }
+
+    [TestMethod]
+    public void AReadOnlyStoreNeitherMovesNorRewritesAnUnusableFile()
+    {
+        JsonSettingsStore writer = Open();
+        writer.Update(s => s.DeviceMatch = "Backup value");
+        writer.Update(s => s.DeviceMatch = "Latest value");
+        File.WriteAllText(SettingsPath, "{ \"DeviceMatch\": \"Lat");
+        string[] before = Directory.GetFileSystemEntries(_temp.Path).Order(StringComparer.Ordinal).ToArray();
+        string backupBefore = File.ReadAllText(SettingsPath + ".bak");
+
+        var store = new JsonSettingsStore(SettingsPath, _log, readOnly: true);
+
+        Assert.AreEqual(SettingsLoadStatus.UnusableReadOnly, store.LastLoadStatus);
+        Assert.AreEqual("Backup value", store.Current.DeviceMatch);
+        Assert.IsNull(store.QuarantinedFile);
+        CollectionAssert.AreEqual(before, Directory.GetFileSystemEntries(_temp.Path).Order(StringComparer.Ordinal).ToArray());
+        Assert.AreEqual("{ \"DeviceMatch\": \"Lat", File.ReadAllText(SettingsPath));
+        Assert.AreEqual(backupBefore, File.ReadAllText(SettingsPath + ".bak"));
+    }
+
+    [TestMethod]
+    public void AReadOnlyStoreReadsAValidFile()
+    {
+        File.WriteAllText(SettingsPath, ValidJson);
+
+        var store = new JsonSettingsStore(SettingsPath, _log, readOnly: true);
+
+        Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
+        Assert.AreEqual("Beats", store.Current.DeviceMatch);
+        Assert.AreEqual(ValidJson, File.ReadAllText(SettingsPath));
     }
 
     [TestMethod]

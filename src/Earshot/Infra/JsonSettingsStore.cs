@@ -11,7 +11,10 @@ internal enum SettingsLoadStatus
     CreatedDefaults,       // no settings.json; defaults written
     RestoredFromBackup,    // settings.json unusable; settings.json.bak used
     ResetAfterCorruption,  // settings.json and the backup unusable; defaults written
-    ReadFailed             // settings.json exists but could not be opened; defaults in memory only
+    ReadFailed,            // settings.json exists but could not be opened; defaults in memory only
+    NewerSchema,           // settings.json is from a newer Earshot; its values (or defaults) in memory, nothing written
+    DefaultsReadOnly,      // read-only store, no settings.json; defaults in memory, nothing written
+    UnusableReadOnly       // read-only store, settings.json unusable; backup or defaults in memory, nothing moved or written
 }
 
 // User settings in %APPDATA%\Earshot\settings.json.
@@ -19,12 +22,20 @@ internal enum SettingsLoadStatus
 // Load:
 //   missing file              defaults, then save
 //   valid file                use it (unknown members are ignored)
+//   newer schema version      the file was written by a newer Earshot. Use the members this build
+//                             knows if they are valid, otherwise defaults; never move or rewrite the
+//                             file; the store becomes read-only (IsReadOnly) and logs a warning
 //   empty, truncated, null,
-//   explicit null for a non-nullable member, unknown schema version or blank match string
+//   explicit null for a non-nullable member, schema version below 1, blank match string,
+//   pinned address that is not "" or 12 upper-case hex, pinned container that is the PC container
 //                             try settings.json.bak; move the bad file aside as
 //                             settings.corrupt-<UTC yyyyMMddHHmmss>.json; use the backup if it is
 //                             valid, otherwise defaults; save; log a warning either way
 //   file cannot be opened     defaults in memory, file left untouched, error logged
+//
+// A store opened read-only (probe and diag, which must change nothing) follows the same rules but
+// never saves, moves or quarantines a file. On a read-only store Update changes the values for this
+// run only and logs that they were not saved.
 //
 // Save writes settings.json.tmp, flushes it to disk, then File.Replace swaps it in and keeps the
 // previous file as settings.json.bak. File.Replace needs an existing destination, so the first
@@ -42,14 +53,17 @@ internal sealed class JsonSettingsStore : ISettingsStore
 
     private readonly Lock _gate = new();
     private readonly ILog _log;
+    private readonly bool _openedReadOnly;
     private EarshotSettings _current = new();
+    private bool _newerSchema;
 
-    public JsonSettingsStore(string path, ILog log)
+    public JsonSettingsStore(string path, ILog log, bool readOnly = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(log);
 
         _log = log;
+        _openedReadOnly = readOnly;
         FilePath = Path.GetFullPath(path);
         BackupPath = FilePath + ".bak";
         TempPath = FilePath + ".tmp";
@@ -68,6 +82,19 @@ internal sealed class JsonSettingsStore : ISettingsStore
     public string TempPath { get; }
 
     public SettingsLoadStatus LastLoadStatus { get; private set; }
+
+    // True when nothing is written: the store was opened read-only, or the file is from a newer
+    // Earshot and saving would drop the settings this build does not know.
+    public bool IsReadOnly
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _openedReadOnly || _newerSchema;
+            }
+        }
+    }
 
     // Where the last unusable settings file was moved, or null.
     public string? QuarantinedFile { get; private set; }
@@ -98,7 +125,16 @@ internal sealed class JsonSettingsStore : ISettingsStore
                 throw new ArgumentException("Settings were not saved: " + problem + ".", nameof(mutate));
             }
 
-            Save(next);
+            if (_openedReadOnly || _newerSchema)
+            {
+                _log.Warn("Settings changed for this run only and not saved to " + FilePath + ", because " +
+                          (_newerSchema ? "the file is from a newer version of Earshot." : "this store is read-only."));
+            }
+            else
+            {
+                Save(next);
+            }
+
             _current = next;
             published = Clone(next);
         }
@@ -121,11 +157,18 @@ internal sealed class JsonSettingsStore : ISettingsStore
     // Returns why the settings cannot be used, or null when they can.
     internal static string? Validate(EarshotSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         if (settings.SchemaVersion != CurrentSchemaVersion)
         {
             return "unknown schema version " + settings.SchemaVersion.ToString(CultureInfo.InvariantCulture);
         }
 
+        return ValidateMembers(settings);
+    }
+
+    // The checks that do not depend on the schema version.
+    private static string? ValidateMembers(EarshotSettings settings)
+    {
         if (string.IsNullOrWhiteSpace(settings.DeviceMatch))
         {
             return "the device match string is blank";
@@ -136,17 +179,35 @@ internal sealed class JsonSettingsStore : ISettingsStore
             return "the pinned address is missing";
         }
 
+        if (settings.PinnedAddress.Length != 0 && !BoundaryValidation.IsAddress12(settings.PinnedAddress))
+        {
+            return "the pinned address is not 12 upper-case hex characters";
+        }
+
+        if (settings.PinnedContainerId != Guid.Empty && !NodeMatch.IsValidTargetContainer(settings.PinnedContainerId))
+        {
+            return "the pinned container is the PC container";
+        }
+
         return null;
     }
 
     private void LoadLocked()
     {
         QuarantinedFile = null;
+        _newerSchema = false;
         ReadResult main = TryRead(FilePath);
 
         if (main.Kind == ReadKind.Missing)
         {
             _current = new EarshotSettings();
+            if (_openedReadOnly)
+            {
+                LastLoadStatus = SettingsLoadStatus.DefaultsReadOnly;
+                _log.Info("No settings file at " + FilePath + ", so defaults are used and nothing is written.");
+                return;
+            }
+
             LastLoadStatus = SettingsLoadStatus.CreatedDefaults;
             _log.Info("No settings file, so defaults are saved to " + FilePath);
             TrySaveDuringLoad();
@@ -160,6 +221,32 @@ internal sealed class JsonSettingsStore : ISettingsStore
             return;
         }
 
+        if (main.Kind == ReadKind.Newer)
+        {
+            // Resetting or rewriting would lose settings a newer build relies on, so the file is
+            // left exactly as it is. This build only understands its own members, so the copy in
+            // memory carries this build's schema version.
+            _newerSchema = true;
+            LastLoadStatus = SettingsLoadStatus.NewerSchema;
+            EarshotSettings newer = main.Settings!;
+            string version = newer.SchemaVersion.ToString(CultureInfo.InvariantCulture);
+            if (main.Problem is null)
+            {
+                newer.SchemaVersion = CurrentSchemaVersion;
+                _current = newer;
+                _log.Warn("Settings file " + FilePath + " is schema version " + version + " from a newer version of Earshot. " +
+                          "The settings this version knows are used, and the file is not changed.");
+            }
+            else
+            {
+                _current = new EarshotSettings();
+                _log.Warn("Settings file " + FilePath + " is schema version " + version + " from a newer version of Earshot, but " +
+                          main.Problem + ", so defaults are used for this run. The file is not changed.");
+            }
+
+            return;
+        }
+
         if (main.Kind == ReadKind.Unreadable)
         {
             _current = new EarshotSettings();
@@ -170,6 +257,17 @@ internal sealed class JsonSettingsStore : ISettingsStore
 
         // The file is there but unusable. Read the backup before anything moves.
         ReadResult backup = TryRead(BackupPath);
+        if (_openedReadOnly)
+        {
+            bool backupUsable = backup.Kind == ReadKind.Valid;
+            _current = backupUsable ? backup.Settings! : new EarshotSettings();
+            LastLoadStatus = SettingsLoadStatus.UnusableReadOnly;
+            _log.Warn("Settings file " + FilePath + " is unusable (" + main.Problem + "). " +
+                      (backupUsable ? "The backup is used" : "Defaults are used") +
+                      " for this run, and no file is moved or written because this store is read-only.");
+            return;
+        }
+
         string? quarantined = Quarantine();
         QuarantinedFile = quarantined;
         string keptAs = quarantined ?? "(could not be moved)";
@@ -184,7 +282,12 @@ internal sealed class JsonSettingsStore : ISettingsStore
         {
             _current = new EarshotSettings();
             LastLoadStatus = SettingsLoadStatus.ResetAfterCorruption;
-            string backupNote = backup.Kind == ReadKind.Missing ? "no backup" : "backup also unusable (" + backup.Problem + ")";
+            string backupNote = backup.Kind switch
+            {
+                ReadKind.Missing => "no backup",
+                ReadKind.Newer => "backup is from a newer version of Earshot",
+                _ => "backup also unusable (" + backup.Problem + ")",
+            };
             _log.Warn("Settings were unusable (" + main.Problem + "; " + backupNote + ") and have been reset to defaults. The unusable file is kept as " + keptAs);
         }
 
@@ -284,6 +387,11 @@ internal sealed class JsonSettingsStore : ISettingsStore
             return ReadResult.Invalid("the file holds null");
         }
 
+        if (parsed.SchemaVersion > CurrentSchemaVersion)
+        {
+            return ReadResult.Newer(parsed, ValidateMembers(parsed));
+        }
+
         string? problem = Validate(parsed);
         return problem is null ? ReadResult.Valid(parsed) : ReadResult.Invalid(problem);
     }
@@ -359,7 +467,7 @@ internal sealed class JsonSettingsStore : ISettingsStore
             SettingsJsonContext.Default.EarshotSettings)
         ?? throw new InvalidOperationException("Copying the settings produced null.");
 
-    private enum ReadKind { Missing, Valid, Invalid, Unreadable }
+    private enum ReadKind { Missing, Valid, Newer, Invalid, Unreadable }
 
     private readonly record struct ReadResult(ReadKind Kind, EarshotSettings? Settings, string? Problem, Exception? Error)
     {
@@ -368,6 +476,10 @@ internal sealed class JsonSettingsStore : ISettingsStore
         public static ReadResult Valid(EarshotSettings settings) => new(ReadKind.Valid, settings, null, null);
 
         public static ReadResult Invalid(string problem) => new(ReadKind.Invalid, null, problem, null);
+
+        // A file from a newer Earshot. Problem is null when the members this build knows are valid.
+        public static ReadResult Newer(EarshotSettings settings, string? problem) =>
+            new(ReadKind.Newer, settings, problem, null);
 
         public static ReadResult Unreadable(Exception error) => new(ReadKind.Unreadable, null, error.Message, error);
     }
