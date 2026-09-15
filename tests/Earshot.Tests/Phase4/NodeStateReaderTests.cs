@@ -150,7 +150,7 @@ public sealed class NodeStateReaderTests
         Assert.AreEqual(NodeBlockStatus.Enabled, byId[RecordedNodes.AirPodsTargets[4]].Status, "A problem other than 22 is not a disable.");
         Assert.AreEqual(10u, byId[RecordedNodes.AirPodsTargets[4]].ProblemCode);
         Assert.AreEqual("BTHENUM", byId[RecordedNodes.AirPodsDeviceNode].EnumeratorPrefix);
-        Assert.AreEqual("Owner’s AirPods Pro", byId[RecordedNodes.AirPodsDeviceNode].Name);
+        Assert.AreEqual("Owner\u2019s AirPods Pro", byId[RecordedNodes.AirPodsDeviceNode].Name);
         Assert.IsTrue(read.Steps.Any(s => s.Step.StartsWith("cm-locate:", StringComparison.Ordinal) && s.CodeName == "CR_NO_SUCH_DEVNODE"));
         Assert.IsTrue(read.Steps.Any(s => s.Step.StartsWith("cm-status:", StringComparison.Ordinal) && s.CodeName == "CR_FAILURE"));
     }

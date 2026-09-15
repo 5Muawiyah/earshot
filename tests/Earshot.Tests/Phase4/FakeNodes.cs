@@ -215,7 +215,7 @@ internal static class RecordedNodes
     public static FakeNodeApi Table()
     {
         var nodes = new List<FakeNode>();
-        nodes.AddRange(AirPodsTargets.Select(id => new FakeNode(id, AirPodsContainer, id == AirPodsDeviceNode ? "Owner’s AirPods Pro" : null)));
+        nodes.AddRange(AirPodsTargets.Select(id => new FakeNode(id, AirPodsContainer, id == AirPodsDeviceNode ? "Owner\u2019s AirPods Pro" : null)));
         nodes.AddRange(AirPodsNonTargets.Select(id => new FakeNode(id, AirPodsContainer) { Present = !id.StartsWith(@"SWD\", StringComparison.Ordinal) }));
         nodes.AddRange(IPhoneNodes.Select(id => new FakeNode(id, IPhoneContainer, id == IPhoneDeviceNode ? "iPhone" : null)));
         nodes.Add(new FakeNode(RadioNode, NodeMatch.PcContainer));

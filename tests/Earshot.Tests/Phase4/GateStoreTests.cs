@@ -179,7 +179,7 @@ public sealed class GateStoreTests
         using var temp = new TempFolder();
         var store = new GateStore(temp.Path);
         List<StepOutcome> many = Enumerable.Range(0, 200)
-            .Select(i => StepOutcomes.FromConfigRet("step-" + i.ToString(CultureInfo.InvariantCulture), 0, new string('x', 5000) + ""))
+            .Select(i => StepOutcomes.FromConfigRet("step-" + i.ToString(CultureInfo.InvariantCulture), 0, new string('x', 5000) + "\u0007"))
             .ToList();
 
         Assert.IsTrue(store.WriteStatus(Status(Nonce, many)).Ok);
@@ -198,7 +198,7 @@ public sealed class GateStoreTests
         using var temp = new TempFolder();
         var store = new GateStore(temp.Path);
         List<StepOutcome> escaped = Enumerable.Range(0, GateStore.MaxStatusSteps)
-            .Select(i => StepOutcomes.FromConfigRet("step-" + i.ToString(CultureInfo.InvariantCulture), 0, new string('’', 1000) + "😀"))
+            .Select(i => StepOutcomes.FromConfigRet("step-" + i.ToString(CultureInfo.InvariantCulture), 0, new string('\u2019', 1000) + "\uD83D\uDE00"))
             .ToList();
 
         StepOutcome written = store.WriteStatus(Status(Nonce, escaped));
@@ -214,8 +214,8 @@ public sealed class GateStoreTests
     [TestMethod]
     public void SurrogatesAndControlCharactersNeverBreakTheJson()
     {
-        Assert.AreEqual("a b??c", GateStore.Bound("a\nb😀c"));
-        Assert.AreEqual("ab?", GateStore.Bound("ab😀", limit: 3));
+        Assert.AreEqual("a b??c", GateStore.Bound("a\nb\uD83D\uDE00c"));
+        Assert.AreEqual("ab?", GateStore.Bound("ab\uD83D\uDE00", limit: 3));
         Assert.AreEqual("?", GateStore.Bound("\uDE00"));
     }
 

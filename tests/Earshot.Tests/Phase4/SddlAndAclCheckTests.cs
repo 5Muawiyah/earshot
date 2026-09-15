@@ -54,7 +54,7 @@ public sealed class SddlAndAclCheckTests
     [DataRow("S-1-5-21-1-2-3-1001 ")]
     [DataRow("s-1-5-21-1-2-3-1001")]
     [DataRow("S-1-5-21-1-2--1001")]
-    [DataRow("S-1-5-21-١-2-3-1001")]
+    [DataRow("S-1-5-21-\u0661-2-3-1001")]
     public void RejectsAnythingElse(string? sid)
     {
         Assert.IsFalse(Sddl.IsUserSid(sid));
