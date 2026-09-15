@@ -176,6 +176,56 @@ public sealed class NodeMatchTests
         }
     }
 
+    // Each node is in the AirPods container and carries the AirPods address, so only the Bluetooth
+    // prefix guard stands between it and a disable.
+    [TestMethod]
+    [DataRow(@"SWD\X\5A6B7C8D9EAF")]
+    [DataRow(@"BTHHFENUM\X\5A6B7C8D9EAF")]
+    [DataRow(@"BTHHFENUM\BTHHFPAUDIO\5A6B7C8D9EAF")]
+    [DataRow(@"USB\VID_004C&PID_2027\5A6B7C8D9EAF")]
+    [DataRow(@"SWD\MMDEVAPI\BTHENUM\5A6B7C8D9EAF")]
+    [DataRow(@"XBTHENUM\DEV_5A6B7C8D9EAF")]
+    [DataRow(@"BTHENUMX\DEV_5A6B7C8D9EAF")]
+    [DataRow(@"BTHENUM_DEV_5A6B7C8D9EAF")]
+    [DataRow(@"5A6B7C8D9EAF\BTHENUM\X")]
+    public void ANonBluetoothPrefixIsRefusedEvenWithTheContainerAndAddress(string instanceId)
+    {
+        Assert.IsTrue(instanceId.Contains(AirPodsAddress, StringComparison.Ordinal));
+
+        Assert.IsFalse(NodeMatch.IsDisableTarget(instanceId, AirPodsContainer, AirPodsContainer, AirPodsAddress));
+    }
+
+    [TestMethod]
+    [DataRow(@"BTHENUM\DEV_5A6B7C8D9EAF\X")]
+    [DataRow(@"BTHLE\DEV_5A6B7C8D9EAF\X")]
+    [DataRow(@"BTHLEDEVICE\{00001800-0000-1000-8000-00805F9B34FB}_DEV_5A6B7C8D9EAF\X")]
+    [DataRow(@"BTH\X\5A6B7C8D9EAF")]
+    [DataRow(@"bthenum\dev_5A6b7C8d9Eaf\x")]
+    public void EachBluetoothPrefixPassesThePrefixGuard(string instanceId)
+    {
+        Assert.IsTrue(NodeMatch.IsDisableTarget(instanceId, AirPodsContainer, AirPodsContainer, AirPodsAddress));
+    }
+
+    // An empty or partial pinned address is contained in real ids, and a lower-case one matches them
+    // ignoring case. Each must select nothing rather than leave only the other two guards.
+    [TestMethod]
+    [DataRow("")]
+    [DataRow(" ")]
+    [DataRow("5A6b7C8d9Eaf")]
+    [DataRow("5A6B7C8d9EAF")]
+    [DataRow("300E431D048")]
+    [DataRow("00E431D048C")]
+    [DataRow("5A6B7C8D9EAF0")]
+    [DataRow("E431D048C")]
+    [DataRow("0")]
+    [DataRow("300E431D048G")]
+    [DataRow("5A6B:7C8D:9EAF")]
+    [DataRow(" 5A6B7C8D9EAF")]
+    public void AnEmptyOrMalformedAddressSelectsNothing(string address)
+    {
+        Assert.IsEmpty(Select(AllNodes(), AirPodsContainer, address));
+    }
+
     [TestMethod]
     public void IsValidTargetContainerRejectsEmptyAndPc()
     {

@@ -19,9 +19,12 @@ public static partial class NodeMatch
     // A disable target: in the pinned container AND a BTHENUM/BTH bus node AND carries the 12-hex address.
     // Excludes SWD\MMDEVAPI endpoints (go phantom when disconnected), BTHHFENUM children (protection
     // removes/re-adds them), the radio (PC container, no address), and the iPhone (different container).
+    // The pinned address must be well formed (12 upper-case hex characters): an empty or partial string
+    // is contained in every id and would reduce the three guards to two, so it selects nothing.
     public static bool IsDisableTarget(string instanceId, Guid nodeContainer,
                                        Guid pinnedContainer, string address12) =>
         IsValidTargetContainer(pinnedContainer) &&
+        BoundaryValidation.IsAddress12(address12) &&
         nodeContainer == pinnedContainer &&
         BluetoothPrefix().IsMatch(instanceId) &&
         instanceId.Contains(address12, StringComparison.OrdinalIgnoreCase);
