@@ -11,6 +11,9 @@ namespace Earshot.Tests.Integration.Coordinator;
 //
 // Everything the coordinator awaits is completed by the test thread, and every continuation is posted to the
 // manual synchronisation context, so Pump runs the whole flow in order with no waiting and no sleeping.
+//
+// Every Pump checks the at-rest invariant against the fakes (AssertAtRest), so a flow that leaves the nodes
+// enabled with nothing in hand fails where it happens, not only in the test that looks for it.
 internal sealed class CoordinatorHarness : IDisposable
 {
     private readonly SynchronizationContext? _previous;
@@ -59,6 +62,9 @@ internal sealed class CoordinatorHarness : IDisposable
 
     public BlockCoordinator Coordinator { get; }
 
+    // False for a test that builds a world Earshot has not been told about yet and checks the invariant itself.
+    public bool CheckInvariantOnPump { get; set; } = true;
+
     // Subscribes the coordinator and lets the first status read and start-up check run.
     public void Start()
     {
@@ -66,8 +72,42 @@ internal sealed class CoordinatorHarness : IDisposable
         Pump();
     }
 
-    // Runs everything posted to the UI thread, including what that work posts in turn.
-    public void Pump() => Ui.RunAll();
+    // Runs everything posted to the UI thread, including what that work posts in turn, then checks the invariant.
+    public void Pump()
+    {
+        Ui.RunAll();
+        Assert.IsEmpty(Block.UnchosenActiveBlocks, "A block was sent while render was ACTIVE; the test must choose Block.ActiveLink.");
+        if (CheckInvariantOnPump)
+        {
+            AssertAtRest("after a pump");
+        }
+    }
+
+    // The at-rest invariant as the fakes stand now: with Block at boot on, the nodes are blocked, or the AirPods
+    // are in use, or Earshot still has something in hand that ends in one of those (an operation in flight or an
+    // idle wait running). A state nothing has observed cannot be acted on, so a failing read, unknown nodes and a
+    // boot block that is not set up are allowed too.
+    public void AssertAtRest(string when = "at the end")
+    {
+        BootBlockStatus status = Block.Status;
+        if (!status.BlockAtBoot || status.State is BlockState.Blocked or BlockState.NotSetUp or BlockState.NotFound or BlockState.Unknown)
+        {
+            return;
+        }
+
+        DeviceSnapshot now = Monitor.Current;
+        if (CoordinatorRules.RenderOf(now, Devices.Container) == RenderState.Active ||
+            Coordinator.IsBusy ||
+            Coordinator.IdleWaitRunning ||
+            Block.StatusFailure is not null ||
+            now.ReadStatus != SnapshotReadStatus.Ok)
+        {
+            return;
+        }
+
+        Assert.Fail("The at-rest invariant does not hold " + when + ": the nodes are " + status.State +
+            " with Block at boot on, the AirPods are not in use, and Earshot has nothing in flight and no idle wait.");
+    }
 
     // Moves the clock, firing every timer due in that time, then runs what they posted.
     public void Advance(TimeSpan by)
@@ -105,7 +145,7 @@ internal sealed class CoordinatorHarness : IDisposable
     public void Dispose()
     {
         Coordinator.Dispose();
-        Pump();
+        Ui.RunAll();
         SynchronizationContext.SetSynchronizationContext(_previous);
     }
 }
@@ -331,8 +371,13 @@ internal static class Results
             [StepOutcomes.NotAttempted("ks-reconnect:src", "a2dp: adapter")]);
 }
 
+// The monitor numbers its enumerations, so each snapshot a test sets or publishes is renumbered as the newest one:
+// the numbers the tests and the other fakes pass only name the state. PublishLate raises a snapshot with the
+// number given and leaves Current alone, for an enumeration that finishes after a newer one.
 internal sealed class FakeMonitor : IDeviceMonitor
 {
+    private long _sequence;
+
     public DeviceSnapshot Current { get; private set; } = Devices.NotRead();
 
     public int Refreshes { get; private set; }
@@ -350,14 +395,20 @@ internal sealed class FakeMonitor : IDeviceMonitor
     }
 
     // The state a later read would show, with no notification.
-    public void Set(DeviceSnapshot snapshot) => Current = snapshot;
+    public void Set(DeviceSnapshot snapshot) => Current = Numbered(snapshot);
 
     // A change, as the monitor raises it on the UI thread.
     public void Publish(DeviceSnapshot snapshot)
     {
-        Current = snapshot;
-        SnapshotChanged?.Invoke(this, new DeviceSnapshotEventArgs(snapshot));
+        Current = Numbered(snapshot);
+        SnapshotChanged?.Invoke(this, new DeviceSnapshotEventArgs(Current));
     }
+
+    public void PublishLate(DeviceSnapshot snapshot) =>
+        SnapshotChanged?.Invoke(this, new DeviceSnapshotEventArgs(snapshot));
+
+    private DeviceSnapshot Numbered(DeviceSnapshot snapshot) =>
+        snapshot.Sequence == 0 ? snapshot : snapshot with { Sequence = ++_sequence };
 
     public void Dispose()
     {
@@ -407,12 +458,27 @@ internal sealed class FakeConnection : IConnectionController
     }
 }
 
+// What a block does to a link that is ACTIVE when it is sent. Whether disabling the nodes drops an active link
+// is not verified on the device (a live-test item), so a test that blocks while render is ACTIVE says which it
+// assumes rather than inheriting a default.
+internal enum ActiveLinkOnBlock
+{
+    NotChosen,
+    Drops,   // the nodes go and the endpoints with them: render NOTPRESENT
+    Stays,   // the disable is kept for the next start, but the link stays up until then: render still ACTIVE
+}
+
 internal sealed class FakeBlock : IBlockController
 {
     private readonly FakeMonitor _monitor;
     private long _sequence = 200;
 
     public FakeBlock(FakeMonitor monitor) => _monitor = monitor;
+
+    public ActiveLinkOnBlock ActiveLink { get; set; }
+
+    // Blocks sent while render was ACTIVE with ActiveLink not chosen; Pump fails the test on any.
+    public List<string> UnchosenActiveBlocks { get; } = new();
 
     public BootBlockStatus Status { get; set; } = Statuses.Allowed();
 
@@ -445,8 +511,18 @@ internal sealed class FakeBlock : IBlockController
             return block(ct);
         }
 
+        bool active = CoordinatorRules.RenderOf(_monitor.Current, Devices.Container) == RenderState.Active;
+        if (active && ActiveLink == ActiveLinkOnBlock.NotChosen)
+        {
+            UnchosenActiveBlocks.Add("block");
+        }
+
         Status = Status with { State = BlockState.Blocked };
-        _monitor.Publish(Devices.NotPresent(++_sequence));
+        if (!active || ActiveLink != ActiveLinkOnBlock.Stays)
+        {
+            _monitor.Publish(Devices.NotPresent(++_sequence));
+        }
+
         return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
     }
 
@@ -569,14 +645,35 @@ internal sealed class RecordingCards : ICardPresenter
 {
     public List<CardShown> Shown { get; } = new();
 
+    // Cards that were asked for but held back.
+    public List<CardShown> HeldBack { get; } = new();
+
     public int Hides { get; private set; }
+
+    // True while Windows is not taking notifications (a full-screen app, quiet time): a card nobody clicked for
+    // is held back, as the real presenter does.
+    public bool HoldBackNearTray { get; set; }
 
     public List<string> Statuses => Shown.Select(s => s.Content.Status).ToList();
 
-    public void Show(CardContent content, CardAnchor anchor) => Shown.Add(new CardShown(content, anchor, null));
+    public void Show(CardContent content, CardAnchor anchor) => Add(new CardShown(content, anchor, null));
 
-    public void Show(CardContent content, CardAnchor anchor, Point clickPoint) =>
-        Shown.Add(new CardShown(content, anchor, clickPoint));
+    public void Show(CardContent content, CardAnchor anchor, Point clickPoint) => Add(new CardShown(content, anchor, clickPoint));
+
+    public Task<bool> ShowAsync(CardContent content, CardAnchor anchor, Point? clickPoint) =>
+        Task.FromResult(Add(new CardShown(content, anchor, clickPoint)));
 
     public void Hide() => Hides++;
+
+    private bool Add(CardShown card)
+    {
+        if (HoldBackNearTray && card.Anchor == CardAnchor.NearTray)
+        {
+            HeldBack.Add(card);
+            return false;
+        }
+
+        Shown.Add(card);
+        return true;
+    }
 }

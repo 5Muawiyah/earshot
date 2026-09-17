@@ -236,6 +236,26 @@ public sealed class ConnectSequenceTests
     }
 
     [TestMethod]
+    public void NothingIsAllowedWhenTheGateStillPinsAnotherDevice()
+    {
+        using var h = new CoordinatorHarness();
+
+        // The gate blocks another device (a device change it did not take); allowing would enable that one.
+        var other = new Guid("0B8E5A51-7F0C-5F5E-9C6B-2D7C1E0F4A11");
+        h.Block.Status = Statuses.Blocked() with { TargetContainerId = other };
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        Assert.AreEqual(BlockCoordinator.OtherDeviceMessage, report.UserMessage);
+        Assert.IsEmpty(h.Block.Calls);
+        CollectionAssert.DoesNotContain(h.Cards.Statuses, BlockCoordinator.AllowingStatus);
+    }
+
+    [TestMethod]
     public void NothingIsAllowedBeforeTheBootBlockIsSetUp()
     {
         using var h = new CoordinatorHarness();

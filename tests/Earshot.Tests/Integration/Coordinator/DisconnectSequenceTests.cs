@@ -41,15 +41,50 @@ public sealed class DisconnectSequenceTests
     public void ADisconnectBlocksTheNodesEvenWhenNoFilterTookTheRequest()
     {
         using CoordinatorHarness h = Connected();
-        h.Connection.OnDisconnect = _ => Task.FromResult(new ConnectResult(
-            ConnectOutcome.NoFiltersResponded, ConnectMessages.CouldNotReachDriver,
-            [StepOutcomes.FromHResult("ks-disconnect:src", unchecked((int)0x80004005), "a2dp: adapter")]));
+        h.Connection.OnDisconnect = _ => Task.FromResult(NoFilterTookIt());
+
+        // Assumed here, not verified on the device: disabling the nodes drops the active link.
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
 
         ToggleReport report = h.Toggle(connect: false);
 
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
         Assert.AreEqual(OpStatus.Success, report.Status, "The block dropped the link, which the endpoints showed.");
         CollectionAssert.AreEqual(Disconnected, h.Cards.Statuses);
+        h.AssertAtRest();
+    }
+
+    [TestMethod]
+    public void ALinkThatStaysUpAfterTheBlockIsReportedAsNotDisconnected()
+    {
+        using CoordinatorHarness h = Connected();
+        h.Connection.OnDisconnect = _ => Task.FromResult(NoFilterTookIt());
+
+        // The other case: the disable is kept for the next start, but the link stays up now.
+        h.Block.ActiveLink = ActiveLinkOnBlock.Stays;
+
+        ToggleReport report = h.Toggle(connect: false);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+        Assert.AreEqual(OpStatus.Failed, report.Status, "Nothing showed the AirPods disconnected.");
+        Assert.AreEqual(BlockCoordinator.CouldNotReachDriverMessage, report.UserMessage);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State, "The block still holds for the next start.");
+        h.AssertAtRest();
+    }
+
+    [TestMethod]
+    public void ABlockThatThrowsAfterADisconnectIsReportedAsABlockFailure()
+    {
+        using CoordinatorHarness h = Connected();
+        h.Block.OnBlock = _ => throw new InvalidOperationException("The gate could not be started.");
+
+        ToggleReport report = h.Toggle(connect: false);
+
+        Assert.AreEqual(OpStatus.Partial, report.Status);
+        Assert.AreEqual(BlockCoordinator.CouldNotBlockMessage, report.UserMessage, "The block failed; the status read did not.");
+        Assert.IsTrue(report.Steps.Any(s => s.Step == "disconnect-block" && !s.Ok));
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "disconnect: the block failed"));
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning, "The idle rule takes over the nodes that are still enabled.");
     }
 
     [TestMethod]
@@ -135,6 +170,8 @@ public sealed class DisconnectSequenceTests
             return waiting.Task;
         };
 
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+
         using var cancel = new CancellationTokenSource();
         Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: false), cancel.Token);
         h.Pump();
@@ -146,5 +183,10 @@ public sealed class DisconnectSequenceTests
         Assert.IsTrue(toggle.IsCompleted);
         Assert.IsTrue(toggle.GetAwaiter().GetResult().Cancelled);
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The disconnect was cancelled, but the at-rest block still ran.");
+        h.AssertAtRest();
     }
+
+    private static ConnectResult NoFilterTookIt() => new(
+        ConnectOutcome.NoFiltersResponded, ConnectMessages.CouldNotReachDriver,
+        [StepOutcomes.FromHResult("ks-disconnect:src", unchecked((int)0x80004005), "a2dp: adapter")]);
 }

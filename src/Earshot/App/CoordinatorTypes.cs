@@ -29,6 +29,13 @@ internal readonly record struct CardPlace(CardAnchor Anchor, Point? ClickPoint)
             cards.Show(content, Anchor);
         }
     }
+
+    // Shows the card and completes with whether it was put on screen, for a card that is remembered once seen.
+    public Task<bool> ShowAsync(ICardPresenter cards, string title, string status)
+    {
+        ArgumentNullException.ThrowIfNull(cards);
+        return cards.ShowAsync(new CardContent(title, status), Anchor, ClickPoint);
+    }
 }
 
 // A connect or disconnect handed to the block coordinator: which container, the name for its cards and
@@ -52,6 +59,16 @@ internal sealed record ToggleReport(bool Connect, OpStatus Status, string UserMe
 //   StartedAtLogon  the tray was started by its Run value (--startup), so render ACTIVE at the first check is
 //                   evidence that the boot block did not hold
 internal sealed record CoordinatorOptions(bool SafeMode, bool StartedAtLogon);
+
+// Why a Block sequence runs, which decides what is checked again just before the block is sent.
+internal enum BlockReason
+{
+    Disconnect,       // the user's disconnect: blocks unless Block at boot is now off
+    ConnectCleanUp,   // a connect that did not reach ACTIVE undoes its allow, unless the AirPods are in use after all
+    Idle,             // the idle rule: needs good reads of the nodes and the endpoints
+    StartUp,          // the start-up check: the same
+    Closing,          // the block before Earshot closes: the same
+}
 
 // The render side of the device as one snapshot observed it.
 internal enum RenderState

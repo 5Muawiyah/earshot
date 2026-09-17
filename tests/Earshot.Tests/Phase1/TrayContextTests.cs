@@ -507,13 +507,14 @@ public sealed class TrayContextTests
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected));
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
             tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
 
             Application.Run(tray.Context);
 
             Assert.AreEqual(1, tray.Cards.Hides);
-            Assert.IsEmpty(tray.Cards.Shown, "Nothing was in flight, so no closing card.");
+            Assert.IsEmpty(tray.Cards.Shown, "Nothing was in flight and the nodes were blocked, so no closing card.");
+            Assert.IsEmpty(tray.Block.Calls);
             Assert.AreEqual(0, tray.Startup.Writes);
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Exit chosen from the tray menu."));
 
@@ -559,9 +560,115 @@ public sealed class TrayContextTests
             Assert.IsTrue(sawCancellation, "Exit did not cancel the connect.");
             Assert.IsTrue(finished, "The message loop ended before the cancelled connect finished.");
             Assert.AreEqual(1, tray.Cards.Hides);
-            CollectionAssert.Contains(tray.Cards.Statuses, TrayContext.ClosingMessage);
+            CardShown closing = tray.Cards.Shown.Single(c => c.Content.Status == TrayContext.ClosingMessage);
+            Assert.AreEqual(CardAnchor.NearCursor, closing.Anchor, "The closing card follows the Exit click.");
+            Assert.AreEqual(TrayHarness.ClickPoint, closing.ClickPoint);
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Waiting for 1 action(s) (toggle)"));
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "connect (cancelled because Earshot is closing)"));
+        });
+    }
+
+    [TestMethod]
+    public void ExitBlocksEnabledNodesThatAreNotInUseBeforeClosing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Devices.Idle(1), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+
+            // The start-up check has blocked once already; this fake leaves the nodes enabled, as a block that
+            // did not take would, so Exit is what must block them.
+            int before = tray.Block.Calls.Count(c => c == "block");
+
+            // A block that takes a moment, as the gate does, so the card for it is up while it runs.
+            tray.Block.OnBlock = async _ =>
+            {
+                await Task.Delay(20, CancellationToken.None);
+                return ControllerResult.Ok("Blocked at boot");
+            };
+            tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
+            Application.Run(tray.Context);
+
+            Assert.AreEqual(before + 1, tray.Block.Calls.Count(c => c == "block"), "Exit left the nodes enabled.");
+            CardShown card = tray.Cards.Shown.Single(c => c.Content.Status == TrayContext.BlockingBeforeClosingMessage);
+            Assert.AreEqual(CardAnchor.NearCursor, card.Anchor);
+            Assert.AreEqual(TrayHarness.ClickPoint, card.ClickPoint);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Blocking before Earshot closes"));
+        });
+    }
+
+    [TestMethod]
+    public void ExitWhileTheAirPodsAreInUseSaysSoAtTheClick()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Devices.Active(1), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
+
+            Application.Run(tray.Context);
+
+            Assert.IsEmpty(tray.Block.Calls, "The AirPods were in use, so nothing was blocked.");
+            CardShown card = tray.Cards.Shown.Single(c => c.Content.Status == BlockCoordinator.ClosedWhileInUseMessage);
+            Assert.AreEqual(CardAnchor.NearCursor, card.Anchor);
+            Assert.AreEqual(TrayHarness.ClickPoint, card.ClickPoint);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "Closing while the AirPods are in use"));
+        });
+    }
+
+    [TestMethod]
+    public void ADeviceTheGateRefusesIsNotPinnedByTheTray()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            tray.Block.OnSetDevice = _ => Task.FromResult(ControllerResult.Fail(RefusedDeviceMessage, [StepOutcomes.FromWin32("set-device", 1168)]));
+            var choice = new PickerChoice("iPhone", "iPhone", IPhoneAddress, IPhoneContainer);
+
+            RunToEnd(tray, tray.Context.ApplyDeviceChoiceAsync(choice, CardPlace.AtClick(TrayHarness.ClickPoint)));
+
+            CollectionAssert.AreEqual(new[] { "set-device:" + IPhoneAddress }, tray.Block.Calls);
+            Assert.AreEqual(AirPodsContainer, tray.Settings.Current.PinnedContainerId, "The tray pinned a device the gate refused.");
+            Assert.AreEqual(AirPodsAddress, tray.Settings.Current.PinnedAddress);
+            Assert.AreEqual(RefusedDeviceMessage, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "Device not changed to iPhone"));
+        });
+    }
+
+    [TestMethod]
+    public void ADeviceTheGateTakesIsPinnedByTheTrayAfterIt()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            Guid pinnedWhenTheGateWasAsked = Guid.Empty;
+            tray.Block.OnSetDevice = _ =>
+            {
+                pinnedWhenTheGateWasAsked = tray.Settings.Current.PinnedContainerId;
+                return Task.FromResult(ControllerResult.Ok("Device chosen"));
+            };
+            var other = new Guid("0B8E5A51-7F0C-5F5E-9C6B-2D7C1E0F4A11");
+            var choice = new PickerChoice("AirPods", "Other AirPods", "A1B2C3D4E5F6", other);
+
+            RunToEnd(tray, tray.Context.ApplyDeviceChoiceAsync(choice, CardPlace.AtClick(TrayHarness.ClickPoint)));
+
+            Assert.AreEqual(AirPodsContainer, pinnedWhenTheGateWasAsked, "The tray moved its pin before the gate took the device.");
+            Assert.AreEqual(other, tray.Settings.Current.PinnedContainerId);
+            Assert.AreEqual("A1B2C3D4E5F6", tray.Settings.Current.PinnedAddress);
+        });
+    }
+
+    [TestMethod]
+    public void BeforeSetUpADeviceIsPinnedWithoutTheGate()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.NotSetUp));
+            var other = new Guid("0B8E5A51-7F0C-5F5E-9C6B-2D7C1E0F4A11");
+            var choice = new PickerChoice("AirPods", "Other AirPods", "A1B2C3D4E5F6", other);
+
+            RunToEnd(tray, tray.Context.ApplyDeviceChoiceAsync(choice, CardPlace.AtClick(TrayHarness.ClickPoint)));
+
+            Assert.IsEmpty(tray.Block.Calls);
+            Assert.AreEqual(other, tray.Settings.Current.PinnedContainerId);
         });
     }
 
@@ -588,6 +695,27 @@ public sealed class TrayContextTests
             Assert.AreEqual(1, tray.Cards.Hides);
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "still in flight"));
         });
+    }
+
+    private const string RefusedDeviceMessage = "That device cannot be blocked at boot.";
+
+    // Pumps the tray until task is done, then rethrows anything it threw.
+    private static void RunToEnd(TrayHarness tray, Task task)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!task.IsCompleted)
+        {
+            if (watch.Elapsed > TimeSpan.FromSeconds(10))
+            {
+                throw new AssertFailedException("The task did not finish within 10 seconds.");
+            }
+
+            Application.DoEvents();
+            Thread.Sleep(1);
+        }
+
+        tray.PumpUntilIdle();
+        task.GetAwaiter().GetResult();
     }
 }
 
@@ -650,6 +778,7 @@ internal sealed class TrayHarness : IDisposable
         var options = new TrayStartOptions(firstRun, settingsStatus ?? Settings.LastLoadStatus, ExePath, Startup)
         {
             ShowIcon = false,
+            ExitNoticeTime = TimeSpan.FromMilliseconds(10),
             CursorPosition = () => ClickPoint,
             StartedAtLogon = startedAtLogon,
             DataRootRedirected = dataRootRedirected,
@@ -804,14 +933,36 @@ internal sealed class FakeBlockController : IBlockController
     public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default) =>
         StatusFailure is null ? Task.FromResult(Status) : Task.FromException<BootBlockStatus>(StatusFailure);
 
-    public Task<ControllerResult> BlockAsync(CancellationToken ct = default) => Record("block");
+    public Func<CancellationToken, Task<ControllerResult>>? OnBlock { get; set; }
+
+    public Task<ControllerResult> BlockAsync(CancellationToken ct = default)
+    {
+        if (OnBlock is null)
+        {
+            return Record("block");
+        }
+
+        Calls.Add("block");
+        return OnBlock(ct);
+    }
 
     public Task<ControllerResult> AllowAsync(CancellationToken ct = default) => Record("allow");
 
     public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default) =>
         Record(blockAtBoot ? "setboot-on" : "setboot-off");
 
-    public Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default) => Record("set-device:" + address12);
+    public Func<CancellationToken, Task<ControllerResult>>? OnSetDevice { get; set; }
+
+    public Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default)
+    {
+        if (OnSetDevice is null)
+        {
+            return Record("set-device:" + address12);
+        }
+
+        Calls.Add("set-device:" + address12);
+        return OnSetDevice(ct);
+    }
 
     public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default) => Record("setup");
 

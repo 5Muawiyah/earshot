@@ -16,6 +16,7 @@ public sealed class ProtectionSequenceTests
     private static readonly bool[] OnOffOn = [true, false, true];
     private static readonly bool[] OffThenOn = [false, true];
     private static readonly bool[] OnOnly = [true];
+    private static readonly bool[] OffOnly = [false];
     private static readonly string[] BlockOnly = ["block"];
     private static readonly string[] ConnectingTryingConnected = ["Connecting", BlockCoordinator.TryingAnotherWayMessage, "Connected"];
 
@@ -279,6 +280,84 @@ public sealed class ProtectionSequenceTests
         CollectionAssert.DoesNotContain(h.Cards.Statuses, BlockCoordinator.TryingAnotherWayMessage);
     }
 
+    [TestMethod]
+    public void NothingIsTriedAnotherWayWhenTheDeviceCannotBeRead()
+    {
+        using CoordinatorHarness h = HandsFreeCase();
+
+        // The endpoints cannot be enumerated, so nothing shows render is not ACTIVE.
+        h.Publish(Devices.Unreadable(40));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        Assert.IsEmpty(h.Protection.Applies, "Protection was turned off without a good read of the device.");
+        CollectionAssert.DoesNotContain(h.Cards.Statuses, BlockCoordinator.TryingAnotherWayMessage);
+    }
+
+    [TestMethod]
+    public void TheHandsFreeAssistedWayKeepsARestoreTheUserAskedFor()
+    {
+        using CoordinatorHarness h = HandsFreeCase();
+
+        // The user turned protection off while the AirPods were blocked, and the gate kept the restore.
+        h.Settings.Update(s => s.ProtectAudioQuality = false);
+        h.Protection.Pending = false;
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Success, report.Status);
+        CollectionAssert.AreEqual(OffOnly, h.Protection.Applies, "Protection was put back on against the saved setting.");
+        Assert.AreEqual(AudioProtectionState.NotProtected, h.Protection.State);
+        Assert.IsFalse(h.Settings.Current.ProtectAudioQuality);
+        Assert.IsNull(h.Coordinator.PendingProtect);
+    }
+
+    [TestMethod]
+    public void TheHandsFreeAssistedWayLeavesProtectionOffAfterAFailureWhenTheSettingIsOff()
+    {
+        using CoordinatorHarness h = HandsFreeCase();
+        h.Settings.Update(s => s.ProtectAudioQuality = false);
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.A2dpRejected()));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        CollectionAssert.AreEqual(OffOnly, h.Protection.Applies);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The nodes are blocked again all the same.");
+        h.AssertAtRest();
+    }
+
+    [TestMethod]
+    public void AMicrophoneNoticeHeldBackByWindowsFollowsTheNextClick()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Protection.State = AudioProtectionState.NotProtected;
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+
+        // A full-screen app or quiet time: the start-up check applies protection, but its notice is held back.
+        h.Cards.HoldBackNearTray = true;
+        h.Start();
+
+        CollectionAssert.AreEqual(OnOnly, h.Protection.Applies);
+        Assert.AreEqual(1, h.Cards.HeldBack.Count(c => c.Content.Status == TrayStatus.MicrophoneNotice));
+        Assert.IsFalse(h.Settings.Current.ProtectAudioNoticeShown, "A notice nobody saw was remembered as shown.");
+
+        h.Cards.HoldBackNearTray = false;
+        var click = new System.Drawing.Point(1830, 1040);
+        h.Toggle(connect: true, click: click);
+
+        CardShown notice = h.Cards.Shown.Single(c => c.Content.Status == TrayStatus.MicrophoneNotice);
+        Assert.AreEqual(CardAnchor.NearCursor, notice.Anchor);
+        Assert.AreEqual(click, notice.ClickPoint);
+        Assert.IsTrue(h.Settings.Current.ProtectAudioNoticeShown);
+
+        h.Toggle(connect: false);
+        h.Toggle(connect: true, click: click);
+        Assert.AreEqual(1, h.Cards.Shown.Count(c => c.Content.Status == TrayStatus.MicrophoneNotice), "The notice was shown again.");
+    }
+
     // Protection is on, so the Hands-Free filter is gone, and the A2DP filter turns the request down.
     private static CoordinatorHarness HandsFreeCase()
     {
@@ -289,9 +368,9 @@ public sealed class ProtectionSequenceTests
         h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
         h.Start();
 
-        // The start-up check blocks idle nodes; the device is connected again from there.
+        // The start-up check blocks idle nodes; the nodes come back (as after an allow), which the monitor reports.
         h.Block.Status = Statuses.Allowed();
-        h.Monitor.Set(Devices.Idle(10, capture: false));
+        h.Publish(Devices.Idle(10, capture: false));
         h.Cards.Shown.Clear();
         h.Block.Calls.Clear();
         h.Trace.Clear();

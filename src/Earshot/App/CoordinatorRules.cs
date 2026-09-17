@@ -80,13 +80,14 @@ internal static class CoordinatorRules
     public static bool NodesEnabled(BootBlockStatus? status) =>
         status?.State is BlockState.Allowed or BlockState.Mixed;
 
-    // Why a connect that found every render endpoint NOTPRESENT cannot allow first, or null when it can. Allow
-    // first is decided from the node state, not from NOTPRESENT alone: an adapter that is off or removed also
-    // reads NOTPRESENT.
-    public static string? AllowFirstRefusal(BootBlockStatus? status) => status?.State switch
+    // Why a connect of container that found every render endpoint NOTPRESENT cannot allow first, or null when it
+    // can. Allow first is decided from the node state, not from NOTPRESENT alone: an adapter that is off or
+    // removed also reads NOTPRESENT. The nodes the gate would allow must be this device's: when the gate still
+    // pins another one (a device change it did not take), allowing would enable the wrong device.
+    public static string? AllowFirstRefusal(BootBlockStatus? status, Guid container) => status?.State switch
     {
         null => BlockCoordinator.BlockStatusUnreadableMessage,
-        BlockState.Blocked or BlockState.Mixed => null,
+        BlockState.Blocked or BlockState.Mixed => status.TargetContainerId == container ? null : BlockCoordinator.OtherDeviceMessage,
         BlockState.NotSetUp => ConnectMessages.BootBlockNotSetUp,
         BlockState.NotFound => ConnectMessages.NotFound,
         _ => BlockCoordinator.NotAvailableMessage,

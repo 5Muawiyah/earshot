@@ -168,6 +168,7 @@ public sealed class StartUpAndSessionTests
         h.Monitor.Set(Devices.Active(1));
         h.Start();
 
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
         h.Coordinator.OnSessionEnding(Query());
         h.Pump();
         h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));

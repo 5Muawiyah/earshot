@@ -19,6 +19,9 @@ internal sealed record TrayStartOptions(
     // How long Exit waits for actions already in flight before it ends the message loop.
     public TimeSpan ExitWaitLimit { get; init; } = TrayContext.DefaultExitWaitLimit;
 
+    // How long Exit keeps the loop running after a card it shows as Earshot closes, so the card can be read.
+    public TimeSpan ExitNoticeTime { get; init; } = TrayContext.DefaultExitNoticeTime;
+
     // False only in tests, so they add no icon to the user's notification area.
     public bool ShowIcon { get; init; } = true;
 
@@ -53,7 +56,9 @@ internal sealed record TrayStartOptions(
 //
 // Exit: no new input, cancel what is in flight, then wait for it and for the coordinator (at most
 // ExitWaitLimit) before the message loop ends, so a cancelled connect can finish putting the device nodes
-// back to blocked.
+// back to blocked and the coordinator can block enabled nodes that are not in use. What the user should
+// know as Earshot closes (it closed while the AirPods were in use, or that block did not take) is shown at
+// the Exit click and kept up for ExitNoticeTime.
 internal sealed class TrayContext : ApplicationContext
 {
     public const string SomethingWentWrongMessage = "Something went wrong. See the log.";
@@ -64,6 +69,7 @@ internal sealed class TrayContext : ApplicationContext
     public const string SettingsNewerMessage = "Settings are from a newer Earshot. Changes will not be saved.";
     public const string BusyMessage = "Another change is still running. Try again shortly.";
     public const string ClosingMessage = "Closing once the current change finishes.";
+    public const string BlockingBeforeClosingMessage = "Blocking the AirPods before closing.";
     public const string BlockStatusUnreadableMessage = "Could not read the boot block status.";
     public const string GateNotRepinnedMessage = "Device saved. Boot block may still use the previous device.";
 
@@ -71,6 +77,10 @@ internal sealed class TrayContext : ApplicationContext
     // block the device nodes; short enough that a controller that never returns cannot keep Earshot
     // running. Whatever is still in flight when it runs out is logged by name.
     public static readonly TimeSpan DefaultExitWaitLimit = TimeSpan.FromSeconds(30);
+
+    // How long a card shown as Earshot closes stays readable before the process ends: about one card's own
+    // dismiss time. A UI timing choice, not a measurement.
+    public static readonly TimeSpan DefaultExitNoticeTime = TimeSpan.FromSeconds(4);
 
     private readonly ServiceRegistry _registry;
     private readonly BlockCoordinator _coordinator;
@@ -83,6 +93,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly BluetoothDeviceList _devices;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TimeSpan _exitWaitLimit;
+    private readonly TimeSpan _exitNoticeTime;
     private readonly Func<Point> _cursorPosition;
     private readonly bool _startedAtLogon;
 
@@ -109,6 +120,7 @@ internal sealed class TrayContext : ApplicationContext
         _coordinator = coordinator;
         _log = registry.Log;
         _exitWaitLimit = options.ExitWaitLimit;
+        _exitNoticeTime = options.ExitNoticeTime;
         _cursorPosition = options.CursorPosition;
         _startedAtLogon = options.StartedAtLogon;
         _snapshot = registry.Monitor.Current;
@@ -135,7 +147,12 @@ internal sealed class TrayContext : ApplicationContext
             _registry.UiPost(() => Launch("choose device", () => ChooseDeviceAsync(place), place));
         };
         _menu.SetUpClicked += (_, _) => Start("setup", RunSetupAsync);
-        _menu.ExitClicked += (_, _) => _ = ExitAsync();
+        // The click point is read now, for a card that follows the Exit click.
+        _menu.ExitClicked += (_, _) =>
+        {
+            CardPlace place = ClickPlace();
+            _ = ExitAsync(place);
+        };
 
         _notifyIcon = new NotifyIcon { ContextMenuStrip = _menu.Strip };
         _notifyIcon.MouseClick += OnIconMouseClick;
@@ -245,9 +262,11 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        // Exit has already begun the coordinator's shutdown, block before closing included. Any other way here
+        // (the loop ending, Dispose) only stops it: nothing would be left to run a block.
         _closing = true;
         _closed = true;
-        _coordinator.BeginShutdown();
+        _coordinator.Stop();
         _lifetime.Cancel();
         _registry.Cards.Hide();
         _notifyIcon.Visible = false;
@@ -605,7 +624,7 @@ internal sealed class TrayContext : ApplicationContext
         status is SettingsLoadStatus.Loaded or SettingsLoadStatus.CreatedDefaults or
                   SettingsLoadStatus.RestoredFromBackup or SettingsLoadStatus.NewerSchema;
 
-    private async Task ExitAsync()
+    private async Task ExitAsync(CardPlace place)
     {
         if (_closing)
         {
@@ -617,7 +636,7 @@ internal sealed class TrayContext : ApplicationContext
         try
         {
             // No more input: the icon goes, the picker closes, and everything in flight is cancelled. The
-            // coordinator blocks the nodes straight away from here on, so its clean-up fits in the wait.
+            // coordinator then blocks enabled nodes that are not in use, after any clean-up in flight.
             _notifyIcon.Visible = false;
             _picker?.Close();
             _coordinator.BeginShutdown();
@@ -626,7 +645,8 @@ internal sealed class TrayContext : ApplicationContext
             if (_pending.Count > 0 || _coordinator.IsBusy)
             {
                 _log.Info("Waiting for " + DescribePending() + " to finish before closing.");
-                _registry.Cards.Show(new CardContent(TrayStatus.AppName, ClosingMessage), CardAnchor.NearTray);
+                bool onlyTheBlock = _pending.Count == 0 && !_coordinator.IsBusyBeyondClosingBlock;
+                place.Show(_registry.Cards, TrayStatus.AppName, onlyTheBlock ? BlockingBeforeClosingMessage : ClosingMessage);
 
                 Task all = Task.WhenAll(_pending.Keys.Append(_coordinator.WhenIdleAsync()));
                 using var limit = new CancellationTokenSource();
@@ -641,6 +661,13 @@ internal sealed class TrayContext : ApplicationContext
                     _log.Warn("Closing after " + _exitWaitLimit.TotalSeconds.ToString(CultureInfo.InvariantCulture) +
                         " s with " + DescribePending() + " still in flight.");
                 }
+            }
+
+            if (_coordinator.ClosingNotice is { } notice)
+            {
+                _log.Info("Exit: " + notice);
+                place.Show(_registry.Cards, TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), notice);
+                await Task.Delay(_exitNoticeTime);
             }
         }
         catch (Exception ex)
@@ -706,6 +733,50 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        if (!_closing)
+        {
+            await ApplyDeviceChoiceAsync(choice, place);
+        }
+    }
+
+    // Pins a chosen device. Once the boot block is set up, the SYSTEM gate keeps its own copy of the device and
+    // may refuse one (a device with no A2DP sink node, or services still turned off on the old device), so the
+    // gate is asked first and the tray pins the device only once the gate has taken it: a refusal never leaves
+    // the tray and the gate on different devices. Before setup there is no gate copy, and setup passes the
+    // pinned device from settings. Internal so tests can drive it without the picker window.
+    internal async Task ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place)
+    {
+        ArgumentNullException.ThrowIfNull(choice);
+        BootBlockStatus? status;
+        try
+        {
+            status = await _coordinator.ReadBlockStatusAsync(_lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (_closing)
+        {
+            return;
+        }
+
+        bool gateRepinned = false;
+        if (status is not null && !TrayStatus.NeedsSetUp(status))
+        {
+            ControllerResult? result = await RunOperationAsync(GateVerbs.SetDevice, ct => _coordinator.ChangeDeviceAsync(choice.Address, ct), place);
+            if (result is not { IsSuccess: true })
+            {
+                // The refusal or failure is already logged and on a card; the tray keeps the device it had.
+                _log.Warn("Device not changed to " + choice.Name + " (" + choice.Address + "): the boot block did not take it" +
+                    (result is null ? "." : " (" + result.Status + ")."));
+                return;
+            }
+
+            gateRepinned = true;
+        }
+
         if (_closing || !TryUpdateSettings(
                 "device",
                 s =>
@@ -716,6 +787,11 @@ internal sealed class TrayContext : ApplicationContext
                 },
                 place))
         {
+            if (gateRepinned)
+            {
+                _log.Warn("The boot block now uses " + choice.Address + ", but the tray could not save it, so a connect that needs an allow is refused until the device is chosen again.");
+            }
+
             return;
         }
 
@@ -723,28 +799,15 @@ internal sealed class TrayContext : ApplicationContext
         _log.Info("Device chosen: " + choice.Name + " (" + choice.Address + ", container " + choice.ContainerId + "), match \"" + choice.Match + "\".");
         _ = RefreshSnapshotAsync();
 
-        // The SYSTEM gate keeps its own copy of the device identity, so it is re-pinned too when it is set
-        // up. Before setup there is no copy: setup passes the pinned device from settings.
-        BootBlockStatus? status = await _coordinator.ReadBlockStatusAsync(_lifetime.Token);
-        if (_closing)
-        {
-            return;
-        }
-
         if (status is null)
         {
             _log.Warn("The boot block status could not be read, so the gate was not re-pinned to " + choice.Address + ".");
             ShowCard(choice.Name, GateNotRepinnedMessage, place);
-            return;
         }
-
-        if (TrayStatus.NeedsSetUp(status))
+        else if (!gateRepinned)
         {
             _log.Info("Boot block is not set up, so there is no gate copy of the device to update.");
-            return;
         }
-
-        await RunOperationAsync(GateVerbs.SetDevice, ct => _coordinator.ChangeDeviceAsync(choice.Address, ct), place);
     }
 
     private async Task LoadDevicesAsync(DevicePickerForm form)
@@ -843,16 +906,17 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    // Runs one menu action. Its token is cancelled only when Earshot closes: a click or another action
-    // never cancels it.
-    private async Task RunOperationAsync(
+    // Runs one menu action and returns its result, or null when it did not run, was cancelled or threw (each
+    // logged, and shown unless Earshot is closing). Its token is cancelled only when Earshot closes: a click or
+    // another action never cancels it.
+    private async Task<ControllerResult?> RunOperationAsync(
         string action,
         Func<CancellationToken, Task<ControllerResult>> operation,
         CardPlace place)
     {
         if (_closing)
         {
-            return;
+            return null;
         }
 
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -864,14 +928,17 @@ internal sealed class TrayContext : ApplicationContext
 
             // While closing, Report logs the result and shows no card.
             Report(action, result, place);
+            return result;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             _log.Info(action + ": cancelled because Earshot is closing.");
+            return null;
         }
         catch (Exception ex)
         {
             ReportUnexpected(action, ex, place);
+            return null;
         }
         finally
         {
