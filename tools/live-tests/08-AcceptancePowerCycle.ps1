@@ -210,6 +210,51 @@ try
             -Outcome $(if (($connected -eq 'yes' -and $statesAfterClick.Render -eq 'Active') -or ($connected -eq 'no' -and $statesAfterClick.Render -ne 'Active')) { 'pass' } else { 'fail' }) `
             -Detail ('You said connected: ' + $connected + '; the render endpoint reads ' + $statesAfterClick.Render + '.')
 
+        Write-Section -Run $run -Title 'Left click again, to disconnect'
+        Write-Line -Run $run -Text 'The click is a toggle, so the other half of it has to be asked as well: a second click hands the'
+        Write-Line -Run $run -Text 'AirPods back. Earshot disconnects and then blocks the nodes straight away, without waiting for the'
+        Write-Line -Run $run -Text 'idle rule, so the nodes should read Blocked again within a few seconds and still no prompt.'
+        if ($statesAfterClick.Render -eq 'Active')
+        {
+            Wait-Owner -Run $run -Text 'Left-click the tray icon once more, and watch the AirPods go back to the phone.'
+            $disconnected = Read-Answer -Run $run -Question 'Did the AirPods disconnect from this PC after that single click?'
+            $promptedOff = Read-Answer -Run $run -Question 'Did any administrator prompt appear during that second click?'
+            $offCardText = Read-Note -Run $run -Question 'What did the card say that time, word for word?'
+
+            Add-Criterion -Run $run -Id 'left-click-disconnects' -Criterion 'A second left click disconnects the AirPods.' `
+                -Outcome $(if ($disconnected -eq 'yes') { 'pass' } elseif ($disconnected -eq 'no') { 'fail' } else { 'inconclusive' }) `
+                -Detail ('You answered ' + $disconnected + '. The card said: ' + $offCardText)
+            Add-Criterion -Run $run -Id 'no-admin-prompt-disconnect' -Criterion 'No administrator prompt appears for a disconnect either.' `
+                -Outcome $(if ($promptedOff -eq 'no') { 'pass' } elseif ($promptedOff -eq 'yes') { 'fail' } else { 'inconclusive' }) `
+                -Detail ('You answered ' + $promptedOff + '.')
+
+            Wait-Seconds -Run $run -Seconds 15 -Reason 'letting the disconnect and the block that follows it finish'
+            $audioAfterOff = Get-AudioState -Run $run -Label 'audio-after-second-click'
+            $statesAfterOff = Get-TargetEndpointStates -AudioJson $audioAfterOff
+            $nodesAfterOff = Get-NodeState -Run $run -Label 'nodes-after-second-click'
+            $stateAfterOff = Get-Field -Object $nodesAfterOff -Name 'nodeState'
+            Write-Line -Run $run -Text ('Render ' + $statesAfterOff.Render + ', nodes ' + $stateAfterOff)
+
+            Add-Criterion -Run $run -Id 'disconnect-agrees-with-endpoints' -Criterion 'What the second click claimed matches what the endpoints say.' `
+                -Outcome $(if (($disconnected -eq 'yes' -and $statesAfterOff.Render -ne 'Active') -or ($disconnected -eq 'no' -and $statesAfterOff.Render -eq 'Active')) { 'pass' } else { 'fail' }) `
+                -Detail ('You said disconnected: ' + $disconnected + '; the render endpoint reads ' + $statesAfterOff.Render + '.')
+            Add-Criterion -Run $run -Id 'blocked-again-after-click' -Criterion 'The nodes go back to Blocked after the disconnect, without waiting for the idle rule.' `
+                -Outcome $(if ($stateAfterOff -eq 'Blocked') { 'pass' } else { 'fail' }) `
+                -Detail ('The nodes read ' + [string]$stateAfterOff + ' about 15 s after the click.')
+
+            $backOnPhone = Read-Answer -Run $run -Question 'Are the AirPods playing from the phone again now?'
+            Add-Finding -Run $run -Name 'secondClickReturnsThemToThePhone' -Value $backOnPhone
+        }
+        else
+        {
+            foreach ($id in @('left-click-disconnects', 'no-admin-prompt-disconnect', 'disconnect-agrees-with-endpoints', 'blocked-again-after-click'))
+            {
+                Add-Criterion -Run $run -Id $id -Criterion 'A second left click disconnects the AirPods, with no prompt, and blocks the nodes again.' `
+                    -Outcome 'inconclusive' `
+                    -Detail ('The first click did not connect them (the render endpoint reads ' + $statesAfterClick.Render + '), so there was nothing to disconnect.')
+            }
+        }
+
         Write-Section -Run $run -Title 'The tray icon and the card, on the real taskbar'
         Write-Line -Run $run -Text 'The glyph is drawn at run time so it scales, and the card must never take focus. Neither can be'
         Write-Line -Run $run -Text 'checked without looking at the screen. The probe renders the four states to files first, so the'
