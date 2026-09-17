@@ -42,4 +42,8 @@ internal static class ConnectMessages
 
     // A request was accepted but no state change came in time (disconnect).
     public const string DidNotDisconnect = "The AirPods did not disconnect in time. Try again.";
+
+    // The audio worker did not get to this request within the pass budget (an earlier driver call had not
+    // returned, or the endpoint read did not finish), so nothing was sent.
+    public const string DriverBusy = "The audio driver is busy. Try again.";
 }

@@ -33,8 +33,10 @@ internal sealed record ConnectReport(
     DateTimeOffset? RequestedUtc,
     DateTimeOffset FinishedUtc);
 
-// A connect or disconnect cancelled after at least one request went to a filter. Steps holds every step up to
-// then, the per-filter ks-reconnect or ks-disconnect steps included (KsConnectPath.RoleOfStep reads their role).
+// A connect or disconnect cancelled once the walk to the filters had begun, so a request may have gone out.
+// Steps holds every step up to then: the per-filter ks-reconnect or ks-disconnect steps (KsConnectPath.RoleOfStep
+// reads their role), accepted, refused or not sent because of the cancel, or only the ks-pass step when the
+// driver call had not returned. A plain OperationCanceledException means nothing was sent.
 internal sealed class ConnectCancelledException : OperationCanceledException
 {
     public ConnectCancelledException()
@@ -55,7 +57,7 @@ internal sealed class ConnectCancelledException : OperationCanceledException
     }
 
     public ConnectCancelledException(IReadOnlyList<StepOutcome> steps, Exception? inner, CancellationToken token)
-        : base("The connect or disconnect was cancelled after a request was sent.", inner, token)
+        : base("The connect or disconnect was cancelled after the walk to the filters began.", inner, token)
     {
         ArgumentNullException.ThrowIfNull(steps);
         Steps = steps.ToArray();
@@ -96,16 +98,19 @@ internal sealed class ConnectCancelledException : OperationCanceledException
 // Connected and Disconnected are only ever reported from an observed endpoint state, never from an HRESULT.
 //
 // Cancellation. A token cancelled before the work item starts, or while it reads the endpoints, stops the
-// operation before anything is sent; cancelled between two filters, it stops the walk before the next one. Once
-// a request is sent it is not recalled: cancellation then ends only the wait, the requests already sent are
-// logged, and ConnectCancelledException (an OperationCanceledException) is thrown carrying every step, so the
-// caller can see what was sent before it decides what to undo.
+// operation before anything is sent, and a plain OperationCanceledException is thrown. Cancelled between two
+// filters, it stops the walk before the next one. Once the walk has begun, a request sent is not recalled: the
+// steps are logged and ConnectCancelledException (an OperationCanceledException) is thrown carrying every step,
+// whether a filter accepted, refused or was sent nothing, so the caller sees what went out before it decides
+// what to undo, and never mistakes a cancelled walk for "no filter responded".
 //
 // A stalled driver. KsProperty is a synchronous call on the single audio worker and Microsoft documents no
-// latency for it, so the pass is awaited with a budget (PassBudget): if the work item has not returned by then
-// the operation reports AttemptedTimedOut rather than leaving the click in flight with no message. The item
-// itself is not torn down (the call is inside a driver) and the worker stays busy until it returns; the owner's
-// live tests time the real call.
+// latency for it, so the pass is awaited with a budget (PassBudget). The work item runs on a token the budget
+// cancels too, so once the budget has run out it sends nothing to a later filter, and an item still queued
+// behind an earlier stalled call never starts. If the item had not begun, nothing was sent: Failed, the driver
+// is busy. If it had begun and not returned: AttemptedTimedOut, or ConnectCancelledException with the ks-pass
+// step when the caller's token was cancelled too. The item itself is not torn down (the call is inside a driver)
+// and the worker stays busy until it returns; the owner's live tests time the real call.
 internal sealed class ConnectionController : IConnectionController
 {
     internal const string GuardStep = "connect-target";
@@ -159,29 +164,67 @@ internal sealed class ConnectionController : IConnectionController
                 new[] { refused }, null, null, null, started, null);
         }
 
-        Task<WorkerPass> passing = _worker.RunAsync(token => PassOnWorker(action, container, token), ct);
-        WorkerPass pass;
+        WorkerPass? pass = null;
+        ConnectReport? stopped = null;
+        var progress = new PassProgress();
         using (var budget = new CancellationTokenSource(Timeout.InfiniteTimeSpan, _time))
+        using (var passCancel = CancellationTokenSource.CreateLinkedTokenSource(ct, budget.Token))
         {
+            Task<WorkerPass> passing = _worker.RunAsync(
+                token => progress.TryStart() ? PassOnWorker(action, container, token) : throw new OperationCanceledException(token),
+                passCancel.Token);
             budget.CancelAfter(PassBudget);
             try
             {
-                // The caller's token is on the work item itself; this only bounds how long the caller is held.
+                // Only the budget ends this wait: an item that has begun is awaited after a cancel, so its steps come back.
                 pass = await passing.WaitAsync(budget.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (budget.IsCancellationRequested && !ct.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (budget.IsCancellationRequested || ct.IsCancellationRequested)
             {
-                // The work item is still inside the driver; it is left to finish, and every later item queues
-                // behind it. Nothing here can say whether the request went out.
-                StepOutcome stalled = StepOutcomes.NotAttempted(StalledStep,
-                    "The audio driver did not answer within " + PassBudget.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + " s.");
-                return Finish(action, container, ConnectDecision.Send, ConnectOutcome.AttemptedTimedOut,
-                    action == ConnectAction.Connect ? ConnectMessages.StillConnecting : ConnectMessages.DidNotDisconnect,
-                    new[] { stalled }, null, null, null, started, null);
+                // From here the pass is given up. The item's token is cancelled before anything is decided, and an
+                // item that has not begun by then never does, so "began" cannot change after it is read.
+                await passCancel.CancelAsync().ConfigureAwait(false);
+                bool began = progress.Abandon();
+                string seconds = PassBudget.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
+                if (passing.IsCompletedSuccessfully)
+                {
+                    pass = await passing.ConfigureAwait(false);
+                }
+                else if (!began || passing.IsCanceled)
+                {
+                    // Nothing was sent: the item never ran, or it stopped at the token check before the walk.
+                    ct.ThrowIfCancellationRequested();
+                    StepOutcome busy = StepOutcomes.NotAttempted(StalledStep, began
+                        ? "The audio devices were not read within " + seconds + " s, so no request was sent."
+                        : "The audio worker was still busy with an earlier request after " + seconds + " s, so no request was sent.");
+                    stopped = Finish(action, container, ConnectDecision.ReadFailed, ConnectOutcome.Failed, ConnectMessages.DriverBusy,
+                        new[] { busy }, null, null, null, started, null);
+                }
+                else
+                {
+                    // The item is still inside the driver; it is left to finish, and every later item queues behind
+                    // it. Nothing here can say whether the request went out.
+                    StepOutcome stalled = StepOutcomes.NotAttempted(StalledStep,
+                        "The audio driver did not answer within " + seconds + " s, so whether the request went out is not known.");
+                    if (ct.IsCancellationRequested)
+                    {
+                        _log.Info(name + ": cancelled while the driver call was still running. " + Describe(new[] { stalled }));
+                        throw new ConnectCancelledException(new[] { stalled }, ex, ct);
+                    }
+
+                    stopped = Finish(action, container, ConnectDecision.Send, ConnectOutcome.AttemptedTimedOut,
+                        action == ConnectAction.Connect ? ConnectMessages.StillConnecting : ConnectMessages.DidNotDisconnect,
+                        new[] { stalled }, null, null, null, started, null);
+                }
             }
         }
 
-        EndpointRead read = pass.Read;
+        if (stopped is not null)
+        {
+            return stopped;
+        }
+
+        EndpointRead read = pass!.Read;
 
         switch (pass.Decision)
         {
@@ -215,6 +258,14 @@ internal sealed class ConnectionController : IConnectionController
             // Logged and surfaced, never rethrown: the caller needs the per-filter steps (which filter was sent
             // what, and what it answered) to tell "the A2DP filter refused" from "nothing responded".
             _log.Error(name + ": the walk to the filters stopped with an exception. Steps: " + Describe(steps), fault);
+        }
+
+        if (ct.IsCancellationRequested)
+        {
+            // A newer intent cancelled this one during the walk. A filter refusing before the cancel is not "no filter
+            // responded": the filters after it were sent nothing only because of the cancel.
+            _log.Info(name + ": cancelled during the walk to the filters. Requests already sent stay sent: " + Describe(steps));
+            throw new ConnectCancelledException(steps, null, ct);
         }
 
         if (!send.AnyAccepted)
@@ -413,4 +464,38 @@ internal sealed class ConnectionController : IConnectionController
 
     // Plain data only: this leaves the audio worker.
     private sealed record WorkerPass(EndpointRead Read, ConnectDecision Decision, KsSendResult? Send, DateTimeOffset StartedUtc, long Sequence);
+
+    // Whether the work item began, decided under one lock with the caller giving up on it, so an item the caller
+    // has already reported on never starts afterwards.
+    private sealed class PassProgress
+    {
+        private readonly Lock _gate = new();
+        private bool _started;
+        private bool _abandoned;
+
+        // Worker side: false when the caller has given up, and the item must not run.
+        public bool TryStart()
+        {
+            lock (_gate)
+            {
+                if (_abandoned)
+                {
+                    return false;
+                }
+
+                _started = true;
+                return true;
+            }
+        }
+
+        // Caller side: gives up on the item; true when it had already begun.
+        public bool Abandon()
+        {
+            lock (_gate)
+            {
+                _abandoned = true;
+                return _started;
+            }
+        }
+    }
 }

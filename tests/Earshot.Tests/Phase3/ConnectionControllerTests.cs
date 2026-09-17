@@ -241,12 +241,17 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
     public async Task ADriverThatDoesNotAnswerEndsTheOperationWithAMessage()
     {
         using var stuck = new ManualResetEventSlim();
+        using var inDriver = new ManualResetEventSlim();
         Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
         Filters(SOk, SOk);
-        _path.DuringSend = () => stuck.Wait(TimeSpan.FromSeconds(30));
+        _path.DuringSend = () =>
+        {
+            inDriver.Set();
+            stuck.Wait(TimeSpan.FromSeconds(30));
+        };
 
         Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer);
-        await Eventually.True(() => _time.ArmedTimers == 1, "the budget for the driver call to arm");
+        await Eventually.True(() => inDriver.IsSet && _time.ArmedTimers == 1, "the driver call to start and its budget to arm");
         _time.Advance(ConnectionController.PassBudget);
         ConnectResult result = await connecting.WaitAsync(Guard);
 
@@ -258,6 +263,63 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
 
         stuck.Set();
         await _worker.RunAsync(_ => 0).WaitAsync(Guard);
+    }
+
+    // Once the budget has run out and the result is reported, a driver call that finally returns does not lead to
+    // a request to the next filter.
+    [TestMethod]
+    public async Task ADriverThatAnswersAfterTheBudgetIsSentNothingMore()
+    {
+        using var stuck = new ManualResetEventSlim();
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(SOk, SOk);
+        using var inDriver = new ManualResetEventSlim();
+        _path.AfterFilter = index =>
+        {
+            if (index == 0)
+            {
+                inDriver.Set();
+                stuck.Wait(TimeSpan.FromSeconds(30));
+            }
+        };
+
+        Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer);
+        await Eventually.True(() => inDriver.IsSet && _time.ArmedTimers == 1, "the driver call to start and its budget to arm");
+        _time.Advance(ConnectionController.PassBudget);
+        ConnectResult result = await connecting.WaitAsync(Guard);
+        stuck.Set();
+        await _worker.RunAsync(_ => 0).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.AttemptedTimedOut, result.Outcome);
+        KsSendResult late = _path.LastSend!;
+        Assert.AreEqual(0, late.Steps.Single(s => s.Step == "ks-reconnect:src").Code, "The call that was in the driver stays sent.");
+        Assert.AreEqual(NativeCodes.NotAttempted, late.Steps.Single(s => s.Step == "ks-reconnect:wave").Code, "The Hands-Free filter is sent nothing.");
+        Assert.AreEqual(0, _monitor.RefreshCalls, "Nothing is waited for after the result was reported.");
+    }
+
+    // A request still queued behind an earlier call that never returned is never sent, and the message does not
+    // claim an attempt.
+    [TestMethod]
+    public async Task ARequestTheWorkerNeverStartedIsNotSentAfterTheBudget()
+    {
+        using var stuck = new ManualResetEventSlim();
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(SOk, SOk);
+        Task earlier = _worker.RunAsync(token => stuck.Wait(TimeSpan.FromSeconds(30), token));
+
+        Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer);
+        await Eventually.True(() => _time.ArmedTimers == 1, "the budget for the driver call to arm");
+        _time.Advance(ConnectionController.PassBudget);
+        ConnectResult result = await connecting.WaitAsync(Guard);
+        stuck.Set();
+        await earlier.WaitAsync(Guard);
+        await _worker.RunAsync(_ => 0).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.DriverBusy, result.UserMessage);
+        StringAssert.Contains(result.Steps.Single(s => s.Step == ConnectionController.StalledStep).Detail, "no request was sent");
+        Assert.IsEmpty(_path.ReadThreads, "The queued pass never ran.");
+        Assert.IsEmpty(_path.Sends);
     }
 
     [TestMethod]
@@ -606,6 +668,67 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
             "The Hands-Free filter was sent nothing, and the log says why.");
         Assert.IsTrue(_log.Entries.Any(e => e.Message.Contains("ks-reconnect:src S_OK", StringComparison.Ordinal)),
             "The request already sent stays sent.");
+    }
+
+    // The A2DP filter refused, then a newer click cancelled: that is a cancel with the refusal on record, not "no
+    // filter responded", which the block coordinator would take as a reason to try the Hands-Free way.
+    [TestMethod]
+    public async Task CancellingAfterTheA2dpFilterRefusedThrowsWithTheRefusalOnRecord()
+    {
+        using var cts = new CancellationTokenSource();
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(EFail, SOk);
+        _path.AfterFilter = index =>
+        {
+            if (index == 0)
+            {
+                cts.Cancel();
+            }
+        };
+
+        ConnectCancelledException cancelled = await Assert.ThrowsExactlyAsync<ConnectCancelledException>(
+            () => _controller.ConnectAsync(AirPodsContainer, cts.Token).WaitAsync(Guard));
+
+        Assert.AreEqual(cts.Token, cancelled.CancellationToken);
+        StepOutcome refused = cancelled.Steps.Single(s => s.Step == "ks-reconnect:src");
+        Assert.AreEqual(EFail, refused.Code);
+        Assert.AreEqual(FilterRole.A2dp, KsConnectPath.RoleOfStep(refused));
+        Assert.AreEqual(NativeCodes.NotAttempted, cancelled.Steps.Single(s => s.Step == "ks-reconnect:wave").Code);
+        Assert.AreEqual(0, _monitor.RefreshCalls);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "cancelled during the walk to the filters"));
+    }
+
+    // Cancelled while the driver call has not returned and the budget runs out too: a request may have gone out,
+    // so the caller gets the steps rather than a bare cancel.
+    [TestMethod]
+    public async Task CancellingWhileTheDriverCallHasNotReturnedThrowsWithThePassStep()
+    {
+        using var cts = new CancellationTokenSource();
+        using var stuck = new ManualResetEventSlim();
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(SOk, SOk);
+        using var inDriver = new ManualResetEventSlim();
+        _path.AfterFilter = index =>
+        {
+            if (index == 0)
+            {
+                inDriver.Set();
+                stuck.Wait(TimeSpan.FromSeconds(30));
+            }
+        };
+
+        Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer, cts.Token);
+        await Eventually.True(() => inDriver.IsSet && _time.ArmedTimers == 1, "the driver call to start and its budget to arm");
+        await cts.CancelAsync();
+        _time.Advance(ConnectionController.PassBudget);
+
+        ConnectCancelledException cancelled = await Assert.ThrowsExactlyAsync<ConnectCancelledException>(() => connecting.WaitAsync(Guard));
+        stuck.Set();
+        await _worker.RunAsync(_ => 0).WaitAsync(Guard);
+
+        Assert.AreEqual(cts.Token, cancelled.CancellationToken);
+        Assert.AreEqual(ConnectionController.StalledStep, cancelled.Steps.Single().Step);
+        Assert.AreEqual(NativeCodes.NotAttempted, _path.LastSend!.Steps.Single(s => s.Step == "ks-reconnect:wave").Code);
     }
 
     [TestMethod]

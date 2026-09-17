@@ -344,7 +344,21 @@ internal sealed class FakeConnectPath : IKsConnectPath
         }
 
         DuringSend?.Invoke();
-        return new KsSendResult(Filters.Select(f => new AdapterPath(f.AdapterId, new[] { f.From })).ToList(), sends, steps, Fault);
+        var result = new KsSendResult(Filters.Select(f => new AdapterPath(f.AdapterId, new[] { f.From })).ToList(), sends, steps, Fault);
+        lock (_gate)
+        {
+            _lastSend = result;
+        }
+
+        return result;
+    }
+
+    private KsSendResult? _lastSend;
+
+    // The result of the latest Send, including one the controller stopped waiting for.
+    public KsSendResult? LastSend
+    {
+        get { lock (_gate) { return _lastSend; } }
     }
 }
 
