@@ -109,6 +109,9 @@ internal sealed class FakeTaskRegistrar : ITaskRegistrar
     // Thrown by every call, for the paths that must not end a run without a record.
     public Exception? Throw { get; set; }
 
+    // Runs at the start of ListTasks: a test looks at what uninstall has done before it removes the tasks.
+    public Action? OnList { get; set; }
+
     public bool FolderExists => FolderSddl is not null;
 
     public int ReadFolderSddl(string folderPath, out string? sddl)
@@ -122,6 +125,7 @@ internal sealed class FakeTaskRegistrar : ITaskRegistrar
     public int ListTasks(string folderPath, out IReadOnlyList<string> names)
     {
         Calls.Add("list " + folderPath);
+        OnList?.Invoke();
         Fail();
         names = Tasks.Keys.Select(k => k[(TaskPlan.FolderPath.Length + 1)..]).ToList();
         return FolderExists ? 0 : NotFound;

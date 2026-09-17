@@ -75,15 +75,32 @@ public sealed class GateSerialisationTests
     {
         public List<string> Events { get; } = new();
 
+        // Runs as the lock is left.
+        public Action? OnExit { get; set; }
+
         public IDisposable? TryEnter(TimeSpan timeout, IList<StepOutcome> steps)
         {
             Events.Add("enter " + timeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            return new Exit(Events);
+            return new Exit(this);
         }
 
-        private sealed class Exit(List<string> events) : IDisposable
+        private sealed class Exit(RecordingRunLock owner) : IDisposable
         {
-            public void Dispose() => events.Add("exit");
+            public void Dispose()
+            {
+                owner.OnExit?.Invoke();
+                owner.Events.Add("exit");
+            }
+        }
+    }
+
+    // Says a run has started waiting for the lock it wraps.
+    private sealed class SignallingRunLock(IGateRunLock inner, ManualResetEventSlim entering) : IGateRunLock
+    {
+        public IDisposable? TryEnter(TimeSpan timeout, IList<StepOutcome> steps)
+        {
+            entering.Set();
+            return inner.TryEnter(timeout, steps);
         }
     }
 
@@ -240,6 +257,98 @@ public sealed class GateSerialisationTests
         CollectionAssert.AreEqual(new[] { TimeSpan.FromSeconds(1) }, busy.Waits);
         Assert.IsGreaterThan(System.Xml.XmlConvert.ToTimeSpan(TaskPlan.ProtectTimeLimit), UninstallActions.LockWait, "Uninstall outwaits a whole protect run.");
         Assert.IsFalse(result.Steps.Any(s => s.Step == DeviceChangeLock.StepName), "The device change lock is not tried without the run lock.");
+    }
+
+    // A gate run that was already waiting for the run lock while uninstall restored the nodes gets in only after
+    // uninstall has removed the records and the folder, so it cannot disable the nodes again. The two runs share
+    // one real mutex under a private test name, on two threads, as two processes would.
+    [TestMethod]
+    [DataRow(GateVerbs.Block)]
+    [DataRow(GateVerbs.Boot)]
+    public void AGateRunQueuedBehindUninstallChangesNothing(string verb)
+    {
+        using var h = new Harness();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        string name = NewName();
+        var layout = new InstallLayout(Path.Combine(h.Root, "unzip"), Path.Combine(h.Root, "ProgramFiles", "Earshot"), h.Machine);
+        var tasks = new FakeTaskRegistrar();
+        var gateLog = new CapturingLog();
+        using var waiting = new ManualResetEventSlim();
+        GateExitCode? queuedExit = null;
+        Thread? queued = null;
+        bool queuedBeforeRelease = false;
+        tasks.OnList = () =>
+        {
+            // Uninstall holds the run lock here: the nodes are allowed, the tasks and the folder are not yet removed.
+            queued = new Thread(() => queuedExit =
+                new GateActions(h.Nodes, h.Store, new FakeFolderSecurity(), gateLog, new ManualTime(), new SignallingRunLock(TestMutex(name), waiting))
+                    .Run(new GateRequest(verb, Nonce, null)));
+            queued.Start();
+            queuedBeforeRelease = waiting.Wait(TimeSpan.FromSeconds(10));
+        };
+
+        InstallResult result = new UninstallActions(layout, new FakeFolderSecurity(), h.Nodes, tasks, new RebootDeleteRecorder(), h.Log,
+            TestMutex(name), DeviceChangeLock.SleepAndContinue, TimeSpan.FromSeconds(5)).Run();
+
+        Assert.IsNotNull(queued);
+        Assert.IsTrue(queued.Join(TimeSpan.FromSeconds(30)), "The queued gate run finished.");
+        Assert.IsTrue(queuedBeforeRelease, "The gate run started waiting while uninstall held the lock.");
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, string.Join(Environment.NewLine, result.Steps.Where(s => !s.Ok).Select(GateActions.Describe)));
+        Assert.AreEqual(GateExitCode.FolderNotSecure, queuedExit, "The folder is gone by the time the gate run gets in.");
+        Assert.IsEmpty(h.Nodes.Calls.Where(c => c.Kind == "disable"), "No node is disabled again after uninstall allowed it.");
+        Assert.IsTrue(RecordedNodes.AirPodsTargets.All(id => !h.Nodes[id].IsDisabled));
+    }
+
+    [TestMethod]
+    public void UninstallRetiresTheRecordsBeforeItLetsGoOfTheDeviceChangeLockAndHoldsTheRunLockUntilTheFolderIsGone()
+    {
+        using var h = new Harness();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord()).Ok);
+        Assert.IsTrue(new ProtectionIntentFile(h.Machine).Write(true).Ok);
+        var layout = new InstallLayout(Path.Combine(h.Root, "unzip"), Path.Combine(h.Root, "ProgramFiles", "Earshot"), h.Machine);
+        var tasks = new FakeTaskRegistrar();
+        string?[]? leftWhenTheTasksGo = null;
+        tasks.OnList = () => leftWhenTheTasksGo = Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray();
+        bool? folderWhenTheRunLockGoes = null;
+        var running = new RecordingRunLock { OnExit = () => folderWhenTheRunLockGoes = Directory.Exists(h.Machine) };
+
+        InstallResult result = new UninstallActions(layout, new FakeFolderSecurity(), h.Nodes, tasks, new RebootDeleteRecorder(), h.Log,
+            running, StopAtOnce, TimeSpan.FromSeconds(1)).Run();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, string.Join(Environment.NewLine, result.Steps.Where(s => !s.Ok).Select(GateActions.Describe)));
+        CollectionAssert.AreEqual(new[] { DeviceChangeLock.FileName }, leftWhenTheTasksGo,
+            "Once the nodes are allowed nothing a gate run acts on is left, and only the released lock file remains.");
+        Assert.IsFalse(folderWhenTheRunLockGoes, "The run lock is held until the machine folder is removed.");
+        Assert.HasCount(2, running.Events);
+        CollectionAssert.AreEquivalent(
+            new[] { "device.json", "config.json", "protection.json", ProtectionIntentFile.FileName },
+            result.Steps.Where(s => s.Step.StartsWith(UninstallActions.RetireStepPrefix, StringComparison.Ordinal) && s.Ok)
+                .Select(s => s.Step[UninstallActions.RetireStepPrefix.Length..]).ToArray());
+    }
+
+    [TestMethod]
+    public void UninstallKeepsTheFolderWhenTheRunLockCannotBeEnteredEvenWithoutADeviceFile()
+    {
+        using var h = new Harness();
+        File.Delete(h.Store.DeviceFile);
+        var layout = new InstallLayout(Path.Combine(h.Root, "unzip"), Path.Combine(h.Root, "ProgramFiles", "Earshot"), h.Machine);
+
+        InstallResult result = new UninstallActions(layout, new FakeFolderSecurity(), h.Nodes, new FakeTaskRegistrar(), new RebootDeleteRecorder(), h.Log,
+            new BusyRunLock(), StopAtOnce, TimeSpan.FromSeconds(1)).Run();
+
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome);
+        Assert.IsTrue(Directory.Exists(h.Machine), "Another elevated run may still be using it.");
+        StringAssert.Contains(result.Steps.Last(s => s.Step == "remove-machine-folder").Detail, "held the gate run lock");
+        Assert.IsTrue(result.Steps.Any(MachineGateMutex.IsBusy));
     }
 
     [TestMethod]

@@ -6,7 +6,8 @@ using Earshot.Contracts;
 namespace Earshot.Boot.Gate;
 
 // One elevated Earshot run at a time on the machine: a gate run from \Earshot\Gate, \Earshot\Protect or
-// \Earshot\BootBlock, and the node allow and protection restore of uninstall. The scheduler's Queue policy
+// \Earshot\BootBlock, and uninstall from before it reads device.json until the machine folder is removed, so a
+// gate run queued behind uninstall finds nothing left to act on. The scheduler's Queue policy
 // only orders runs of the same task, so without this a boot block, a protect verb and an allow could run in
 // three processes at once. The device change lock (DeviceChangeLock) still guards each node or service change
 // on its own; this lock also keeps the status files, config.json and device.json writes apart.
