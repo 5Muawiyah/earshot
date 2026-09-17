@@ -26,8 +26,10 @@ namespace Earshot.App;
 // allow lands, and a block sent while a protect verb still runs would disable the nodes under a Bluetooth service
 // change, which the order below forbids. A cancellation is acted on at the next step. A result that does not show
 // the run ended (the gate's wait ran out, or a state read failed while it was polled) may still run for
-// UnsettledGateWindow: no block is sent while a protect verb may still run, the pin does not move while any
-// change may still run, and the state is read again until the window has passed.
+// UnsettledGateWindow: no block is sent while a protect verb may still run, no block or allow is sent while a
+// set-device may still move the pin (the gate acts on whichever device it pins when the request runs), the pin
+// does not move while any change may still run, a Block at boot setting read as off is not taken as settled while
+// a change to it may still land, and the state is read again until the window has passed.
 //
 // Connect.
 //   1. ConnectAsync. Confirmed: the AirPods are in use, the nodes stay enabled, protection is checked again.
@@ -54,12 +56,14 @@ namespace Earshot.App;
 // Start-up. Once the first good snapshot and the first node read are in: nodes enabled and not in use, block at
 // once; in use, log the evidence and leave them enabled for the idle rule. Then check protection.
 // Session end. On WM_QUERYENDSESSION, with Block at boot on and the nodes not known to be blocked, start a block
-// and return at once, unless a protect verb this tray started may still be running. A windowless app can be
-// ended about five seconds in, so this is a backstop only.
+// and return at once, unless a protect verb or a set-device this tray started may still be running. A windowless
+// app can be ended about five seconds in, so this is a backstop only.
 // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession
 // Exit. The operation in flight is cancelled; a gate change it already sent is waited for, then its clean-up
 // runs, and a Block sequence starts no new protection step and blocks. Then, with Block at boot on, nodes enabled
-// and the AirPods not in use, the nodes are blocked before Earshot closes. Closing while they are in use, or
+// and the AirPods not in use, the nodes are blocked before Earshot closes. Whether to block is decided from a read
+// taken once the operation in flight has ended, since that operation (setup, or turning Block at boot on) may
+// change exactly what an earlier read showed. Closing while they are in use, or
 // while a change may still run, is logged and noted for a card; the BootBlock task is then what blocks them.
 //
 // Nothing is decided from a read that failed or has not run: an unknown snapshot or node state never leads to a
@@ -134,12 +138,21 @@ internal sealed class BlockCoordinator : IDisposable
     // time is a read that failed: the device state is not known. A waiting budget, not a measured figure.
     public static readonly TimeSpan RefreshBudget = TimeSpan.FromSeconds(5);
 
+    // How long a read of the boot block status, the Bluetooth services or the kept protection request is waited
+    // for. These reads call Task Scheduler COM, CfgMgr32 and the Bluetooth API on the thread pool, and nothing
+    // documents a limit for any of them, so without one a read that never returns would hold the operation in flight
+    // for good, a re-block included, and every later click and Exit behind it. A read that does not come back in
+    // time is a read that failed: the state is not known and is read again later. A waiting budget, not a measured
+    // figure.
+    public static readonly TimeSpan StatusReadBudget = TimeSpan.FromSeconds(30);
+
     // ProtectionPolicy runs each change at most once per sequence, so a sequence ends well within this many steps.
     internal const int MaxProtectionSteps = 16;
 
     private const string ClosingBlockName = "block before closing";
     private const string InUseReason = "the AirPods are in use";
     private const string ProtectMayRunReason = "an audio quality change this tray started may still be running";
+    private const string PinMayMoveReason = "a device change this tray sent may still move the pin to another device";
 
     private readonly IDeviceMonitor _monitor;
     private readonly IConnectionController _connection;
@@ -172,7 +185,13 @@ internal sealed class BlockCoordinator : IDisposable
     // Gate changes this tray sent whose end was not seen may still run until these times.
     private DateTimeOffset _allowSettlesAt = DateTimeOffset.MinValue;
     private DateTimeOffset _protectSettlesAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _pinSettlesAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _bootSettingSettlesAt = DateTimeOffset.MinValue;
     private int _protectVerbsRunning;
+
+    // The last refresh of the device state failed or did not come back in time, and no snapshot has arrived since,
+    // so the snapshot in hand may be out of date: the idle rule takes the device state as not known.
+    private bool _deviceReadFailed;
 
     // Allows this tray has sent and is still waiting for. A node read taken before one ends can still say Blocked.
     private int _allowsRunning;
@@ -286,6 +305,12 @@ internal sealed class BlockCoordinator : IDisposable
 
     // A protect verb this tray sent is running or may still run.
     internal bool ProtectMayRun => _protectVerbsRunning > 0 || _time.GetUtcNow() < _protectSettlesAt;
+
+    // A set-device this tray sent may still move the pin: its end was not seen.
+    internal bool PinMayMove => _time.GetUtcNow() < _pinSettlesAt;
+
+    // A Block at boot change this tray sent may still write config.json: its end was not seen.
+    internal bool BootSettingMayChange => _time.GetUtcNow() < _bootSettingSettlesAt;
 
     private EarshotSettings Settings => _settings.Current;
 
@@ -411,14 +436,18 @@ internal sealed class BlockCoordinator : IDisposable
         }
     }
 
-    // Reads the boot block status now and keeps it. Null when the read failed (logged with its code). Throws
-    // OperationCanceledException only when ct is cancelled.
+    // Reads the boot block status now, within StatusReadBudget, and keeps it. Null when the read failed or did not
+    // come back in time (logged either way). Throws OperationCanceledException only when ct is cancelled.
     public async Task<BootBlockStatus?> ReadBlockStatusAsync(CancellationToken ct = default)
     {
         long read = ++_blockReadsStarted;
+        using var budget = new CancellationTokenSource(StatusReadBudget, _time);
+        using var within = CancellationTokenSource.CreateLinkedTokenSource(ct, budget.Token);
         try
         {
-            BootBlockStatus status = await _block.GetStatusAsync(ct);
+            // As for a device refresh: the token takes a read that has not started, and WaitAsync ends the wait for
+            // one that has, whatever the controller does with the token.
+            BootBlockStatus status = await _block.GetStatusAsync(within.Token).WaitAsync(within.Token);
             if (read > _blockReadApplied)
             {
                 _blockReadApplied = read;
@@ -445,7 +474,15 @@ internal sealed class BlockCoordinator : IDisposable
                 RaiseChanged();
             }
 
-            LogReadFailure("block-status", "The boot block status could not be read.", ex);
+            if (ex is OperationCanceledException && budget.IsCancellationRequested)
+            {
+                LogReadTimeout("block-status", "The boot block status");
+            }
+            else
+            {
+                LogReadFailure("block-status", "The boot block status could not be read.", ex);
+            }
+
             return null;
         }
     }
@@ -542,13 +579,23 @@ internal sealed class BlockCoordinator : IDisposable
             {
                 // A gate change, so its result is waited for (see the class comment).
                 ControllerResult set = await _block.SetBlockAtBootAsync(blockAtBoot, CancellationToken.None);
+                if (CoordinatorRules.MayStillRun(set))
+                {
+                    // The queued run may still write config.json with no notification to say so, so a read that
+                    // shows the setting off is read again until it could have ended.
+                    _bootSettingSettlesAt = _time.GetUtcNow() + UnsettledGateWindow;
+                    _log.Warn((blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff) +
+                        ": the gate run did not end while it was waited for, so it may still change Block at boot until " + Utc(_bootSettingSettlesAt) + ".");
+                }
+
+                // Read at once, however the change ended, so the idle rule acts on the setting as it is now as soon as
+                // this operation ends, never on the read from before the change.
+                BootBlockStatus? status = await ReadBlockStatusAsync(CancellationToken.None);
                 if (!set.IsSuccess)
                 {
                     return set;
                 }
 
-                // Read at once either way, so the idle rule acts on the new setting as soon as this operation ends.
-                BootBlockStatus? status = await ReadBlockStatusAsync(CancellationToken.None);
                 if (blockAtBoot)
                 {
                     return set;
@@ -719,16 +766,29 @@ internal sealed class BlockCoordinator : IDisposable
             return ProtectMayRunReason + ", and a block now would disable the nodes under it";
         }
 
+        // The gate would block whichever device it pins when the block runs; the BootBlock task blocks the pinned one.
+        if (PinMayMove)
+        {
+            return PinMayMoveReason;
+        }
+
         return "";
     }
 
     // Why no block before closing is queued, from what is known now, or "" when one is. The block itself reads the
-    // state again once the operation in flight has finished.
+    // state again once the operation in flight has finished, so while one is in flight, or a Block at boot change
+    // may still land, it is always queued: setup and turning Block at boot on change exactly what the read before
+    // them showed.
     private string ClosingBlockBlocker()
     {
         if (_sessionBlockIssued)
         {
             return "a block was issued for the session end";
+        }
+
+        if (_current is not null || BootSettingMayChange)
+        {
+            return "";
         }
 
         BootBlockStatus? status = _blockStatus;
@@ -747,7 +807,7 @@ internal sealed class BlockCoordinator : IDisposable
             return "the boot block is not set up";
         }
 
-        if (_current is null && _blockStatusFresh && status.State == BlockState.Blocked && !AllowMayLand)
+        if (_blockStatusFresh && status.State == BlockState.Blocked && !AllowMayLand)
         {
             return "the nodes are already blocked";
         }
@@ -818,10 +878,11 @@ internal sealed class BlockCoordinator : IDisposable
     {
         string? why = AllowMayLand ? "an allow this tray sent may still enable the nodes of the device the gate pins now"
             : ProtectMayRun ? ProtectMayRunReason
+            : PinMayMove ? PinMayMoveReason
             : null;
         if (why is not null)
         {
-            _log.Warn("set-device: not sent, because " + why + " (until " + Utc(Max(_allowSettlesAt, _protectSettlesAt)) + ").");
+            _log.Warn("set-device: not sent, because " + why + " (until " + Utc(Max(Max(_allowSettlesAt, _protectSettlesAt), _pinSettlesAt)) + ").");
             return new ControllerResult(
                 OpStatus.NotAttempted,
                 ChangeStillRunningMessage,
@@ -849,6 +910,17 @@ internal sealed class BlockCoordinator : IDisposable
                     }
 
                     return pin with { Steps = steps };
+                }
+
+                if (CoordinatorRules.MayStillRun(pin))
+                {
+                    // The queued run may still move the pin, and every gate request after it acts on whichever device
+                    // it pins then: nothing is put back or blocked until it could have ended (UndoDeviceChangeAsync,
+                    // BlockSkipReasonAsync), and the state is read again until then.
+                    _pinSettlesAt = _time.GetUtcNow() + UnsettledGateWindow;
+                    _log.Warn("set-device: the gate run did not end while it was waited for, so it may still move the pin to " + address12 +
+                        " until " + Utc(_pinSettlesAt) + ".");
+                    return await FailDeviceChangeAsync(pin.Status, pin.UserMessage, steps, undo);
                 }
 
                 SetDeviceRefusal refusal = CoordinatorRules.SetDeviceRefusalOf(pin);
@@ -940,6 +1012,19 @@ internal sealed class BlockCoordinator : IDisposable
     {
         try
         {
+            if ((undo.AllowIssued || undo.ProtectOffIssued) && PinMayMove)
+            {
+                // The pin may no longer name the device this change allowed or turned the services on for, so a
+                // block or protect-on now could land on the device chosen instead. The idle rule reads the state again
+                // and blocks whatever device the gate pins once the run could have ended.
+                steps.Add(StepOutcomes.NotAttempted("set-device-clean-up", "Not put back, because " + PinMayMoveReason + "."));
+                _log.Warn("set-device clean-up: nothing is put back, because " + PinMayMoveReason + " until " + Utc(_pinSettlesAt) +
+                    ". The device pinned before is left " + (undo.AllowIssued ? "allowed" : "with its services on") + " until the idle rule reads the state again.");
+                undo.AllowIssued = false;
+                undo.ProtectOffIssued = false;
+                return;
+            }
+
             if (undo.AllowIssued && undo.BlockAtBoot)
             {
                 undo.AllowIssued = false;
@@ -995,6 +1080,14 @@ internal sealed class BlockCoordinator : IDisposable
 
             if (result.Outcome == ConnectOutcome.NodesBlocked)
             {
+                if (PinMayMove)
+                {
+                    // The allow would enable whichever device the gate pins when it runs, which may be another one.
+                    _log.Warn("connect: nothing is allowed, because " + PinMayMoveReason + " until " + Utc(_pinSettlesAt) + ".");
+                    steps.Add(StepOutcomes.NotAttempted("connect-allow", "Not sent, because " + PinMayMoveReason + "."));
+                    return Finish(request, OpStatus.Failed, ChangeStillRunningMessage, steps);
+                }
+
                 BootBlockStatus? status = await ReadBlockStatusAsync(ct);
                 string? refusal = CoordinatorRules.AllowFirstRefusal(status, request.Container);
                 if (refusal is not null)
@@ -1007,7 +1100,7 @@ internal sealed class BlockCoordinator : IDisposable
                 // The allow cannot be taken back once sent, so a cancellation that came while the status was read
                 // ends the connect before it.
                 ct.ThrowIfCancellationRequested();
-                cleanup.BlockAtBoot = status!.BlockAtBoot;
+                cleanup.BlockAtBoot = status!.BlockAtBootKnown ? status.BlockAtBoot : null;
                 ShowCard(request, AllowingStatus);
                 cleanup.AllowIssued = true;
                 ControllerResult allow = await SendAllowAsync("allow (connect)", steps);
@@ -1202,13 +1295,24 @@ internal sealed class BlockCoordinator : IDisposable
 
             // Every gate change this connect sent has ended or has been given up on, so this read is not taken
             // before an allow that is still on its way; one whose end was not seen is read again later.
+            //
+            // Only a setting read as off leaves this connect's own allow in place. One that could not be read now
+            // (config.json unreadable, or the whole read failed) falls back to the setting read before the allow, and
+            // when that was not known either, the allow is still put back: the nodes were blocked before the click.
             BootBlockStatus? status = await ReadBlockStatusAsync(CancellationToken.None);
-            bool blockAtBoot = status?.BlockAtBoot ?? cleanup.BlockAtBoot ?? false;
+            bool? blockAtBootNow = status is { BlockAtBootKnown: true } ? status.BlockAtBoot : null;
+            bool blockAtBoot = blockAtBootNow ?? cleanup.BlockAtBoot ?? cleanup.AllowIssued;
             if (!blockAtBoot)
             {
-                bool known = status?.BlockAtBootKnown ?? cleanup.BlockAtBoot is not null;
+                bool known = blockAtBootNow is not null || cleanup.BlockAtBoot is not null;
                 _log.Info("connect clean-up: Block at boot is " + (known ? "off" : "not known") + ", so the nodes are not blocked.");
                 return ConnectCleanUpOutcome.NodesLeftEnabled;
+            }
+
+            if (blockAtBootNow is null)
+            {
+                _log.Warn("connect clean-up: Block at boot could not be read now, so the setting read before the allow is used (" +
+                    (cleanup.BlockAtBoot is { } before ? (before ? "on" : "off") : "not known either, and the allow is put back") + ").");
             }
 
             if (status?.State == BlockState.Blocked)
@@ -1619,7 +1723,8 @@ internal sealed class BlockCoordinator : IDisposable
     // start-up, closing) need good reads: Block at boot on, the nodes enabled, and render not ACTIVE. A connect
     // clean-up undoes its own allow unless Block at boot is now off or the AirPods are in use after all. A
     // disconnect blocks unless Block at boot is now off: the block is what drops a link the request did not. None
-    // is sent while a protect verb this tray started may still run.
+    // is sent while a protect verb this tray started may still run, or while a set-device it sent may still move the
+    // pin.
     //
     // An automatic block acts only on reads taken just before it is sent: the nodes and Block at boot are read
     // again, then the device, and nothing is awaited between the last read and the block. The reads the sequence
@@ -1633,7 +1738,10 @@ internal sealed class BlockCoordinator : IDisposable
             status = await ReadBlockStatusAsync(CancellationToken.None);
         }
 
-        if (status is { BlockAtBoot: false })
+        // Putting back this coordinator's own allow is held back only by a setting read as off: one that could not
+        // be read is no reason to leave the nodes it enabled (the clean-up has already decided from the reads it has).
+        bool undoesOwnAllow = check.Reason is BlockReason.ConnectCleanUp or BlockReason.DeviceChangeCleanUp;
+        if (status is { BlockAtBoot: false } && (status.BlockAtBootKnown || !undoesOwnAllow))
         {
             return status.BlockAtBootKnown ? "Block at boot is now off" : BlockAtBootOffReason(status);
         }
@@ -1641,6 +1749,12 @@ internal sealed class BlockCoordinator : IDisposable
         if (ProtectMayRun)
         {
             return ProtectMayRunReason;
+        }
+
+        // The gate acts on whichever device it pins when the block runs.
+        if (PinMayMove)
+        {
+            return PinMayMoveReason;
         }
 
         if (automatic && status is null)
@@ -1661,8 +1775,17 @@ internal sealed class BlockCoordinator : IDisposable
         // The device is read again when protection was changed first, which takes time and churns the endpoints,
         // and before every automatic block, which acts only on what a read shows now: a notification can be late,
         // and none comes at all when watching for changes failed.
-        DeviceSnapshot? now = refreshSnapshot || automatic ? await RefreshSnapshotAsync() : _snapshot;
-        RenderState render = now is null ? RenderState.Unknown : CoordinatorRules.RenderOf(now, check.Container);
+        RenderState render;
+        if (refreshSnapshot || automatic)
+        {
+            DeviceSnapshot? now = await RefreshSnapshotAsync();
+            render = now is null ? RenderState.Unknown : CoordinatorRules.RenderOf(now, check.Container);
+        }
+        else
+        {
+            render = SnapshotRender(check.Container);
+        }
+
         if (render == RenderState.Active)
         {
             return InUseReason;
@@ -1780,21 +1903,28 @@ internal sealed class BlockCoordinator : IDisposable
     private async Task<bool> ProtectionIsOnAsync(CancellationToken ct) =>
         (await ReadServicesAsync(ct))?.State == AudioProtectionState.Protected;
 
-    // True only when a good read shows render not ACTIVE for container: the latest snapshot when it is one,
-    // otherwise a fresh one.
+    // True only when a good read shows render not ACTIVE for container: the latest snapshot when it is one and no
+    // refresh has failed since, otherwise a fresh one.
     private async Task<bool> RenderNotActiveAsync(Guid container)
     {
-        DeviceSnapshot? now = _snapshot.ReadStatus == SnapshotReadStatus.Ok ? _snapshot : await RefreshSnapshotAsync();
+        DeviceSnapshot? now = _snapshot.ReadStatus == SnapshotReadStatus.Ok && !_deviceReadFailed ? _snapshot : await RefreshSnapshotAsync();
         return now is not null && CoordinatorRules.RenderOf(now, container) == RenderState.NotActive;
     }
 
-    // Reads the protection status now and keeps it. Null when the read failed (logged with its code).
+    // The render side of container in the snapshot in hand, or Unknown when a refresh has failed since it arrived.
+    private RenderState SnapshotRender(Guid container) =>
+        _deviceReadFailed ? RenderState.Unknown : CoordinatorRules.RenderOf(_snapshot, container);
+
+    // Reads the protection status now, within StatusReadBudget, and keeps it. Null when the read failed or did not
+    // come back in time (logged either way).
     private async Task<AudioProtectionSnapshot?> ReadServicesAsync(CancellationToken ct)
     {
         long read = ++_serviceReadsStarted;
+        using var budget = new CancellationTokenSource(StatusReadBudget, _time);
+        using var within = CancellationTokenSource.CreateLinkedTokenSource(ct, budget.Token);
         try
         {
-            AudioProtectionSnapshot services = await _protection.GetStatusAsync(ct);
+            AudioProtectionSnapshot services = await _protection.GetStatusAsync(within.Token).WaitAsync(within.Token);
             if (read > _serviceReadApplied)
             {
                 _serviceReadApplied = read;
@@ -1804,6 +1934,11 @@ internal sealed class BlockCoordinator : IDisposable
 
             return services;
         }
+        catch (OperationCanceledException) when (budget.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            LogReadTimeout("protection-status", "The audio protection status");
+            return null;
+        }
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             LogReadFailure("protection-status", "The audio protection status could not be read.", ex);
@@ -1811,11 +1946,20 @@ internal sealed class BlockCoordinator : IDisposable
         }
     }
 
+    // The kept protection request, within StatusReadBudget. Null when there is none, or the read failed or did not
+    // come back in time (logged either way).
     private async Task<bool?> ReadPendingProtectAsync(CancellationToken ct)
     {
+        using var budget = new CancellationTokenSource(StatusReadBudget, _time);
+        using var within = CancellationTokenSource.CreateLinkedTokenSource(ct, budget.Token);
         try
         {
-            return await _protection.GetPendingProtectAsync(ct);
+            return await _protection.GetPendingProtectAsync(within.Token).WaitAsync(within.Token);
+        }
+        catch (OperationCanceledException) when (budget.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            LogReadTimeout("protection-intent", "The kept protection request");
+            return null;
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
@@ -1839,12 +1983,14 @@ internal sealed class BlockCoordinator : IDisposable
         }
         catch (OperationCanceledException) when (budget.IsCancellationRequested)
         {
+            _deviceReadFailed = true;
             _log.Warn("The device state was not refreshed within " + Seconds(RefreshBudget) +
                 ", so it is not known. The audio worker may still be inside a driver call.");
             return null;
         }
         catch (Exception ex)
         {
+            _deviceReadFailed = true;
             LogReadFailure("device-refresh", "The device state could not be refreshed.", ex);
             return null;
         }
@@ -1928,7 +2074,8 @@ internal sealed class BlockCoordinator : IDisposable
         }
     }
 
-    // Keeps the newest snapshot. A snapshot from an older enumeration never replaces a newer one.
+    // Keeps the newest snapshot. A snapshot from an older enumeration never replaces a newer one, and a failed
+    // refresh is only put behind by a snapshot that is kept.
     private void Observe(DeviceSnapshot snapshot)
     {
         if (snapshot.Sequence != 0 && _snapshot.Sequence > snapshot.Sequence)
@@ -1937,6 +2084,7 @@ internal sealed class BlockCoordinator : IDisposable
         }
 
         _snapshot = snapshot;
+        _deviceReadFailed = false;
         if (CoordinatorRules.RenderOf(snapshot, WatchedContainer()) == RenderState.Active)
         {
             ReArmIdleRule("the AirPods are in use");
@@ -1970,6 +2118,11 @@ internal sealed class BlockCoordinator : IDisposable
             return (ProtectMayRunReason, IdleVerdict.Unsettled);
         }
 
+        if (PinMayMove)
+        {
+            return (PinMayMoveReason, IdleVerdict.Unsettled);
+        }
+
         if (!_blockStatusFresh || _blockStatus is null)
         {
             return ("the boot block status is not known", IdleVerdict.Unsettled);
@@ -1992,9 +2145,13 @@ internal sealed class BlockCoordinator : IDisposable
             return (BlockAtBootOffReason(_blockStatus), IdleVerdict.Unsettled);
         }
 
+        // A Block at boot change this tray sent whose end was not seen may still turn the setting on, with no
+        // notification to say so.
         if (!_blockStatus.BlockAtBoot)
         {
-            return (BlockAtBootOffReason(_blockStatus), IdleVerdict.Settled);
+            return BootSettingMayChange && _blockStatus.State != BlockState.Blocked
+                ? (BlockAtBootOffReason(_blockStatus) + ", but a change to it this tray sent may still land", IdleVerdict.Unsettled)
+                : (BlockAtBootOffReason(_blockStatus), IdleVerdict.Settled);
         }
 
         if (_blockStatus.State == BlockState.Blocked)
@@ -2007,8 +2164,10 @@ internal sealed class BlockCoordinator : IDisposable
             return ("the nodes read " + _blockStatus.State, IdleVerdict.Unsettled);
         }
 
-        // In use settles nothing while changes are not watched: no notification would say when that ends.
-        return CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) switch
+        // In use settles nothing while changes are not watched: no notification would say when that ends. After a
+        // refresh that failed or did not come back in time, the snapshot in hand may be out of date, so the state is
+        // read again later, less often each time, rather than an idle wait started on it again and again.
+        return SnapshotRender(WatchedContainer()) switch
         {
             RenderState.Unknown => ("the device state is not known", IdleVerdict.Unsettled),
             RenderState.Active when _monitor.WatchFailed => (InUseReason + " and changes are not watched", IdleVerdict.Unsettled),
@@ -2097,6 +2256,8 @@ internal sealed class BlockCoordinator : IDisposable
         DateTimeOffset now = _time.GetUtcNow();
         delay = EndsSooner(delay, _allowSettlesAt - now);
         delay = EndsSooner(delay, _protectSettlesAt - now);
+        delay = EndsSooner(delay, _pinSettlesAt - now);
+        delay = EndsSooner(delay, _bootSettingSettlesAt - now);
 
         _recheck = new CancellationTokenSource();
         _log.Write(_rechecksInARow == 0 ? LogLevel.Info : LogLevel.Debug,
@@ -2150,7 +2311,7 @@ internal sealed class BlockCoordinator : IDisposable
             }
 
             _rechecksInARow++;
-            if (_monitor.WatchFailed || CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) == RenderState.Unknown)
+            if (_monitor.WatchFailed || SnapshotRender(WatchedContainer()) == RenderState.Unknown)
             {
                 await RefreshSnapshotAsync();
             }
@@ -2425,6 +2586,12 @@ internal sealed class BlockCoordinator : IDisposable
                     ", and nothing blocks them again until Earshot runs again or the BootBlock task runs.");
                 ClosingNotice = ClosedBeforeChangeEndedMessage;
             }
+            else if (!status.BlockAtBoot && BootSettingMayChange && CoordinatorRules.NodesEnabled(status))
+            {
+                _log.Warn("Closing: Block at boot reads " + (status.BlockAtBootKnown ? "off" : "not known") + ", but the change to it this tray sent may still turn it on until " +
+                    Utc(_bootSettingSettlesAt) + ", and the nodes read " + status.State + ". Nothing blocks them again until Earshot runs again or the BootBlock task runs.");
+                ClosingNotice = ClosedBeforeChangeEndedMessage;
+            }
 
             _log.Info("Closing: nothing to block (" + Describe(status) + ").");
             return false;
@@ -2451,7 +2618,7 @@ internal sealed class BlockCoordinator : IDisposable
         ProtectionRun run = await RunBlockSequenceAsync(BlockReason.Closing, container, CardPlace.NearTray, ct);
         if (run.Skipped is { } skipped)
         {
-            if (skipped == ProtectMayRunReason)
+            if (skipped is ProtectMayRunReason or PinMayMoveReason)
             {
                 _log.Warn("Closing: the nodes are not blocked, because " + skipped + "; the BootBlock task blocks them at the next start.");
                 ClosingNotice = ClosedBeforeChangeEndedMessage;
@@ -2506,6 +2673,14 @@ internal sealed class BlockCoordinator : IDisposable
     {
         StepOutcome outcome = StepOutcomes.FromHResult(step, ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
         _log.Error(message + " " + TrayReport.DescribeStep(outcome), ex);
+    }
+
+    // A read that did not come back within StatusReadBudget. It may still be running on the thread pool; its result
+    // is not used.
+    private void LogReadTimeout(string step, string what)
+    {
+        StepOutcome outcome = StepOutcomes.NotAttempted(step, "No result within " + Seconds(StatusReadBudget) + ".");
+        _log.Warn(what + " was not read within " + Seconds(StatusReadBudget) + ", so it is not known. " + TrayReport.DescribeStep(outcome));
     }
 
     private void RaiseChanged()
@@ -2591,7 +2766,8 @@ internal sealed class BlockCoordinator : IDisposable
     {
         public bool AllowIssued { get; set; }
 
-        // Block at boot as read before the allow, for a clean-up whose own read fails.
+        // Block at boot as read before the allow, for a clean-up whose own read fails or cannot read the setting;
+        // null when it was not known then either.
         public bool? BlockAtBoot { get; set; }
 
         public bool ProtectOffIssued { get; set; }

@@ -102,6 +102,8 @@ internal sealed class CoordinatorHarness : IDisposable
             Coordinator.IdleWaitRunning ||
             Coordinator.RecheckRunning ||
             Block.StatusFailure is not null ||
+            Block.StatusStalls ||
+            Protection.StatusStalls ||
             now.ReadStatus != SnapshotReadStatus.Ok)
         {
             return;
@@ -500,6 +502,10 @@ internal sealed class FakeBlock : IBlockController
 
     public Exception? StatusFailure { get; set; }
 
+    // While true, a status read never completes and ignores its token: a Task Scheduler or CfgMgr32 call that never
+    // returns.
+    public bool StatusStalls { get; set; }
+
     // The next reads that fail, once each, before reads work again. The fault has cleared once they are used up.
     public int StatusFailuresLeft { get; set; }
 
@@ -535,6 +541,11 @@ internal sealed class FakeBlock : IBlockController
         if (StatusFailure is not null)
         {
             return Task.FromException<BootBlockStatus>(StatusFailure);
+        }
+
+        if (StatusStalls)
+        {
+            return new TaskCompletionSource<BootBlockStatus>().Task;
         }
 
         if (StatusFailuresLeft > 0)
@@ -586,9 +597,18 @@ internal sealed class FakeBlock : IBlockController
         return Task.FromResult(ControllerResult.Ok("Allowed"));
     }
 
+    // A Block at boot change that does something else than write the setting at once.
+    public Func<bool, CancellationToken, Task<ControllerResult>>? OnSetBlockAtBoot { get; set; }
+
     public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default)
     {
         Calls.Add(blockAtBoot ? "setboot-on" : "setboot-off");
+        NoteToken(blockAtBoot ? "setboot-on" : "setboot-off", ct);
+        if (OnSetBlockAtBoot is { } set)
+        {
+            return set(blockAtBoot, ct);
+        }
+
         Status = Status with { BlockAtBoot = blockAtBoot };
         return Task.FromResult(ControllerResult.Ok("Block at boot is " + (blockAtBoot ? "on" : "off")));
     }
@@ -632,6 +652,9 @@ internal sealed class FakeProtection : IAudioProtectionController
 
     public Exception? StatusFailure { get; set; }
 
+    // While true, a status read never completes and ignores its token: a Bluetooth API call that never returns.
+    public bool StatusStalls { get; set; }
+
     public List<bool> Applies { get; } = new();
 
     // Protect verbs that were handed a token that can be cancelled. The coordinator waits for every gate change.
@@ -649,6 +672,11 @@ internal sealed class FakeProtection : IAudioProtectionController
         if (StatusFailure is not null)
         {
             return Task.FromException<AudioProtectionSnapshot>(StatusFailure);
+        }
+
+        if (StatusStalls)
+        {
+            return new TaskCompletionSource<AudioProtectionSnapshot>().Task;
         }
 
         return Task.FromResult(new AudioProtectionSnapshot(

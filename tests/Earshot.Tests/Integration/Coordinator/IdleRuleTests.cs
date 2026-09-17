@@ -641,6 +641,85 @@ public sealed class IdleRuleTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "no block before closing, because the nodes are already blocked"));
     }
 
+    // Exit while setup runs: the read before it said not set up, but setup installs the tasks and leaves the nodes
+    // enabled, so whether to block is decided from a read taken once setup has ended.
+    [TestMethod]
+    public void ExitWhileSetUpRunsBlocksTheNodesSetUpLeftEnabled()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.NotSetUp();
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        var installing = new TaskCompletionSource<ControllerResult>();
+        Task<ControllerResult> setup = h.Coordinator.RunAsync("setup", _ => installing.Task);
+        h.Pump();
+
+        h.Coordinator.BeginShutdown();
+        Task idle = h.Coordinator.WhenIdleAsync();
+        h.Pump();
+        h.Block.Status = Statuses.Allowed();
+        installing.SetResult(ControllerResult.Ok("Earshot is set up"));
+        h.Pump();
+
+        Assert.IsTrue(setup.IsCompleted);
+        Assert.IsTrue(idle.IsCompleted);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "Earshot closed with the nodes setup left enabled and not in use.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    // Exit while Block at boot is being turned on: the read before it said off.
+    [TestMethod]
+    public void ExitWhileBlockAtBootIsTurnedOnBlocksOnceTheSettingIsOn()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        var setting = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnSetBlockAtBoot = (_, _) => setting.Task;
+        Task<ControllerResult> set = h.Coordinator.SetBlockAtBootAsync(true, CardPlace.NearCursor);
+        h.Pump();
+
+        h.Coordinator.BeginShutdown();
+        Task idle = h.Coordinator.WhenIdleAsync();
+        h.Pump();
+        h.Block.Status = Statuses.Allowed();
+        setting.SetResult(ControllerResult.Ok("Block at boot is on"));
+        h.Pump();
+
+        Assert.IsTrue(set.IsCompleted);
+        Assert.IsTrue(idle.IsCompleted);
+        CollectionAssert.AreEqual(SetBootOnThenBlock, h.Block.Calls, "Earshot closed with the nodes enabled and Block at boot on.");
+    }
+
+    // A refresh that never comes back (a driver call that has not returned) leaves the last good snapshot in hand. It is
+    // not acted on, and not waited on again every grace period either: the state is read again less often each time,
+    // and once the refresh works again the nodes are blocked.
+    [TestMethod]
+    public void WhileRefreshesStallTheIdleRuleReadsAgainLessOftenAndBlocksOnceTheyWork()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Publish(Devices.Idle(2));
+        h.Monitor.RefreshStalls = true;
+        h.CheckInvariantOnPump = false;
+        int refreshes = h.Monitor.Refreshes;
+        int reads = h.Block.StatusReads;
+
+        h.Advance(TimeSpan.FromHours(1));
+
+        Assert.IsEmpty(h.Block.Calls, "A device state that could not be read never leads to a block.");
+        Assert.AreEqual(0, h.Coordinator.IdleFailures);
+        Assert.IsGreaterThanOrEqualTo(3, h.Monitor.Refreshes - refreshes, "The device was not read again.");
+        Assert.IsLessThan(15, h.Monitor.Refreshes - refreshes, "The device was read again every grace period for as long as the refresh stalled.");
+        Assert.IsLessThan(30, h.Block.StatusReads - reads);
+
+        h.Monitor.RefreshStalls = false;
+        h.CheckInvariantOnPump = true;
+        h.Advance(BlockCoordinator.RefreshBudget + BlockCoordinator.IdleRetryLimit + BlockCoordinator.IdleGrace + BlockCoordinator.RecheckDelay);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
     [TestMethod]
     public void AnIdleBlockReadsTheDeviceFirstAndHoldsOffForUseNoNotificationHasReportedYet()
     {

@@ -13,6 +13,7 @@ public sealed class StalledDriverTests
 {
     private static readonly string[] Allow = ["allow"];
     private static readonly string[] AllowThenBlock = ["allow", "block"];
+    private static readonly string[] BlockOnly = ["block"];
 
     // What ConnectionController returns once its pass budget has run out with the driver call still running.
     private static ConnectResult DriverStalled() =>
@@ -122,6 +123,80 @@ public sealed class StalledDriverTests
         Assert.IsTrue(idle.IsCompleted, "Earshot could not close while the audio worker was stuck.");
         Assert.IsEmpty(h.Block.Calls, "A device state that could not be read never leads to a block.");
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "Closing: the nodes are not blocked, because the device state could not be read."));
+    }
+
+    // A boot block status read calls Task Scheduler COM and CfgMgr32 on the thread pool. One that never returns is a
+    // read that failed once its budget has run out: the disconnect ends, nothing is blocked on a state nobody read,
+    // and the state is read again later.
+    [TestMethod]
+    public void AStatusReadThatNeverReturnsEndsTheDisconnectAsAReadThatFailed()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Block.StatusStalls = true;
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: false));
+        h.Pump();
+        Assert.IsFalse(toggle.IsCompleted, "The disconnect did not wait for its status read at all.");
+
+        h.Advance(BlockCoordinator.StatusReadBudget);
+
+        Assert.IsTrue(toggle.IsCompleted, "The disconnect never ended while the status read did not return.");
+        Assert.AreEqual(OpStatus.Success, toggle.GetAwaiter().GetResult().Status);
+        Assert.IsEmpty(h.Block.Calls, "A status that was never read led to a block.");
+        Assert.IsFalse(h.Coordinator.IsBusy);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "The boot block status was not read within"));
+
+        // The read works again: the nodes are read again and blocked.
+        h.Block.StatusStalls = false;
+        h.Advance(BlockCoordinator.IdleRetryLimit + BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void ExitWithAStatusReadThatNeverReturnsClosesWithinTheReadBudgets()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Monitor.Set(Devices.Idle(2));
+        h.Block.StatusStalls = true;
+
+        h.Coordinator.BeginShutdown();
+        Task idle = h.Coordinator.WhenIdleAsync();
+        h.Pump();
+        Assert.IsFalse(idle.IsCompleted);
+
+        h.Advance(BlockCoordinator.StatusReadBudget);
+
+        Assert.IsTrue(idle.IsCompleted, "Earshot could not close while a status read did not return.");
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "Closing: the nodes are not blocked, because the boot block status could not be read."));
+    }
+
+    [TestMethod]
+    public void AServiceReadThatNeverReturnsDoesNotHoldTheBlockAfterADisconnect()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Protection.State = AudioProtectionState.Protected;
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Protection.StatusStalls = true;
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: false));
+        h.Pump();
+        Assert.IsFalse(toggle.IsCompleted);
+
+        h.Advance(BlockCoordinator.StatusReadBudget);
+
+        Assert.IsTrue(toggle.IsCompleted, "The block after the disconnect waited for good on a service read.");
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "A protection read that failed never holds up the block.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "The audio protection status was not read within"));
     }
 
     [TestMethod]

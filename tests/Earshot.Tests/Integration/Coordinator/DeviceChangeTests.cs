@@ -2,6 +2,7 @@ using Earshot.App;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Integration.Coordinator;
@@ -19,6 +20,7 @@ public sealed class DeviceChangeTests
     private static readonly string[] PinOnly = ["set-device"];
     private static readonly string[] AllowThenBlock = ["set-device", "allow", "block"];
     private static readonly string[] AllowThenPin = ["set-device", "allow", "set-device"];
+    private static readonly string[] AllowThenPinThenBlock = ["set-device", "allow", "set-device", "block"];
     private static readonly string[] AllowProtectOffThenPin = ["set-device", "allow", "set-device", "protect-off", "set-device"];
     private static readonly string[] PutBackInOrder = ["set-device", "allow", "set-device", "protect-off", "set-device", "protect-on", "block"];
 
@@ -169,6 +171,72 @@ public sealed class DeviceChangeTests
 
         Assert.AreEqual(BlockController.NotAudioSinkMessage, result.UserMessage);
         CollectionAssert.AreEqual(PinOnly, h.Trace);
+    }
+
+    // The second pin was accepted by the Task Scheduler but its end was not seen, so it may still move the pin, and a
+    // block sent now would land on whichever device the gate pins when it runs. Nothing is blocked or allowed until
+    // the run could have ended; the state is read again meanwhile, and a pin that never moved is then blocked again.
+    [TestMethod]
+    public void APinWhoseRunDidNotEndIsNotFollowedByABlockUntilItCouldHaveEnded()
+    {
+        using CoordinatorHarness h = AtRest();
+        int pins = 0;
+        h.Block.OnSetDevice = _ => Task.FromResult(++pins == 1
+            ? Refused(GateExitCode.OtherDeviceBlocked, BlockController.OtherDeviceBlockedMessage)
+            : Results.GateWaitRanOut("Gate", BlockController.TimedOutMessage));
+
+        ControllerResult result = Change(h);
+
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        CollectionAssert.AreEqual(AllowThenPin, h.Trace, "A block went out while the pin may still move.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "set-device: the gate run did not end while it was waited for, so it may still move the pin"));
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the state again while the nodes of the device pinned before are enabled.");
+
+        // No other device change goes to the gate meanwhile, and no idle block either.
+        Assert.AreEqual(BlockCoordinator.ChangeStillRunningMessage, Change(h).UserMessage);
+        h.Advance(BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(AllowThenPin, h.Trace);
+
+        // The run never moved the pin: once it could have ended, the device pinned now is blocked again.
+        h.Advance(BlockCoordinator.UnsettledGateWindow + BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(AllowThenPinThenBlock, h.Trace);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    // A connect that has to allow first would enable whichever device the gate pins when the allow runs, so it is not
+    // sent while a pin may still move.
+    [TestMethod]
+    public void AConnectDoesNotAllowWhileAPinMayStillMove()
+    {
+        using CoordinatorHarness h = AtRest();
+        h.Block.OnSetDevice = _ => Task.FromResult(Results.GateWaitRanOut("Gate", BlockController.TimedOutMessage));
+        Change(h);
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        Assert.AreEqual(BlockCoordinator.ChangeStillRunningMessage, report.UserMessage);
+        CollectionAssert.AreEqual(PinOnly, h.Trace.Where(t => t != "connect").ToArray(), "An allow went out while the pin may still move.");
+    }
+
+    // The session-end block would go to whichever device the gate pins when it runs, so it is not queued while a pin
+    // may still move; the BootBlock task blocks the device pinned then.
+    [TestMethod]
+    public void TheSessionEndBlockIsNotQueuedWhileAPinMayStillMove()
+    {
+        using CoordinatorHarness h = AtRest();
+        int pins = 0;
+        h.Block.OnSetDevice = _ => Task.FromResult(++pins == 1
+            ? Refused(GateExitCode.OtherDeviceBlocked, BlockController.OtherDeviceBlockedMessage)
+            : Results.GateWaitRanOut("Gate", BlockController.TimedOutMessage));
+        Change(h);
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+
+        CollectionAssert.AreEqual(AllowThenPin, h.Trace);
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: no block issued, because a device change this tray sent may still move the pin"));
     }
 
     // Exit cancels the change while its allow runs: the allow is waited for, no second pin is asked for, and the

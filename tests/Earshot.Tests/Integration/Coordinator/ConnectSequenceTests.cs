@@ -75,6 +75,30 @@ public sealed class ConnectSequenceTests
         CollectionAssert.DoesNotContain(h.Cards.Statuses, ConnectMessages.StillConnecting);
     }
 
+    // config.json cannot be read when the clean-up reads the status again (a file in use, say). That is not Block at
+    // boot off: the setting read before the allow decides, and the allow is put back.
+    [TestMethod]
+    public void AConnectCleanUpThatCannotReadBlockAtBootStillPutsBackItsAllow()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        h.Connection.Connects.Enqueue(_ =>
+        {
+            h.Block.Status = h.Block.Status with { BlockAtBoot = false, BlockAtBootKnown = false };
+            return Task.FromResult(Results.TimedOut());
+        });
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The connect's own allow was left in place on a setting that could not be read.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        Assert.AreEqual(BlockCoordinator.DidNotConnectMessage, report.UserMessage);
+    }
+
     [TestMethod]
     public void AConnectThatTimesOutWithNothingPutBackMayStillConnect()
     {

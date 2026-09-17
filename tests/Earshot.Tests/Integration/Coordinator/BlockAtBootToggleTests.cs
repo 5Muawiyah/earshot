@@ -14,6 +14,7 @@ public sealed class BlockAtBootToggleTests
     private static readonly string[] AllowThenProtectOn = ["allow", "protect-on"];
     private static readonly string[] SetBootOffOnly = ["setboot-off"];
     private static readonly string[] SetBootOnOnly = ["setboot-on"];
+    private static readonly string[] SetBootOnThenBlock = ["setboot-on", "block"];
 
     private static ControllerResult Toggle(CoordinatorHarness h, bool blockAtBoot)
     {
@@ -76,6 +77,71 @@ public sealed class BlockAtBootToggleTests
         Assert.AreEqual(OpStatus.Partial, result.Status);
         Assert.AreEqual(BlockCoordinator.BlockAtBootOffStillBlockedMessage, result.UserMessage);
         CollectionAssert.AreEqual(SetBootOffThenAllow, h.Block.Calls);
+    }
+
+    // The gate run for turning it on was accepted but not seen to end (queued behind another run past the wait), so
+    // it may still write the setting with no notification to say so. A read that still shows it off does not settle
+    // the idle rule until the run could have ended, and once the setting lands the nodes are blocked.
+    [TestMethod]
+    public void ATurnOnWhoseRunDidNotEndIsReadAgainAndItsBlockFollowsWhenItLands()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        h.Block.OnSetBlockAtBoot = (_, _) => Task.FromResult(Results.GateWaitRanOut("Gate", BlockController.TimedOutMessage));
+
+        ControllerResult result = Toggle(h, blockAtBoot: true);
+
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        Assert.AreEqual(BlockController.TimedOutMessage, result.UserMessage);
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "A read that shows Block at boot off was taken as settled while the change may still land.");
+
+        // The queued run writes config.json two minutes later.
+        h.Advance(TimeSpan.FromMinutes(2));
+        h.Block.Status = Statuses.Allowed();
+        h.Advance(TimeSpan.FromMinutes(3));
+
+        CollectionAssert.AreEqual(SetBootOnThenBlock, h.Block.Calls);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    [TestMethod]
+    public void ATurnOnWhoseRunDidNotEndAndNeverLandsStopsBeingReadOnceItCouldHaveEnded()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        h.Block.OnSetBlockAtBoot = (_, _) => Task.FromResult(Results.GateWaitRanOut("Gate", BlockController.TimedOutMessage));
+        Toggle(h, blockAtBoot: true);
+        int reads = h.Block.StatusReads;
+
+        h.Advance(BlockCoordinator.UnsettledGateWindow + BlockCoordinator.RecheckDelay);
+
+        Assert.IsFalse(h.Coordinator.RecheckRunning, "Block at boot read off after the run could have ended settles the rule.");
+        Assert.IsGreaterThan(reads, h.Block.StatusReads);
+        CollectionAssert.AreEqual(SetBootOnOnly, h.Block.Calls);
+    }
+
+    // Exit before the next read: the setting has landed, but the last read still showed it off.
+    [TestMethod]
+    public void ExitAfterATurnOnWhoseRunDidNotEndReadsTheSettingAgainAndBlocks()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        h.Block.OnSetBlockAtBoot = (_, _) => Task.FromResult(Results.GateWaitRanOut("Gate", BlockController.TimedOutMessage));
+        Toggle(h, blockAtBoot: true);
+        h.Block.Status = Statuses.Allowed();
+
+        h.Coordinator.BeginShutdown();
+        Task idle = h.Coordinator.WhenIdleAsync();
+        h.Pump();
+
+        Assert.IsTrue(idle.IsCompleted);
+        CollectionAssert.AreEqual(SetBootOnThenBlock, h.Block.Calls, "Exit trusted a Block at boot read taken before the change could have landed.");
     }
 
     // Turning it on changes no node itself: the idle rule blocks enabled nodes that are not in use.
