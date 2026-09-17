@@ -203,6 +203,16 @@ public sealed class InteropConstantsTests
     [DataRow(typeof(Dwm), "DWMWA_WINDOW_CORNER_PREFERENCE", 33L)]
     [DataRow(typeof(Dwm), "DWMWCP_ROUND", 2L)]
     [DataRow(typeof(Dwm), "DWMWA_SYSTEMBACKDROP_TYPE", 38L)]
+    [DataRow(typeof(DevQuery), "DevObjectTypeAEP", 5L)]
+    [DataRow(typeof(DevQuery), "DevObjectTypeAEPContainer", 6L)]
+    [DataRow(typeof(DevQuery), "DevQueryFlagAllProperties", 2L)]
+    [DataRow(typeof(DevQuery), "DEVPROP_OPERATOR_EQUALS", 2L)]
+    [DataRow(typeof(DevQuery), "DEVPROP_STORE_SYSTEM", 0L)]
+    [DataRow(typeof(DevQuery), "DEVPROP_TYPE_BYTE", 3L)]
+    [DataRow(typeof(DevQuery), "DEVPROP_MASK_TYPE", 0xFFFL)]
+    [DataRow(typeof(FileApis), "MOVEFILE_DELAY_UNTIL_REBOOT", 4L)]
+    [DataRow(typeof(FileApis), "FILE_FLAG_OPEN_REPARSE_POINT", 0x00200000L)]
+    [DataRow(typeof(FileApis), "FILE_ATTRIBUTE_REPARSE_POINT", 0x400L)]
     public void ConstantMatchesTheSdk(Type owner, string name, long expected)
     {
         Assert.AreEqual(expected, ReadConstant(owner, name), owner.Name + "." + name);
