@@ -449,6 +449,8 @@ internal sealed partial class GateActions
     //     in Earshot able to allow it again;
     //   - moving the pin while protection.json lists services Earshot turned off (or cannot be read) would make
     //     protect-off and the uninstall restore turn services on for the new device and never for the old one.
+    // A node read that fails in either of the first two checks refuses with Failed: it says nothing about the
+    // device, so it is neither "not an audio device" nor "not blocked".
     // https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio
     private VerbResult SetDevice(string address, List<StepOutcome> steps)
     {
@@ -506,11 +508,21 @@ internal sealed partial class GateActions
             return new VerbResult(GateExitCode.Failed, null);
         }
 
-        if (!HasAudioSinkNode(ids, container, address, steps))
+        switch (FindAudioSinkNode(ids, container, address, steps))
         {
-            steps.Add(StepOutcomes.NotAttempted("set-device",
-                "The device has no A2DP sink node, so it is not headphones or speakers and was not pinned."));
-            return new VerbResult(GateExitCode.NotAudioSink, null);
+            case SinkNode.None:
+                steps.Add(StepOutcomes.NotAttempted("set-device",
+                    "The device has no A2DP sink node, so it is not headphones or speakers and was not pinned."));
+                return new VerbResult(GateExitCode.NotAudioSink, null);
+
+            case SinkNode.Unreadable:
+                // A read that failed is not a claim about the device.
+                steps.Add(StepOutcomes.NotAttempted("set-device",
+                    "An A2DP sink node with this address could not be read, so whether the device plays audio is not known and it was not pinned."));
+                return new VerbResult(GateExitCode.Failed, null);
+
+            case SinkNode.Found:
+                break;
         }
 
         GateRead<DeviceIdentity> current = _store.ReadDevice();
@@ -543,6 +555,14 @@ internal sealed partial class GateActions
                     steps.Add(StepOutcomes.NotAttempted("set-device", "The device pinned now is still blocked. Allow it first."));
                     return new VerbResult(GateExitCode.OtherDeviceBlocked, null);
                 }
+
+                if (old.Unread.Count > 0)
+                {
+                    steps.AddRange(old.Steps.Where(s => !s.Ok));
+                    steps.Add(StepOutcomes.NotAttempted("set-device",
+                        "Whether the device pinned now is still blocked could not be read, so the pin was not moved."));
+                    return new VerbResult(GateExitCode.Failed, null);
+                }
             }
 
             GateRead<ProtectionRecord> protection = _store.ReadProtection();
@@ -565,10 +585,18 @@ internal sealed partial class GateActions
     // The instance id prefix of an A2DP sink service node: BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_...
     internal const string AudioSinkNodePrefix = @"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_";
 
-    // True when a node with the A2DP sink prefix, the address and the device's container exists (present or
-    // not). A node whose container cannot be read does not count, and its failure is a step.
-    private bool HasAudioSinkNode(string[] ids, Guid container, string address, List<StepOutcome> steps)
+    private enum SinkNode
     {
+        Found,       // a node with the A2DP sink prefix, the address and the device's container
+        None,        // every candidate was read, and none is in the device's container
+        Unreadable,  // none found, and a candidate carrying the address could not be located or its container read
+    }
+
+    // Looks for a node with the A2DP sink prefix, the address and the device's container (present or not). A
+    // candidate that cannot be read is a failed step and makes the answer Unreadable unless another one is found.
+    private SinkNode FindAudioSinkNode(string[] ids, Guid container, string address, List<StepOutcome> steps)
+    {
+        bool unreadable = false;
         foreach (string id in ids.Where(i => i.StartsWith(AudioSinkNodePrefix, StringComparison.OrdinalIgnoreCase)))
         {
             if (!id.Contains(address, StringComparison.OrdinalIgnoreCase))
@@ -580,6 +608,7 @@ internal sealed partial class GateActions
             if (cr != CfgMgr32.CR_SUCCESS)
             {
                 steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + id, cr));
+                unreadable = true;
                 continue;
             }
 
@@ -587,16 +616,17 @@ internal sealed partial class GateActions
             if (cr != CfgMgr32.CR_SUCCESS)
             {
                 steps.Add(StepOutcomes.FromConfigRet("cm-container:" + id, cr));
+                unreadable = true;
                 continue;
             }
 
             if (NodeMatch.IsDisableTarget(id, nodeContainer, container, address))
             {
-                return true;
+                return SinkNode.Found;
             }
         }
 
-        return false;
+        return unreadable ? SinkNode.Unreadable : SinkNode.None;
     }
 
     // The BootBlock task. Blocks only when config.json says BlockAtBoot is true; a missing or invalid

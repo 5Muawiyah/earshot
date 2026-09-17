@@ -387,10 +387,16 @@ internal sealed class BlockController : IBlockController, IDisposable
 
         DeviceIdentity identity = device.Value;
         NodeReadResult before = _reader.Read(identity.ContainerId, identity.Address);
+
+        // Only a read of every target answers "already": a node that could not be read never counts, so the gate
+        // runs and decides from its own strict read.
         if (block ? BlockStateClassifier.IsFullyBlocked(before) : BlockStateClassifier.IsFullyAllowed(before))
         {
             return Finish(verb, ControllerResult.Already(block ? AlreadyBlockedMessage : AlreadyAllowedMessage));
         }
+
+        // What the check saw fail stays on record with the result.
+        steps.AddRange(before.Steps.Where(s => !s.Ok));
 
         GateRunResult run = _gate.Run(TaskPlan.GateTaskName, verb, NewNonce(), null, TaskSchedulerGate.GateTimeout, ct);
         steps.AddRange(run.Steps);
@@ -445,6 +451,12 @@ internal sealed class BlockController : IBlockController, IDisposable
                 return new ControllerResult(OpStatus.Partial, block ? PartialBlockMessage : PartialAllowMessage, steps);
 
             case BlockState.Blocked when block:
+                if (after.Unread.Count > 0)
+                {
+                    // The present nodes read as blocked, but not every target could be read, so nothing is claimed.
+                    return new ControllerResult(OpStatus.Partial, UnreadableMessage, steps);
+                }
+
                 if (BlockStateClassifier.AnyUnresolvedForBlock(after))
                 {
                     return new ControllerResult(OpStatus.Partial, NotPresentBlockMessage, steps);
@@ -455,6 +467,11 @@ internal sealed class BlockController : IBlockController, IDisposable
                     : new ControllerResult(OpStatus.Partial, NotPersistentMessage, steps);
 
             case BlockState.Allowed when !block:
+                if (after.Unread.Count > 0)
+                {
+                    return new ControllerResult(OpStatus.Partial, UnreadableMessage, steps);
+                }
+
                 if (BlockStateClassifier.AnyUnresolvedForAllow(after))
                 {
                     return new ControllerResult(OpStatus.Partial, NotPresentAllowMessage, steps);

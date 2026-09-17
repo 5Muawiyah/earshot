@@ -42,6 +42,9 @@ internal sealed class FakeNode
 
     public uint StatusReadResult { get; set; }
 
+    // CONFIGRET a normal (present-only) locate of a present node returns; a phantom locate is unaffected.
+    public uint PresentLocateResult { get; set; }
+
     public bool IsDisabled => (Status & CfgMgr32.DN_HAS_PROBLEM) != 0 && Problem == CfgMgr32.CM_PROB_DISABLED;
 
     public void MarkDisabled(bool persistent)
@@ -86,6 +89,11 @@ internal sealed class FakeNodeApi : INodeApi
         if (index < 0 || (!includeNonPresent && !_nodes[index].Present))
         {
             return CfgMgr32.CR_NO_SUCH_DEVNODE;
+        }
+
+        if (!includeNonPresent && _nodes[index].PresentLocateResult != CfgMgr32.CR_SUCCESS)
+        {
+            return _nodes[index].PresentLocateResult;
         }
 
         devInst = (uint)index + 1;

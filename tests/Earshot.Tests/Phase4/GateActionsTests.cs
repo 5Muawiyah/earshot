@@ -364,6 +364,37 @@ public sealed class GateActionsTests
         Assert.IsEmpty(h.Nodes.Calls);
     }
 
+    // A sink node that cannot be read says nothing about the device, so the refusal is a failure, not "cannot play
+    // audio".
+    [TestMethod]
+    public void SetDeviceWithAnUnreadableSinkNodeFailsRatherThanCallingItNotAnAudioDevice()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        h.Pin(RecordedNodes.AirPods());
+        string sink = RecordedNodes.HeadphonesNodes.Single(id => id.StartsWith(GateActions.AudioSinkNodePrefix, StringComparison.OrdinalIgnoreCase));
+        h.Nodes[sink].ContainerReadResult = 0x1Du; // CR_REGISTRY_ERROR
+
+        Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address, "The pin is unchanged.");
+        GateStatusFile status = h.Status();
+        Assert.IsTrue(status.Steps.Any(s => s.Step == "cm-container:" + sink && s.CodeName == "CR_REGISTRY_ERROR"));
+        Assert.Contains("could not be read", status.Steps.Last(s => s.Step == "set-device").Detail!);
+    }
+
+    [TestMethod]
+    public void SetDeviceWithAnUnreadableNodeOfTheCurrentDeviceDoesNotMoveThePin()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        h.Pin(RecordedNodes.AirPods());
+        h.Nodes[RecordedNodes.AirPodsTargets[3]].ConfigFlagsReadResult = CfgMgr32.CR_FAILURE;
+
+        Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
+        Assert.Contains("could not be read", h.Status().Steps.Last(s => s.Step == "set-device").Detail!);
+    }
+
     [TestMethod]
     public void SetDeviceRefusesToMoveThePinWhileProtectionListsServices()
     {

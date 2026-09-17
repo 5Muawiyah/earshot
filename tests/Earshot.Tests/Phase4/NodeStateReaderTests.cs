@@ -155,6 +155,42 @@ public sealed class NodeStateReaderTests
         Assert.IsTrue(read.Steps.Any(s => s.Step.StartsWith("cm-status:", StringComparison.Ordinal) && s.CodeName == "CR_FAILURE"));
     }
 
+    // A flag or a presence that could not be read leaves defaults on the node (flag clear, not present); those are
+    // not observations, so the read names the node and neither "already allowed" nor "already blocked" holds.
+    [TestMethod]
+    public void ANodeWhoseFlagOrPresenceCannotBeReadIsNeverTakenAsAllowedOrBlocked()
+    {
+        FakeNodeApi flags = RecordedNodes.Table();
+        flags[RecordedNodes.AirPodsTargets[0]].ConfigFlagsReadResult = CfgMgr32.CR_FAILURE;
+        FakeNodeApi presence = RecordedNodes.Table();
+        presence[RecordedNodes.AirPodsTargets[1]].PresentLocateResult = CfgMgr32.CR_FAILURE;
+        FakeNodeApi status = RecordedNodes.Table();
+        status[RecordedNodes.AirPodsTargets[2]].StatusReadResult = CfgMgr32.CR_FAILURE;
+        FakeNodeApi clean = RecordedNodes.Table();
+
+        foreach ((FakeNodeApi table, string id) in new[] { (flags, RecordedNodes.AirPodsTargets[0]), (presence, RecordedNodes.AirPodsTargets[1]), (status, RecordedNodes.AirPodsTargets[2]) })
+        {
+            NodeReadResult read = new NodeStateReader(table).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+
+            CollectionAssert.AreEqual(new[] { id }, read.Unread.ToArray());
+            Assert.IsTrue(read.Steps.Any(s => !s.Ok && s.Step.EndsWith(":" + id, StringComparison.Ordinal)), "The failed read is a step.");
+            Assert.IsFalse(BlockStateClassifier.IsFullyAllowed(read), id);
+        }
+
+        NodeReadResult readable = new NodeStateReader(clean).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+        Assert.IsEmpty(readable.Unread);
+        Assert.IsTrue(BlockStateClassifier.IsFullyAllowed(readable));
+
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            flags[id].MarkDisabled(persistent: true);
+        }
+
+        flags[RecordedNodes.AirPodsTargets[0]].ConfigFlags = CfgMgr32.CONFIGFLAG_DISABLED;
+        Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(new NodeStateReader(flags).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress)),
+            "An unread flag is not a persistent block either.");
+    }
+
     private static BluetoothNode Node(bool present, NodeBlockStatus status, bool persist = false) =>
         new("id", "BTHENUM", null, present, status, status == NodeBlockStatus.Disabled ? 22u : 0u, persist);
 

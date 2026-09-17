@@ -298,6 +298,44 @@ public sealed class BlockControllerTests
         Assert.AreEqual(OpStatus.AlreadyInState, (await h.Controller.AllowAsync()).Status);
     }
 
+    // A flag that cannot be read is not "already allowed": the gate runs, changes nothing it cannot read, and the
+    // failed read is in the result rather than dropped.
+    [TestMethod]
+    public async Task AllowWithAnUnreadableFlagRunsTheGateAndKeepsTheFailedRead()
+    {
+        using var h = new Harness();
+        string unreadable = RecordedNodes.AirPodsTargets[3];
+        h.Nodes[unreadable].ConfigFlagsReadResult = CfgMgr32.CR_FAILURE;
+
+        ControllerResult result = await h.Controller.AllowAsync();
+
+        Assert.HasCount(1, h.Tasks.Runs, "Not answered as already allowed.");
+        Assert.AreNotEqual(OpStatus.AlreadyInState, result.Status);
+        Assert.AreEqual(OpStatus.Partial, result.Status, result.UserMessage);
+        Assert.AreEqual(BlockController.UnreadableMessage, result.UserMessage);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "cm-configflags:" + unreadable && s.CodeName == "CR_FAILURE"));
+        Assert.IsEmpty(h.Nodes.Calls.Where(c => c.InstanceId == unreadable), "A node whose flag cannot be read is not changed.");
+    }
+
+    [TestMethod]
+    public async Task BlockWithAnUnreadablePresenceIsNotAlreadyBlocked()
+    {
+        using var h = new Harness();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        h.Nodes[RecordedNodes.AirPodsTargets[5]].PresentLocateResult = CfgMgr32.CR_FAILURE;
+
+        ControllerResult result = await h.Controller.BlockAsync();
+
+        Assert.HasCount(1, h.Tasks.Runs);
+        Assert.AreNotEqual(OpStatus.Success, result.Status);
+        Assert.AreNotEqual(OpStatus.AlreadyInState, result.Status);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "cm-locate:" + RecordedNodes.AirPodsTargets[5] && s.CodeName == "CR_FAILURE"));
+    }
+
     // The check before the gate and the read after it follow the same rule, so a node that is not present and
     // not marked disabled gives the same answer every time rather than alternating with "already blocked".
     [TestMethod]
