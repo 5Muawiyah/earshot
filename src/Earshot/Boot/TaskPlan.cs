@@ -75,8 +75,9 @@ internal static class TaskPlan
     // same user can change without elevation (%LOCALAPPDATA%, and .NET runtime variables in HKCU\Environment), so
     // it is a same-user elevation surface: only a fall-back for when the owner's live test finds SYSTEM does not
     // work. The gate then keeps its log out of that profile (Program.GateLog), and refuses to act while its
-    // environment names code for the .NET runtime to load (Program.RuntimeCodeLoadingVariables), which says so but
-    // cannot keep that code out, since the runtime loads it before Earshot runs. install logs a warning for it.
+    // environment names code for the .NET runtime to load, or a trace or dump file to write
+    // (Program.UnsafeRuntimeVariables), which says so but cannot keep that code out, since the runtime loads it
+    // before Earshot runs. install logs a warning for it.
     public static TaskPrincipal PrincipalFor(string taskName, TaskPrincipalMode mode, string userSid)
     {
         ArgumentNullException.ThrowIfNull(taskName);
@@ -132,10 +133,17 @@ internal static class TaskXmlCheck
     };
 
     // steps, when given, receives the account lookup step when a principal name does not resolve.
-    public static IReadOnlyList<string> Verify(string? xml, TaskSpec expected, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps)
+    public static IReadOnlyList<string> Verify(string? xml, TaskSpec expected, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps) =>
+        Verify(xml, expected, accountToSid, steps, out _);
+
+    // nameNotLookedUp: the principal is an account name whose lookup failed, so whether it is the expected user is
+    // not known. The problem list still names it.
+    public static IReadOnlyList<string> Verify(
+        string? xml, TaskSpec expected, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps, out bool nameNotLookedUp)
     {
         ArgumentNullException.ThrowIfNull(expected);
         ArgumentNullException.ThrowIfNull(accountToSid);
+        nameNotLookedUp = false;
         var problems = new List<string>();
         XElement? root = Load(xml, problems);
         if (root is null)
@@ -143,7 +151,7 @@ internal static class TaskXmlCheck
             return problems;
         }
 
-        CheckPrincipal(root, expected, accountToSid, problems, steps);
+        nameNotLookedUp = CheckPrincipal(root, expected, accountToSid, problems, steps);
         CheckAction(root, expected, problems);
         CheckTriggers(root, expected, problems);
         CheckSettings(root, expected, problems);
@@ -153,8 +161,17 @@ internal static class TaskXmlCheck
     // For a reader that does not know which principal install chose: the SYSTEM form, or for Gate and
     // Protect the interactive user form, must match in full.
     public static IReadOnlyList<string> VerifyInstalled(
-        string? xml, string taskName, string installFolder, string userSid, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps)
+        string? xml, string taskName, string installFolder, string userSid, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps) =>
+        VerifyInstalled(xml, taskName, installFolder, userSid, accountToSid, steps, out _);
+
+    // onlyNameNotLookedUp: the task matches the interactive user form in everything but a principal named by an
+    // account whose lookup failed. A lookup that failed says nothing about the task, so the caller takes the task as
+    // unreadable, not as one that differs.
+    public static IReadOnlyList<string> VerifyInstalled(
+        string? xml, string taskName, string installFolder, string userSid, Func<string, AccountLookup> accountToSid, IList<StepOutcome>? steps,
+        out bool onlyNameNotLookedUp)
     {
+        onlyNameNotLookedUp = false;
         if (!Sddl.IsUserSid(userSid))
         {
             return ["The current user has no usable SID."];
@@ -168,8 +185,16 @@ internal static class TaskXmlCheck
 
         // A principal name that does not resolve adds its lookup step here even though the SYSTEM form's
         // problems are the ones returned.
-        IReadOnlyList<string> asUser = Verify(xml, TaskPlan.Spec(taskName, installFolder, userSid, TaskPrincipalMode.InteractiveUser), accountToSid, steps);
-        return asUser.Count == 0 ? asUser : asSystem;
+        IReadOnlyList<string> asUser = Verify(xml, TaskPlan.Spec(taskName, installFolder, userSid, TaskPrincipalMode.InteractiveUser), accountToSid, steps,
+            out bool nameNotLookedUp);
+        if (asUser.Count == 0)
+        {
+            return asUser;
+        }
+
+        // The failed lookup adds exactly one problem, the principal's own, so nothing else differs.
+        onlyNameNotLookedUp = nameNotLookedUp && asUser.Count == 1;
+        return asSystem;
     }
 
     // The principal and action a task's XML names, for display. Null fields were absent or unreadable.
@@ -222,14 +247,15 @@ internal static class TaskXmlCheck
         }
     }
 
-    private static void CheckPrincipal(
+    // True when the principal is an account name whose lookup failed (its problem is added all the same).
+    private static bool CheckPrincipal(
         XElement root, TaskSpec expected, Func<string, AccountLookup> accountToSid, List<string> problems, IList<StepOutcome>? steps)
     {
         List<XElement> principals = root.Element(Ns + "Principals")?.Elements(Ns + "Principal").ToList() ?? [];
         if (principals.Count != 1)
         {
             problems.Add("The task has " + principals.Count + " principals, not one.");
-            return;
+            return false;
         }
 
         XElement principal = principals[0];
@@ -257,12 +283,12 @@ internal static class TaskXmlCheck
                 problems.Add("The logon type is " + logonType + ", not ServiceAccount.");
             }
 
-            return;
+            return false;
         }
 
         string? sid = userId;
         StepOutcome? failedLookup = null;
-        if (!userId.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase))
+        if (userId.Length > 0 && !userId.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase))
         {
             AccountLookup lookup = accountToSid(userId);
             sid = lookup.Sid;
@@ -288,6 +314,8 @@ internal static class TaskXmlCheck
         {
             problems.Add("The run level is " + (runLevel ?? "missing") + ", not HighestAvailable.");
         }
+
+        return failedLookup is not null;
     }
 
     private static void CheckAction(XElement root, TaskSpec expected, List<string> problems)

@@ -199,7 +199,7 @@ internal enum TaskHealth
     Ready,          // present, and its SDDL and XML match what install registers
     Missing,        // 0x80070002: not set up
     NeedsRepair,    // present, read in full, and its security or definition differs
-    Unreadable,     // any other failure to open it, or to read its security descriptor or XML
+    Unreadable,     // any other failure to open it, to read its security descriptor or XML, or to look up its account
 }
 
 internal sealed record TaskVerification(string TaskName, TaskHealth Health, IReadOnlyList<string> Problems, IReadOnlyList<StepOutcome> Steps, TaskReadback? Task);
@@ -306,9 +306,18 @@ internal sealed class TaskSchedulerGate
         }
 
         bool userMayRun = !string.Equals(taskName, TaskPlan.BootTaskName, StringComparison.Ordinal);
-        var problems = AclCheck.CheckTask(task.Sddl, _userSid!, userMayRun)
-            .Concat(TaskXmlCheck.VerifyInstalled(task.Xml, taskName, _installFolder, _userSid!, _accountToSid, steps))
-            .ToList();
+        IReadOnlyList<string> aclProblems = AclCheck.CheckTask(task.Sddl, _userSid!, userMayRun);
+        IReadOnlyList<string> xmlProblems = TaskXmlCheck.VerifyInstalled(task.Xml, taskName, _installFolder, _userSid!, _accountToSid, steps,
+            out bool onlyNameNotLookedUp);
+
+        // A principal named by an account whose lookup failed (its step, with the code, is in steps) is not known to
+        // be anyone else, just as a security descriptor that could not be read is not known to be wrong.
+        if (aclProblems.Count == 0 && onlyNameNotLookedUp)
+        {
+            return new TaskVerification(taskName, TaskHealth.Unreadable, ["The account the task runs as could not be looked up."], steps, task);
+        }
+
+        var problems = aclProblems.Concat(xmlProblems).ToList();
         return new TaskVerification(taskName, problems.Count == 0 ? TaskHealth.Ready : TaskHealth.NeedsRepair, problems, steps, task);
     }
 

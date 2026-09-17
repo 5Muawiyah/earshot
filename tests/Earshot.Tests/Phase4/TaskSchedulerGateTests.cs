@@ -90,6 +90,40 @@ public sealed class TaskSchedulerGateTests
         Assert.AreEqual(TaskHealth.Unreadable, h.Gate.Verify(TaskPlan.GateTaskName).Health);
     }
 
+    // install --principal user: the task XML may name the principal by account name, which the check looks up. A lookup
+    // that fails (a domain controller out of reach, say) says nothing about the task, so the task is unreadable, not in
+    // need of repair, and nothing is sent to it. A name that resolves to someone else still needs repair.
+    [TestMethod]
+    public void AUserPrincipalWhoseNameCannotBeLookedUpIsUnreadableNotInNeedOfRepair()
+    {
+        using var temp = new TempFolder();
+        var tasks = new FakeScheduledTasks();
+        tasks.InstallAll(InstallFolder);
+        TaskSpec userGate = TaskPlan.Spec(TaskPlan.GateTaskName, InstallFolder, TestUsers.Sid, TaskPrincipalMode.InteractiveUser);
+        tasks.Tasks[@"\Earshot\Gate"] = FakeScheduledTasks.Healthy(TaskPlan.GateTaskName, InstallFolder, TaskPrincipalMode.InteractiveUser) with
+        {
+            Xml = TaskXml.For(userGate, userId: @"CONTOSO\owner"),
+        };
+        StepOutcome failure = StepOutcomes.FromWin32(AccountSids.Step, 1789, "'CONTOSO\\owner'", ok: false);
+        var failing = new TaskSchedulerGate(tasks, new GateStore(temp.Path), InstallFolder, TestUsers.Sid, _ => new AccountLookup(null, failure),
+            new ManualTime(), (_, ct) => !ct.IsCancellationRequested);
+
+        TaskVerification check = failing.Verify(TaskPlan.GateTaskName);
+
+        Assert.AreEqual(TaskHealth.Unreadable, check.Health, string.Join(" | ", check.Problems));
+        Assert.AreEqual(failure, check.Steps.Single(s => s.Step == AccountSids.Step), "The failed lookup keeps its code.");
+        Assert.AreEqual(GateRunOutcome.TaskUnreadable, failing.Run(TaskPlan.GateTaskName, GateVerbs.Block, Nonce, null, TaskSchedulerGate.GateTimeout, CancellationToken.None).Outcome);
+        Assert.IsEmpty(tasks.Runs);
+
+        var someoneElse = new TaskSchedulerGate(tasks, new GateStore(temp.Path), InstallFolder, TestUsers.Sid, Lookups.Only(@"CONTOSO\owner", "S-1-5-21-1-2-3-1002"),
+            new ManualTime(), (_, ct) => !ct.IsCancellationRequested);
+        Assert.AreEqual(TaskHealth.NeedsRepair, someoneElse.Verify(TaskPlan.GateTaskName).Health);
+
+        // A failed lookup next to another difference is still a task that differs.
+        tasks.Tasks[@"\Earshot\Gate"] = tasks.Tasks[@"\Earshot\Gate"] with { Xml = TaskXml.For(userGate, userId: @"CONTOSO\owner", runLevel: "LeastPrivilege") };
+        Assert.AreEqual(TaskHealth.NeedsRepair, failing.Verify(TaskPlan.GateTaskName).Health);
+    }
+
     [TestMethod]
     public void WithoutAUserSidNothingVerifies()
     {
