@@ -90,8 +90,8 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string BlockAtBootFailedMessage = "Could not change Block at boot. Try again.";
     internal const string InvalidAddressMessage = "That device address is not valid.";
     internal const string DeviceChosenMessage = "Device chosen";
-    internal const string OtherDeviceBlockedMessage = "Allow the current AirPods first, then choose another device.";
-    internal const string OtherDeviceProtectedMessage = "Turn Protect audio quality off first, then choose another device.";
+    internal const string OtherDeviceBlockedMessage = "The current AirPods are still blocked. Connect them, then choose the device again.";
+    internal const string OtherDeviceProtectedMessage = "The current AirPods still have their microphone turned off. Connect them, then choose the device again.";
     internal const string NotAudioSinkMessage = "That device cannot play audio from this PC. Choose headphones or speakers.";
     internal const string DeviceFailedMessage = "Could not choose that device. Try again.";
     internal const string NothingPinnedMessage = "Choose your AirPods first, then set up Earshot.";
@@ -106,6 +106,10 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string RemovedPartlyMessage = "Earshot is mostly removed. Some parts could not be undone.";
     internal const string RemoveCancelledMessage = "Removal was cancelled";
     internal const string RemoveFailedMessage = "Removal did not finish. Try again.";
+
+    // The step that carries the gate's exit code for a set-device that did not move the pin, so the block
+    // coordinator can tell a refusal it can work through from one it cannot.
+    internal const string SetDeviceExitStep = "set-device-exit";
 
     private const uint ErrorCancelled = 1223;
 
@@ -556,6 +560,11 @@ internal sealed class BlockController : IBlockController, IDisposable
         if (after.IsOk && after.Value is not null && string.Equals(after.Value.Address, address12, StringComparison.Ordinal))
         {
             return Finish(GateVerbs.SetDevice, ControllerResult.Ok(DeviceChosenMessage, steps));
+        }
+
+        if (run.Status is { } ran)
+        {
+            steps.Add(ExitStep(SetDeviceExitStep, ran.ExitCode));
         }
 
         string message = run.Status?.ExitCode switch

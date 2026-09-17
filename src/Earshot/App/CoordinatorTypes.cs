@@ -65,9 +65,18 @@ internal enum BlockReason
 {
     Disconnect,       // the user's disconnect: blocks unless Block at boot is now off
     ConnectCleanUp,   // a connect that did not reach ACTIVE undoes its allow, unless the AirPods are in use after all
+    DeviceChangeCleanUp, // a device change whose pin did not move undoes its allow, unless the AirPods are in use
     Idle,             // the idle rule: needs good reads of the nodes and the endpoints
     StartUp,          // the start-up check: the same
     Closing,          // the block before Earshot closes: the same
+}
+
+// Why the gate refused to move the pin, where the device change can do something about it.
+internal enum SetDeviceRefusal
+{
+    None,                // a success, or a refusal nothing here can change (not an audio device, not found, busy)
+    OldDeviceBlocked,    // the device pinned now still has a disabled node
+    OldDeviceProtected,  // protection.json lists services turned off on the device pinned now
 }
 
 // The render side of the device as one snapshot observed it.

@@ -598,7 +598,7 @@ internal sealed partial class GateActions
                     steps.Add(protection.Step);
                     steps.Add(StepOutcomes.NotAttempted("set-device",
                         protection.IsOk
-                            ? "protection.json lists services turned off on the device pinned now. Turn Protect audio quality off first."
+                            ? "protection.json lists services turned off on the device pinned now. Turn them back on (protect-off) first."
                             : "protection.json could not be read, so it may list services turned off on the device pinned now."));
                     return new VerbResult(GateExitCode.OtherDeviceProtected, null);
                 }

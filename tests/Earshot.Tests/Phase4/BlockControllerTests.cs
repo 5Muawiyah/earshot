@@ -445,6 +445,7 @@ public sealed class BlockControllerTests
 
         Assert.AreEqual(BlockController.InvalidAddressMessage, invalid.UserMessage);
         Assert.AreEqual(BlockController.OtherDeviceBlockedMessage, blockedFirst.UserMessage);
+        Assert.AreEqual((int)GateExitCode.OtherDeviceBlocked, blockedFirst.Steps.Single(s => s.Step == BlockController.SetDeviceExitStep).Code);
         Assert.AreEqual(OpStatus.Success, chosen.Status, chosen.UserMessage);
         Assert.AreEqual(BlockController.DeviceChosenMessage, chosen.UserMessage);
         Assert.HasCount(2, h.Tasks.Runs, "The invalid address never reaches the task.");

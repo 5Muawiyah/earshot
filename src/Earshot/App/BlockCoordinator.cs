@@ -498,27 +498,16 @@ internal sealed class BlockCoordinator : IDisposable
     // Choose device. Waits for the operation in flight, its clean-up included, so a re-block after an allow
     // finishes against the device the gate pins now before the pin moves. Refused while a change this tray sent
     // may still run, since the pin would move under it.
+    //
+    // The gate will not move the pin away from a device that is still blocked, or whose services protection.json
+    // lists as turned off, since nothing in Earshot could undo either afterwards. With Block at boot on the
+    // device pinned now is blocked at rest, so those refusals are worked through here, in ProtectionPolicy's
+    // order: allow its nodes, turn its services back on while they are enabled, and ask again. Each step runs at
+    // most once and only on a good read. Once the pin has moved the previous device is left allowed, as Windows
+    // would have it without Earshot. If the pin does not move, what this change did is put back: the block when
+    // Block at boot is on (a Block sequence, which turns protection back on first), otherwise protection alone.
     public Task<ControllerResult> ChangeDeviceAsync(string address12, CancellationToken ct = default) =>
-        RunExclusiveAsync(
-            GateVerbs.SetDevice,
-            _ =>
-            {
-                string? why = AllowMayLand ? "an allow this tray sent may still enable the nodes of the device the gate pins now"
-                    : ProtectMayRun ? ProtectMayRunReason
-                    : null;
-                if (why is not null)
-                {
-                    _log.Warn("set-device: not sent, because " + why + " (until " + Utc(Max(_allowSettlesAt, _protectSettlesAt)) + ").");
-                    return Task.FromResult(new ControllerResult(
-                        OpStatus.NotAttempted,
-                        ChangeStillRunningMessage,
-                        [StepOutcomes.NotAttempted(GateVerbs.SetDevice, "Not sent, because " + why + ".")]));
-                }
-
-                // A gate change, so its result is waited for (see the class comment).
-                return _block.SetDeviceAsync(address12, CancellationToken.None);
-            },
-            ct);
+        RunExclusiveAsync(GateVerbs.SetDevice, token => ChangeDeviceCoreAsync(address12, token), ct);
 
     // Runs a menu action (setup, Block at boot) as an operation, so it never overlaps a connect or a block.
     public Task<ControllerResult> RunAsync(string name, Func<CancellationToken, Task<ControllerResult>> operation, CancellationToken ct = default)
@@ -725,6 +714,164 @@ internal sealed class BlockCoordinator : IDisposable
             _log.Write(LogLevel.Debug, name + ": finished.");
             RaiseChanged();
             EvaluateIdle();
+        }
+    }
+
+    private async Task<ControllerResult> ChangeDeviceCoreAsync(string address12, CancellationToken ct)
+    {
+        string? why = AllowMayLand ? "an allow this tray sent may still enable the nodes of the device the gate pins now"
+            : ProtectMayRun ? ProtectMayRunReason
+            : null;
+        if (why is not null)
+        {
+            _log.Warn("set-device: not sent, because " + why + " (until " + Utc(Max(_allowSettlesAt, _protectSettlesAt)) + ").");
+            return new ControllerResult(
+                OpStatus.NotAttempted,
+                ChangeStillRunningMessage,
+                [StepOutcomes.NotAttempted(GateVerbs.SetDevice, "Not sent, because " + why + ".")]);
+        }
+
+        var steps = new List<StepOutcome>();
+        var undo = new DeviceChangeUndo();
+        try
+        {
+            while (true)
+            {
+                // Nothing more is sent once the change has been cancelled; what was sent is put back below.
+                ct.ThrowIfCancellationRequested();
+
+                // A gate change, so its result is waited for (see the class comment).
+                ControllerResult pin = await _block.SetDeviceAsync(address12, CancellationToken.None);
+                Record(steps, GateVerbs.SetDevice, pin);
+                if (pin.IsSuccess)
+                {
+                    if (undo.AllowIssued || undo.ProtectOffIssued)
+                    {
+                        _log.Info("set-device: the pin moved to " + address12 + "; the previous device is left " +
+                            (undo.AllowIssued ? "allowed" : "with its services on") + ", as Windows would have it without Earshot.");
+                    }
+
+                    return pin with { Steps = steps };
+                }
+
+                SetDeviceRefusal refusal = CoordinatorRules.SetDeviceRefusalOf(pin);
+                bool handledBefore = refusal switch
+                {
+                    SetDeviceRefusal.OldDeviceBlocked => undo.AllowIssued,
+                    SetDeviceRefusal.OldDeviceProtected => undo.ProtectOffIssued,
+                    _ => true,
+                };
+                if (handledBefore)
+                {
+                    return await FailDeviceChangeAsync(pin.Status, pin.UserMessage, steps, undo);
+                }
+
+                ct.ThrowIfCancellationRequested();
+                BootBlockStatus? status = await ReadBlockStatusAsync(ct);
+                if (status is null)
+                {
+                    return await FailDeviceChangeAsync(OpStatus.Failed, BlockStatusUnreadableMessage, steps, undo);
+                }
+
+                if (refusal == SetDeviceRefusal.OldDeviceBlocked)
+                {
+                    // Only on a good read that shows the nodes blocked: a node the gate counts as disabled that is not
+                    // present cannot be allowed from here, and the refusal says what to do then.
+                    if (status.State is not (BlockState.Blocked or BlockState.Mixed))
+                    {
+                        _log.Warn("set-device: the gate still counts the device pinned now as blocked, but the nodes read " + Describe(status) + ", so nothing is allowed.");
+                        return await FailDeviceChangeAsync(pin.Status, pin.UserMessage, steps, undo);
+                    }
+
+                    undo.AllowIssued = true;
+                    undo.BlockAtBoot = status.BlockAtBoot;
+                    undo.Container = status.TargetContainerId;
+                    _log.Info("set-device: the device pinned now is blocked (" + Describe(status) + "), so it is allowed before the pin moves.");
+                    ControllerResult allow = await SendAllowAsync("allow (device change)", steps);
+                    if (!allow.IsSuccess || CoordinatorRules.MayStillRun(allow))
+                    {
+                        return await FailDeviceChangeAsync(OpStatus.Failed, allow.UserMessage, steps, undo);
+                    }
+                }
+                else
+                {
+                    // A service state only changes while every node is enabled (ProtectionPolicy).
+                    if (!ProtectionPolicy.MayChangeServices(CoordinatorRules.PhaseOf(status)))
+                    {
+                        _log.Warn("set-device: protection.json lists services turned off on the device pinned now, but the nodes read " + Describe(status) + ", so they are not turned back on.");
+                        return await FailDeviceChangeAsync(pin.Status, pin.UserMessage, steps, undo);
+                    }
+
+                    undo.ProtectOffIssued = true;
+                    undo.Container = status.TargetContainerId;
+                    _log.Info("set-device: protection.json lists services turned off on the device pinned now, so they are turned back on before the pin moves.");
+                    ControllerResult off = await SendProtectionAsync(false);
+                    Record(steps, GateVerbs.ProtectOff + " (device change)", off);
+                    if (off.Status is OpStatus.Failed or OpStatus.NotAttempted || CoordinatorRules.MayStillRun(off))
+                    {
+                        return await FailDeviceChangeAsync(OpStatus.Failed, off.UserMessage, steps, undo);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            bool cancelled = ex is OperationCanceledException && ct.IsCancellationRequested;
+            if (cancelled)
+            {
+                _log.Info("set-device: cancelled; putting back what it changed before it ends.");
+            }
+            else
+            {
+                _log.Error("set-device: unexpected error; putting back what it changed before it is reported.", ex);
+            }
+
+            await UndoDeviceChangeAsync(steps, undo);
+            throw;
+        }
+    }
+
+    private async Task<ControllerResult> FailDeviceChangeAsync(OpStatus status, string message, List<StepOutcome> steps, DeviceChangeUndo undo)
+    {
+        await UndoDeviceChangeAsync(steps, undo);
+        return new ControllerResult(status is OpStatus.NotAttempted or OpStatus.Partial ? status : OpStatus.Failed, message, steps);
+    }
+
+    // Puts back what a device change that did not move the pin changed, while the pin still names that device. Never
+    // throws: a failure is recorded as a step with its code and logged.
+    private async Task UndoDeviceChangeAsync(List<StepOutcome> steps, DeviceChangeUndo undo)
+    {
+        try
+        {
+            if (undo.AllowIssued && undo.BlockAtBoot)
+            {
+                undo.AllowIssued = false;
+                undo.ProtectOffIssued = false;
+                _log.Info("set-device clean-up: blocking the device pinned now again.");
+                ProtectionRun run = await RunBlockSequenceAsync(BlockReason.DeviceChangeCleanUp, undo.Container, CardPlace.NearTray, CancellationToken.None);
+                steps.AddRange(run.Steps);
+                if (run.Skipped is { } skipped)
+                {
+                    _log.Info("set-device clean-up: the nodes are not blocked again, because " + skipped + ".");
+                }
+                else if (!run.BlockTook)
+                {
+                    _log.Warn("set-device clean-up: the nodes could not be blocked again: " + (run.NodeChange?.UserMessage ?? "no block result") + ".");
+                }
+
+                return;
+            }
+
+            if (undo.ProtectOffIssued)
+            {
+                undo.ProtectOffIssued = false;
+                await PutProtectionBackAsync(steps);
+            }
+        }
+        catch (Exception ex)
+        {
+            steps.Add(StepOutcomes.FromHResult("set-device-clean-up", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false));
+            _log.Error("set-device clean-up failed; the device pinned now may be left allowed or with its services on.", ex);
         }
     }
 
@@ -2225,6 +2372,20 @@ internal sealed class BlockCoordinator : IDisposable
 
     // Why a Block sequence runs and which device its render check watches.
     private readonly record struct BlockCheck(BlockReason Reason, Guid Container);
+
+    // What a device change has done to the device pinned now, to put back if the pin does not move.
+    private sealed class DeviceChangeUndo
+    {
+        public bool AllowIssued { get; set; }
+
+        // Block at boot as read before the allow.
+        public bool BlockAtBoot { get; set; }
+
+        public bool ProtectOffIssued { get; set; }
+
+        // The device pinned now, as the status read before the change named it.
+        public Guid Container { get; set; }
+    }
 
     // What a connect has changed so far and must put back if it does not reach ACTIVE.
     private sealed class ConnectCleanup

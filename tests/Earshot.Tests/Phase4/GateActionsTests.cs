@@ -438,7 +438,7 @@ public sealed class GateActionsTests
         Assert.AreEqual(GateExitCode.OtherDeviceProtected, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
 
         Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
-        Assert.Contains("Turn Protect audio quality off first", h.Status().Steps.Last(s => s.Step == "set-device").Detail!);
+        Assert.Contains("Turn them back on (protect-off) first", h.Status().Steps.Last(s => s.Step == "set-device").Detail!);
         Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.AirPodsAddress), "Re-pinning the same device is fine.");
     }
 

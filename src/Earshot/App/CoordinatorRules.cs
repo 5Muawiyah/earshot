@@ -1,5 +1,7 @@
 using Earshot.Audio.Connect;
 using Earshot.AudioProtection;
+using Earshot.Boot;
+using Earshot.Boot.Gate;
 using Earshot.Contracts;
 
 namespace Earshot.App;
@@ -129,6 +131,24 @@ internal static class CoordinatorRules
         bool sent = result.Steps.Any(s => s.Ok && s.Step.StartsWith(TaskRunStepPrefix, StringComparison.Ordinal));
         bool ended = result.Steps.Any(s => string.Equals(s.Step, TaskEndedStep, StringComparison.Ordinal));
         return sent && !ended;
+    }
+
+    // Why a set-device did not move the pin, from the gate's own exit code, which BlockController records as a step.
+    public static SetDeviceRefusal SetDeviceRefusalOf(ControllerResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.IsSuccess)
+        {
+            return SetDeviceRefusal.None;
+        }
+
+        StepOutcome? exit = result.Steps.LastOrDefault(s => string.Equals(s.Step, BlockController.SetDeviceExitStep, StringComparison.Ordinal));
+        return exit?.Code switch
+        {
+            (int)GateExitCode.OtherDeviceBlocked => SetDeviceRefusal.OldDeviceBlocked,
+            (int)GateExitCode.OtherDeviceProtected => SetDeviceRefusal.OldDeviceProtected,
+            _ => SetDeviceRefusal.None,
+        };
     }
 
     // The message for a disconnect that was not observed, with no other way taken (Block at boot off or not known).
