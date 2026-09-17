@@ -72,16 +72,49 @@ public sealed class DiagConnectTests
         {
             foreach (string filter in new[] { "src", "wave", "all", "phone" })
             {
-                bool dispatcher = Program.TryParseDiagArgs(["diag", "ks", action, filter], out Program.DiagRequest? request, out _);
-                bool target = Program.TryParseDiagKs([action, filter], out _, out _);
-
-                Assert.AreEqual(dispatcher, target, action + " " + filter);
-                if (dispatcher)
+                foreach (string[] extra in new[] { Array.Empty<string>(), ["buffer4"], ["buffer8"], ["buffer4", "buffer4"] })
                 {
-                    Assert.IsTrue(Program.TryParseDiagKs(request!.Args, out _, out _));
+                    string[] args = [action, filter, .. extra];
+                    bool dispatcher = Program.TryParseDiagArgs(["diag", "ks", .. args], out Program.DiagRequest? request, out _);
+                    bool target = Program.TryParseDiagKs(args, out _, out _);
+
+                    Assert.AreEqual(dispatcher, target, string.Join(' ', args));
+                    if (dispatcher)
+                    {
+                        Assert.IsTrue(Program.TryParseDiagKs(request!.Args, out _, out _));
+                    }
                 }
             }
         }
+
+        Assert.IsTrue(Program.TryParseDiagKs(["reconnect", "src", Program.DiagKsBufferArgument], out Program.DiagKsArguments? buffered, out _));
+        Assert.AreEqual(KsPayload.ZeroedFourBytes, buffered.Payload, "The dispatcher's buffer4 is the switch the target reads.");
+    }
+
+    // The recorder is a local of the diag run, so a client whose Unregister failed must be kept elsewhere.
+    [TestMethod]
+    public async Task ARecorderClientWhoseUnregisterFailedOutlivesTheRun()
+    {
+        var log = new CapturingLog();
+        var enumerator = new FakeEnumerator(new ReleaseLedger()) { RegisterHr = 0, UnregisterHr = unchecked((int)0x80004005) };
+        int keptBefore = NotificationRecorder.Kept.Count;
+        StepOutcome unregister;
+        await using (var worker = new AudioWorker(log, (out IMMDeviceEnumerator? created) =>
+        {
+            created = enumerator;
+            return 0;
+        }))
+        {
+            var recorder = new NotificationRecorder(TimeProvider.System);
+            StepOutcome register = await worker.RunAsync(_ => recorder.Register(worker));
+            Assert.IsTrue(register.Ok, register.CodeName);
+
+            unregister = await worker.RunAsync(_ => recorder.Unregister(worker, log));
+        }
+
+        Assert.IsFalse(unregister.Ok);
+        Assert.IsGreaterThan(keptBefore, NotificationRecorder.Kept.Count, "The client is kept for the rest of the process.");
+        Assert.IsTrue(log.Has(LogLevel.Error, "could not be unregistered"));
     }
 
     [TestMethod]
