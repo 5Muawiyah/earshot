@@ -1020,6 +1020,8 @@ internal sealed class FakeDeviceMonitor : IDeviceMonitor
 
     public Task<DeviceSnapshot> RefreshAsync(CancellationToken ct = default) => Task.FromResult(Current);
 
+    public bool WatchFailed => false;
+
     // Raised on the calling thread, which in these tests is the UI thread, as the contract requires.
     public void Raise(DeviceSnapshot snapshot)
     {

@@ -25,6 +25,9 @@ public interface IDeviceMonitor : IDisposable
     event EventHandler<DeviceSnapshotEventArgs>? SnapshotChanged; // raised on the UI sync context
     void Start();
     Task<DeviceSnapshot> RefreshAsync(CancellationToken ct = default);
+
+    // True once watching for endpoint changes has failed: Current and SnapshotChanged then follow RefreshAsync only.
+    bool WatchFailed { get; }
 }
 
 public interface IConnectionController                            // pure Core Audio / IKsControl; no admin

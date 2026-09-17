@@ -451,6 +451,67 @@ public sealed class IdleRuleTests
     }
 
     [TestMethod]
+    public void AnIdleBlockReadsTheDeviceFirstAndHoldsOffForUseNoNotificationHasReportedYet()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Publish(Devices.Idle(2));
+        h.Advance(JustUnderGrace);
+
+        // Back in use, but the notification is still on its way.
+        h.Monitor.Set(Devices.Active(3));
+        h.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.IsEmpty(h.Block.Calls, "The idle block acted on a snapshot the device no longer showed.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "no block sent, because the AirPods are in use"));
+    }
+
+    [TestMethod]
+    public void WithChangesNotWatchedTheAirPodsAreReadOnATimerAndBlockedOnceOutOfUse()
+    {
+        using var h = new CoordinatorHarness();
+        h.Monitor.WatchFailed = true;
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "In use settles nothing while no notification can say when it ends.");
+        Assert.AreEqual(1, h.Cards.Statuses.Count(s => s == BlockCoordinator.ChangesNotWatchedMessage));
+
+        // Out of use, and no notification says so.
+        h.Monitor.Set(Devices.Idle(2));
+        h.Advance(BlockCoordinator.RecheckDelay);
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning, "The read on the timer did not see the AirPods leave.");
+
+        h.Advance(BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+        Assert.AreEqual(1, h.Cards.Statuses.Count(s => s == BlockCoordinator.ChangesNotWatchedMessage), "The card is shown once.");
+    }
+
+    [TestMethod]
+    public void WithChangesNotWatchedTheReadsInUseNeverWaitLongerThanTheirLimit()
+    {
+        using var h = new CoordinatorHarness();
+        h.Monitor.WatchFailed = true;
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        // In use for a long listen: the reads go on, however long it lasts.
+        for (int i = 0; i < 10; i++)
+        {
+            h.Advance(BlockCoordinator.UnwatchedRecheckLimit);
+            Assert.IsTrue(h.Coordinator.RecheckRunning);
+        }
+
+        Assert.IsEmpty(h.Block.Calls);
+        h.Monitor.Set(Devices.Idle(2));
+        h.Advance(BlockCoordinator.UnwatchedRecheckLimit + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The AirPods leaving was not acted on within the read limit and the grace period.");
+    }
+
+    [TestMethod]
     public void ClosingWithoutExitIssuesNoBlock()
     {
         using CoordinatorHarness h = InUse();

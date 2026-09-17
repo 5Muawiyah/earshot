@@ -95,6 +95,7 @@ internal sealed class BlockCoordinator : IDisposable
     public const string BlockAtBootOffMessage = "Block at boot is off";
     public const string BlockAtBootOffStillBlockedMessage = "Block at boot is off, but the AirPods are still blocked. Connect to allow them.";
     public const string BlockAtBootOffMayStillBeBlockedMessage = "Block at boot is off, but the AirPods may still be blocked. Connect to allow them.";
+    public const string ChangesNotWatchedMessage = "Earshot cannot see audio device changes, so blocking may be late.";
 
     // How long render must stay not ACTIVE, with nothing in flight, before the nodes are blocked again. A
     // conservative waiting budget, not a measured figure: long enough that the churn of a protection change or a
@@ -109,6 +110,11 @@ internal sealed class BlockCoordinator : IDisposable
     // nodes may be enabled. It doubles after each such read in a row, up to IdleRetryLimit. A waiting budget, not
     // a measured figure.
     public static readonly TimeSpan RecheckDelay = TimeSpan.FromSeconds(30);
+
+    // While watching for endpoint changes has failed, nothing says when the AirPods stop being used, so the device is
+    // read again on a timer while the nodes may be enabled: RecheckDelay, doubling up to this. A waiting budget, not
+    // a measured figure: it bounds how late the idle block can start.
+    public static readonly TimeSpan UnwatchedRecheckLimit = TimeSpan.FromMinutes(2);
 
     // How long a gate change whose end was not seen may still run: the \Earshot\Protect task's PT5M execution
     // limit (the longer of the Gate and Protect limits), plus a margin for a run the scheduler queued behind
@@ -194,6 +200,7 @@ internal sealed class BlockCoordinator : IDisposable
     private BootBlockStatus? _statusAtIdleFailure;
 
     private bool _noticeShowing;
+    private bool _unwatchedNoted;
     private bool _statusRefreshInFlight;
     private bool _statusRefreshAgain;
     private bool _started;
@@ -1615,8 +1622,10 @@ internal sealed class BlockCoordinator : IDisposable
             return null;
         }
 
-        // Protection was changed first, which takes time and churns the endpoints, so the device is read again.
-        DeviceSnapshot? now = refreshSnapshot ? await RefreshSnapshotAsync() : _snapshot;
+        // The device is read again when protection was changed first, which takes time and churns the endpoints,
+        // and before every automatic block, which acts only on what a read shows now: a notification can be late,
+        // and none comes at all when watching for changes failed.
+        DeviceSnapshot? now = refreshSnapshot || automatic ? await RefreshSnapshotAsync() : _snapshot;
         RenderState render = now is null ? RenderState.Unknown : CoordinatorRules.RenderOf(now, check.Container);
         if (render == RenderState.Active)
         {
@@ -1950,9 +1959,11 @@ internal sealed class BlockCoordinator : IDisposable
             return ("the nodes read " + _blockStatus.State, unknown);
         }
 
+        // In use settles nothing while changes are not watched: no notification would say when that ends.
         return CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) switch
         {
             RenderState.Unknown => ("the device state is not known", IdleVerdict.Unsettled),
+            RenderState.Active when _monitor.WatchFailed => (InUseReason + " and changes are not watched", IdleVerdict.Unsettled),
             RenderState.Active => (InUseReason, IdleVerdict.Settled),
             _ => ("", IdleVerdict.Due),
         };
@@ -1960,6 +1971,7 @@ internal sealed class BlockCoordinator : IDisposable
 
     private void EvaluateIdle()
     {
+        NoteUnwatched();
         (string why, IdleVerdict verdict) = IdleCheck();
         if (verdict != IdleVerdict.Due)
         {
@@ -2007,6 +2019,23 @@ internal sealed class BlockCoordinator : IDisposable
         wait.Cancel();
     }
 
+    // Watching for endpoint changes failed, which the idle rule depends on to see the AirPods leave: it reads the
+    // device on a timer instead (IdleCheck, RecheckAsync). Logged and shown once, and only where the boot block
+    // could act at all: set up, with Block at boot on.
+    private void NoteUnwatched()
+    {
+        if (_unwatchedNoted || !_monitor.WatchFailed || _closing || _disposed ||
+            _blockStatus is not { BlockAtBoot: true } status || status.State == BlockState.NotSetUp)
+        {
+            return;
+        }
+
+        _unwatchedNoted = true;
+        _log.Warn("Audio device changes are not watched, so the AirPods are read again every " + Seconds(RecheckDelay) + " to " +
+            Seconds(UnwatchedRecheckLimit) + " while the nodes may be enabled, and an automatic block may start late.");
+        CardPlace.NearTray.Show(_cards, TrayStatus.DeviceName(_snapshot, Settings), ChangesNotWatchedMessage);
+    }
+
     // Reads the state again later, because the last read could not settle whether the nodes need blocking. The
     // wait doubles after each such read in a row, and ends early when a change that may still run is due to end.
     private void ScheduleRecheck(string why)
@@ -2016,7 +2045,7 @@ internal sealed class BlockCoordinator : IDisposable
             return;
         }
 
-        TimeSpan delay = Doubled(RecheckDelay, _rechecksInARow);
+        TimeSpan delay = Doubled(RecheckDelay, _rechecksInARow, _monitor.WatchFailed ? UnwatchedRecheckLimit : IdleRetryLimit);
         DateTimeOffset now = _time.GetUtcNow();
         delay = EndsSooner(delay, _allowSettlesAt - now);
         delay = EndsSooner(delay, _protectSettlesAt - now);
@@ -2073,7 +2102,7 @@ internal sealed class BlockCoordinator : IDisposable
             }
 
             _rechecksInARow++;
-            if (CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) == RenderState.Unknown)
+            if (_monitor.WatchFailed || CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) == RenderState.Unknown)
             {
                 await RefreshSnapshotAsync();
             }
@@ -2439,15 +2468,16 @@ internal sealed class BlockCoordinator : IDisposable
         }
     }
 
-    private static TimeSpan Doubled(TimeSpan start, int times)
+    private static TimeSpan Doubled(TimeSpan start, int times, TimeSpan? limit = null)
     {
+        TimeSpan most = limit ?? IdleRetryLimit;
         TimeSpan delay = start;
-        for (int i = 0; i < times && delay < IdleRetryLimit; i++)
+        for (int i = 0; i < times && delay < most; i++)
         {
             delay += delay;
         }
 
-        return delay < IdleRetryLimit ? delay : IdleRetryLimit;
+        return delay < most ? delay : most;
     }
 
     private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;

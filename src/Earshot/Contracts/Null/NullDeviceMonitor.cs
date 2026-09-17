@@ -25,6 +25,9 @@ public sealed class NullDeviceMonitor : IDeviceMonitor
 
     public Task<DeviceSnapshot> RefreshAsync(CancellationToken ct = default) => Task.FromResult(Current);
 
+    // Nothing is watched, but nothing failed either: there is no device to follow.
+    public bool WatchFailed => false;
+
     public void Dispose()
     {
     }

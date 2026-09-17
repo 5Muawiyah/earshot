@@ -99,6 +99,7 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
 
         CollectionAssert.AreEqual(SubscribeThenEnumerate, _source.Calls.ToArray());
         Assert.IsTrue(_log.Has(LogLevel.Info, "Watching audio devices for changes."));
+        Assert.IsFalse(_monitor.WatchFailed);
     }
 
     [TestMethod]
@@ -618,9 +619,13 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
     public async Task ASubscribeFailureIsLoggedAndDiscoveryStillWorks()
     {
         _source.SubscribeResult = StepOutcomes.FromHResult(AudioWorker.Steps.RegisterClient, unchecked((int)0x80004005));
+        Assert.IsFalse(_monitor.WatchFailed, "Nothing has failed before Start.");
 
         _monitor.Start();
         await Eventually.True(() => Raised == 1, "the first snapshot");
+
+        // Set before the first snapshot is published, so the coordinator sees it from its first handler on.
+        Assert.IsTrue(_monitor.WatchFailed);
 
         Assert.IsTrue(_log.Has(LogLevel.Error, "Could not watch audio devices for changes: register-notification-client E_FAIL"));
         Assert.AreEqual(AirPodsContainer, _monitor.Current.Target?.ContainerId);

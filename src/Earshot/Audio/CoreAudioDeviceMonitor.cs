@@ -73,6 +73,7 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     private int _started;
     private int _disposed;
     private int _refreshPending;
+    private int _watchFailed;
     private long _notificationCount;
     private long _enumerationCount;
 
@@ -140,6 +141,10 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     internal long EnumerationCount => Interlocked.Read(ref _enumerationCount);
 
     private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+    // Set on the worker when the notification client could not be registered, before the enumeration that
+    // follows publishes, so a handler of that first SnapshotChanged already sees it.
+    public bool WatchFailed => Volatile.Read(ref _watchFailed) != 0;
 
     public void Start()
     {
@@ -277,6 +282,7 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
         }
         else
         {
+            Volatile.Write(ref _watchFailed, 1);
             _log.Error("Could not watch audio devices for changes: " + Describe(subscribe) +
                        ". The device state updates only when it is refreshed.");
         }

@@ -234,6 +234,8 @@ internal sealed class FakeDeviceMonitor(TimeProvider time) : IDeviceMonitor
         return OnRefresh is { } refresh ? refresh(ct) : Task.FromResult(Snapshot());
     }
 
+    public bool WatchFailed => false;
+
     public void Dispose()
     {
     }

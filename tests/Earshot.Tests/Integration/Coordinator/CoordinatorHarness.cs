@@ -395,6 +395,9 @@ internal sealed class FakeMonitor : IDeviceMonitor
     // driver call that has not returned, the worst case, since a refresh still queued would at least be cancelled.
     public bool RefreshStalls { get; set; }
 
+    // Watching for endpoint changes failed at start: no notification ever comes, and only a refresh reads the device.
+    public bool WatchFailed { get; set; }
+
     public event EventHandler<DeviceSnapshotEventArgs>? SnapshotChanged;
 
     public void Start()
