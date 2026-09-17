@@ -47,8 +47,10 @@ internal sealed record ConfirmationResult(
 //
 // Unreachable. A snapshot taken after the request can show that the wanted state cannot come: the container has
 // no render endpoint any more, or, for a connect, no render endpoint that could become ACTIVE (every one
-// NOTPRESENT, as when its adapter is removed or disabled, or DISABLED in Sound settings). When the newest
-// snapshot seen shows that, the wait ends at once rather than at the timeout.
+// NOTPRESENT, as when its adapter is removed or disabled, or DISABLED in Sound settings), or, for a disconnect,
+// every render endpoint DISABLED, which hides the link state. When the newest snapshot seen shows that, the wait
+// ends at once rather than at the timeout. A snapshot holding a render endpoint whose container could not be
+// read never ends a wait this way (MayHideTheDevice).
 //
 // Race safety. The wait is armed first (a TaskCompletionSource plus the SnapshotChanged subscription), and
 // only then is the monitor refreshed. A state reached before arming shows in that refresh and completes the
@@ -56,15 +58,13 @@ internal sealed record ConfirmationResult(
 // between the two and turn into a false timeout.
 //
 // Stale evidence. SnapshotChanged is delivered through the UI post, so an event published before the request
-// can still arrive after arming. Only snapshots whose TakenUtc is later than requestedUtc count. The caller
-// stamps requestedUtc on the audio worker at the start of the work item that reads the endpoints and sends. The
-// monitor builds and stamps its snapshots on that worker too, one item at a time, and after an enumeration it
-// builds from that enumeration's readings, so the snapshot of an enumeration that ran before the request carries
-// an earlier time. A refresh whose enumeration failed hands back the current snapshot, which keeps the time of
-// the last enumeration that worked and is ignored the same way when it is older than the request. A rebuild
-// after a settings change keeps the time of the enumeration it was built from too. One gap remains: both times
-// are wall-clock times, so a clock step while the operation runs can make a snapshot look newer or older than
-// it is. DeviceSnapshot.Sequence, the monitor's monotonic enumeration number, would close it.
+// can still arrive after arming. Only snapshots the monitor numbered above requestedSequence count, and only
+// snapshots of a read that worked (SnapshotReadStatus.Ok): a failed read keeps the devices and the number of
+// the last enumeration that worked, so it is never taken as evidence either way. The caller reads the number on
+// the audio worker at the start of the work item that reads the endpoints and sends; the monitor numbers its
+// enumerations on that same worker, one item at a time, so every snapshot above that number was enumerated
+// after the request. A rebuild after a settings change keeps the number of the enumeration it was built from,
+// so it can never look newer than it is, and a clock step during the operation changes nothing.
 //
 // Timeout and cancellation. The timeout is a CancellationTokenSource with CancelAfter; the caller's token is
 // linked to it. Either ends the wait only: a request already sent is never recalled. The timeout returns a
@@ -119,16 +119,33 @@ internal sealed class ConfirmationWaiter
         };
     }
 
-    // True when the endpoints show that the wanted state can no longer come: no render endpoint, or, for a
-    // connect, every render endpoint NOTPRESENT or DISABLED. Only an ACTIVE endpoint can stream, and only a present,
-    // enabled endpoint can become ACTIVE.
+    // True when the endpoints show that the wanted state can no longer come, or can no longer be seen: no render
+    // endpoint; for a connect, every render endpoint NOTPRESENT or DISABLED (only a present, enabled endpoint can
+    // become ACTIVE); for a disconnect, every render endpoint DISABLED. A render endpoint turned off in Sound
+    // settings reports DISABLED whether or not the link is up, so it can never show UNPLUGGED, and the capture
+    // side alone cannot stand in for it: with Protect audio quality on there is no Hands-Free capture endpoint at
+    // all. Nothing is then claimed either way.
     // https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-state-xxx-constants
     public static bool IsUnreachable(IEnumerable<AudioEndpoint> endpoints, ConnectAction action)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         List<AudioEndpoint> render = endpoints.Where(e => e.Flow == EndpointFlow.Render).ToList();
-        return render.Count == 0 ||
-               (action == ConnectAction.Connect && render.All(e => e.State is EndpointState.NotPresent or EndpointState.Disabled));
+        return render.Count == 0 || action switch
+        {
+            ConnectAction.Connect => render.All(e => e.State is EndpointState.NotPresent or EndpointState.Disabled),
+            ConnectAction.Disconnect => render.All(e => e.State == EndpointState.Disabled),
+            _ => false,
+        };
+    }
+
+    // True when the snapshot holds a render endpoint whose container could not be read (the builder groups
+    // those under Guid.Empty). One of them could be the device's, so an empty-looking container is not proof
+    // that the device went: the wait then runs to its timeout rather than report it gone.
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/container-ids
+    internal static bool MayHideTheDevice(DeviceSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return snapshot.AllGroups.Any(g => g.ContainerId == Guid.Empty && g.Endpoints.Any(e => e.Flow == EndpointFlow.Render));
     }
 
     // The container's endpoints in a snapshot, or none when the container is not in it.
@@ -140,13 +157,17 @@ internal sealed class ConfirmationWaiter
         return group?.Endpoints ?? Array.Empty<AudioEndpoint>();
     }
 
+    // The monitor's enumeration number now. Read on the audio worker at the start of a send, so every later
+    // enumeration carries a higher number.
+    public long CurrentSequence => _monitor.Current.Sequence;
+
     public async Task<ConfirmationResult> WaitAsync(
-        Guid container, ConnectAction action, TimeSpan timeout, DateTimeOffset requestedUtc, CancellationToken ct = default)
+        Guid container, ConnectAction action, TimeSpan timeout, long requestedSequence, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
         ct.ThrowIfCancellationRequested();
 
-        var wait = new Wait(container, action, requestedUtc, _time, _log);
+        var wait = new Wait(container, action, requestedSequence, _time, _log);
         EventHandler<DeviceSnapshotEventArgs> handler = wait.OnSnapshotChanged;
 
         // 1. Arm.
@@ -182,7 +203,7 @@ internal sealed class ConfirmationWaiter
     {
         private readonly Guid _container;
         private readonly ConnectAction _action;
-        private readonly DateTimeOffset _requestedUtc;
+        private readonly long _requestedSequence;
         private readonly TimeProvider _time;
         private readonly ILog _log;
         private readonly long _armed;
@@ -194,11 +215,11 @@ internal sealed class ConfirmationWaiter
         private int _stale;
         private long _stopped;
 
-        public Wait(Guid container, ConnectAction action, DateTimeOffset requestedUtc, TimeProvider time, ILog log)
+        public Wait(Guid container, ConnectAction action, long requestedSequence, TimeProvider time, ILog log)
         {
             _container = container;
             _action = action;
-            _requestedUtc = requestedUtc;
+            _requestedSequence = requestedSequence;
             _time = time;
             _log = log;
             _armed = time.GetTimestamp();
@@ -258,8 +279,10 @@ internal sealed class ConfirmationWaiter
                 return;
             }
 
-            if (snapshot.TakenUtc <= _requestedUtc)
+            if (snapshot.ReadStatus != SnapshotReadStatus.Ok || snapshot.Sequence <= _requestedSequence)
             {
+                // Either the read failed (so the devices in it are the last known, not an observation) or it
+                // was enumerated before the request.
                 Interlocked.Increment(ref _stale);
                 return;
             }
@@ -268,7 +291,7 @@ internal sealed class ConfirmationWaiter
             bool newest;
             lock (_gate)
             {
-                newest = _last is null || snapshot.TakenUtc >= _last.TakenUtc;
+                newest = _last is null || snapshot.Sequence >= _last.Sequence;
                 if (newest)
                 {
                     _last = snapshot;
@@ -280,7 +303,7 @@ internal sealed class ConfirmationWaiter
             {
                 End(snapshot, reached: true, source);
             }
-            else if (newest && IsUnreachable(endpoints, _action))
+            else if (newest && IsUnreachable(endpoints, _action) && !MayHideTheDevice(snapshot))
             {
                 // Only the newest snapshot seen can end the wait this way; an older one is already out of date.
                 End(snapshot, reached: false, source);

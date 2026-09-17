@@ -26,7 +26,8 @@ internal static class ConnectMessages
     public const string CouldNotReadDevices = "Could not read the audio devices. Try again.";
 
     // Connect, and every render endpoint is DISABLED (or NOTPRESENT with at least one DISABLED), so no request
-    // could turn into an ACTIVE endpoint.
+    // could turn into an ACTIVE endpoint; or disconnect, and every render endpoint is DISABLED, so no disconnect
+    // could be seen.
     public const string OutputTurnedOff = "The AirPods output is turned off in Sound settings.";
 
     // No endpoint in the device's container.

@@ -203,6 +203,63 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
         Assert.IsEmpty(_path.Sends);
     }
 
+    // A render endpoint turned off in Sound settings hides the link state: no disconnect could be seen, so
+    // nothing is sent and the message says why rather than claim the AirPods disconnected.
+    [TestMethod]
+    [DataRow(EndpointState.Unplugged)]
+    [DataRow(EndpointState.Active)]
+    public async Task DisconnectWithTheOutputTurnedOffSendsNothingAndSaysWhy(EndpointState capture)
+    {
+        Device(Render(EndpointState.Disabled), Capture(capture));
+        Filters(SOk, SOk);
+
+        ConnectResult result = await _controller.DisconnectAsync(AirPodsContainer).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.OutputTurnedOff, result.UserMessage);
+        Assert.IsEmpty(_path.Sends);
+        Assert.AreEqual(0, _monitor.RefreshCalls);
+    }
+
+    [TestMethod]
+    public async Task DisconnectEndsWithTheOutputMessageWhenTheOutputIsTurnedOffDuringTheWait()
+    {
+        Device(Render(EndpointState.Active), Capture(EndpointState.Active));
+        Filters(SOk, SOk);
+
+        Task<ConnectResult> disconnecting = _controller.DisconnectAsync(AirPodsContainer);
+        await Armed();
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Disabled), Capture(EndpointState.Unplugged)));
+        ConnectResult result = await disconnecting.WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.OutputTurnedOff, result.UserMessage);
+    }
+
+    // A driver that never returns must not leave the click in flight with no message.
+    [TestMethod]
+    public async Task ADriverThatDoesNotAnswerEndsTheOperationWithAMessage()
+    {
+        using var stuck = new ManualResetEventSlim();
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(SOk, SOk);
+        _path.DuringSend = () => stuck.Wait(TimeSpan.FromSeconds(30));
+
+        Task<ConnectResult> connecting = _controller.ConnectAsync(AirPodsContainer);
+        await Eventually.True(() => _time.ArmedTimers == 1, "the budget for the driver call to arm");
+        _time.Advance(ConnectionController.PassBudget);
+        ConnectResult result = await connecting.WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.AttemptedTimedOut, result.Outcome);
+        Assert.AreEqual(ConnectMessages.StillConnecting, result.UserMessage);
+        StepOutcome stalled = result.Steps.Single();
+        Assert.AreEqual(ConnectionController.StalledStep, stalled.Step);
+        Assert.AreEqual(NativeCodes.NotAttempted, stalled.Code);
+
+        stuck.Set();
+        await _worker.RunAsync(_ => 0).WaitAsync(Guard);
+    }
+
     [TestMethod]
     public async Task DisconnectWithAnActiveHandsFreeLinkSendsAndWaitsForItToEnd()
     {
@@ -502,23 +559,52 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
         Assert.IsTrue(logged.Message.Contains("ks-reconnect:src S_OK", StringComparison.Ordinal), "The request already sent is in the log.");
     }
 
+    // The walk stopping is not a reason to lose what each filter did: the caller needs those steps to tell
+    // "the A2DP filter refused" from "nothing responded" (the Hands-Free fallback rests on that).
     [TestMethod]
-    public async Task AWalkThatThrowsWithNothingAcceptedIsLoggedAndRethrown()
+    public async Task AWalkThatThrowsWithNothingAcceptedIsLoggedAndReportedWithEveryStep()
     {
         var error = new InvalidOperationException("walk failed");
         Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
         Filters(EFail, null);
         _path.Fault = error;
 
-        InvalidOperationException thrown = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard));
+        ConnectResult result = await _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard);
 
-        Assert.AreSame(error, thrown);
-        Assert.IsTrue(_log.Has(LogLevel.Error, "ks-reconnect:src E_FAIL"), "The rejected request is in the log before the exception leaves.");
-        Assert.AreEqual(0, _monitor.RefreshCalls);
+        Assert.AreEqual(ConnectOutcome.NoFiltersResponded, result.Outcome);
+        Assert.AreEqual(ConnectMessages.CouldNotReachDriver, result.UserMessage);
+        StepOutcome rejected = result.Steps.Single(s => s.Step == "ks-reconnect:src");
+        Assert.AreEqual(EFail, rejected.Code);
+        Assert.AreEqual(FilterRole.A2dp, KsConnectPath.RoleOfStep(rejected));
+        Assert.IsTrue(_log.Has(LogLevel.Error, "the walk to the filters stopped with an exception"));
+        Assert.AreEqual(0, _monitor.RefreshCalls, "Nothing was accepted, so nothing is waited for.");
     }
 
     // Cancellation
+
+    // A newer click cancels this one while the A2DP filter is still in the driver: what was sent stays sent,
+    // and the Hands-Free filter is not sent anything afterwards.
+    [TestMethod]
+    public async Task CancellingBetweenTwoFiltersStopsTheWalkBeforeTheSecond()
+    {
+        using var cts = new CancellationTokenSource();
+        Device(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
+        Filters(SOk, SOk);
+        _path.AfterFilter = index =>
+        {
+            if (index == 0)
+            {
+                cts.Cancel();
+            }
+        };
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => _controller.ConnectAsync(AirPodsContainer, cts.Token).WaitAsync(Guard));
+
+        Assert.IsTrue(_log.Entries.Any(e => e.Message.Contains("cancelled before this filter", StringComparison.Ordinal)),
+            "The Hands-Free filter was sent nothing, and the log says why.");
+        Assert.IsTrue(_log.Entries.Any(e => e.Message.Contains("ks-reconnect:src S_OK", StringComparison.Ordinal)),
+            "The request already sent stays sent.");
+    }
 
     [TestMethod]
     public async Task CancellingDuringTheWaitThrowsAndTheRequestStaysSent()
@@ -610,6 +696,59 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
         Assert.AreEqual(ConnectDecision.NotFound, ConnectionController.Decide(ConnectAction.Disconnect, Read(Capture(EndpointState.Active))),
             "Without a render endpoint no state could confirm a request, so none is sent.");
         Assert.AreEqual(ConnectDecision.NotFound, ConnectionController.Decide(ConnectAction.Connect, Read(Capture(EndpointState.Unplugged))));
+        Assert.AreEqual(ConnectDecision.OutputDisabled, ConnectionController.Decide(ConnectAction.Disconnect, Read(Render(EndpointState.Disabled))),
+            "Every render endpoint turned off: no disconnect could be seen, so nothing is sent.");
+        Assert.AreEqual(ConnectDecision.OutputDisabled, ConnectionController.Decide(ConnectAction.Disconnect,
+            Read(Render(EndpointState.Disabled), Capture(EndpointState.Active))));
+    }
+
+    // "Not found" is a claim about the device. When a read failure could have kept the device's own render
+    // endpoint out of its container, the decision is a failed read instead.
+    [TestMethod]
+    [DataRow(CoreAudioEndpointReader.ContainerStep)]
+    [DataRow(CoreAudioEndpointReader.StoreStep)]
+    [DataRow(CoreAudioEndpointReader.IdStep)]
+    [DataRow(CoreAudioEndpointReader.FlowStep)]
+    [DataRow(CoreAudioEndpointReader.ItemStep)]
+    public void AReadFailureThatCouldHideTheRenderEndpointIsNotNotFound(string failedStep)
+    {
+        AudioEndpoint unreadable = Render(EndpointState.Active) with { ContainerId = Guid.Empty, EndpointId = "{0.0.0.00000000}.{unreadable}" };
+        var enumeration = new EndpointEnumeration(true,
+            [EndpointReading.Of(Capture(EndpointState.Active)), EndpointReading.Of(unreadable)],
+            [StepOutcomes.FromHResult(failedStep + ":" + unreadable.EndpointId, EFail)]);
+
+        EndpointRead read = EndpointRead.From(enumeration, AirPodsContainer);
+
+        Assert.IsTrue(ConnectionController.HidesAnEndpoint(read));
+        Assert.AreEqual(ConnectDecision.ReadFailed, ConnectionController.Decide(ConnectAction.Connect, read));
+        Assert.AreEqual(ConnectDecision.ReadFailed, ConnectionController.Decide(ConnectAction.Disconnect, read));
+    }
+
+    [TestMethod]
+    public void AFailedNameReadHidesNothing()
+    {
+        var enumeration = new EndpointEnumeration(true,
+            [EndpointReading.Of(Capture(EndpointState.Active))],
+            [StepOutcomes.FromHResult(CoreAudioEndpointReader.FriendlyNameStep + ":" + AirPodsCaptureId, EFail)]);
+
+        EndpointRead read = EndpointRead.From(enumeration, AirPodsContainer);
+
+        Assert.IsFalse(ConnectionController.HidesAnEndpoint(read));
+        Assert.AreEqual(ConnectDecision.NotFound, ConnectionController.Decide(ConnectAction.Connect, read));
+    }
+
+    [TestMethod]
+    public async Task AConnectWhoseReadCouldHideTheDeviceSaysTheReadFailed()
+    {
+        AudioEndpoint unreadable = Render(EndpointState.Unplugged) with { ContainerId = Guid.Empty, EndpointId = "{0.0.0.00000000}.{unreadable}" };
+        Device(Capture(EndpointState.Unplugged), unreadable);
+        _path.ReadSteps = [StepOutcomes.FromHResult(CoreAudioEndpointReader.ContainerStep + ":" + unreadable.EndpointId, EFail)];
+
+        ConnectResult result = await _controller.ConnectAsync(AirPodsContainer).WaitAsync(Guard);
+
+        Assert.AreEqual(ConnectOutcome.Failed, result.Outcome);
+        Assert.AreEqual(ConnectMessages.CouldNotReadDevices, result.UserMessage);
+        Assert.IsEmpty(_path.Sends);
     }
 
     [TestMethod]

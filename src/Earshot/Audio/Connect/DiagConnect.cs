@@ -101,6 +101,7 @@ internal static partial class Program
         KsSendResult? send = null;
         ConfirmationResult? confirmation = null;
         DateTimeOffset? requested = null;
+        long sequence = 0;
         Guid container = Guid.Empty;
         string? failure = null;
 
@@ -116,14 +117,15 @@ internal static partial class Program
             }
             else
             {
-                (read, send, requested) = worker.RunAsync(_ =>
+                (read, send, requested, sequence) = worker.RunAsync(_ =>
                 {
                     DateTimeOffset at = DateTimeOffset.UtcNow;
+                    long atSequence = waiter.CurrentSequence;
                     EndpointRead endpoints = path.ReadEndpoints(container);
                     KsSendResult? sent = endpoints.Ok && endpoints.Endpoints.Count > 0
-                        ? path.Send(container, endpoints.Endpoints, arguments.Action, arguments.Filters, arguments.Payload)
+                        ? path.Send(container, endpoints.Endpoints, arguments.Action, arguments.Filters, arguments.Payload, CancellationToken.None)
                         : null;
-                    return (endpoints, sent, (DateTimeOffset?)at);
+                    return (endpoints, sent, (DateTimeOffset?)at, atSequence);
                 }).GetAwaiter().GetResult();
 
                 if (send?.Fault is Exception fault)
@@ -137,8 +139,8 @@ internal static partial class Program
                     // Watch for the connect timeout whatever the HRESULTs were, so a change after a refused request
                     // is recorded too.
                     TimeSpan window = ConfirmationWaiter.TimeoutFor(ConnectAction.Connect);
-                    confirmation = waiter.WaitAsync(container, arguments.Action, window, requested!.Value).GetAwaiter().GetResult();
-                    TimeSpan remaining = requested.Value + window - DateTimeOffset.UtcNow;
+                    confirmation = waiter.WaitAsync(container, arguments.Action, window, sequence).GetAwaiter().GetResult();
+                    TimeSpan remaining = (requested ?? DateTimeOffset.UtcNow) + window - DateTimeOffset.UtcNow;
                     if (remaining > TimeSpan.Zero)
                     {
                         Task.Delay(remaining).GetAwaiter().GetResult();
@@ -159,7 +161,7 @@ internal static partial class Program
         }
         finally
         {
-            recorderSteps.Add(worker.RunAsync(_ => recorder.Unregister(worker)).GetAwaiter().GetResult());
+            recorderSteps.Add(worker.RunAsync(_ => recorder.Unregister(worker, log)).GetAwaiter().GetResult());
         }
 
         var evidence = new DiagConnectEvidence("ks", ctx.Args, arguments.Action, arguments.Filters, started, DateTimeOffset.UtcNow,
@@ -344,7 +346,7 @@ internal static partial class Program
         }
         finally
         {
-            recorderSteps.Add(worker.RunAsync(_ => recorder.Unregister(worker)).GetAwaiter().GetResult());
+            recorderSteps.Add(worker.RunAsync(_ => recorder.Unregister(worker, log)).GetAwaiter().GetResult());
         }
 
         var evidence = new DiagConnectEvidence(target, ctx.Args, action, FilterChoice.All, started, DateTimeOffset.UtcNow,
@@ -648,6 +650,10 @@ internal sealed class NotificationRecorder
     internal const string RegisterStep = "register-diag-notification-client";
     internal const string UnregisterStep = "unregister-diag-notification-client";
 
+    // Clients whose Unregister failed, kept for the rest of the process: MMDevAPI does not AddRef the client,
+    // so one it may still call must not be collected. Static, because a recorder itself is a local of the run.
+    private static readonly List<NotificationClient> KeptAfterFailedUnregister = new();
+
     private readonly ConcurrentStack<RecordedNotification> _entries = new();
     private readonly TimeProvider _time;
     private long _sequence;
@@ -689,9 +695,16 @@ internal sealed class NotificationRecorder
         return StepOutcomes.FromHResult(RegisterStep, hr);
     }
 
-    // Audio worker thread only. After a failed Unregister the client stays referenced, because MMDevAPI may still
-    // call it.
-    public StepOutcome Unregister(AudioWorker worker)
+    // The clients kept after a failed Unregister, for the tests.
+    internal static IReadOnlyList<NotificationClient> Kept
+    {
+        get { lock (KeptAfterFailedUnregister) { return KeptAfterFailedUnregister.ToArray(); } }
+    }
+
+    // Audio worker thread only. After an Unregister that failed with anything but E_NOTFOUND (not registered) the
+    // client is kept alive for the rest of the process, because MMDevAPI may still call it, and the failure is
+    // logged rather than left in the steps alone.
+    public StepOutcome Unregister(AudioWorker worker, ILog? log = null)
     {
         ArgumentNullException.ThrowIfNull(worker);
         if (_client is null)
@@ -708,9 +721,16 @@ internal sealed class NotificationRecorder
         NotificationClient client = _client;
         hr = enumerator.UnregisterEndpointNotificationCallback(client);
         (int failures, Exception? last) = client.TakeSinkFailures();
-        if (hr >= 0)
+        _client = null;
+        if (hr < 0 && hr != CoreAudio.E_NOTFOUND)
         {
-            _client = null;
+            lock (KeptAfterFailedUnregister)
+            {
+                KeptAfterFailedUnregister.Add(client);
+            }
+
+            log?.Error("The diag notification client could not be unregistered (" + NativeCodes.Name(hr) +
+                       "), so it is kept for the rest of this run in case Windows still calls it.");
         }
 
         GC.KeepAlive(client);
