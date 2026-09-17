@@ -61,7 +61,7 @@ against its recorded hash, and a build output folder has no manifest.
 
 ## Tests that need a restart
 
-Four tests are in two halves, because a script cannot survive a restart. The first
+Six tests are in two halves, because a script cannot survive a restart. The first
 half stops, tells you how to restart, and prints the exact command to run after you
 log back in. That command is also saved as `resume.txt` in the evidence folder, so
 it is never lost.

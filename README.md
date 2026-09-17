@@ -214,7 +214,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
 | `Earshot.exe install` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` for you. |
 | `Earshot.exe gate <verb> <nonce> [address]` | The elevated worker. Started by Earshot's own scheduled task, not by hand. |
-| `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **These change the state of the device.** They exist for the live tests below and are not part of normal use. |
+| `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **These change the state of the device.** They exist for the live tests in `tools\live-tests` and are not part of normal use. |
 
 Two variables help testing. `EARSHOT_DATA_ROOT=<absolute folder>` moves every
 data folder under that folder. `EARSHOT_SAFE_MODE=1` turns every device action
@@ -256,12 +256,13 @@ either is set, and in safe mode every `diag` target is refused.
 ## Verification status
 
 Nothing below that needs the AirPods themselves has been run yet. Those rows
-stay pending until the live tests are run on the device.
+stay pending until the live tests in `tools\live-tests` are run on the device.
 
 | What | Status |
 |---|---|
 | Builds with no warnings, and no suppressed or downgraded analyser rule | Done, checked on every build |
 | Unit tests: device-node matching, block and connection state, the elevated worker's argument validation, settings handling, icon bytes, card placement | Done |
+| The live test scripts parse, and every Earshot command line they pass is accepted by the application's own argument parsers | Done. Checked in the unit tests, which never run a script |
 | Read-only probe of the audio endpoints on this PC | Done. The AirPods container is found by name and grouped correctly |
 | Read-only walk from the endpoints to the audio driver, including reading a pin property from both the A2DP and Hands-Free filters | Done. Both filters answer, so the connect path is reachable |
 | Read-only reads of the device nodes, installed Bluetooth services and scheduled tasks | Done |
@@ -275,6 +276,32 @@ stay pending until the live tests are run on the device.
 | Starting the SYSTEM task from the tray without a prompt | Pending |
 | The battery check with the AirPods disconnected | Pending |
 | Fast Startup | Pending |
+
+## Live tests
+
+The pending rows above are settled by the scripts in `tools\live-tests`. They
+are run by hand, with the AirPods and the phone there, against an installed copy
+or an unzipped release. Nothing runs them for you, and none of them runs during
+a build.
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -List
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -Test 01 -ExePath "C:\Program Files\Earshot\Earshot.exe"
+
+They are numbered riskiest first. Test 08 is the acceptance test the whole
+application exists for: after a full power cycle, the AirPods are still
+connected to the phone. Every step that changes a device, a scheduled task or a
+folder is printed first, with what it will do, and waits for you to agree. Six
+of the tests are in two halves, because a script cannot survive a restart; the
+first half prints the command to run afterwards and saves it as well.
+
+Each run writes its evidence to `%LOCALAPPDATA%\Earshot\livetest`, one folder
+per run, with a `result.json` that records every criterion as pass, fail or
+inconclusive against a stated rule. `inconclusive` is a real answer and is
+recorded as one.
+
+`00-Restore.ps1` puts the machine back if a test stops in the middle. Read
+`tools\live-tests\README.md` before the first run, so you know how to run it
+before you need it.
 
 ## Uninstall
 
