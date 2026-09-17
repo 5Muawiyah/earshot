@@ -98,7 +98,7 @@ internal static partial class Program
         {
             // Task Scheduler COM runs on an MTA thread, as it does in the tray.
             using var worker = new SystemWorker(log);
-            return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new ComTaskRegistrar(), AccountSids.Translate, log).Run(request))
+            return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log).Run(request))
                 .GetAwaiter().GetResult();
         }));
     }

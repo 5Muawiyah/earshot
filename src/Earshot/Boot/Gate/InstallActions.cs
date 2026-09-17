@@ -307,6 +307,9 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 // install <userSid> <addr12> <containerGuid> [--principal user], run elevated from the tray with one UAC
 // prompt. The request is already validated. Each step is a StepOutcome and install stops at the first
 // failure that would leave something unsafe (fail closed):
+//   0. check the device with the same rule set-device applies (GateActions.ResolveAudioDevice): a
+//      BTHENUM\DEV_<address> node whose container is the one given, with an A2DP sink node, so setup can never
+//      pin a phone and the tray and the gate always name the same device. Nothing is changed before this passes;
 //   1. read the publish manifest (Earshot.files.json) next to the running exe, copy exactly the files it lists,
 //      and the manifest itself, to %ProgramFiles%\Earshot with IntegrityCopy (staged, then swapped in), check
 //      each copy against the hash the manifest records, and check the install folder grants no one but
@@ -325,20 +328,24 @@ internal sealed class InstallActions
 {
     private readonly InstallLayout _layout;
     private readonly IFolderSecurity _folders;
+    private readonly INodeReader _nodes;
     private readonly ITaskRegistrar _tasks;
     private readonly Func<string, AccountLookup> _accountToSid;
     private readonly ILog _log;
     private bool _manifestMissing;
 
-    public InstallActions(InstallLayout layout, IFolderSecurity folders, ITaskRegistrar tasks, Func<string, AccountLookup> accountToSid, ILog log)
+    // nodes is only read, to check the device before anything is changed.
+    public InstallActions(InstallLayout layout, IFolderSecurity folders, INodeReader nodes, ITaskRegistrar tasks, Func<string, AccountLookup> accountToSid, ILog log)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(tasks);
         ArgumentNullException.ThrowIfNull(accountToSid);
         ArgumentNullException.ThrowIfNull(log);
         _layout = layout;
         _folders = folders;
+        _nodes = nodes;
         _tasks = tasks;
         _accountToSid = accountToSid;
         _log = log;
@@ -364,6 +371,12 @@ internal sealed class InstallActions
 
     private InstallResult RunSteps(InstallRequest request, List<StepOutcome> steps)
     {
+        GateExitCode device = CheckDevice(request, steps);
+        if (device != GateExitCode.Success)
+        {
+            return new InstallResult(device, steps);
+        }
+
         if (!CopyApplication(steps))
         {
             return new InstallResult(_manifestMissing ? GateExitCode.NoManifest : GateExitCode.Failed, steps);
@@ -385,6 +398,30 @@ internal sealed class InstallActions
         }
 
         return new InstallResult(GateExitCode.Success, steps);
+    }
+
+    // The rule set-device applies, plus the container the tray passed: the address's device node must be in it. A
+    // stale or mistaken container would leave the gate and the tray on different devices, so it is refused rather
+    // than replaced with the node's.
+    private GateExitCode CheckDevice(InstallRequest request, List<StepOutcome> steps)
+    {
+        GateExitCode resolved = GateActions.ResolveAudioDevice(_nodes, request.Address, "install-device", steps, out Guid container);
+        if (resolved != GateExitCode.Success)
+        {
+            return resolved;
+        }
+
+        if (container != request.ContainerId)
+        {
+            steps.Add(StepOutcomes.NotAttempted("install-device",
+                "The device node with address " + request.Address + " is in container " + container.ToString("D") +
+                ", not " + request.ContainerId.ToString("D") + ", so nothing was pinned."));
+            return GateExitCode.DeviceMismatch;
+        }
+
+        steps.Add(new StepOutcome("install-device", true, 0, "S_OK",
+            request.Address + " in container " + container.ToString("D") + " has an A2DP sink node."));
+        return GateExitCode.Success;
     }
 
     private bool CopyApplication(List<StepOutcome> steps)

@@ -66,8 +66,11 @@ public sealed class InstallActionsTests
         public InstallLayout Layout => new(Source, Install, Machine);
 
         public InstallResult RunInstall(TaskPrincipalMode mode = TaskPrincipalMode.System) =>
-            new InstallActions(Layout, Folders, Tasks, NoLookup, Log)
-                .Run(new InstallRequest(TestUsers.Sid, RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer, mode));
+            RunInstall(RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer, mode);
+
+        public InstallResult RunInstall(string address, Guid container, TaskPrincipalMode mode = TaskPrincipalMode.System) =>
+            new InstallActions(Layout, Folders, Nodes, Tasks, NoLookup, Log)
+                .Run(new InstallRequest(TestUsers.Sid, address, container, mode));
 
         public InstallResult RunUninstall() => new UninstallActions(Layout, Folders, Nodes, Tasks, Reboot, Log).Run();
 
@@ -141,6 +144,61 @@ public sealed class InstallActionsTests
         Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok && s.Detail!.Contains("4 published files", StringComparison.Ordinal)), "The three listed files and the manifest.");
         CollectionAssert.AreEqual(File.ReadAllBytes(Path.Combine(h.Source, FileManifest.FileName)), File.ReadAllBytes(Path.Combine(h.Install, FileManifest.FileName)),
             "The manifest is installed with the files, for a repair run.");
+    }
+
+    [TestMethod]
+    public void InstallRefusesAPhoneAndChangesNothing()
+    {
+        using var h = new Harness();
+
+        // The paired iPhone: a device node and service nodes in its own container, but no A2DP sink node.
+        InstallResult result = h.RunInstall(RecordedNodes.IPhoneAddress, RecordedNodes.IPhoneContainer);
+
+        Assert.AreEqual(GateExitCode.NotAudioSink, result.Outcome, Fail(result));
+        AssertNothingChanged(h);
+    }
+
+    [TestMethod]
+    public void InstallRefusesAContainerThatIsNotTheContainerOfTheAddresssDevice()
+    {
+        using var h = new Harness();
+
+        InstallResult result = h.RunInstall(RecordedNodes.AirPodsAddress, RecordedNodes.IPhoneContainer);
+
+        Assert.AreEqual(GateExitCode.DeviceMismatch, result.Outcome, Fail(result));
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "install-device" && !s.Ok && s.Detail!.Contains(RecordedNodes.AirPodsContainer.ToString("D"), StringComparison.Ordinal)));
+        AssertNothingChanged(h);
+    }
+
+    [TestMethod]
+    public void InstallForAnAddressWithNoDeviceNodeIsNotFound()
+    {
+        using var h = new Harness();
+
+        InstallResult result = h.RunInstall(RecordedNodes.HeadphonesAddress, RecordedNodes.HeadphonesContainer);
+
+        Assert.AreEqual(GateExitCode.NotFound, result.Outcome, Fail(result));
+        AssertNothingChanged(h);
+    }
+
+    [TestMethod]
+    public void InstallWithAnUnreadableDeviceListFailsAndChangesNothing()
+    {
+        using var h = new Harness();
+        h.Nodes.ListResult = CfgMgr32.CR_FAILURE;
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome, Fail(result));
+        AssertNothingChanged(h);
+    }
+
+    private static void AssertNothingChanged(Harness h)
+    {
+        Assert.IsFalse(Directory.Exists(h.Install), "Files were copied for a refused device.");
+        Assert.IsFalse(Directory.Exists(h.Machine), "The machine folder was created for a refused device.");
+        Assert.IsEmpty(h.Folders.Created);
+        Assert.IsEmpty(h.Tasks.Calls, "The task namespace was touched for a refused device.");
     }
 
     [TestMethod]

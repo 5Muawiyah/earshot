@@ -102,6 +102,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string SetupUnsafeFolderMessage = "Setup stopped because a folder it uses was not safe.";
     internal const string SetupNeedsReleaseMessage = Boot.Gate.FileManifest.MissingMessage;
     internal const string SetupFailedMessage = "Setup did not finish. Try again.";
+    internal const string SetupDeviceChangedMessage = "Choose the device again, then set up Earshot.";
     internal const string RemovedMessage = "Earshot is removed";
     internal const string RemovedPartlyMessage = "Earshot is mostly removed. Some parts could not be undone.";
     internal const string RemoveCancelledMessage = "Removal was cancelled";
@@ -254,6 +255,9 @@ internal sealed class BlockController : IBlockController, IDisposable
                 (int)GateExitCode.NotElevated or (int)GateExitCode.RunningAsSystem => SetupNeedsAdminMessage,
                 (int)GateExitCode.FolderNotSecure => SetupUnsafeFolderMessage,
                 (int)GateExitCode.NoManifest => SetupNeedsReleaseMessage,
+                (int)GateExitCode.NotAudioSink => NotAudioSinkMessage,
+                (int)GateExitCode.NotFound => NotFoundMessage,
+                (int)GateExitCode.DeviceMismatch => SetupDeviceChangedMessage,
                 _ => SetupFailedMessage,
             };
             return Finish("install", ControllerResult.Fail(message, steps));

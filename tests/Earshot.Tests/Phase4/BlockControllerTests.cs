@@ -524,6 +524,15 @@ public sealed class BlockControllerTests
         h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.FolderNotSecure, StepOutcomes.FromWin32("runas", 0));
         Assert.AreEqual(BlockController.SetupUnsafeFolderMessage, (await h.Controller.RunSetupAsync()).UserMessage);
 
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.NotAudioSink, StepOutcomes.FromWin32("runas", 0));
+        Assert.AreEqual(BlockController.NotAudioSinkMessage, (await h.Controller.RunSetupAsync()).UserMessage, "A phone is never set up.");
+
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.NotFound, StepOutcomes.FromWin32("runas", 0));
+        Assert.AreEqual(BlockController.NotFoundMessage, (await h.Controller.RunSetupAsync()).UserMessage);
+
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.DeviceMismatch, StepOutcomes.FromWin32("runas", 0));
+        Assert.AreEqual(BlockController.SetupDeviceChangedMessage, (await h.Controller.RunSetupAsync()).UserMessage);
+
         h.Launcher.Result = _ => new ElevatedRun(77, StepOutcomes.FromWin32("runas", 0));
         ControllerResult refused = await h.Controller.RunSetupAsync();
         Assert.AreEqual(BlockController.SetupFailedMessage, refused.UserMessage);

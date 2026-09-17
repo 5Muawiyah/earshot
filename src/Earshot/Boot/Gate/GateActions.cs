@@ -42,6 +42,7 @@ internal enum GateExitCode
     NotAudioSink = 12,       // set-device for a device with no A2DP sink node, such as a phone
     OtherDeviceProtected = 13, // set-device while protection.json lists services turned off on the device pinned now
     NoManifest = 14,         // install without a valid Earshot.files.json next to the running exe
+    DeviceMismatch = 15,     // install with a container that is not the container of the address's device node
     Rejected = 20,           // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
@@ -65,6 +66,7 @@ internal static class GateExitCodes
         [GateExitCode.NotAudioSink] = "not-audio-sink",
         [GateExitCode.OtherDeviceProtected] = "other-device-protected",
         [GateExitCode.NoManifest] = "no-manifest",
+        [GateExitCode.DeviceMismatch] = "device-mismatch",
         [GateExitCode.Rejected] = "rejected",
         [GateExitCode.NotElevated] = "not-elevated",
         [GateExitCode.RunningAsSystem] = "running-as-system",
@@ -455,8 +457,7 @@ internal sealed partial class GateActions
     // that node, never taken from the command line.
     //
     // Guards, each refusing with nothing written:
-    //   - the device must have an A2DP sink service node (BTHENUM\{0000110B-...}) with the address in the same
-    //     container, so only headphones or speakers can be pinned and a paired phone never can;
+    //   - the device must be one ResolveAudioDevice accepts: headphones or speakers, never a paired phone;
     //   - moving the pin away from a device whose nodes are still disabled would leave it disabled with nothing
     //     in Earshot able to allow it again;
     //   - moving the pin while protection.json lists services Earshot turned off (or cannot be read) would make
@@ -465,7 +466,6 @@ internal sealed partial class GateActions
     //     entries went with its pairing, so they are emptied here rather than hold the pin for good.
     // A node read that fails in either of the first two checks refuses with Failed: it says nothing about the
     // device, so it is neither "not an audio device" nor "not blocked".
-    // https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio
     private VerbResult SetDevice(string address, List<StepOutcome> steps)
     {
         if (!BoundaryValidation.IsAddress12(address))
@@ -480,63 +480,10 @@ internal sealed partial class GateActions
             return new VerbResult(GateExitCode.Failed, null);
         }
 
-        uint cr = _nodes.ListDeviceIds(out string[] ids);
-        if (cr != CfgMgr32.CR_SUCCESS)
+        GateExitCode resolved = ResolveAudioDevice(_nodes, address, "set-device", steps, out Guid container);
+        if (resolved != GateExitCode.Success)
         {
-            steps.Add(StepOutcomes.FromConfigRet("cm-list", cr, "The device list could not be read."));
-            return new VerbResult(GateExitCode.Failed, null);
-        }
-
-        string prefix = @"BTHENUM\DEV_" + address + @"\";
-        List<string> matches = ids.Where(id => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (matches.Count == 0)
-        {
-            steps.Add(StepOutcomes.FromConfigRet("set-device-find", CfgMgr32.CR_NO_SUCH_DEVNODE, "No Bluetooth device node has this address."));
-            return new VerbResult(GateExitCode.NotFound, nameof(BlockState.NotFound));
-        }
-
-        if (matches.Count > 1)
-        {
-            steps.Add(StepOutcomes.NotAttempted("set-device-find", "More than one device node has this address."));
-            return new VerbResult(GateExitCode.Failed, null);
-        }
-
-        string deviceId = matches[0];
-        cr = _nodes.Locate(deviceId, includeNonPresent: true, out uint devInst);
-        if (cr != CfgMgr32.CR_SUCCESS)
-        {
-            steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + deviceId, cr));
-            return new VerbResult(GateExitCode.Failed, null);
-        }
-
-        cr = _nodes.GetContainerId(devInst, out Guid container);
-        steps.Add(StepOutcomes.FromConfigRet("cm-container:" + deviceId, cr));
-        if (cr != CfgMgr32.CR_SUCCESS)
-        {
-            return new VerbResult(GateExitCode.Failed, null);
-        }
-
-        if (!NodeMatch.IsDisableTarget(deviceId, container, container, address))
-        {
-            steps.Add(StepOutcomes.NotAttempted("set-device", "The node's container is empty or the PC container."));
-            return new VerbResult(GateExitCode.Failed, null);
-        }
-
-        switch (FindAudioSinkNode(ids, container, address, steps))
-        {
-            case SinkNode.None:
-                steps.Add(StepOutcomes.NotAttempted("set-device",
-                    "The device has no A2DP sink node, so it is not headphones or speakers and was not pinned."));
-                return new VerbResult(GateExitCode.NotAudioSink, null);
-
-            case SinkNode.Unreadable:
-                // A read that failed is not a claim about the device.
-                steps.Add(StepOutcomes.NotAttempted("set-device",
-                    "An A2DP sink node with this address could not be read, so whether the device plays audio is not known and it was not pinned."));
-                return new VerbResult(GateExitCode.Failed, null);
-
-            case SinkNode.Found:
-                break;
+            return new VerbResult(resolved, resolved == GateExitCode.NotFound ? nameof(BlockState.NotFound) : null);
         }
 
         GateRead<DeviceIdentity> current = _store.ReadDevice();
@@ -613,6 +560,88 @@ internal sealed partial class GateActions
     // The instance id prefix of an A2DP sink service node: BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_...
     internal const string AudioSinkNodePrefix = @"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_";
 
+    // The device a pin names, from its address alone, for set-device and install. The address only ever selects
+    // the BTHENUM\DEV_<address> node, and the container is read from that node. Success, with the container, only
+    // for a device that has an A2DP sink service node (BTHENUM\{0000110B-...}) with the address in that same
+    // container, so only headphones or speakers can be pinned and a paired phone never can:
+    //   NotFound      no BTHENUM\DEV_ node has the address
+    //   NotAudioSink  every candidate sink node was read, and none is the device's
+    //   Failed        a read failed, more than one device node has the address, or the node's container is empty
+    //                 or the PC container; a read that failed says nothing about the device
+    // step names the steps this adds (set-device, install-device).
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio
+    internal static GateExitCode ResolveAudioDevice(INodeReader nodes, string address, string step, IList<StepOutcome> steps, out Guid container)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(step);
+        ArgumentNullException.ThrowIfNull(steps);
+        container = Guid.Empty;
+        if (!BoundaryValidation.IsAddress12(address))
+        {
+            steps.Add(StepOutcomes.NotAttempted(step, "The address is not 12 upper-case hex characters."));
+            return GateExitCode.Rejected;
+        }
+
+        uint cr = nodes.ListDeviceIds(out string[] ids);
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet("cm-list", cr, "The device list could not be read."));
+            return GateExitCode.Failed;
+        }
+
+        string prefix = @"BTHENUM\DEV_" + address + @"\";
+        List<string> matches = ids.Where(id => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (matches.Count == 0)
+        {
+            steps.Add(StepOutcomes.FromConfigRet(step + "-find", CfgMgr32.CR_NO_SUCH_DEVNODE, "No Bluetooth device node has this address."));
+            return GateExitCode.NotFound;
+        }
+
+        if (matches.Count > 1)
+        {
+            steps.Add(StepOutcomes.NotAttempted(step + "-find", "More than one device node has this address."));
+            return GateExitCode.Failed;
+        }
+
+        string deviceId = matches[0];
+        cr = nodes.Locate(deviceId, includeNonPresent: true, out uint devInst);
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + deviceId, cr));
+            return GateExitCode.Failed;
+        }
+
+        cr = nodes.GetContainerId(devInst, out Guid found);
+        steps.Add(StepOutcomes.FromConfigRet("cm-container:" + deviceId, cr));
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            return GateExitCode.Failed;
+        }
+
+        if (!NodeMatch.IsDisableTarget(deviceId, found, found, address))
+        {
+            steps.Add(StepOutcomes.NotAttempted(step, "The node's container is empty or the PC container."));
+            return GateExitCode.Failed;
+        }
+
+        switch (FindAudioSinkNode(nodes, ids, found, address, steps))
+        {
+            case SinkNode.None:
+                steps.Add(StepOutcomes.NotAttempted(step,
+                    "The device has no A2DP sink node, so it is not headphones or speakers and was not pinned."));
+                return GateExitCode.NotAudioSink;
+
+            case SinkNode.Unreadable:
+                // A read that failed is not a claim about the device.
+                steps.Add(StepOutcomes.NotAttempted(step,
+                    "An A2DP sink node with this address could not be read, so whether the device plays audio is not known and it was not pinned."));
+                return GateExitCode.Failed;
+        }
+
+        container = found;
+        return GateExitCode.Success;
+    }
+
     private enum SinkNode
     {
         Found,       // a node with the A2DP sink prefix, the address and the device's container
@@ -622,7 +651,7 @@ internal sealed partial class GateActions
 
     // Looks for a node with the A2DP sink prefix, the address and the device's container (present or not). A
     // candidate that cannot be read is a failed step and makes the answer Unreadable unless another one is found.
-    private SinkNode FindAudioSinkNode(string[] ids, Guid container, string address, List<StepOutcome> steps)
+    private static SinkNode FindAudioSinkNode(INodeReader nodes, string[] ids, Guid container, string address, IList<StepOutcome> steps)
     {
         bool unreadable = false;
         foreach (string id in ids.Where(i => i.StartsWith(AudioSinkNodePrefix, StringComparison.OrdinalIgnoreCase)))
@@ -632,7 +661,7 @@ internal sealed partial class GateActions
                 continue;
             }
 
-            uint cr = _nodes.Locate(id, includeNonPresent: true, out uint devInst);
+            uint cr = nodes.Locate(id, includeNonPresent: true, out uint devInst);
             if (cr != CfgMgr32.CR_SUCCESS)
             {
                 steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + id, cr));
@@ -640,7 +669,7 @@ internal sealed partial class GateActions
                 continue;
             }
 
-            cr = _nodes.GetContainerId(devInst, out Guid nodeContainer);
+            cr = nodes.GetContainerId(devInst, out Guid nodeContainer);
             if (cr != CfgMgr32.CR_SUCCESS)
             {
                 steps.Add(StepOutcomes.FromConfigRet("cm-container:" + id, cr));
