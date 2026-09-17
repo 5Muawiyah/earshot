@@ -1,4 +1,6 @@
+using System.Drawing;
 using System.Globalization;
+using Earshot.Audio.Connect;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Icons;
@@ -17,29 +19,49 @@ internal sealed record TrayStartOptions(
     // How long Exit waits for actions already in flight before it ends the message loop.
     public TimeSpan ExitWaitLimit { get; init; } = TrayContext.DefaultExitWaitLimit;
 
+    // How long Exit keeps the loop running after a card it shows as Earshot closes, so the card can be read.
+    public TimeSpan ExitNoticeTime { get; init; } = TrayContext.DefaultExitNoticeTime;
+
     // False only in tests, so they add no icon to the user's notification area.
     public bool ShowIcon { get; init; } = true;
+
+    // True when Windows started Earshot from its Run value (--startup).
+    public bool StartedAtLogon { get; init; }
+
+    // True when EARSHOT_DATA_ROOT points Earshot's folders somewhere else, so this run must not write the
+    // owner's real Run value.
+    public bool DataRootRedirected { get; init; }
+
+    // Where the pointer is, read when a click arrives so a card that comes later still lands at the click.
+    public Func<Point> CursorPosition { get; init; } = () => Cursor.Position;
 }
 
 // The tray: icon, tooltip, menu, left click and the cards they raise. Runs on the UI thread only.
 //
-// Every device action goes through the ServiceRegistry, so with the null services the tray reports
-// "not found" and "not set up" and changes nothing. Every result that is not a success is logged with
-// its steps and shown on a card through registry.Cards; this class never draws a card itself.
+// Every device action goes through the BlockCoordinator, which owns connect, disconnect, block, allow and
+// protection order and shows the cards for them. The tray decides what a click means, shows what it decides
+// before handing over (nothing found, busy, settings), and logs every result with its steps.
 //
 // Left click: MouseClick with the left button only (Click and MouseClick also fire for the right and
 // middle buttons, with X = Y = 0), ignored while a connect or disconnect is in flight so a fast triple
-// click cannot toggle twice, and ignored with a card while a menu action is in flight.
+// click cannot toggle twice, ignored with a card while a menu action is in flight, and ignored while the
+// device itself reports the link is changing, which is when the menu item is disabled too.
 // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.notifyicon.mouseclick
 //
 // Cancellation: each connect or disconnect has its own token, cancelled when a different device is
 // chosen or Earshot closes. Each menu action (setup, Block at boot, protection, device change) has its
-// own token too, cancelled only when Earshot closes, so a click never cancels one. Nothing here reads
-// IBlockController.IsSetUp: that checks a scheduled task, which is not UI thread work, so setup is
-// decided from the boot block status read asynchronously.
+// own token too, cancelled only when Earshot closes, so a click never cancels one. A cancellation stops the
+// coordinator's waits, never a gate change it has already sent: that is waited for before the clean-up.
+// Nothing here reads IBlockController.IsSetUp: that checks a scheduled task, which is not UI thread work,
+// so setup is decided from the boot block status the coordinator reads asynchronously.
 //
-// Exit: no new input, cancel what is in flight, then wait for it (at most ExitWaitLimit) before the
-// message loop ends, so a cancelled connect can finish putting the device nodes back to blocked.
+// Exit: no new input, cancel what is in flight, then wait for it and for the coordinator (at most
+// ExitWaitLimit) before the message loop ends, so a cancelled connect can finish putting the device nodes
+// back to blocked and the coordinator can block enabled nodes that are not in use. The Exit click shows a
+// card that Earshot waits for the current change only when a change other than the check before closing is
+// in flight; "Blocking" is shown only once the coordinator is about to send the block. What the user should
+// know as Earshot closes (it closed while the AirPods were in use, before a change finished, or that block
+// did not take) is shown at the Exit click and kept up for ExitNoticeTime.
 internal sealed class TrayContext : ApplicationContext
 {
     public const string SomethingWentWrongMessage = "Something went wrong. See the log.";
@@ -50,6 +72,7 @@ internal sealed class TrayContext : ApplicationContext
     public const string SettingsNewerMessage = "Settings are from a newer Earshot. Changes will not be saved.";
     public const string BusyMessage = "Another change is still running. Try again shortly.";
     public const string ClosingMessage = "Closing once the current change finishes.";
+    public const string BlockingBeforeClosingMessage = "Blocking the AirPods before closing.";
     public const string BlockStatusUnreadableMessage = "Could not read the boot block status.";
     public const string GateNotRepinnedMessage = "Device saved. Boot block may still use the previous device.";
 
@@ -58,7 +81,12 @@ internal sealed class TrayContext : ApplicationContext
     // running. Whatever is still in flight when it runs out is logged by name.
     public static readonly TimeSpan DefaultExitWaitLimit = TimeSpan.FromSeconds(30);
 
+    // How long a card shown as Earshot closes stays readable before the process ends: about one card's own
+    // dismiss time. A UI timing choice, not a measurement.
+    public static readonly TimeSpan DefaultExitNoticeTime = TimeSpan.FromSeconds(4);
+
     private readonly ServiceRegistry _registry;
+    private readonly BlockCoordinator _coordinator;
     private readonly ILog _log;
     private readonly NotifyIcon _notifyIcon;
     private readonly TrayMenu _menu;
@@ -68,35 +96,41 @@ internal sealed class TrayContext : ApplicationContext
     private readonly BluetoothDeviceList _devices;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TimeSpan _exitWaitLimit;
+    private readonly TimeSpan _exitNoticeTime;
+    private readonly Func<Point> _cursorPosition;
+    private readonly bool _startedAtLogon;
 
     // Actions started from the icon or the menu that have not finished, by name.
     private readonly Dictionary<Task, string> _pending = new();
 
     private DeviceSnapshot _snapshot;
-    private BootBlockStatus? _blockStatus;
-    private AudioProtectionSnapshot? _protectionStatus;
     private StartupState _startupState;
     private CancellationTokenSource? _toggle;
     private bool _toggleInFlight;
     private int _operationsInFlight;
-    private bool _statusRefreshInFlight;
-    private bool _statusRefreshAgain;
     private Guid _pinAttemptedFor;
     private DevicePickerForm? _picker;
+    private CardPlace? _exitPlace;
+    private bool _blockingCardShown;
     private bool _closing;
     private bool _closed;
 
-    public TrayContext(ServiceRegistry registry, TrayStartOptions options)
+    public TrayContext(ServiceRegistry registry, BlockCoordinator coordinator, TrayStartOptions options)
     {
         ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(coordinator);
         ArgumentNullException.ThrowIfNull(options);
 
         _registry = registry;
+        _coordinator = coordinator;
         _log = registry.Log;
         _exitWaitLimit = options.ExitWaitLimit;
+        _exitNoticeTime = options.ExitNoticeTime;
+        _cursorPosition = options.CursorPosition;
+        _startedAtLogon = options.StartedAtLogon;
         _snapshot = registry.Monitor.Current;
         _devices = new BluetoothDeviceList(_log);
-        _startup = new StartupRegistration(options.StartupRegistry, _log, registry.SafeMode, options.ExePath);
+        _startup = new StartupRegistration(options.StartupRegistry, _log, registry.SafeMode, options.ExePath, options.DataRootRedirected);
         _icons = new TrayIconFactory(_log, new ThemeReader(_log));
 
         _window = new ShellMessageWindow(_log);
@@ -104,26 +138,36 @@ internal sealed class TrayContext : ApplicationContext
         _window.TaskbarCreated += (_, _) => RefreshIcon(remeasure: true, force: true);
         _window.SettingChanged += (_, _) => RefreshIcon(remeasure: true, force: false);
         _window.DisplayChanged += (_, _) => RefreshIcon(remeasure: true, force: false);
-        _window.SessionEnding += (_, e) => SessionEnding?.Invoke(this, e);
+        _window.SessionEnding += OnSessionEnding;
 
         _menu = new TrayMenu(CurrentMenuState);
-        _menu.ToggleClicked += (_, _) => Launch("toggle", () => ToggleAsync(CardAnchor.NearCursor), CardAnchor.NearCursor);
-        _menu.BlockAtBootClicked += (_, _) => Launch("block at boot", BlockAtBootAsync, CardAnchor.NearCursor);
+        _menu.ToggleClicked += (_, _) => StartToggle();
+        _menu.BlockAtBootClicked += (_, _) => Start("block at boot", BlockAtBootAsync);
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
         _menu.OpenOnStartupClicked += (_, _) => OnOpenOnStartupClicked();
-        // Posted, so the menu has closed before the modal picker opens.
-        _menu.ChooseDeviceClicked += (_, _) => _registry.UiPost(() => Launch("choose device", ChooseDeviceAsync, CardAnchor.NearCursor));
-        _menu.SetUpClicked += (_, _) => Launch("setup", RunSetupAsync, CardAnchor.NearCursor);
-        _menu.ExitClicked += (_, _) => _ = ExitAsync();
+        // The click point is read now, before the menu closes and the picker opens.
+        _menu.ChooseDeviceClicked += (_, _) =>
+        {
+            CardPlace place = ClickPlace();
+            _registry.UiPost(() => Launch("choose device", () => ChooseDeviceAsync(place), place));
+        };
+        _menu.SetUpClicked += (_, _) => Start("setup", RunSetupAsync);
+        // The click point is read now, for a card that follows the Exit click.
+        _menu.ExitClicked += (_, _) =>
+        {
+            CardPlace place = ClickPlace();
+            _ = ExitAsync(place);
+        };
 
         _notifyIcon = new NotifyIcon { ContextMenuStrip = _menu.Strip };
         _notifyIcon.MouseClick += OnIconMouseClick;
-        _notifyIcon.MouseDown += (_, _) => _ = RefreshStatusAsync();
+        _notifyIcon.MouseDown += (_, _) => _ = _coordinator.RefreshStatusAsync();
         UpdatePresentation(forceIcon: true);
         _notifyIcon.Visible = options.ShowIcon;
 
         _registry.Monitor.SnapshotChanged += OnSnapshotChanged;
         _registry.Settings.Changed += OnSettingsChanged;
+        _coordinator.Changed += OnCoordinatorChanged;
 
         _startupState = _startup.Read();
         if (options.FirstRun)
@@ -132,26 +176,27 @@ internal sealed class TrayContext : ApplicationContext
         }
         else
         {
-            RepairStartupIfStale();
+            RepairStartupIfStale(options.SettingsStatus);
         }
 
         ReportSettingsLoad(options.SettingsStatus);
-        _ = RefreshStatusAsync();
+        _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
 
-    // WM_QUERYENDSESSION and WM_ENDSESSION, already logged. Nothing acts on them yet.
-    public event EventHandler<SessionEndingEventArgs>? SessionEnding;
-
-    // True while a connect, disconnect or menu action is in flight.
+    // True while a connect, disconnect or menu action started here is in flight.
     internal bool IsBusy => _toggleInFlight || _operationsInFlight > 0;
+
+    // True while anything at all is in flight, the coordinator's own work included.
+    internal bool IsWorking => IsBusy || _pending.Count > 0 || _coordinator.IsBusy;
 
     // Actions from the icon or the menu that have not finished yet.
     internal int PendingActions => _pending.Count;
 
     internal TrayMenu Menu => _menu;
 
-    // Shows the current state on a card, for example when a second copy of Earshot is started.
+    // Shows the current state on a card, for example when a second copy of Earshot is started. It follows the
+    // user's own action, so it is placed like a card after a click.
     public void ShowStatusCard()
     {
         if (_closing || _closed)
@@ -160,15 +205,15 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         EarshotSettings settings = _registry.Settings.Current;
-        ShowCard(TrayStatus.DeviceName(_snapshot, settings), TrayStatus.CardStatus(_snapshot, _blockStatus, settings), CardAnchor.NearTray);
+        ShowCard(TrayStatus.DeviceName(_snapshot, settings), TrayStatus.CardStatus(_snapshot, BlockStatus, settings), CardPlace.NearCursor);
     }
 
     // Shows an unexpected exception from any handler on the tray thread. Program.Tray routes
     // Application.ThreadException here.
-    internal void ReportUnexpected(string action, Exception ex, CardAnchor anchor)
+    internal void ReportUnexpected(string action, Exception ex, CardPlace place)
     {
         _log.Error(action + ": unexpected error.", ex);
-        ShowCard(TrayStatus.AppName, SomethingWentWrongMessage, anchor);
+        ShowCard(TrayStatus.AppName, SomethingWentWrongMessage, place);
     }
 
     // The NotifyIcon.MouseClick handler. Internal so tests can raise each button.
@@ -179,7 +224,7 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        Launch("toggle", () => ToggleAsync(CardAnchor.NearCursor), CardAnchor.NearCursor);
+        StartToggle();
     }
 
     protected override void ExitThreadCore()
@@ -195,6 +240,8 @@ internal sealed class TrayContext : ApplicationContext
             Close();
             _registry.Monitor.SnapshotChanged -= OnSnapshotChanged;
             _registry.Settings.Changed -= OnSettingsChanged;
+            _coordinator.Changed -= OnCoordinatorChanged;
+            _window.SessionEnding -= OnSessionEnding;
             _notifyIcon.MouseClick -= OnIconMouseClick;
 
             // NotifyIcon.Dispose removes the icon from the notification area. The Icon it used is
@@ -211,6 +258,8 @@ internal sealed class TrayContext : ApplicationContext
         base.Dispose(disposing);
     }
 
+    private BootBlockStatus? BlockStatus => _coordinator.BlockStatus;
+
     private void Close()
     {
         if (_closed)
@@ -218,17 +267,35 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        // Exit has already begun the coordinator's shutdown, block before closing included. Any other way here
+        // (the loop ending, Dispose) only stops it: nothing would be left to run a block.
         _closing = true;
         _closed = true;
+        _coordinator.Stop();
         _lifetime.Cancel();
         _registry.Cards.Hide();
         _notifyIcon.Visible = false;
     }
 
+    // The cursor as it is now, for a card that follows this click however long the action takes.
+    private CardPlace ClickPlace() => CardPlace.AtClick(_cursorPosition());
+
+    private void StartToggle()
+    {
+        CardPlace place = ClickPlace();
+        Launch("toggle", () => ToggleAsync(place), place);
+    }
+
+    private void Start(string action, Func<CardPlace, Task> work)
+    {
+        CardPlace place = ClickPlace();
+        Launch(action, () => work(place), place);
+    }
+
     // Starts an action from the icon or the menu. An action still running is kept so Exit can wait for
     // it, and an exception the action did not handle is logged and shown rather than lost with a
     // discarded task.
-    private void Launch(string action, Func<Task> work, CardAnchor anchor)
+    private void Launch(string action, Func<Task> work, CardPlace place)
     {
         if (_closing)
         {
@@ -236,7 +303,7 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        Task task = RunReportedAsync(action, work, anchor);
+        Task task = RunReportedAsync(action, work, place);
         if (!task.IsCompleted)
         {
             _pending.Add(task, action);
@@ -244,7 +311,7 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    private async Task RunReportedAsync(string action, Func<Task> work, CardAnchor anchor)
+    private async Task RunReportedAsync(string action, Func<Task> work, CardPlace place)
     {
         try
         {
@@ -252,7 +319,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            ReportUnexpected(action, ex, anchor);
+            ReportUnexpected(action, ex, place);
         }
     }
 
@@ -268,8 +335,9 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    // Toggles the connection of the pinned (or resolved) device.
-    private async Task ToggleAsync(CardAnchor anchor)
+    // Toggles the connection of the pinned (or resolved) device through the coordinator, which owns the
+    // block, allow and protection order around it and shows its cards.
+    private async Task ToggleAsync(CardPlace place)
     {
         if (_toggleInFlight)
         {
@@ -283,16 +351,27 @@ internal sealed class TrayContext : ApplicationContext
             // A menu action such as a protection change or a device change is still running through the
             // gate. A connect started now could allow the device nodes under it, so the click is not queued.
             _log.Info("Click ignored: a menu action is still in flight.");
-            ShowCard(TrayStatus.DeviceName(_snapshot, settings), BusyMessage, anchor);
+            ShowCard(TrayStatus.DeviceName(_snapshot, settings), BusyMessage, place);
+            return;
+        }
+
+        // The menu toggle is disabled while the device itself reports the link is changing, so a click is
+        // ignored then too: the label and the click always agree.
+        ConnectionState connection = TrayStatus.ActiveTarget(_snapshot, settings)?.Connection ?? ConnectionState.Unknown;
+        if (connection is ConnectionState.Connecting or ConnectionState.Disconnecting)
+        {
+            _log.Write(LogLevel.Debug, "Click ignored: the link is already changing (" + connection + ").");
             return;
         }
 
         ToggleIntent? intent = TrayStatus.Intent(_snapshot, settings);
         if (intent is null)
         {
-            string message = TrayStatus.NotFoundMessage(settings);
+            string message = _snapshot.ReadStatus == SnapshotReadStatus.Failed
+                ? ConnectMessages.CouldNotReadDevices
+                : TrayStatus.NotFoundMessage(settings);
             _log.Warn("Toggle: " + message);
-            ShowCard(settings.DeviceMatch, message, anchor);
+            ShowCard(settings.DeviceMatch, message, place);
             return;
         }
 
@@ -303,32 +382,17 @@ internal sealed class TrayContext : ApplicationContext
         string action = intent.Connect ? "connect" : "disconnect";
         try
         {
-            if (intent.Connect)
-            {
-                ShowCard(intent.DeviceName, TrayStatus.CardConnecting, anchor);
-            }
+            ToggleReport report = await _coordinator.ToggleAsync(
+                new ToggleRequest(intent.Connect, intent.Container, intent.DeviceName, place), cts.Token);
 
-            ConnectResult result = await RunToggleAsync(intent, cts.Token);
-            if (cts.IsCancellationRequested)
-            {
-                _log.Info(TrayReport.Describe(
-                    action + " (cancelled because " + CancelReason() + ") " + result.Outcome,
-                    result.Confirmed ? OpStatus.Success : OpStatus.Failed,
-                    result.UserMessage,
-                    result.Steps));
-                return;
-            }
-
-            if (result.Confirmed)
-            {
-                _log.Info(TrayReport.Describe(action, OpStatus.Success, result.UserMessage, result.Steps));
-                ShowCard(intent.DeviceName, intent.Connect ? TrayStatus.CardConnected : TrayStatus.CardDisconnected, anchor);
-            }
-            else
-            {
-                _log.Warn(TrayReport.Describe(action + " " + result.Outcome, OpStatus.Failed, result.UserMessage, result.Steps));
-                ShowCard(intent.DeviceName, result.UserMessage, anchor);
-            }
+            // A controller that reports a cancellation rather than throwing one is still a cancelled click.
+            bool cancelled = report.Cancelled || cts.IsCancellationRequested;
+            string text = TrayReport.Describe(
+                cancelled ? action + " (cancelled because " + CancelReason() + ")" : action,
+                report.Status,
+                report.UserMessage,
+                report.Steps);
+            _log.Write(report.IsSuccess || cancelled ? LogLevel.Info : LogLevel.Warn, text);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -336,25 +400,33 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            ReportUnexpected(action, ex, anchor);
+            ReportUnexpected(action, ex, place);
         }
         finally
         {
             _toggle = null;
             _toggleInFlight = false;
             UpdatePresentation(forceIcon: false);
-            _ = RefreshStatusAsync();
+            _ = _coordinator.RefreshStatusAsync();
         }
     }
 
-    // The single call that changes the connection. Kept on its own so it can be routed through the
-    // block coordinator without touching the click handling around it.
-    private Task<ConnectResult> RunToggleAsync(ToggleIntent intent, CancellationToken ct) =>
-        intent.Connect
-            ? _registry.Connection.ConnectAsync(intent.Container, ct)
-            : _registry.Connection.DisconnectAsync(intent.Container, ct);
-
     private string CancelReason() => _lifetime.IsCancellationRequested ? "Earshot is closing" : "another device was chosen";
+
+    // The hidden window raises this for WM_QUERYENDSESSION and WM_ENDSESSION. Internal so a test can raise it
+    // without a real end-session message.
+    internal void OnSessionEnding(object? sender, SessionEndingEventArgs e)
+    {
+        SessionEnding?.Invoke(this, e);
+        if (!_closed)
+        {
+            _coordinator.OnSessionEnding(e);
+        }
+    }
+
+    // WM_QUERYENDSESSION and WM_ENDSESSION, for anything else that wants them; the coordinator is wired
+    // above and starts the best-effort block itself.
+    public event EventHandler<SessionEndingEventArgs>? SessionEnding;
 
     private void OnSnapshotChanged(object? sender, DeviceSnapshotEventArgs e)
     {
@@ -366,7 +438,6 @@ internal sealed class TrayContext : ApplicationContext
         _snapshot = e.Snapshot;
         UpdatePresentation(forceIcon: false);
         _ = PinIfFirstSightingAsync();
-        _ = RefreshStatusAsync();
     }
 
     // Settings.Update raises Changed before it returns, so the presentation is refreshed afterwards.
@@ -379,8 +450,25 @@ internal sealed class TrayContext : ApplicationContext
             }
         });
 
+    private void OnCoordinatorChanged(object? sender, EventArgs e)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        UpdatePresentation(forceIcon: false);
+
+        // Once Exit is chosen, the card for the block before closing goes up only when that block is sent.
+        if (_exitPlace is { } place && !_blockingCardShown && _coordinator.BlockingBeforeClosing)
+        {
+            _blockingCardShown = true;
+            place.Show(_registry.Cards, TrayStatus.AppName, BlockingBeforeClosingMessage);
+        }
+    }
+
     private MenuState CurrentMenuState() =>
-        MenuModel.Build(_snapshot, _blockStatus, _protectionStatus, _registry.Settings.Current, IsBusy, _startupState);
+        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy, _startupState, _registry.SafeMode);
 
     private void UpdatePresentation(bool forceIcon)
     {
@@ -390,7 +478,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         RefreshIcon(remeasure: forceIcon, force: forceIcon);
-        _notifyIcon.Text = TrayStatus.Tooltip(_snapshot, _blockStatus, _registry.Settings.Current);
+        _notifyIcon.Text = TrayStatus.Tooltip(_snapshot, BlockStatus, _registry.Settings.Current);
     }
 
     private void RefreshIcon(bool remeasure, bool force)
@@ -400,18 +488,18 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        GlyphState glyph = TrayStatus.Glyph(_snapshot, _blockStatus, _registry.Settings.Current, _toggleInFlight);
+        GlyphState glyph = TrayStatus.Glyph(_snapshot, BlockStatus, _registry.Settings.Current, _toggleInFlight);
         _icons.Apply(_notifyIcon, glyph, remeasure, force);
     }
 
-    private Task RunSetupAsync() =>
-        RunOperationAsync("setup", ct => _registry.Block.RunSetupAsync(ct), CardAnchor.NearCursor);
+    private Task RunSetupAsync(CardPlace place) =>
+        RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place);
 
-    private async Task BlockAtBootAsync()
+    private async Task BlockAtBootAsync(CardPlace place)
     {
         // The cached status is read again whenever the icon is pressed, which happens before the menu
         // opens; it is read here only when nothing has been read yet.
-        BootBlockStatus? status = _blockStatus ?? await ReadBlockStatusAsync();
+        BootBlockStatus? status = BlockStatus ?? await _coordinator.ReadBlockStatusAsync(_lifetime.Token);
         if (_closing)
         {
             return;
@@ -419,22 +507,25 @@ internal sealed class TrayContext : ApplicationContext
 
         if (status is null)
         {
-            ShowCard(TrayStatus.AppName, BlockStatusUnreadableMessage, CardAnchor.NearCursor);
+            ShowCard(TrayStatus.AppName, BlockStatusUnreadableMessage, place);
             return;
         }
 
         // Before setup there is no gate to take the setting, so the click runs setup instead.
         if (TrayStatus.NeedsSetUp(status))
         {
-            await RunSetupAsync();
+            await RunSetupAsync(place);
             return;
         }
 
         bool blockAtBoot = !status.BlockAtBoot;
+        string action = blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff;
+
+        // A gate change: once it is running it is waited for, so the block before closing reads the setting it left.
         await RunOperationAsync(
-            blockAtBoot ? "setboot-on" : "setboot-off",
-            ct => _registry.Block.SetBlockAtBootAsync(blockAtBoot, ct),
-            CardAnchor.NearCursor);
+            action,
+            ct => _coordinator.RunAsync(action, _ => _registry.Block.SetBlockAtBootAsync(blockAtBoot, CancellationToken.None), ct),
+            place);
     }
 
     private void OnProtectAudioClicked()
@@ -444,40 +535,16 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        CardPlace place = ClickPlace();
         bool protect = !_registry.Settings.Current.ProtectAudioQuality;
-        if (!TryUpdateSettings("protect audio quality", s => s.ProtectAudioQuality = protect, CardAnchor.NearCursor))
+        if (!TryUpdateSettings("protect audio quality", s => s.ProtectAudioQuality = protect, place))
         {
             return;
         }
 
-        string action = protect ? "protect-on" : "protect-off";
-        Launch(
-            action,
-            () => RunOperationAsync(
-                action,
-                ct => _registry.Protection.ApplyAsync(protect, ct),
-                CardAnchor.NearCursor,
-                onSuccess: result =>
-                {
-                    if (protect && result.Status == OpStatus.Success)
-                    {
-                        ShowMicrophoneNoticeOnce();
-                    }
-                }),
-            CardAnchor.NearCursor);
-    }
-
-    // The microphone caveat, once, after the first successful protection change.
-    private void ShowMicrophoneNoticeOnce()
-    {
-        EarshotSettings settings = _registry.Settings.Current;
-        if (settings.ProtectAudioNoticeShown)
-        {
-            return;
-        }
-
-        ShowCard(TrayStatus.DeviceName(_snapshot, settings), TrayStatus.MicrophoneNotice, CardAnchor.NearTray);
-        TryUpdateSettings("microphone notice", s => s.ProtectAudioNoticeShown = true, CardAnchor.NearTray);
+        // The coordinator applies it in the right order and shows the microphone caveat once.
+        string action = protect ? GateVerbs.ProtectOn : GateVerbs.ProtectOff;
+        Launch(action, () => RunOperationAsync(action, ct => _coordinator.SetProtectionAsync(protect, place, ct), place), place);
     }
 
     private void OnOpenOnStartupClicked()
@@ -487,36 +554,39 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        CardPlace place = ClickPlace();
         _startupState = _startup.Read();
         bool openOnStartup = _startupState != StartupState.On;
         if (openOnStartup && _startupState == StartupState.DisabledInWindows)
         {
             _log.Warn("Open on startup: " + StartupRegistration.TurnedOffInWindowsMessage);
-            ShowCard(TrayStatus.AppName, StartupRegistration.TurnedOffInWindowsMessage, CardAnchor.NearCursor);
+            ShowCard(TrayStatus.AppName, StartupRegistration.TurnedOffInWindowsMessage, place);
             return;
         }
 
-        if (!TryUpdateSettings("open on startup", s => s.OpenOnStartup = openOnStartup, CardAnchor.NearCursor))
+        if (!TryUpdateSettings("open on startup", s => s.OpenOnStartup = openOnStartup, place))
         {
             return;
         }
 
-        Report("open-on-startup", _startup.Apply(openOnStartup), CardAnchor.NearCursor);
+        Report("open-on-startup", _startup.Apply(openOnStartup), place);
         _startupState = _startup.Read();
     }
 
-    // First run: apply the default (on). In safe mode StartupRegistration writes nothing and logs it.
+    // First run: apply the default (on). In safe mode, and against a test data folder, StartupRegistration
+    // writes nothing and logs it.
     private void ApplyStartupDefault()
     {
         bool openOnStartup = _registry.Settings.Current.OpenOnStartup;
         ControllerResult result = _startup.Apply(openOnStartup);
-        if (_registry.SafeMode)
+        if (_startup.WritesBlocked)
         {
-            _log.Info("First run in safe mode: Open on startup default (" + (openOnStartup ? "on" : "off") + ") not applied.");
+            _log.Info((_registry.SafeMode ? "First run in safe mode: " : "First run against a test data folder: ") +
+                "Open on startup default (" + (openOnStartup ? "on" : "off") + ") not applied.");
         }
         else
         {
-            Report("open-on-startup (first run)", result, CardAnchor.NearTray);
+            Report("open-on-startup (first run)", result, CardPlace.NearTray);
         }
 
         _startupState = _startup.Read();
@@ -524,25 +594,53 @@ internal sealed class TrayContext : ApplicationContext
 
     // Any later start with Open on startup on: the Run value is written again when it is missing or
     // starts another file, for example after the Earshot folder moved. The tray owns this value.
-    private void RepairStartupIfStale()
+    //
+    // It is left alone when the settings could not be read (the default would be written over the user's
+    // choice), and when Windows started Earshot from that same value, which Microsoft's Run key guidance
+    // asks a program not to write while it runs.
+    // https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys
+    private void RepairStartupIfStale(SettingsLoadStatus status)
     {
-        if (!_registry.Settings.Current.OpenOnStartup || !_startup.RunValueNeedsRepair())
+        if (!_registry.Settings.Current.OpenOnStartup)
         {
             return;
         }
 
-        if (_registry.SafeMode)
+        if (!SettingsWereRead(status))
         {
-            _log.Info("Safe mode: the Open on startup Run value is missing or starts another file, and was not repaired.");
+            _log.Info("Settings could not be read (" + status + "), so the Open on startup value is left as it is.");
+            return;
+        }
+
+        if (_startedAtLogon)
+        {
+            _log.Info("Earshot was started by its Run value, so that value is not written again in this run.");
+            return;
+        }
+
+        if (!_startup.RunValueNeedsRepair())
+        {
+            return;
+        }
+
+        if (_startup.WritesBlocked)
+        {
+            _log.Info(_startup.BlockedMessage + " The Open on startup Run value is missing or starts another file, and was not repaired.");
             return;
         }
 
         _log.Info("Open on startup is on, but the Run value is missing or starts another file. Writing it again.");
-        Report("open-on-startup (repair)", _startup.Apply(true), CardAnchor.NearTray);
+        Report("open-on-startup (repair)", _startup.Apply(true), CardPlace.NearTray);
         _startupState = _startup.Read();
     }
 
-    private async Task ExitAsync()
+    // True when settings.json holds the user's own choice. A load that only put defaults in memory (the file
+    // could not be read, or was unusable and reset) is not a choice to write back to HKCU.
+    private static bool SettingsWereRead(SettingsLoadStatus status) =>
+        status is SettingsLoadStatus.Loaded or SettingsLoadStatus.CreatedDefaults or
+                  SettingsLoadStatus.RestoredFromBackup or SettingsLoadStatus.NewerSchema;
+
+    private async Task ExitAsync(CardPlace place)
     {
         if (_closing)
         {
@@ -553,17 +651,28 @@ internal sealed class TrayContext : ApplicationContext
         _log.Info("Exit chosen from the tray menu.");
         try
         {
-            // No more input: the icon goes, the picker closes, and everything in flight is cancelled.
+            // No more input: the icon goes, the picker closes, and everything in flight is cancelled. The
+            // coordinator then blocks enabled nodes that are not in use, after any clean-up in flight.
             _notifyIcon.Visible = false;
             _picker?.Close();
+            _exitPlace = place;
+            _coordinator.BeginShutdown();
             _lifetime.Cancel();
 
-            if (_pending.Count > 0)
+            bool gaveUp = false;
+            if (_pending.Count > 0 || _coordinator.IsBusy)
             {
                 _log.Info("Waiting for " + DescribePending() + " to finish before closing.");
-                _registry.Cards.Show(new CardContent(TrayStatus.AppName, ClosingMessage), CardAnchor.NearTray);
 
-                Task all = Task.WhenAll(_pending.Keys);
+                // The block before closing on its own first reads the state and may block nothing, so it gets no
+                // card until the block is sent (OnCoordinatorChanged).
+                bool onlyTheBlock = _pending.Count == 0 && !_coordinator.IsBusyBeyondClosingBlock;
+                if (!onlyTheBlock)
+                {
+                    place.Show(_registry.Cards, TrayStatus.AppName, ClosingMessage);
+                }
+
+                Task all = Task.WhenAll(_pending.Keys.Append(_coordinator.WhenIdleAsync()));
                 using var limit = new CancellationTokenSource();
                 Task first = await Task.WhenAny(all, Task.Delay(_exitWaitLimit, limit.Token));
                 await limit.CancelAsync();
@@ -573,9 +682,21 @@ internal sealed class TrayContext : ApplicationContext
                 }
                 else if (first != all)
                 {
+                    gaveUp = true;
                     _log.Warn("Closing after " + _exitWaitLimit.TotalSeconds.ToString(CultureInfo.InvariantCulture) +
                         " s with " + DescribePending() + " still in flight.");
                 }
+            }
+
+            // A change still running when the wait ran out may leave the nodes enabled, with nothing left here
+            // to block them; the BootBlock task is then what blocks them at the next start.
+            string? notice = _coordinator.ClosingNotice ??
+                             (gaveUp && _coordinator.IsBusy && BlockStatus?.BlockAtBoot != false ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
+            if (notice is not null)
+            {
+                _log.Info("Exit: " + notice);
+                place.Show(_registry.Cards, TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), notice);
+                await Task.Delay(_exitNoticeTime);
             }
         }
         catch (Exception ex)
@@ -589,9 +710,10 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private string DescribePending() =>
-        _pending.Count.ToString(CultureInfo.InvariantCulture) + " action(s) (" + string.Join(", ", _pending.Values) + ")";
+        _pending.Count.ToString(CultureInfo.InvariantCulture) + " action(s) (" + string.Join(", ", _pending.Values) + ")" +
+        (_coordinator.IsBusy ? " and the block coordinator" : "");
 
-    private async Task ChooseDeviceAsync()
+    private async Task ChooseDeviceAsync(CardPlace place)
     {
         if (_closing)
         {
@@ -628,9 +750,63 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        // A different device is a new intent: a connect or disconnect in flight for the old one is cancelled.
+        // A different device is a new intent: a connect or disconnect in flight for the old one is cancelled,
+        // and the pin waits for its clean-up, so any re-block still acts on the device the gate pins now.
         _toggle?.Cancel();
-        if (!TryUpdateSettings(
+        try
+        {
+            await _coordinator.WhenIdleAsync(_lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (!_closing)
+        {
+            await ApplyDeviceChoiceAsync(choice, place);
+        }
+    }
+
+    // Pins a chosen device. Once the boot block is set up, the SYSTEM gate keeps its own copy of the device and
+    // may refuse one (a device with no A2DP sink node, or services still turned off on the old device), so the
+    // gate is asked first and the tray pins the device only once the gate has taken it: a refusal never leaves
+    // the tray and the gate on different devices. Before setup there is no gate copy, and setup passes the
+    // pinned device from settings. Internal so tests can drive it without the picker window.
+    internal async Task ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place)
+    {
+        ArgumentNullException.ThrowIfNull(choice);
+        BootBlockStatus? status;
+        try
+        {
+            status = await _coordinator.ReadBlockStatusAsync(_lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (_closing)
+        {
+            return;
+        }
+
+        bool gateRepinned = false;
+        if (status is not null && !TrayStatus.NeedsSetUp(status))
+        {
+            ControllerResult? result = await RunOperationAsync(GateVerbs.SetDevice, ct => _coordinator.ChangeDeviceAsync(choice.Address, ct), place);
+            if (result is not { IsSuccess: true })
+            {
+                // The refusal or failure is already logged and on a card; the tray keeps the device it had.
+                _log.Warn("Device not changed to " + choice.Name + " (" + choice.Address + "): the boot block did not take it" +
+                    (result is null ? "." : " (" + result.Status + ")."));
+                return;
+            }
+
+            gateRepinned = true;
+        }
+
+        if (_closing || !TryUpdateSettings(
                 "device",
                 s =>
                 {
@@ -638,8 +814,13 @@ internal sealed class TrayContext : ApplicationContext
                     s.PinnedContainerId = choice.ContainerId;
                     s.PinnedAddress = choice.Address;
                 },
-                CardAnchor.NearCursor))
+                place))
         {
+            if (gateRepinned)
+            {
+                _log.Warn("The boot block now uses " + choice.Address + ", but the tray could not save it, so a connect that needs an allow is refused until the device is chosen again.");
+            }
+
             return;
         }
 
@@ -647,28 +828,15 @@ internal sealed class TrayContext : ApplicationContext
         _log.Info("Device chosen: " + choice.Name + " (" + choice.Address + ", container " + choice.ContainerId + "), match \"" + choice.Match + "\".");
         _ = RefreshSnapshotAsync();
 
-        // The SYSTEM gate keeps its own copy of the device identity, so it is re-pinned too when it is set
-        // up. Before setup there is no copy: setup passes the pinned device from settings.
-        BootBlockStatus? status = await ReadBlockStatusAsync();
-        if (_closing)
-        {
-            return;
-        }
-
         if (status is null)
         {
             _log.Warn("The boot block status could not be read, so the gate was not re-pinned to " + choice.Address + ".");
-            ShowCard(choice.Name, GateNotRepinnedMessage, CardAnchor.NearCursor);
-            return;
+            ShowCard(choice.Name, GateNotRepinnedMessage, place);
         }
-
-        if (TrayStatus.NeedsSetUp(status))
+        else if (!gateRepinned)
         {
             _log.Info("Boot block is not set up, so there is no gate copy of the device to update.");
-            return;
         }
-
-        await RunOperationAsync("set-device", ct => _registry.Block.SetDeviceAsync(choice.Address, ct), CardAnchor.NearCursor);
     }
 
     private async Task LoadDevicesAsync(DevicePickerForm form)
@@ -696,7 +864,7 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     // Pins the resolved target's container, and the address of its BTHENUM\DEV_ node, the first time a
-    // device matching the name is seen. Tried once per container per run.
+    // device matching the name is seen. Tried once per container per run, and never from a read that failed.
     private async Task PinIfFirstSightingAsync()
     {
         DeviceModel? target = TrayStatus.PinCandidate(_snapshot, _registry.Settings.Current);
@@ -740,7 +908,7 @@ internal sealed class TrayContext : ApplicationContext
                     s.PinnedContainerId = target.ContainerId;
                     s.PinnedAddress = address ?? "";
                 },
-                CardAnchor.NearTray))
+                CardPlace.NearTray))
         {
             _log.Info("Pinned " + target.DisplayName + ": container " + target.ContainerId + ", address " + (address ?? "(none)") + ".");
         }
@@ -767,103 +935,17 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    // Reads the boot block status now and caches it. Null when the read failed (logged with its code) or
-    // Earshot is closing.
-    private async Task<BootBlockStatus?> ReadBlockStatusAsync()
-    {
-        CancellationToken ct = _lifetime.Token;
-        try
-        {
-            BootBlockStatus status = await _registry.Block.GetStatusAsync(ct);
-            _blockStatus = status;
-            return status;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            return null;
-        }
-        catch (Exception ex)
-        {
-            LogReadFailure("block-status", "The boot block status could not be read.", ex);
-            return null;
-        }
-    }
-
-    // Reads the boot block and protection status in the background. Overlapping requests are merged
-    // into one more pass.
-    private async Task RefreshStatusAsync()
-    {
-        if (_closed)
-        {
-            return;
-        }
-
-        if (_statusRefreshInFlight)
-        {
-            _statusRefreshAgain = true;
-            return;
-        }
-
-        _statusRefreshInFlight = true;
-        try
-        {
-            do
-            {
-                _statusRefreshAgain = false;
-                CancellationToken ct = _lifetime.Token;
-                try
-                {
-                    _blockStatus = await _registry.Block.GetStatusAsync(ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    LogReadFailure("block-status", "The boot block status could not be read.", ex);
-                }
-
-                try
-                {
-                    _protectionStatus = await _registry.Protection.GetStatusAsync(ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    LogReadFailure("protection-status", "The audio protection status could not be read.", ex);
-                }
-
-                UpdatePresentation(forceIcon: false);
-            }
-            while (_statusRefreshAgain && !_closed);
-        }
-        finally
-        {
-            _statusRefreshInFlight = false;
-        }
-    }
-
-    private void LogReadFailure(string step, string message, Exception ex)
-    {
-        StepOutcome outcome = StepOutcomes.FromHResult(step, ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
-        _log.Error(message + " " + TrayReport.DescribeStep(outcome), ex);
-    }
-
-    // Runs one menu action. Its token is cancelled only when Earshot closes: a click or another action
-    // never cancels it.
-    private async Task RunOperationAsync(
+    // Runs one menu action and returns its result, or null when it did not run, was cancelled or threw (each
+    // logged, and shown unless Earshot is closing). Its token is cancelled only when Earshot closes: a click or
+    // another action never cancels it.
+    private async Task<ControllerResult?> RunOperationAsync(
         string action,
         Func<CancellationToken, Task<ControllerResult>> operation,
-        CardAnchor anchor,
-        Action<ControllerResult>? onSuccess = null)
+        CardPlace place)
     {
         if (_closing)
         {
-            return;
+            return null;
         }
 
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -873,32 +955,30 @@ internal sealed class TrayContext : ApplicationContext
         {
             ControllerResult result = await operation(cts.Token);
 
-            // While closing, Report logs the result and shows no card, and the one-time notice waits for
-            // a run in which it can be seen.
-            Report(action, result, anchor);
-            if (result.IsSuccess && !_closing)
-            {
-                onSuccess?.Invoke(result);
-            }
+            // While closing, Report logs the result and shows no card.
+            Report(action, result, place);
+            return result;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             _log.Info(action + ": cancelled because Earshot is closing.");
+            return null;
         }
         catch (Exception ex)
         {
-            ReportUnexpected(action, ex, anchor);
+            ReportUnexpected(action, ex, place);
+            return null;
         }
         finally
         {
             _operationsInFlight--;
             UpdatePresentation(forceIcon: false);
-            _ = RefreshStatusAsync();
+            _ = _coordinator.RefreshStatusAsync();
         }
     }
 
     // Logs every result; shows a card for any result that is not a success.
-    private void Report(string action, ControllerResult result, CardAnchor anchor)
+    private void Report(string action, ControllerResult result, CardPlace place)
     {
         string text = TrayReport.Describe(action, result.Status, result.UserMessage, result.Steps);
         if (result.IsSuccess)
@@ -908,10 +988,10 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         _log.Warn(text);
-        ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), result.UserMessage, anchor);
+        ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), result.UserMessage, place);
     }
 
-    private bool TryUpdateSettings(string what, Action<EarshotSettings> mutate, CardAnchor anchor)
+    private bool TryUpdateSettings(string what, Action<EarshotSettings> mutate, CardPlace place)
     {
         try
         {
@@ -921,7 +1001,7 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
             _log.Error("Settings were not saved (" + what + ").", ex);
-            ShowCard(TrayStatus.AppName, SettingsNotSavedMessage, anchor);
+            ShowCard(TrayStatus.AppName, SettingsNotSavedMessage, place);
             return false;
         }
     }
@@ -939,19 +1019,19 @@ internal sealed class TrayContext : ApplicationContext
 
         if (message is not null)
         {
-            ShowCard(TrayStatus.AppName, message, CardAnchor.NearTray);
+            ShowCard(TrayStatus.AppName, message, CardPlace.NearTray);
         }
     }
 
     // Every card goes through registry.Cards. None is shown once Exit is chosen; the message behind it
     // has already been logged by the caller.
-    private void ShowCard(string title, string status, CardAnchor anchor)
+    private void ShowCard(string title, string status, CardPlace place)
     {
         if (_closing || _closed)
         {
             return;
         }
 
-        _registry.Cards.Show(new CardContent(title, status), anchor);
+        place.Show(_registry.Cards, title, status);
     }
 }

@@ -14,7 +14,8 @@ namespace Earshot.Popup;
 // reused for every later card.
 //
 // Show. A newer card replaces the content of the one on screen, moves it if needed, and restarts the
-// dismiss timer. The card goes away after DismissAfter, when it is clicked, or on Hide.
+// dismiss timer. The card goes away after DismissAfter, when it is clicked, or on Hide. ShowAsync does the
+// same and reports whether the card went on screen, for a one-time notice that is remembered only once seen.
 //
 // Where a card after a click goes. The notification area guidance asks for a popup raised by a click to
 // sit near the click, but a result card often comes long after the click (a connect waits for the
@@ -35,8 +36,8 @@ namespace Earshot.Popup;
 // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shqueryusernotificationstate
 // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ne-shellapi-query_user_notification_state
 //
-// Failures. A card that cannot be placed or shown is logged with its native code and dropped; nothing is
-// thrown back into the message loop, where the tray would report it on another card.
+// Failures. A card that cannot be placed, drawn or shown is logged with its native code and dropped; nothing
+// is thrown back into the message loop, where the tray would report it on another card.
 //
 // Dispose on the UI thread, after the tray stops posting.
 internal sealed class CardPresenter : ICardPresenter, IDisposable
@@ -98,6 +99,16 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         _uiPost(() => ShowOnUiThread(content, anchor, clickPoint));
     }
 
+    // Show that completes, on the UI thread, with whether the card was put on screen: false when it was held back
+    // (the notification state), the presenter was closed, or the card could not be placed, drawn or shown.
+    public Task<bool> ShowAsync(CardContent content, CardAnchor anchor, Point? clickPoint)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        var shown = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _uiPost(() => shown.TrySetResult(ShowOnUiThread(content, anchor, clickPoint)));
+        return shown.Task;
+    }
+
     public void Hide() => _uiPost(HideOnUiThread);
 
     public void Dispose()
@@ -139,20 +150,21 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         _ => "QUNS " + state.ToString(CultureInfo.InvariantCulture),
     };
 
-    private void ShowOnUiThread(CardContent content, CardAnchor anchor, Point? clickPoint)
+    // True when the card was put on screen.
+    private bool ShowOnUiThread(CardContent content, CardAnchor anchor, Point? clickPoint)
     {
         string what = anchor + " card \"" + content.Title + ": " + content.Status + "\"";
         _log.Write(LogLevel.Debug, "Show " + what + ".");
         if (_disposed)
         {
             _log.Write(LogLevel.Debug, "Not shown, the card is closed: " + what + ".");
-            return;
+            return false;
         }
 
         // Only a card that follows a click skips the check; any other anchor is treated as NearTray.
         if (anchor != CardAnchor.NearCursor && !NotificationsAccepted(what))
         {
-            return;
+            return false;
         }
 
         try
@@ -186,7 +198,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
                 timer.Stop();
                 _log.Error("Not shown: " + what + ". " + TrayReport.DescribeStep(shown));
                 ReportHide(card.HideCard());
-                return;
+                return false;
             }
 
             if (anchoredAt is { } used)
@@ -198,10 +210,18 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
             timer.Restart(DismissAfter);
             _log.Write(LogLevel.Debug, string.Create(CultureInfo.InvariantCulture,
                 $"Shown at {bounds.X},{bounds.Y} {bounds.Width}x{bounds.Height}, {dpi} DPI, taskbar {target.Edge}, {where}: {what}."));
+            return true;
         }
-        catch (Exception ex) when (ex is ExternalException or InvalidOperationException or ArgumentException)
+        catch (Exception ex)
         {
+            // Every failure while a card is measured, drawn or shown is logged here with what it was for, and
+            // the card is dropped. The net is this wide on purpose: System.Drawing turns several GDI+ statuses
+            // into exceptions that are not ExternalException (OutOfMemoryException for the GDI+ OutOfMemory
+            // status, say), and anything that reached the message loop would be answered by the tray with
+            // another card, through this same path.
+            // https://learn.microsoft.com/en-us/dotnet/api/system.drawing.image.fromfile
             _log.Error("Not shown: " + what + ".", ex);
+            return false;
         }
     }
 

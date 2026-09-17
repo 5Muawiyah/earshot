@@ -15,8 +15,8 @@ public sealed class StartupRegistrationTests
     private static readonly byte[] EnabledInWindows = [0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     private static readonly byte[] DisabledInWindows = [0x03, 0, 0, 0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x01];
 
-    private static StartupRegistration Create(FakeStartupRegistry registry, CapturingLog log, bool safeMode = false, string? exePath = ExePath) =>
-        new(registry, log, safeMode, exePath);
+    private static StartupRegistration Create(FakeStartupRegistry registry, CapturingLog log, bool safeMode = false, string? exePath = ExePath, bool redirected = false) =>
+        new(registry, log, safeMode, exePath, redirected);
 
     [TestMethod]
     public void TheCommandQuotesThePathAndAddsTheStartupArgument()
@@ -133,6 +133,24 @@ public sealed class StartupRegistrationTests
         Assert.AreEqual(0, registry.Deletes);
         Assert.AreEqual("\"D:\\Old\\Earshot.exe\" --startup", registry.Run["Earshot"]);
         Assert.IsTrue(log.Has(LogLevel.Warn, "Safe mode: startup setting not changed."));
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void ATestDataFolderWritesNothingAndLogsInstead(bool openOnStartup)
+    {
+        var registry = new FakeStartupRegistry();
+        registry.Run["Earshot"] = "\"D:\\Old\\Earshot.exe\" --startup";
+        var log = new CapturingLog();
+
+        ControllerResult result = Create(registry, log, redirected: true).Apply(openOnStartup);
+
+        Assert.AreEqual(OpStatus.NotAttempted, result.Status);
+        Assert.AreEqual(StartupRegistration.TestFolderMessage, result.UserMessage);
+        Assert.AreEqual(0, registry.Writes);
+        Assert.AreEqual(0, registry.Deletes);
+        Assert.IsTrue(log.Has(LogLevel.Warn, StartupRegistration.TestFolderMessage));
     }
 
     [TestMethod]

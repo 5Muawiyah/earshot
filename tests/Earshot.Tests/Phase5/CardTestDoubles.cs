@@ -66,10 +66,18 @@ internal sealed class FakeCardSurface : ICardSurface
 
     public List<int> ThreadIds { get; } = new();
 
+    // Thrown by Prepare when it is set, standing in for a failure while the card is drawn.
+    public Exception? PrepareFailure { get; set; }
+
     public Size Prepare(CardContent content, int dpi, CardPalette palette, int maxWidth)
     {
         ThreadIds.Add(Environment.CurrentManagedThreadId);
         Prepared.Add((content, dpi, palette, maxWidth));
+        if (PrepareFailure is not null)
+        {
+            throw PrepareFailure;
+        }
+
         return PreparedSize;
     }
 

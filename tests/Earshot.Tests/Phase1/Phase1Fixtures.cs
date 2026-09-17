@@ -15,13 +15,36 @@ internal static class Phase1Fixtures
     public static readonly Guid AirPodsContainer = new("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D");
     public static readonly Guid IPhoneContainer = new("4FB94536-5965-549C-A947-0B115F3D9B56");
 
+    // Nothing has been enumerated yet: not an observation of anything.
     public static DeviceSnapshot NoDevice() =>
         new(Target: null, AllGroups: [], TakenUtc: DateTimeOffset.UnixEpoch);
+
+    // An enumeration that worked and matched nothing.
+    public static DeviceSnapshot NotFound() =>
+        new(Target: null, AllGroups: [], TakenUtc: DateTimeOffset.UnixEpoch)
+        {
+            Sequence = 1,
+            ReadStatus = SnapshotReadStatus.Ok,
+            Resolution = TargetResolution.NotFound,
+        };
+
+    // An enumeration that failed: what it carries is not current.
+    public static DeviceSnapshot ReadFailed() =>
+        new(Target: null, AllGroups: [], TakenUtc: DateTimeOffset.UnixEpoch)
+        {
+            ReadStatus = SnapshotReadStatus.Failed,
+            Resolution = TargetResolution.ReadFailed,
+        };
 
     public static DeviceSnapshot Target(ConnectionState connection, Guid? container = null, string name = AirPodsName)
     {
         var model = new DeviceModel(container ?? AirPodsContainer, name, connection, []);
-        return new DeviceSnapshot(model, [model], DateTimeOffset.UnixEpoch);
+        return new DeviceSnapshot(model, [model], DateTimeOffset.UnixEpoch)
+        {
+            Sequence = 1,
+            ReadStatus = SnapshotReadStatus.Ok,
+            Resolution = TargetResolution.Pinned,
+        };
     }
 
     public static BootBlockStatus Block(BlockState state, bool blockAtBoot = true) =>

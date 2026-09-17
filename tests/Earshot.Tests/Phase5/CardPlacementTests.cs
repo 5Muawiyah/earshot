@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Popup;
@@ -362,6 +363,59 @@ public sealed class CardPlacementTests
         // A popup that does not touch the exclude rectangle stays where the alignment put it.
         Rectangle free = CardPlacement.CalculatePopup(new Point(500, 500), Card, Shell.TPM_CENTERALIGN | Shell.TPM_BOTTOMALIGN | Shell.TPM_VERTICAL, band, area);
         Assert.AreEqual(new Rectangle(350, 420, 300, 80), free);
+    }
+
+    // The Microsoft page does not say how CalculatePopupWindowPosition resolves an overlap with the exclude
+    // rectangle, so the managed calculation is compared with the real one over the combinations Earshot uses:
+    // each taskbar edge with that edge's band, on this machine's primary work area. The call is a pure
+    // calculation and moves no window.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-calculatepopupwindowposition
+    [TestMethod]
+    public void TheManagedPopupMatchesTheRealCalculationForEveryTaskbarEdge()
+    {
+        if (Screen.PrimaryScreen is not { } screen)
+        {
+            Assert.Inconclusive("This session has no display to read a work area from.");
+            return;
+        }
+
+        Rectangle work = screen.WorkingArea;
+        const int Thickness = 48;
+        foreach (TaskbarEdge edge in new[] { TaskbarEdge.Bottom, TaskbarEdge.Top, TaskbarEdge.Left, TaskbarEdge.Right })
+        {
+            Rectangle band = edge switch
+            {
+                TaskbarEdge.Bottom => Rectangle.FromLTRB(work.Left, work.Bottom - Thickness, work.Right, work.Bottom),
+                TaskbarEdge.Top => Rectangle.FromLTRB(work.Left, work.Top, work.Right, work.Top + Thickness),
+                TaskbarEdge.Left => Rectangle.FromLTRB(work.Left, work.Top, work.Left + Thickness, work.Bottom),
+                _ => Rectangle.FromLTRB(work.Right - Thickness, work.Top, work.Right, work.Bottom),
+            };
+            uint flags = CardPlacement.CursorFlags(edge);
+            foreach (Point anchor in Anchors(work, band))
+            {
+                Rectangle managed = CardPlacement.CalculatePopup(anchor, Card, flags, band, work);
+                Assert.AreEqual(Real(anchor, Card, flags, band), managed, edge + " at " + anchor);
+            }
+        }
+    }
+
+    private static IEnumerable<Point> Anchors(Rectangle work, Rectangle band)
+    {
+        yield return new Point(band.Left + (band.Width / 2), band.Top + (band.Height / 2));
+        yield return new Point(work.Left + 5, work.Top + 5);
+        yield return new Point(work.Right - 5, work.Bottom - 5);
+        yield return new Point(work.Left + (work.Width / 2), work.Top + (work.Height / 2));
+    }
+
+    private static Rectangle Real(Point anchor, Size card, uint flags, Rectangle exclude)
+    {
+        var point = new POINT { x = anchor.X, y = anchor.Y };
+        var size = new SIZE { cx = card.Width, cy = card.Height };
+        var excluded = new RECT { left = exclude.Left, top = exclude.Top, right = exclude.Right, bottom = exclude.Bottom };
+        Assert.IsTrue(
+            Shell.CalculatePopupWindowPosition(point, size, flags | Shell.TPM_WORKAREA, excluded, out RECT placed),
+            "CalculatePopupWindowPosition failed.");
+        return Rectangle.FromLTRB(placed.left, placed.top, placed.right, placed.bottom);
     }
 
     [TestMethod]

@@ -35,7 +35,9 @@ public interface IConnectionController                            // pure Core A
 
 public interface IBlockController
 {
-    bool IsSetUp { get; }                                          // \Earshot\Gate present + DACL verified
+    // \Earshot\Gate present and its DACL verified, as of the last status read or change; false before either.
+    // The tray decides setup from GetStatusAsync (BlockState.NotSetUp), never from this.
+    bool IsSetUp { get; }
     Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default);   // read-only, non-admin
     Task<ControllerResult> BlockAsync(CancellationToken ct = default);      // RunEx "block"
     Task<ControllerResult> AllowAsync(CancellationToken ct = default);      // RunEx "allow"
@@ -52,6 +54,11 @@ public interface IAudioProtectionController
 {
     Task<AudioProtectionSnapshot> GetStatusAsync(CancellationToken ct = default); // read-only, non-admin
     Task<ControllerResult> ApplyAsync(bool protect, CancellationToken ct = default); // via SYSTEM gate only
+
+    // A protection request kept while the device was blocked and not applied yet: true to protect, false to
+    // restore. Null when none is kept. A record that is there but cannot be read or is not valid throws, with the
+    // read's own code as the HResult. Read-only, non-admin. A controller that keeps no request has nothing to report.
+    Task<bool?> GetPendingProtectAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
 }
 
 // Phase 0 resolved: no battery source on this hardware. Kept so a future AACP/WinRT source
@@ -72,6 +79,23 @@ public interface ICardPresenter
     // A card that follows a click at clickPoint, the cursor position in physical pixels read when the click
     // happened. A presenter that cannot place a card at a point shows it as Show(content, anchor) does.
     void Show(CardContent content, CardAnchor anchor, System.Drawing.Point clickPoint) => Show(content, anchor);
+
+    // Shows a card as Show does (at clickPoint when there is one) and completes with whether it was put on screen:
+    // false when it was held back or could not be drawn. For a one-time notice that is remembered only once seen.
+    // It may complete later, on the UI thread. A presenter that cannot tell reports true.
+    Task<bool> ShowAsync(CardContent content, CardAnchor anchor, System.Drawing.Point? clickPoint)
+    {
+        if (clickPoint is { } point)
+        {
+            Show(content, anchor, point);
+        }
+        else
+        {
+            Show(content, anchor);
+        }
+
+        return Task.FromResult(true);
+    }
 
     void Hide();
 }
