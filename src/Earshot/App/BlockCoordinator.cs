@@ -1027,7 +1027,7 @@ internal sealed class BlockCoordinator : IDisposable
             await CleanUpConnectAsync(request, cleanup, steps);
             if (cancelled)
             {
-                return new ToggleReport(Connect: true, OpStatus.Failed, "", steps, Cancelled: true);
+                return CancelledReport(connect: true, OpStatus.Failed, "", steps);
             }
 
             throw;
@@ -1065,7 +1065,7 @@ internal sealed class BlockCoordinator : IDisposable
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _log.Info("connect: connected; the protection check was cancelled.");
-            return new ToggleReport(Connect: true, OpStatus.Success, TrayStatus.CardConnected, steps, Cancelled: true);
+            return CancelledReport(connect: true, OpStatus.Success, TrayStatus.CardConnected, steps);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1282,7 +1282,7 @@ internal sealed class BlockCoordinator : IDisposable
         fault?.Throw();
         if (cancelled)
         {
-            return new ToggleReport(Connect: false, OpStatus.Failed, "", steps, Cancelled: true);
+            return CancelledReport(connect: false, OpStatus.Failed, "", steps);
         }
 
         DeviceSnapshot? now = await RefreshSnapshotAsync();
@@ -2350,6 +2350,14 @@ internal sealed class BlockCoordinator : IDisposable
 
         return run.BlockTook;
     }
+
+    // A connect or disconnect that was cancelled, with the reason when the coordinator cancelled it itself: the
+    // caller's own token is not cancelled then, so the caller cannot tell why.
+    private ToggleReport CancelledReport(bool connect, OpStatus status, string message, List<StepOutcome> steps) =>
+        new(connect, status, message, steps, Cancelled: true)
+        {
+            CancelledBecause = _sessionBlockIssued ? "the session is ending" : _closing ? "Earshot is closing" : null,
+        };
 
     private ToggleReport Finish(ToggleRequest request, OpStatus status, string message, List<StepOutcome> steps, bool showCard = true)
     {

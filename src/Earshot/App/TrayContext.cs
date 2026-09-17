@@ -34,6 +34,19 @@ internal sealed record TrayStartOptions(
 
     // Where the pointer is, read when a click arrives so a card that comes later still lands at the click.
     public Func<Point> CursorPosition { get; init; } = () => Cursor.Position;
+
+    // Milliseconds since some fixed point, read when a click arrives.
+    public Func<long> TickCount { get; init; } = () => Environment.TickCount64;
+
+    // Clicks this close together are one click as the user meant it (a double or triple click).
+    // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.systeminformation.doubleclicktime
+    public TimeSpan DoubleClickTime { get; init; } = TimeSpan.FromMilliseconds(SystemInformation.DoubleClickTime);
+
+    // The installed copy (%ProgramFiles%\Earshot\Earshot.exe), which Open on startup starts once it exists, or null.
+    public string? InstalledExePath { get; init; }
+
+    // Whether a file exists, for the installed copy.
+    public Func<string, bool> FileExists { get; init; } = File.Exists;
 }
 
 // The tray: icon, tooltip, menu, left click and the cards they raise. Runs on the UI thread only.
@@ -43,15 +56,17 @@ internal sealed record TrayStartOptions(
 // before handing over (nothing found, busy, settings), and logs every result with its steps.
 //
 // Left click: MouseClick with the left button only (Click and MouseClick also fire for the right and
-// middle buttons, with X = Y = 0), ignored while a connect or disconnect is in flight so a fast triple
-// click cannot toggle twice, ignored with a card while a menu action is in flight, and ignored while the
-// device itself reports the link is changing, which is when the menu item is disabled too.
+// middle buttons, with X = Y = 0), ignored with a card while a menu action is in flight, and ignored while the
+// device itself reports the link is changing, which is when the menu item is disabled too. A click while a
+// connect or disconnect is in flight is a newer intent: the one in flight is cancelled and, once its clean-up
+// (a re-block included) has finished, the opposite runs. Clicks within the double-click time of the one that
+// started it are the same click, so a fast double or triple click never toggles twice.
 // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.notifyicon.mouseclick
 //
-// Cancellation: each connect or disconnect has its own token, cancelled when a different device is
-// chosen or Earshot closes. Each menu action (setup, Block at boot, protection, device change) has its
-// own token too, cancelled only when Earshot closes, so a click never cancels one. A cancellation stops the
-// coordinator's waits, never a gate change it has already sent: that is waited for before the clean-up.
+// Cancellation: each connect or disconnect has its own token, cancelled by a newer click, when a different
+// device is chosen, or when Earshot closes. Each menu action (setup, Block at boot, protection, device change)
+// has its own token too, cancelled only when Earshot closes, so a click never cancels one. A cancellation stops
+// the coordinator's waits, never a gate change it has already sent: that is waited for before the clean-up.
 // Nothing here reads IBlockController.IsSetUp: that checks a scheduled task, which is not UI thread work,
 // so setup is decided from the boot block status the coordinator reads asynchronously.
 //
@@ -98,6 +113,8 @@ internal sealed class TrayContext : ApplicationContext
     private readonly TimeSpan _exitWaitLimit;
     private readonly TimeSpan _exitNoticeTime;
     private readonly Func<Point> _cursorPosition;
+    private readonly Func<long> _tickCount;
+    private readonly TimeSpan _doubleClickTime;
     private readonly bool _startedAtLogon;
 
     // Actions started from the icon or the menu that have not finished, by name.
@@ -107,6 +124,14 @@ internal sealed class TrayContext : ApplicationContext
     private StartupState _startupState;
     private CancellationTokenSource? _toggle;
     private bool _toggleInFlight;
+
+    // The connect or disconnect in flight: which it is, when its click came, whether a newer click is waiting for
+    // it to end, why it was cancelled, and a task that completes once it has ended, clean-up included.
+    private bool _toggleConnect;
+    private long _toggleClickedAt;
+    private bool _toggleSuperseded;
+    private string? _toggleCancelReason;
+    private TaskCompletionSource? _toggleDone;
     private int _operationsInFlight;
     private Guid _pinAttemptedFor;
     private DevicePickerForm? _picker;
@@ -127,10 +152,13 @@ internal sealed class TrayContext : ApplicationContext
         _exitWaitLimit = options.ExitWaitLimit;
         _exitNoticeTime = options.ExitNoticeTime;
         _cursorPosition = options.CursorPosition;
+        _tickCount = options.TickCount;
+        _doubleClickTime = options.DoubleClickTime;
         _startedAtLogon = options.StartedAtLogon;
         _snapshot = registry.Monitor.Current;
         _devices = new BluetoothDeviceList(_log);
-        _startup = new StartupRegistration(options.StartupRegistry, _log, registry.SafeMode, options.ExePath, options.DataRootRedirected);
+        _startup = new StartupRegistration(options.StartupRegistry, _log, registry.SafeMode, options.ExePath, options.DataRootRedirected,
+            options.InstalledExePath, options.FileExists);
         _icons = new TrayIconFactory(_log, new ThemeReader(_log));
 
         _window = new ShellMessageWindow(_log);
@@ -283,7 +311,8 @@ internal sealed class TrayContext : ApplicationContext
     private void StartToggle()
     {
         CardPlace place = ClickPlace();
-        Launch("toggle", () => ToggleAsync(place), place);
+        long clickedAt = _tickCount();
+        Launch("toggle", () => ToggleAsync(place, clickedAt), place);
     }
 
     private void Start(string action, Func<CardPlace, Task> work)
@@ -337,10 +366,62 @@ internal sealed class TrayContext : ApplicationContext
 
     // Toggles the connection of the pinned (or resolved) device through the coordinator, which owns the
     // block, allow and protection order around it and shows its cards.
-    private async Task ToggleAsync(CardPlace place)
+    private async Task ToggleAsync(CardPlace place, long clickedAt)
     {
         if (_toggleInFlight)
         {
+            if (_toggleSuperseded || clickedAt - _toggleClickedAt < (long)_doubleClickTime.TotalMilliseconds)
+            {
+                _log.Write(LogLevel.Debug, "Click ignored: a connect or disconnect is already in flight.");
+                return;
+            }
+
+            await SupersedeToggleAsync(place, clickedAt);
+            return;
+        }
+
+        await RunToggleAsync(place, clickedAt, connect: null);
+    }
+
+    // A click while a connect or disconnect is in flight asks for the opposite. The one in flight is cancelled and
+    // the new one runs only once it has ended, clean-up included, so a re-block after a cancelled allow always
+    // comes first.
+    private async Task SupersedeToggleAsync(CardPlace place, long clickedAt)
+    {
+        bool connect = !_toggleConnect;
+        string next = connect ? "connect" : "disconnect";
+        TaskCompletionSource? done = _toggleDone;
+        _toggleSuperseded = true;
+        _toggleCancelReason = "a newer click asked to " + next;
+        _log.Info("Click: the " + (connect ? "disconnect" : "connect") + " in flight is cancelled, and a " + next + " follows once it has finished.");
+        _toggle?.Cancel();
+        try
+        {
+            if (done is not null)
+            {
+                await done.Task;
+            }
+        }
+        finally
+        {
+            _toggleSuperseded = false;
+        }
+
+        if (_closing)
+        {
+            _log.Info(next + ": not started, because Earshot is closing.");
+            return;
+        }
+
+        await RunToggleAsync(place, clickedAt, connect);
+    }
+
+    // connect: the intent a newer click asked for, or null to take it from the device state.
+    private async Task RunToggleAsync(CardPlace place, long clickedAt, bool? connect)
+    {
+        if (_toggleInFlight)
+        {
+            // Another click started one while this waited for the last to end.
             _log.Write(LogLevel.Debug, "Click ignored: a connect or disconnect is already in flight.");
             return;
         }
@@ -375,20 +456,27 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        bool wanted = connect ?? intent.Connect;
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         _toggle = cts;
         _toggleInFlight = true;
+        _toggleConnect = wanted;
+        _toggleClickedAt = clickedAt;
+        _toggleCancelReason = null;
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _toggleDone = done;
         UpdatePresentation(forceIcon: false);
-        string action = intent.Connect ? "connect" : "disconnect";
+        string action = wanted ? "connect" : "disconnect";
         try
         {
             ToggleReport report = await _coordinator.ToggleAsync(
-                new ToggleRequest(intent.Connect, intent.Container, intent.DeviceName, place), cts.Token);
+                new ToggleRequest(wanted, intent.Container, intent.DeviceName, place), cts.Token);
 
-            // A controller that reports a cancellation rather than throwing one is still a cancelled click.
+            // A controller that reports a cancellation rather than throwing one is still a cancelled click. The
+            // coordinator names the reason when it cancelled the operation itself (a session end, say).
             bool cancelled = report.Cancelled || cts.IsCancellationRequested;
             string text = TrayReport.Describe(
-                cancelled ? action + " (cancelled because " + CancelReason() + ")" : action,
+                cancelled ? action + " (cancelled because " + (report.CancelledBecause ?? CancelReason()) + ")" : action,
                 report.Status,
                 report.UserMessage,
                 report.Steps);
@@ -406,12 +494,16 @@ internal sealed class TrayContext : ApplicationContext
         {
             _toggle = null;
             _toggleInFlight = false;
+            _toggleDone = null;
+            done.TrySetResult();
             UpdatePresentation(forceIcon: false);
             _ = _coordinator.RefreshStatusAsync();
         }
     }
 
-    private string CancelReason() => _lifetime.IsCancellationRequested ? "Earshot is closing" : "another device was chosen";
+    // Why the tray cancelled the connect or disconnect in flight.
+    private string CancelReason() =>
+        _lifetime.IsCancellationRequested ? "Earshot is closing" : _toggleCancelReason ?? "another device was chosen";
 
     // The hidden window raises this for WM_QUERYENDSESSION and WM_ENDSESSION. Internal so a test can raise it
     // without a real end-session message.
@@ -492,8 +584,35 @@ internal sealed class TrayContext : ApplicationContext
         _icons.Apply(_notifyIcon, glyph, remeasure, force);
     }
 
-    private Task RunSetupAsync(CardPlace place) =>
-        RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place);
+    private async Task RunSetupAsync(CardPlace place)
+    {
+        ControllerResult? result = await RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place);
+        if (result is { IsSuccess: true } && !_closing)
+        {
+            PointStartupAtInstalledCopy();
+        }
+    }
+
+    // Setup has put a copy in %ProgramFiles%\Earshot: with Open on startup on, the Run value starts that copy from now
+    // on (StartupRegistration.TargetExePath), so deleting the download folder does not stop Earshot opening at
+    // sign-in. This copy keeps running until Earshot is closed.
+    private void PointStartupAtInstalledCopy()
+    {
+        if (!_registry.Settings.Current.OpenOnStartup || !_startup.RunValueNeedsRepair())
+        {
+            return;
+        }
+
+        if (_startup.WritesBlocked)
+        {
+            _log.Info(_startup.BlockedMessage + " Open on startup was not pointed at " + _startup.TargetExePath + " after setup.");
+            return;
+        }
+
+        _log.Info("Setup is done, so Open on startup now starts " + _startup.TargetExePath + ".");
+        Report("open-on-startup (after setup)", _startup.Apply(true), CardPlace.NearTray);
+        _startupState = _startup.Read();
+    }
 
     private async Task BlockAtBootAsync(CardPlace place)
     {
@@ -750,7 +869,12 @@ internal sealed class TrayContext : ApplicationContext
 
         // A different device is a new intent: a connect or disconnect in flight for the old one is cancelled,
         // and the pin waits for its clean-up, so any re-block still acts on the device the gate pins now.
-        _toggle?.Cancel();
+        if (_toggle is not null)
+        {
+            _toggleCancelReason = "another device was chosen";
+            _toggle.Cancel();
+        }
+
         try
         {
             await _coordinator.WhenIdleAsync(_lifetime.Token);

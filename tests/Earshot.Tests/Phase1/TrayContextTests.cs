@@ -75,6 +75,79 @@ public sealed class TrayContextTests
         });
     }
 
+    // A click after the double-click time, while the connect still runs, is a newer intent: the connect is
+    // cancelled, and the disconnect runs only once the connect's clean-up has finished.
+    [TestMethod]
+    public void ALaterClickCancelsTheConnectAndDisconnectsOnceItsCleanUpHasFinished()
+    {
+        StaThread.Run(() =>
+        {
+            long now = 0;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), tickCount: () => now);
+            bool connectEnded = false;
+            bool disconnectStartedBeforeTheConnectEnded = false;
+            tray.Connection.OnConnect = async ct =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                // Stands in for the clean-up a cancelled connect runs before it returns.
+                await Task.Delay(30, CancellationToken.None);
+                connectEnded = true;
+                return new ConnectResult(ConnectOutcome.Failed, "Cancelled", []);
+            };
+            tray.Connection.OnDisconnect = _ =>
+            {
+                disconnectStartedBeforeTheConnectEnded = !connectEnded;
+                return Task.FromResult(new ConnectResult(ConnectOutcome.Confirmed, "Disconnected", []));
+            };
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            now += 200;
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            Assert.HasCount(1, tray.Connection.Calls, "A click within the double-click time is the same click.");
+
+            now += 1000;
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            now += 100;
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            CollectionAssert.AreEqual(new[] { (true, AirPodsContainer), (false, AirPodsContainer) }, tray.Connection.Calls);
+            Assert.IsFalse(disconnectStartedBeforeTheConnectEnded, "The disconnect started before the connect's clean-up had finished.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "connect (cancelled because a newer click asked to disconnect)"));
+        });
+    }
+
+    // The coordinator cancels a connect itself when the session ends; the log says so rather than blaming a device
+    // change.
+    [TestMethod]
+    public void AConnectCancelledByTheSessionEndIsLoggedWithThatReason()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            // The connect's wait ends with the cancellation, as the real controller's does.
+            tray.Connection.OnConnect = async ct =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return new ConnectResult(ConnectOutcome.Confirmed, "Connected", []);
+            };
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.Context.OnSessionEnding(null, new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "connect (cancelled because the session is ending)"));
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "another device was chosen"));
+        });
+    }
+
     [TestMethod]
     public void AConnectedTargetIsDisconnectedWithoutAConnectingCard()
     {
@@ -339,6 +412,42 @@ public sealed class TrayContextTests
 
             CollectionAssert.AreEqual(new[] { expected }, tray.Block.Calls);
             Assert.AreEqual(0, tray.Block.IsSetUpReads, "IsSetUp checks a scheduled task and must not be read on the UI thread.");
+        });
+    }
+
+    // Setup copies Earshot to Program Files, which the scheduled tasks run and only administrators can change: Open
+    // on startup starts that copy from then on, so deleting the download folder does not stop it.
+    [TestMethod]
+    public void SetUpPointsOpenOnStartupAtTheInstalledCopy()
+    {
+        StaThread.Run(() =>
+        {
+            const string Installed = @"C:\Program Files\Earshot Installed\Earshot.exe";
+            bool installed = false;
+            using var tray = new TrayHarness(
+                arrange: t => t.Block.Status = Block(BlockState.NotSetUp),
+                installedExePath: Installed,
+                fileExists: path => installed && path == Installed);
+            Assert.AreEqual(0, tray.Startup.Writes, "Before setup the Run value starts this copy.");
+
+            installed = true;
+            tray.ClickMenu(MenuModel.SetUpEarshot);
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(StartupRegistration.CommandFor(Installed), tray.Startup.Run[StartupRegistration.ValueName]);
+            Assert.AreEqual(1, tray.Startup.Writes);
+        });
+    }
+
+    [TestMethod]
+    public void AtStartTheRunValueIsPointedAtAnInstalledCopy()
+    {
+        StaThread.Run(() =>
+        {
+            const string Installed = @"C:\Program Files\Earshot Installed\Earshot.exe";
+            using var tray = new TrayHarness(installedExePath: Installed, fileExists: path => path == Installed);
+
+            Assert.AreEqual(StartupRegistration.CommandFor(Installed), tray.Startup.Run[StartupRegistration.ValueName]);
         });
     }
 
@@ -767,7 +876,10 @@ internal sealed class TrayHarness : IDisposable
         Action<TrayHarness>? arrange = null,
         bool startedAtLogon = false,
         bool dataRootRedirected = false,
-        SettingsLoadStatus? settingsStatus = null)
+        SettingsLoadStatus? settingsStatus = null,
+        Func<long>? tickCount = null,
+        string? installedExePath = null,
+        Func<string, bool>? fileExists = null)
     {
         // An exception in a posted callback fails the test instead of opening the WinForms error dialog.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
@@ -810,6 +922,10 @@ internal sealed class TrayHarness : IDisposable
             CursorPosition = () => ClickPoint,
             StartedAtLogon = startedAtLogon,
             DataRootRedirected = dataRootRedirected,
+            TickCount = tickCount ?? (() => 0),
+            DoubleClickTime = TimeSpan.FromMilliseconds(500),
+            InstalledExePath = installedExePath,
+            FileExists = fileExists ?? (_ => false),
         };
         if (exitWaitLimit is { } limit)
         {

@@ -67,6 +67,10 @@ internal sealed class CurrentUserStartupRegistry : IStartupRegistry
 // In safe mode, and whenever EARSHOT_DATA_ROOT redirects Earshot's folders, nothing is written: the change is
 // logged instead. A run against a test data folder is always a first run, whose default would otherwise point
 // the owner's real Open on startup at that build.
+//
+// The value starts the installed copy once setup has put one in %ProgramFiles%\Earshot, and the running copy
+// until then. The installed copy is the one the scheduled tasks run and only administrators can change, while
+// a download folder can be moved or deleted, which would silently stop Earshot opening at sign-in.
 internal sealed class StartupRegistration
 {
     public const string ValueName = "Earshot";
@@ -86,9 +90,13 @@ internal sealed class StartupRegistration
     private readonly ILog _log;
     private readonly bool _safeMode;
     private readonly bool _redirected;
-    private readonly string? _exePath;
+    private readonly string? _runningExePath;
+    private readonly string? _installedExePath;
+    private readonly Func<string, bool> _fileExists;
 
-    public StartupRegistration(IStartupRegistry registry, ILog log, bool safeMode, string? exePath, bool redirected = false)
+    public StartupRegistration(
+        IStartupRegistry registry, ILog log, bool safeMode, string? exePath, bool redirected = false,
+        string? installedExePath = null, Func<string, bool>? fileExists = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(log);
@@ -96,8 +104,14 @@ internal sealed class StartupRegistration
         _log = log;
         _safeMode = safeMode;
         _redirected = redirected;
-        _exePath = exePath;
+        _runningExePath = exePath;
+        _installedExePath = installedExePath;
+        _fileExists = fileExists ?? File.Exists;
     }
+
+    // The file the Run value starts: the installed copy when there is one, otherwise this copy.
+    public string? TargetExePath =>
+        !string.IsNullOrWhiteSpace(_installedExePath) && _fileExists(_installedExePath) ? _installedExePath : _runningExePath;
 
     // True when this run must not write the Run value at all.
     public bool WritesBlocked => _safeMode || _redirected;
@@ -142,7 +156,8 @@ internal sealed class StartupRegistration
     // only "--startup". Reads only; a registry error is logged and gives false.
     public bool RunValueNeedsRepair()
     {
-        if (string.IsNullOrWhiteSpace(_exePath))
+        string? exePath = TargetExePath;
+        if (string.IsNullOrWhiteSpace(exePath))
         {
             _log.Warn(NoExePathMessage + " The Open on startup Run value was not checked.");
             return false;
@@ -158,7 +173,7 @@ internal sealed class StartupRegistration
             string? current = _registry.ReadRunValue(ValueName);
             bool startsThisFile = current is not null &&
                                   current.EndsWith("\" " + StartupArgument, StringComparison.Ordinal) &&
-                                  string.Equals(current, CommandFor(_exePath), StringComparison.OrdinalIgnoreCase);
+                                  string.Equals(current, CommandFor(exePath), StringComparison.OrdinalIgnoreCase);
             return !startsThisFile;
         }
         catch (Exception ex) when (IsRegistryError(ex))
@@ -185,13 +200,14 @@ internal sealed class StartupRegistration
 
     private ControllerResult TurnOn(string action)
     {
-        if (string.IsNullOrWhiteSpace(_exePath))
+        string? exePath = TargetExePath;
+        if (string.IsNullOrWhiteSpace(exePath))
         {
             _log.Error(NoExePathMessage + " Open on startup was not turned on.");
             return new ControllerResult(OpStatus.NotAttempted, NoExePathMessage, [StepOutcomes.NotAttempted(action, NoExePathMessage)]);
         }
 
-        string command = CommandFor(_exePath);
+        string command = CommandFor(exePath);
         if (command.Length > MaxCommandLength)
         {
             _log.Error(PathTooLongMessage + " Command: " + command);

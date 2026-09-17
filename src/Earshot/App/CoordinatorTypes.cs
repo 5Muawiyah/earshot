@@ -47,9 +47,14 @@ internal sealed record ToggleRequest(bool Connect, Guid Container, string Device
 //                re-applied, nodes blocked) did not work; Failed otherwise
 //   UserMessage  the last card the operation showed, or what it would have said
 //   Steps        every native step, in order: connect, allow, block and protection
-//   Cancelled    the caller's token was cancelled; the clean-up still ran before the report was returned
+//   Cancelled    the caller's token or the coordinator itself cancelled it; the clean-up still ran before the
+//                report was returned
+//   CancelledBecause  why the coordinator cancelled it (the session is ending, Earshot is closing), or null when
+//                it was not cancelled or only the caller's token was, whose reason the caller knows
 internal sealed record ToggleReport(bool Connect, OpStatus Status, string UserMessage, IReadOnlyList<StepOutcome> Steps, bool Cancelled)
 {
+    public string? CancelledBecause { get; init; }
+
     public bool IsSuccess => Status is OpStatus.Success or OpStatus.AlreadyInState;
 }
 

@@ -200,6 +200,7 @@ internal static partial class Program
                 {
                     StartedAtLogon = startedAtLogon,
                     DataRootRedirected = paths.IsRedirected,
+                    InstalledExePath = paths.InstalledExe,
                 });
 
                 TrayContext shown = context;
