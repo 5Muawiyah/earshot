@@ -51,14 +51,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -List
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -Test 01 -ExePath "C:\Program Files\Earshot\Earshot.exe"
 ```
 
-Four tests take an option of their own. The launcher passes each one on, and refuses
+Seven tests take an option of their own. The launcher passes each one on, and refuses
 it for a test that does not take it rather than dropping it quietly:
 
 | Option | Test | What it is for |
 |---|---|---|
 | `-Variant 1` to `-Variant 5` | 10 | Which kind of restart to raise. Run the test once per variant. |
 | `-AllowPlanB` | 07 | Also try the `--principal user` fallback, which raises an administrator prompt. |
-| `-Note "fast startup on"` | 04 | Free text kept with the run, to record the setting it was run under. |
+| `-Note "..."` | 04 | Free text kept with the run, for whatever that run was meant to show. |
+| `-WatchSeconds 120` | 03 | How long to watch for Windows paging the AirPods after an allow. |
+| `-WatchMinutes 10` | 13 | How long to wait for the idle rule to block the nodes again. |
+| `-PhoneAddress`, `-SpeakerAddress` | 14 | The addresses to try. Without them the test lists the ones it can see and asks which is which. |
 | `-OfferUninstall` | 00 | Offer a full uninstall at the end of the restore. |
 
 The tests are numbered riskiest first. Test 08 is the acceptance test the whole
@@ -79,9 +82,13 @@ rather than send a real device action with its evidence redirected.
 ## Which Earshot.exe
 
 Pass the installed copy at `%ProgramFiles%\Earshot\Earshot.exe`, or the
-`Earshot.exe` in an unzipped release folder. Install and uninstall refuse anything
-else: they copy only the files the publish manifest lists and check each copy
-against its recorded hash, and a build output folder has no manifest.
+`Earshot.exe` in an unzipped release folder. Install refuses anything else itself:
+it copies only the files the publish manifest lists and checks each copy against its
+recorded hash, and a build output folder has no manifest, so it stops with "Install
+from a release build." Uninstall reads no manifest and has no such check, so the
+scripts do it instead: every test that runs either verb (00 with `-OfferUninstall`,
+07 with `-AllowPlanB`, and 15) refuses a build output folder before it removes
+anything.
 
 ## Tests that need a restart
 
@@ -115,7 +122,11 @@ it is never lost.
 `result.json` is the one to read. Each criterion carries `pass`, `fail` or
 `inconclusive` against a stated rule, and the `findings` list holds the measured
 values and the decisions a test settles, such as whether the Handsfree assisted
-connect fallback is needed.
+connect fallback is needed. A finding whose value is null means the read behind it
+did not answer, which is recorded rather than guessed at.
+
+Each test also ends with an exit code, and the launcher passes it on: 0 for pass,
+1 for fail, 2 for inconclusive. `result.json` is still where the detail is.
 
 `inconclusive` is a real answer, not a soft failure. It means the test could not
 reach the state it needed, usually because a precondition was not met, and it is
@@ -155,17 +166,19 @@ unknown rather than assumed.
 
 | Backlog needs | Where they are answered |
 |---|---|
-| 001, 003, 010 | 08 (`icon-dpi`, `icon-theme`). A contrast theme is not asked. |
+| 001, 003, 010 | 08 (`icon-dpi`, `icon-theme`). The icon ink in a contrast theme is not asked; the card in one is, under 085. |
+| 002, 011 | 08 (`icon-dpi`, `icon-theme`, `taskbarCreatedSeen`). No script restarts Explorer, so only the scaling change and the light and dark switch are actually raised; the finding counts the `TaskbarCreated` lines the log already holds. |
 | 004, 005, 006, 012, 016 | 08 (`click-once`, `menu`, `clean-exit`, `startup-value`, `startup-agrees`, `single-instance`) |
 | 007, 013 | 10, all five variants (`query-arrived`, `end-arrived`) |
-| 009, 015 | 14 (`picker-lists-devices`). The greyed entries, the rename and the re-pin are not asked. |
+| 009, 015 | 14 (`picker-lists-devices`, `pickerMarksAbsentDevices`). The rename and the re-pin through the picker are not asked. |
+| 014 | 08 (`keyboardReachesTheIcon`) |
 | 017, 064, 080 | 08, both halves of the click: `left-click-connects`, `click-agrees-with-endpoints`, `no-admin-prompt`, then `left-click-disconnects`, `disconnect-agrees-with-endpoints`, `no-admin-prompt-disconnect`, `blocked-again-after-click`, plus `card-no-focus`. 01 and 02 settle the driver requests underneath them. |
 | 018, 021, 027, 060, 071, 079, 122 | 12 |
 | 019 | 06, 12 (`protection-churn`) |
 | 020, 025, 026, 037, 049, 078 | 04 |
 | 023, 056, 057, 065, 072, 073, 076, 098, 112, 128 | 01 |
 | 024 | 01, 02, 03 |
-| 030, 031, 043, 045, 054, 099, 134 | 15 |
+| 030, 031, 045, 054, 099, 134 | 15 |
 | 032, 048, 125 | 07 (`ace-present`), 15 (`install-again`) |
 | 033, 034, 035, 047, 051, 110, 116, 124 | 07 |
 | 036 | 04, 06, 07: any gate run that completes |
@@ -174,34 +187,35 @@ unknown rather than assumed.
 | 040, 133 | 09 (`not-paged-at-boot`, `nodes-after-boot`) |
 | 041 | 07 (`setboot-round-trip`), 14 (the set-device half) |
 | 044, 055, 136 | 07 with `-AllowPlanB` (`planb`) |
-| 050, 117 | 05 (`bit-cleared`), 04 (`persisted`), 15 (`nodes-restored`) |
+| 050, 117 | 05 (`bit-cleared`), 04 (`persisted`), 15 (`nodes-restored`). Need 117 also asks for the Fast Startup variant, and **that half is not asked**: see below. |
 | 052, 108 | 06 (`services-readable-while-blocked`), 08 (`no-fresh-handsfree-node`) |
 | 053, 119 | 09. A battery-saver boot is not asked. |
 | 058, 068, 077 | 02 |
+| 059 | 01 (`reconnectWhileActive`), 02 (`disconnectWhileUnplugged`) |
 | 061, 066, 074 | 01 (`K1-budget`), 02 (`disconnect-budget`) |
+| 081, 082, 083, 090, 092 | 08 (`cardFollowsTheCursorDisplay`, `cardClearsAnAutoHidingTaskbar`, `cardSuppressedInFullScreen`). The `ABM_GETTASKBARPOS` rectangle itself, the log line naming `QUNS_BUSY`, and a result card over an exclusive full-screen app are not read back. |
 | 084, 086, 087 | 08 (`card-no-focus`) |
-| 085 | 08 (`icon-theme`) for light and dark. High contrast is not asked. |
+| 085 | 08 (`icon-theme`) for the light and dark half, and (`cardReadableInContrastTheme`) for the contrast theme half. |
 | 093 to 097, 100, 102 to 106, 115, 130 | 06 |
 | 113, 129 | 03 (`no-auto-page`), 02 (`block-recorded`) |
 | 118, 132 | 10 (`block-queued`), 09 (`end-session-logged`) |
 | 120, 131 | 13 |
 | 137 | 11 |
-| 002, 011 | **Not asked.** An Explorer restart and a primary-display DPI change. |
 | 008 | **Not asked.** No script watches a first sighting pin the container. |
-| 014 | **Not asked.** Keyboard access to the icon (Win+B, Shift+F10). |
 | 022, 028 | **Not asked.** They need a tray session of hours. |
 | 029 | **Not asked.** A code question, not a device one. |
 | 042 | **Not asked.** It needs the AirPods unpaired from this PC. |
+| 043 | **Not asked.** The tray's own `Set up Earshot...` prompt, and what a declined one gives. Test 15 elevates from PowerShell instead, so only an accepted prompt is ever seen. |
 | 046 | **Not asked.** It needs a second account and a squatted task folder. |
-| 059, 067 | **Not asked.** Wrong-state and unsupported requests, and what they return. |
 | 062, 063 | **Not asked.** The controller's own return while blocked, and whether `staleSnapshotsIgnored` is ever non-zero. |
+| 067 | **Not asked.** An unsupported request, and whether a null property buffer of length 0 is accepted. A redundant request is recorded under 059. |
 | 069, 070, 075 | **Not asked.** Whether the render endpoint or its connector changes shape mid-connect. |
-| 081, 082, 083, 088 to 092 | **Not asked.** A second monitor, an auto-hidden taskbar, a full-screen app, and the other card placement cases. |
+| 088, 089, 091 | **Not asked.** Moving a card between displays of different scaling (this machine has only 96 DPI displays), DWM rounding on other builds, and whether a secondary-display taskbar hosts the icon. |
 | 101, 121 | **Not asked.** Two SYSTEM tasks started together, and the locks under the real task limits. |
 | 107 | **Not asked.** A protection intent kept while blocked and applied after the next allow. |
 | 109 | **Not asked.** The DACL on `device-change.lock`. |
 | 123, 135 | **Not asked.** Removing a paired device while it is blocked. |
-| 126, Fast Startup half | **Not asked.** No script turns Fast Startup on, reads it, or has a criterion for it. Test 08 powers down with whatever the machine is set to, and does not record which. To cover it by hand, turn Fast Startup on and run `04-BlockAndReboot.ps1 -Note "fast startup on"`, then read the note back beside `persisted`. Until then the answer is unknown, not settled. |
+| 117 and 126, Fast Startup halves | **Not asked.** No script turns Fast Startup on, and none has a criterion for it. Tests 08 and 09 now read the setting and record it (`fastStartupAtPowerDown`, `fastStartupAtShutdown`), so the evidence says which kind of shutdown a run used, but they power down with whatever the machine is set to. To cover it by hand, turn Fast Startup on and run 08 (or 09), the only halves that shut the machine right down, then read the finding back beside `still-blocked`. Test 04 cannot cover it: a restart always performs a full shutdown and a cold boot, whatever Fast Startup is set to. Until a power cycle has been made with it on, the answer is unknown, not settled. |
 
 When a sitting ends, tick the needs the run actually answered against this table in
 `PROMPTING_RESPONSES.md`, so an unasked question is never read as a settled one.

@@ -104,7 +104,7 @@ devices could not be read at all, so a failed read is never shown as a state.
 | `Protect audio quality` | Tick, on by default. Turns off the Hands-Free profile, as described below. |
 | `Turns off the AirPods microphone` | A caption under that setting. Always visible, never clickable, because it is the cost of the setting above. |
 | `Open on startup` | Tick, on by default. Writes one value named `Earshot` under the current user's `Run` key, with the `--startup` argument. Earshot has to be running to put the block back when you stop using the AirPods. |
-| `Choose device...` | Lists the paired Bluetooth devices, with the name to match. Choosing one pins it, and points the elevated worker at the same device. Use this if your AirPods are renamed, so that the default match "AirPods" no longer fits. |
+| `Choose device...` | Lists the paired Bluetooth devices, with the name to match. Choosing one pins it, and points the elevated worker at the same device. Use this if your AirPods are renamed, so that the default match "AirPods" no longer fits. A device that cannot play audio from this PC, a phone for instance, is refused: "That device cannot play audio from this PC. Choose headphones or speakers." |
 | `Set up Earshot...` | Runs the one-time setup. Shown only while setup is needed. |
 | `Exit` | Closes Earshot. With Block at boot on, it blocks the device nodes before it closes. |
 
@@ -249,7 +249,9 @@ rather than let a real device action write its evidence somewhere else.
   described above, not on a guarantee.
 - **Fast Startup has not been tested.** It was off on the machine this was
   built against. Whether a persistent device-node disable behaves the same
-  through a hybrid shutdown is unverified.
+  through a hybrid shutdown is unverified. Tests 08 and 09, the two that power
+  the machine right down, record which it was set to, so a sitting made with it
+  off is never read as having covered it.
 - **Whether the A2DP driver accepts the connect request is unverified.** The
   one-shot reconnect and disconnect properties are documented for Hands-Free
   filters, and the audio protection removes the Hands-Free filter. If the A2DP
@@ -273,8 +275,10 @@ rather than let a real device action write its evidence somewhere else.
 
 ## Verification status
 
-Nothing below that needs the AirPods themselves has been run yet. Those rows
-stay pending until the live tests in `tools\live-tests` are run on the device.
+Nothing below that needs a live action on the AirPods has been run yet: the
+read-only rows were done on this machine with the AirPods paired and connected,
+and the rest stay pending until the live tests in `tools\live-tests` are run on
+the device.
 
 | What | Status |
 |---|---|
@@ -298,13 +302,15 @@ stay pending until the live tests in `tools\live-tests` are run on the device.
 ## Live tests
 
 The pending rows above are settled by the scripts in `tools\live-tests`, with
-one exception: no script settles Fast Startup. Test 08 powers the machine down
-with whatever it is set to and does not record which, so a full sitting leaves
-that row where it is. To cover it by hand, turn Fast Startup on and run
-`04-BlockAndReboot.ps1 -Note "fast startup on"`. They
-are run by hand, with the AirPods and the phone there, against an installed copy
-or an unzipped release. Nothing runs them for you, and none of them runs during
-a build.
+one exception: no script settles Fast Startup. Tests 08 and 09 read the setting
+and record it, but they power the machine down with whatever it happens to be,
+so a full sitting leaves that row where it is unless it was on. To cover it by
+hand, turn Fast Startup on and run 08 (or 09), the two tests that shut the
+machine right down rather than restarting it, then read `fastStartupAtPowerDown`
+back beside the criteria. A restart always performs a full shutdown and a cold
+boot, so no restart test can cover it. The scripts are run by hand, with the
+AirPods and the phone there, against an installed copy or an unzipped release.
+Nothing runs them for you, and none of them runs during a build.
 
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -List
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -Test 01 -ExePath "C:\Program Files\Earshot\Earshot.exe"
