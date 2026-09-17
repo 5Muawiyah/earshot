@@ -245,6 +245,73 @@ try
             -Outcome $(if ($focus -eq 'yes') { 'pass' } elseif ($focus -eq 'no') { 'fail' } else { 'inconclusive' }) `
             -Detail ('You answered ' + $focus + '.')
 
+        Write-Section -Run $run -Title 'Clicking, the menu and closing'
+        Wait-Owner -Run $run -Text 'Click the tray icon a few ways: one click, a fast double click, then a right click. Watch what each one does.'
+        $onceOnly = Read-Answer -Run $run -Question 'Did a fast double click still toggle only once, rather than connecting and disconnecting again?'
+        Add-Criterion -Run $run -Id 'click-once' -Criterion 'A fast double click toggles once, not twice.' `
+            -Outcome $(if ($onceOnly -eq 'yes') { 'pass' } elseif ($onceOnly -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $onceOnly + '.')
+
+        $menuOk = Read-Answer -Run $run -Question 'Did the right click open the menu without toggling anything, with its ticks matching the real state?'
+        Add-Criterion -Run $run -Id 'menu' -Criterion 'Right click opens the menu, never toggles, and its ticks are up to date.' `
+            -Outcome $(if ($menuOk -eq 'yes') { 'pass' } elseif ($menuOk -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $menuOk + '.')
+
+        $keyboard = Read-Answer -Run $run -Question 'From the keyboard (Windows+B, then arrow keys, then Enter or Shift+F10), could you reach the icon and open its menu?'
+        Add-Finding -Run $run -Name 'keyboardReachesTheIcon' -Value $keyboard
+
+        Write-Section -Run $run -Title 'Open on startup'
+        Write-Line -Run $run -Text 'Earshot writes its own startup value in your registry hive. It is read here, never written.'
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        $runValue = ''
+        try
+        {
+            $entry = Get-ItemProperty -LiteralPath $runKey -Name 'Earshot'
+            $runValue = '' + (Get-Field -Object $entry -Name 'Earshot')
+        }
+        catch
+        {
+            Write-Line -Run $run -Text ('There is no Earshot startup value: ' + ($_ | Out-String).Trim())
+        }
+
+        Write-Line -Run $run -Text ('Run value: ' + $runValue)
+        Add-Criterion -Run $run -Id 'startup-value' -Criterion 'With Open on startup ticked, the Run value names this Earshot and passes --startup.' `
+            -Outcome $(if (($runValue -like '*--startup*') -and ($runValue -like '*Earshot.exe*')) { 'pass' } else { 'inconclusive' }) `
+            -Detail ('It reads: ' + $runValue + '. Inconclusive if Open on startup is not ticked, which is a setting, not a fault.')
+        Add-Finding -Run $run -Name 'startupRunValue' -Value $runValue
+
+        Wait-Owner -Run $run -Text 'In the Earshot menu, turn Open on startup off and on again, then open Task Manager, Startup apps, and turn Earshot off there.'
+        $startupAgrees = Read-Answer -Run $run -Question 'After turning it off in Task Manager, did the Earshot menu show Open on startup unticked, and did clicking it show a card rather than silently re-enabling it?'
+        Add-Criterion -Run $run -Id 'startup-agrees' -Criterion 'The menu agrees with what Task Manager says about startup, and never fights it.' `
+            -Outcome $(if ($startupAgrees -eq 'yes') { 'pass' } elseif ($startupAgrees -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $startupAgrees + '.')
+
+        Write-Section -Run $run -Title 'The card in awkward places'
+        Write-Line -Run $run -Text 'These are all things only you can see. Answer unsure for any you cannot set up.'
+        $secondCopy = Read-Answer -Run $run -Question 'Start Earshot a second time. Did the one already running show a card, instead of a second icon appearing?'
+        Add-Criterion -Run $run -Id 'single-instance' -Criterion 'A second copy shows a card and leaves one icon.' `
+            -Outcome $(if ($secondCopy -eq 'yes') { 'pass' } elseif ($secondCopy -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $secondCopy + '.')
+
+        $underCursor = Read-Answer -Run $run -Question 'With a second display attached, did the card after a click appear on the display the cursor was on, sized for it?'
+        Add-Finding -Run $run -Name 'cardFollowsTheCursorDisplay' -Value $underCursor
+
+        $autoHide = Read-Answer -Run $run -Question 'With the taskbar set to hide itself, did the card stay clear of the taskbar when it slid back into view?'
+        Add-Finding -Run $run -Name 'cardClearsAnAutoHidingTaskbar' -Value $autoHide
+
+        $fullScreen = Read-Answer -Run $run -Question 'During a full-screen game or presentation, was the card correctly not shown at all?'
+        Add-Finding -Run $run -Name 'cardSuppressedInFullScreen' -Value $fullScreen
+
+        $contrast = Read-Answer -Run $run -Question 'In a contrast theme, was the card readable and drawn in the system colours?'
+        Add-Finding -Run $run -Name 'cardReadableInContrastTheme' -Value $contrast
+
+        Wait-Owner -Run $run -Text 'Now choose Exit from the Earshot menu and watch the notification area.'
+        $ghost = Read-Answer -Run $run -Question 'Did the icon disappear cleanly, with no ghost left behind?'
+        $stopped = Get-EarshotLogLines -Run $run -Pattern 'Tray stopped.'
+        Add-Criterion -Run $run -Id 'clean-exit' -Criterion 'Exit removes the icon cleanly and the log ends with a clean stop.' `
+            -Outcome $(if ($ghost -eq 'yes' -and $stopped.Count -gt 0) { 'pass' } elseif ($ghost -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $ghost + '; the log holds ' + $stopped.Count + ' clean stop line(s).')
+
         Save-EarshotLog -Run $run
         Write-Line -Run $run -Text ''
         Write-Line -Run $run -Text 'Leave the tray running. Its idle rule blocks the nodes again once the AirPods stop being used.'

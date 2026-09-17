@@ -161,6 +161,30 @@ try
             $argNote = Read-Note -Run $run -Question 'From the gate log, how did the unsupplied third argument arrive (literal placeholder, empty, or not at all)?'
             if (-not [string]::IsNullOrEmpty($argNote)) { Add-Finding -Run $run -Name 'unsuppliedThirdArgument' -Value $argNote }
 
+            Write-Section -Run $run -Title 'A verb that writes: setboot'
+            Write-Line -Run $run -Text 'status only reads. setboot-off and setboot-on write the SYSTEM-owned config file, so they show'
+            Write-Line -Run $run -Text 'that a verb started this way really reaches the gate and takes effect. No device node is touched.'
+            $blockAtBootBefore = Get-BlockAtBootSetting -Run $run
+            Write-Line -Run $run -Text ('Block at boot reads ' + $blockAtBootBefore + ' before the change.')
+            $off = Invoke-Earshot -Run $run -Label 'gate-setboot-off' -Command @('diag', 'gate', 'setboot-off') -Live `
+                -Consequence 'Turns Block at boot off in the machine configuration. No device node is changed by this verb, and the next step turns it back on.'
+            if ($null -ne $off)
+            {
+                $afterOff = Get-BlockAtBootSetting -Run $run
+                Write-Line -Run $run -Text ('Block at boot now reads ' + $afterOff + '.')
+                Add-Criterion -Run $run -Id 'setboot-round-trip' -Criterion 'A verb sent through RunEx changes the machine configuration and the change can be read back.' `
+                    -Outcome $(if ($afterOff -eq $false) { 'pass' } else { 'fail' }) -Detail ('It reads ' + $afterOff + ' after setboot-off.')
+
+                $on = Invoke-Earshot -Run $run -Label 'gate-setboot-on' -Command @('diag', 'gate', 'setboot-on') -Live `
+                    -Consequence 'Turns Block at boot back on, returning the machine to how it ships.'
+                if ($null -ne $on)
+                {
+                    $afterOn = Get-BlockAtBootSetting -Run $run
+                    Add-Criterion -Run $run -Id 'setboot-restored' -Criterion 'Block at boot is left on, as Earshot ships.' `
+                        -Outcome $(if ($afterOn -eq $true) { 'pass' } else { 'fail' }) -Detail ('It reads ' + $afterOn + '.')
+                }
+            }
+
             if (-not $mayRun -or $outcome -ne 'Completed')
             {
                 Write-Section -Run $run -Title 'Plan B'

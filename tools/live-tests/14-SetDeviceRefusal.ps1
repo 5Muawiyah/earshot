@@ -198,6 +198,18 @@ try
             }
         }
 
+        Write-Section -Run $run -Title 'The device picker'
+        Write-Line -Run $run -Text 'Choose device in the tray menu is the only place the pin is meant to move from, so it has to show'
+        Write-Line -Run $run -Text 'the right devices with the right names, including a renamed pair and a curly apostrophe.'
+        Wait-Owner -Run $run -Text 'Start Earshot, open its menu, choose Choose device, and look at the list. Close it without changing anything.'
+        $listed = Read-Answer -Run $run -Question 'Did the list show your AirPods and your phone with their real names, spelled exactly as Windows shows them?'
+        Add-Criterion -Run $run -Id 'picker-lists-devices' -Criterion 'The device picker lists the paired devices with their real names.' `
+            -Outcome $(if ($listed -eq 'yes') { 'pass' } elseif ($listed -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $listed + '.')
+
+        $greyed = Read-Answer -Run $run -Question 'Were devices that are not present now shown as unavailable rather than selectable?'
+        Add-Finding -Run $run -Name 'pickerMarksAbsentDevices' -Value $greyed
+
         Save-EarshotLog -Run $run
     }
 }

@@ -17,6 +17,7 @@
       2  shutdown /r /t 0
       3  shutdown /r /f
       4  a Windows Update restart, whenever one is next offered
+      5  sign out, then sign back in
 
 .PARAMETER ExePath
     Earshot.exe: the installed copy or an unzipped release.
@@ -25,7 +26,7 @@
     The evidence folder. The second half needs the one the first half printed.
 
 .PARAMETER Variant
-    Which restart to use, 1 to 4.
+    Which restart to use, 1 to 5.
 
 .PARAMETER Resume
     Read the log after the restart.
@@ -40,7 +41,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [string]$RunRoot = '',
-    [ValidateRange(1, 4)][int]$Variant = 1,
+    [ValidateRange(1, 5)][int]$Variant = 1,
     [switch]$Resume
 )
 
@@ -58,6 +59,7 @@ $variants = @{
     2 = 'type: shutdown /r /t 0'
     3 = 'type: shutdown /r /f'
     4 = 'a Windows Update restart, from Settings, Windows Update, Restart now'
+    5 = 'sign out from the Start menu, then sign back in'
 }
 
 $run = New-LiveTestRun -TestId ('10-shutdown-messages-v' + $Variant) -Title ('End-session messages, variant ' + $Variant) `
@@ -152,7 +154,7 @@ try
 
         Save-EarshotLog -Run $run
         Write-Line -Run $run -Text ''
-        Write-Line -Run $run -Text 'Run the other variants the same way: -Variant 2, 3 and 4.'
+        Write-Line -Run $run -Text 'Run the other variants the same way: -Variant 2, 3, 4 and 5.'
     }
 }
 catch
