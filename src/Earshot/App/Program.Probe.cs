@@ -9,14 +9,20 @@ using Earshot.Infra;
 namespace Earshot;
 
 // probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>]
+// probe icon --out <folder> [--json]
 //
 // Read-only diagnostics that reuse the production selection code. Each target is one elidable
 // partial implemented in its feature's folder (Audio\ProbeAudio.cs and so on); a missing target
 // prints "Not available in this build." and makes the exit code non-zero.
+//
+// icon is not part of all: it writes image files, so it runs only when named, and its --out is the folder
+// the images go to (the report itself goes to the console).
 internal static partial class Program
 {
     internal const string ProbeUsage =
-        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>]";
+        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json]";
+
+    internal const string ProbeIconTarget = "icon";
 
     internal static readonly IReadOnlyList<string> ProbeTargets =
         ["audio", "topology", "nodes", "services", "task", "battery"];
@@ -34,7 +40,9 @@ internal static partial class Program
             return;
         }
 
-        if (!CommandOutput.TryOpen(request.OutPath, out CommandOutput? output, out string? outputProblem))
+        // probe icon's --out names the folder for its images; its report goes to the console.
+        string? reportPath = IsIconProbe(request) ? null : request.OutPath;
+        if (!CommandOutput.TryOpen(reportPath, out CommandOutput? output, out string? outputProblem))
         {
             log.Error("probe: " + outputProblem);
             ctx.ExitCode = ExitCodes.IoError;
@@ -89,7 +97,7 @@ internal static partial class Program
 
                 outPath = args[++i];
             }
-            else if (a == "all" || ProbeTargets.Contains(a, StringComparer.Ordinal))
+            else if (a == "all" || a == ProbeIconTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
             {
                 if (target is not null)
                 {
@@ -106,10 +114,22 @@ internal static partial class Program
             }
         }
 
+        if (target == ProbeIconTarget && outPath is null)
+        {
+            error = "probe icon needs --out <folder>.";
+            return false;
+        }
+
         IReadOnlyList<string> targets = target is null or "all" ? ProbeTargets : [target];
         request = new ProbeRequest(targets, json, outPath);
         error = null;
         return true;
+    }
+
+    internal static bool IsIconProbe(ProbeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Targets.Count == 1 && request.Targets[0] == ProbeIconTarget;
     }
 
     // Runs each requested target and returns the first non-zero exit code, or 0.
@@ -143,7 +163,7 @@ internal static partial class Program
             }
 
             var probe = new ProbeContext(target, targetOut, request.Json, services);
-            RunProbeTarget(probe);
+            RunProbeTarget(probe, request.OutPath);
             if (!probe.Handled)
             {
                 WriteProbeNotAvailable(probe);
@@ -171,7 +191,7 @@ internal static partial class Program
         return exitCode;
     }
 
-    private static void RunProbeTarget(ProbeContext ctx)
+    private static void RunProbeTarget(ProbeContext ctx, string? outPath)
     {
         switch (ctx.Target)
         {
@@ -181,6 +201,7 @@ internal static partial class Program
             case "services": ProbeServices(ctx); break;
             case "task":     ProbeTask(ctx); break;
             case "battery":  ProbeBattery(ctx); break;
+            case ProbeIconTarget: ProbeIcon(ctx, outPath); break;
             default:         break;
         }
     }
@@ -191,6 +212,9 @@ internal static partial class Program
     static partial void ProbeServices(ProbeContext ctx);
     static partial void ProbeTask(ProbeContext ctx);
     static partial void ProbeBattery(ProbeContext ctx);
+
+    // folder: where the images go (probe icon's --out).
+    static partial void ProbeIcon(ProbeContext ctx, string? folder);
 
     private static void WriteProbeNotAvailable(ProbeContext ctx)
     {
