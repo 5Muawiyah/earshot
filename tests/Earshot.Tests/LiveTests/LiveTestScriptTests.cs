@@ -55,23 +55,25 @@ public sealed class LiveTestScriptTests
     {
         ["Action"] = "reconnect",                                          // reconnect or disconnect
         ["Filter"] = "src",                                                // src, wave or all
-        ["Address"] = "5A6B7C8D9EAF",                                      // 12 upper-case hex
-        ["Container"] = "1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d",            // a device container
+        // Made up, and only their shape matters: the parsers under test check 12 upper-case hex and a
+        // GUID. These are the same synthetic values the rest of the tests use, so no real device
+        // identifier is committed.
+        ["Address"] = "0A1B2C3D4E8C",                                      // 12 upper-case hex
+        ["Container"] = "5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13",            // a device container
         ["Sid"] = "S-1-5-21-1111111111-2222222222-3333333333-1001",        // a user SID
         ["evidence"] = @"C:\evidence\report.json",                         // a file to write to
         ["iconFolder"] = @"C:\evidence\icons",                             // a folder to write into
     };
 
-    private static ScriptSet? _scripts;
+    // Read once, however the test classes are ordered: LiveTestFieldTests reads the field names from
+    // the same pass.
+    private static readonly Lazy<ScriptSet> Analysis = new(Analyse);
 
-    [ClassInitialize]
-    public static void ReadTheScripts(TestContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        _scripts = Analyse();
-    }
+    private static ScriptSet Scripts => Analysis.Value;
 
-    private static ScriptSet Scripts => _scripts ?? throw new AssertFailedException("The scripts were not read.");
+    // Every name the scripts read out of a JSON report, with where it is read. LiveTestFieldTests
+    // checks each one against the writer that is supposed to produce it.
+    internal static IReadOnlyList<FieldRead> FieldReads => Scripts.FieldReads;
 
     [TestMethod]
     public void EveryScriptParses()
@@ -412,6 +414,7 @@ public sealed class LiveTestScriptTests
     {
         var files = new List<ScriptFile>();
         var calls = new List<CommandCall>();
+        var fieldReads = new List<FieldRead>();
         using JsonDocument document = JsonDocument.Parse(json);
         foreach (JsonElement file in Items(document.RootElement, "files"))
         {
@@ -420,6 +423,11 @@ public sealed class LiveTestScriptTests
                 name,
                 ReadStrings(file, "errors"),
                 ReadStrings(file, "strings")));
+
+            foreach (JsonElement read in Items(file, "fieldReads"))
+            {
+                fieldReads.Add(new FieldRead(name, read.GetProperty("line").GetInt32(), ReadStrings(read, "names")));
+            }
 
             foreach (JsonElement call in Items(file, "calls"))
             {
@@ -440,7 +448,7 @@ public sealed class LiveTestScriptTests
             }
         }
 
-        return new ScriptSet(files, calls);
+        return new ScriptSet(files, calls, fieldReads);
     }
 
     // Some PowerShell versions write a list of one as that one value rather than as a list, so a
@@ -500,7 +508,10 @@ public sealed class LiveTestScriptTests
         throw new AssertFailedException("Earshot.slnx was not found above " + AppContext.BaseDirectory + ".");
     }
 
-    private sealed record ScriptSet(IReadOnlyList<ScriptFile> Files, IReadOnlyList<CommandCall> Calls);
+    private sealed record ScriptSet(
+        IReadOnlyList<ScriptFile> Files,
+        IReadOnlyList<CommandCall> Calls,
+        IReadOnlyList<FieldRead> FieldReads);
 
     private sealed record ScriptFile(string Name, IReadOnlyList<string> Errors, IReadOnlyList<string> Strings);
 
@@ -513,6 +524,10 @@ public sealed class LiveTestScriptTests
 
     private sealed record CommandElement(string Kind, string Value);
 
+    // One Get-Field or Get-FieldPath call, with the literal names it reads. A name built from a
+    // variable is not recorded, because there is nothing to check it against.
+    internal sealed record FieldRead(string File, int Line, IReadOnlyList<string> Names);
+
     // Parses each script with the PowerShell parser and reports what it found as JSON. ParseFile
     // reads a file and builds a syntax tree; it never runs anything in it, so no live step can
     // happen here. The command lines come from the tree, not from a text search, so a call that is
@@ -522,6 +537,42 @@ public sealed class LiveTestScriptTests
         param([Parameter(Mandatory = $true)][string]$Root)
 
         $ErrorActionPreference = 'Stop'
+
+        # The elements of an argument, whether it was written as one value, as @('a', 'b') or as a
+        # bare array literal. @('a', 'b') is an array expression holding an array literal; @('a')
+        # holds one expression and no literal. All of them come back as a flat list.
+        function Get-ArgumentItems
+        {
+            param($Argument)
+
+            if ($null -eq $Argument) { return @() }
+            if ($Argument -is [System.Management.Automation.Language.ArrayLiteralAst]) { return $Argument.Elements }
+            if ($Argument -is [System.Management.Automation.Language.ArrayExpressionAst])
+            {
+                $items = @()
+                foreach ($statement in $Argument.SubExpression.Statements)
+                {
+                    if (-not ($statement -is [System.Management.Automation.Language.PipelineAst])) { continue }
+                    foreach ($piece in $statement.PipelineElements)
+                    {
+                        if (-not ($piece -is [System.Management.Automation.Language.CommandExpressionAst])) { continue }
+                        if ($piece.Expression -is [System.Management.Automation.Language.ArrayLiteralAst])
+                        {
+                            $items += $piece.Expression.Elements
+                        }
+                        else
+                        {
+                            $items += $piece.Expression
+                        }
+                    }
+                }
+
+                return $items
+            }
+
+            return @($Argument)
+        }
+
         $files = @()
         $scripts = @(Get-ChildItem -LiteralPath $Root -Recurse -File |
             Where-Object { $_.Extension -eq '.ps1' -or $_.Extension -eq '.psm1' } |
@@ -541,8 +592,42 @@ public sealed class LiveTestScriptTests
 
             $calls = @()
             $strings = @()
+            $fieldReads = @()
             if ($null -ne $ast)
             {
+                # Every literal name a script reads out of a JSON report, so that each one can be
+                # checked against the writer that is supposed to produce it.
+                foreach ($c in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true))
+                {
+                    $name = $c.GetCommandName()
+                    if ($name -ne 'Get-Field' -and $name -ne 'Get-FieldPath') { continue }
+
+                    $elements = $c.CommandElements
+                    for ($i = 1; $i -lt $elements.Count; $i++)
+                    {
+                        $element = $elements[$i]
+                        if (-not ($element -is [System.Management.Automation.Language.CommandParameterAst])) { continue }
+                        if ($element.ParameterName -ne 'Name' -and $element.ParameterName -ne 'Path') { continue }
+
+                        $argument = $element.Argument
+                        if ($null -eq $argument -and $i + 1 -lt $elements.Count) { $argument = $elements[$i + 1] }
+
+                        $names = @()
+                        foreach ($item in (Get-ArgumentItems -Argument $argument))
+                        {
+                            if ($item -is [System.Management.Automation.Language.StringConstantExpressionAst])
+                            {
+                                $names += $item.Value
+                            }
+                        }
+
+                        if ($names.Count -gt 0)
+                        {
+                            $fieldReads += [ordered]@{ line = $c.Extent.StartLineNumber; names = $names }
+                        }
+                    }
+                }
+
                 foreach ($s in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true))
                 {
                     $strings += $s.Value
@@ -573,38 +658,7 @@ public sealed class LiveTestScriptTests
                     $parts = @()
                     if ($null -ne $commandArgument)
                     {
-                        # @('a', 'b') is an array expression holding an array literal; @('a') holds one
-                        # expression and no literal. Both are unpacked to the same list of elements.
-                        $items = @()
-                        if ($commandArgument -is [System.Management.Automation.Language.ArrayLiteralAst])
-                        {
-                            $items = $commandArgument.Elements
-                        }
-                        elseif ($commandArgument -is [System.Management.Automation.Language.ArrayExpressionAst])
-                        {
-                            foreach ($statement in $commandArgument.SubExpression.Statements)
-                            {
-                                if (-not ($statement -is [System.Management.Automation.Language.PipelineAst])) { continue }
-                                foreach ($piece in $statement.PipelineElements)
-                                {
-                                    if (-not ($piece -is [System.Management.Automation.Language.CommandExpressionAst])) { continue }
-                                    if ($piece.Expression -is [System.Management.Automation.Language.ArrayLiteralAst])
-                                    {
-                                        $items += $piece.Expression.Elements
-                                    }
-                                    else
-                                    {
-                                        $items += $piece.Expression
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            $items = @($commandArgument)
-                        }
-
-                        foreach ($item in $items)
+                        foreach ($item in (Get-ArgumentItems -Argument $commandArgument))
                         {
                             if ($item -is [System.Management.Automation.Language.StringConstantExpressionAst])
                             {
@@ -635,6 +689,7 @@ public sealed class LiveTestScriptTests
                 path = $file.FullName
                 errors = $messages
                 calls = $calls
+                fieldReads = $fieldReads
                 strings = $strings
             }
         }

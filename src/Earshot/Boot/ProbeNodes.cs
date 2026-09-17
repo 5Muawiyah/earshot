@@ -21,6 +21,7 @@ internal static partial class Program
         uint? DevNodeStatus,
         uint Problem,
         uint? ConfigFlags,
+        bool ConfigFlagsDisabled,
         NodeBlockStatus Status,
         string? Name);
 
@@ -85,7 +86,8 @@ internal static partial class Program
             }
 
             uint? configFlags = nodes.GetConfigFlags(node.PhantomDevInst, out uint flags) == CfgMgr32.CR_SUCCESS ? flags : null;
-            rows.Add(new ProbeNodeRow(node.InstanceId, isTarget, read.IsPresent, rawStatus, read.ProblemCode, configFlags, read.Status, read.Name));
+            rows.Add(new ProbeNodeRow(node.InstanceId, isTarget, read.IsPresent, rawStatus, read.ProblemCode, configFlags,
+                read.ConfigFlagsDisabledBit, read.Status, read.Name));
         }
 
         // Classified from the nodes alone; the task check is probe task's job.
@@ -124,6 +126,9 @@ internal static partial class Program
                     WriteHex(w, "devNodeStatus", row.DevNodeStatus);
                     w.WriteNumber("problem", row.Problem);
                     WriteHex(w, "configFlags", row.ConfigFlags);
+                    // The CONFIGFLAG_DISABLED bit on its own, under the same name diag gate writes it. A reader
+                    // asking "is this node blocked across a restart" should not have to decode the hex above.
+                    w.WriteBoolean("configFlagsDisabled", row.ConfigFlagsDisabled);
                     w.WriteString("name", row.Name);
                     w.WriteEndObject();
                 }
