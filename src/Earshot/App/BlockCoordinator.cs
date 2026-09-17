@@ -593,7 +593,7 @@ internal sealed class BlockCoordinator : IDisposable
         {
             if (_sessionBlockIssued)
             {
-                _log.Info("The session end was cancelled after a block was issued for it.");
+                _log.Info("The session end was cancelled after a block was queued for it.");
                 if (_sessionBlockWhileInUse)
                 {
                     // Whether a block drops an active link is a live-test item; if it does, this user was disconnected
@@ -640,7 +640,9 @@ internal sealed class BlockCoordinator : IDisposable
             return;
         }
 
-        _log.Info("Session ending: block issued at " + Utc(issued) + " (" + (e.IsQuery ? "WM_QUERYENDSESSION" : "WM_ENDSESSION") + ")" +
+        // Queued, not sent: the block runs on the system worker, behind any gate request already there. The gate
+        // logs its own line with a UTC time once RunEx returns (TaskSchedulerGate).
+        _log.Info("Session ending: block queued at " + Utc(issued) + " (" + (e.IsQuery ? "WM_QUERYENDSESSION" : "WM_ENDSESSION") + ")" +
             (_sessionBlockWhileInUse ? ", while the AirPods were in use." : "."));
         _sessionBlock = LogSessionBlockAsync(block, issued);
         RaiseChanged();
@@ -731,13 +733,13 @@ internal sealed class BlockCoordinator : IDisposable
         try
         {
             ControllerResult result = await block;
-            string text = TrayReport.Describe("session-end block (issued " + Utc(issued) + ")", result.Status, result.UserMessage, result.Steps);
+            string text = TrayReport.Describe("session-end block (queued " + Utc(issued) + ")", result.Status, result.UserMessage, result.Steps);
             _log.Write(result.IsSuccess ? LogLevel.Info : LogLevel.Warn, text);
         }
         catch (Exception ex)
         {
             StepOutcome step = StepOutcomes.FromHResult("session-end-block", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
-            _log.Error("Session ending: the block issued at " + Utc(issued) + " failed. " + TrayReport.DescribeStep(step), ex);
+            _log.Error("Session ending: the block queued at " + Utc(issued) + " failed. " + TrayReport.DescribeStep(step), ex);
         }
         finally
         {

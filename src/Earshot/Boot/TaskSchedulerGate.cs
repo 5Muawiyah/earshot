@@ -240,8 +240,11 @@ internal sealed class TaskSchedulerGate
     private readonly Func<string, AccountLookup> _accountToSid;
     private readonly TimeProvider _time;
     private readonly Func<TimeSpan, CancellationToken, bool> _wait;
+    private readonly ILog? _log;
 
-    // wait returns false when cancelled.
+    // wait returns false when cancelled. log, when given, gets one line with a UTC time as soon as each RunEx
+    // returns, before the run is polled, so a request sent just before the process ended (a session end) is on
+    // record even though its result never is.
     public TaskSchedulerGate(
         IScheduledTasks tasks,
         GateStore store,
@@ -249,7 +252,8 @@ internal sealed class TaskSchedulerGate
         string? userSid,
         Func<string, AccountLookup> accountToSid,
         TimeProvider time,
-        Func<TimeSpan, CancellationToken, bool> wait)
+        Func<TimeSpan, CancellationToken, bool> wait,
+        ILog? log = null)
     {
         ArgumentNullException.ThrowIfNull(tasks);
         ArgumentNullException.ThrowIfNull(store);
@@ -264,6 +268,7 @@ internal sealed class TaskSchedulerGate
         _accountToSid = accountToSid;
         _time = time;
         _wait = wait;
+        _log = log;
     }
 
     public static bool WaitOrCancelled(TimeSpan delay, CancellationToken ct) => !ct.WaitHandle.WaitOne(delay);
@@ -341,7 +346,11 @@ internal sealed class TaskSchedulerGate
         string path = TaskPlan.TaskPath(taskName);
         string[] parameters = address is null ? [verb, nonce] : [verb, nonce, address];
         int hr = _tasks.Run(path, parameters);
-        steps.Add(StepOutcomes.FromHResult("task-run:" + path, hr, verb + " " + nonce));
+        StepOutcome sent = StepOutcomes.FromHResult("task-run:" + path, hr, verb + " " + nonce);
+        steps.Add(sent);
+        _log?.Write(sent.Ok ? LogLevel.Info : LogLevel.Warn,
+            "RunEx " + path + " " + verb + " " + nonce + " returned " + sent.CodeName + " at " +
+            _time.GetUtcNow().UtcDateTime.ToString("O", CultureInfo.InvariantCulture) + ".");
         if (hr < 0)
         {
             return new GateRunResult(

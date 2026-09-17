@@ -185,7 +185,7 @@ internal sealed class BlockController : IBlockController, IDisposable
 
         var store = new GateStore(paths.MachineFolder);
         var gate = new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid,
-            AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled);
+            AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled, log);
         return new BlockController(log, settings, store, new CfgMgr32NodeReader(), gate, new ShellRunasLauncher(),
             sid, Environment.ProcessPath, worker, ownedWorker);
     }

@@ -115,7 +115,7 @@ public sealed class StartUpAndSessionTests
 
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The block was not issued as the session ended.");
         Assert.IsTrue(h.Coordinator.IsBusy);
-        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: block issued at "));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: block queued at "));
 
         // A second message for the same session end does not start another.
         h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
@@ -124,7 +124,7 @@ public sealed class StartUpAndSessionTests
         blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
         h.Pump();
 
-        Assert.IsTrue(h.Log.Has(LogLevel.Info, "session-end block (issued "));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "session-end block (queued "));
         Assert.IsFalse(h.Coordinator.IsBusy);
     }
 

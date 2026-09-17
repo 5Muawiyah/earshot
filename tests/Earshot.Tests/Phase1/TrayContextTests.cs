@@ -565,7 +565,7 @@ public sealed class TrayContextTests
 
             Assert.IsTrue(raised);
             CollectionAssert.Contains(tray.Block.Calls, "block");
-            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Session ending: block issued at "));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Session ending: block queued at "));
         });
     }
 

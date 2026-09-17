@@ -1,3 +1,4 @@
+using System.Globalization;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
@@ -26,8 +27,10 @@ public sealed class TaskSchedulerGateTests
                 Time.Advance(delay);
                 OnPoll?.Invoke(Polls);
                 return !ct.IsCancellationRequested;
-            });
+            }, Log);
         }
+
+        public CapturingLog Log { get; } = new();
 
         public GateStore Store { get; }
 
@@ -105,6 +108,29 @@ public sealed class TaskSchedulerGateTests
         Assert.AreEqual(GateRunOutcome.RunFailed, h.Run().Outcome);
 
         Assert.IsEmpty(h.Tasks.Runs);
+    }
+
+    [TestMethod]
+    public void EachRunExIsLoggedWithAUtcTimeAsSoonAsItReturns()
+    {
+        using var h = new Harness();
+        string sentAt = h.Time.GetUtcNow().UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+        bool loggedBeforeTheRunEnded = false;
+        h.OnPoll = poll =>
+        {
+            if (poll == 1)
+            {
+                loggedBeforeTheRunEnded = h.Log.Has(LogLevel.Info, @"RunEx \Earshot\Gate block " + Nonce + " returned S_OK at " + sentAt + ".");
+                h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, 0, 1002);
+            }
+        };
+
+        Assert.AreEqual(GateRunOutcome.Completed, h.Run().Outcome);
+        Assert.IsTrue(loggedBeforeTheRunEnded, "The RunEx line was not written before the run was polled.");
+
+        h.Tasks.RunResult = unchecked((int)0x80070005);
+        Assert.AreEqual(GateRunOutcome.RunFailed, h.Run().Outcome);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, @"RunEx \Earshot\Gate block " + Nonce + " returned "));
     }
 
     [TestMethod]

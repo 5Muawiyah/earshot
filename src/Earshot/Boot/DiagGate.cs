@@ -35,7 +35,7 @@ internal static partial class Program
 
         var store = new GateStore(paths.MachineFolder);
         var gate = new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid, AccountSids.Translate,
-            TimeProvider.System, TaskSchedulerGate.WaitOrCancelled);
+            TimeProvider.System, TaskSchedulerGate.WaitOrCancelled, log);
         var reader = new NodeStateReader(new CfgMgr32NodeReader());
         string nonce = Guid.NewGuid().ToString("N");
 

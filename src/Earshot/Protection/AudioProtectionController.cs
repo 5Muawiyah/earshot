@@ -97,7 +97,7 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
 
         var store = new GateStore(paths.MachineFolder);
         var gate = new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid,
-            AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled);
+            AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled, log);
         return new AudioProtectionController(log, settings, store, new ServiceStateReader(new BluetoothServiceReader()), gate, worker, ownedWorker);
     }
 
