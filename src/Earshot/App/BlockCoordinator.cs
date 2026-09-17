@@ -1754,7 +1754,7 @@ internal sealed class BlockCoordinator : IDisposable
 
         _recheck = new CancellationTokenSource();
         _log.Write(_rechecksInARow == 0 ? LogLevel.Info : LogLevel.Debug,
-            "The state is read again in " + Seconds(delay) + ", because " + why + " while the nodes may be enabled.");
+            "The state is read again in " + Seconds(delay) + ": " + why + ", and nothing read so far rules out enabled nodes.");
         _ = RecheckAsync(_recheck, delay);
     }
 
