@@ -3,9 +3,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Contracts;
 
-// The safety test for node selection. The fixture is the device-node set recorded on the owner's
-// PC, with the addresses replaced: the AirPods container (9 BTHENUM nodes, 1 BTHHFENUM child, 3 audio endpoints),
-// the paired iPhone (13 BTHENUM nodes and its hands-free child, in a different container), and the
+// The safety test for node selection. The fixture is the device-node set recorded on the owner's PC, with
+// made-up addresses, container ids and names: the AirPods container (9 BTHENUM nodes, 1 BTHHFENUM child, 3 audio endpoints), the paired
+// iPhone (13 BTHENUM nodes and its hands-free child, in a different container), and the
 // Bluetooth radio bus node in the PC container.
 [TestClass]
 public sealed class NodeMatchTests
@@ -115,7 +115,7 @@ public sealed class NodeMatchTests
     }
 
     [TestMethod]
-    public void TheRadioMatchesTheBriefPrefixButIsNotSelected()
+    public void TheRadioMatchesThePrototypePrefixButIsNotSelected()
     {
         foreach (Node radio in RadioNodes)
         {

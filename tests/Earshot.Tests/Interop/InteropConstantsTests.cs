@@ -6,7 +6,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Interop;
 
-// GUIDs and constants against the values in the SDK 10.0.26100.0 headers and the linked Microsoft docs. The expected strings are typed out independently of the declarations.
+// GUIDs and constants against the values in the SDK 10.0.26100.0 headers and the linked Microsoft docs. The
+// expected strings are typed out independently of the declarations.
 [TestClass]
 public sealed class InteropConstantsTests
 {
@@ -82,7 +83,7 @@ public sealed class InteropConstantsTests
     }
 
     [TestMethod]
-    public void BluetoothServiceClassesMatchTheBrief()
+    public void BluetoothServiceClassesMatchTheDocumentedServiceGuids()
     {
         Assert.AreEqual(new Guid("0000111E-0000-1000-8000-00805F9B34FB"), BluetoothApis.HandsfreeServiceClass);
         Assert.AreEqual(new Guid("00001108-0000-1000-8000-00805F9B34FB"), BluetoothApis.HeadsetServiceClass);
