@@ -144,6 +144,7 @@ internal sealed class FakeDeviceMonitor(TimeProvider time) : IDeviceMonitor
     private List<AudioEndpoint> _endpoints = new();
     private int _refreshCalls;
     private int _handlersAtFirstRefresh = -1;
+    private long _sequence;
 
     public event EventHandler<DeviceSnapshotEventArgs>? SnapshotChanged
     {
@@ -185,6 +186,9 @@ internal sealed class FakeDeviceMonitor(TimeProvider time) : IDeviceMonitor
 
     public DeviceSnapshot Current => Snapshot();
 
+    // The number of the last snapshot this monitor made, as the real monitor numbers its enumerations.
+    public long Sequence => Interlocked.Read(ref _sequence);
+
     public void SetEndpoints(params AudioEndpoint[] endpoints)
     {
         lock (_gate)
@@ -202,7 +206,10 @@ internal sealed class FakeDeviceMonitor(TimeProvider time) : IDeviceMonitor
             list = endpoints.Length > 0 ? endpoints.ToList() : _endpoints.ToList();
         }
 
-        return EndpointModelBuilder.Build(list, "AirPods", AirPodsContainer, time.GetUtcNow()).Snapshot;
+        return EndpointModelBuilder.Build(list, "AirPods", AirPodsContainer, time.GetUtcNow()).Snapshot with
+        {
+            Sequence = Interlocked.Increment(ref _sequence),
+        };
     }
 
     public void Raise(DeviceSnapshot snapshot)
@@ -257,6 +264,9 @@ internal sealed class FakeConnectPath : IKsConnectPath
     // Runs inside Send, on the worker, after the requests are recorded.
     public Action? DuringSend { get; set; }
 
+    // Runs inside Send after each filter, with its index: a test cancels here to stop the walk before the next.
+    public Action<int>? AfterFilter { get; set; }
+
     // Reported as the send's Fault: the walk stopped with this exception after the filters above.
     public Exception? Fault { get; set; }
 
@@ -287,7 +297,8 @@ internal sealed class FakeConnectPath : IKsConnectPath
         return EndpointRead.From(enumeration, container);
     }
 
-    public KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice)
+    // Cancelled before a filter: it is recorded as sent nothing, as the real path does.
+    public KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice, CancellationToken ct = default)
     {
         lock (_gate)
         {
@@ -303,6 +314,15 @@ internal sealed class FakeConnectPath : IKsConnectPath
             string name = KsConnectPath.FilterName(filter.AdapterId);
             FilterRole role = KsConnectPath.RoleOf(adapter);
             string label = KsConnectPath.RoleName(role) + ": " + filter.AdapterId;
+            if (ct.IsCancellationRequested)
+            {
+                const string Cancelled = "the request was cancelled before this filter.";
+                StepOutcome skipped = StepOutcomes.NotAttempted(prefix + ":" + name, label + ": no request was sent because " + Cancelled);
+                steps.Add(skipped);
+                sends.Add(new FilterSend(adapter, name, role, new FilterVisit(adapter, null, null, false, false, []), null, 0, null, null, Cancelled, skipped));
+                continue;
+            }
+
             var visitSteps = new List<StepOutcome>();
             if (filter.ActivateHr is int activateHr)
             {
@@ -320,10 +340,25 @@ internal sealed class FakeConnectPath : IKsConnectPath
             steps.Add(step);
             sends.Add(new FilterSend(adapter, name, role, visit, filter.Hr, 0, sent ? DateTimeOffset.UtcNow : null,
                 sent ? TimeSpan.FromMilliseconds(1) : null, reason, step));
+            AfterFilter?.Invoke(sends.Count - 1);
         }
 
         DuringSend?.Invoke();
-        return new KsSendResult(Filters.Select(f => new AdapterPath(f.AdapterId, new[] { f.From })).ToList(), sends, steps, Fault);
+        var result = new KsSendResult(Filters.Select(f => new AdapterPath(f.AdapterId, new[] { f.From })).ToList(), sends, steps, Fault);
+        lock (_gate)
+        {
+            _lastSend = result;
+        }
+
+        return result;
+    }
+
+    private KsSendResult? _lastSend;
+
+    // The result of the latest Send, including one the controller stopped waiting for.
+    public KsSendResult? LastSend
+    {
+        get { lock (_gate) { return _lastSend; } }
     }
 }
 

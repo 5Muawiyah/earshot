@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
+using Earshot.AudioProtection;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
@@ -8,15 +9,16 @@ using Earshot.Infra;
 
 namespace Earshot;
 
-// The three elevated run modes.
+// The elevated run modes.
 //
-//   gate <verb> <nonce>                 run by \Earshot\Gate or \Earshot\Protect as SYSTEM
+//   gate <verb> <nonce>                 run by \Earshot\Gate as SYSTEM; every verb except protect-on and protect-off
 //   gate set-device <nonce> <address>   the only verb that carries an address
 //   gate boot                           run by \Earshot\BootBlock at boot
+//   gate-protect <verb> <nonce>         run by \Earshot\Protect; protect-on and protect-off only
 //   install <userSid> <address> <containerGuid> [--principal user]
 //   uninstall
 //
-// Program.Dispatch has already refused all three in safe mode and while EARSHOT_DATA_ROOT is set. The
+// Program.Dispatch has already refused all of them in safe mode and while EARSHOT_DATA_ROOT is set. The
 // command line is attacker-controlled (anyone who may start the gate task chooses $(Arg0) to $(Arg2)), so
 // it is matched exactly and never used in a shell, a path or a query. A command line that does not match
 // exits with GateExitCode.Rejected and does nothing else.
@@ -29,7 +31,8 @@ internal static partial class Program
     {
         Paths paths = Paths.Current;
         var log = new FileLog(paths.LogFolder);
-        ctx.ExitCode = (int)RunGate(ctx.Args, WindowsProcessToken.Current(), log, () => GateActions.ForMachine(paths.MachineFolder, log));
+        ctx.ExitCode = (int)Guarded(log, "gate", () =>
+            RunGate(ctx.Args, WindowsProcessToken.Current(), log, () => GateActions.ForMachine(paths.MachineFolder, log)));
     }
 
     static partial void TryRunInstall(RunContext ctx)
@@ -37,13 +40,13 @@ internal static partial class Program
         Paths paths = Paths.Current;
         var log = new FileLog(paths.LogFolder);
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
-        ctx.ExitCode = (int)RunInstall(ctx.Args, WindowsProcessToken.Current(), log, request =>
+        ctx.ExitCode = (int)Guarded(log, "install", () => RunInstall(ctx.Args, WindowsProcessToken.Current(), log, request =>
         {
             // Task Scheduler COM runs on an MTA thread, as it does in the tray.
             using var worker = new SystemWorker(log);
             return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new ComTaskRegistrar(), AccountSids.Translate, log).Run(request))
                 .GetAwaiter().GetResult();
-        });
+        }));
     }
 
     static partial void TryRunUninstall(RunContext ctx)
@@ -51,12 +54,27 @@ internal static partial class Program
         Paths paths = Paths.Current;
         var log = new FileLog(paths.LogFolder);
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
-        ctx.ExitCode = (int)RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
+        ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
         {
             using var worker = new SystemWorker(log);
-            return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log).Run())
+            return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(), new BluetoothServiceApi()).Run())
                 .GetAwaiter().GetResult();
-        });
+        }));
+    }
+
+    // The actions record their own failures; this is the last resort for anything around them (the worker, the
+    // COM connection, a token read), so an elevated mode never ends without a line in the log.
+    private static GateExitCode Guarded(ILog log, string mode, Func<GateExitCode> run)
+    {
+        try
+        {
+            return run();
+        }
+        catch (Exception ex)
+        {
+            log.Error(mode + ": " + GateActions.Describe(ElevatedFailure.Step(mode, ex)), ex);
+            return GateExitCode.Failed;
+        }
     }
 
     internal static GateExitCode RunGate(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<GateActions> actions)
@@ -68,7 +86,8 @@ internal static partial class Program
 
         if (!TryParseGateArgs(args, out GateRequest? request, out string? problem))
         {
-            log.Warn("gate: rejected (" + problem + "): " + DescribeArgs(args));
+            log.Warn((args.Count > 0 && args[0] == GateModes.ProtectToken ? GateModes.ProtectToken : GateModes.GateToken) +
+                     ": rejected (" + problem + "): " + DescribeArgs(args));
             return GateExitCode.Rejected;
         }
 
@@ -149,9 +168,14 @@ internal static partial class Program
         return null;
     }
 
-    // Exactly [gate, verb, nonce], [gate, set-device, nonce, address] or [gate, boot]. Task Scheduler may pass
-    // an unsupplied $(Arg2) as the literal placeholder or as an empty string, so a fourth argument that
-    // normalises to empty is dropped for the verbs without an address.
+    // Exactly [gate, verb, nonce], [gate, set-device, nonce, address], [gate, boot] or
+    // [gate-protect, protect-on|protect-off, nonce]. Task Scheduler may pass an unsupplied $(Arg2) as the literal
+    // placeholder or as an empty string, so a fourth gate argument that normalises to empty is dropped for the
+    // verbs without an address. The Protect task's action has no $(Arg2), so gate-protect takes no fourth one.
+    //
+    // A protect verb is refused in gate mode and every other verb in gate-protect mode: BluetoothSetServiceState
+    // installs or removes drivers for an undocumented time, so it runs only under \Earshot\Protect's longer time
+    // limit, and a node change never runs under it.
     //
     // [gate, boot] is accepted whoever started the gate. \Earshot\BootBlock passes it, but a caller allowed to
     // start \Earshot\Gate can produce the same command line too: RunEx(["boot"]) with $(Arg1) and $(Arg2)
@@ -169,10 +193,15 @@ internal static partial class Program
         ArgumentNullException.ThrowIfNull(args);
         request = null;
 
-        if (args.Count == 0 || args[0] != "gate")
+        if (args.Count == 0 || args[0] is not (GateModes.GateToken or GateModes.ProtectToken))
         {
             problem = "not a gate command line";
             return false;
+        }
+
+        if (args[0] == GateModes.ProtectToken)
+        {
+            return TryParseGateProtectArgs(args, out request, out problem);
         }
 
         if (args.Count == 2 && args[1] == GateVerbs.Boot)
@@ -195,6 +224,12 @@ internal static partial class Program
         if (!GateVerbs.All.Contains(verb) || verb == GateVerbs.Boot)
         {
             problem = "unknown verb";
+            return false;
+        }
+
+        if (GateModes.IsProtectVerb(verb))
+        {
+            problem = "protect verbs run only through the Protect task";
             return false;
         }
 
@@ -224,6 +259,35 @@ internal static partial class Program
         }
 
         request = new GateRequest(verb, nonce, null);
+        problem = null;
+        return true;
+    }
+
+    private static bool TryParseGateProtectArgs(
+        IReadOnlyList<string> args,
+        [NotNullWhen(true)] out GateRequest? request,
+        [NotNullWhen(false)] out string? problem)
+    {
+        request = null;
+        if (args.Count != 3)
+        {
+            problem = "wrong number of arguments";
+            return false;
+        }
+
+        if (!GateModes.IsProtectVerb(args[1]))
+        {
+            problem = "gate-protect takes only protect-on or protect-off";
+            return false;
+        }
+
+        if (!BoundaryValidation.IsNonce(args[2]))
+        {
+            problem = "bad nonce";
+            return false;
+        }
+
+        request = new GateRequest(args[1], args[2], null, GateMode.Protect);
         problem = null;
         return true;
     }

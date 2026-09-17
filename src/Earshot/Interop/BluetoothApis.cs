@@ -146,6 +146,41 @@ internal static unsafe partial class BluetoothApis
         return result;
     }
 
+    // Opens the first local radio. Returns 0 with both handles set (close them with CloseRadio), ERROR_NO_MORE_ITEMS
+    // when there is no radio, or the Win32 error from BluetoothFindFirstRadio; the handles are 0 then.
+    // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothfindfirstradio
+    internal static uint OpenFirstRadio(out nint find, out nint radio)
+    {
+        var findParams = new BLUETOOTH_FIND_RADIO_PARAMS { dwSize = (uint)sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
+        nint handle = 0;
+        find = BluetoothFindFirstRadio(&findParams, &handle);
+        if (find == 0)
+        {
+            radio = 0;
+            return (uint)Marshal.GetLastPInvokeError();
+        }
+
+        radio = handle;
+        return ERROR_SUCCESS;
+    }
+
+    // Closes what OpenFirstRadio opened. Returns the first close error, or 0.
+    internal static uint CloseRadio(nint find, nint radio)
+    {
+        uint closeError = ERROR_SUCCESS;
+        if (radio != 0 && !NativeMethods.CloseHandle(radio))
+        {
+            closeError = (uint)Marshal.GetLastPInvokeError();
+        }
+
+        if (find != 0 && !BluetoothFindRadioClose(find) && closeError == ERROR_SUCCESS)
+        {
+            closeError = (uint)Marshal.GetLastPInvokeError();
+        }
+
+        return closeError;
+    }
+
     // Enumerates remembered, authenticated and connected Classic devices from the local cache. It never
     // issues an inquiry (fIssueInquiry = 0), so no device is paged. Returns 0 when the enumeration ran
     // to its end (including no device), otherwise the Win32 error that stopped it; devices holds what
@@ -203,11 +238,37 @@ internal static unsafe partial class BluetoothApis
     // Reads the enabled service GUIDs of a device found by FindPairedDevices. Returns 0 for a complete
     // list, ERROR_MORE_DATA when the list is still incomplete after the retries (services holds what came
     // back), or another Win32 error with an empty list.
-    internal static uint GetInstalledServices(BLUETOOTH_DEVICE_INFO device, out Guid[] services)
+    internal static uint GetInstalledServices(BLUETOOTH_DEVICE_INFO device, out Guid[] services) =>
+        GetInstalledServices((ref uint count, Guid[]? buffer) => EnumerateInstalledServices(device, ref count, buffer), out services);
+
+    // One BluetoothEnumerateInstalledServices call with a managed buffer (null for the size query).
+    private static uint EnumerateInstalledServices(BLUETOOTH_DEVICE_INFO device, ref uint count, Guid[]? buffer)
     {
+        uint inout = count;
+        uint rc;
+        fixed (Guid* pointer = buffer)
+        {
+            rc = BluetoothEnumerateInstalledServices(0, &device, &inout, pointer);
+        }
+
+        count = inout;
+        return rc;
+    }
+
+    // The list logic over any call shaped like BluetoothEnumerateInstalledServices, so it can be tested.
+    //
+    // The count out of a call that returned ERROR_MORE_DATA is the whole count (a one-slot buffer came back with
+    // 234 and 8 on the owner's PC), so the buffer is sized from it with room to spare. A result whose count is
+    // below the buffer's size holds every service, even when the call said ERROR_MORE_DATA, and is returned as a
+    // complete list (0). A count that fills the buffer cannot show whether more were left out, so the buffer
+    // grows and the call is made again; after the retries ERROR_MORE_DATA stands.
+    // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothenumerateinstalledservices
+    internal static uint GetInstalledServices(EnumerateServices call, out Guid[] services)
+    {
+        ArgumentNullException.ThrowIfNull(call);
         services = [];
         uint count = 0;
-        uint rc = BluetoothEnumerateInstalledServices(0, &device, &count, null);
+        uint rc = call(ref count, null);
         if (rc != ERROR_SUCCESS && rc != ERROR_MORE_DATA)
         {
             return rc;
@@ -215,12 +276,9 @@ internal static unsafe partial class BluetoothApis
 
         for (int attempt = 0; attempt < 4; attempt++)
         {
-            var buffer = new Guid[Math.Max(count, 1u)];
+            var buffer = new Guid[count + ServicesSlack];
             uint inout = (uint)buffer.Length;
-            fixed (Guid* pointer = buffer)
-            {
-                rc = BluetoothEnumerateInstalledServices(0, &device, &inout, pointer);
-            }
+            rc = call(ref inout, buffer);
 
             if (rc != ERROR_SUCCESS && rc != ERROR_MORE_DATA)
             {
@@ -228,16 +286,27 @@ internal static unsafe partial class BluetoothApis
             }
 
             services = buffer.AsSpan(0, (int)Math.Min(inout, (uint)buffer.Length)).ToArray();
-            if (rc == ERROR_SUCCESS || inout <= (uint)buffer.Length)
+            if (rc == ERROR_SUCCESS)
             {
                 return rc;
             }
 
-            count = inout;
+            if (inout < (uint)buffer.Length)
+            {
+                return ERROR_SUCCESS;
+            }
+
+            count = Math.Max(inout, (uint)buffer.Length);
         }
 
         return rc;
     }
+
+    // Spare slots in the service buffer, so a list that fits leaves at least one unused.
+    internal const uint ServicesSlack = 4;
+
+    // pcServiceInout in and out; the buffer is null for the size query.
+    internal delegate uint EnumerateServices(ref uint count, Guid[]? buffer);
 
     // A BLUETOOTH_DEVICE_INFO with dwSize set, ready for the find and get functions.
     internal static BLUETOOTH_DEVICE_INFO NewDeviceInfo() =>

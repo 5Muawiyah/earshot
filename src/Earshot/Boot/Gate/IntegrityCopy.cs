@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Earshot.Contracts;
+using Earshot.Interop;
 using Microsoft.Win32.SafeHandles;
 
 namespace Earshot.Boot.Gate;
@@ -10,7 +11,11 @@ internal sealed record CopiedFile(string RelativePath, long Length, string Sha25
 
 internal sealed record IntegrityCopyResult(bool Ok, IReadOnlyList<CopiedFile> Files, IReadOnlyList<StepOutcome> Steps);
 
-// Copies the application folder for install and proves the copy is what was read.
+// Copies the published files of the application folder for install and proves the copy is what was read.
+//
+// What is copied is the list install read from the publish manifest (Earshot.files.json), never whatever the
+// folder happens to hold: a release unzipped into a busy folder (Downloads, say) must not put unrelated files
+// into %ProgramFiles%\Earshot, which is the elevated gate's DLL search folder.
 //
 // The unzip folder is user-writable, so a process running as the user could swap a file while the elevated
 // install copies it. Every source file is opened first and held open with FileShare.Read for the whole
@@ -34,27 +39,15 @@ internal static unsafe partial class IntegrityCopy
     public const int MaxFiles = 5000;
     private const int BufferSize = 81920;
 
-    // CreateFileW and GetFileInformationByHandle values (fileapi.h, winnt.h).
-    private const uint FILE_LIST_DIRECTORY = 0x00000001;
-    private const uint FILE_READ_ATTRIBUTES = 0x00000080;
-    private const uint FILE_SHARE_READ = 0x00000001;
-    private const uint FILE_SHARE_WRITE = 0x00000002;
-    private const uint OPEN_EXISTING = 3;
-    private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
-    private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
-    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
-    private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
+    // files: the relative paths to copy, in the order they were listed. Every one must be there.
+    public static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, IReadOnlyList<string> files) =>
+        Copy(sourceFolder, destinationFolder, files, afterListing: null);
 
-    // GetFinalPathNameByHandleW flags: FILE_NAME_NORMALIZED | VOLUME_NAME_DOS.
-    private const uint FinalPathFlags = 0;
-
-    public static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder) =>
-        Copy(sourceFolder, destinationFolder, afterListing: null);
-
-    // afterListing runs after the source is listed and before its files are opened. Tests use it to change
-    // the source in that window.
-    internal static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, Action? afterListing)
+    // afterListing runs after the source list is settled and before its files are opened. Tests use it to
+    // change the source in that window.
+    internal static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, IReadOnlyList<string> files, Action? afterListing)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationFolder);
         string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceFolder));
@@ -72,11 +65,18 @@ internal static unsafe partial class IntegrityCopy
                 return new IntegrityCopyResult(false, copied, steps);
             }
 
-            if (!TryHoldSourceFolder(source, steps, out root, out string? rootFinal) ||
-                !TryListFiles(source, steps, out List<string> relativeFiles))
+            if (!TryHoldSourceFolder(source, steps, out root, out string? rootFinal))
             {
                 return new IntegrityCopyResult(false, copied, steps);
             }
+
+            if (files.Count == 0 || files.Count > MaxFiles)
+            {
+                steps.Add(StepOutcomes.NotAttempted("copy-app", "The file list is empty or holds more than " + MaxFiles + " files."));
+                return new IntegrityCopyResult(false, copied, steps);
+            }
+
+            List<string> relativeFiles = files.ToList();
 
             afterListing?.Invoke();
 
@@ -159,7 +159,7 @@ internal static unsafe partial class IntegrityCopy
             }
 
             steps.Add(new StepOutcome("copy-app", true, 0, "S_OK",
-                copied.Count.ToString(CultureInfo.InvariantCulture) + " files copied and verified with SHA-256."));
+                copied.Count.ToString(CultureInfo.InvariantCulture) + " published files copied and verified with SHA-256."));
             return new IntegrityCopyResult(true, copied, steps);
         }
         catch (IOException ex)
@@ -192,8 +192,9 @@ internal static unsafe partial class IntegrityCopy
     private static bool TryHoldSourceFolder(string source, List<StepOutcome> steps, out SafeFileHandle? handle, out string? finalPath)
     {
         finalPath = null;
-        handle = CreateFile(source, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+        handle = FileApis.CreateFile(source, FileApis.FILE_LIST_DIRECTORY | FileApis.FILE_READ_ATTRIBUTES,
+            FileApis.FILE_SHARE_READ | FileApis.FILE_SHARE_WRITE, 0, FileApis.OPEN_EXISTING,
+            FileApis.FILE_FLAG_BACKUP_SEMANTICS | FileApis.FILE_FLAG_OPEN_REPARSE_POINT, 0);
         if (handle.IsInvalid)
         {
             uint error = unchecked((uint)Marshal.GetLastPInvokeError());
@@ -203,19 +204,19 @@ internal static unsafe partial class IntegrityCopy
             return false;
         }
 
-        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+        if (!FileApis.GetFileInformationByHandle(handle, out BY_HANDLE_FILE_INFORMATION info))
         {
             steps.Add(StepOutcomes.FromWin32("copy-app", unchecked((uint)Marshal.GetLastPInvokeError()), "The source folder could not be read: " + source));
             return false;
         }
 
-        if ((info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        if ((info.FileAttributes & FileApis.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
         {
             steps.Add(StepOutcomes.NotAttempted("copy-app", "The source folder is a reparse point."));
             return false;
         }
 
-        if ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        if ((info.FileAttributes & FileApis.FILE_ATTRIBUTE_DIRECTORY) == 0)
         {
             steps.Add(StepOutcomes.NotAttempted("copy-app", "The source is not a folder: " + source));
             return false;
@@ -242,12 +243,12 @@ internal static unsafe partial class IntegrityCopy
             return StepOutcomes.NotAttempted(step, "The file opened is not the one listed; the source changed after it was listed: " + final);
         }
 
-        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+        if (!FileApis.GetFileInformationByHandle(handle, out BY_HANDLE_FILE_INFORMATION info))
         {
             return StepOutcomes.FromWin32(step, unchecked((uint)Marshal.GetLastPInvokeError()), "The file could not be read.");
         }
 
-        if ((info.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+        if ((info.FileAttributes & (FileApis.FILE_ATTRIBUTE_DIRECTORY | FileApis.FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
         {
             return StepOutcomes.NotAttempted(step, "The file opened is a folder or a reparse point.");
         }
@@ -269,7 +270,7 @@ internal static unsafe partial class IntegrityCopy
             uint length;
             fixed (char* p = buffer)
             {
-                length = GetFinalPathNameByHandle(handle, p, capacity, FinalPathFlags);
+                length = FileApis.GetFinalPathNameByHandle(handle, p, capacity, FileApis.FILE_NAME_NORMALIZED_VOLUME_NAME_DOS);
             }
 
             if (length == 0)
@@ -291,65 +292,6 @@ internal static unsafe partial class IntegrityCopy
         return false;
     }
 
-    // Lists every file under root as a relative path. Fails on any reparse point (a junction or link could
-    // make the copy read from somewhere else) and on more than MaxFiles files.
-    private static bool TryListFiles(string root, List<StepOutcome> steps, out List<string> files)
-    {
-        files = [];
-        var rootInfo = new DirectoryInfo(root);
-        if (!rootInfo.Exists)
-        {
-            steps.Add(StepOutcomes.FromHResult("copy-app", unchecked((int)0x80070003), "The source folder does not exist: " + root));
-            return false;
-        }
-
-        if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0)
-        {
-            steps.Add(StepOutcomes.NotAttempted("copy-app", "The source folder is a reparse point."));
-            return false;
-        }
-
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0,
-            IgnoreInaccessible = false,
-            ReturnSpecialDirectories = false,
-        };
-        var pending = new Stack<DirectoryInfo>();
-        pending.Push(rootInfo);
-        while (pending.Count > 0)
-        {
-            DirectoryInfo current = pending.Pop();
-            foreach (FileSystemInfo entry in current.EnumerateFileSystemInfos("*", options))
-            {
-                string relative = Path.GetRelativePath(root, entry.FullName);
-                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    steps.Add(StepOutcomes.NotAttempted("copy-app:" + relative, "A reparse point in the source is not copied."));
-                    return false;
-                }
-
-                if (entry is DirectoryInfo directory)
-                {
-                    pending.Push(directory);
-                }
-                else
-                {
-                    files.Add(relative);
-                    if (files.Count > MaxFiles)
-                    {
-                        steps.Add(StepOutcomes.NotAttempted("copy-app", "The source has more than " + MaxFiles + " files."));
-                        return false;
-                    }
-                }
-            }
-        }
-
-        files.Sort(StringComparer.OrdinalIgnoreCase);
-        return true;
-    }
-
     internal static bool IsInside(string path, string folder)
     {
         string p = Path.TrimEndingDirectorySeparator(path);
@@ -357,36 +299,4 @@ internal static unsafe partial class IntegrityCopy
         return p.Equals(f, StringComparison.OrdinalIgnoreCase) ||
                p.StartsWith(f + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
-
-    // BY_HANDLE_FILE_INFORMATION, 52 bytes.
-    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-by_handle_file_information
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ByHandleFileInformation
-    {
-        public uint FileAttributes;
-        public uint CreationTimeLow;
-        public uint CreationTimeHigh;
-        public uint LastAccessTimeLow;
-        public uint LastAccessTimeHigh;
-        public uint LastWriteTimeLow;
-        public uint LastWriteTimeHigh;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
-
-    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    private static partial SafeFileHandle CreateFile(
-        string lpFileName, uint dwDesiredAccess, uint dwShareMode, nint lpSecurityAttributes, uint dwCreationDisposition,
-        uint dwFlagsAndAttributes, nint hTemplateFile);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetFileInformationByHandle(SafeFileHandle hFile, out ByHandleFileInformation lpFileInformation);
-
-    [LibraryImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true)]
-    private static partial uint GetFinalPathNameByHandle(SafeFileHandle hFile, char* lpszFilePath, uint cchFilePath, uint dwFlags);
 }

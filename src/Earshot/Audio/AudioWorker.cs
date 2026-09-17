@@ -42,16 +42,35 @@ internal sealed class AudioWorker : IAudioWorker
     private bool _disposing;
     private Task? _disposeTask;
 
+    // Clients whose Unregister failed. MMDevAPI does not AddRef a client and may still hold a raw pointer to one
+    // it failed to unregister, so each is kept here for the rest of the process, whatever becomes of the worker
+    // that registered it.
+    // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-registerendpointnotificationcallback
+    private static readonly List<NotificationClient> KeptAfterFailedUnregister = [];
+
+    private readonly EnumeratorFactory _createEnumerator;
+
     // Owned by the worker thread; touched only there.
     private IMMDeviceEnumerator? _enumerator;
     private NotificationClient? _client;
     private bool _closed;
 
     public AudioWorker(ILog log)
+        : this(log, CoreAudio.TryCreateEnumerator)
+    {
+    }
+
+    // For tests: an enumerator that is not the real MMDeviceEnumerator.
+    internal AudioWorker(ILog log, EnumeratorFactory createEnumerator)
     {
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(createEnumerator);
         _log = log;
+        _createEnumerator = createEnumerator;
     }
+
+    // Creates the enumerator and returns the HRESULT, as CoreAudio.TryCreateEnumerator does.
+    internal delegate int EnumeratorFactory(out IMMDeviceEnumerator? enumerator);
 
     // True on the worker thread.
     internal bool IsWorkerThread
@@ -165,7 +184,7 @@ internal sealed class AudioWorker : IAudioWorker
         ThrowIfNotUsable();
         if (_enumerator is null)
         {
-            int hr = CoreAudio.TryCreateEnumerator(out IMMDeviceEnumerator? created);
+            int hr = _createEnumerator(out IMMDeviceEnumerator? created);
             if (hr < 0 || created is null)
             {
                 enumerator = null;
@@ -208,8 +227,24 @@ internal sealed class AudioWorker : IAudioWorker
         return StepOutcomes.FromHResult(Steps.RegisterClient, hr);
     }
 
-    // Worker thread only. Unregisters the registered client, if any, and only then lets go of it.
+    // The clients kept after a failed Unregister, in this process.
+    internal static IReadOnlyList<NotificationClient> ClientsKeptAfterAFailedUnregister
+    {
+        get
+        {
+            lock (KeptAfterFailedUnregister)
+            {
+                return KeptAfterFailedUnregister.ToArray();
+            }
+        }
+    }
+
+    // Worker thread only. Unregisters the registered client, if any, and only then lets go of it. An
+    // Unregister that fails with anything but E_NOTFOUND (the client was not registered) may leave MMDevAPI
+    // holding the client, which it does not AddRef, so the client is kept for the rest of the process and the
+    // failure is logged.
     // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-unregisterendpointnotificationcallback
+    // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient
     internal StepOutcome UnregisterNotificationClient()
     {
         if (!IsWorkerThread)
@@ -232,6 +267,17 @@ internal sealed class AudioWorker : IAudioWorker
         int hr = _enumerator.UnregisterEndpointNotificationCallback(client);
         ReportCallbackFailures(client);
         _client = null;
+        if (hr < 0 && hr != CoreAudio.E_NOTFOUND)
+        {
+            lock (KeptAfterFailedUnregister)
+            {
+                KeptAfterFailedUnregister.Add(client);
+            }
+
+            _log.Error("The endpoint notification client could not be unregistered (" + NativeCodes.Name(hr) +
+                       "), so it is kept for the rest of this run in case Windows still calls it.");
+        }
+
         GC.KeepAlive(client);
         return StepOutcomes.FromHResult(Steps.UnregisterClient, hr);
     }
@@ -310,7 +356,12 @@ internal sealed class AudioWorker : IAudioWorker
 
         if (_enumerator is not null)
         {
-            Marshal.ReleaseComObject(_enumerator);
+            // A test's managed enumerator is not an RCW and has nothing to release.
+            if (Marshal.IsComObject(_enumerator))
+            {
+                Marshal.ReleaseComObject(_enumerator);
+            }
+
             _enumerator = null;
         }
 

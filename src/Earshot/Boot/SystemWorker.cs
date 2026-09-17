@@ -10,11 +10,12 @@ internal interface ISystemWorker
     Task<T> RunAsync<T>(Func<CancellationToken, T> work, CancellationToken ct = default);
 }
 
-// One background thread in the COM multithreaded apartment for the slow tray-side operations: Task Scheduler
-// RunEx and its completion polling, the read-only task checks and the CfgMgr32 verification reads. They never
-// touch the UI thread or the audio worker, and they never overlap, so a disable or enable never races a
-// service state change requested through the same gate. The thread starts on first use and is a background
-// thread, so it never keeps the process alive.
+// One background thread in the COM multithreaded apartment for the tray's gate requests: Task Scheduler RunEx
+// and its completion polling. They never touch the UI thread or the audio worker, and items run one at a time,
+// so a block or allow this tray starts never overlaps a protect-on or protect-off it starts, as long as both
+// controllers share one worker (the composition root gives them one). Runs started elsewhere are kept apart by
+// the gate's own locks. Read-only status reads do not queue here, so they never wait behind a change. The
+// thread starts on first use and is a background thread, so it never keeps the process alive.
 // https://learn.microsoft.com/en-us/dotnet/api/system.threading.thread.setapartmentstate
 // https://learn.microsoft.com/en-us/windows/win32/taskschd/boot-trigger-example--c---
 internal sealed class SystemWorker : ISystemWorker, IDisposable

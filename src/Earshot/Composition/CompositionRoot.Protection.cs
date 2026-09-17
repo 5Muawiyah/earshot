@@ -7,13 +7,15 @@ namespace Earshot.Composition;
 // change. Status reads are non-elevated; every change goes through the \Earshot\Protect task. In safe mode the
 // registry wraps it, so only its status read runs.
 //
-// The controller has a worker of its own: the block controller does not expose its worker, so a protection
-// change and a block or allow from this tray do not yet queue behind each other. When one worker is shared,
-// this becomes AudioProtectionController.Create(r.Log, r.Settings, Paths.Current, sharedWorker).
+// The boot hook runs first and leaves its system worker on the registry; protection changes go on that same
+// thread, so a protect verb and a block or allow from this tray never run side by side. Without that hook
+// (a build without the boot block) the controller makes a worker of its own and owns it.
 internal static partial class CompositionRoot
 {
     static partial void ConfigureProtection(ServiceRegistry r)
     {
-        r.Protection = AudioProtectionController.Create(r.Log, r.Settings, Paths.Current);
+        r.Protection = r.SystemWorker is { } shared
+            ? AudioProtectionController.Create(r.Log, r.Settings, Paths.Current, shared)
+            : AudioProtectionController.Create(r.Log, r.Settings, Paths.Current);
     }
 }

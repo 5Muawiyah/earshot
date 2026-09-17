@@ -40,7 +40,9 @@ internal enum SettingsLoadStatus
 // After a load that left the files untouched, the values in memory are not what settings.json holds,
 // so saving them would overwrite the user's settings. Update therefore loads again first. If the file
 // can now be used, the change is applied to what it holds and saved; if not, the change is kept for
-// this run only and nothing is written.
+// this run only and nothing is written. A load again (in Update or Reload) that still leaves the files
+// untouched keeps the values already in memory, including earlier changes kept for this run, rather than
+// falling back to defaults; and Update raises Changed once, with the values it ends with.
 //
 // A store opened read-only (probe and diag, which must change nothing) follows the same rules but
 // never saves, moves or quarantines a file. On a read-only store Update changes the values for this
@@ -127,22 +129,16 @@ internal sealed class JsonSettingsStore : ISettingsStore
     {
         ArgumentNullException.ThrowIfNull(mutate);
 
-        bool reload;
-        lock (_gate)
-        {
-            reload = _loadUnsettled && !_openedReadOnly;
-        }
-
-        if (reload)
-        {
-            // Saving now would put the values in memory over settings the last load never read.
-            _log.Info("Loading " + FilePath + " again before saving, because the last load left it untouched.");
-            Reload();
-        }
-
         EarshotSettings published;
         lock (_gate)
         {
+            if (_loadUnsettled && !_openedReadOnly)
+            {
+                // Saving now would put the values in memory over settings the last load never read.
+                _log.Info("Loading " + FilePath + " again before saving, because the last load left it untouched.");
+                LoadAgainLocked();
+            }
+
             EarshotSettings next = Clone(_current);
             mutate(next);
             string? problem = Validate(next);
@@ -175,11 +171,25 @@ internal sealed class JsonSettingsStore : ISettingsStore
         EarshotSettings published;
         lock (_gate)
         {
-            LoadLocked();
+            LoadAgainLocked();
             published = Clone(_current);
         }
 
         Changed?.Invoke(this, published);
+    }
+
+    // Loads the files again. A load that still leaves them untouched (unreadable, or unusable and not moved
+    // aside) says nothing about the settings, so the values in memory stay as they were rather than becoming
+    // defaults: they may hold what an earlier load read, or changes kept for this run.
+    private void LoadAgainLocked()
+    {
+        EarshotSettings before = Clone(_current);
+        LoadLocked();
+        if (_loadUnsettled)
+        {
+            _current = before;
+            _log.Warn("Settings still cannot be read or moved aside, so the values already in memory are kept: " + FilePath);
+        }
     }
 
     // Returns why the settings cannot be used, or null when they can.

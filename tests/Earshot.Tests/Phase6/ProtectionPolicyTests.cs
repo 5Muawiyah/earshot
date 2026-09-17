@@ -399,7 +399,8 @@ public sealed class ProtectionPolicyTests
         Assert.IsFalse(ProtectionPolicy.MayChangeServices(NodePhase.Mixed));
         Assert.IsTrue(ProtectionPolicy.IsDeviceChange(ProtectionAction.ProtectOn));
         Assert.IsFalse(ProtectionPolicy.IsDeviceChange(ProtectionAction.ReadServices));
-        Assert.IsFalse(ProtectionPolicy.IsDeviceChange(ProtectionAction.StoreIntent));
+        Assert.IsTrue(ProtectionPolicy.IsDeviceChange(ProtectionAction.StoreIntent),
+            "StoreIntent runs the protect verb, which applies the change at once if the nodes were allowed meanwhile.");
         Assert.IsFalse(ProtectionPolicy.IsDeviceChange(ProtectionAction.KeepIntent));
     }
 }

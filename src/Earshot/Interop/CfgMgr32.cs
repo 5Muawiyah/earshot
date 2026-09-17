@@ -178,6 +178,42 @@ internal static unsafe partial class CfgMgr32
     internal static partial uint CM_Get_DevNode_PropertyW(
         uint dnDevInst, in DEVPROPKEY propertyKey, out uint propertyType, byte* propertyBuffer, ref uint propertyBufferSize, uint ulFlags);
 
+    // The keys of every property set on a devnode. With a null array and a count of 0 it returns CR_BUFFER_SMALL
+    // and the count needed. Use GetDevNodePropertyKeys.
+    // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_get_devnode_property_keys
+    [LibraryImport(Dll)]
+    internal static partial uint CM_Get_DevNode_Property_Keys(uint dnDevInst, DEVPROPKEY* propertyKeyArray, ref uint propertyKeyCount, uint ulFlags);
+
+    // Lists the property keys set on a devnode. Retries on CR_BUFFER_SMALL. Returns the CONFIGRET; keys is empty
+    // on failure.
+    internal static uint GetDevNodePropertyKeys(uint devInst, out DEVPROPKEY[] keys)
+    {
+        keys = [];
+        uint count = 0;
+        uint cr = CM_Get_DevNode_Property_Keys(devInst, null, ref count, 0);
+        if (cr == CR_SUCCESS)
+        {
+            return cr;
+        }
+
+        for (int attempt = 0; attempt < BufferSmallRetries && cr == CR_BUFFER_SMALL; attempt++)
+        {
+            var buffer = new DEVPROPKEY[Math.Max(count, 1u)];
+            count = (uint)buffer.Length;
+            fixed (DEVPROPKEY* pointer = buffer)
+            {
+                cr = CM_Get_DevNode_Property_Keys(devInst, pointer, ref count, 0);
+            }
+
+            if (cr == CR_SUCCESS)
+            {
+                keys = buffer.AsSpan(0, (int)Math.Min(count, (uint)buffer.Length)).ToArray();
+            }
+        }
+
+        return cr;
+    }
+
     // SYSTEM gate only. Declared, never called outside the gate's block action.
     // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_disable_devnode
     [LibraryImport(Dll)]

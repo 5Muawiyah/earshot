@@ -35,7 +35,15 @@ internal sealed class FakeNode
 
     public uint ContainerReadResult { get; set; }
 
+    // An enable that leaves CONFIGFLAG_DISABLED set, so the node would come back disabled.
+    public bool KeepConfigFlagsOnEnable { get; set; }
+
+    public uint ConfigFlagsReadResult { get; set; }
+
     public uint StatusReadResult { get; set; }
+
+    // CONFIGRET a normal (present-only) locate of a present node returns; a phantom locate is unaffected.
+    public uint PresentLocateResult { get; set; }
 
     public bool IsDisabled => (Status & CfgMgr32.DN_HAS_PROBLEM) != 0 && Problem == CfgMgr32.CM_PROB_DISABLED;
 
@@ -83,6 +91,11 @@ internal sealed class FakeNodeApi : INodeApi
             return CfgMgr32.CR_NO_SUCH_DEVNODE;
         }
 
+        if (!includeNonPresent && _nodes[index].PresentLocateResult != CfgMgr32.CR_SUCCESS)
+        {
+            return _nodes[index].PresentLocateResult;
+        }
+
         devInst = (uint)index + 1;
         return CfgMgr32.CR_SUCCESS;
     }
@@ -116,8 +129,9 @@ internal sealed class FakeNodeApi : INodeApi
 
     public uint GetConfigFlags(uint devInst, out uint configFlags)
     {
-        configFlags = Node(devInst).ConfigFlags;
-        return CfgMgr32.CR_SUCCESS;
+        FakeNode node = Node(devInst);
+        configFlags = node.ConfigFlags;
+        return node.ConfigFlagsReadResult;
     }
 
     public uint GetName(uint devInst, out string? name)
@@ -146,7 +160,10 @@ internal sealed class FakeNodeApi : INodeApi
         {
             node.Status &= ~CfgMgr32.DN_HAS_PROBLEM;
             node.Problem = 0;
-            node.ConfigFlags &= ~CfgMgr32.CONFIGFLAG_DISABLED;
+            if (!node.KeepConfigFlagsOnEnable)
+            {
+                node.ConfigFlags &= ~CfgMgr32.CONFIGFLAG_DISABLED;
+            }
         }
 
         return node.EnableResult;
@@ -208,6 +225,19 @@ internal static class RecordedNodes
         @"BTHHFENUM\BTHHFPAUDIO\c&4d5e6f7&0&97",
     ];
 
+    // A second pair of Bluetooth headphones: a device node and an A2DP sink service node, in lower case, so
+    // set-device has somewhere to move the pin to and the match is exercised whatever the case.
+    public const string HeadphonesAddress = "AABBCCDDEEFF";
+
+    public static readonly Guid HeadphonesContainer = new("1D7C22F5-7A64-4F0E-9B2C-5C6C0A47B1E2");
+
+    public static readonly string[] HeadphonesNodes =
+    [
+        @"bthenum\dev_aabbccddeeff\b&1a2b3c4d&0&bluetoothdevice_aabbccddeeff",
+        @"bthenum\{0000110b-0000-1000-8000-00805f9b34fb}_vid&0001004c_pid&2028\b&1a2b3c4d&0&aabbccddeeff_c00000000",
+        @"bthenum\{0000111e-0000-1000-8000-00805f9b34fb}_vid&0001004c_pid&2028\b&1a2b3c4d&0&aabbccddeeff_c00000000",
+    ];
+
     public static IEnumerable<string> AllIds() => AirPodsTargets.Concat(AirPodsNonTargets).Concat(IPhoneNodes).Append(RadioNode);
 
     // A fresh table. The AirPods audio endpoints are non-present when the AirPods are not connected, as
@@ -222,7 +252,17 @@ internal static class RecordedNodes
         return new FakeNodeApi(nodes);
     }
 
+    // The same table plus the second pair of headphones.
+    public static FakeNodeApi TableWithHeadphones()
+    {
+        List<FakeNode> nodes = Table().Nodes.ToList();
+        nodes.AddRange(HeadphonesNodes.Select(id => new FakeNode(id, HeadphonesContainer, id.Contains(@"\dev_", StringComparison.Ordinal) ? "Headphones" : null)));
+        return new FakeNodeApi(nodes);
+    }
+
     public static DeviceIdentity AirPods() => new() { Address = AirPodsAddress, ContainerId = AirPodsContainer };
+
+    public static DeviceIdentity Headphones() => new() { Address = HeadphonesAddress, ContainerId = HeadphonesContainer };
 
     public static DeviceIdentity IPhone() => new() { Address = IPhoneAddress, ContainerId = IPhoneContainer };
 }

@@ -25,8 +25,9 @@ internal static class ComRelease
 // What the device monitor needs from Core Audio. Every member is called on the audio worker thread.
 internal interface IEndpointSource
 {
-    // Registers for endpoint notifications; the sink is called on MMDevAPI's callback thread.
-    StepOutcome Subscribe(Action<EndpointNotification> sink);
+    // Registers for endpoint notifications; the sink is called on MMDevAPI's callback thread, and sinkFailed
+    // on the same thread right after the sink threw.
+    StepOutcome Subscribe(Action<EndpointNotification> sink, Action sinkFailed);
 
     // Unregisters what Subscribe registered.
     StepOutcome Unsubscribe();
@@ -48,8 +49,8 @@ internal sealed class CoreAudioEndpointSource : IEndpointSource
         _worker = worker;
     }
 
-    public StepOutcome Subscribe(Action<EndpointNotification> sink) =>
-        _worker.RegisterNotificationClient(new NotificationClient(sink));
+    public StepOutcome Subscribe(Action<EndpointNotification> sink, Action sinkFailed) =>
+        _worker.RegisterNotificationClient(new NotificationClient(sink, sinkFailed));
 
     public StepOutcome Unsubscribe() => _worker.UnregisterNotificationClient();
 

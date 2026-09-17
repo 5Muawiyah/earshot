@@ -12,6 +12,10 @@ namespace Earshot;
 // container), activates IKsControl and reads KSPROPERTY_PIN_CTYPES, a KSPROPSETID_Pin Get. That proves the
 // connect path is reachable while changing nothing. On the owner's machine the expected adapters are the
 // A2DP filter (id ending \src) and the Hands-Free filter (id ending \wave).
+//
+// Exit code: 0 only when IKsControl was activated on at least one filter, which is what "the connect path is
+// reachable" means. No target device, or no filter that could be activated, is ExitCodes.Unavailable; an
+// enumeration that failed is ExitCodes.OsError. The report says which it was either way.
 internal static partial class Program
 {
     internal sealed record TopologyAdapterReport(FilterVisit Visit, uint? PinCount);
@@ -51,7 +55,12 @@ internal static partial class Program
         }
 
         WriteTopologyProbe(ctx, report);
-        ctx.ExitCode = report.EnumerationOk ? ExitCodes.Ok : ExitCodes.OsError;
+
+        // A probe that proved nothing is not a pass: the live-test skill reads the exit code to tell "the
+        // connect path is reachable" from "there was nothing to walk".
+        ctx.ExitCode = !report.EnumerationOk ? ExitCodes.OsError
+            : report.Target is null || !report.Adapters.Any(a => a.Visit.ControlActivated) ? ExitCodes.Unavailable
+            : ExitCodes.Ok;
     }
 
     // Worker thread only.

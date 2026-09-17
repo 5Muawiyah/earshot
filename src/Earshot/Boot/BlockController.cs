@@ -75,6 +75,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string BlockedMessage = "Blocked at boot";
     internal const string AlreadyBlockedMessage = "Already blocked at boot";
     internal const string NotPersistentMessage = "Blocked for now, but it may not last a restart. Try again.";
+    internal const string AllowNotPersistentMessage = "Allowed for now, but the AirPods may be blocked again after a restart. Try again.";
     internal const string AllowedMessage = "Allowed";
     internal const string AlreadyAllowedMessage = "Already allowed";
     internal const string PartialBlockMessage = "Only part of the AirPods could be blocked. Try again.";
@@ -83,12 +84,15 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string AllowFailedMessage = "Could not allow the AirPods. Try again.";
     internal const string TimedOutMessage = "The boot block did not finish in time. Try again.";
     internal const string CancelledMessage = "Stopped waiting for the boot block.";
+    internal const string BusyMessage = "Another change to the AirPods is still running. Try again.";
     internal const string BlockAtBootOnMessage = "Block at boot is on";
     internal const string BlockAtBootOffMessage = "Block at boot is off";
     internal const string BlockAtBootFailedMessage = "Could not change Block at boot. Try again.";
     internal const string InvalidAddressMessage = "That device address is not valid.";
     internal const string DeviceChosenMessage = "Device chosen";
     internal const string OtherDeviceBlockedMessage = "Allow the current AirPods first, then choose another device.";
+    internal const string OtherDeviceProtectedMessage = "Turn Protect audio quality off first, then choose another device.";
+    internal const string NotAudioSinkMessage = "That device cannot play audio from this PC. Choose headphones or speakers.";
     internal const string DeviceFailedMessage = "Could not choose that device. Try again.";
     internal const string NothingPinnedMessage = "Choose your AirPods first, then set up Earshot.";
     internal const string NoUserMessage = "Setup needs a signed-in Windows user.";
@@ -96,6 +100,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string SetupCancelledMessage = "Setup was cancelled";
     internal const string SetupNeedsAdminMessage = "Setup needs administrator approval.";
     internal const string SetupUnsafeFolderMessage = "Setup stopped because a folder it uses was not safe.";
+    internal const string SetupNeedsReleaseMessage = Boot.Gate.FileManifest.MissingMessage;
     internal const string SetupFailedMessage = "Setup did not finish. Try again.";
     internal const string RemovedMessage = "Earshot is removed";
     internal const string RemovedPartlyMessage = "Earshot is mostly removed. Some parts could not be undone.";
@@ -114,6 +119,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     private readonly string? _executable;
     private readonly ISystemWorker _worker;
     private readonly IDisposable? _ownedWorker;
+    private readonly Lock _statusLock = new();
     private volatile bool _isSetUp;
     private string _lastStatusProblems = "";
 
@@ -148,31 +154,50 @@ internal sealed class BlockController : IBlockController, IDisposable
         _ownedWorker = ownedWorker;
     }
 
-    // The real controller. Constructing it reads the current user's SID and nothing else; the worker thread
-    // starts on first use.
+    // The real controller with a worker of its own. Constructing it reads the current user's SID and nothing
+    // else; the worker thread starts on first use.
     public static BlockController Create(ILog log, ISettingsStore settings, Paths paths)
     {
+        var worker = new SystemWorker(log);
+        return Create(log, settings, paths, worker, worker);
+    }
+
+    // The real controller on a worker shared with the protection controller, so a block or allow and a
+    // protect-on or protect-off requested by this tray queue behind each other rather than run side by side.
+    // The caller owns the worker and disposes it.
+    public static BlockController Create(ILog log, ISettingsStore settings, Paths paths, ISystemWorker sharedWorker) =>
+        Create(log, settings, paths, sharedWorker, ownedWorker: null);
+
+    private static BlockController Create(ILog log, ISettingsStore settings, Paths paths, ISystemWorker worker, IDisposable? ownedWorker)
+    {
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(worker);
         string? sid;
         using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
         {
             sid = identity.User?.Value;
         }
 
-        var worker = new SystemWorker(log);
         var store = new GateStore(paths.MachineFolder);
         var gate = new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid,
             AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled);
         return new BlockController(log, settings, store, new CfgMgr32NodeReader(), gate, new ShellRunasLauncher(),
-            sid, Environment.ProcessPath, worker, worker);
+            sid, Environment.ProcessPath, worker, ownedWorker);
     }
 
     // \Earshot\Gate, \Earshot\Protect and \Earshot\BootBlock present and verified, as of the last status
     // read or change. False until one has run; reading it does no I/O.
     public bool IsSetUp => _isSetUp;
 
+    // The thread its gate requests run on, shared with the protection controller by the composition root.
+    internal ISystemWorker Worker => _worker;
+
+    // Task Scheduler reads and CfgMgr32 reads, neither of which changes anything, so this runs on the thread
+    // pool (whose threads are in the multithreaded apartment, which Task Scheduler COM needs) rather than on
+    // the system worker, where it would queue behind a protection change that can take minutes.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.thread.setapartmentstate
     public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default) =>
-        _worker.RunAsync(_ => ReadStatus(), ct);
+        Task.Run(ReadStatus, ct);
 
     public Task<ControllerResult> BlockAsync(CancellationToken ct = default) =>
         _worker.RunAsync(token => ChangeNodes(block: true, token), ct);
@@ -224,6 +249,7 @@ internal sealed class BlockController : IBlockController, IDisposable
             {
                 (int)GateExitCode.NotElevated or (int)GateExitCode.RunningAsSystem => SetupNeedsAdminMessage,
                 (int)GateExitCode.FolderNotSecure => SetupUnsafeFolderMessage,
+                (int)GateExitCode.NoManifest => SetupNeedsReleaseMessage,
                 _ => SetupFailedMessage,
             };
             return Finish("install", ControllerResult.Fail(message, steps));
@@ -288,13 +314,17 @@ internal sealed class BlockController : IBlockController, IDisposable
         steps.AddRange(read.Steps);
         BlockState state = BlockStateClassifier.Classify(installed, identity is not null, read);
 
+        // Status reads run on the thread pool, so more than one can be in flight.
         string problems = string.Join(" | ", steps.Where(s => !s.Ok).Select(GateActions.Describe));
-        if (!string.Equals(problems, _lastStatusProblems, StringComparison.Ordinal))
+        lock (_statusLock)
         {
-            _lastStatusProblems = problems;
-            if (problems.Length > 0)
+            if (!string.Equals(problems, _lastStatusProblems, StringComparison.Ordinal))
             {
-                _log.Warn("boot block status " + state + ": " + problems);
+                _lastStatusProblems = problems;
+                if (problems.Length > 0)
+                {
+                    _log.Warn("boot block status " + state + ": " + problems);
+                }
             }
         }
 
@@ -357,10 +387,16 @@ internal sealed class BlockController : IBlockController, IDisposable
 
         DeviceIdentity identity = device.Value;
         NodeReadResult before = _reader.Read(identity.ContainerId, identity.Address);
+
+        // Only a read of every target answers "already": a node that could not be read never counts, so the gate
+        // runs and decides from its own strict read.
         if (block ? BlockStateClassifier.IsFullyBlocked(before) : BlockStateClassifier.IsFullyAllowed(before))
         {
             return Finish(verb, ControllerResult.Already(block ? AlreadyBlockedMessage : AlreadyAllowedMessage));
         }
+
+        // What the check saw fail stays on record with the result.
+        steps.AddRange(before.Steps.Where(s => !s.Ok));
 
         GateRunResult run = _gate.Run(TaskPlan.GateTaskName, verb, NewNonce(), null, TaskSchedulerGate.GateTimeout, ct);
         steps.AddRange(run.Steps);
@@ -375,6 +411,11 @@ internal sealed class BlockController : IBlockController, IDisposable
             return Finish(verb, refused with { Steps = steps });
         }
 
+        if (IsBusy(run))
+        {
+            return Finish(verb, ControllerResult.Fail(BusyMessage, steps));
+        }
+
         // Ground truth: the node state read now, not the task's result.
         NodeReadResult after = _reader.Read(identity.ContainerId, identity.Address);
         steps.AddRange(after.Steps);
@@ -382,9 +423,11 @@ internal sealed class BlockController : IBlockController, IDisposable
         return Finish(verb, MapNodeResult(block, state, after, run.Outcome, steps));
     }
 
+    // The result of a block or an allow, from the node state read afterwards. A target that is not present is
+    // only in the way when the persistent disable flag says it would come back in the wrong state
+    // (BlockStateClassifier), so the same nodes always give the same answer.
     internal static ControllerResult MapNodeResult(bool block, BlockState state, NodeReadResult after, GateRunOutcome run, IReadOnlyList<StepOutcome> steps)
     {
-        bool anyNotPresent = after.Nodes.Any(n => !n.IsPresent);
         string failed = run switch
         {
             GateRunOutcome.TimedOut => TimedOutMessage,
@@ -408,19 +451,35 @@ internal sealed class BlockController : IBlockController, IDisposable
                 return new ControllerResult(OpStatus.Partial, block ? PartialBlockMessage : PartialAllowMessage, steps);
 
             case BlockState.Blocked when block:
-                if (!BlockStateClassifier.IsFullyBlocked(after))
+                if (after.Unread.Count > 0)
                 {
-                    return new ControllerResult(OpStatus.Partial, NotPersistentMessage, steps);
+                    // The present nodes read as blocked, but not every target could be read, so nothing is claimed.
+                    return new ControllerResult(OpStatus.Partial, UnreadableMessage, steps);
                 }
 
-                return anyNotPresent
-                    ? new ControllerResult(OpStatus.Partial, NotPresentBlockMessage, steps)
-                    : ControllerResult.Ok(BlockedMessage, steps);
+                if (BlockStateClassifier.AnyUnresolvedForBlock(after))
+                {
+                    return new ControllerResult(OpStatus.Partial, NotPresentBlockMessage, steps);
+                }
+
+                return BlockStateClassifier.IsFullyBlocked(after)
+                    ? ControllerResult.Ok(BlockedMessage, steps)
+                    : new ControllerResult(OpStatus.Partial, NotPersistentMessage, steps);
 
             case BlockState.Allowed when !block:
-                return anyNotPresent
-                    ? new ControllerResult(OpStatus.Partial, NotPresentAllowMessage, steps)
-                    : ControllerResult.Ok(AllowedMessage, steps);
+                if (after.Unread.Count > 0)
+                {
+                    return new ControllerResult(OpStatus.Partial, UnreadableMessage, steps);
+                }
+
+                if (BlockStateClassifier.AnyUnresolvedForAllow(after))
+                {
+                    return new ControllerResult(OpStatus.Partial, NotPresentAllowMessage, steps);
+                }
+
+                return BlockStateClassifier.IsFullyAllowed(after)
+                    ? ControllerResult.Ok(AllowedMessage, steps)
+                    : new ControllerResult(OpStatus.Partial, AllowNotPersistentMessage, steps);
 
             default:
                 return ControllerResult.Fail(failed, steps);
@@ -450,6 +509,11 @@ internal sealed class BlockController : IBlockController, IDisposable
         if (refused is not null)
         {
             return Finish(verb, refused with { Steps = steps });
+        }
+
+        if (IsBusy(run))
+        {
+            return Finish(verb, ControllerResult.Fail(BusyMessage, steps));
         }
 
         GateRead<GateConfig> after = _store.ReadConfig();
@@ -482,6 +546,11 @@ internal sealed class BlockController : IBlockController, IDisposable
             return Finish(GateVerbs.SetDevice, refused with { Steps = steps });
         }
 
+        if (IsBusy(run))
+        {
+            return Finish(GateVerbs.SetDevice, ControllerResult.Fail(BusyMessage, steps));
+        }
+
         GateRead<DeviceIdentity> after = _store.ReadDevice();
         steps.Add(after.Step);
         if (after.IsOk && after.Value is not null && string.Equals(after.Value.Address, address12, StringComparison.Ordinal))
@@ -492,10 +561,19 @@ internal sealed class BlockController : IBlockController, IDisposable
         string message = run.Status?.ExitCode switch
         {
             (int)GateExitCode.OtherDeviceBlocked => OtherDeviceBlockedMessage,
+            (int)GateExitCode.OtherDeviceProtected => OtherDeviceProtectedMessage,
+            (int)GateExitCode.NotAudioSink => NotAudioSinkMessage,
             (int)GateExitCode.NotFound => NotFoundMessage,
             _ => run.Outcome == GateRunOutcome.TimedOut ? TimedOutMessage : DeviceFailedMessage,
         };
         return Finish(GateVerbs.SetDevice, ControllerResult.Fail(message, steps));
+    }
+
+    // The gate changed nothing because another elevated run held the gate run lock or the device change lock.
+    internal static bool IsBusy(GateRunResult run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return run.Status is { } status && status.Steps.Any(s => DeviceChangeLock.IsBusy(s) || MachineGateMutex.IsBusy(s));
     }
 
     private ControllerResult? RunRefusal(GateRunResult run)

@@ -40,7 +40,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
         Assert.AreEqual(0, _time.LiveTimers, "The timeout timer is disposed on every path.");
     }
 
-    private Task<ConfirmationResult> Wait(ConnectAction action, DateTimeOffset requested, CancellationToken ct = default) =>
+    private Task<ConfirmationResult> Wait(ConnectAction action, long requested, CancellationToken ct = default) =>
         _waiter.WaitAsync(AirPodsContainer, action, ConfirmationWaiter.TimeoutFor(action), requested, ct);
 
     private async Task Armed() => await Eventually.True(() => _time.ArmedTimers == 1 && _monitor.RefreshCalls == 1, "the wait to arm and refresh");
@@ -48,7 +48,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [TestMethod]
     public async Task AStateReachedBeforeArmingCompletesFromTheRefresh()
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Active), Capture(EndpointState.Active));
 
         ConfirmationResult result = await Wait(ConnectAction.Connect, requested).WaitAsync(Guard);
@@ -62,7 +62,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [TestMethod]
     public async Task ANotificationBetweenArmingAndTheRefreshResultIsNotLost()
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Unplugged));
         _monitor.OnRefresh = _ =>
         {
@@ -83,7 +83,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [TestMethod]
     public async Task ANotificationAfterTheRefreshCompletesTheWait()
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
         await Armed();
@@ -105,7 +105,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [DataRow(EndpointState.NotPresent)]
     public async Task ADisconnectIsReachedWhenTheRenderEndpointLeavesActive(EndpointState state)
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Active));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Disconnect, requested);
         await Armed();
@@ -120,7 +120,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     public async Task ASnapshotTakenBeforeTheRequestIsIgnored()
     {
         DeviceSnapshot stale = _monitor.Snapshot(Render(EndpointState.Active));
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Unplugged));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
         await Armed();
@@ -140,7 +140,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     public async Task ARefreshThatHandsBackAnOlderSnapshotIsIgnored()
     {
         DeviceSnapshot previous = _monitor.Snapshot(Render(EndpointState.Active));
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.OnRefresh = _ => Task.FromResult(previous);   // an enumeration that failed keeps the old snapshot
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
         await Armed();
@@ -156,7 +156,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [TestMethod]
     public async Task NoChangeTimesOutOnTheInjectedClock()
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Unplugged));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
         await Armed();
@@ -181,7 +181,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [DataRow((int)ConnectAction.Disconnect)]
     public async Task ARenderEndpointThatHasGoneEndsTheWaitWithoutTheTimeout(int action)
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Capture(EndpointState.Unplugged));
 
         ConfirmationResult result = await Wait((ConnectAction)action, requested).WaitAsync(Guard);
@@ -199,7 +199,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [DataRow(EndpointState.Disabled)]
     public async Task AConnectEndsWhenNoRenderEndpointCanBecomeActive(EndpointState state)
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
         await Armed();
@@ -214,10 +214,29 @@ public sealed class ConfirmationWaiterTests : IDisposable
         Assert.AreEqual(state, ConfirmationWaiter.EndpointsOf(result.LastObserved!, AirPodsContainer).Single(e => e.Flow == EndpointFlow.Render).State);
     }
 
+    // A render endpoint turned off in Sound settings during a disconnect hides the link state for the rest of the
+    // wait, so the wait ends then rather than run to its timeout and blame the AirPods.
+    [TestMethod]
+    public async Task ADisconnectEndsWhenEveryRenderEndpointIsTurnedOff()
+    {
+        long requested = _monitor.Sequence;
+        _monitor.SetEndpoints(Render(EndpointState.Active), Capture(EndpointState.Active));
+        Task<ConfirmationResult> waiting = Wait(ConnectAction.Disconnect, requested);
+        await Armed();
+        Assert.IsFalse(waiting.IsCompleted);
+
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Disabled), Capture(EndpointState.Unplugged)));
+        ConfirmationResult result = await waiting.WaitAsync(Guard);
+
+        Assert.IsFalse(result.Reached, "Nothing shows the link went.");
+        Assert.IsTrue(result.Unreachable);
+        Assert.AreEqual(ConfirmationSource.Notification, result.Source);
+    }
+
     [TestMethod]
     public async Task AnOlderSnapshotWithoutARenderEndpointDoesNotEndTheWait()
     {
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         DeviceSnapshot older = _monitor.Snapshot(Capture(EndpointState.Unplugged));
         _monitor.SetEndpoints(Render(EndpointState.Unplugged));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
@@ -240,7 +259,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     {
         var phoneRender = new AudioEndpoint("{0.0.0.00000000}.{44444444-5555-4666-8777-888888888802}", EndpointFlow.Render,
             EndpointState.Active, "Headphones (iPhone)", IPhoneContainer);
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Unplugged), phoneRender);
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
         await Armed();
@@ -256,7 +275,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     public async Task CancellationEndsTheWaitAndThrows()
     {
         using var cts = new CancellationTokenSource();
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.SetEndpoints(Render(EndpointState.Unplugged));
         Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested, cts.Token);
         await Armed();
@@ -273,7 +292,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => Wait(ConnectAction.Connect, _time.GetUtcNow(), cts.Token));
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => Wait(ConnectAction.Connect, _monitor.Sequence, cts.Token));
 
         Assert.AreEqual(0, _monitor.Subscribed);
         Assert.AreEqual(0, _monitor.RefreshCalls);
@@ -284,14 +303,14 @@ public sealed class ConfirmationWaiterTests : IDisposable
     {
         _monitor.OnRefresh = _ => Task.FromException<DeviceSnapshot>(new ObjectDisposedException("monitor"));
 
-        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => Wait(ConnectAction.Disconnect, _time.GetUtcNow()).WaitAsync(Guard));
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => Wait(ConnectAction.Disconnect, _monitor.Sequence).WaitAsync(Guard));
     }
 
     [TestMethod]
     public async Task ARefreshThatFailsAfterTheStateWasSeenIsLogged()
     {
         var refresh = new TaskCompletionSource<DeviceSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
-        DateTimeOffset requested = _time.GetUtcNow();
+        long requested = _monitor.Sequence;
         _monitor.OnRefresh = _ =>
         {
             _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Active)));
@@ -303,6 +322,84 @@ public sealed class ConfirmationWaiterTests : IDisposable
 
         Assert.IsTrue(result.Reached);
         await Eventually.True(() => _log.Has(LogLevel.Error, "after the wait for the device state had ended"), "the late refresh failure to be logged");
+    }
+
+    // A rebuild after a settings change carries the enumeration's own number, so a snapshot stamped later than
+    // the request but built from readings taken before it is not evidence.
+    [TestMethod]
+    public async Task ASnapshotOfAnEarlierEnumerationIsIgnoredHoweverLateItsTimeIs()
+    {
+        _monitor.SetEndpoints(Render(EndpointState.Unplugged));
+        DeviceSnapshot earlier = _monitor.Snapshot(Render(EndpointState.Active));
+        long requested = _monitor.Sequence;
+        Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
+        await Armed();
+
+        _time.Advance(TimeSpan.FromSeconds(1));
+        _monitor.Raise(earlier with { TakenUtc = _time.GetUtcNow() });
+
+        Assert.IsFalse(waiting.IsCompleted, "The number, not the time, says what came after the request.");
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Active)));
+        ConfirmationResult result = await waiting.WaitAsync(Guard);
+
+        Assert.IsTrue(result.Reached);
+        Assert.AreEqual(1, result.StaleIgnored);
+    }
+
+    [TestMethod]
+    public async Task AFailedReadIsNeverEvidence()
+    {
+        _monitor.SetEndpoints(Render(EndpointState.Unplugged));
+        long requested = _monitor.Sequence;
+        Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
+        await Armed();
+
+        // What the monitor publishes when an enumeration fails: the last devices, marked as not read.
+        DeviceSnapshot failed = _monitor.Snapshot(Render(EndpointState.Active)) with
+        {
+            ReadStatus = SnapshotReadStatus.Failed,
+            Resolution = TargetResolution.ReadFailed,
+        };
+        _monitor.Raise(failed);
+
+        Assert.IsFalse(waiting.IsCompleted, "A read that failed says nothing about the device.");
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Active)));
+        ConfirmationResult result = await waiting.WaitAsync(Guard);
+
+        Assert.IsTrue(result.Reached);
+        Assert.AreEqual(1, result.StaleIgnored);
+    }
+
+    // An endpoint whose container could not be read is grouped under Guid.Empty, so an empty-looking container
+    // is not proof the device went.
+    [TestMethod]
+    public async Task ARenderEndpointWithAnUnreadableContainerKeepsTheWaitGoing()
+    {
+        _monitor.SetEndpoints(Render(EndpointState.Unplugged));
+        long requested = _monitor.Sequence;
+        Task<ConfirmationResult> waiting = Wait(ConnectAction.Connect, requested);
+        await Armed();
+
+        AudioEndpoint unreadable = Render(EndpointState.Unplugged) with { ContainerId = Guid.Empty, EndpointId = "{0.0.0.00000000}.{unreadable}" };
+        _monitor.Raise(_monitor.Snapshot(unreadable));
+
+        Assert.IsFalse(waiting.IsCompleted, "The device may be the endpoint whose container could not be read.");
+        _monitor.Raise(_monitor.Snapshot(Render(EndpointState.Active)));
+        ConfirmationResult result = await waiting.WaitAsync(Guard);
+
+        Assert.IsTrue(result.Reached);
+    }
+
+    [TestMethod]
+    public void AGroupWithoutAContainerCanHideTheDevice()
+    {
+        DeviceSnapshot clean = _monitor.Snapshot(Render(EndpointState.Unplugged));
+        DeviceSnapshot hidden = _monitor.Snapshot(Render(EndpointState.Unplugged) with { ContainerId = Guid.Empty });
+        DeviceSnapshot captureOnly = _monitor.Snapshot(Capture(EndpointState.Unplugged) with { ContainerId = Guid.Empty });
+
+        Assert.IsFalse(ConfirmationWaiter.MayHideTheDevice(clean));
+        Assert.IsTrue(ConfirmationWaiter.MayHideTheDevice(hidden));
+        Assert.IsFalse(ConfirmationWaiter.MayHideTheDevice(captureOnly), "Only a render endpoint can confirm anything.");
     }
 
     [TestMethod]
@@ -324,7 +421,10 @@ public sealed class ConfirmationWaiterTests : IDisposable
         Assert.IsTrue(ConfirmationWaiter.IsReached([Render(EndpointState.Unplugged), Capture(EndpointState.Unplugged)], ConnectAction.Disconnect));
         Assert.IsFalse(ConfirmationWaiter.IsReached([Render(EndpointState.Active), secondRender], ConnectAction.Disconnect),
             "Any render endpoint still active is not a disconnect.");
-        Assert.IsFalse(ConfirmationWaiter.IsReached([Render(EndpointState.Disabled)], ConnectAction.Disconnect));
+        Assert.IsFalse(ConfirmationWaiter.IsReached([Render(EndpointState.Disabled)], ConnectAction.Disconnect),
+            "A render endpoint turned off in Sound settings hides the link state, so no disconnect is seen.");
+        Assert.IsFalse(ConfirmationWaiter.IsReached([Render(EndpointState.Disabled), Capture(EndpointState.Unplugged)], ConnectAction.Disconnect),
+            "The capture side cannot stand in for it.");
         Assert.IsFalse(ConfirmationWaiter.IsReached([Capture(EndpointState.Unplugged)], ConnectAction.Disconnect),
             "Without a render endpoint nothing was observed.");
         Assert.IsFalse(ConfirmationWaiter.IsReached([], ConnectAction.Disconnect));
@@ -344,7 +444,11 @@ public sealed class ConfirmationWaiterTests : IDisposable
         Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Unplugged)], ConnectAction.Connect));
         Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.NotPresent)], ConnectAction.Disconnect),
             "NOTPRESENT is where a disconnect is going.");
-        Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Disabled)], ConnectAction.Disconnect));
+        Assert.IsTrue(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Disabled)], ConnectAction.Disconnect),
+            "Every render endpoint turned off in Sound settings: a disconnect can no longer be seen.");
+        Assert.IsTrue(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Disabled), Capture(EndpointState.Active)], ConnectAction.Disconnect));
+        Assert.IsFalse(ConfirmationWaiter.IsUnreachable([Render(EndpointState.Disabled), secondRender], ConnectAction.Disconnect),
+            "One render endpoint can still show the link state.");
     }
 
     [TestMethod]

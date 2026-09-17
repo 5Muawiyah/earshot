@@ -10,7 +10,7 @@ namespace Earshot;
 //
 //   diag connect
 //   diag disconnect
-//   diag ks <reconnect|disconnect> <src|wave|all>
+//   diag ks <reconnect|disconnect> <src|wave|all> [buffer4]
 //   diag gate <verb> [address]        verb from GateVerbs except boot; address only for set-device
 //   diag protect-unelevated <on|off>
 //   diag battery-sweep
@@ -23,10 +23,12 @@ namespace Earshot;
 internal static partial class Program
 {
     internal const string DiagUsage =
-        "Usage: Earshot.exe diag connect | disconnect | ks <reconnect|disconnect> <src|wave|all> | " +
+        "Usage: Earshot.exe diag connect | disconnect | ks <reconnect|disconnect> <src|wave|all> [buffer4] | " +
         "gate <verb> [address] | protect-unelevated <on|off> | battery-sweep [--out <path>]";
 
     internal const string DiagBatterySweepName = "battery-sweep";
+
+    internal const string DiagKsBufferArgument = "buffer4";
 
     internal sealed record DiagRequest(string Target, IReadOnlyList<string> Args, string? OutPath);
 
@@ -120,9 +122,11 @@ internal static partial class Program
                 return rest.Count == 0 ? null : "diag " + target + " takes no arguments.";
 
             case "ks":
-                if (rest.Count != 2)
+                // buffer4 retries with a 4-byte zeroed data buffer, for the case where a filter answers the
+                // documented request (no buffer) with a buffer error.
+                if (rest.Count is not (2 or 3))
                 {
-                    return "diag ks needs <reconnect|disconnect> <src|wave|all>.";
+                    return "diag ks needs <reconnect|disconnect> <src|wave|all> [buffer4].";
                 }
 
                 if (rest[0] is not ("reconnect" or "disconnect"))
@@ -130,7 +134,12 @@ internal static partial class Program
                     return "diag ks action must be reconnect or disconnect.";
                 }
 
-                return rest[1] is "src" or "wave" or "all" ? null : "diag ks filter must be src, wave or all.";
+                if (rest[1] is not ("src" or "wave" or "all"))
+                {
+                    return "diag ks filter must be src, wave or all.";
+                }
+
+                return rest.Count == 2 || rest[2] == DiagKsBufferArgument ? null : "diag ks only takes buffer4 after the filter.";
 
             case "gate":
                 if (rest.Count is < 1 or > 2)

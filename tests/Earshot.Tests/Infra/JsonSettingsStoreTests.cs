@@ -552,6 +552,32 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.IsEmpty(Quarantined());
     }
 
+    // Each Update loads again first while the file is locked. A load that still fails must not drop the changes
+    // an earlier Update kept for this run, and must not announce defaults.
+    [TestMethod]
+    public void ChangesKeptForThisRunSurviveALoadThatStillFails()
+    {
+        File.WriteAllText(SettingsPath, ValidJson);
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            JsonSettingsStore store = Open();
+            var published = new List<EarshotSettings>();
+            store.Changed += (_, s) => published.Add(s);
+
+            store.Update(s => s.OpenOnStartup = false);
+            store.Update(s => s.DeviceMatch = "Buds");
+            store.Reload();
+
+            Assert.AreEqual(SettingsLoadStatus.ReadFailed, store.LastLoadStatus);
+            Assert.IsFalse(store.Current.OpenOnStartup, "The first change is still there.");
+            Assert.AreEqual("Buds", store.Current.DeviceMatch);
+            Assert.HasCount(3, published, "Changed once per Update and once for the Reload.");
+            Assert.IsTrue(published.All(s => !s.OpenOnStartup), "Defaults were never announced after the first change.");
+        }
+
+        Assert.AreEqual(ValidJson, File.ReadAllText(SettingsPath), "Nothing was written while the file was locked.");
+    }
+
     // Reading is allowed but moving is not, so the unusable file cannot be put aside. Saving then would
     // push it over the good backup, so nothing is saved until a later load can move it.
     [TestMethod]

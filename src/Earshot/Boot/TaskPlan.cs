@@ -36,12 +36,14 @@ internal sealed record TaskSpec(
 // The three scheduled tasks install registers, described once so install, the tray's pre-run check and
 // the probe agree on every value.
 //
-//   \Earshot\Gate       on demand   gate $(Arg0) $(Arg1) $(Arg2)   PT2M   the user may start it
-//   \Earshot\Protect    on demand   gate $(Arg0) $(Arg1) $(Arg2)   PT5M   the user may start it
-//   \Earshot\BootBlock  boot        gate boot                      PT2M   SYSTEM only, the user may read it
+//   \Earshot\Gate       on demand   gate $(Arg0) $(Arg1) $(Arg2)       PT2M   the user may start it
+//   \Earshot\Protect    on demand   gate-protect $(Arg0) $(Arg1)       PT5M   the user may start it
+//   \Earshot\BootBlock  boot        gate boot                          PT2M   SYSTEM only, the user may read it
 //
-// The literal gate token comes before any caller-supplied value, so $(Arg0) can never select install,
-// uninstall or probe. $(ArgN) is substituted in Arguments, never in Path. Settings that default badly are
+// The literal gate or gate-protect token comes before any caller-supplied value, so $(Arg0) can never select
+// install, uninstall or probe. The two tokens split the verbs: gate refuses protect-on and protect-off, and
+// gate-protect accepts nothing else, so a Bluetooth service change always runs under the Protect task's PT5M
+// limit and a node change never does. $(ArgN) is substituted in Arguments, never in Path. Settings that default badly are
 // set explicitly: DisallowStartIfOnBatteries and StopIfGoingOnBatteries false, MultipleInstances Queue.
 // https://learn.microsoft.com/en-us/windows/win32/taskschd/task-actions
 // https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-disallowstartifonbatteries-settingstype-element
@@ -54,6 +56,7 @@ internal static class TaskPlan
     public const string ProtectTaskName = "Protect";
     public const string BootTaskName = "BootBlock";
     public const string GateArguments = "gate $(Arg0) $(Arg1) $(Arg2)";
+    public const string ProtectArguments = "gate-protect $(Arg0) $(Arg1)";
     public const string BootArguments = "gate boot";
     public const string GateTimeLimit = "PT2M";
 
@@ -94,7 +97,7 @@ internal static class TaskPlan
         [
             new TaskSpec(GateTaskName, exe, GateArguments, installFolder, GateTimeLimit, BootTrigger: false,
                 PrincipalFor(GateTaskName, mode, userSid), Sddl.RunnableTask(userSid), UserMayRun: true),
-            new TaskSpec(ProtectTaskName, exe, GateArguments, installFolder, ProtectTimeLimit, BootTrigger: false,
+            new TaskSpec(ProtectTaskName, exe, ProtectArguments, installFolder, ProtectTimeLimit, BootTrigger: false,
                 PrincipalFor(ProtectTaskName, mode, userSid), Sddl.RunnableTask(userSid), UserMayRun: true),
             new TaskSpec(BootTaskName, exe, BootArguments, installFolder, GateTimeLimit, BootTrigger: true,
                 PrincipalFor(BootTaskName, mode, userSid), Sddl.ReadableTask(userSid), UserMayRun: false),
@@ -434,7 +437,14 @@ internal static class TaskDefinitionWriter
                 return Failed(hr);
             }
 
-            var exec = (IExecAction)action;
+            // A cast would throw InvalidCastException when the action does not carry IExecAction; the QI path
+            // records E_NOINTERFACE as a step instead.
+            hr = ComActivation.AsInterface(action, out IExecAction? exec);
+            if (!Track(steps, step + ":exec-interface", hr, exec, created) || exec is null)
+            {
+                return Failed(hr);
+            }
+
             if (!Put(steps, step + ":path", hr = exec.put_Path(spec.ExecutablePath)) ||
                 !Put(steps, step + ":arguments", hr = exec.put_Arguments(spec.Arguments)) ||
                 !Put(steps, step + ":working-directory", hr = exec.put_WorkingDirectory(spec.WorkingDirectory)))

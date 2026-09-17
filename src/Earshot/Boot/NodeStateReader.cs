@@ -206,6 +206,11 @@ internal static class NodeScan
 internal sealed record NodeReadResult(bool Listed, IReadOnlyList<BluetoothNode> Nodes, IReadOnlyList<StepOutcome> Steps)
 {
     public static NodeReadResult NoIdentity { get; } = new(false, Array.Empty<BluetoothNode>(), Array.Empty<StepOutcome>());
+
+    // Instance ids of targets whose persistent disable flag, presence or status could not be read (each failure
+    // is in Steps). Such a node's IsPresent and ConfigFlagsDisabledBit are defaults, not observations, so no rule
+    // that decides "already blocked", "already allowed" or "not blocked" counts it as either.
+    public IReadOnlyCollection<string> Unread { get; init; } = Array.Empty<string>();
 }
 
 // Reads the real state of the target nodes without elevation. This is the ground truth for the boot
@@ -230,15 +235,25 @@ internal sealed class NodeStateReader
         NodeScanResult scan = NodeScan.FindTargets(_nodes, pinnedContainer, address12);
         var steps = new List<StepOutcome>(scan.Steps);
         var result = new List<BluetoothNode>(scan.Targets.Count);
+        var unread = new List<string>();
         foreach (TargetNode target in scan.Targets)
         {
-            result.Add(ReadNode(_nodes, target, steps));
+            result.Add(ReadNode(_nodes, target, steps, out bool complete));
+            if (!complete)
+            {
+                unread.Add(target.InstanceId);
+            }
         }
 
-        return new NodeReadResult(scan.Listed, result, steps);
+        return new NodeReadResult(scan.Listed, result, steps) { Unread = unread };
     }
 
-    public static BluetoothNode ReadNode(INodeReader nodes, TargetNode target, List<StepOutcome> steps)
+    public static BluetoothNode ReadNode(INodeReader nodes, TargetNode target, List<StepOutcome> steps) =>
+        ReadNode(nodes, target, steps, out _);
+
+    // complete: false when the config flags, the presence or the status could not be read. The node then carries
+    // a default for what was not read (flag clear, not present, or status Unknown), and the failure is a step.
+    public static BluetoothNode ReadNode(INodeReader nodes, TargetNode target, List<StepOutcome> steps, out bool complete)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(target);
@@ -254,6 +269,7 @@ internal sealed class NodeStateReader
         }
 
         bool persistBit = false;
+        complete = true;
         uint flagsCr = nodes.GetConfigFlags(target.PhantomDevInst, out uint configFlags);
         if (flagsCr == CfgMgr32.CR_SUCCESS)
         {
@@ -261,7 +277,8 @@ internal sealed class NodeStateReader
         }
         else if (flagsCr != CfgMgr32.CR_NO_SUCH_VALUE)
         {
-            steps.Add(StepOutcomes.FromConfigRet("cm-configflags:" + id, flagsCr));
+            steps.Add(StepOutcomes.FromConfigRet("cm-configflags:" + id, flagsCr, "Whether it stays disabled after a restart could not be read."));
+            complete = false;
         }
 
         uint cr = nodes.Locate(id, includeNonPresent: false, out uint devInst);
@@ -274,6 +291,7 @@ internal sealed class NodeStateReader
         if (cr != CfgMgr32.CR_SUCCESS)
         {
             steps.Add(StepOutcomes.FromConfigRet("cm-locate:" + id, cr, "Presence unreadable."));
+            complete = false;
             return new BluetoothNode(id, prefix, name, IsPresent: false, NodeBlockStatus.Unknown, 0, persistBit);
         }
 
@@ -281,6 +299,7 @@ internal sealed class NodeStateReader
         if (cr != CfgMgr32.CR_SUCCESS)
         {
             steps.Add(StepOutcomes.FromConfigRet("cm-status:" + id, cr, "Status unreadable."));
+            complete = false;
             return new BluetoothNode(id, prefix, name, IsPresent: true, NodeBlockStatus.Unknown, 0, persistBit);
         }
 
@@ -359,22 +378,42 @@ internal static class BlockStateClassifier
         return disabled > 0 ? BlockState.Blocked : BlockState.Allowed;
     }
 
-    // True when every present target is disabled with the persistent flag and none is enabled or unreadable,
-    // so a block request has nothing to do.
+    // True when every target would come up disabled after a restart: every present one disabled with the
+    // persistent flag, and every non-present one carrying the flag. One rule for the check before a block and
+    // for the result read after it, so repeated blocks cannot alternate between "already blocked" and a
+    // failure over the same nodes. A target that could not be fully read (NodeReadResult.Unread) is never
+    // taken as blocked.
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-device-configflags
     public static bool IsFullyBlocked(NodeReadResult read)
     {
         ArgumentNullException.ThrowIfNull(read);
-        var present = read.Nodes.Where(n => n.IsPresent).ToList();
-        return read.Listed && present.Count > 0 &&
-               present.All(n => n.Status == NodeBlockStatus.Disabled && n.ConfigFlagsDisabledBit);
+        return read.Listed && read.Nodes.Count > 0 && read.Unread.Count == 0 &&
+               read.Nodes.All(n => n.IsPresent ? n.Status == NodeBlockStatus.Disabled && n.ConfigFlagsDisabledBit : n.ConfigFlagsDisabledBit);
     }
 
-    // True when every present target is enabled and none carries the persistent disable flag.
+    // True when every target would come up enabled after a restart: every present one enabled, and no target,
+    // present or not, carrying the persistent disable flag. A target that could not be fully read is never taken
+    // as allowed: its flag and presence are defaults, not observations.
     public static bool IsFullyAllowed(NodeReadResult read)
     {
         ArgumentNullException.ThrowIfNull(read);
-        var present = read.Nodes.Where(n => n.IsPresent).ToList();
-        return read.Listed && present.Count > 0 &&
-               present.All(n => n.Status == NodeBlockStatus.Enabled && !n.ConfigFlagsDisabledBit);
+        return read.Listed && read.Nodes.Count > 0 && read.Unread.Count == 0 &&
+               read.Nodes.All(n => n.IsPresent ? n.Status == NodeBlockStatus.Enabled && !n.ConfigFlagsDisabledBit : !n.ConfigFlagsDisabledBit);
+    }
+
+    // A target that is not present and does not carry the persistent disable flag: it cannot be changed now,
+    // and it comes back in the state the flag says, so a block cannot finish while one is there.
+    public static bool AnyUnresolvedForBlock(NodeReadResult read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        return read.Nodes.Any(n => !n.IsPresent && !n.ConfigFlagsDisabledBit);
+    }
+
+    // A target that is not present and still carries the flag: an allow cannot reach it, so it would come back
+    // disabled.
+    public static bool AnyUnresolvedForAllow(NodeReadResult read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        return read.Nodes.Any(n => !n.IsPresent && n.ConfigFlagsDisabledBit);
     }
 }

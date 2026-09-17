@@ -194,6 +194,7 @@ public static class NativeCodes
         1060 => "ERROR_SERVICE_DOES_NOT_EXIST",
         1167 => "ERROR_DEVICE_NOT_CONNECTED",
         1168 => "ERROR_NOT_FOUND",
+        1332 => "ERROR_NONE_MAPPED",
         1223 => "ERROR_CANCELLED",
         1306 => "ERROR_REVISION_MISMATCH",
         1460 => "ERROR_TIMEOUT",

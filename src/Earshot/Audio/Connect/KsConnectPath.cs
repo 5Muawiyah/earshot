@@ -201,8 +201,9 @@ internal interface IKsConnectPath
     EndpointRead ReadEndpoints(Guid container);
 
     // Walks the endpoints to their filters, applies the guard and sends the documented request (no buffer) to
-    // each chosen filter that passes it, in order.
-    KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice);
+    // each chosen filter that passes it, in order. A cancelled token stops the walk before the next filter; a
+    // request already sent is never recalled.
+    KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice, CancellationToken ct = default);
 }
 
 // The connect path over Core Audio (design sections F, steps 1 to 5). Worker thread only. Discovery and the
@@ -266,10 +267,12 @@ internal sealed class KsConnectPath : IKsConnectPath
         return EndpointRead.From(CoreAudioEndpointReader.ReadAll(enumerator, _release), container);
     }
 
-    public KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice) =>
-        Send(container, endpoints, action, choice, KsPayload.None);
+    public KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice, CancellationToken ct = default) =>
+        Send(container, endpoints, action, choice, KsPayload.None, ct);
 
-    internal KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice, KsPayload payload)
+    internal KsSendResult Send(
+        Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice, KsPayload payload,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         string stepPrefix = StepPrefix(action);
@@ -294,12 +297,16 @@ internal sealed class KsConnectPath : IKsConnectPath
             string stepName = stepPrefix + ":" + names[i];
             string label = RoleName(role) + ": " + adapter.AdapterId;
 
-            if (fault is not null)
+            // A newer click may have cancelled this one while an earlier filter was still in the driver. What
+            // was sent stays sent; nothing more is.
+            string? stopped = fault is not null ? "the walk stopped at an earlier filter."
+                : ct.IsCancellationRequested ? "the request was cancelled before this filter."
+                : null;
+            if (stopped is not null)
             {
-                const string Stopped = "the walk stopped at an earlier filter.";
-                StepOutcome skipped = StepOutcomes.NotAttempted(stepName, label + ": no request was sent because " + Stopped);
+                StepOutcome skipped = StepOutcomes.NotAttempted(stepName, label + ": no request was sent because " + stopped);
                 steps.Add(skipped);
-                filters.Add(new FilterSend(adapter, names[i], role, NotVisited(adapter), null, 0, null, null, Stopped, skipped));
+                filters.Add(new FilterSend(adapter, names[i], role, NotVisited(adapter), null, 0, null, null, stopped, skipped));
                 continue;
             }
 

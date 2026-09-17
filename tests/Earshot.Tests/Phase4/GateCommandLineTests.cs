@@ -19,12 +19,47 @@ public sealed class GateCommandLineTests
     [DataRow("status")]
     [DataRow("setboot-on")]
     [DataRow("setboot-off")]
-    [DataRow("protect-on")]
-    [DataRow("protect-off")]
     public void AcceptsEachVerbWithANonce(string verb)
     {
         Assert.IsTrue(Program.TryParseGateArgs(["gate", verb, Nonce], out GateRequest? request, out string? problem), problem);
         Assert.AreEqual(new GateRequest(verb, Nonce, null), request);
+        Assert.AreEqual(GateMode.Gate, request.Mode);
+    }
+
+    [TestMethod]
+    [DataRow("protect-on")]
+    [DataRow("protect-off")]
+    public void TheProtectVerbsParseOnlyInGateProtectMode(string verb)
+    {
+        Assert.IsTrue(Program.TryParseGateArgs(["gate-protect", verb, Nonce], out GateRequest? request, out string? problem), problem);
+        Assert.AreEqual(new GateRequest(verb, Nonce, null, GateMode.Protect), request);
+
+        Assert.IsFalse(Program.TryParseGateArgs(["gate", verb, Nonce], out GateRequest? refused, out problem));
+        Assert.IsNull(refused);
+        Assert.AreEqual("protect verbs run only through the Protect task", problem);
+    }
+
+    [TestMethod]
+    [DataRow("gate-protect")]
+    [DataRow("gate-protect", "protect-on")]
+    [DataRow("gate-protect", "protect-on", Nonce, "$(Arg2)")]
+    [DataRow("gate-protect", "protect-on", Nonce, "")]
+    [DataRow("gate-protect", "block", Nonce)]
+    [DataRow("gate-protect", "allow", Nonce)]
+    [DataRow("gate-protect", "status", Nonce)]
+    [DataRow("gate-protect", "setboot-off", Nonce)]
+    [DataRow("gate-protect", "set-device", Nonce, "5A6B7C8D9EAF")]
+    [DataRow("gate-protect", "boot")]
+    [DataRow("gate-protect", "Protect-On", Nonce)]
+    [DataRow("gate-protect", "protect-on", "0123456789ABCDEF0123456789ABCDEF")]
+    [DataRow("gate-protect", "$(Arg0)", "$(Arg1)")]
+    [DataRow("Gate-Protect", "protect-on", Nonce)]
+    [DataRow("gate-protect ", "protect-on", Nonce)]
+    public void GateProtectRejectsEverythingButAProtectVerbAndANonce(params string[] args)
+    {
+        Assert.IsFalse(Program.TryParseGateArgs(args, out GateRequest? request, out string? problem));
+        Assert.IsNull(request);
+        Assert.IsFalse(string.IsNullOrEmpty(problem));
     }
 
     [TestMethod]
@@ -109,8 +144,11 @@ public sealed class GateCommandLineTests
 
             string verb = new(chars);
             bool parsed = Program.TryParseGateArgs(["gate", verb, Nonce], out _, out _);
-            bool expected = GateVerbs.All.Contains(verb) && verb is not (GateVerbs.Boot or GateVerbs.SetDevice);
+            bool expected = GateVerbs.All.Contains(verb) && verb is not (GateVerbs.Boot or GateVerbs.SetDevice or GateVerbs.ProtectOn or GateVerbs.ProtectOff);
             Assert.AreEqual(expected, parsed, verb);
+
+            bool parsedProtect = Program.TryParseGateArgs(["gate-protect", verb, Nonce], out _, out _);
+            Assert.AreEqual(verb is GateVerbs.ProtectOn or GateVerbs.ProtectOff, parsedProtect, "gate-protect " + verb);
         }
     }
 
@@ -123,6 +161,28 @@ public sealed class GateCommandLineTests
 
         Assert.AreEqual(GateExitCode.Rejected, exit);
         Assert.IsTrue(log.Has(LogLevel.Warn, "gate: rejected"));
+    }
+
+    [TestMethod]
+    public void AProtectVerbSentThroughTheGateTaskNeverBuildsTheActions()
+    {
+        var log = new CapturingLog();
+
+        GateExitCode exit = Program.RunGate(["gate", "protect-on", Nonce], FakeToken.System, log, NeverBuilt);
+
+        Assert.AreEqual(GateExitCode.Rejected, exit);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "gate: rejected (protect verbs run only through the Protect task)"));
+    }
+
+    [TestMethod]
+    public void ANodeVerbSentThroughTheProtectTaskNeverBuildsTheActions()
+    {
+        var log = new CapturingLog();
+
+        GateExitCode exit = Program.RunGate(["gate-protect", "block", Nonce], FakeToken.System, log, NeverBuilt);
+
+        Assert.AreEqual(GateExitCode.Rejected, exit);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "gate-protect: rejected"));
     }
 
     [TestMethod]

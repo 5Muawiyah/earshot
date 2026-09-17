@@ -1,3 +1,4 @@
+using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
 using Earshot.Interop;
@@ -36,6 +37,10 @@ internal enum GateExitCode
     OtherDeviceBlocked = 8,  // set-device while the device pinned now is still disabled
     StatusNotWritten = 9,    // the action succeeded but its status file could not be written
     FolderNotSecure = 10,    // %ProgramData%\Earshot is missing or its ACL fails the check
+    DeviceBlocked = 11,      // protect-on or protect-off while the device is blocked; the request is kept for the next allow
+    NotAudioSink = 12,       // set-device for a device with no A2DP sink node, such as a phone
+    OtherDeviceProtected = 13, // set-device while protection.json lists services turned off on the device pinned now
+    NoManifest = 14,         // install without a valid Earshot.files.json next to the running exe
     Rejected = 20,           // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
@@ -55,6 +60,10 @@ internal static class GateExitCodes
         [GateExitCode.OtherDeviceBlocked] = "other-device-blocked",
         [GateExitCode.StatusNotWritten] = "status-not-written",
         [GateExitCode.FolderNotSecure] = "folder-not-secure",
+        [GateExitCode.DeviceBlocked] = "device-blocked",
+        [GateExitCode.NotAudioSink] = "not-audio-sink",
+        [GateExitCode.OtherDeviceProtected] = "other-device-protected",
+        [GateExitCode.NoManifest] = "no-manifest",
         [GateExitCode.Rejected] = "rejected",
         [GateExitCode.NotElevated] = "not-elevated",
         [GateExitCode.RunningAsSystem] = "running-as-system",
@@ -70,14 +79,44 @@ internal static class GateExitCodes
         Enum.IsDefined((GateExitCode)exitCode) ? Names[(GateExitCode)exitCode] : null;
 }
 
-internal sealed record GateRequest(string Verb, string Nonce, string? Address);
+// Which command line started the gate. \Earshot\Gate and \Earshot\BootBlock run "gate"; \Earshot\Protect runs
+// "gate-protect", so a Bluetooth service change only ever runs under the Protect task's longer time limit and a
+// node change never does. Each mode accepts only its own verbs.
+internal enum GateMode
+{
+    Gate,     // gate <verb> <nonce> [address]: every verb except protect-on and protect-off
+    Protect,  // gate-protect <verb> <nonce>: protect-on and protect-off only
+}
+
+internal static class GateModes
+{
+    public const string GateToken = "gate";
+    public const string ProtectToken = "gate-protect";
+
+    public static bool IsProtectVerb(string verb) => verb is GateVerbs.ProtectOn or GateVerbs.ProtectOff;
+
+    // True when the verb may run in the mode.
+    public static bool Allows(GateMode mode, string verb) =>
+        mode == GateMode.Protect ? IsProtectVerb(verb) : !IsProtectVerb(verb);
+
+    public static string TokenOf(GateMode mode) => mode == GateMode.Protect ? ProtectToken : GateToken;
+}
+
+internal sealed record GateRequest(string Verb, string Nonce, string? Address, GateMode Mode = GateMode.Gate);
 
 // What a gate verb implemented elsewhere receives (the protect verbs and the protection restore hook).
 // Identity is the validated device.json. Every native call is appended to Steps as a StepOutcome; the
 // implementation sets Handled, Outcome and, when it read one, State.
+//
+// Bluetooth is the service API the protect verbs call, or null in a build or test without one (the verbs then
+// report not available). The gate checks the device nodes through Nodes before any service call, so the two
+// must describe the same machine: the real node API goes only with the real Bluetooth API (or none), and a
+// test's fake node table never with the real one, so a test can never reach a real BluetoothSetServiceState.
 internal sealed class GateRunContext
 {
-    public GateRunContext(string verb, string nonce, DeviceIdentity identity, INodeApi nodes, GateStore store, ILog log, IList<StepOutcome> steps)
+    public GateRunContext(
+        string verb, string nonce, DeviceIdentity identity, INodeApi nodes, GateStore store, ILog log, IList<StepOutcome> steps,
+        IBluetoothServiceApi? bluetooth = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(verb);
         ArgumentException.ThrowIfNullOrWhiteSpace(nonce);
@@ -86,6 +125,7 @@ internal sealed class GateRunContext
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(steps);
+        GateActions.RequireSameMachine(nodes, bluetooth);
         Verb = verb;
         Nonce = nonce;
         Identity = identity;
@@ -93,7 +133,10 @@ internal sealed class GateRunContext
         Store = store;
         Log = log;
         Steps = steps;
+        Bluetooth = bluetooth;
     }
+
+    public IBluetoothServiceApi? Bluetooth { get; }
 
     public string Verb { get; }
 
@@ -126,12 +169,19 @@ internal sealed record NodeChangeSummary(int Total, int Changed, int Already, in
         : GateExitCode.Failed;
 }
 
-// The elevated action behind \Earshot\Gate and \Earshot\BootBlock: gate <verb> <nonce> [address].
+// The elevated action behind \Earshot\Gate and \Earshot\BootBlock (gate <verb> <nonce> [address]) and
+// \Earshot\Protect (gate-protect <verb> <nonce>).
 //
 // Runs as SYSTEM. The request has already been validated (GateArguments). The identity for every verb
 // except set-device comes only from device.json, never from the command line. Before anything is read,
 // %ProgramData%\Earshot must pass the machine folder ACL check, so a folder a user could write is never
 // trusted. Each run writes status-<nonce>.json with every step and returns an exit code for the result.
+//
+// Serialisation. A run first enters the machine-wide gate run lock (IGateRunLock), so no two elevated Earshot
+// runs overlap whichever task started them; a run that cannot enter it within its wait changes nothing and
+// reports the busy step. Every node change (block, allow, the boot block, set-device) also takes the device
+// change lock before it reads the nodes, as the protect verbs do, so the rule holds for any process that takes
+// that lock too.
 internal sealed partial class GateActions
 {
     // CM_DISABLE_PERSIST is what makes the disable survive a reboot; without it the acceptance test fails
@@ -142,37 +192,83 @@ internal sealed partial class GateActions
     private readonly INodeApi _nodes;
     private readonly GateStore _store;
     private readonly IFolderSecurity _folders;
+    // How long a run waits to enter the gate run lock. A gate run waits no longer than a node change waits for
+    // the device change lock, inside \Earshot\Gate's PT2M limit. A protect run may wait for a whole gate run
+    // (PT2M) and still leave most of \Earshot\Protect's PT5M for the service calls.
+    public static readonly TimeSpan GateRunWait = DeviceChangeLock.NodeChangeLockTimeout;
+    public static readonly TimeSpan ProtectRunWait = TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15);
+
     private readonly ILog _log;
     private readonly TimeProvider _time;
+    private readonly IGateRunLock _runLock;
+    private readonly IBluetoothServiceApi? _bluetooth;
 
-    public GateActions(INodeApi nodes, GateStore store, IFolderSecurity folders, ILog log, TimeProvider time)
+    // runLock null: no machine-wide lock, for a gate over a test's fake node table. bluetooth null: the protect
+    // verbs are not available. ForMachine passes the mutex and the real Bluetooth API.
+    public GateActions(
+        INodeApi nodes, GateStore store, IFolderSecurity folders, ILog log, TimeProvider time,
+        IGateRunLock? runLock = null, IBluetoothServiceApi? bluetooth = null)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(folders);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(time);
+        RequireSameMachine(nodes, bluetooth);
         _nodes = nodes;
         _store = store;
         _folders = folders;
         _log = log;
         _time = time;
+        _runLock = runLock ?? NoGateRunLock.Instance;
+        _bluetooth = bluetooth;
     }
 
     public static GateActions ForMachine(string machineFolder, ILog log) =>
-        new(new CfgMgr32NodeApi(), new GateStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System);
+        new(new CfgMgr32NodeApi(), new GateStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System, new MachineGateMutex(), new BluetoothServiceApi());
+
+    internal IGateRunLock RunLock => _runLock;
+
+    internal IBluetoothServiceApi? Bluetooth => _bluetooth;
+
+    // The real Bluetooth API only with the real node API; see GateRunContext.
+    internal static void RequireSameMachine(INodeApi nodes, IBluetoothServiceApi? bluetooth)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        if (bluetooth is BluetoothServiceApi && nodes is not CfgMgr32NodeApi)
+        {
+            throw new ArgumentException("The real Bluetooth API goes only with the real node API.", nameof(bluetooth));
+        }
+
+        if (nodes is CfgMgr32NodeApi && bluetooth is not (null or BluetoothServiceApi))
+        {
+            throw new ArgumentException("The real node API goes only with the real Bluetooth API.", nameof(bluetooth));
+        }
+    }
+
+    // For tests: the wait between device change lock attempts. Returning false stops waiting at once.
+    internal Func<TimeSpan, bool> LockWait { get; init; } = DeviceChangeLock.SleepAndContinue;
 
     private sealed record VerbResult(GateExitCode Outcome, string? State);
 
     public GateExitCode Run(GateRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (!GateModes.Allows(request.Mode, request.Verb))
+        {
+            // The command line parser refuses this already; the check is repeated so no caller of Run can send a
+            // service change through the Gate task or a node change through the Protect task.
+            _log.Warn(GateModes.TokenOf(request.Mode) + " " + request.Verb + ": rejected, this verb does not run in this mode.");
+            return GateExitCode.Rejected;
+        }
+
         DateTimeOffset started = _time.GetUtcNow();
         var steps = new List<StepOutcome>();
+        using IDisposable? held = _runLock.TryEnter(request.Mode == GateMode.Protect ? ProtectRunWait : GateRunWait, steps);
 
         if (!FolderIsSecure(steps))
         {
-            foreach (StepOutcome step in steps)
+            foreach (StepOutcome step in steps.Where(s => !s.Ok))
             {
                 _log.Error("gate " + request.Verb + ": " + Describe(step));
             }
@@ -180,21 +276,38 @@ internal sealed partial class GateActions
             return GateExitCode.FolderNotSecure;
         }
 
-        VerbResult result = request.Verb switch
+        // Without the run lock nothing is changed or pruned; the status file, named by this run's own nonce,
+        // still says why. An unexpected failure inside a verb is recorded the same way rather than ending the
+        // process without a status file.
+        VerbResult result;
+        try
         {
-            GateVerbs.Block => Block(steps),
-            GateVerbs.Allow => Allow(steps),
-            GateVerbs.Status => Status(steps),
-            GateVerbs.SetBootOn => SetBoot(true, steps),
-            GateVerbs.SetBootOff => SetBoot(false, steps),
-            GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
-            GateVerbs.Boot => Boot(steps),
-            GateVerbs.ProtectOn => Protect(request, protect: true, steps),
-            GateVerbs.ProtectOff => Protect(request, protect: false, steps),
-            _ => new VerbResult(GateExitCode.Rejected, null),
-        };
+            result = held is null ? new VerbResult(GateExitCode.Failed, null) : request.Verb switch
+            {
+                GateVerbs.Block => Block(steps),
+                GateVerbs.Allow => Allow(steps),
+                GateVerbs.Status => Status(steps),
+                GateVerbs.SetBootOn => SetBoot(true, steps),
+                GateVerbs.SetBootOff => SetBoot(false, steps),
+                GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
+                GateVerbs.Boot => Boot(steps),
+                GateVerbs.ProtectOn => Protect(request, protect: true, steps),
+                GateVerbs.ProtectOff => Protect(request, protect: false, steps),
+                _ => new VerbResult(GateExitCode.Rejected, null),
+            };
+        }
+        catch (Exception ex)
+        {
+            steps.Add(ElevatedFailure.Step(request.Verb, ex));
+            _log.Error("gate " + request.Verb + " stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
+            result = new VerbResult(GateExitCode.Failed, null);
+        }
 
-        steps.AddRange(_store.PruneStatusFiles(_time.GetUtcNow()));
+        if (held is not null)
+        {
+            steps.AddRange(_store.PruneStatusFiles(_time.GetUtcNow()));
+        }
+
         GateExitCode outcome = result.Outcome;
         var status = new GateStatusFile(
             GateStore.SchemaVersion, request.Nonce, request.Verb, started, _time.GetUtcNow(),
@@ -246,6 +359,12 @@ internal sealed partial class GateActions
 
     private VerbResult Block(List<StepOutcome> steps)
     {
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
         DeviceIdentity? identity = ReadIdentity(steps);
         if (identity is null)
         {
@@ -270,6 +389,12 @@ internal sealed partial class GateActions
 
     private VerbResult Allow(List<StepOutcome> steps)
     {
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
         DeviceIdentity? identity = ReadIdentity(steps);
         if (identity is null)
         {
@@ -316,12 +441,29 @@ internal sealed partial class GateActions
     // Re-pins device.json to the device with this address. The address is validated, but it is still
     // attacker-controlled: it only ever selects a BTHENUM\DEV_<address> node, and the container is read from
     // that node, never taken from the command line.
+    //
+    // Guards, each refusing with nothing written:
+    //   - the device must have an A2DP sink service node (BTHENUM\{0000110B-...}) with the address in the same
+    //     container, so only headphones or speakers can be pinned and a paired phone never can;
+    //   - moving the pin away from a device whose nodes are still disabled would leave it disabled with nothing
+    //     in Earshot able to allow it again;
+    //   - moving the pin while protection.json lists services Earshot turned off (or cannot be read) would make
+    //     protect-off and the uninstall restore turn services on for the new device and never for the old one.
+    // A node read that fails in either of the first two checks refuses with Failed: it says nothing about the
+    // device, so it is neither "not an audio device" nor "not blocked".
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio
     private VerbResult SetDevice(string address, List<StepOutcome> steps)
     {
         if (!BoundaryValidation.IsAddress12(address))
         {
             steps.Add(StepOutcomes.NotAttempted("set-device", "The address is not 12 upper-case hex characters."));
             return new VerbResult(GateExitCode.Rejected, null);
+        }
+
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
         }
 
         uint cr = _nodes.ListDeviceIds(out string[] ids);
@@ -366,6 +508,23 @@ internal sealed partial class GateActions
             return new VerbResult(GateExitCode.Failed, null);
         }
 
+        switch (FindAudioSinkNode(ids, container, address, steps))
+        {
+            case SinkNode.None:
+                steps.Add(StepOutcomes.NotAttempted("set-device",
+                    "The device has no A2DP sink node, so it is not headphones or speakers and was not pinned."));
+                return new VerbResult(GateExitCode.NotAudioSink, null);
+
+            case SinkNode.Unreadable:
+                // A read that failed is not a claim about the device.
+                steps.Add(StepOutcomes.NotAttempted("set-device",
+                    "An A2DP sink node with this address could not be read, so whether the device plays audio is not known and it was not pinned."));
+                return new VerbResult(GateExitCode.Failed, null);
+
+            case SinkNode.Found:
+                break;
+        }
+
         GateRead<DeviceIdentity> current = _store.ReadDevice();
         if (current.Status == GateReadStatus.Unreadable)
         {
@@ -378,28 +537,96 @@ internal sealed partial class GateActions
             steps.Add(current.Step);
         }
 
-        if (current.IsOk && current.Value is { } pinned &&
-            (!string.Equals(pinned.Address, address, StringComparison.Ordinal) || pinned.ContainerId != container))
+        bool samePin = current.IsOk && current.Value is { } same &&
+                       string.Equals(same.Address, address, StringComparison.Ordinal) && same.ContainerId == container;
+        if (!samePin)
         {
-            // Moving the pin away from a device that is still disabled would leave it disabled with nothing
-            // in Earshot able to allow it again.
-            NodeReadResult old = new NodeStateReader(_nodes).Read(pinned.ContainerId, pinned.Address);
-            if (!old.Listed)
+            if (current.IsOk && current.Value is { } pinned)
             {
-                steps.AddRange(old.Steps);
-                return new VerbResult(GateExitCode.Failed, null);
+                NodeReadResult old = new NodeStateReader(_nodes).Read(pinned.ContainerId, pinned.Address);
+                if (!old.Listed)
+                {
+                    steps.AddRange(old.Steps);
+                    return new VerbResult(GateExitCode.Failed, null);
+                }
+
+                if (old.Nodes.Any(n => n.Status == NodeBlockStatus.Disabled || n.ConfigFlagsDisabledBit))
+                {
+                    steps.Add(StepOutcomes.NotAttempted("set-device", "The device pinned now is still blocked. Allow it first."));
+                    return new VerbResult(GateExitCode.OtherDeviceBlocked, null);
+                }
+
+                if (old.Unread.Count > 0)
+                {
+                    steps.AddRange(old.Steps.Where(s => !s.Ok));
+                    steps.Add(StepOutcomes.NotAttempted("set-device",
+                        "Whether the device pinned now is still blocked could not be read, so the pin was not moved."));
+                    return new VerbResult(GateExitCode.Failed, null);
+                }
             }
 
-            if (old.Nodes.Any(n => n.Status == NodeBlockStatus.Disabled || n.ConfigFlagsDisabledBit))
+            GateRead<ProtectionRecord> protection = _store.ReadProtection();
+            if (protection.Status != GateReadStatus.Missing && !(protection.IsOk && protection.Value is { DisabledServices.Count: 0 }))
             {
-                steps.Add(StepOutcomes.NotAttempted("set-device", "The device pinned now is still blocked. Allow it first."));
-                return new VerbResult(GateExitCode.OtherDeviceBlocked, null);
+                steps.Add(protection.Step);
+                steps.Add(StepOutcomes.NotAttempted("set-device",
+                    protection.IsOk
+                        ? "protection.json lists services turned off on the device pinned now. Turn Protect audio quality off first."
+                        : "protection.json could not be read, so it may list services turned off on the device pinned now."));
+                return new VerbResult(GateExitCode.OtherDeviceProtected, null);
             }
         }
 
         StepOutcome written = _store.WriteDevice(new DeviceIdentity { Address = address, ContainerId = container });
         steps.Add(written);
         return new VerbResult(written.Ok ? GateExitCode.Success : GateExitCode.Failed, null);
+    }
+
+    // The instance id prefix of an A2DP sink service node: BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_...
+    internal const string AudioSinkNodePrefix = @"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_";
+
+    private enum SinkNode
+    {
+        Found,       // a node with the A2DP sink prefix, the address and the device's container
+        None,        // every candidate was read, and none is in the device's container
+        Unreadable,  // none found, and a candidate carrying the address could not be located or its container read
+    }
+
+    // Looks for a node with the A2DP sink prefix, the address and the device's container (present or not). A
+    // candidate that cannot be read is a failed step and makes the answer Unreadable unless another one is found.
+    private SinkNode FindAudioSinkNode(string[] ids, Guid container, string address, List<StepOutcome> steps)
+    {
+        bool unreadable = false;
+        foreach (string id in ids.Where(i => i.StartsWith(AudioSinkNodePrefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!id.Contains(address, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            uint cr = _nodes.Locate(id, includeNonPresent: true, out uint devInst);
+            if (cr != CfgMgr32.CR_SUCCESS)
+            {
+                steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + id, cr));
+                unreadable = true;
+                continue;
+            }
+
+            cr = _nodes.GetContainerId(devInst, out Guid nodeContainer);
+            if (cr != CfgMgr32.CR_SUCCESS)
+            {
+                steps.Add(StepOutcomes.FromConfigRet("cm-container:" + id, cr));
+                unreadable = true;
+                continue;
+            }
+
+            if (NodeMatch.IsDisableTarget(id, nodeContainer, container, address))
+            {
+                return SinkNode.Found;
+            }
+        }
+
+        return unreadable ? SinkNode.Unreadable : SinkNode.None;
     }
 
     // The BootBlock task. Blocks only when config.json says BlockAtBoot is true; a missing or invalid
@@ -431,7 +658,7 @@ internal sealed partial class GateActions
             return new VerbResult(GateExitCode.NoIdentity, null);
         }
 
-        var ctx = new GateRunContext(request.Verb, request.Nonce, identity, _nodes, _store, _log, steps);
+        var ctx = new GateRunContext(request.Verb, request.Nonce, identity, _nodes, _store, _log, steps, _bluetooth);
         RunProtectVerb(ctx, protect);
         if (!ctx.Handled)
         {
@@ -441,6 +668,11 @@ internal sealed partial class GateActions
 
         return new VerbResult(ctx.Outcome, ctx.State);
     }
+
+    // The device change lock for a node change, waiting DeviceChangeLock.NodeChangeLockTimeout. Null (with a
+    // failed step) means change nothing.
+    private DeviceChangeLock? AcquireForNodeChange(List<StepOutcome> steps) =>
+        DeviceChangeLock.TryAcquire(_store.Folder, DeviceChangeLockAccess.For(_nodes), DeviceChangeLock.NodeChangeLockTimeout, LockWait, steps);
 
     // Runs the protection restore hook for uninstall. False when this build has no protection feature.
     public static bool TryRestoreProtection(GateRunContext ctx)
@@ -508,7 +740,15 @@ internal sealed partial class GateActions
         return new NodeChangeSummary(targets.Count, changed, already, notPresent, failed);
     }
 
-    // Enables each target at problem 22 (CM_PROB_DISABLED). The device node goes first, then its services.
+    // Enables each target at problem 22 (CM_PROB_DISABLED), and each enabled target that still carries
+    // CONFIGFLAG_DISABLED, which would come back disabled at the next restart. The device node goes first, then
+    // its services. After each enable the flag is read again: an enable that leaves it set is a failure, since
+    // the allow may not last a restart. A non-present target cannot be enabled: without the flag it comes back
+    // enabled and counts as not present; with the flag it would come back disabled and counts as failed.
+    // CM_DISABLE_PERSIST works by setting CONFIGFLAG_DISABLED (cfgmgr32.h); that CM_Enable_DevNode clears it is
+    // checked here rather than assumed.
+    // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_enable_devnode
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-device-configflags
     public static NodeChangeSummary ApplyAllow(INodeApi nodes, IReadOnlyList<TargetNode> targets, IList<StepOutcome> steps)
     {
         ArgumentNullException.ThrowIfNull(nodes);
@@ -518,31 +758,78 @@ internal sealed partial class GateActions
         foreach (TargetNode target in targets.OrderBy(t => !t.IsDeviceNode).ThenBy(t => t.InstanceId, StringComparer.Ordinal))
         {
             string id = target.InstanceId;
+            int notPresentBefore = notPresent;
             if (!TryLocatePresent(nodes, id, "cm-enable:", steps, ref notPresent, ref failed, out uint devInst, out bool disabled))
             {
+                if (notPresent > notPresentBefore && ReadFlag(nodes, target.PhantomDevInst, "cm-configflags:" + id, steps) is not false)
+                {
+                    // Flagged (or unreadable): it would come back disabled, so the allow is not complete.
+                    notPresent--;
+                    failed++;
+                    steps.Add(StepOutcomes.NotAttempted("cm-enable:" + id,
+                        "Not present and still marked disabled, so it may come back disabled. Connect the device to this PC once."));
+                }
+
                 continue;
             }
 
             if (!disabled)
             {
-                steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, CfgMgr32.CR_SUCCESS, "Already enabled."));
-                already++;
-                continue;
+                bool? flagged = ReadFlag(nodes, devInst, "cm-configflags:" + id, steps);
+                if (flagged is false)
+                {
+                    steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, CfgMgr32.CR_SUCCESS, "Already enabled."));
+                    already++;
+                    continue;
+                }
+
+                if (flagged is null)
+                {
+                    steps.Add(StepOutcomes.NotAttempted("cm-enable:" + id,
+                        "Enabled, but whether it stays enabled after a restart could not be read, so it was not changed."));
+                    failed++;
+                    continue;
+                }
             }
 
             uint cr = nodes.Enable(devInst);
-            steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, cr, DescribeEnable(cr)));
-            if (cr == CfgMgr32.CR_SUCCESS)
-            {
-                changed++;
-            }
-            else
+            steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, cr, DescribeEnable(cr) + (disabled ? "" : " It was enabled but still marked disabled.")));
+            if (cr != CfgMgr32.CR_SUCCESS)
             {
                 failed++;
+                continue;
             }
+
+            if (ReadFlag(nodes, devInst, "cm-configflags:" + id, steps) is not false)
+            {
+                steps.Add(StepOutcomes.NotAttempted("cm-enable:" + id, "Enabled, but still marked disabled, so it may be disabled again after a restart."));
+                failed++;
+                continue;
+            }
+
+            changed++;
         }
 
         return new NodeChangeSummary(targets.Count, changed, already, notPresent, failed);
+    }
+
+    // CONFIGFLAG_DISABLED on a node: true or false, or null when the flags could not be read (recorded as a
+    // step). A node without the property has no flags set.
+    private static bool? ReadFlag(INodeApi nodes, uint devInst, string step, IList<StepOutcome> steps)
+    {
+        uint cr = nodes.GetConfigFlags(devInst, out uint flags);
+        if (cr == CfgMgr32.CR_NO_SUCH_VALUE)
+        {
+            return false;
+        }
+
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet(step, cr, "The config flags could not be read."));
+            return null;
+        }
+
+        return (flags & CfgMgr32.CONFIGFLAG_DISABLED) != 0;
     }
 
     // Locates a target in the live tree and reads whether it is at CM_PROB_DISABLED. A node that is not
@@ -590,13 +877,13 @@ internal sealed partial class GateActions
         _ => null,
     };
 
-    internal static string? DescribeEnable(uint cr) => cr switch
+    internal static string DescribeEnable(uint cr) => cr switch
     {
         CfgMgr32.CR_SUCCESS => "Enabled.",
         CfgMgr32.CR_NO_SUCH_DEVNODE => "Not present, so it cannot be enabled.",
         CfgMgr32.CR_ACCESS_DENIED => "Access denied.",
         CfgMgr32.CR_NEED_RESTART => "Windows needs a restart to finish.",
-        _ => null,
+        _ => "Windows did not enable it.",
     };
 
     internal static string Describe(StepOutcome step) =>

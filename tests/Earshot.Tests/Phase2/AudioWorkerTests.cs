@@ -253,6 +253,52 @@ public sealed class AudioWorkerTests
         Assert.AreEqual(Earshot.Contracts.NativeCodes.NotAttempted, step.Code);
     }
 
+    // MMDevAPI does not AddRef the client, so one whose Unregister failed must outlive the worker that held it.
+    [TestMethod]
+    public async Task AClientWhoseUnregisterFailedIsKeptForTheRestOfTheProcess()
+    {
+        var log = new CapturingLog();
+        var enumerator = new FakeEnumerator(new ReleaseLedger()) { RegisterHr = FakeHr.SOk, UnregisterHr = FakeHr.EFail };
+        var client = new NotificationClient(_ => { });
+        Earshot.Contracts.StepOutcome unregister;
+        await using (var worker = new AudioWorker(log, Returning(enumerator)))
+        {
+            Earshot.Contracts.StepOutcome register = await worker.RunAsync(_ => worker.RegisterNotificationClient(client)).WaitAsync(Timeout);
+            Assert.IsTrue(register.Ok, register.CodeName);
+
+            unregister = await worker.RunAsync(_ => worker.UnregisterNotificationClient()).WaitAsync(Timeout);
+        }
+
+        Assert.IsFalse(unregister.Ok);
+        Assert.AreEqual(FakeHr.EFail, unregister.Code);
+        Assert.IsTrue(AudioWorker.ClientsKeptAfterAFailedUnregister.Any(kept => ReferenceEquals(kept, client)),
+            "The client stays referenced after the worker is gone.");
+        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Error, "could not be unregistered"));
+    }
+
+    [TestMethod]
+    public async Task AClientThatWasNoLongerRegisteredIsNotKept()
+    {
+        var log = new CapturingLog();
+        var enumerator = new FakeEnumerator(new ReleaseLedger()) { RegisterHr = FakeHr.SOk, UnregisterHr = Earshot.Interop.CoreAudio.E_NOTFOUND };
+        var client = new NotificationClient(_ => { });
+        await using (var worker = new AudioWorker(log, Returning(enumerator)))
+        {
+            await worker.RunAsync(_ => worker.RegisterNotificationClient(client)).WaitAsync(Timeout);
+            await worker.RunAsync(_ => worker.UnregisterNotificationClient()).WaitAsync(Timeout);
+        }
+
+        Assert.IsFalse(AudioWorker.ClientsKeptAfterAFailedUnregister.Any(kept => ReferenceEquals(kept, client)));
+        Assert.IsFalse(log.Has(Earshot.Contracts.LogLevel.Error, "could not be unregistered"));
+    }
+
+    private static AudioWorker.EnumeratorFactory Returning(Earshot.Interop.IMMDeviceEnumerator enumerator) =>
+        (out Earshot.Interop.IMMDeviceEnumerator? created) =>
+        {
+            created = enumerator;
+            return FakeHr.SOk;
+        };
+
     // Creates the MMDevice enumerator (no device is opened) to have a real RCW to return.
     [TestMethod]
     [TestCategory("ReadOnlyHardware")]

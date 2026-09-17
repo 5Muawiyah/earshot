@@ -7,14 +7,13 @@ namespace Earshot.Boot.Gate;
 // longer time limit leaves room for BluetoothSetServiceState to install or remove drivers) and the
 // protection restore that uninstall runs. See ProtectionGateRunner for the procedure.
 //
-// Without a Bluetooth service API for the context's node API the hooks leave ctx.Handled false, so the verbs
-// report not available rather than reach a real service call from a test's fake node table.
+// Without a Bluetooth service API in the context the hooks leave ctx.Handled false, so the verbs report not
+// available. The context only ever pairs the real node API with the real Bluetooth API (GateRunContext).
 internal sealed partial class GateActions
 {
     static partial void RunProtectVerb(GateRunContext ctx, bool protect)
     {
-        IBluetoothServiceApi? services = GateBluetooth.For(ctx.Nodes);
-        if (services is not null)
+        if (ctx.Bluetooth is { } services)
         {
             new ProtectionGateRunner(services).Run(ctx, protect);
         }
@@ -22,8 +21,7 @@ internal sealed partial class GateActions
 
     static partial void RunProtectionRestore(GateRunContext ctx)
     {
-        IBluetoothServiceApi? services = GateBluetooth.For(ctx.Nodes);
-        if (services is not null)
+        if (ctx.Bluetooth is { } services)
         {
             new ProtectionGateRunner(services).Restore(ctx);
         }

@@ -26,6 +26,45 @@ public sealed class InteropLayoutTests
     }
 
     [TestMethod]
+    public void ByHandleFileInformationIs52BytesWithTheLinkCountAt40()
+    {
+        Assert.AreEqual(52, Marshal.SizeOf<BY_HANDLE_FILE_INFORMATION>());
+        Assert.AreEqual(0, Offset<BY_HANDLE_FILE_INFORMATION>(nameof(BY_HANDLE_FILE_INFORMATION.FileAttributes)));
+        Assert.AreEqual(40, Offset<BY_HANDLE_FILE_INFORMATION>(nameof(BY_HANDLE_FILE_INFORMATION.NumberOfLinks)));
+    }
+
+    // devpropdef.h, devfiltertypes.h and devquerydef.h on x64: pointers are 8 bytes and align to 8.
+    [TestMethod]
+    public void TheDeviceQueryStructsHaveTheirX64Layout()
+    {
+        Assert.AreEqual(32, Marshal.SizeOf<DEVPROPCOMPKEY>());
+        Assert.AreEqual(20, Offset<DEVPROPCOMPKEY>(nameof(DEVPROPCOMPKEY.Store)));
+        Assert.AreEqual(24, Offset<DEVPROPCOMPKEY>(nameof(DEVPROPCOMPKEY.LocaleName)));
+
+        Assert.AreEqual(48, Marshal.SizeOf<DEVPROPERTY>());
+        Assert.AreEqual(32, Offset<DEVPROPERTY>(nameof(DEVPROPERTY.Type)));
+        Assert.AreEqual(36, Offset<DEVPROPERTY>(nameof(DEVPROPERTY.BufferSize)));
+        Assert.AreEqual(40, Offset<DEVPROPERTY>(nameof(DEVPROPERTY.Buffer)));
+
+        Assert.AreEqual(56, Marshal.SizeOf<DEVPROP_FILTER_EXPRESSION>());
+        Assert.AreEqual(8, Offset<DEVPROP_FILTER_EXPRESSION>(nameof(DEVPROP_FILTER_EXPRESSION.Property)));
+
+        Assert.AreEqual(32, Unsafe.SizeOf<DEV_OBJECT>());
+        Assert.AreEqual(8, Offset<DEV_OBJECT>(nameof(DEV_OBJECT.pszObjectId)));
+        Assert.AreEqual(16, Offset<DEV_OBJECT>(nameof(DEV_OBJECT.cPropertyCount)));
+        Assert.AreEqual(24, Offset<DEV_OBJECT>(nameof(DEV_OBJECT.pProperties)));
+    }
+
+    [TestMethod]
+    public void TheDeviceQueryKeysAreTheSdkOnes()
+    {
+        Assert.AreEqual(new Guid("A35996AB-11CF-4935-8B61-A6761081ECDF"), DevQuery.PKEY_Devices_Aep_IsPaired.fmtid);
+        Assert.AreEqual(16u, DevQuery.PKEY_Devices_Aep_IsPaired.pid);
+        Assert.AreEqual(new Guid("0BBA1EDE-7566-4F47-90EC-25FC567CED2A"), DevQuery.PKEY_Devices_AepContainer_IsPaired.fmtid);
+        Assert.AreEqual(4u, DevQuery.PKEY_Devices_AepContainer_IsPaired.pid);
+    }
+
+    [TestMethod]
     public void ProcessIsSixtyFourBit()
     {
         Assert.AreEqual(8, IntPtr.Size);

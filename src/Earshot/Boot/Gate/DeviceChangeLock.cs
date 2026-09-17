@@ -1,21 +1,18 @@
 using System.Globalization;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using Earshot.Boot.Gate;
 using Earshot.Contracts;
 
-namespace Earshot.AudioProtection.Gate;
+namespace Earshot.Boot.Gate;
 
 // One device change at a time across the Earshot processes that take this lock. \Earshot\Gate,
 // \Earshot\Protect and \Earshot\BootBlock are separate tasks, and the scheduler's Queue policy only orders
 // runs of the same task. Nothing documents BluetoothSetServiceState while the device nodes are being
 // disabled, so a service change must never overlap a node change.
 //
-// Who takes it today: gate protect-on and protect-off, and the uninstall protection restore, so two protect
-// verbs, or a protect verb and the restore, never run side by side. The block, allow, boot and set-device
-// verbs and uninstall's node allow do not take it yet (they belong to the boot block feature); until they
-// do, this lock does not keep a node change away from a service change. TryAcquireForNodeChange is the call
-// they are meant to make.
+// Who takes it: gate protect-on and protect-off, the uninstall protection restore, and every node change (the
+// block, allow, boot and set-device verbs, waiting NodeChangeLockTimeout, and uninstall's node allow), so a
+// service change never overlaps a node change, and neither overlaps another of its kind.
 //
 // The lock is an open of %ProgramData%\Earshot\device-change.lock that asks for write access and shares only
 // read, so a second writer's open fails with a sharing violation until the first handle closes. The gate has

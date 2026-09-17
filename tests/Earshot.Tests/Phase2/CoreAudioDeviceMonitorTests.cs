@@ -638,6 +638,21 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         Assert.IsInstanceOfType<InvalidOperationException>(entry.Exception);
     }
 
+    // The failed sink never queued a refresh, so the failure is logged at once rather than at a later enumeration.
+    [TestMethod]
+    public async Task ASinkFailureIsLoggedWithoutWaitingForAnEnumeration()
+    {
+        _monitor.Start();
+        await Eventually.True(() => Raised == 1, "the first snapshot");
+        int enumerations = _source.EnumerateCalls;
+        _source.SetCallbackFailures(1, new InvalidOperationException("sink failed"));
+
+        _source.SinkFailed!();
+
+        await Eventually.True(() => _log.Has(LogLevel.Error, "1 audio device notifications could not be handled"), "the failure to be logged");
+        Assert.AreEqual(enumerations, _source.EnumerateCalls, "No enumeration was needed to report it.");
+    }
+
     [TestMethod]
     public async Task ARefreshAfterTheWorkerStoppedFailsLoudly()
     {

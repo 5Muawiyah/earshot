@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
@@ -8,47 +7,12 @@ using Earshot.Interop;
 
 namespace Earshot.AudioProtection.Gate;
 
-// Which Bluetooth service API goes with a gate's node API. The gate checks the device nodes through its node
-// API before any service call, so the two must describe the same machine: the real CfgMgr32 node API gets the
-// real Bluetooth API, and any other node API (a test's fake node table) gets only the Bluetooth API paired
-// with it. A gate built over fake nodes therefore can never reach a real BluetoothSetServiceState call; with
-// nothing paired, the protect verbs stay not available.
-internal static class GateBluetooth
-{
-    private static readonly ConditionalWeakTable<INodeApi, IBluetoothServiceApi> Paired = new();
-
-    public static IBluetoothServiceApi? For(INodeApi nodes)
-    {
-        ArgumentNullException.ThrowIfNull(nodes);
-        if (nodes is CfgMgr32NodeApi)
-        {
-            return new BluetoothServiceApi();
-        }
-
-        return Paired.TryGetValue(nodes, out IBluetoothServiceApi? services) ? services : null;
-    }
-
-    public static void Pair(INodeApi nodes, IBluetoothServiceApi services)
-    {
-        ArgumentNullException.ThrowIfNull(nodes);
-        ArgumentNullException.ThrowIfNull(services);
-        if (nodes is CfgMgr32NodeApi)
-        {
-            throw new ArgumentException("The real node API always uses the real Bluetooth API.", nameof(nodes));
-        }
-
-        Paired.AddOrUpdate(nodes, services);
-    }
-}
-
 // protect-on, protect-off and the uninstall restore, inside the gate (SYSTEM, or the elevated uninstall).
 // Identity is only ever the validated device.json in the context.
 //
-//   0. Take the device change lock (DeviceChangeLock), so two protect verbs, or a protect verb and the
-//      restore, never run side by side. If another holder still has it after the wait, change nothing. The
-//      block, allow, boot and set-device verbs do not take the lock yet, so it does not keep them out; until
-//      they do, only the node check in step 1 stands between a service change and a disabled device node,
-//      and it cannot stop a block that starts after it.
+//   0. Take the device change lock (DeviceChangeLock), which the block, allow, boot and set-device verbs and
+//      uninstall's node allow take too, so no node change runs while a service changes. If another holder
+//      still has it after the wait, change nothing.
 //   1. Read the target device nodes. If any counts as blocked (BlockedNodes), change nothing: nothing
 //      documents BluetoothSetServiceState while the device node is disabled. A protect verb then stores the
 //      wanted state in protection-intent.json for the next allow and exits with BlockedExit, or with Failed
@@ -66,11 +30,10 @@ internal static class GateBluetooth
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothenumerateinstalledservices
 internal sealed class ProtectionGateRunner
 {
-    // The exit code for a request refused because the device is blocked and kept for the next allow. It is
-    // the code set-device uses for "the pinned device is still disabled", so the status file names it
-    // other-device-blocked; the tray reads it together with the protect verb. It is only returned once the
-    // request has been written to protection-intent.json.
-    public const GateExitCode BlockedExit = GateExitCode.OtherDeviceBlocked;
+    // The exit code for a request refused because the device is blocked and kept for the next allow
+    // (device-blocked in the status file). It is only returned once the request has been written to
+    // protection-intent.json.
+    public const GateExitCode BlockedExit = GateExitCode.DeviceBlocked;
 
     public const string RefusedStep = "protect-refused";
     public const string DeviceNodeStep = "protect-device-node";
@@ -78,8 +41,8 @@ internal sealed class ProtectionGateRunner
     public const string RecordKeptStepPrefix = "protection-record-kept:";
 
     // How long a protect verb waits for the device change lock: longer than \Earshot\Gate's PT2M limit, so a
-    // block, allow or boot block that holds it (once those verbs take it) has finished or been stopped by the
-    // scheduler. What is left of \Earshot\Protect's PT5M is for the service calls.
+    // block, allow or boot block that holds it has finished or been stopped by the scheduler. What is left of
+    // \Earshot\Protect's PT5M is for the service calls.
     public static readonly TimeSpan ProtectLockTimeout = TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15);
 
     // How long the uninstall restore waits: longer than \Earshot\Protect's PT5M limit, so a protect verb
@@ -379,12 +342,14 @@ internal sealed class ProtectionGateRunner
                 }
             }
 
+            // Only a change is progress. Already off and not on the device are neither progress nor failure, like
+            // a service the complete list skips, so they cannot turn a failed Handsfree change into a partial one.
             ServiceChange change = Call(ctx, device, service, enable: false);
-            if (ServiceStateResults.IsOk(change))
+            if (change == ServiceChange.Changed)
             {
                 ok++;
             }
-            else
+            else if (!ServiceStateResults.IsOk(change))
             {
                 failed++;
             }

@@ -53,7 +53,9 @@ internal sealed record EndpointNotification(
 //
 // MMDevAPI ignores the return value, so an exception escaping a callback would vanish into an HRESULT
 // nobody reads. A sink failure is therefore counted and kept here with Interlocked (no lock), and the audio
-// worker reads and logs it (TakeSinkFailures).
+// worker reads and logs it (TakeSinkFailures). The failed sink is what would have queued the next refresh, so
+// the failure is also handed to sinkFailed, which only queues a report for the worker to log now rather than
+// at some later enumeration. If even that cannot be queued, its failure is counted with the sink's.
 //
 // The client is not AddRef'd by MMDevAPI; AudioWorker holds it in a field from Register until after
 // Unregister.
@@ -62,13 +64,16 @@ internal sealed class NotificationClient : IMMNotificationClient
     internal const int S_OK = 0;
 
     private readonly Action<EndpointNotification> _sink;
+    private readonly Action? _sinkFailed;
     private int _sinkFailures;
     private Exception? _lastSinkFailure;
 
-    public NotificationClient(Action<EndpointNotification> sink)
+    // sinkFailed: called on the callback thread after the sink threw. Like the sink it must not block.
+    public NotificationClient(Action<EndpointNotification> sink, Action? sinkFailed = null)
     {
         ArgumentNullException.ThrowIfNull(sink);
         _sink = sink;
+        _sinkFailed = sinkFailed;
     }
 
     // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immnotificationclient-ondevicestatechanged
@@ -109,10 +114,35 @@ internal sealed class NotificationClient : IMMNotificationClient
         catch (Exception ex)
         {
             // Kept for the worker to log; see the header comment.
-            Interlocked.Exchange(ref _lastSinkFailure, ex);
-            Interlocked.Increment(ref _sinkFailures);
+            Keep(ex);
+            ReportSinkFailure();
         }
 
         return S_OK;
+    }
+
+    private void ReportSinkFailure()
+    {
+        if (_sinkFailed is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _sinkFailed();
+        }
+        catch (Exception ex)
+        {
+            // The report could not be queued either. Counted with the sink's failure, so the next read of the
+            // counters (at the next enumeration or at Unregister) still logs both.
+            Keep(ex);
+        }
+    }
+
+    private void Keep(Exception ex)
+    {
+        Interlocked.Exchange(ref _lastSinkFailure, ex);
+        Interlocked.Increment(ref _sinkFailures);
     }
 }

@@ -26,7 +26,8 @@ internal static class ConnectMessages
     public const string CouldNotReadDevices = "Could not read the audio devices. Try again.";
 
     // Connect, and every render endpoint is DISABLED (or NOTPRESENT with at least one DISABLED), so no request
-    // could turn into an ACTIVE endpoint.
+    // could turn into an ACTIVE endpoint; or disconnect, and every render endpoint is DISABLED, so no disconnect
+    // could be seen.
     public const string OutputTurnedOff = "The AirPods output is turned off in Sound settings.";
 
     // No endpoint in the device's container.
@@ -41,4 +42,8 @@ internal static class ConnectMessages
 
     // A request was accepted but no state change came in time (disconnect).
     public const string DidNotDisconnect = "The AirPods did not disconnect in time. Try again.";
+
+    // The audio worker did not get to this request within the pass budget (an earlier driver call had not
+    // returned, or the endpoint read did not finish), so nothing was sent.
+    public const string DriverBusy = "The audio driver is busy. Try again.";
 }

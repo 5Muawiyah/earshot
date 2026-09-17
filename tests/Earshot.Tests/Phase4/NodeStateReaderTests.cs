@@ -155,6 +155,42 @@ public sealed class NodeStateReaderTests
         Assert.IsTrue(read.Steps.Any(s => s.Step.StartsWith("cm-status:", StringComparison.Ordinal) && s.CodeName == "CR_FAILURE"));
     }
 
+    // A flag or a presence that could not be read leaves defaults on the node (flag clear, not present); those are
+    // not observations, so the read names the node and neither "already allowed" nor "already blocked" holds.
+    [TestMethod]
+    public void ANodeWhoseFlagOrPresenceCannotBeReadIsNeverTakenAsAllowedOrBlocked()
+    {
+        FakeNodeApi flags = RecordedNodes.Table();
+        flags[RecordedNodes.AirPodsTargets[0]].ConfigFlagsReadResult = CfgMgr32.CR_FAILURE;
+        FakeNodeApi presence = RecordedNodes.Table();
+        presence[RecordedNodes.AirPodsTargets[1]].PresentLocateResult = CfgMgr32.CR_FAILURE;
+        FakeNodeApi status = RecordedNodes.Table();
+        status[RecordedNodes.AirPodsTargets[2]].StatusReadResult = CfgMgr32.CR_FAILURE;
+        FakeNodeApi clean = RecordedNodes.Table();
+
+        foreach ((FakeNodeApi table, string id) in new[] { (flags, RecordedNodes.AirPodsTargets[0]), (presence, RecordedNodes.AirPodsTargets[1]), (status, RecordedNodes.AirPodsTargets[2]) })
+        {
+            NodeReadResult read = new NodeStateReader(table).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+
+            CollectionAssert.AreEqual(new[] { id }, read.Unread.ToArray());
+            Assert.IsTrue(read.Steps.Any(s => !s.Ok && s.Step.EndsWith(":" + id, StringComparison.Ordinal)), "The failed read is a step.");
+            Assert.IsFalse(BlockStateClassifier.IsFullyAllowed(read), id);
+        }
+
+        NodeReadResult readable = new NodeStateReader(clean).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+        Assert.IsEmpty(readable.Unread);
+        Assert.IsTrue(BlockStateClassifier.IsFullyAllowed(readable));
+
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            flags[id].MarkDisabled(persistent: true);
+        }
+
+        flags[RecordedNodes.AirPodsTargets[0]].ConfigFlags = CfgMgr32.CONFIGFLAG_DISABLED;
+        Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(new NodeStateReader(flags).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress)),
+            "An unread flag is not a persistent block either.");
+    }
+
     private static BluetoothNode Node(bool present, NodeBlockStatus status, bool persist = false) =>
         new("id", "BTHENUM", null, present, status, status == NodeBlockStatus.Disabled ? 22u : 0u, persist);
 
@@ -183,17 +219,34 @@ public sealed class NodeStateReaderTests
     }
 
     [TestMethod]
-    public void FullyBlockedNeedsThePersistentFlagOnEveryPresentNode()
+    public void FullyBlockedNeedsThePersistentFlagOnEveryNode()
     {
         BluetoothNode persistent = Node(true, NodeBlockStatus.Disabled, persist: true);
         BluetoothNode temporary = Node(true, NodeBlockStatus.Disabled, persist: false);
         BluetoothNode gone = Node(false, NodeBlockStatus.Unknown);
+        BluetoothNode goneFlagged = Node(false, NodeBlockStatus.Unknown, persist: true);
 
-        Assert.IsTrue(BlockStateClassifier.IsFullyBlocked(Read(persistent, persistent, gone)));
+        Assert.IsTrue(BlockStateClassifier.IsFullyBlocked(Read(persistent, persistent, goneFlagged)));
         Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(Read(persistent, temporary)));
+        Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(Read(persistent, gone)), "A node that is not present and not flagged comes back enabled.");
         Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(Read(gone)));
         Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(new NodeReadResult(false, [persistent], [])));
         Assert.IsTrue(BlockStateClassifier.IsFullyAllowed(Read(Node(true, NodeBlockStatus.Enabled), gone)));
+        Assert.IsFalse(BlockStateClassifier.IsFullyAllowed(Read(Node(true, NodeBlockStatus.Enabled), goneFlagged)), "It would come back disabled.");
         Assert.IsFalse(BlockStateClassifier.IsFullyAllowed(Read(Node(true, NodeBlockStatus.Enabled, persist: true))));
+    }
+
+    // One rule for the check before a change and the read after it: the same nodes always give the same answer.
+    [TestMethod]
+    public void AnUnresolvedNodeIsOneThatComesBackInTheWrongState()
+    {
+        BluetoothNode gone = Node(false, NodeBlockStatus.Unknown);
+        BluetoothNode goneFlagged = Node(false, NodeBlockStatus.Unknown, persist: true);
+        BluetoothNode present = Node(true, NodeBlockStatus.Enabled);
+
+        Assert.IsTrue(BlockStateClassifier.AnyUnresolvedForBlock(Read(present, gone)));
+        Assert.IsFalse(BlockStateClassifier.AnyUnresolvedForBlock(Read(present, goneFlagged)));
+        Assert.IsTrue(BlockStateClassifier.AnyUnresolvedForAllow(Read(present, goneFlagged)));
+        Assert.IsFalse(BlockStateClassifier.AnyUnresolvedForAllow(Read(present, gone)));
     }
 }

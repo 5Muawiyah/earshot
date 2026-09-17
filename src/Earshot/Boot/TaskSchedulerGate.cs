@@ -307,6 +307,13 @@ internal sealed class TaskSchedulerGate
             throw new ArgumentException("Not a request the tray sends: " + verb + ".", nameof(verb));
         }
 
+        // The Protect task runs gate-protect, which takes only the protect verbs; the Gate task refuses them.
+        string expectedTask = GateModes.IsProtectVerb(verb) ? TaskPlan.ProtectTaskName : TaskPlan.GateTaskName;
+        if (!string.Equals(taskName, expectedTask, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(verb + " is sent to " + TaskPlan.TaskPath(expectedTask) + ", not " + taskName + ".", nameof(taskName));
+        }
+
         TaskVerification check = Verify(taskName);
         var steps = new List<StepOutcome>(check.Steps);
         foreach (string problem in check.Problems)
@@ -364,6 +371,13 @@ internal sealed class TaskSchedulerGate
             bool ran = status.Status != GateReadStatus.Missing || newRunTime;
             if (!running && ran)
             {
+                if (status.Status == GateReadStatus.Missing)
+                {
+                    // The status file is read before the run state, so a gate that wrote it and exited between
+                    // those two reads would otherwise lose its per-node outcomes.
+                    status = _store.ReadStatus(nonce);
+                }
+
                 if (status.Status is GateReadStatus.Invalid or GateReadStatus.Unreadable)
                 {
                     steps.Add(status.Step);

@@ -213,7 +213,7 @@ public sealed class AudioProbeTests
     }
 
     [TestMethod]
-    public async Task ProbeTopologyWithNoTargetWalksNothing()
+    public async Task ProbeTopologyWithNoTargetWalksNothingAndSaysSoInItsExitCode()
     {
         var log = new CapturingLog();
         var settings = new FakeSettingsStore();
@@ -227,7 +227,7 @@ public sealed class AudioProbeTests
 
         int exit = Program.RunProbe(new Program.ProbeRequest(["topology"], Json: true, OutPath: null), output, () => registry);
 
-        Assert.AreEqual(ExitCodes.Ok, exit);
+        Assert.AreEqual(ExitCodes.Unavailable, exit, "Nothing was proved, so the exit code is not a pass.");
         using JsonDocument doc = JsonDocument.Parse(output.ToString());
         Assert.AreEqual(JsonValueKind.Null, doc.RootElement.GetProperty("device").ValueKind);
         Assert.AreEqual(0, doc.RootElement.GetProperty("adapters").GetArrayLength());

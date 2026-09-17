@@ -15,6 +15,62 @@ public sealed class InteropHelpersTests
     private static readonly string[] Unterminated = ["unterminated"];
     private static readonly string[] TwoItems = ["a", "b"];
 
+    // BluetoothEnumerateInstalledServices returned ERROR_MORE_DATA with the whole count for a buffer that was too
+    // small (research probe). A result whose count leaves room in the buffer holds every service.
+    [TestMethod]
+    public void AnInstalledServiceListThatFitsIsCompleteWhateverTheCallSaid()
+    {
+        Guid[] eight = Enumerable.Range(1, 8).Select(i => new Guid(i, 0, 0, new byte[8])).ToArray();
+        var sizes = new List<uint>();
+
+        uint rc = BluetoothApis.GetInstalledServices((ref uint count, Guid[]? buffer) =>
+        {
+            sizes.Add(count);
+            if (buffer is not null)
+            {
+                eight.AsSpan(0, Math.Min(8, (int)count)).CopyTo(buffer);
+            }
+
+            count = 8;
+            return BluetoothApis.ERROR_MORE_DATA;
+        }, out Guid[] services);
+
+        Assert.AreEqual(BluetoothApis.ERROR_SUCCESS, rc, "Eight services in a buffer with room for more is the whole list.");
+        CollectionAssert.AreEqual(eight, services);
+        CollectionAssert.AreEqual(new uint[] { 0, 8 + BluetoothApis.ServicesSlack }, sizes);
+    }
+
+    [TestMethod]
+    public void AListThatKeepsFillingTheBufferStaysIncomplete()
+    {
+        int calls = 0;
+
+        uint rc = BluetoothApis.GetInstalledServices((ref uint count, Guid[]? buffer) =>
+        {
+            calls++;
+            // Always reports exactly as many as there is room for, so no read can show the list ended.
+            if (buffer is null)
+            {
+                count = 2;
+            }
+
+            return BluetoothApis.ERROR_MORE_DATA;
+        }, out Guid[] services);
+
+        Assert.AreEqual(BluetoothApis.ERROR_MORE_DATA, rc);
+        Assert.AreEqual(5, calls, "One size query and four reads.");
+        Assert.IsNotEmpty(services);
+    }
+
+    [TestMethod]
+    public void AFailedListCallReturnsItsErrorAndNothing()
+    {
+        uint rc = BluetoothApis.GetInstalledServices((ref uint _, Guid[]? _) => 1168, out Guid[] services);
+
+        Assert.AreEqual(1168u, rc);
+        Assert.IsEmpty(services);
+    }
+
     [TestMethod]
     public void ReadStringReturnsTheValueAndClears()
     {

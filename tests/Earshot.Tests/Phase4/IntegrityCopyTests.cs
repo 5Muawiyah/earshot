@@ -5,9 +5,16 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase4;
 
+// The copy is bounded by the list install read from the publish manifest, so only these three files are ever
+// copied out of a source folder that may hold anything else.
 [TestClass]
 public sealed class IntegrityCopyTests
 {
+    private static readonly string[] SourceFiles = ["Earshot.exe", @"a\one.dll", @"a\b\empty.json"];
+
+    private static IntegrityCopyResult Copy(string source, string destination, Action? afterListing = null) =>
+        IntegrityCopy.Copy(source, destination, SourceFiles, afterListing);
+
     private static string MakeSource(TempFolder temp)
     {
         string source = temp.File("source");
@@ -25,7 +32,7 @@ public sealed class IntegrityCopyTests
         string source = MakeSource(temp);
         string destination = temp.File("destination");
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(source, destination);
+        IntegrityCopyResult result = Copy(source, destination);
 
         Assert.IsTrue(result.Ok, string.Join(" | ", result.Steps.Select(s => s.Detail)));
         Assert.HasCount(3, result.Files);
@@ -50,7 +57,7 @@ public sealed class IntegrityCopyTests
         // writer, which is the same rule that keeps a writer out once the copy holds the file.
         using (new FileStream(Path.Combine(source, "a", "one.dll"), FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
         {
-            IntegrityCopyResult result = IntegrityCopy.Copy(source, destination);
+            IntegrityCopyResult result = Copy(source, destination);
 
             Assert.IsFalse(result.Ok);
             Assert.AreEqual("0x80070020", result.Steps.Single().CodeName, "ERROR_SHARING_VIOLATION as an HRESULT.");
@@ -83,7 +90,7 @@ public sealed class IntegrityCopyTests
         Directory.CreateDirectory(destination);
         File.WriteAllText(Path.Combine(destination, "Earshot.exe"), "planted");
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(source, destination);
+        IntegrityCopyResult result = Copy(source, destination);
 
         Assert.IsFalse(result.Ok);
         Assert.AreEqual("planted", File.ReadAllText(Path.Combine(destination, "Earshot.exe")));
@@ -95,8 +102,8 @@ public sealed class IntegrityCopyTests
         using var temp = new TempFolder();
         string source = MakeSource(temp);
 
-        Assert.IsFalse(IntegrityCopy.Copy(source, Path.Combine(source, "inner")).Ok);
-        Assert.IsFalse(IntegrityCopy.Copy(source, source).Ok);
+        Assert.IsFalse(Copy(source, Path.Combine(source, "inner")).Ok);
+        Assert.IsFalse(Copy(source, source).Ok);
         Assert.IsFalse(Directory.Exists(Path.Combine(source, "inner")));
     }
 
@@ -105,14 +112,14 @@ public sealed class IntegrityCopyTests
     {
         using var temp = new TempFolder();
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(temp.File("absent"), temp.File("destination"));
+        IntegrityCopyResult result = Copy(temp.File("absent"), temp.File("destination"));
 
         Assert.IsFalse(result.Ok);
         Assert.AreEqual("ERROR_FILE_NOT_FOUND", result.Steps.Single().CodeName, "CreateFileW on the source folder.");
     }
 
     [TestMethod]
-    public void AJunctionInsideTheSourceFailsTheCopy()
+    public void AJunctionInsideTheSourceIsNotCopiedThrough()
     {
         using var temp = new TempFolder();
         string source = MakeSource(temp);
@@ -122,11 +129,60 @@ public sealed class IntegrityCopyTests
         using IDisposable junction = TestLinks.CreateJunction(Path.Combine(source, "a", "link"), outside);
         string destination = temp.File("destination");
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(source, destination);
+        IntegrityCopyResult listed = IntegrityCopy.Copy(source, destination, [@"a\link\secret.txt"]);
+
+        Assert.IsFalse(listed.Ok, "A file reached through a junction is not the one the list names.");
+        StringAssert.Contains(listed.Steps.Single().Detail, "not the one listed");
+        Assert.IsFalse(File.Exists(Path.Combine(destination, "a", "link", "secret.txt")));
+
+        IntegrityCopyResult unlisted = Copy(source, temp.File("destination2"));
+
+        Assert.IsTrue(unlisted.Ok, "A junction the list does not name is simply not copied.");
+        Assert.HasCount(3, unlisted.Files);
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.File("destination2"), "a", "link")));
+    }
+
+    [TestMethod]
+    public void AFileTheListNamesThatIsNotThereFailsTheCopy()
+    {
+        using var temp = new TempFolder();
+        string source = MakeSource(temp);
+
+        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"), ["Earshot.exe", "absent.dll"]);
 
         Assert.IsFalse(result.Ok);
-        StringAssert.Contains(result.Steps.Single().Detail, "reparse point");
-        Assert.IsFalse(Directory.Exists(destination));
+        Assert.AreEqual("ERROR_FILE_NOT_FOUND", result.Steps.Single().CodeName);
+        Assert.IsFalse(File.Exists(Path.Combine(temp.File("destination"), "Earshot.exe")), "Nothing is copied until every file is held.");
+    }
+
+    [TestMethod]
+    public void EverythingTheListDoesNotNameStaysBehind()
+    {
+        using var temp = new TempFolder();
+        string source = MakeSource(temp);
+        File.WriteAllText(Path.Combine(source, "unrelated.dll"), "someone else's file");
+        Directory.CreateDirectory(Path.Combine(source, "other"));
+        File.WriteAllText(Path.Combine(source, "other", "notes.txt"), "not ours");
+        string destination = temp.File("destination");
+
+        IntegrityCopyResult result = Copy(source, destination);
+
+        Assert.IsTrue(result.Ok, string.Join(" | ", result.Steps.Select(s => s.Detail)));
+        CollectionAssert.AreEquivalent(SourceFiles, result.Files.Select(f => f.RelativePath).ToArray());
+        Assert.IsFalse(File.Exists(Path.Combine(destination, "unrelated.dll")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(destination, "other")));
+    }
+
+    [TestMethod]
+    public void AnEmptyOrOversizedListIsRefused()
+    {
+        using var temp = new TempFolder();
+        string source = MakeSource(temp);
+
+        IntegrityCopyResult empty = IntegrityCopy.Copy(source, temp.File("destination"), []);
+
+        Assert.IsFalse(empty.Ok);
+        StringAssert.Contains(empty.Steps.Single().Detail, "empty");
     }
 
     [TestMethod]
@@ -137,13 +193,13 @@ public sealed class IntegrityCopyTests
         string source = temp.File("unzip");
         using IDisposable junction = TestLinks.CreateJunction(source, real);
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"));
+        IntegrityCopyResult result = Copy(source, temp.File("destination"));
 
         Assert.IsFalse(result.Ok);
         StringAssert.Contains(result.Steps.Single().Detail, "reparse point");
     }
 
-    // The window the listing check alone left open: a subfolder is swapped for a junction after the source
+    // The window the list alone leaves open: a subfolder is swapped for a junction after the source
     // was listed and before its files are opened. The open follows the junction; the handle's final path
     // shows it and the copy stops before anything is read or written.
     [TestMethod]
@@ -159,7 +215,7 @@ public sealed class IntegrityCopyTests
         IDisposable? junction = null;
         try
         {
-            IntegrityCopyResult result = IntegrityCopy.Copy(source, destination, afterListing: () =>
+            IntegrityCopyResult result = Copy(source, destination, afterListing: () =>
             {
                 Directory.Move(Path.Combine(source, "a"), Path.Combine(source, "a-old"));
                 junction = TestLinks.CreateJunction(Path.Combine(source, "a"), outside);
@@ -189,7 +245,7 @@ public sealed class IntegrityCopyTests
         File.WriteAllText(outside, "outside");
         TestLinks.CreateHardLink(Path.Combine(source, "a", "linked.dll"), outside);
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"));
+        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"), [@"a\linked.dll"]);
 
         Assert.IsFalse(result.Ok);
         StepOutcome step = result.Steps.Single();
@@ -204,7 +260,7 @@ public sealed class IntegrityCopyTests
         string source = MakeSource(temp);
         Exception? renameError = null;
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"), afterListing: () =>
+        IntegrityCopyResult result = Copy(source, temp.File("destination"), afterListing: () =>
         {
             try
             {
@@ -222,12 +278,13 @@ public sealed class IntegrityCopyTests
     }
 
     [TestMethod]
-    public void ALinkInsideTheSourceFailsTheCopy()
+    public void AFileReachedThroughALinkInsideTheSourceFailsTheCopy()
     {
         using var temp = new TempFolder();
         string source = MakeSource(temp);
         string outside = temp.File("outside");
         Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "secret.txt"), "outside");
         try
         {
             Directory.CreateSymbolicLink(Path.Combine(source, "a", "link"), outside);
@@ -241,10 +298,10 @@ public sealed class IntegrityCopyTests
             Assert.Inconclusive("This account cannot create a symbolic link: " + ex.Message);
         }
 
-        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"));
+        IntegrityCopyResult result = IntegrityCopy.Copy(source, temp.File("destination"), [@"a\link\secret.txt"]);
 
         Assert.IsFalse(result.Ok);
-        StringAssert.Contains(result.Steps.Single().Detail, "reparse point");
+        StringAssert.Contains(result.Steps.Single().Detail, "not the one listed");
     }
 
     [TestMethod]

@@ -27,6 +27,22 @@ public sealed class InstallActionsTests
             File.WriteAllBytes(Path.Combine(Source, "Earshot.exe"), RandomNumberGenerator.GetBytes(4096));
             File.WriteAllBytes(Path.Combine(Source, "Earshot.dll"), RandomNumberGenerator.GetBytes(100_000));
             File.WriteAllText(Path.Combine(Source, "runtimes", "native.txt"), "native");
+            WriteManifest("Earshot.exe", "Earshot.dll", "runtimes/native.txt");
+        }
+
+        // The publish manifest as the publish step writes it: the relative path and hash of every published
+        // file, with "/" separators.
+        public void WriteManifest(params string[] relativePaths)
+        {
+            IEnumerable<string> entries = relativePaths.Select(relative =>
+            {
+                string path = Path.Combine(Source, relative.Replace('/', Path.DirectorySeparatorChar));
+                string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+                return "    { \"Path\": \"" + relative + "\", \"Sha256\": \"" + hash + "\" }";
+            });
+            File.WriteAllText(
+                Path.Combine(Source, FileManifest.FileName),
+                "{\r\n  \"SchemaVersion\": 1,\r\n  \"Files\": [\r\n" + string.Join(",\r\n", entries) + "\r\n  ]\r\n}\r\n");
         }
 
         public string Root => _temp.Path;
@@ -78,6 +94,22 @@ public sealed class InstallActionsTests
             .Where(d => Path.GetFileName(d).StartsWith("Earshot.", StringComparison.Ordinal))
             .ToArray();
 
+    private const string SampleHash = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    private static readonly Guid Handsfree = new("0000111E-0000-1000-8000-00805F9B34FB");
+
+    // What a Task Scheduler call throws when its service is stopped, with the HRESULT of ERROR_SERVICE_DISABLED.
+    private sealed class SchedulerUnavailable : InvalidOperationException
+    {
+        public SchedulerUnavailable()
+            : base("The Task Scheduler service is not available.") =>
+            HResult = unchecked((int)0x80070422);
+    }
+
+    private static readonly string[] KeptRecordFiles = ["device.json", "protection.json"];
+
+    private static readonly string[] ProtectionRecordOnly = ["protection.json"];
+
     private static string Fail(InstallResult result) =>
         string.Join(Environment.NewLine, result.Steps.Where(s => !s.Ok).Select(GateActions.Describe));
 
@@ -106,7 +138,9 @@ public sealed class InstallActionsTests
         Assert.AreEqual(Sddl.RunnableTask(TestUsers.Sid), h.Tasks.Tasks[@"\Earshot\Gate"].Sddl);
         Assert.AreEqual(Sddl.ReadableTask(TestUsers.Sid), h.Tasks.Tasks[@"\Earshot\BootBlock"].Sddl);
         CollectionAssert.AreEqual(FreshInstallCalls, h.Tasks.Calls);
-        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok && s.Detail!.Contains("3 files", StringComparison.Ordinal)));
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok && s.Detail!.Contains("4 published files", StringComparison.Ordinal)), "The three listed files and the manifest.");
+        CollectionAssert.AreEqual(File.ReadAllBytes(Path.Combine(h.Source, FileManifest.FileName)), File.ReadAllBytes(Path.Combine(h.Install, FileManifest.FileName)),
+            "The manifest is installed with the files, for a repair run.");
     }
 
     [TestMethod]
@@ -153,17 +187,52 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
         Assert.AreEqual(NativeCodes.NotAttempted, result.Steps.Single(s => s.Step == "copy-app").Code);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "verify-installed" && s.Ok && s.Detail!.Contains("3 installed files", StringComparison.Ordinal)));
+    }
+
+    // A repair run from the installed copy follows the manifest rule too: no manifest there, no repair.
+    [TestMethod]
+    public void RunningFromTheInstallFolderWithoutAManifestIsRefused()
+    {
+        using var h = new Harness();
+        Directory.Move(h.Source, h.Install);
+        h.Source = h.Install;
+        File.Delete(Path.Combine(h.Install, FileManifest.FileName));
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.NoManifest, result.Outcome);
+        StringAssert.Contains(result.Steps.Single(s => s.Step == FileManifest.ReadStep).Detail, FileManifest.MissingMessage);
+        Assert.IsEmpty(h.Tasks.Calls);
+        Assert.IsFalse(Directory.Exists(h.Machine));
+    }
+
+    [TestMethod]
+    public void RunningFromTheInstallFolderWithAChangedFileIsRefused()
+    {
+        using var h = new Harness();
+        Directory.Move(h.Source, h.Install);
+        h.Source = h.Install;
+        File.WriteAllText(Path.Combine(h.Install, "runtimes", "native.txt"), "changed after install");
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "verify-installed:" + Path.Combine("runtimes", "native.txt")).Detail, "does not match the hash");
+        Assert.IsEmpty(h.Tasks.Calls);
     }
 
     [TestMethod]
     public void AnApplicationFolderWithoutTheExeIsNotInstalled()
     {
         using var h = new Harness();
+        h.WriteManifest("Earshot.dll", "runtimes/native.txt");
         File.Delete(Path.Combine(h.Source, "Earshot.exe"));
 
         InstallResult result = h.RunInstall();
 
         Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Detail!.Contains("not in the published file list", StringComparison.Ordinal)));
         Assert.IsFalse(Directory.Exists(h.Install));
         Assert.IsEmpty(Directory.GetDirectories(Path.GetDirectoryName(h.Install)!));
         Assert.IsEmpty(h.Tasks.Calls);
@@ -410,7 +479,7 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
         Assert.IsTrue(Directory.Exists(h.Install), "In use, so left for the restart.");
-        Assert.HasCount(5, h.Reboot.Scheduled);
+        Assert.HasCount(6, h.Reboot.Scheduled, "Four files, including the manifest, then two folders.");
         Assert.AreEqual(h.Install, h.Reboot.Scheduled[^1], "The folder itself goes last.");
         Assert.AreEqual(Path.Combine(h.Install, "runtimes"), h.Reboot.Scheduled[^2], "Folders after every file.");
     }
@@ -443,24 +512,32 @@ public sealed class InstallActionsTests
         Assert.IsFalse(h.Tasks.FolderExists, "The rest still runs.");
     }
 
+    // Without a Bluetooth service API in the context the restore hook reports not available, whatever the node
+    // table is; the record is then kept.
     [TestMethod]
-    public void UninstallCannotRestoreRecordedServicesWithoutTheProtectionFeature()
+    public void UninstallCannotRestoreRecordedServicesWithoutABluetoothApi()
     {
         using var h = new Harness();
         Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
-        Assert.IsTrue(new GateStore(h.Machine).WriteProtection(new ProtectionRecord { DisabledServices = { new Guid("0000111E-0000-1000-8000-00805F9B34FB") } }).Ok);
+        Assert.IsTrue(new GateStore(h.Machine).WriteProtection(new ProtectionRecord { DisabledServices = { Handsfree } }).Ok);
 
         InstallResult result = h.RunUninstall();
 
         Assert.AreEqual(GateExitCode.Partial, result.Outcome);
         Assert.AreEqual(NativeCodes.NotAvailable, result.Steps.Single(s => s.Step == "protection-restore").Code);
+        CollectionAssert.AreEquivalent(KeptRecordFiles, Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray(),
+            "Only the records stay; the status files and config go.");
     }
 
+    // The only record of what to allow and what to turn back on is in the machine folder, so a reversal that
+    // did not finish keeps it (and nothing else) for another try.
     [TestMethod]
-    public void UninstallReportsANodeThatWouldNotEnable()
+    public void UninstallReportsANodeThatWouldNotEnableAndKeepsTheRecords()
     {
         using var h = new Harness();
         Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        var store = new GateStore(h.Machine);
+        Assert.IsTrue(store.WriteProtection(new ProtectionRecord { DisabledServices = { Handsfree } }).Ok);
         h.Nodes[RecordedNodes.AirPodsDeviceNode].MarkDisabled(persistent: true);
         h.Nodes[RecordedNodes.AirPodsDeviceNode].EnableResult = CfgMgr32.CR_ACCESS_DENIED;
 
@@ -468,6 +545,28 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Partial, result.Outcome);
         Assert.AreEqual("CR_ACCESS_DENIED", result.Steps.Single(s => s.Step == "cm-enable:" + RecordedNodes.AirPodsDeviceNode).CodeName);
+        Assert.IsTrue(Directory.Exists(h.Machine));
+        CollectionAssert.AreEquivalent(KeptRecordFiles, Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray());
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, store.ReadDevice().Value!.Address);
+        CollectionAssert.AreEqual(new[] { Handsfree }, store.ReadProtection().Value!.DisabledServices);
+        StringAssert.Contains(result.Steps.Last(s => s.Step == "remove-machine-folder").Detail, "is kept with device.json and protection.json");
+        Assert.IsFalse(h.Tasks.FolderExists, "The tasks are still removed.");
+        Assert.IsFalse(Directory.Exists(h.Install), "The install folder is still removed.");
+    }
+
+    [TestMethod]
+    public void UninstallKeepsTheProtectionRecordEvenWithoutADeviceFile()
+    {
+        using var h = new Harness();
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        Assert.IsTrue(new GateStore(h.Machine).WriteProtection(new ProtectionRecord { DisabledServices = { Handsfree } }).Ok);
+        File.Delete(new GateStore(h.Machine).DeviceFile);
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome);
+        CollectionAssert.AreEquivalent(ProtectionRecordOnly, Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray());
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "protection-restore").Detail, "device.json is missing");
     }
 
     [TestMethod]
@@ -510,6 +609,108 @@ public sealed class InstallActionsTests
         Assert.IsEmpty(h.Reboot.Scheduled, "Nothing is scheduled for deletion at restart either.");
         StringAssert.Contains(result.Steps.Single(s => s.Step == "remove-install-folder").Detail, "by hand");
         Assert.IsFalse(Directory.Exists(h.Machine));
+    }
+
+    // A crash part way through install or uninstall must still leave the steps taken so far and a log line.
+    // Install only ever runs from a published folder: without the manifest it copies nothing and says so.
+    [TestMethod]
+    public void WithoutThePublishManifestNothingIsCopied()
+    {
+        using var h = new Harness();
+        File.Delete(Path.Combine(h.Source, FileManifest.FileName));
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.NoManifest, result.Outcome);
+        Assert.AreEqual("no-manifest", GateExitCodes.ResultName(result.Outcome));
+        StringAssert.Contains(result.Steps.Single(s => s.Step == FileManifest.ReadStep).Detail, "Install from a release build.");
+        Assert.IsFalse(Directory.Exists(h.Install));
+        Assert.IsEmpty(h.Tasks.Calls);
+        Assert.IsFalse(Directory.Exists(h.Machine));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("not json")]
+    [DataRow("{ \"SchemaVersion\": 2, \"Files\": [] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [] }")]
+    [DataRow("{ \"SchemaVersion\": 1 }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"..\\\\Earshot.exe\", \"Sha256\": \"" + SampleHash + "\" } ] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"C:/Earshot.exe\", \"Sha256\": \"" + SampleHash + "\" } ] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"Earshot.exe\", \"Sha256\": \"short\" } ] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"Earshot.exe\" } ] }")]
+    public void AnUnusableManifestIsRefused(string content)
+    {
+        using var h = new Harness();
+        File.WriteAllText(Path.Combine(h.Source, FileManifest.FileName), content);
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.NoManifest, result.Outcome);
+        Assert.IsFalse(Directory.Exists(h.Install));
+    }
+
+    [TestMethod]
+    public void AFileChangedAfterItWasPublishedIsRefused()
+    {
+        using var h = new Harness();
+        File.WriteAllBytes(Path.Combine(h.Source, "Earshot.dll"), RandomNumberGenerator.GetBytes(100_000));
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "verify-manifest:Earshot.dll").Detail, "does not match the hash recorded when it was published");
+        Assert.IsFalse(Directory.Exists(h.Install), "Nothing is left behind.");
+        Assert.IsEmpty(LeftOvers(h.Install));
+        Assert.IsEmpty(h.Tasks.Calls);
+    }
+
+    [TestMethod]
+    public void OnlyThePublishedFilesAreCopiedOutOfTheFolderTheReleaseWasUnzippedInto()
+    {
+        using var h = new Harness();
+        File.WriteAllText(Path.Combine(h.Source, "someone-elses.dll"), "not part of the release");
+        Directory.CreateDirectory(Path.Combine(h.Source, "Downloads"));
+        File.WriteAllText(Path.Combine(h.Source, "Downloads", "invoice.pdf"), "not part of the release");
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        CollectionAssert.AreEquivalent(
+            new[] { "Earshot.exe", "Earshot.dll", Path.Combine("runtimes", "native.txt"), FileManifest.FileName },
+            Directory.GetFiles(h.Install, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(h.Install, f)).ToArray());
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "verify-manifest" && s.Ok));
+    }
+
+    [TestMethod]
+    public void AnInstallThatStopsWithAnExceptionKeepsItsStepsAndIsLogged()
+    {
+        using var h = new Harness();
+        h.Tasks.Throw = new SchedulerUnavailable();
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok), "The steps before it are kept.");
+        StepOutcome stopped = result.Steps.Single(s => s.Step == "install" + ElevatedFailure.StepSuffix);
+        Assert.IsFalse(stopped.Ok);
+        Assert.AreEqual(unchecked((int)0x80070422), stopped.Code);
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "install stopped with SchedulerUnavailable"));
+    }
+
+    [TestMethod]
+    public void AnUninstallThatStopsWithAnExceptionKeepsItsStepsAndIsLogged()
+    {
+        using var h = new Harness();
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Tasks.Throw = new SchedulerUnavailable();
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        StepOutcome stopped = result.Steps.Single(s => s.Step == "uninstall" + ElevatedFailure.StepSuffix);
+        Assert.AreEqual(unchecked((int)0x80070422), stopped.Code);
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "uninstall stopped with SchedulerUnavailable"));
     }
 
     [TestMethod]

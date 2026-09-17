@@ -85,9 +85,11 @@ internal static class ProtectionPolicy
     public static bool MayChangeServices(NodePhase nodes) => nodes == NodePhase.Allowed;
 
     // Actions that change a device, which the caller treats as an operation in flight (driver churn from
-    // them must not look like a disconnect).
+    // them must not look like a disconnect). StoreIntent counts: it runs the protect verb, and the gate applies
+    // the change there and then if the nodes were allowed in the meantime.
     public static bool IsDeviceChange(ProtectionAction action) =>
-        action is ProtectionAction.ProtectOn or ProtectionAction.ProtectOff or ProtectionAction.BlockNodes or ProtectionAction.AllowNodes;
+        action is ProtectionAction.ProtectOn or ProtectionAction.ProtectOff or ProtectionAction.BlockNodes or ProtectionAction.AllowNodes
+            or ProtectionAction.StoreIntent;
 
     public static bool IsSatisfied(bool protect, AudioProtectionState services) =>
         protect ? services == AudioProtectionState.Protected : services == AudioProtectionState.NotProtected;

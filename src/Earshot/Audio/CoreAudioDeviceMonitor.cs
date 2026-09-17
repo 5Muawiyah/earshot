@@ -207,6 +207,22 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
         ThreadPool.UnsafeQueueUserWorkItem(static monitor => monitor.BeginCoalescedRefresh(), this, preferLocal: false);
     }
 
+    // Called on MMDevAPI's callback thread right after OnNotification threw. The notification it failed to take
+    // never queued a refresh, so nothing would log the failure until some later enumeration. Like the sink this
+    // must not block: it only queues a work item that logs the counted failures on the worker.
+    internal void OnSinkFailed()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        ThreadPool.UnsafeQueueUserWorkItem(
+            static monitor => monitor.Observe(monitor._worker.RunAsync(_ => monitor.ReportCallbackFailures()), "report a failed audio device notification"),
+            this,
+            preferLocal: false);
+    }
+
     private void BeginCoalescedRefresh() => Observe(CoalescedRefreshAsync(), "refresh after a device notification");
 
     private async Task CoalescedRefreshAsync()
@@ -254,7 +270,7 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
             return new MonitorRefresh(current, false, Array.Empty<EndpointReading>(), Array.Empty<StepOutcome>(), current.Resolution);
         }
 
-        StepOutcome subscribe = _source.Subscribe(OnNotification);
+        StepOutcome subscribe = _source.Subscribe(OnNotification, OnSinkFailed);
         if (subscribe.Ok)
         {
             _log.Info("Watching audio devices for changes.");

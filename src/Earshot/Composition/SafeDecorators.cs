@@ -7,6 +7,10 @@ namespace Earshot.Composition;
 // start an elevation is refused: it returns NotAttempted (or ConnectOutcome.Failed), says
 // "Safe mode: no device actions." and logs the refusal. The real controller is never called for
 // those members.
+//
+// Each decorator holds the controller it wraps in a private field. Inner exposes it to the tests only
+// (the assembly's internals are visible to the test project); nothing in the application reads it, which
+// SharedSystemWorkerTests checks, because that would be a way round safe mode.
 internal static class SafeDecorators
 {
     public const string Message = "Safe mode: no device actions.";
@@ -39,17 +43,19 @@ internal static class SafeDecorators
 
 internal sealed class SafeConnectionController : IConnectionController
 {
+    private readonly IConnectionController _inner;
     private readonly ILog _log;
 
     public SafeConnectionController(IConnectionController inner, ILog log)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(log);
-        Inner = inner;
+        _inner = inner;
         _log = log;
     }
 
-    public IConnectionController Inner { get; }
+    // Tests only.
+    internal IConnectionController Inner => _inner;
 
     public Task<ConnectResult> ConnectAsync(Guid containerId, CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.RefuseConnect(_log, "connect"));
@@ -60,21 +66,23 @@ internal sealed class SafeConnectionController : IConnectionController
 
 internal sealed class SafeBlockController : IBlockController
 {
+    private readonly IBlockController _inner;
     private readonly ILog _log;
 
     public SafeBlockController(IBlockController inner, ILog log)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(log);
-        Inner = inner;
+        _inner = inner;
         _log = log;
     }
 
-    public IBlockController Inner { get; }
+    // Tests only.
+    internal IBlockController Inner => _inner;
 
-    public bool IsSetUp => Inner.IsSetUp;
+    public bool IsSetUp => _inner.IsSetUp;
 
-    public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default) => Inner.GetStatusAsync(ct);
+    public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default) => _inner.GetStatusAsync(ct);
 
     public Task<ControllerResult> BlockAsync(CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.Refuse(_log, "block"));
@@ -97,19 +105,21 @@ internal sealed class SafeBlockController : IBlockController
 
 internal sealed class SafeAudioProtectionController : IAudioProtectionController
 {
+    private readonly IAudioProtectionController _inner;
     private readonly ILog _log;
 
     public SafeAudioProtectionController(IAudioProtectionController inner, ILog log)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(log);
-        Inner = inner;
+        _inner = inner;
         _log = log;
     }
 
-    public IAudioProtectionController Inner { get; }
+    // Tests only.
+    internal IAudioProtectionController Inner => _inner;
 
-    public Task<AudioProtectionSnapshot> GetStatusAsync(CancellationToken ct = default) => Inner.GetStatusAsync(ct);
+    public Task<AudioProtectionSnapshot> GetStatusAsync(CancellationToken ct = default) => _inner.GetStatusAsync(ct);
 
     public Task<ControllerResult> ApplyAsync(bool protect, CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.Refuse(_log, protect ? "protect-on" : "protect-off"));

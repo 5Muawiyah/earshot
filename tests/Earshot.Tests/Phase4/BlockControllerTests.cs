@@ -22,8 +22,9 @@ public sealed class BlockControllerTests
         private readonly TempFolder _temp = new();
         private readonly SystemWorker _worker;
 
-        public Harness(bool setUp = true)
+        public Harness(bool setUp = true, FakeNodeApi? nodes = null)
         {
+            Nodes = nodes ?? RecordedNodes.Table();
             string machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
             Directory.CreateDirectory(machine);
             Store = new GateStore(machine);
@@ -46,7 +47,7 @@ public sealed class BlockControllerTests
 
         public GateStore Store { get; }
 
-        public FakeNodeApi Nodes { get; } = RecordedNodes.Table();
+        public FakeNodeApi Nodes { get; }
 
         public FakeScheduledTasks Tasks { get; } = new();
 
@@ -297,6 +298,97 @@ public sealed class BlockControllerTests
         Assert.AreEqual(OpStatus.AlreadyInState, (await h.Controller.AllowAsync()).Status);
     }
 
+    // A flag that cannot be read is not "already allowed": the gate runs, changes nothing it cannot read, and the
+    // failed read is in the result rather than dropped.
+    [TestMethod]
+    public async Task AllowWithAnUnreadableFlagRunsTheGateAndKeepsTheFailedRead()
+    {
+        using var h = new Harness();
+        string unreadable = RecordedNodes.AirPodsTargets[3];
+        h.Nodes[unreadable].ConfigFlagsReadResult = CfgMgr32.CR_FAILURE;
+
+        ControllerResult result = await h.Controller.AllowAsync();
+
+        Assert.HasCount(1, h.Tasks.Runs, "Not answered as already allowed.");
+        Assert.AreNotEqual(OpStatus.AlreadyInState, result.Status);
+        Assert.AreEqual(OpStatus.Partial, result.Status, result.UserMessage);
+        Assert.AreEqual(BlockController.UnreadableMessage, result.UserMessage);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "cm-configflags:" + unreadable && s.CodeName == "CR_FAILURE"));
+        Assert.IsEmpty(h.Nodes.Calls.Where(c => c.InstanceId == unreadable), "A node whose flag cannot be read is not changed.");
+    }
+
+    [TestMethod]
+    public async Task BlockWithAnUnreadablePresenceIsNotAlreadyBlocked()
+    {
+        using var h = new Harness();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        h.Nodes[RecordedNodes.AirPodsTargets[5]].PresentLocateResult = CfgMgr32.CR_FAILURE;
+
+        ControllerResult result = await h.Controller.BlockAsync();
+
+        Assert.HasCount(1, h.Tasks.Runs);
+        Assert.AreNotEqual(OpStatus.Success, result.Status);
+        Assert.AreNotEqual(OpStatus.AlreadyInState, result.Status);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "cm-locate:" + RecordedNodes.AirPodsTargets[5] && s.CodeName == "CR_FAILURE"));
+    }
+
+    // The check before the gate and the read after it follow the same rule, so a node that is not present and
+    // not marked disabled gives the same answer every time rather than alternating with "already blocked".
+    [TestMethod]
+    public async Task RepeatedBlocksWithANodeThatIsNotPresentSayTheSameThing()
+    {
+        using var h = new Harness();
+        h.Nodes[RecordedNodes.AirPodsTargets[2]].Present = false;
+
+        ControllerResult first = await h.Controller.BlockAsync();
+        ControllerResult second = await h.Controller.BlockAsync();
+
+        Assert.AreEqual(OpStatus.Partial, first.Status, first.UserMessage);
+        Assert.AreEqual(BlockController.NotPresentBlockMessage, first.UserMessage);
+        Assert.AreEqual(first.Status, second.Status);
+        Assert.AreEqual(first.UserMessage, second.UserMessage);
+        Assert.HasCount(2, h.Tasks.Runs, "Neither click short-circuits.");
+        Assert.HasCount(8, h.Nodes.Calls.Where(c => c.Kind == "disable" && c.InstanceId != RecordedNodes.AirPodsTargets[2]).Select(c => c.InstanceId).Distinct());
+    }
+
+    [TestMethod]
+    public async Task ANodeThatIsNotPresentButStillMarkedDisabledCountsAsBlocked()
+    {
+        using var h = new Harness();
+        FakeNode gone = h.Nodes[RecordedNodes.AirPodsTargets[2]];
+        gone.MarkDisabled(persistent: true);
+        gone.Present = false;
+
+        ControllerResult first = await h.Controller.BlockAsync();
+        ControllerResult second = await h.Controller.BlockAsync();
+
+        Assert.AreEqual(OpStatus.Success, first.Status, first.UserMessage);
+        Assert.AreEqual(BlockController.BlockedMessage, first.UserMessage);
+        Assert.AreEqual(OpStatus.AlreadyInState, second.Status);
+        Assert.AreEqual(BlockController.AlreadyBlockedMessage, second.UserMessage);
+    }
+
+    [TestMethod]
+    public async Task AnAllowThatLeavesANodeMarkedDisabledIsPartial()
+    {
+        using var h = new Harness();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        h.Nodes[RecordedNodes.AirPodsDeviceNode].KeepConfigFlagsOnEnable = true;
+
+        ControllerResult result = await h.Controller.AllowAsync();
+
+        Assert.AreEqual(OpStatus.Partial, result.Status, result.UserMessage);
+        Assert.AreEqual(BlockController.AllowNotPersistentMessage, result.UserMessage);
+    }
+
     [TestMethod]
     public async Task BlockAtBootIsChangedThroughTheGateAndReadBack()
     {
@@ -317,23 +409,48 @@ public sealed class BlockControllerTests
     [TestMethod]
     public async Task SetDeviceValidatesThenRePinsThroughTheGate()
     {
-        using var h = new Harness();
+        using var h = new Harness(nodes: RecordedNodes.TableWithHeadphones());
 
         ControllerResult invalid = await h.Controller.SetDeviceAsync("5A6b7C8d9Eaf");
         ControllerResult blockedFirst;
         h.Nodes[RecordedNodes.AirPodsTargets[0]].MarkDisabled(persistent: true);
-        blockedFirst = await h.Controller.SetDeviceAsync(RecordedNodes.IPhoneAddress);
+        blockedFirst = await h.Controller.SetDeviceAsync(RecordedNodes.HeadphonesAddress);
         h.Nodes[RecordedNodes.AirPodsTargets[0]].Status = CfgMgr32.DN_STARTED;
         h.Nodes[RecordedNodes.AirPodsTargets[0]].ConfigFlags = 0;
-        ControllerResult chosen = await h.Controller.SetDeviceAsync(RecordedNodes.IPhoneAddress);
+        ControllerResult chosen = await h.Controller.SetDeviceAsync(RecordedNodes.HeadphonesAddress);
 
         Assert.AreEqual(BlockController.InvalidAddressMessage, invalid.UserMessage);
         Assert.AreEqual(BlockController.OtherDeviceBlockedMessage, blockedFirst.UserMessage);
         Assert.AreEqual(OpStatus.Success, chosen.Status, chosen.UserMessage);
         Assert.AreEqual(BlockController.DeviceChosenMessage, chosen.UserMessage);
         Assert.HasCount(2, h.Tasks.Runs, "The invalid address never reaches the task.");
-        CollectionAssert.AreEqual(new[] { GateVerbs.SetDevice, h.Tasks.Runs[1][1], RecordedNodes.IPhoneAddress }, h.Tasks.Runs[1]);
-        Assert.AreEqual(RecordedNodes.IPhoneContainer, h.Store.ReadDevice().Value!.ContainerId);
+        CollectionAssert.AreEqual(new[] { GateVerbs.SetDevice, h.Tasks.Runs[1][1], RecordedNodes.HeadphonesAddress }, h.Tasks.Runs[1]);
+        Assert.AreEqual(RecordedNodes.HeadphonesContainer, h.Store.ReadDevice().Value!.ContainerId);
+    }
+
+    [TestMethod]
+    public async Task SetDeviceReportsWhyTheGateRefusedADevice()
+    {
+        using var h = new Harness();
+
+        ControllerResult phone = await h.Controller.SetDeviceAsync(RecordedNodes.IPhoneAddress);
+
+        Assert.AreEqual(OpStatus.Failed, phone.Status);
+        Assert.AreEqual(BlockController.NotAudioSinkMessage, phone.UserMessage);
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
+    }
+
+    [TestMethod]
+    public async Task SetDeviceReportsProtectionOnTheDevicePinnedNow()
+    {
+        using var h = new Harness(nodes: RecordedNodes.TableWithHeadphones());
+        Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord { DisabledServices = { new Guid("0000111E-0000-1000-8000-00805F9B34FB") } }).Ok);
+
+        ControllerResult refused = await h.Controller.SetDeviceAsync(RecordedNodes.HeadphonesAddress);
+
+        Assert.AreEqual(OpStatus.Failed, refused.Status);
+        Assert.AreEqual(BlockController.OtherDeviceProtectedMessage, refused.UserMessage);
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
     }
 
     [TestMethod]
