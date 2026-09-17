@@ -315,6 +315,14 @@ function Confirm-Step
 }
 
 # A question only the owner can answer, recorded with its answer.
+#
+# A script started without a console gets end of input from Read-Host, which comes back as an empty
+# string or as $null depending on how the input was closed, never as an error, so an unbounded loop
+# here would spin for ever instead of stopping. Three empty answers in a row is taken as nobody being
+# there, and the run is stopped with a message that says so. A wrong word is just asked again:
+# someone is clearly at the keyboard.
+$script:EmptyAnswerLimit = 3
+
 function Read-Answer
 {
     param(
@@ -326,9 +334,12 @@ function Read-Answer
     Write-Line -Run $Run -Text ''
     Write-Line -Run $Run -Text ('QUESTION: ' + $Question)
     $list = $Options -join '/'
+    $empty = 0
     while ($true)
     {
-        $answer = (Read-Host ('  [' + $list + ']')).Trim().ToLowerInvariant()
+        $typed = Read-Host ('  [' + $list + ']')
+        $answer = ''
+        if ($null -ne $typed) { $answer = ([string]$typed).Trim().ToLowerInvariant() }
         foreach ($option in $Options)
         {
             if ($answer -eq $option.ToLowerInvariant())
@@ -339,6 +350,21 @@ function Read-Answer
             }
         }
 
+        if ([string]::IsNullOrEmpty($answer))
+        {
+            $empty++
+            if ($empty -ge $script:EmptyAnswerLimit)
+            {
+                throw ('This question was left blank ' + [string]$empty + ' times, so this run is being stopped rather than ' +
+                    'left waiting: "' + $Question + '". These tests have to be run by hand, in a console you can type in. ' +
+                    'Nothing was changed by the question itself, and the evidence so far is in ' + $Run.Folder + '.')
+            }
+
+            Write-Host ('  Nothing was typed. Answer with one of: ' + $list)
+            continue
+        }
+
+        $empty = 0
         Write-Host ('  Please answer with one of: ' + $list)
     }
 }
