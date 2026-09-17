@@ -50,15 +50,18 @@ internal sealed record TrayStartOptions(
 //
 // Cancellation: each connect or disconnect has its own token, cancelled when a different device is
 // chosen or Earshot closes. Each menu action (setup, Block at boot, protection, device change) has its
-// own token too, cancelled only when Earshot closes, so a click never cancels one. Nothing here reads
-// IBlockController.IsSetUp: that checks a scheduled task, which is not UI thread work, so setup is
-// decided from the boot block status the coordinator reads asynchronously.
+// own token too, cancelled only when Earshot closes, so a click never cancels one. A cancellation stops the
+// coordinator's waits, never a gate change it has already sent: that is waited for before the clean-up.
+// Nothing here reads IBlockController.IsSetUp: that checks a scheduled task, which is not UI thread work,
+// so setup is decided from the boot block status the coordinator reads asynchronously.
 //
 // Exit: no new input, cancel what is in flight, then wait for it and for the coordinator (at most
 // ExitWaitLimit) before the message loop ends, so a cancelled connect can finish putting the device nodes
-// back to blocked and the coordinator can block enabled nodes that are not in use. What the user should
-// know as Earshot closes (it closed while the AirPods were in use, or that block did not take) is shown at
-// the Exit click and kept up for ExitNoticeTime.
+// back to blocked and the coordinator can block enabled nodes that are not in use. The Exit click shows a
+// card that Earshot waits for the current change only when a change other than the check before closing is
+// in flight; "Blocking" is shown only once the coordinator is about to send the block. What the user should
+// know as Earshot closes (it closed while the AirPods were in use, before a change finished, or that block
+// did not take) is shown at the Exit click and kept up for ExitNoticeTime.
 internal sealed class TrayContext : ApplicationContext
 {
     public const string SomethingWentWrongMessage = "Something went wrong. See the log.";
@@ -107,6 +110,8 @@ internal sealed class TrayContext : ApplicationContext
     private int _operationsInFlight;
     private Guid _pinAttemptedFor;
     private DevicePickerForm? _picker;
+    private CardPlace? _exitPlace;
+    private bool _blockingCardShown;
     private bool _closing;
     private bool _closed;
 
@@ -447,9 +452,18 @@ internal sealed class TrayContext : ApplicationContext
 
     private void OnCoordinatorChanged(object? sender, EventArgs e)
     {
-        if (!_closed)
+        if (_closed)
         {
-            UpdatePresentation(forceIcon: false);
+            return;
+        }
+
+        UpdatePresentation(forceIcon: false);
+
+        // Once Exit is chosen, the card for the block before closing goes up only when that block is sent.
+        if (_exitPlace is { } place && !_blockingCardShown && _coordinator.BlockingBeforeClosing)
+        {
+            _blockingCardShown = true;
+            place.Show(_registry.Cards, TrayStatus.AppName, BlockingBeforeClosingMessage);
         }
     }
 
@@ -506,9 +520,11 @@ internal sealed class TrayContext : ApplicationContext
 
         bool blockAtBoot = !status.BlockAtBoot;
         string action = blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff;
+
+        // A gate change: once it is running it is waited for, so the block before closing reads the setting it left.
         await RunOperationAsync(
             action,
-            ct => _coordinator.RunAsync(action, token => _registry.Block.SetBlockAtBootAsync(blockAtBoot, token), ct),
+            ct => _coordinator.RunAsync(action, _ => _registry.Block.SetBlockAtBootAsync(blockAtBoot, CancellationToken.None), ct),
             place);
     }
 
@@ -639,14 +655,22 @@ internal sealed class TrayContext : ApplicationContext
             // coordinator then blocks enabled nodes that are not in use, after any clean-up in flight.
             _notifyIcon.Visible = false;
             _picker?.Close();
+            _exitPlace = place;
             _coordinator.BeginShutdown();
             _lifetime.Cancel();
 
+            bool gaveUp = false;
             if (_pending.Count > 0 || _coordinator.IsBusy)
             {
                 _log.Info("Waiting for " + DescribePending() + " to finish before closing.");
+
+                // The block before closing on its own first reads the state and may block nothing, so it gets no
+                // card until the block is sent (OnCoordinatorChanged).
                 bool onlyTheBlock = _pending.Count == 0 && !_coordinator.IsBusyBeyondClosingBlock;
-                place.Show(_registry.Cards, TrayStatus.AppName, onlyTheBlock ? BlockingBeforeClosingMessage : ClosingMessage);
+                if (!onlyTheBlock)
+                {
+                    place.Show(_registry.Cards, TrayStatus.AppName, ClosingMessage);
+                }
 
                 Task all = Task.WhenAll(_pending.Keys.Append(_coordinator.WhenIdleAsync()));
                 using var limit = new CancellationTokenSource();
@@ -658,12 +682,17 @@ internal sealed class TrayContext : ApplicationContext
                 }
                 else if (first != all)
                 {
+                    gaveUp = true;
                     _log.Warn("Closing after " + _exitWaitLimit.TotalSeconds.ToString(CultureInfo.InvariantCulture) +
                         " s with " + DescribePending() + " still in flight.");
                 }
             }
 
-            if (_coordinator.ClosingNotice is { } notice)
+            // A change still running when the wait ran out may leave the nodes enabled, with nothing left here
+            // to block them; the BootBlock task is then what blocks them at the next start.
+            string? notice = _coordinator.ClosingNotice ??
+                             (gaveUp && _coordinator.IsBusy && BlockStatus?.BlockAtBoot != false ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
+            if (notice is not null)
             {
                 _log.Info("Exit: " + notice);
                 place.Show(_registry.Cards, TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), notice);

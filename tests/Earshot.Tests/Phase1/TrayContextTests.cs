@@ -597,6 +597,30 @@ public sealed class TrayContextTests
     }
 
     [TestMethod]
+    public void ExitWhoseCheckBeforeClosingBlocksNothingNeverSaysItIsBlocking()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Devices.Active(1), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+
+            // The check before closing reads the nodes on the system worker, so it is still in flight at the click.
+            tray.Block.OnStatus = async _ =>
+            {
+                await Task.Delay(20, CancellationToken.None);
+                return tray.Block.Status;
+            };
+            tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
+
+            Application.Run(tray.Context);
+
+            Assert.IsEmpty(tray.Block.Calls, "The AirPods were in use, so nothing was blocked.");
+            CollectionAssert.DoesNotContain(tray.Cards.Statuses, TrayContext.BlockingBeforeClosingMessage, "A card said the AirPods were being blocked when nothing was.");
+            CollectionAssert.DoesNotContain(tray.Cards.Statuses, TrayContext.ClosingMessage);
+            Assert.AreEqual(BlockCoordinator.ClosedWhileInUseMessage, tray.Cards.Shown.Single().Content.Status);
+        });
+    }
+
+    [TestMethod]
     public void ExitWhileTheAirPodsAreInUseSaysSoAtTheClick()
     {
         StaThread.Run(() =>
@@ -694,6 +718,10 @@ public sealed class TrayContextTests
             Assert.AreEqual(1, tray.Context.PendingActions);
             Assert.AreEqual(1, tray.Cards.Hides);
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "still in flight"));
+
+            // Nothing is left to block the nodes the change in flight may leave enabled, so the card says so.
+            CardShown notice = tray.Cards.Shown.Single(c => c.Content.Status == BlockCoordinator.ClosedBeforeChangeEndedMessage);
+            Assert.AreEqual(TrayHarness.ClickPoint, notice.ClickPoint);
         });
     }
 
@@ -930,8 +958,13 @@ internal sealed class FakeBlockController : IBlockController
         }
     }
 
+    // A status read that takes time, as it does on the system worker.
+    public Func<CancellationToken, Task<BootBlockStatus>>? OnStatus { get; set; }
+
     public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default) =>
-        StatusFailure is null ? Task.FromResult(Status) : Task.FromException<BootBlockStatus>(StatusFailure);
+        StatusFailure is not null ? Task.FromException<BootBlockStatus>(StatusFailure)
+        : OnStatus is { } read ? read(ct)
+        : Task.FromResult(Status);
 
     public Func<CancellationToken, Task<ControllerResult>>? OnBlock { get; set; }
 
