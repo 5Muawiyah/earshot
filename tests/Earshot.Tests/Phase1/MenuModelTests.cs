@@ -60,7 +60,8 @@ public sealed class MenuModelTests
 
         Assert.AreEqual(MenuModel.Connect, state.Toggle.Text);
         Assert.IsTrue(state.Toggle.Enabled);
-        Assert.IsTrue(state.BlockAtBoot.Checked, "Before setup the shipped default (on) is shown.");
+        Assert.IsFalse(state.BlockAtBoot.Checked, "Before setup nothing blocks at boot, so no check says it does.");
+        Assert.IsFalse(state.BlockAtBoot.Indeterminate);
         Assert.IsTrue(state.BlockAtBoot.Enabled);
         Assert.IsTrue(state.ProtectAudio.Checked, "Protect audio quality defaults on.");
         Assert.IsFalse(state.ProtectAudio.Indeterminate, "An unknown read-back never overrides the intent.");
@@ -71,11 +72,12 @@ public sealed class MenuModelTests
     }
 
     [TestMethod]
-    public void BeforeTheStatusIsReadBlockAtBootShowsTheDefaultAndSetUpIsHidden()
+    public void BeforeTheStatusIsReadBlockAtBootShowsNeitherStateAndSetUpIsHidden()
     {
         MenuState state = Build(block: null);
 
-        Assert.IsTrue(state.BlockAtBoot.Checked);
+        Assert.IsFalse(state.BlockAtBoot.Checked);
+        Assert.IsTrue(state.BlockAtBoot.Indeterminate, "Not known yet, so neither on nor off.");
         Assert.IsFalse(state.SetUp.Visible);
     }
 

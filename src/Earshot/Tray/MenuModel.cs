@@ -60,13 +60,14 @@ internal static class MenuModel
         bool changing = connection is ConnectionState.Connecting or ConnectionState.Disconnecting;
         bool connected = connection == ConnectionState.Connected;
 
-        // Before setup the gate config does not exist, so the shipped default is shown.
-        bool blockAtBoot = block?.BlockAtBoot ?? new GateConfig().BlockAtBoot;
+        // The check shows what is in force. Before setup nothing blocks at boot, so it is unchecked (clicking it runs
+        // setup, which turns it on); before the first status read it is not known, so it shows neither state.
+        bool blockAtBoot = block is { State: not BlockState.NotSetUp, BlockAtBoot: true };
 
         return new MenuState(
             SafeMode: new MenuItemState(SafeMode, Checked: false, Enabled: false, Visible: safeMode),
             Toggle: new MenuItemState(connected ? Disconnect : Connect, Checked: false, Enabled: !busy && !changing, Visible: true),
-            BlockAtBoot: new MenuItemState(BlockAtBoot, Checked: blockAtBoot, Enabled: !busy, Visible: true),
+            BlockAtBoot: new MenuItemState(BlockAtBoot, Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: block is null),
             ProtectAudio: new MenuItemState(
                 ProtectAudioQuality,
                 Checked: settings.ProtectAudioQuality,
