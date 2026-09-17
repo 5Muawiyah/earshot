@@ -81,6 +81,35 @@ public sealed class CardPresenterTests
     }
 
     [TestMethod]
+    public void ShowAsyncReportsWhetherTheCardWentOnScreen()
+    {
+        using var h = new Harness();
+
+        Task<bool> atClick = h.Presenter.ShowAsync(Connected, CardAnchor.NearCursor, new Point(960, 1056));
+        Assert.IsFalse(atClick.IsCompleted, "It completes on the UI thread, once the card is shown.");
+        h.Ui.RunAll();
+        Assert.IsTrue(atClick.IsCompletedSuccessfully && atClick.GetAwaiter().GetResult());
+
+        // Quiet time holds back a card nobody clicked for.
+        h.Environment.Notifications = new NotificationStateReading(0, Shell.QUNS_QUIET_TIME);
+        Task<bool> heldBack = h.Presenter.ShowAsync(Connected, CardAnchor.NearTray, null);
+        h.Ui.RunAll();
+        Assert.IsFalse(heldBack.GetAwaiter().GetResult());
+
+        // A card that cannot be put on screen is not shown either.
+        h.Environment.Notifications = new NotificationStateReading(0, Shell.QUNS_ACCEPTS_NOTIFICATIONS);
+        h.Card.ShowResult = StepOutcomes.FromWin32("set-window-pos:show-card", 1400);
+        Task<bool> failed = h.Presenter.ShowAsync(Connected, CardAnchor.NearTray, null);
+        h.Ui.RunAll();
+        Assert.IsFalse(failed.GetAwaiter().GetResult());
+
+        h.Presenter.Dispose();
+        Task<bool> closed = h.Presenter.ShowAsync(Connected, CardAnchor.NearCursor, null);
+        h.Ui.RunAll();
+        Assert.IsFalse(closed.GetAwaiter().GetResult());
+    }
+
+    [TestMethod]
     public void CallsFromAnotherThreadRunOnTheUiThread()
     {
         using var h = new Harness();

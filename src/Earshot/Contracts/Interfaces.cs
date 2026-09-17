@@ -80,5 +80,22 @@ public interface ICardPresenter
     // happened. A presenter that cannot place a card at a point shows it as Show(content, anchor) does.
     void Show(CardContent content, CardAnchor anchor, System.Drawing.Point clickPoint) => Show(content, anchor);
 
+    // Shows a card as Show does (at clickPoint when there is one) and completes with whether it was put on screen:
+    // false when it was held back or could not be drawn. For a one-time notice that is remembered only once seen.
+    // It may complete later, on the UI thread. A presenter that cannot tell reports true.
+    Task<bool> ShowAsync(CardContent content, CardAnchor anchor, System.Drawing.Point? clickPoint)
+    {
+        if (clickPoint is { } point)
+        {
+            Show(content, anchor, point);
+        }
+        else
+        {
+            Show(content, anchor);
+        }
+
+        return Task.FromResult(true);
+    }
+
     void Hide();
 }
