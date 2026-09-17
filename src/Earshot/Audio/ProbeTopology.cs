@@ -56,7 +56,7 @@ internal static partial class Program
 
         WriteTopologyProbe(ctx, report);
 
-        // A probe that proved nothing is not a pass: the live-test skill reads the exit code to tell "the
+        // A probe that proved nothing is not a pass: the owner's live test reads the exit code to tell "the
         // connect path is reachable" from "there was nothing to walk".
         ctx.ExitCode = !report.EnumerationOk ? ExitCodes.OsError
             : report.Target is null || !report.Adapters.Any(a => a.Visit.ControlActivated) ? ExitCodes.Unavailable

@@ -206,7 +206,7 @@ internal interface IKsConnectPath
     KsSendResult Send(Guid container, IReadOnlyList<AudioEndpoint> endpoints, ConnectAction action, FilterChoice choice, CancellationToken ct = default);
 }
 
-// The connect path over Core Audio (design sections F, steps 1 to 5). Worker thread only. Discovery and the
+// The connect path over Core Audio: find the filters, guard them, send the property. Worker thread only. Discovery and the
 // guard are TopologyWalk's: endpoint -> IDeviceTopology -> connector 0 -> GetDeviceIdConnectedTo, then per
 // adapter GetDevice, GetState == ACTIVE, adapter ContainerId == target, and only then Activate(IKsControl).
 // That container check keeps any other device's filter, such as the paired phone's Hands-Free filter, out.

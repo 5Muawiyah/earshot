@@ -66,7 +66,9 @@ internal sealed class ConnectCancelledException : OperationCanceledException
     public IReadOnlyList<StepOutcome> Steps { get; }
 }
 
-// Connect and disconnect over Core Audio and IKsControl (design section F). No elevation.
+// Connect and disconnect over Core Audio and IKsControl, the documented path from an endpoint to its kernel
+// streaming filter. No elevation.
+// https://learn.microsoft.com/en-us/windows/win32/coreaudio/using-the-ikscontrol-interface-to-access-audio-properties
 //
 //   1. On the audio worker, in one work item: enumerate the endpoints and keep the container's, decide, and when
 //      the decision is to send, walk to the filters and send KSPROPERTY_ONESHOT_RECONNECT (connect) or

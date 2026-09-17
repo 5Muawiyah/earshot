@@ -8,7 +8,7 @@ namespace Earshot.Boot;
 // Evaluates a security descriptor read back from a folder or a scheduled task and lists every problem.
 // An empty list means the descriptor is safe; anything unexpected is a problem (fail closed).
 //
-// The rules the design sets:
+// The rules, which keep every file and task an elevated Earshot run trusts out of reach of a standard user:
 //   - the owner is SYSTEM or Administrators;
 //   - no allow ACE for any other SID carries write, append, delete, WRITE_DAC or WRITE_OWNER (or the
 //     generic rights that include them), inherited and inherit-only ACEs included, because the files and

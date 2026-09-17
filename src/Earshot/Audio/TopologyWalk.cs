@@ -27,8 +27,8 @@ internal sealed record FilterVisit(
     bool ControlActivated,
     IReadOnlyList<StepOutcome> Steps);
 
-// The documented walk from a device's endpoints to its kernel streaming filters (design section F, steps 1
-// to 3). Worker thread only; every RCW is created and released inside these calls, and no interface leaves
+// The documented walk from a device's endpoints to its kernel streaming filters, up to the IKsControl each
+// one offers. Worker thread only; every RCW is created and released inside these calls, and no interface leaves
 // them except the IKsControl lent to the caller's callback for the duration of that call.
 //
 //   1-2  for each endpoint of the target container (any flow, any state): IMMDevice.Activate(IDeviceTopology)
