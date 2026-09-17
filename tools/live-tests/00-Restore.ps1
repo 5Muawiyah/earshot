@@ -124,6 +124,24 @@ try
             if ($want -eq 'off' -and $protection -ne 'NotProtected') { $outcome = 'fail' }
             Add-Criterion -Run $run -Id 'protection' -Criterion 'Handsfree ends in the state you asked for.' `
                 -Outcome $outcome -Detail ('You asked for ' + $want + '; it reads ' + $protection + '.')
+
+            # Test 07 turns Block at boot off and back on again. If it stopped between the two, or
+            # the second step was declined, the machine is left not blocking at boot, which is not
+            # how Earshot ships and would quietly undo the thing test 08 exists to prove.
+            Write-Section -Run $run -Title 'Block at boot'
+            $blockAtBoot = Get-BlockAtBootSetting -Run $run
+            Write-Line -Run $run -Text ('Block at boot reads ' + $blockAtBoot + '. Earshot ships with it on.')
+            if ($blockAtBoot -eq $false)
+            {
+                Write-Line -Run $run -Text 'Test 07 turns it off and back on again, so a run that stopped in the middle can leave it off.'
+                $backOn = Invoke-Earshot -Run $run -Label 'gate-setboot-on' -Command @('diag', 'gate', 'setboot-on') -Live `
+                    -Consequence 'Turns Block at boot back on in the machine configuration. No device node is changed by this verb.'
+                if ($null -ne $backOn) { $blockAtBoot = Get-BlockAtBootSetting -Run $run }
+            }
+
+            Add-Criterion -Run $run -Id 'block-at-boot' -Criterion 'Block at boot is left on, as Earshot ships.' `
+                -Outcome $(if ($blockAtBoot -eq $true) { 'pass' } elseif ($blockAtBoot -eq $false) { 'fail' } else { 'inconclusive' }) `
+                -Detail ('It reads ' + $blockAtBoot + '.')
         }
 
         # Two things this script cannot put back, because both need either the tray or an
