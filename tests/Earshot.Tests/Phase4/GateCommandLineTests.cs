@@ -270,6 +270,95 @@ public sealed class GateCommandLineTests
         Assert.HasCount(9, bootNodes.Calls);
     }
 
+    // A gate run that is not SYSTEM (install --principal user) has an environment its user can change. While that
+    // environment names code for the .NET runtime to load, the run changes nothing and says which variable, never
+    // its value.
+    [TestMethod]
+    [DataRow("CORECLR_ENABLE_PROFILING")]
+    [DataRow("coreclr_profiler_path_64")]
+    [DataRow("CORECLR_ENABLE_NOTIFICATION_PROFILERS")]
+    [DataRow("COR_ENABLE_PROFILING")]
+    [DataRow("COR_PROFILER")]
+    [DataRow("COR_PROFILER_PATH")]
+    [DataRow("DOTNET_ENABLE_PROFILING")]
+    [DataRow("DOTNET_PROFILER_PATH")]
+    [DataRow("DOTNET_NOTIFICATION_PROFILERS")]
+    [DataRow("DOTNET_STARTUP_HOOKS")]
+    [DataRow("DOTNET_ADDITIONAL_DEPS")]
+    [DataRow("DOTNET_SHARED_STORE")]
+    [DataRow("DOTNET_DiagnosticPorts")]
+    [DataRow("COMPlus_DiagnosticPorts")]
+    [DataRow("complus_enable_profiling")]
+    public void AGateRunNotAsSystemRefusesWhileItsEnvironmentNamesCodeForTheRuntimeToLoad(string name)
+    {
+        var log = new CapturingLog();
+
+        GateExitCode exit = Program.RunGate(["gate", "block", Nonce], FakeToken.ElevatedUser, log, NeverBuilt, ["Path", "TEMP", name]);
+        GateExitCode protect = Program.RunGate(["gate-protect", "protect-on", Nonce], FakeToken.ElevatedUser, log, NeverBuilt, [name]);
+
+        Assert.AreEqual(GateExitCode.UnsafeEnvironment, exit);
+        Assert.AreEqual(GateExitCode.UnsafeEnvironment, protect);
+        Assert.AreEqual("unsafe-environment", GateExitCodes.ResultName(exit));
+        Assert.IsTrue(log.Has(LogLevel.Warn, "gate block: refused, because this elevated run is not SYSTEM and its environment sets " + name + ","));
+        Assert.IsTrue(log.Has(LogLevel.Warn, "gate-protect protect-on: refused"));
+    }
+
+    [TestMethod]
+    public void OrdinaryVariablesDoNotStopAGateRunNotAsSystem()
+    {
+        using var temp = new TempFolder();
+        string machine = Path.Combine(temp.Path, "ProgramData", "Earshot");
+        Directory.CreateDirectory(machine);
+        var store = new GateStore(machine);
+        Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        FakeNodeApi nodes = RecordedNodes.Table();
+        var log = new CapturingLog();
+        string[] names = ["Path", "TEMP", "DOTNET_CLI_TELEMETRY_OPTOUT", "DOTNET_ROOT", "DOTNET_NOLOGO", "COMPlus_gcServer", "CORE_ROOT", "COR_X"];
+
+        GateExitCode exit = Program.RunGate(["gate", "block", Nonce], FakeToken.ElevatedUser, log,
+            () => new GateActions(nodes, store, new FakeFolderSecurity(), log, new ManualTime()), names);
+
+        Assert.AreEqual(GateExitCode.Success, exit);
+        Assert.IsEmpty(Program.RuntimeCodeLoadingVariables(names));
+    }
+
+    // SYSTEM's environment is the machine's, which only administrators can change, so the check never stops the
+    // default principal, whatever the machine environment holds.
+    [TestMethod]
+    public void AGateRunAsSystemIsNeverRefusedForItsEnvironment()
+    {
+        using var temp = new TempFolder();
+        string machine = Path.Combine(temp.Path, "ProgramData", "Earshot");
+        Directory.CreateDirectory(machine);
+        var store = new GateStore(machine);
+        Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        FakeNodeApi nodes = RecordedNodes.Table();
+        var log = new CapturingLog();
+
+        GateExitCode exit = Program.RunGate(["gate", "block", Nonce], FakeToken.System, log,
+            () => new GateActions(nodes, store, new FakeFolderSecurity(), log, new ManualTime()), ["CORECLR_ENABLE_PROFILING", "DOTNET_STARTUP_HOOKS"]);
+
+        Assert.AreEqual(GateExitCode.Success, exit);
+        Assert.HasCount(9, nodes.Calls);
+    }
+
+    [TestMethod]
+    public void InstallWithTheUserPrincipalWarnsAndARejectedInstallSaysHowToCallIt()
+    {
+        var log = new CapturingLog();
+
+        Program.RunInstall(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal", "user"], FakeToken.ElevatedUser, log,
+            _ => new InstallResult(GateExitCode.Success, []));
+        Program.RunInstall(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container], FakeToken.ElevatedUser, log,
+            _ => new InstallResult(GateExitCode.Success, []));
+        Assert.AreEqual(1, log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains(Program.InstallPrincipalUserWarning, StringComparison.Ordinal)),
+            "Only the user principal is warned about.");
+
+        Assert.AreEqual(GateExitCode.Rejected, Program.RunInstall(["install", "--principal", "user"], FakeToken.ElevatedUser, log, NeverRun));
+        Assert.IsTrue(log.Has(LogLevel.Warn, Program.InstallUsage));
+        StringAssert.Contains(Program.InstallUsage, "[--principal user]");
+    }
+
     [TestMethod]
     public void TheLoggedCommandLineIsBoundedAndPrintable()
     {

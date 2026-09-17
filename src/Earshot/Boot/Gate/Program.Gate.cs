@@ -18,6 +18,14 @@ namespace Earshot;
 //   install <userSid> <address> <containerGuid> [--principal user]
 //   uninstall
 //
+// install --principal user is the fall-back to the default SYSTEM tasks, never passed by the tray. It runs Gate and
+// Protect elevated as the interactive user, with that user's own environment, which any program the user runs can
+// change without elevation (HKCU\Environment). The .NET runtime loads a profiler named by environment variables as
+// it starts, before any Earshot code runs, so such a program can run its own code in those elevated runs. install
+// logs this as a warning when the flag is given, InstallUsage says it, and a gate run that is not SYSTEM refuses to
+// act while such a variable is set (RuntimeCodeLoadingVariables), which tells the owner but cannot keep the code out.
+// https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
+//
 // Program.Dispatch has already refused all of them in safe mode and while EARSHOT_DATA_ROOT is set. The
 // command line is attacker-controlled (anyone who may start the gate task chooses $(Arg0) to $(Arg2)), so
 // it is matched exactly and never used in a shell, a path or a query. A command line that does not match
@@ -34,6 +42,13 @@ internal static partial class Program
 {
     internal const string InstallPrincipalFlag = "--principal";
     internal const string InstallPrincipalUser = "user";
+
+    internal const string InstallUsage =
+        "Usage: Earshot.exe install <userSid> <address> <containerGuid> [--principal user]. " + InstallPrincipalUserWarning;
+
+    internal const string InstallPrincipalUserWarning =
+        "--principal user runs the Gate and Protect tasks elevated as that user, with that user's own environment, " +
+        "which any program the user runs can change to load its own code into them. Use it only if the default SYSTEM tasks do not work.";
 
     static partial void TryRunGate(RunContext ctx)
     {
@@ -167,7 +182,8 @@ internal static partial class Program
         }
     }
 
-    internal static GateExitCode RunGate(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<GateActions> actions)
+    // environmentNames: the names of the variables in this process's environment; null reads them. A test passes its own.
+    internal static GateExitCode RunGate(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<GateActions> actions, IEnumerable<string>? environmentNames = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(token);
@@ -187,8 +203,73 @@ internal static partial class Program
             return GateExitCode.NotElevated;
         }
 
+        // SYSTEM's environment is the machine's, which only administrators can change, so only a run as someone else
+        // (install --principal user, or an administrator by hand) is checked; a SYSTEM run is never refused for it.
+        if (!token.IsLocalSystem)
+        {
+            IReadOnlyList<string> loaders = RuntimeCodeLoadingVariables(environmentNames ?? CurrentEnvironmentNames());
+            if (loaders.Count > 0)
+            {
+                log.Warn(GateModes.TokenOf(request.Mode) + " " + request.Verb + ": refused, because this elevated run is not SYSTEM and its environment sets " +
+                         string.Join(", ", loaders) + ", which make the .NET runtime load code that is not Earshot's. That code may already have run in " +
+                         "this process. Remove the variables from the user's environment, or run uninstall and set up again without --principal user.");
+                return GateExitCode.UnsafeEnvironment;
+            }
+        }
+
         return actions().Run(request);
     }
+
+    // The names, in the order given, of the environment variables that make the .NET runtime or its host load code
+    // other than the application's, or connect to a diagnostics client that can tell it to: a profiler (CORECLR_*,
+    // COR_ENABLE_PROFILING and COR_PROFILER*, and the DOTNET_ spellings, notification profilers included), startup
+    // hooks, additional deps files, a runtime package store, and diagnostic ports. Names are compared as Windows
+    // compares them, ignoring case. The value is never read or logged.
+    // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
+    // https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-environment-variables
+    // https://learn.microsoft.com/en-us/dotnet/core/diagnostics/diagnostic-port
+    internal static IReadOnlyList<string> RuntimeCodeLoadingVariables(IEnumerable<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        return names.Where(IsRuntimeCodeLoadingVariable).ToList();
+    }
+
+    private static readonly string[] RuntimeKnobPrefixes = ["DOTNET_", "COMPlus_"];
+
+    private static readonly string[] CodeLoadingKnobs =
+    [
+        "ENABLE_PROFILING", "PROFILER", "ENABLE_NOTIFICATION_PROFILERS", "NOTIFICATION_PROFILERS",
+        "STARTUP_HOOKS", "ADDITIONAL_DEPS", "SHARED_STORE", "DiagnosticPorts",
+    ];
+
+    private static bool IsRuntimeCodeLoadingVariable(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return false;
+        }
+
+        if (name.StartsWith("CORECLR_", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("COR_ENABLE_PROFILING", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("COR_PROFILER", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (string prefix in RuntimeKnobPrefixes)
+        {
+            if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string knob = name[prefix.Length..];
+                return CodeLoadingKnobs.Any(k => knob.StartsWith(k, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> CurrentEnvironmentNames() =>
+        Environment.GetEnvironmentVariables().Keys.OfType<string>();
 
     internal static GateExitCode RunInstall(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<InstallRequest, InstallResult> run)
     {
@@ -205,12 +286,16 @@ internal static partial class Program
 
         if (!TryParseInstallArgs(args, out InstallRequest? request, out string? problem))
         {
-            log.Warn("install: rejected (" + problem + "): " + DescribeArgs(args));
+            log.Warn("install: rejected (" + problem + "): " + DescribeArgs(args) + ". " + InstallUsage);
             return GateExitCode.Rejected;
         }
 
         log.Info("install for " + request.UserSid + ", device " + request.Address + ", container " +
                  request.ContainerId.ToString("D") + ", " + request.Principal + " principal.");
+        if (request.Principal == TaskPrincipalMode.InteractiveUser)
+        {
+            log.Warn("install: " + InstallPrincipalUserWarning);
+        }
         InstallResult result = run(request);
         LogSteps(log, "install", result);
         return result.Outcome;
@@ -382,7 +467,8 @@ internal static partial class Program
         return true;
     }
 
-    // Exactly [install, userSid, address, containerGuid] or the same followed by [--principal, user].
+    // Exactly [install, userSid, address, containerGuid] or the same followed by [--principal, user]. The flag is the
+    // fall-back principal and a same-user elevation surface (InstallPrincipalUserWarning, and the header comment).
     internal static bool TryParseInstallArgs(
         IReadOnlyList<string> args,
         [NotNullWhen(true)] out InstallRequest? request,

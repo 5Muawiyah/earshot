@@ -43,7 +43,8 @@ internal enum GateExitCode
     OtherDeviceProtected = 13, // set-device while protection.json lists services turned off on the device pinned now
     NoManifest = 14,         // install without a valid Earshot.files.json next to the running exe
     DeviceMismatch = 15,     // install with a container that is not the container of the address's device node
-    Rejected = 20,           // the command line did not validate; nothing was done
+    UnsafeEnvironment = 16,  // a gate run not as SYSTEM whose environment names code for the .NET runtime to load
+    Rejected = 20,          // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
 }
@@ -67,6 +68,7 @@ internal static class GateExitCodes
         [GateExitCode.OtherDeviceProtected] = "other-device-protected",
         [GateExitCode.NoManifest] = "no-manifest",
         [GateExitCode.DeviceMismatch] = "device-mismatch",
+        [GateExitCode.UnsafeEnvironment] = "unsafe-environment",
         [GateExitCode.Rejected] = "rejected",
         [GateExitCode.NotElevated] = "not-elevated",
         [GateExitCode.RunningAsSystem] = "running-as-system",

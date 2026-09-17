@@ -74,7 +74,9 @@ internal static class TaskPlan
     // --principal user) runs the gate elevated with that user's own profile and environment, both of which the
     // same user can change without elevation (%LOCALAPPDATA%, and .NET runtime variables in HKCU\Environment), so
     // it is a same-user elevation surface: only a fall-back for when the owner's live test finds SYSTEM does not
-    // work, and the gate then keeps its log out of that profile (Program.GateLog).
+    // work. The gate then keeps its log out of that profile (Program.GateLog), and refuses to act while its
+    // environment names code for the .NET runtime to load (Program.RuntimeCodeLoadingVariables), which says so but
+    // cannot keep that code out, since the runtime loads it before Earshot runs. install logs a warning for it.
     public static TaskPrincipal PrincipalFor(string taskName, TaskPrincipalMode mode, string userSid)
     {
         ArgumentNullException.ThrowIfNull(taskName);
