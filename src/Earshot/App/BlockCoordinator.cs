@@ -120,6 +120,13 @@ internal sealed class BlockCoordinator : IDisposable
     // a measured figure; nothing documents how long enabling a device node takes to bring its endpoints back.
     public static readonly TimeSpan EndpointWait = TimeSpan.FromSeconds(10);
 
+    // How long a refresh of the audio devices is waited for. A refresh runs on the audio worker, behind any call
+    // still inside the audio driver (ConnectionController leaves a KsProperty call that has not returned to finish,
+    // and every later item queues behind it), so without a limit a stalled driver would hold the operation in
+    // flight for good, a re-block after the coordinator's own allow included. A refresh that does not come back in
+    // time is a read that failed: the device state is not known. A waiting budget, not a measured figure.
+    public static readonly TimeSpan RefreshBudget = TimeSpan.FromSeconds(5);
+
     // ProtectionPolicy runs each change at most once per sequence, so a sequence ends well within this many steps.
     internal const int MaxProtectionSteps = 16;
 
@@ -1770,14 +1777,24 @@ internal sealed class BlockCoordinator : IDisposable
         }
     }
 
-    // Refreshes the device monitor. Null when the refresh failed (logged with its code).
+    // Refreshes the device monitor within RefreshBudget. Null when the refresh failed or did not come back in time
+    // (logged either way), which callers take as a device state that is not known.
     private async Task<DeviceSnapshot?> RefreshSnapshotAsync()
     {
+        using var budget = new CancellationTokenSource(RefreshBudget, _time);
         try
         {
-            DeviceSnapshot snapshot = await _monitor.RefreshAsync(CancellationToken.None);
+            // The token takes a refresh that is still queued off the worker; WaitAsync ends the wait for one that
+            // is not, whatever the monitor does with the token.
+            DeviceSnapshot snapshot = await _monitor.RefreshAsync(budget.Token).WaitAsync(budget.Token);
             Observe(snapshot);
             return snapshot;
+        }
+        catch (OperationCanceledException) when (budget.IsCancellationRequested)
+        {
+            _log.Warn("The device state was not refreshed within " + Seconds(RefreshBudget) +
+                ", so it is not known. The audio worker may still be inside a driver call.");
+            return null;
         }
         catch (Exception ex)
         {
@@ -1787,7 +1804,9 @@ internal sealed class BlockCoordinator : IDisposable
     }
 
     // Waits for a snapshot in which ready holds for container: armed first, then refreshed, so a state reached
-    // before the wait began is seen. False at the timeout; OperationCanceledException when ct is cancelled.
+    // before the wait began is seen. The refresh is not waited for on its own, so the timeout holds even when
+    // the audio worker is inside a driver call, and a notification that arrives first ends the wait. False at the
+    // timeout; OperationCanceledException when ct is cancelled.
     private async Task<bool> WaitForSnapshotAsync(Guid container, Func<DeviceSnapshot, Guid, bool> ready, TimeSpan timeout, CancellationToken ct)
     {
         var seen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1804,20 +1823,40 @@ internal sealed class BlockCoordinator : IDisposable
         try
         {
             using var timeoutSource = new CancellationTokenSource(timeout, _time);
+            using var refreshCancel = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutSource.Token);
             using CancellationTokenRegistration onTimeout = timeoutSource.Token.Register(() => seen.TrySetResult(false));
             using CancellationTokenRegistration onCancel = ct.Register(() => seen.TrySetCanceled(ct));
+            _ = RefreshForWaitAsync(container, ready, seen, refreshCancel.Token);
+            return await seen.Task;
+        }
+        finally
+        {
+            _monitor.SnapshotChanged -= OnSnapshot;
+        }
+    }
+
+    // The refresh that starts a wait for a snapshot. Never throws: a refresh that fails is logged and the wait goes
+    // on for a notification, and one still queued or running when the wait ends is left, since the wait has
+    // already reported how it ended.
+    private async Task RefreshForWaitAsync(Guid container, Func<DeviceSnapshot, Guid, bool> ready, TaskCompletionSource<bool> seen, CancellationToken ct)
+    {
+        try
+        {
             DeviceSnapshot now = await _monitor.RefreshAsync(ct);
             Observe(now);
             if (ready(now, container))
             {
                 seen.TrySetResult(true);
             }
-
-            return await seen.Task;
         }
-        finally
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _monitor.SnapshotChanged -= OnSnapshot;
+            // The wait ended (timed out or cancelled) while the refresh was queued; the caller reports how.
+            _log.Write(LogLevel.Debug, "The refresh for a device wait had not run when the wait ended.");
+        }
+        catch (Exception ex)
+        {
+            LogReadFailure("device-refresh", "The device state could not be refreshed while waiting for the AirPods.", ex);
         }
     }
 

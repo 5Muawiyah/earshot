@@ -391,6 +391,10 @@ internal sealed class FakeMonitor : IDeviceMonitor
 
     public int Refreshes { get; private set; }
 
+    // While true, a refresh never completes and ignores its token: a refresh queued on the audio worker behind a
+    // driver call that has not returned, the worst case, since a refresh still queued would at least be cancelled.
+    public bool RefreshStalls { get; set; }
+
     public event EventHandler<DeviceSnapshotEventArgs>? SnapshotChanged;
 
     public void Start()
@@ -400,7 +404,7 @@ internal sealed class FakeMonitor : IDeviceMonitor
     public Task<DeviceSnapshot> RefreshAsync(CancellationToken ct = default)
     {
         Refreshes++;
-        return Task.FromResult(Current);
+        return RefreshStalls ? new TaskCompletionSource<DeviceSnapshot>().Task : Task.FromResult(Current);
     }
 
     // The state a later read would show, with no notification.
