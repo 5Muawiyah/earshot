@@ -224,11 +224,11 @@ One program, `Earshot.exe`, chosen by its first argument.
 | Command | What it does |
 |---|---|
 | `Earshot.exe` | The tray application. `--startup` is the same thing, and is what the startup value passes. |
-| `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer above. It changes nothing. |
+| `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer above. It changes nothing. On a machine where Earshot is not set up and no device is pinned it still writes a full report, and exits 78 to say so: the nodes and services targets had no device to read. Read the report, not the exit code. |
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
-| `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep change the state of the device**; the sweep only reads. They exist for the live tests in `tools\live-tests` and are not part of normal use. |
+| `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep and `gate status` change the state of the device**; those two only read. They exist for the live tests in `tools\live-tests` and are not part of normal use. |
 
 Two variables help testing. `EARSHOT_DATA_ROOT=<absolute folder>` moves every
 data folder under that folder. `EARSHOT_SAFE_MODE=1` turns every device action
@@ -297,7 +297,11 @@ stay pending until the live tests in `tools\live-tests` are run on the device.
 
 ## Live tests
 
-The pending rows above are settled by the scripts in `tools\live-tests`. They
+The pending rows above are settled by the scripts in `tools\live-tests`, with
+one exception: no script settles Fast Startup. Test 08 powers the machine down
+with whatever it is set to and does not record which, so a full sitting leaves
+that row where it is. To cover it by hand, turn Fast Startup on and run
+`04-BlockAndReboot.ps1 -Note "fast startup on"`. They
 are run by hand, with the AirPods and the phone there, against an installed copy
 or an unzipped release. Nothing runs them for you, and none of them runs during
 a build.
@@ -358,6 +362,11 @@ compiler or analyser warning is suppressed anywhere in the solution.
 every published file against the manifest the build writes, zips it to
 `artifacts\Earshot-<version>-win-x64.zip`, and prints the zip's size and
 SHA-256. The version comes from `src\Earshot\Earshot.csproj`.
+
+`Earshot.pdb` is published, listed in the manifest and installed on purpose. It
+is 247 KB, and it is what turns the stack trace in a logged exception into file
+names and line numbers you can act on. Since the log is where Earshot reports
+the failures it refuses to swallow, the symbols earn their place.
 
 `prototype\` holds the three PowerShell scripts that blocked the AirPods before
 Earshot existed. They are superseded and kept only for reference.
