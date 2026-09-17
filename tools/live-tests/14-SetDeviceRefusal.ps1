@@ -154,6 +154,13 @@ try
 
                 Add-Finding -Run $run -Name 'setDevicePhoneRefusal' -Value ('' + $statusResult + ' (' + $statusExit + ')')
 
+                if (-not $unchanged)
+                {
+                    Write-Failure -Run $run -Message 'The pin moved. device.json now names a device Earshot must never disable, and a later block would disable that device.'
+                    Write-Line -Run $run -Text 'Put the pin back before anything else: open the tray menu, choose "Choose device...", and pick the AirPods again.'
+                    Write-Line -Run $run -Text 'If the menu cannot do it, uninstall and install again. 00-Restore.ps1 restores nodes and protection only; it does not touch device.json.'
+                }
+
                 $nodesAfter = Get-NodeState -Run $run -Label 'nodes-after'
                 Add-Criterion -Run $run -Id 'phone-untouched' -Criterion 'Nothing on the phone was disabled.' `
                     -Outcome $(if ((Get-Field -Object $nodesAfter -Name 'address').ToUpperInvariant() -eq $pinned) { 'pass' } else { 'fail' }) `
@@ -195,6 +202,13 @@ try
                     -Outcome $(if ($statusExit -eq $OtherDeviceProtectedExit) { 'pass' } elseif ($statusExit -eq 0) { 'fail' } else { 'inconclusive' }) `
                     -Detail ('It answered ' + $statusResult + ', exit ' + $statusExit + '. ' + $OtherDeviceProtectedExit + ' is the other-device-protected refusal.')
                 Add-Finding -Run $run -Name 'setDeviceProtectedRefusal' -Value ('' + $statusResult + ' (' + $statusExit + ')')
+
+                if ($statusExit -eq 0)
+                {
+                    Write-Failure -Run $run -Message 'The pin moved to the other device while services were still turned off on the AirPods, so the record that puts them back no longer matches the pinned device.'
+                    Write-Line -Run $run -Text 'Put the pin back before anything else: tray menu, "Choose device...", pick the AirPods again, or uninstall and install again.'
+                    Write-Line -Run $run -Text '00-Restore.ps1 restores nodes and protection only; it does not touch device.json.'
+                }
             }
         }
 

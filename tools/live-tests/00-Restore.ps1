@@ -126,6 +126,44 @@ try
                 -Outcome $outcome -Detail ('You asked for ' + $want + '; it reads ' + $protection + '.')
         }
 
+        # Two things this script cannot put back, because both need either the tray or an
+        # administrator: which device is pinned, and how the tasks are registered. It reads
+        # them and says what to do, rather than leaving a wrong one to be found by a block.
+        Write-Section -Run $run -Title 'The pinned device and the task principal'
+        $deviceFile = Read-EarshotJsonFile -Run $run -Path (Join-Path $run.MachineFolder 'device.json')
+        $pinnedAddress = Get-Field -Object $deviceFile -Name 'Address'
+        $pinnedContainer = Get-Field -Object $deviceFile -Name 'ContainerId'
+        Write-Line -Run $run -Text ('device.json names address ' + $pinnedAddress + ', container ' + $pinnedContainer + '.')
+        Write-Line -Run $run -Text 'If that is not the AirPods, a block would disable the wrong device. Nothing here can move it back:'
+        Write-Line -Run $run -Text 'start the tray, open its menu, choose "Choose device..." and pick the AirPods, or uninstall and install again.'
+
+        $systemSid = 'S-1-5-18'
+        $notSystem = @()
+        foreach ($row in (Get-Field -Object $task -Name 'tasks'))
+        {
+            $userId = '' + (Get-Field -Object $row -Name 'userId')
+            if ($userId.Length -gt 0 -and $userId -ne $systemSid)
+            {
+                $notSystem = $notSystem + @(('' + (Get-Field -Object $row -Name 'path') + ' runs as ' + $userId))
+            }
+        }
+
+        if ($notSystem.Count -gt 0)
+        {
+            Write-Line -Run $run -Text ''
+            Write-Line -Run $run -Text 'A task is not registered as SYSTEM, which is what test 07 leaves behind when it is run with -AllowPlanB:'
+            foreach ($line in $notSystem) { Write-Line -Run $run -Text ('  ' + $line) }
+            Write-Line -Run $run -Text 'That is not how Earshot ships. Uninstall and install again without --principal user before any other test.'
+            Add-Criterion -Run $run -Id 'tasks-as-shipped' -Criterion 'The Gate and Protect tasks run as SYSTEM, as Earshot ships them.' `
+                -Outcome 'fail' -Detail ($notSystem -join '; ')
+        }
+        else
+        {
+            Add-Criterion -Run $run -Id 'tasks-as-shipped' -Criterion 'The Gate and Protect tasks run as SYSTEM, as Earshot ships them.' `
+                -Outcome $(if ($setUp -eq $true) { 'pass' } else { 'inconclusive' }) `
+                -Detail $(if ($setUp -eq $true) { 'Every task reads ' + $systemSid + '.' } else { 'The tasks are not installed, so there is nothing to read.' })
+        }
+
         Write-Section -Run $run -Title 'The state it finished in'
         [void](Get-AudioState -Run $run -Label 'audio-after')
         [void](Get-NodeState -Run $run -Label 'nodes-final')

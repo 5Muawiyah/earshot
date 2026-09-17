@@ -44,13 +44,16 @@ The tests are numbered riskiest first. Test 08 is the acceptance test the whole
 application exists for: after a full power cycle, the AirPods are still connected
 to the phone. Everything else is secondary to it.
 
-Use a normal window, not an administrator one. Tests 07 and 15 raise an
-administrator prompt of their own, which only you can approve, and test 07 is
-specifically about what a normal window can do without one.
+Use a normal window, not an administrator one. Test 15 raises an administrator
+prompt of its own, and so does `00-Restore.ps1 -OfferUninstall`. Test 07 raises
+one only if you pass `-AllowPlanB`; its default path is specifically about what
+a normal window can do without a prompt. Only you can approve any of them.
 
-`EARSHOT_SAFE_MODE` and `EARSHOT_DATA_ROOT` must not be set. Earshot refuses its
-live modes while either is, and the scripts stop with that message rather than
-report a device failure that never happened.
+`EARSHOT_SAFE_MODE` and `EARSHOT_DATA_ROOT` must not be set. Earshot refuses
+`gate`, `gate-protect`, `install` and `uninstall` while either is set, and
+refuses every `diag` target in safe mode. `EARSHOT_DATA_ROOT` on its own does
+not stop a `diag` target, so the scripts check both themselves and stop the run
+rather than send a real device action with its evidence redirected.
 
 ## Which Earshot.exe
 
@@ -72,7 +75,7 @@ it is never lost.
 | 05 | optional, to show the enable persists too |
 | 08 | a full power down, not a restart |
 | 09 | shut down while the AirPods are connected to this PC |
-| 10 | one restart per variant, four variants |
+| 10 | one restart per variant, five variants: the fifth signs out and back in rather than restarting |
 | 15 | a restart, to check the delayed file deletion |
 
 ## Where the evidence goes
@@ -116,6 +119,70 @@ recorded that way rather than guessed at.
 | 13 | The value of the idle grace window. |
 | 14 | That a phone can never be pinned as the device Earshot disables. |
 | 15 | Whether uninstall reverses everything and install passes its own checks. |
+
+## What the backlog asks, and where it is answered
+
+The build's backlog holds 138 `live_test_needs`. This table maps every one of them
+onto the script that asks it, by its number in `live_test_needs`. It is deliberately
+cautious: a need is named against a test only where that test has a criterion or a
+recorded finding for it, so a need marked **not asked** may still be partly visible
+in the evidence. Nothing here is settled until the test has actually been run.
+
+**Not asked** is not the same as failed. It means no script puts the question, so
+after a full sitting the answer is still unknown, and it should be recorded as
+unknown rather than assumed.
+
+| Backlog needs | Where they are answered |
+|---|---|
+| 001, 003, 010 | 08 (`icon-dpi`, `icon-theme`). A contrast theme is not asked. |
+| 004, 005, 006, 012, 016 | 08 (`click-once`, `menu`, `clean-exit`, `startup-value`, `startup-agrees`, `single-instance`) |
+| 007, 013 | 10, all five variants (`query-arrived`, `end-arrived`) |
+| 009, 015 | 14 (`picker-lists-devices`). The greyed entries, the rename and the re-pin are not asked. |
+| 017, 064, 080 | 08 (`left-click-connects`, `click-agrees-with-endpoints`, `no-admin-prompt`, `card-no-focus`), 01, 02 |
+| 018, 021, 027, 060, 071, 079, 122 | 12 |
+| 019 | 06, 12 (`protection-churn`) |
+| 020, 025, 026, 037, 049, 078 | 04 |
+| 023, 056, 057, 065, 072, 073, 076, 098, 112, 128 | 01 |
+| 024 | 01, 02, 03 |
+| 030, 031, 043, 045, 054, 099, 134 | 15 |
+| 032, 048, 125 | 07 (`ace-present`), 15 (`install-again`) |
+| 033, 034, 035, 047, 051, 110, 116, 124 | 07 |
+| 036 | 04, 06, 07: any gate run that completes |
+| 038, 111, 126, 127, 138 | 08 (`ACCEPTANCE`, `still-blocked`) |
+| 039, 114 | 05 |
+| 040, 133 | 09 (`not-paged-at-boot`, `nodes-after-boot`) |
+| 041 | 07 (`setboot-round-trip`), 14 (the set-device half) |
+| 044, 055, 136 | 07 with `-AllowPlanB` (`planb`) |
+| 050, 117 | 05 (`bit-cleared`), 04 (`persisted`), 15 (`nodes-restored`) |
+| 052, 108 | 06 (`services-readable-while-blocked`), 08 (`no-fresh-handsfree-node`) |
+| 053, 119 | 09. A battery-saver boot is not asked. |
+| 058, 068, 077 | 02 |
+| 061, 066, 074 | 01 (`K1-budget`), 02 (`disconnect-budget`) |
+| 084, 086, 087 | 08 (`card-no-focus`) |
+| 085 | 08 (`icon-theme`) for light and dark. High contrast is not asked. |
+| 093 to 097, 100, 102 to 106, 115, 130 | 06 |
+| 113, 129 | 03 (`no-auto-page`), 02 (`block-recorded`) |
+| 118, 132 | 10 (`block-queued`), 09 (`end-session-logged`) |
+| 120, 131 | 13 |
+| 137 | 11 |
+| 002, 011 | **Not asked.** An Explorer restart and a primary-display DPI change. |
+| 008 | **Not asked.** No script watches a first sighting pin the container. |
+| 014 | **Not asked.** Keyboard access to the icon (Win+B, Shift+F10). |
+| 022, 028 | **Not asked.** They need a tray session of hours. |
+| 029 | **Not asked.** A code question, not a device one. |
+| 042 | **Not asked.** It needs the AirPods unpaired from this PC. |
+| 046 | **Not asked.** It needs a second account and a squatted task folder. |
+| 059, 067 | **Not asked.** Wrong-state and unsupported requests, and what they return. |
+| 062, 063 | **Not asked.** The controller's own return while blocked, and whether `staleSnapshotsIgnored` is ever non-zero. |
+| 069, 070, 075 | **Not asked.** Whether the render endpoint or its connector changes shape mid-connect. |
+| 081, 082, 083, 088 to 092 | **Not asked.** A second monitor, an auto-hidden taskbar, a full-screen app, and the other card placement cases. |
+| 101, 121 | **Not asked.** Two SYSTEM tasks started together, and the locks under the real task limits. |
+| 107 | **Not asked.** A protection intent kept while blocked and applied after the next allow. |
+| 109 | **Not asked.** The DACL on `device-change.lock`. |
+| 123, 135 | **Not asked.** Removing a paired device while it is blocked. |
+
+When a sitting ends, tick the needs the run actually answered against this table in
+`PROMPTING_RESPONSES.md`, so an unasked question is never read as a settled one.
 
 ## A note on numbers
 

@@ -123,7 +123,7 @@ $tests = @(
         Number = '10'; Script = '10-ShutdownMessages.ps1'
         Title = 'End-session messages, one variant per run'
         Settles = 'Which end-session messages arrive for each kind of restart, and whether the queued block finishes.'
-        Needs = 'Set up, tray running, AirPods connected. Run once per variant with -Variant 1 to 4.'
+        Needs = 'Set up, tray running, AirPods connected. Run once per variant with -Variant 1 to 5; variant 5 signs out and back in.'
         Halves = 'two, per variant'
     },
     [ordered]@{

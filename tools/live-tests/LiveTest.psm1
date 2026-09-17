@@ -94,8 +94,11 @@ function Get-UtcNowText
 # ------------------------------------------------------------------ environment
 
 # The live tests act on the real machine, so the two build-time safety switches must
-# be off. With either set, Earshot refuses gate, install and uninstall outright and
-# refuses every diag target, which would look like a device failure.
+# be off. With either set, Earshot refuses gate, gate-protect, install and uninstall
+# outright, and in safe mode it refuses every diag target as well, which would look
+# like a device failure. EARSHOT_DATA_ROOT alone does not stop a diag target: it would
+# run the real device action and write its evidence to the redirected folder, so this
+# check, not the application, is what stops the run.
 function Assert-LiveEnvironment
 {
     $set = @()

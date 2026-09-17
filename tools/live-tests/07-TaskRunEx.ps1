@@ -232,6 +232,13 @@ try
                                 -Detail ('install exit ' + $installed.exitCode + ' (' + $installed.exitName + '), gate outcome ' + $outcomeB +
                                     ', set up ' + $tasksAfter.SetUp + '.')
                             Add-Finding -Run $run -Name 'planBWorks' -Value $(if ($outcomeB -eq 'Completed') { 'yes' } else { 'no' })
+
+                            Write-Section -Run $run -Title 'Put the shipping registration back'
+                            Write-Line -Run $run -Text 'The Gate and Protect tasks now run as you, which is not how Earshot ships, and they stay that way until'
+                            Write-Line -Run $run -Text 'they are registered again. Before any other test, uninstall and install again without --principal user:'
+                            Write-Line -Run $run -Text ('  "' + $run.ExePath + '" uninstall')
+                            Write-Line -Run $run -Text ('  "' + $run.ExePath + '" install ' + $Sid + ' ' + $Address + ' ' + $Container)
+                            Write-Line -Run $run -Text 'Both need an administrator window. 00-Restore.ps1 does not undo a plan B install.'
                         }
                     }
                 }
