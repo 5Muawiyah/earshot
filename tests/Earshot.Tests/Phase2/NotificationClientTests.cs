@@ -89,6 +89,30 @@ public sealed class NotificationClientTests
     }
 
     [TestMethod]
+    public void ASinkFailureIsReportedAtOnceAndAFailedReportIsCountedToo()
+    {
+        int reports = 0;
+        var client = new NotificationClient(
+            _ => throw new InvalidOperationException("queue full"),
+            () =>
+            {
+                reports++;
+                if (reports == 2)
+                {
+                    throw new NotSupportedException("report could not be queued");
+                }
+            });
+
+        Assert.AreEqual(NotificationClient.S_OK, client.OnDeviceAdded(DeviceId));
+        Assert.AreEqual(NotificationClient.S_OK, client.OnDeviceRemoved(DeviceId));
+
+        Assert.AreEqual(2, reports, "Each failure is reported once.");
+        (int count, Exception? last) = client.TakeSinkFailures();
+        Assert.AreEqual(3, count, "Two sink failures and one report that could not be queued.");
+        Assert.IsInstanceOfType<NotSupportedException>(last);
+    }
+
+    [TestMethod]
     public void StateAddAndRemoveRequireARefreshButADefaultChangeDoesNot()
     {
         Assert.IsTrue(Notification(EndpointNotificationKind.StateChanged).RequiresRefresh);

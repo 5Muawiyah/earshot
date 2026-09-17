@@ -14,6 +14,7 @@ internal sealed class FakeEndpointSource : IEndpointSource
     private List<EndpointReading> _readings = new();
     private List<StepOutcome> _steps = new();
     private Action<EndpointNotification>? _sink;
+    private Action? _sinkFailed;
     private (int Count, Exception? Last) _callbackFailures;
 
     public StepOutcome SubscribeResult { get; set; } = StepOutcomes.FromHResult(AudioWorker.Steps.RegisterClient, 0);
@@ -40,6 +41,11 @@ internal sealed class FakeEndpointSource : IEndpointSource
         get { lock (_gate) { return _sink; } }
     }
 
+    public Action? SinkFailed
+    {
+        get { lock (_gate) { return _sinkFailed; } }
+    }
+
     public void SetReadings(IEnumerable<EndpointReading> readings, IEnumerable<StepOutcome>? steps = null)
     {
         lock (_gate)
@@ -57,7 +63,7 @@ internal sealed class FakeEndpointSource : IEndpointSource
         }
     }
 
-    public StepOutcome Subscribe(Action<EndpointNotification> sink)
+    public StepOutcome Subscribe(Action<EndpointNotification> sink, Action sinkFailed)
     {
         Record("subscribe");
         lock (_gate)
@@ -65,6 +71,7 @@ internal sealed class FakeEndpointSource : IEndpointSource
             if (SubscribeResult.Ok)
             {
                 _sink = sink;
+                _sinkFailed = sinkFailed;
             }
 
             return SubscribeResult;

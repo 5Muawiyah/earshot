@@ -106,9 +106,13 @@ internal sealed class FakeEnumerator(ReleaseLedger ledger) : IMMDeviceEnumerator
         return FakeHr.SOk;
     }
 
-    public int RegisterEndpointNotificationCallback(IMMNotificationClient pClient) => FakeHr.ENotImpl;
+    public int RegisterHr { get; set; } = FakeHr.ENotImpl;
 
-    public int UnregisterEndpointNotificationCallback(IMMNotificationClient pClient) => FakeHr.ENotImpl;
+    public int UnregisterHr { get; set; } = FakeHr.ENotImpl;
+
+    public int RegisterEndpointNotificationCallback(IMMNotificationClient pClient) => RegisterHr;
+
+    public int UnregisterEndpointNotificationCallback(IMMNotificationClient pClient) => UnregisterHr;
 }
 
 internal sealed class FakeCollection(ReleaseLedger ledger) : IMMDeviceCollection
