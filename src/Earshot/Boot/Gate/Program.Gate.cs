@@ -21,9 +21,10 @@ namespace Earshot;
 // install --principal user is the fall-back to the default SYSTEM tasks, never passed by the tray. It runs Gate and
 // Protect elevated as the interactive user, with that user's own environment, which any program the user runs can
 // change without elevation (HKCU\Environment). The .NET runtime loads a profiler named by environment variables as
-// it starts, before any Earshot code runs, so such a program can run its own code in those elevated runs. install
-// logs this as a warning when the flag is given, InstallUsage says it, and a gate run that is not SYSTEM refuses to
-// act while such a variable is set (RuntimeCodeLoadingVariables), which tells the owner but cannot keep the code out.
+// it starts, before any Earshot code runs, so such a program can run its own code in those elevated runs, or have the
+// host or runtime write a trace or dump file where it chooses. install logs this as a warning when the flag is given,
+// InstallUsage says it, and a gate run that is not SYSTEM refuses to act while such a variable is set
+// (UnsafeRuntimeVariables), which tells the owner but cannot keep the code out or undo a file already written.
 // install and uninstall start from the user's session through the UAC prompt with the same environment, so they
 // refuse on the same variables.
 // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
@@ -230,11 +231,11 @@ internal static partial class Program
         // (install --principal user, or an administrator by hand) is checked; a SYSTEM run is never refused for it.
         if (!token.IsLocalSystem)
         {
-            IReadOnlyList<string> loaders = RuntimeCodeLoadingVariables(environmentNames ?? CurrentEnvironmentNames());
+            IReadOnlyList<string> loaders = UnsafeRuntimeVariables(environmentNames ?? CurrentEnvironmentNames());
             if (loaders.Count > 0)
             {
                 log.Warn(GateModes.TokenOf(request.Mode) + " " + request.Verb + ": refused, because this elevated run is not SYSTEM and its environment sets " +
-                         string.Join(", ", loaders) + ", which make the .NET runtime load code that is not Earshot's. That code may already have run in " +
+                         string.Join(", ", loaders) + ", which " + UnsafeRuntimeVariablesEffect + " That code may already have run, or that file been written, in " +
                          "this process. Remove the variables from the user's environment, or run uninstall and set up again without --principal user.");
                 return GateExitCode.UnsafeEnvironment;
             }
@@ -243,31 +244,48 @@ internal static partial class Program
         return actions().Run(request);
     }
 
+    // What the variables UnsafeRuntimeVariables names can do, for the refusal's log line.
+    internal const string UnsafeRuntimeVariablesEffect =
+        "make the .NET host or runtime load code that is not Earshot's, use another runtime, or write trace or dump files where they say.";
+
     // The names, in the order given, of the environment variables that make the .NET runtime or its host load code
-    // other than the application's, or connect to a diagnostics client that can tell it to: a profiler (CORECLR_*,
-    // COR_ENABLE_PROFILING and COR_PROFILER*, and the DOTNET_ spellings, notification profilers included), startup
-    // hooks, additional deps files, a runtime package store, diagnostic ports, and a standalone garbage collector
-    // (GCPath, a native library loaded from a full path, and GCName, one loaded by name). Names are compared as
-    // Windows compares them, ignoring case. The value is never read or logged.
+    // other than the application's, run on a runtime other than the one published with it, or write a file to a path
+    // the variable chooses. Code: a profiler (CORECLR_*, COR_ENABLE_PROFILING and COR_PROFILER*, and the DOTNET_
+    // spellings, notification profilers included), startup hooks, additional deps files, a runtime package store, a
+    // servicing index, diagnostic ports, a standalone garbage collector (GCPath, a native library loaded from a full
+    // path, and GCName, one loaded by name), and the folder a single-file app extracts itself to and runs from. Another
+    // runtime: DOTNET_ROOT and its architecture spellings, which an apphost uses to find a framework-dependent app's
+    // runtime. Files: host tracing (DOTNET_HOST_TRACE*, and the COREHOST_TRACE* spelling used before .NET 10, whose
+    // TRACEFILE names the file), crash dumps and their diagnostics (DbgEnableMiniDump, DbgMiniDumpName and
+    // DbgMiniDumpType, CreateDump*, EnableCrashReport, DbgCreateDumpToolPath), and EventPipe tracing
+    // (EnableEventPipe, EventPipeOutputPath and the other EventPipe* settings). Names are compared as Windows
+    // compares them, ignoring case. The value is never read or logged.
     // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
     // https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-environment-variables
     // https://learn.microsoft.com/en-us/dotnet/core/diagnostics/diagnostic-port
     // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/garbage-collector#standalone-gc
-    internal static IReadOnlyList<string> RuntimeCodeLoadingVariables(IEnumerable<string> names)
+    // https://learn.microsoft.com/en-us/dotnet/core/diagnostics/collect-dumps-crash
+    // https://learn.microsoft.com/en-us/dotnet/core/diagnostics/eventpipe
+    internal static IReadOnlyList<string> UnsafeRuntimeVariables(IEnumerable<string> names)
     {
         ArgumentNullException.ThrowIfNull(names);
-        return names.Where(IsRuntimeCodeLoadingVariable).ToList();
+        return names.Where(IsUnsafeRuntimeVariable).ToList();
     }
 
     private static readonly string[] RuntimeKnobPrefixes = ["DOTNET_", "COMPlus_"];
 
-    private static readonly string[] CodeLoadingKnobs =
+    // Matched as prefixes after DOTNET_ or COMPlus_, so PROFILER covers PROFILER_PATH_64 and EventPipe covers
+    // EventPipeOutputPath.
+    private static readonly string[] UnsafeKnobs =
     [
         "ENABLE_PROFILING", "PROFILER", "ENABLE_NOTIFICATION_PROFILERS", "NOTIFICATION_PROFILERS",
-        "STARTUP_HOOKS", "ADDITIONAL_DEPS", "SHARED_STORE", "DiagnosticPorts", "GCPath", "GCName",
+        "STARTUP_HOOKS", "ADDITIONAL_DEPS", "SHARED_STORE", "SERVICING", "DiagnosticPorts", "GCPath", "GCName",
+        "BUNDLE_EXTRACT_BASE_DIR", "HOST_TRACE",
+        "DbgEnableMiniDump", "DbgMiniDump", "DbgCreateDumpToolPath", "CreateDump", "EnableCrashReport",
+        "EnableEventPipe", "EventPipe",
     ];
 
-    private static bool IsRuntimeCodeLoadingVariable(string name)
+    private static bool IsUnsafeRuntimeVariable(string name)
     {
         if (string.IsNullOrEmpty(name))
         {
@@ -276,7 +294,16 @@ internal static partial class Program
 
         if (name.StartsWith("CORECLR_", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("COR_ENABLE_PROFILING", StringComparison.OrdinalIgnoreCase) ||
-            name.StartsWith("COR_PROFILER", StringComparison.OrdinalIgnoreCase))
+            name.StartsWith("COR_PROFILER", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("COREHOST_TRACE", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // DOTNET_ROOT, DOTNET_ROOT(x86) and DOTNET_ROOT_<ARCH>, and nothing else that starts with those letters.
+        if (name.Equals("DOTNET_ROOT", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("DOTNET_ROOT(", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("DOTNET_ROOT_", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -286,7 +313,7 @@ internal static partial class Program
             if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 string knob = name[prefix.Length..];
-                return CodeLoadingKnobs.Any(k => knob.StartsWith(k, StringComparison.OrdinalIgnoreCase));
+                return UnsafeKnobs.Any(k => knob.StartsWith(k, StringComparison.OrdinalIgnoreCase));
             }
         }
 
@@ -359,24 +386,36 @@ internal static partial class Program
 
         InstallResult result = run();
         LogSteps(log, "uninstall", result);
+
+        // Open on startup is a value in the signed-in user's own registry hive, which the tray writes and removes. This
+        // elevated run does not touch it: under Administrator protection it runs with a profile of its own, so it would
+        // not even reach that user's value. So the log says what is left to the owner.
+        // https://learn.microsoft.com/en-us/windows/security/application-security/application-control/administrator-protection/
+        log.Info("uninstall: " + UninstallStartupNote);
         return result.Outcome;
     }
 
+    internal const string UninstallStartupNote =
+        "Open on startup is not changed by uninstall. Turn it off in the Earshot menu before uninstall. If it was left on, " +
+        "start Earshot once more and turn it off; with it off, Earshot also removes a startup entry whose program is gone.";
+
     // install and uninstall are elevated from the user's own session through the UAC prompt, so they start with that
     // user's environment (HKCU\Environment included), which any program the user runs can change without elevation.
-    // As for a gate run that is not SYSTEM, they change nothing while it names code for the .NET runtime to load, and
-    // say which variable. Such code may already have run in this process; the refusal tells the owner.
+    // As for a gate run that is not SYSTEM, they change nothing while it names code for the .NET host or runtime to
+    // load, another runtime, or a trace or dump file to write (UnsafeRuntimeVariables), and say which variable. Such
+    // code may already have run, or such a file been written, in this process; the refusal tells the owner.
     // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
+    // https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-environment-variables
     private static GateExitCode? EnvironmentRefusal(string mode, IEnumerable<string>? environmentNames, ILog log)
     {
-        IReadOnlyList<string> loaders = RuntimeCodeLoadingVariables(environmentNames ?? CurrentEnvironmentNames());
+        IReadOnlyList<string> loaders = UnsafeRuntimeVariables(environmentNames ?? CurrentEnvironmentNames());
         if (loaders.Count == 0)
         {
             return null;
         }
 
         log.Warn(mode + ": refused, because this elevated run started from a user's session and its environment sets " +
-                 string.Join(", ", loaders) + ", which make the .NET runtime load code that is not Earshot's. That code may already have run in " +
+                 string.Join(", ", loaders) + ", which " + UnsafeRuntimeVariablesEffect + " That code may already have run, or that file been written, in " +
                  "this process. Remove the variables from the user's environment, then run " + mode + " again.");
         return GateExitCode.UnsafeEnvironment;
     }

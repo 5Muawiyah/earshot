@@ -54,7 +54,9 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 // A folder is only deleted from this elevated process after its security shows no one but administrators
 // can change what is inside, because a recursive delete goes by path. A folder that fails is left for the
 // user to remove and the result is partial. Pairing is never touched, and %APPDATA%\Earshot stays for the
-// user. The tray removes its own startup value.
+// user. The Open on startup value is the tray's and is not touched here: the owner turns it off in Earshot first
+// (Program.RunUninstall logs this), and the tray removes one left behind whose program is gone when it next starts
+// with the setting off.
 internal sealed class UninstallActions
 {
     private readonly InstallLayout _layout;

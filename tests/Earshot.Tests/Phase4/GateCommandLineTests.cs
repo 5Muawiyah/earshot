@@ -272,8 +272,8 @@ public sealed class GateCommandLineTests
     }
 
     // A gate run that is not SYSTEM (install --principal user) has an environment its user can change. While that
-    // environment names code for the .NET runtime to load, the run changes nothing and says which variable, never
-    // its value.
+    // environment names code for the .NET host or runtime to load, another runtime, or a trace or dump file to write,
+    // the run changes nothing and says which variable, never its value.
     [TestMethod]
     [DataRow("CORECLR_ENABLE_PROFILING")]
     [DataRow("coreclr_profiler_path_64")]
@@ -294,7 +294,26 @@ public sealed class GateCommandLineTests
     [DataRow("COMPlus_GCPath")]
     [DataRow("DOTNET_GCName")]
     [DataRow("complus_gcname")]
-    public void AGateRunNotAsSystemRefusesWhileItsEnvironmentNamesCodeForTheRuntimeToLoad(string name)
+    [DataRow("DOTNET_SERVICING")]
+    [DataRow("DOTNET_BUNDLE_EXTRACT_BASE_DIR")]
+    [DataRow("DOTNET_ROOT")]
+    [DataRow("DOTNET_ROOT(x86)")]
+    [DataRow("dotnet_root_x64")]
+    [DataRow("DOTNET_HOST_TRACE")]
+    [DataRow("DOTNET_HOST_TRACEFILE")]
+    [DataRow("COREHOST_TRACE")]
+    [DataRow("COREHOST_TRACEFILE")]
+    [DataRow("DOTNET_DbgEnableMiniDump")]
+    [DataRow("DOTNET_DbgMiniDumpName")]
+    [DataRow("COMPlus_DbgMiniDumpType")]
+    [DataRow("DOTNET_CreateDumpDiagnostics")]
+    [DataRow("DOTNET_CreateDumpLogToFile")]
+    [DataRow("DOTNET_EnableCrashReport")]
+    [DataRow("DOTNET_DbgCreateDumpToolPath")]
+    [DataRow("DOTNET_EnableEventPipe")]
+    [DataRow("DOTNET_EventPipeOutputPath")]
+    [DataRow("COMPlus_EventPipeConfig")]
+    public void AGateRunNotAsSystemRefusesWhileItsEnvironmentNamesCodeToLoadAnotherRuntimeOrAFileToWrite(string name)
     {
         var log = new CapturingLog();
 
@@ -319,13 +338,13 @@ public sealed class GateCommandLineTests
         Assert.IsTrue(store.WriteConfig(new GateConfig()).Ok);
         FakeNodeApi nodes = RecordedNodes.Table();
         var log = new CapturingLog();
-        string[] names = ["Path", "TEMP", "DOTNET_CLI_TELEMETRY_OPTOUT", "DOTNET_ROOT", "DOTNET_NOLOGO", "COMPlus_gcServer", "CORE_ROOT", "COR_X"];
+        string[] names = ["Path", "TEMP", "DOTNET_CLI_TELEMETRY_OPTOUT", "DOTNET_ROOTS", "DOTNET_NOLOGO", "COMPlus_gcServer", "CORE_ROOT", "COR_X", "DOTNET_HOST_PATH"];
 
         GateExitCode exit = Program.RunGate(["gate", "block", Nonce], FakeToken.ElevatedUser, log,
             () => new GateActions(nodes, store, new FakeFolderSecurity(), log, new ManualTime()), names);
 
         Assert.AreEqual(GateExitCode.Success, exit);
-        Assert.IsEmpty(Program.RuntimeCodeLoadingVariables(names));
+        Assert.IsEmpty(Program.UnsafeRuntimeVariables(names));
     }
 
     // SYSTEM's environment is the machine's, which only administrators can change, so the check never stops the
@@ -435,7 +454,11 @@ public sealed class GateCommandLineTests
     [DataRow("CORECLR_ENABLE_PROFILING")]
     [DataRow("DOTNET_STARTUP_HOOKS")]
     [DataRow("DOTNET_GCPath")]
-    public void InstallAndUninstallRefuseWhileTheirEnvironmentNamesCodeForTheRuntimeToLoad(string name)
+    [DataRow("DOTNET_ROOT")]
+    [DataRow("DOTNET_HOST_TRACEFILE")]
+    [DataRow("DOTNET_DbgMiniDumpName")]
+    [DataRow("DOTNET_EventPipeOutputPath")]
+    public void InstallAndUninstallRefuseWhileTheirEnvironmentNamesCodeToLoadAnotherRuntimeOrAFileToWrite(string name)
     {
         var log = new CapturingLog();
 
@@ -452,12 +475,27 @@ public sealed class GateCommandLineTests
     public void OrdinaryVariablesDoNotStopInstallOrUninstall()
     {
         var log = new CapturingLog();
-        string[] names = ["Path", "TEMP", "DOTNET_ROOT", "COMPlus_gcServer"];
+        string[] names = ["Path", "TEMP", "DOTNET_NOLOGO", "COMPlus_gcServer"];
 
         Assert.AreEqual(GateExitCode.Success, Program.RunInstall(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container], FakeToken.ElevatedUser, log,
             _ => new InstallResult(GateExitCode.Success, []), names));
         Assert.AreEqual(GateExitCode.Success, Program.RunUninstall(["uninstall"], FakeToken.ElevatedUser, log,
             () => new InstallResult(GateExitCode.Success, []), names));
+    }
+
+    // The Open on startup value is the signed-in user's, which this elevated run does not reach, so its log says
+    // what is left to the owner, whatever the uninstall result.
+    [TestMethod]
+    [DataRow((int)GateExitCode.Success)]
+    [DataRow((int)GateExitCode.Partial)]
+    public void UninstallLogsThatOpenOnStartupIsLeftToTheOwner(int outcome)
+    {
+        var log = new CapturingLog();
+
+        Program.RunUninstall(["uninstall"], FakeToken.ElevatedUser, log, () => new InstallResult((GateExitCode)outcome, []), []);
+
+        Assert.IsTrue(log.Has(LogLevel.Info, "uninstall: " + Program.UninstallStartupNote));
+        StringAssert.Contains(Program.UninstallStartupNote, "Turn it off in the Earshot menu before uninstall.");
     }
 
     [TestMethod]

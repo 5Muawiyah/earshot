@@ -43,7 +43,7 @@ internal enum GateExitCode
     OtherDeviceProtected = 13, // set-device while protection.json lists services turned off on the device pinned now
     NoManifest = 14,         // install without a valid Earshot.files.json next to the running exe
     DeviceMismatch = 15,     // install with a container that is not the container of the address's device node
-    UnsafeEnvironment = 16,  // a gate, install or uninstall run whose environment names code for the .NET runtime to load
+    UnsafeEnvironment = 16,  // a gate, install or uninstall run whose environment sets a variable Program.UnsafeRuntimeVariables names
     NoConfig = 17,           // a node change, set-device or protect verb while config.json is missing: not set up, or uninstall kept only the records
     Rejected = 20,          // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator

@@ -104,7 +104,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string SetupNotReadBackMessage = "Earshot is set up, but its tasks could not be read back yet.";
     internal const string SetupOtherDeviceBlockedMessage = "Earshot still blocks the AirPods chosen before. Choose them again, then set up Earshot.";
     internal const string SetupOtherDeviceProtectedMessage = "Earshot turned off the microphone of the AirPods chosen before. Choose them again, then set up Earshot.";
-    internal const string SetupUnsafeEnvironmentMessage = "Setup stopped because the environment sets .NET runtime variables that load code.";
+    internal const string SetupUnsafeEnvironmentMessage = "Setup stopped because the environment sets unsafe .NET runtime variables.";
     internal const string SetupCancelledMessage = "Setup was cancelled";
     internal const string SetupNeedsAdminMessage = "Setup needs administrator approval.";
     internal const string SetupUnsafeFolderMessage = "Setup stopped because a folder it uses was not safe.";
@@ -115,7 +115,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string RemovedPartlyMessage = "Earshot is mostly removed. Some parts could not be undone.";
     internal const string RemoveCancelledMessage = "Removal was cancelled";
     internal const string RemoveFailedMessage = "Removal did not finish. Try again.";
-    internal const string RemoveUnsafeEnvironmentMessage = "Removal stopped because the environment sets .NET runtime variables that load code.";
+    internal const string RemoveUnsafeEnvironmentMessage = "Removal stopped because the environment sets unsafe .NET runtime variables.";
     internal const string NoConfigMessage = "Earshot's boot block setting is missing. Choose Block at boot, then try again.";
 
     // The step that carries the gate's exit code for a set-device that did not move the pin, so the block
