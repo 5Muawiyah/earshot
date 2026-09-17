@@ -119,6 +119,20 @@ public sealed class DiagBatterySweepTests
     }
 
     [TestMethod]
+    public void ANameThatCouldNotBeReadIsOnRecord()
+    {
+        FakeSweepReader reader = Machine();
+        reader.FailingNameRead = @"BTHENUM\DEV_3410BE0E0ABB\7&3";
+
+        BatterySweepReport report = Earshot.BatterySweep.Run(reader, "AirPods", AirPodsContainer, TimeProvider.System);
+
+        StepOutcome failed = report.Steps.Single(s => s.Step.StartsWith("cm-property:BTHENUM\\DEV_3410BE0E0ABB", StringComparison.Ordinal));
+        Assert.IsFalse(failed.Ok);
+        Assert.AreEqual("CR_FAILURE", failed.CodeName);
+        Assert.Contains("could not be matched", failed.Detail!);
+    }
+
+    [TestMethod]
     public void TheWatchedKeysAreTheBatteryOnes()
     {
         Assert.IsTrue(Earshot.BatterySweep.IsWatched(BatteryKey));
@@ -152,6 +166,9 @@ public sealed class DiagBatterySweepTests
         public uint ListResult { get; set; }
 
         public int ObjectsHr { get; set; }
+
+        // A node whose friendly name read fails with CR_FAILURE.
+        public string? FailingNameRead { get; set; }
 
         public NodeBuilder Node(string id, bool present, string? friendly, Guid container)
         {
@@ -205,6 +222,14 @@ public sealed class DiagBatterySweepTests
 
         public uint GetProperty(uint devInst, DEVPROPKEY key, out uint type, out byte[] data)
         {
+            if (_nodes[(int)devInst - 1].Id == FailingNameRead && key.fmtid == CfgMgr32.DEVPKEY_Device_FriendlyName.fmtid &&
+                key.pid == CfgMgr32.DEVPKEY_Device_FriendlyName.pid)
+            {
+                type = 0;
+                data = [];
+                return CfgMgr32.CR_FAILURE;
+            }
+
             if (_nodes[(int)devInst - 1].Properties.TryGetValue((key.fmtid, key.pid), out (uint Type, byte[] Data) value))
             {
                 (type, data) = value;

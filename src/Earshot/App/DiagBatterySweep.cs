@@ -195,6 +195,7 @@ internal static class BatterySweep
         var nodes = new List<SweepNode>();
         int locateFailures = 0;
         StepOutcome? firstLocateFailure = null;
+        var readFailures = new ReadFailures();
         foreach (string id in cr == CfgMgr32.CR_SUCCESS ? ids : [])
         {
             uint located = reader.Locate(id, out uint devInst);
@@ -205,9 +206,9 @@ internal static class BatterySweep
                 continue;
             }
 
-            string? friendly = ReadString(reader, devInst, CfgMgr32.DEVPKEY_Device_FriendlyName);
-            string? name = ReadString(reader, devInst, CfgMgr32.DEVPKEY_NAME);
-            Guid? container = ReadGuid(reader, devInst, CfgMgr32.DEVPKEY_Device_ContainerId);
+            string? friendly = ReadString(reader, id, devInst, CfgMgr32.DEVPKEY_Device_FriendlyName, readFailures);
+            string? name = ReadString(reader, id, devInst, CfgMgr32.DEVPKEY_NAME, readFailures);
+            Guid? container = ReadGuid(reader, id, devInst, CfgMgr32.DEVPKEY_Device_ContainerId, readFailures);
             string? matchedBy = NodeMatch.NameMatches(friendly, match) ? "friendly name"
                 : NodeMatch.NameMatches(name, match) ? "name"
                 : pinned && container == pinnedContainer ? "pinned container"
@@ -242,6 +243,16 @@ internal static class BatterySweep
             }
 
             nodes.Add(new SweepNode(id, friendly, name, reader.IsPresent(id), container, matchedBy, keysStep, properties));
+        }
+
+        if (readFailures.First is not null)
+        {
+            // A node whose name or container could not be read may have been one to match, so it is on record.
+            steps.Add(readFailures.First with
+            {
+                Detail = readFailures.Count.ToString(CultureInfo.InvariantCulture) +
+                         " name or container reads failed (other than a property not set), so those nodes could not be matched; this is the first.",
+            });
         }
 
         if (firstLocateFailure is not null)
@@ -484,13 +495,36 @@ internal static class BatterySweep
 
     private static bool Same(DEVPROPKEY a, DEVPROPKEY b) => a.fmtid == b.fmtid && a.pid == b.pid;
 
-    private static string? ReadString(IBatterySweepReader reader, uint devInst, DEVPROPKEY key) =>
-        reader.GetProperty(devInst, key, out uint type, out byte[] data) == CfgMgr32.CR_SUCCESS && CfgMgr32.TryDecodeString(type, data, out string? value)
-            ? value
-            : null;
+    // A property that is not set (CR_NO_SUCH_VALUE) is normal and reads as null; any other failure is counted.
+    private static string? ReadString(IBatterySweepReader reader, string id, uint devInst, DEVPROPKEY key, ReadFailures failures)
+    {
+        uint cr = reader.GetProperty(devInst, key, out uint type, out byte[] data);
+        failures.Note(cr, id, key);
+        return cr == CfgMgr32.CR_SUCCESS && CfgMgr32.TryDecodeString(type, data, out string? value) ? value : null;
+    }
 
-    private static Guid? ReadGuid(IBatterySweepReader reader, uint devInst, DEVPROPKEY key) =>
-        reader.GetProperty(devInst, key, out uint type, out byte[] data) == CfgMgr32.CR_SUCCESS && CfgMgr32.TryDecodeGuid(type, data, out Guid value)
-            ? value
-            : null;
+    private static Guid? ReadGuid(IBatterySweepReader reader, string id, uint devInst, DEVPROPKEY key, ReadFailures failures)
+    {
+        uint cr = reader.GetProperty(devInst, key, out uint type, out byte[] data);
+        failures.Note(cr, id, key);
+        return cr == CfgMgr32.CR_SUCCESS && CfgMgr32.TryDecodeGuid(type, data, out Guid value) ? value : null;
+    }
+
+    private sealed class ReadFailures
+    {
+        public int Count { get; private set; }
+
+        public StepOutcome? First { get; private set; }
+
+        public void Note(uint cr, string id, DEVPROPKEY key)
+        {
+            if (cr is CfgMgr32.CR_SUCCESS or CfgMgr32.CR_NO_SUCH_VALUE)
+            {
+                return;
+            }
+
+            Count++;
+            First ??= StepOutcomes.FromConfigRet("cm-property:" + id + ":" + KeyText(key), cr);
+        }
+    }
 }
