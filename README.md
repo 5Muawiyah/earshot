@@ -78,6 +78,8 @@ driver.
 - Blocking needs a one-time setup with an administrator prompt. After that it
   runs through a scheduled task with no prompt.
 - Protect audio quality turns off the AirPods microphone while it is on.
+- With Block at boot off, Disconnect only asks the AirPods to disconnect. If
+  they do not, Earshot says so and changes nothing else.
 - More caveats, and the results of testing on real hardware, will be added
   here before release.
 
