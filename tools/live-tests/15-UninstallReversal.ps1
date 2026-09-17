@@ -235,3 +235,7 @@ finally
     $overall = Complete-LiveTestRun -Run $run
     Write-Host ('Test 15 finished: ' + $overall)
 }
+
+# 0 pass, 1 fail, 2 inconclusive. Anything that starts a test can read the outcome without
+# parsing result.json, and a test that recorded a failure is never read as a clean run.
+exit (Get-LiveTestExitCode -Overall $overall)

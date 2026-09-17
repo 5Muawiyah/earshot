@@ -120,6 +120,14 @@ try
                 '. Protection (device): ' + $protection + '. Set up: ' + (Get-Field -Object $tasks -Name 'setUp') + '.')
             Add-Finding -Run $run -Name 'configurationUnderTest' -Value ('BlockAtBoot=' + $blockAtBoot + ', ProtectAudioQuality=' + $protectAudio + ', protection=' + $protection)
 
+            # Fast Startup only applies to a shutdown, never to a restart, so this test is one of the
+            # two whose evidence can say anything about it. It is read, not changed: the setting stays
+            # whatever the machine is set to, and the run records which that was.
+            $fastStartup = Get-FastStartupSetting -Run $run
+            Write-Line -Run $run -Text ('Fast Startup: ' + $fastStartup + '. This power cycle is the one that tests it.')
+            Add-Finding -Run $run -Name 'fastStartupAtPowerDown' -Value $fastStartup `
+                -Detail 'HiberbootEnabled under HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power, read before the shutdown'
+
             Add-Criterion -Run $run -Id 'default-config' -Criterion 'The test runs in the shipping configuration: Block at boot on, Protect audio quality on.' `
                 -Outcome $(if ($blockAtBoot -eq $true -and $protectAudio -eq $true) { 'pass' } else { 'inconclusive' }) `
                 -Detail ('Block at boot ' + $blockAtBoot + ', Protect audio quality ' + $protectAudio + '. Anything else is a different test.')
@@ -372,3 +380,7 @@ finally
     $overall = Complete-LiveTestRun -Run $run
     Write-Host ('Test 08 finished: ' + $overall)
 }
+
+# 0 pass, 1 fail, 2 inconclusive. Anything that starts a test can read the outcome without
+# parsing result.json, and a test that recorded a failure is never read as a clean run.
+exit (Get-LiveTestExitCode -Overall $overall)

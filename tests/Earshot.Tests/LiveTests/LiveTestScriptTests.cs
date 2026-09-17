@@ -65,6 +65,14 @@ public sealed class LiveTestScriptTests
         ["iconFolder"] = @"C:\evidence\icons",                             // a folder to write into
     };
 
+    // Commands whose result is always there, so a method may be called straight on it. Anything else
+    // goes through ('' + (...)) or [string](...), because a helper returns $null for a report member
+    // that is missing and a live test must record that, not throw on it.
+    private static readonly HashSet<string> CommandsThatNeverReturnNull = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Get-Date",
+    };
+
     // Read once, however the test classes are ordered: LiveTestFieldTests reads the field names from
     // the same pass.
     private static readonly Lazy<ScriptSet> Analysis = new(Analyse);
@@ -109,6 +117,108 @@ public sealed class LiveTestScriptTests
             "A '+' that builds text starts with something that is not text. Put [string] in front of the first " +
             "operand, or write a literal first, or PowerShell will throw instead of building the text:" +
             Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    // The same failure in another shape. A report leaves a member out whenever the read behind it
+    // did not answer, so Get-Field and its callers return $null, and calling a method on $null
+    // throws "You cannot call a method on a null-valued expression". The script's own catch turns
+    // that into "run: fail" with the rest of the sitting lost, exactly where the evidence matters
+    // most. A command result therefore has to be made a string before a method is called on it.
+    [TestMethod]
+    public void NoMethodIsCalledStraightOnACommandResult()
+    {
+        var problems = Scripts.MethodCalls
+            .Where(c => !CommandsThatNeverReturnNull.Contains(c.Command))
+            .Select(c => c.File + " line " + c.Line.ToString(CultureInfo.InvariantCulture) +
+                " calls ." + c.Method + "() on " + c.Command + ": " + c.Text)
+            .ToList();
+
+        Assert.IsEmpty(
+            problems,
+            "A method is called straight on what a command returned, and that command can return $null, " +
+            "which throws at run time. Write ('' + (...)) or [string](...) around it first:" +
+            Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    // The other half of the same rule. Add-Finding records a value the run measured, and a report
+    // writes null for a value it could not read, which is itself the finding. A Mandatory parameter
+    // rejects $null with "Cannot bind argument to parameter 'Value' because it is null", so the
+    // attribute that lets it through is what keeps a failed device read from ending the test.
+    [TestMethod]
+    public void AddFindingTakesAValueThatIsNull()
+    {
+        string module = File.ReadAllText(Path.Combine(ScriptFolder(), "LiveTest.psm1"));
+        int start = module.IndexOf("function Add-Finding", StringComparison.Ordinal);
+        Assert.IsGreaterThanOrEqualTo(0, start, "Add-Finding was not found in LiveTest.psm1.");
+
+        int next = module.IndexOf("\nfunction ", start, StringComparison.Ordinal);
+        string body = next < 0 ? module[start..] : module[start..next];
+        StringAssert.Contains(
+            body,
+            "[AllowNull()]$Value",
+            "Add-Finding's -Value must carry [AllowNull()], or a finding whose value could not be read throws " +
+            "instead of being recorded as not known.");
+    }
+
+    // A test that recorded a failure has to say so to whatever started it, not only in result.json.
+    // Each script ends with its own exit code, and the launcher passes that code on, so a sitting
+    // driven by anything other than a person still sees a failed run as failed.
+    [TestMethod]
+    public void EveryTestScriptEndsWithItsOwnExitCode()
+    {
+        foreach (string expected in ExpectedScripts)
+        {
+            if (expected.EndsWith(".psm1", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string text = File.ReadAllText(Path.Combine(ScriptFolder(), expected));
+            string wanted = string.Equals(expected, "Run-LiveTests.ps1", StringComparison.OrdinalIgnoreCase)
+                ? "exit $LASTEXITCODE"
+                : "exit (Get-LiveTestExitCode -Overall $overall)";
+            StringAssert.Contains(text, wanted, expected + " does not end with \"" + wanted + "\", so a run that failed would look like one that passed.");
+        }
+    }
+
+    // A test's own option is only any use if the launcher can pass it. The launcher forwards from a
+    // table of its own, so an option added to a script and not to that table is refused for the very
+    // test that takes it, and the READMEs that say every option is passed on become wrong.
+    [TestMethod]
+    public void TheLauncherDeclaresAndForwardsEveryOptionATestDeclares()
+    {
+        ScriptFile launcher = Scripts.Files.Single(f => string.Equals(f.Name, "Run-LiveTests.ps1", StringComparison.OrdinalIgnoreCase));
+        string launcherText = File.ReadAllText(Path.Combine(ScriptFolder(), launcher.Name));
+        var declared = launcher.Parameters.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var problems = new List<string>();
+        foreach (ScriptFile file in Scripts.Files)
+        {
+            if (file.Name.EndsWith(".psm1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(file.Name, launcher.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (string parameter in file.Parameters)
+            {
+                if (string.Equals(parameter, "ExePath", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!declared.Contains(parameter))
+                {
+                    problems.Add(file.Name + " takes -" + parameter + ", which the launcher does not declare.");
+                }
+                else if (!launcherText.Contains("Name = '" + parameter + "'", StringComparison.Ordinal))
+                {
+                    problems.Add(file.Name + " takes -" + parameter + ", which the launcher declares but never forwards.");
+                }
+            }
+        }
+
+        Assert.IsEmpty(problems, string.Join(Environment.NewLine, problems));
     }
 
     [TestMethod]
@@ -436,6 +546,7 @@ public sealed class LiveTestScriptTests
         var calls = new List<CommandCall>();
         var fieldReads = new List<FieldRead>();
         var concatenations = new List<Concatenation>();
+        var methodCalls = new List<MethodOnCommand>();
         using JsonDocument document = JsonDocument.Parse(json);
         foreach (JsonElement file in Items(document.RootElement, "files"))
         {
@@ -443,7 +554,8 @@ public sealed class LiveTestScriptTests
             files.Add(new ScriptFile(
                 name,
                 ReadStrings(file, "errors"),
-                ReadStrings(file, "strings")));
+                ReadStrings(file, "strings"),
+                ReadStrings(file, "parameters")));
 
             foreach (JsonElement read in Items(file, "fieldReads"))
             {
@@ -457,6 +569,16 @@ public sealed class LiveTestScriptTests
                     join.GetProperty("line").GetInt32(),
                     join.GetProperty("head").GetString() ?? "",
                     join.GetProperty("text").GetString() ?? ""));
+            }
+
+            foreach (JsonElement method in Items(file, "methodCalls"))
+            {
+                methodCalls.Add(new MethodOnCommand(
+                    name,
+                    method.GetProperty("line").GetInt32(),
+                    method.GetProperty("command").GetString() ?? "",
+                    method.GetProperty("method").GetString() ?? "",
+                    method.GetProperty("text").GetString() ?? ""));
             }
 
             foreach (JsonElement call in Items(file, "calls"))
@@ -478,7 +600,7 @@ public sealed class LiveTestScriptTests
             }
         }
 
-        return new ScriptSet(files, calls, fieldReads, concatenations);
+        return new ScriptSet(files, calls, fieldReads, concatenations, methodCalls);
     }
 
     // Some PowerShell versions write a list of one as that one value rather than as a list, so a
@@ -542,12 +664,16 @@ public sealed class LiveTestScriptTests
         IReadOnlyList<ScriptFile> Files,
         IReadOnlyList<CommandCall> Calls,
         IReadOnlyList<FieldRead> FieldReads,
-        IReadOnlyList<Concatenation> Concatenations);
+        IReadOnlyList<Concatenation> Concatenations,
+        IReadOnlyList<MethodOnCommand> MethodCalls);
 
     // One '+' chain that builds text, with the operand it starts with.
     private sealed record Concatenation(string File, int Line, string Head, string Text);
 
-    private sealed record ScriptFile(string Name, IReadOnlyList<string> Errors, IReadOnlyList<string> Strings);
+    // One method called straight on the result of a command, for example (Get-Field ...).Trim().
+    private sealed record MethodOnCommand(string File, int Line, string Command, string Method, string Text);
+
+    private sealed record ScriptFile(string Name, IReadOnlyList<string> Errors, IReadOnlyList<string> Strings, IReadOnlyList<string> Parameters);
 
     private sealed record CommandCall(
         string File,
@@ -642,8 +768,19 @@ public sealed class LiveTestScriptTests
             $strings = @()
             $fieldReads = @()
             $concatenations = @()
+            $methodCalls = @()
+            # Named apart from the $parameters each Invoke-Earshot call is read into below, which is
+            # reset per call: one name for both would report a call's parameters as the script's.
+            $scriptParameters = @()
             if ($null -ne $ast)
             {
+                # The options a script declares. The launcher has to declare and forward every one of
+                # them, or an option the owner passes is refused by a test that does take it.
+                if ($null -ne $ast.ParamBlock)
+                {
+                    foreach ($declared in $ast.ParamBlock.Parameters) { $scriptParameters += $declared.Name.VariablePath.UserPath }
+                }
+
                 # A '+' chain that builds text must start with a string, because PowerShell converts
                 # the right operand to the type of the left one. An integer on the left of ' of '
                 # throws "Cannot convert value" at run time instead of producing text, and a throw
@@ -680,6 +817,40 @@ public sealed class LiveTestScriptTests
                     $whole = ($b.Extent.Text -replace '\s+', ' ')
                     if ($whole.Length -gt 160) { $whole = $whole.Substring(0, 160) + '...' }
                     $concatenations += [ordered]@{ line = $b.Extent.StartLineNumber; head = $head; text = $whole }
+                }
+
+                # A method called straight on the result of a command, for example
+                # (Get-Field -Object $nodes -Name 'address').ToUpperInvariant(). The helpers return
+                # $null for a member a report left out, and $null.Trim() throws "You cannot call a
+                # method on a null-valued expression", which aborts the test the same way a parse
+                # error would. ('' + (...)) or [string](...) first makes it a string, and $null
+                # becomes the empty one.
+                # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_methods
+                foreach ($m in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))
+                {
+                    $target = $m.Expression
+                    if (-not ($target -is [System.Management.Automation.Language.ParenExpressionAst])) { continue }
+
+                    # Only a single bare command inside the brackets. A pipeline such as
+                    # ($_ | Out-String) and an expression such as ('' + $x) are settled types already.
+                    $inner = $target.Pipeline
+                    if (-not ($inner -is [System.Management.Automation.Language.PipelineAst])) { continue }
+                    if ($inner.PipelineElements.Count -ne 1) { continue }
+
+                    $element = $inner.PipelineElements[0]
+                    if (-not ($element -is [System.Management.Automation.Language.CommandAst])) { continue }
+
+                    $method = ''
+                    if ($m.Member -is [System.Management.Automation.Language.StringConstantExpressionAst]) { $method = $m.Member.Value }
+
+                    $whole = ($m.Extent.Text -replace '\s+', ' ')
+                    if ($whole.Length -gt 160) { $whole = $whole.Substring(0, 160) + '...' }
+                    $methodCalls += [ordered]@{
+                        line = $m.Extent.StartLineNumber
+                        command = ('' + $element.GetCommandName())
+                        method = $method
+                        text = $whole
+                    }
                 }
 
                 # Every literal name a script reads out of a JSON report, so that each one can be
@@ -775,9 +946,11 @@ public sealed class LiveTestScriptTests
                 name = $file.Name
                 path = $file.FullName
                 errors = $messages
+                parameters = $scriptParameters
                 calls = $calls
                 fieldReads = $fieldReads
                 concatenations = $concatenations
+                methodCalls = $methodCalls
                 strings = $strings
             }
         }

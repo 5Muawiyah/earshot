@@ -39,7 +39,21 @@
     administrator prompt. Its default path deliberately raises none.
 
 .PARAMETER Note
-    Test 04 only: free text kept with the run, for example "fast startup on".
+    Test 04 only: free text kept with the run.
+
+.PARAMETER WatchSeconds
+    Test 03 only: how long to watch for Windows paging the AirPods after an allow.
+
+.PARAMETER WatchMinutes
+    Test 13 only: how long to wait for the idle rule to block the nodes again.
+
+.PARAMETER PhoneAddress
+    Test 14 only: your phone's twelve character Bluetooth address. Without it the
+    test lists the addresses it can see and asks which one it is.
+
+.PARAMETER SpeakerAddress
+    Test 14 only: the address of another Bluetooth audio device with an A2DP sink,
+    for the protected-device half. Without it that half is inconclusive.
 
 .PARAMETER OfferUninstall
     Restore (00) only: offer a full uninstall at the end.
@@ -48,6 +62,8 @@
     An option is only forwarded to a test that declares it. Passing one to a test
     that does not take it stops the run and says which tests do, rather than
     running the test with the option silently dropped.
+
+    The exit code is the test's own: 0 pass, 1 fail, 2 inconclusive.
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -List
@@ -71,6 +87,10 @@ param(
     [int]$Variant = 0,
     [switch]$AllowPlanB,
     [string]$Note = '',
+    [int]$WatchSeconds = 0,
+    [int]$WatchMinutes = 0,
+    [string]$PhoneAddress = '',
+    [string]$SpeakerAddress = '',
     [switch]$OfferUninstall
 )
 
@@ -288,6 +308,10 @@ $options = @(
     [ordered]@{ Name = 'Variant'; Passed = ($Variant -ne 0); Value = $Variant; Takers = '10' }
     [ordered]@{ Name = 'AllowPlanB'; Passed = [bool]$AllowPlanB; Value = $true; Takers = '07' }
     [ordered]@{ Name = 'Note'; Passed = (-not [string]::IsNullOrEmpty($Note)); Value = $Note; Takers = '04' }
+    [ordered]@{ Name = 'WatchSeconds'; Passed = ($WatchSeconds -ne 0); Value = $WatchSeconds; Takers = '03' }
+    [ordered]@{ Name = 'WatchMinutes'; Passed = ($WatchMinutes -ne 0); Value = $WatchMinutes; Takers = '13' }
+    [ordered]@{ Name = 'PhoneAddress'; Passed = (-not [string]::IsNullOrEmpty($PhoneAddress)); Value = $PhoneAddress; Takers = '14' }
+    [ordered]@{ Name = 'SpeakerAddress'; Passed = (-not [string]::IsNullOrEmpty($SpeakerAddress)); Value = $SpeakerAddress; Takers = '14' }
     [ordered]@{ Name = 'OfferUninstall'; Passed = [bool]$OfferUninstall; Value = $true; Takers = '00' }
 )
 
@@ -304,3 +328,7 @@ foreach ($option in $options)
 }
 
 & $script @forward
+
+# The test's own exit code, so a sitting driven by anything other than a person still sees a
+# failure: 0 pass, 1 fail, 2 inconclusive. result.json is still where the detail is.
+exit $LASTEXITCODE

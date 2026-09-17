@@ -12,8 +12,10 @@
     CM_DISABLE_PERSIST. Without the persist flag the disable is undone at the next
     boot, and the acceptance test would fail quietly.
 
-    Run it once with Fast Startup as it is, and, if you ever turn Fast Startup on,
-    once more with -Note 'fast startup on' so the evidence says which it was.
+    This half restarts the machine, so it says nothing about Fast Startup: a restart
+    always performs a full shutdown and a cold boot, whatever Fast Startup is set to.
+    Tests 08 and 09 are the ones that power the machine right down, and each records
+    the setting it ran under.
 
 .PARAMETER ExePath
     Earshot.exe: the installed copy or an unzipped release.
@@ -25,7 +27,7 @@
     Run the second half, after the restart.
 
 .PARAMETER Note
-    A short note kept in the evidence, for example 'fast startup on'.
+    A short note kept in the evidence, for whatever this run was meant to show.
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\04-BlockAndReboot.ps1 -ExePath "C:\Program Files\Earshot\Earshot.exe"
@@ -194,3 +196,7 @@ finally
     $overall = Complete-LiveTestRun -Run $run
     Write-Host ('Test 04 finished: ' + $overall)
 }
+
+# 0 pass, 1 fail, 2 inconclusive. Anything that starts a test can read the outcome without
+# parsing result.json, and a test that recorded a failure is never read as a clean run.
+exit (Get-LiveTestExitCode -Overall $overall)

@@ -108,7 +108,7 @@ try
         $markerFile = Join-Path $run.Folder 'restart-started-utc.txt'
         if (Test-Path -LiteralPath $markerFile)
         {
-            $text = (Get-Content -LiteralPath $markerFile -Raw).Trim()
+            $text = ('' + (Get-Content -LiteralPath $markerFile -Raw)).Trim()
             try
             {
                 $since = [datetime]::ParseExact($text, "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
@@ -167,3 +167,7 @@ finally
     $overall = Complete-LiveTestRun -Run $run
     Write-Host ('Test 10 finished: ' + $overall)
 }
+
+# 0 pass, 1 fail, 2 inconclusive. Anything that starts a test can read the outcome without
+# parsing result.json, and a test that recorded a failure is never read as a clean run.
+exit (Get-LiveTestExitCode -Overall $overall)

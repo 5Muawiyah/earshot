@@ -203,7 +203,28 @@ try
                     $Sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
                     Write-Line -Run $run -Text ('Account ' + $Sid + ', device ' + $Address + ', container ' + $Container)
 
-                    if ([string]::IsNullOrEmpty($Address) -or [string]::IsNullOrEmpty($Container))
+                    # Plan B uninstalls and installs again, so this Earshot.exe has to be one install will
+                    # accept: the installed copy or an unzipped release, never a build output folder. It is
+                    # checked here, before anything is removed, because uninstall reads no manifest and would
+                    # succeed, and the install after it would then refuse for want of one, leaving the machine
+                    # with no tasks in the middle of a sitting.
+                    $fromRelease = $true
+                    try
+                    {
+                        [void](Resolve-EarshotExe -ExePath $run.ExePath -RequireRelease)
+                    }
+                    catch
+                    {
+                        $fromRelease = $false
+                        Write-Failure -Run $run -Message ('Plan B was not run: ' + ($_ | Out-String).Trim())
+                    }
+
+                    if (-not $fromRelease)
+                    {
+                        Add-Criterion -Run $run -Id 'planb' -Criterion 'Plan B registers the tasks for this user.' -Outcome 'inconclusive' `
+                            -Detail 'This Earshot.exe is not one install accepts, so nothing was removed. Run it again with the installed copy or an unzipped release.'
+                    }
+                    elseif ([string]::IsNullOrEmpty($Address) -or [string]::IsNullOrEmpty($Container))
                     {
                         Add-Criterion -Run $run -Id 'planb' -Criterion 'Plan B registers the tasks for this user.' -Outcome 'inconclusive' `
                             -Detail 'The pinned device address or container could not be read, so install cannot be called.'
@@ -267,3 +288,7 @@ finally
     $overall = Complete-LiveTestRun -Run $run
     Write-Host ('Test 07 finished: ' + $overall)
 }
+
+# 0 pass, 1 fail, 2 inconclusive. Anything that starts a test can read the outcome without
+# parsing result.json, and a test that recorded a failure is never read as a clean run.
+exit (Get-LiveTestExitCode -Overall $overall)

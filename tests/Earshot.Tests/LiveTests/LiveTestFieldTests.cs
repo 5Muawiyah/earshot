@@ -86,8 +86,10 @@ public sealed class LiveTestFieldTests
         typeof(ProtectionRecord),
     ];
 
-    // Names that come from neither: the startup value under the user's Run key is called Earshot.
-    private static readonly string[] NotJson = ["Earshot"];
+    // Names that come from neither. The startup value under the user's Run key is called Earshot, and
+    // HiberbootEnabled is the registry value Windows keeps Fast Startup in, which the two tests that
+    // power the machine down read so their evidence says which kind of shutdown it was.
+    private static readonly string[] NotJson = ["Earshot", "HiberbootEnabled"];
 
     private static ServiceRegistry NoServices() => throw new AssertFailedException("Writing a report needs no services.");
 

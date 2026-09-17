@@ -78,6 +78,11 @@ try
                 -Detail ('render ' + $states.Render + ', nodes ' + (Get-Field -Object $nodes -Name 'nodeState') + '. This is the state the shutdown has to be started from.')
 
             Add-Finding -Run $run -Name 'blockAtBootAtShutdown' -Value (Get-BlockAtBootSetting -Run $run)
+
+            # This half shuts the machine down rather than restarting it, so Fast Startup applies to it.
+            # It is read, never changed, so the evidence says which kind of shutdown this run was.
+            Add-Finding -Run $run -Name 'fastStartupAtShutdown' -Value (Get-FastStartupSetting -Run $run) `
+                -Detail 'HiberbootEnabled under HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power, read before the shutdown'
             Save-EarshotLog -Run $run
 
             Write-Section -Run $run -Title 'Now shut down, straight away'
@@ -136,3 +141,7 @@ finally
     $overall = Complete-LiveTestRun -Run $run
     Write-Host ('Test 09 finished: ' + $overall)
 }
+
+# 0 pass, 1 fail, 2 inconclusive. Anything that starts a test can read the outcome without
+# parsing result.json, and a test that recorded a failure is never read as a clean run.
+exit (Get-LiveTestExitCode -Overall $overall)

@@ -15,14 +15,19 @@ namespace Earshot.Tests.LiveTests;
 [TestClass]
 public sealed class GateExitNameTableTests
 {
-    // Codes the module names that are not GateExitCode values: the sysexits values Program returns
-    // for a command line it will not run, and the Windows code for a declined administrator prompt.
-    // They are listed here so an entry that is neither a gate code nor one of these fails the test.
+    // Codes the module names that are not GateExitCode values: the sysexits numbering in
+    // src\Earshot\ExitCodes.cs, which every mode shares and which is how a read-only probe ends,
+    // and the Windows code for a declined administrator prompt. They are listed here so an entry
+    // that is neither a gate code nor one of these fails the test.
     private static readonly Dictionary<int, string> OtherCodes = new()
     {
         [64] = "bad command line",                            // EX_USAGE
         [69] = "not available in this build",                 // EX_UNAVAILABLE
+        [70] = "a check inside Earshot failed",               // EX_SOFTWARE
+        [71] = "a system call failed",                        // EX_OSERR
+        [74] = "the report could not be written",             // EX_IOERR
         [77] = "refused",                                     // EX_NOPERM
+        [78] = "nothing configured to read",                  // EX_CONFIG: no pinned device, for one
         [1223] = "the administrator prompt was declined",     // ERROR_CANCELLED
     };
 
@@ -73,6 +78,31 @@ public sealed class GateExitNameTableTests
         }
 
         Assert.IsEmpty(problems, string.Join(Environment.NewLine, problems));
+    }
+
+    // A probe, and any mode that will not run, ends in one of the sysexits values rather than in a
+    // gate code, and the module names every step's exit code. They are held to the application's own
+    // constants here so the second half of the table cannot drift either.
+    [TestMethod]
+    public void EverySysexitsCodeTheApplicationReturnsIsNamed()
+    {
+        int[] used =
+        [
+            ExitCodes.Usage,
+            ExitCodes.Unavailable,
+            ExitCodes.Software,
+            ExitCodes.OsError,
+            ExitCodes.IoError,
+            ExitCodes.Refused,
+            ExitCodes.Config,
+        ];
+
+        Dictionary<int, string> table = ReadTable();
+        foreach (int number in used)
+        {
+            Assert.Contains(number, OtherCodes.Keys, "Exit code " + Text(number) + " is one the application returns, but this test does not expect a name for it.");
+            Assert.Contains(number, table.Keys, "Exit code " + Text(number) + " is one the application returns, but Get-GateExitName does not name it.");
+        }
     }
 
     // The sysexits values Program uses must stay clear of the gate codes, or one number would want

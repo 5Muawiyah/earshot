@@ -379,7 +379,11 @@ function Read-Note
 
     Write-Line -Run $Run -Text ''
     Write-Line -Run $Run -Text ('NOTE: ' + $Question)
-    $answer = Read-Host '  Your answer (Enter to leave it blank)'
+    # Read-Host comes back as $null when the input was closed rather than left blank, the same as in
+    # Read-Answer above, and a caller that trims the answer would throw on it. It is made a string here.
+    $typed = Read-Host '  Your answer (Enter to leave it blank)'
+    $answer = ''
+    if ($null -ne $typed) { $answer = [string]$typed }
     Write-Line -Run $Run -Text ('  Answer: ' + $answer)
     [void]$Run.Answers.Add([ordered]@{ question = $Question; answer = $answer; utc = (Get-UtcNowText) })
     return $answer
@@ -669,13 +673,19 @@ function Invoke-EarshotElevated
     return [pscustomobject]$step
 }
 
-# The name install, uninstall and the gate use for an exit code, so the summary reads
-# the way the log does. Anything else is reported as the number it was.
+# The name an exit code is given, so the summary reads the way the log does. Every step goes
+# through here, a read-only probe as much as a gate run. Anything the table does not hold is
+# reported as the number it was.
 #
 # The first block is GateExitCode in src\Earshot\Boot\Gate\GateActions.cs, value for value:
 # install and uninstall exit with exactly those numbers, so a wrong name here would point
 # the owner at the wrong remedy. GateExitNameTableTests holds the two tables to each other.
 # There is no 1: no mode returns it, and a .NET crash does.
+#
+# The second block is ExitCodes in src\Earshot\ExitCodes.cs, the BSD sysexits numbering every
+# mode shares. A probe ends in one of those rather than in a gate code: 78 is what `probe nodes`
+# and `probe services` return on a machine with no pinned device, which is a normal answer and
+# not a fault, so leaving it unnamed read as a non-answer in the evidence.
 function Get-GateExitName
 {
     param([int]$ExitCode)
@@ -687,7 +697,9 @@ function Get-GateExitName
         14 = 'no-manifest'; 15 = 'device-mismatch'; 16 = 'unsafe-environment'; 17 = 'no-config'
         20 = 'rejected'; 21 = 'not-elevated'; 22 = 'running-as-system'
         1223 = 'the administrator prompt was declined'
-        64 = 'bad command line'; 69 = 'not available in this build'; 77 = 'refused'
+        64 = 'bad command line'; 69 = 'not available in this build'; 70 = 'a check inside Earshot failed'
+        71 = 'a system call failed'; 74 = 'the report could not be written'; 77 = 'refused'
+        78 = 'nothing configured to read'
     }
 
     if ($names.ContainsKey($ExitCode)) { return $names[$ExitCode] }
@@ -1011,6 +1023,34 @@ function Get-ProtectAudioSetting
     return (Get-Field -Object $settings -Name 'ProtectAudioQuality')
 }
 
+# Whether Fast Startup is on, read from the registry value Windows keeps it in. Read only:
+# nothing here turns it on or off, because that changes how the machine shuts down.
+#
+# Fast Startup is a hybrid shutdown, so it applies to a shutdown and never to a restart. A test
+# that powers the machine right down is the only one whose evidence can say anything about it,
+# which is why the value is recorded there rather than left to a free-text note.
+# https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/shutdown-and-restart-notifications
+function Get-FastStartupSetting
+{
+    param([Parameter(Mandatory = $true)]$Run)
+
+    $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power'
+    try
+    {
+        $entry = Get-ItemProperty -LiteralPath $key -Name 'HiberbootEnabled'
+        $value = Get-Field -Object $entry -Name 'HiberbootEnabled'
+        if ($null -eq $value) { return 'unknown' }
+        if ([int]$value -eq 0) { return 'off' }
+        return 'on'
+    }
+    catch
+    {
+        Write-Failure -Run $Run -Message ('HiberbootEnabled could not be read under ' + $key + ', so Fast Startup is recorded as unknown: ' +
+            ($_ | Out-String).Trim())
+        return 'unknown'
+    }
+}
+
 # The Earshot log lines written at or after the given UTC time whose text holds the
 # pattern. The log is plain text, one entry per line, starting with the UTC stamp.
 function Get-EarshotLogLines
@@ -1102,17 +1142,24 @@ function Add-Criterion
 
 # A measured value or a decision the build was waiting for, kept in result.json so the
 # skill can read it back without re-reading the whole summary.
+#
+# $Value takes $null on purpose. A report leaves a member out when the read behind it failed
+# or the answer is not known, which is a finding in itself: the application writes null to say
+# so, and a test that threw on it would lose the whole sitting for the one case it was there to
+# investigate. Mandatory alone would reject $null, so [AllowNull] is what lets it through, and
+# it is written down as "not recorded" rather than as an empty value.
+# https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_functions_advanced_parameters
 function Add-Finding
 {
     param(
         [Parameter(Mandatory = $true)]$Run,
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][AllowNull()]$Value,
         [string]$Detail = ''
     )
 
     [void]$Run.Findings.Add([ordered]@{ name = $Name; value = $Value; detail = $Detail; utc = (Get-UtcNowText) })
-    $text = 'FINDING ' + $Name + ' = ' + $Value
+    $text = 'FINDING ' + $Name + ' = ' + $(if ($null -eq $Value) { 'not recorded' } else { $Value })
     if (-not [string]::IsNullOrEmpty($Detail)) { $text = [string]$text + ' (' + $Detail + ')' }
     Write-Line -Run $Run -Text $text
 }
@@ -1198,7 +1245,9 @@ function Complete-LiveTestRun
 
     foreach ($finding in $Run.Findings)
     {
-        Write-Line -Run $Run -Text (('  finding      {0} = {1}' -f $finding.name, $finding.value))
+        $shown = 'not recorded'
+        if ($null -ne $finding.value) { $shown = $finding.value }
+        Write-Line -Run $Run -Text (('  finding      {0} = {1}' -f $finding.name, $shown))
     }
 
     if ($Run.Errors.Count -gt 0)
@@ -1211,6 +1260,18 @@ function Complete-LiveTestRun
     return $overall
 }
 
+# The process exit code for an overall outcome, so a run that failed is visible to anything that
+# does not read result.json: 0 pass, 1 fail, 2 inconclusive. Every script ends with it, and the
+# launcher passes it on.
+function Get-LiveTestExitCode
+{
+    param([Parameter(Mandatory = $true)][string]$Overall)
+
+    if ($Overall -eq $script:PassOutcome) { return 0 }
+    if ($Overall -eq $script:FailOutcome) { return 1 }
+    return 2
+}
+
 Export-ModuleMember -Function `
     Get-Field, Get-FieldPath, Join-Parts, Get-UtcStamp, Get-UtcNowText,
     Assert-LiveEnvironment, Get-EarshotDataPaths, Resolve-EarshotExe,
@@ -1220,5 +1281,6 @@ Export-ModuleMember -Function `
     Get-GateExitName, Get-OutPath, Copy-AppEvidence, Get-DiagEvidence, Read-KsEvidence,
     Get-NodeState, Get-AudioState, Get-TopologyState, Get-ServiceState, Get-TaskState,
     Get-TargetEndpointStates, Read-EarshotJsonFile, Get-BlockAtBootSetting, Get-ProtectAudioSetting,
-    Get-EarshotLogLines, Save-EarshotLog,
-    Add-Criterion, Add-Finding, Write-Failure, Write-ResumeInstruction, Complete-LiveTestRun
+    Get-EarshotLogLines, Save-EarshotLog, Get-FastStartupSetting,
+    Add-Criterion, Add-Finding, Write-Failure, Write-ResumeInstruction, Complete-LiveTestRun,
+    Get-LiveTestExitCode

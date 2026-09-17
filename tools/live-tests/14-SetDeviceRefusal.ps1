@@ -104,7 +104,7 @@ try
             Write-Line -Run $run -Text 'Addresses seen in the Bluetooth node list, other than the pinned one:'
             foreach ($address in $others) { Write-Line -Run $run -Text ('  ' + $address) }
             Write-Line -Run $run -Text 'Windows Bluetooth settings shows which device each one is, under the device properties.'
-            $PhoneAddress = (Read-Note -Run $run -Question 'Type the twelve character address of your phone, upper case.').Trim().ToUpperInvariant()
+            $PhoneAddress = ('' + (Read-Note -Run $run -Question 'Type the twelve character address of your phone, upper case.')).Trim().ToUpperInvariant()
         }
         else
         {
@@ -161,10 +161,25 @@ try
                     Write-Line -Run $run -Text 'If the menu cannot do it, uninstall and install again. 00-Restore.ps1 restores nodes and protection only; it does not touch device.json.'
                 }
 
+                # A read that did not answer is not a pass and not a fail: without an address there is
+                # nothing to compare the pin against, so it is recorded as unknown and says where to look.
                 $nodesAfter = Get-NodeState -Run $run -Label 'nodes-after'
+                $addressAfter = ('' + (Get-Field -Object $nodesAfter -Name 'address')).ToUpperInvariant()
+                $untouched = 'fail'
+                $untouchedDetail = 'The nodes now resolve through ' + $addressAfter + ', which is not the device that was pinned.'
+                if ([string]::IsNullOrEmpty($addressAfter))
+                {
+                    $untouched = 'inconclusive'
+                    $untouchedDetail = 'The node read gave no address, so the pin could not be compared. Read device.json before going on.'
+                }
+                elseif ($addressAfter -eq $pinned)
+                {
+                    $untouched = 'pass'
+                    $untouchedDetail = 'The nodes still resolve through ' + $addressAfter + '.'
+                }
+
                 Add-Criterion -Run $run -Id 'phone-untouched' -Criterion 'Nothing on the phone was disabled.' `
-                    -Outcome $(if ((Get-Field -Object $nodesAfter -Name 'address').ToUpperInvariant() -eq $pinned) { 'pass' } else { 'fail' }) `
-                    -Detail ('The nodes still resolve through ' + (Get-Field -Object $nodesAfter -Name 'address') + '.')
+                    -Outcome $untouched -Detail $untouchedDetail
             }
         }
 
@@ -237,3 +252,7 @@ finally
     $overall = Complete-LiveTestRun -Run $run
     Write-Host ('Test 14 finished: ' + $overall)
 }
+
+# 0 pass, 1 fail, 2 inconclusive. Anything that starts a test can read the outcome without
+# parsing result.json, and a test that recorded a failure is never read as a clean run.
+exit (Get-LiveTestExitCode -Overall $overall)
