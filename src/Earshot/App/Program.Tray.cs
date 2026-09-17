@@ -38,6 +38,13 @@ internal static partial class Program
 
     internal static readonly NamedWaitHandleOptions TrayInstanceOptions = new() { CurrentUserOnly = true, CurrentSessionOnly = true };
 
+    // How long closing waits for the audio worker to stop. A driver call that stalls inside IKsControl.KsProperty
+    // keeps the worker busy until it returns, and nothing documents a limit for that, so after this long the
+    // worker, a background thread, is left to end with the process rather than keep a closed tray running with
+    // its single-instance lock held. A waiting budget, not a measured figure.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.thread.isbackground
+    internal static readonly TimeSpan AudioWorkerStopLimit = TimeSpan.FromSeconds(10);
+
     // Held for the life of the tray.
     private static Mutex? _trayInstance;
 
@@ -107,6 +114,41 @@ internal static partial class Program
             mutex.Dispose();
             _trayInstance = null;
         }
+    }
+
+    // Stops the audio worker, waiting at most limit. True when it stopped; a worker that did not stop in time, or
+    // stopped with an error, is logged by name and left to end with the process.
+    internal static bool StopAudioWorker(IAudioWorker worker, ILog log, TimeSpan limit)
+    {
+        ArgumentNullException.ThrowIfNull(worker);
+        ArgumentNullException.ThrowIfNull(log);
+        Task stopping;
+        try
+        {
+            stopping = worker.DisposeAsync().AsTask();
+        }
+        catch (Exception ex)
+        {
+            log.Error("Closing: the audio worker could not be stopped.", ex);
+            return false;
+        }
+
+        try
+        {
+            if (stopping.Wait(limit))
+            {
+                return true;
+            }
+        }
+        catch (AggregateException ex)
+        {
+            log.Error("Closing: the audio worker stopped with an error.", ex.InnerException ?? ex);
+            return false;
+        }
+
+        log.Warn("Closing: the audio worker did not stop within " + limit.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+            " s, so a call to the audio driver may still be running. It is a background thread and ends with the process.");
+        return false;
     }
 
     // The name of the event a second copy sets to ask the running tray for its card.
@@ -248,7 +290,7 @@ internal static partial class Program
                 registry?.Monitor.Dispose();
                 if (registry?.Worker is { } worker)
                 {
-                    worker.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                    StopAudioWorker(worker, log, AudioWorkerStopLimit);
                 }
 
                 (registry?.SystemWorker as IDisposable)?.Dispose();

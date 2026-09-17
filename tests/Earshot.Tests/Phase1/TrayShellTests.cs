@@ -1,4 +1,5 @@
 using System.Drawing;
+using Earshot.Contracts;
 using Earshot.Icons;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -87,6 +88,35 @@ public sealed class TrayShellTests
         Assert.IsFalse(DevicePickerForm.CanAccept(airPods with { ContainerId = Guid.Empty }, "AirPods"));
         Assert.IsFalse(DevicePickerForm.CanAccept(airPods with { ContainerId = Earshot.Contracts.NodeMatch.PcContainer }, "AirPods"));
         Assert.IsFalse(DevicePickerForm.CanAccept(airPods with { Address = "0a1b2c3d4e8c" }, "AirPods"));
+    }
+
+    // A driver call stalled on the audio worker must not keep a closed tray running: closing waits a limited time,
+    // says so by name, and goes on.
+    [TestMethod]
+    public void ClosingDoesNotWaitForAnAudioWorkerThatNeverStops()
+    {
+        var log = new CapturingLog();
+        var stuck = new StuckWorker();
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        bool stopped = Program.StopAudioWorker(stuck, log, TimeSpan.FromMilliseconds(100));
+
+        Assert.IsFalse(stopped);
+        Assert.IsLessThan(5.0, watch.Elapsed.TotalSeconds);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "the audio worker did not stop within"));
+        Assert.IsTrue(Program.StopAudioWorker(new StuckWorker(stopsAt: Task.CompletedTask), log, TimeSpan.FromSeconds(1)));
+        Assert.IsTrue(Program.AudioWorkerStopLimit < Earshot.App.TrayContext.DefaultExitWaitLimit, "Closing stays bounded.");
+    }
+
+    private sealed class StuckWorker(Task? stopsAt = null) : IAudioWorker
+    {
+        private readonly Task _stopped = stopsAt ?? new TaskCompletionSource().Task;
+
+        public Task<T> RunAsync<T>(Func<CancellationToken, T> work, CancellationToken ct = default) => new TaskCompletionSource<T>().Task;
+
+        public Task RunAsync(Action<CancellationToken> work, CancellationToken ct = default) => new TaskCompletionSource().Task;
+
+        public ValueTask DisposeAsync() => new(_stopped);
     }
 
     [TestMethod]
