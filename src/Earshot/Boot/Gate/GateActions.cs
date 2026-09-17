@@ -1,4 +1,5 @@
 using Earshot.AudioProtection;
+using Earshot.AudioProtection.Gate;
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
 using Earshot.Interop;
@@ -460,6 +461,8 @@ internal sealed partial class GateActions
     //     in Earshot able to allow it again;
     //   - moving the pin while protection.json lists services Earshot turned off (or cannot be read) would make
     //     protect-off and the uninstall restore turn services on for the new device and never for the old one.
+    //     The one exception is a device pinned now that has been removed from Windows (no node, not paired): its
+    //     entries went with its pairing, so they are emptied here rather than hold the pin for good.
     // A node read that fails in either of the first two checks refuses with Failed: it says nothing about the
     // device, so it is neither "not an audio device" nor "not blocked".
     // https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio
@@ -552,9 +555,10 @@ internal sealed partial class GateActions
                        string.Equals(same.Address, address, StringComparison.Ordinal) && same.ContainerId == container;
         if (!samePin)
         {
+            NodeReadResult? old = null;
             if (current.IsOk && current.Value is { } pinned)
             {
-                NodeReadResult old = new NodeStateReader(_nodes).Read(pinned.ContainerId, pinned.Address);
+                old = new NodeStateReader(_nodes).Read(pinned.ContainerId, pinned.Address);
                 if (!old.Listed)
                 {
                     steps.AddRange(old.Steps);
@@ -579,12 +583,25 @@ internal sealed partial class GateActions
             GateRead<ProtectionRecord> protection = _store.ReadProtection();
             if (protection.Status != GateReadStatus.Missing && !(protection.IsOk && protection.Value is { DisabledServices.Count: 0 }))
             {
-                steps.Add(protection.Step);
-                steps.Add(StepOutcomes.NotAttempted("set-device",
-                    protection.IsOk
-                        ? "protection.json lists services turned off on the device pinned now. Turn Protect audio quality off first."
-                        : "protection.json could not be read, so it may list services turned off on the device pinned now."));
-                return new VerbResult(GateExitCode.OtherDeviceProtected, null);
+                // The entries of a device removed from Windows are void (ProtectionGateRunner.IsRemovedFromThisPc):
+                // its pairing, and the service state with it, is gone, so they must not hold the pin for good.
+                if (protection.IsOk && old is not null && current.Value is { } gone &&
+                    ProtectionGateRunner.IsRemovedFromThisPc(old, _bluetooth, gone.Address, steps))
+                {
+                    if (ProtectionGateRunner.VoidRecord(_store, gone.Address, steps, _log) != GateExitCode.Success)
+                    {
+                        return new VerbResult(GateExitCode.Failed, null);
+                    }
+                }
+                else
+                {
+                    steps.Add(protection.Step);
+                    steps.Add(StepOutcomes.NotAttempted("set-device",
+                        protection.IsOk
+                            ? "protection.json lists services turned off on the device pinned now. Turn Protect audio quality off first."
+                            : "protection.json could not be read, so it may list services turned off on the device pinned now."));
+                    return new VerbResult(GateExitCode.OtherDeviceProtected, null);
+                }
             }
         }
 

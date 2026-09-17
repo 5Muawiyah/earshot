@@ -39,6 +39,7 @@ internal sealed class ProtectionGateRunner
     public const string DeviceNodeStep = "protect-device-node";
     public const string ServicesAfterStep = "bt-installed-services-after";
     public const string RecordKeptStepPrefix = "protection-record-kept:";
+    public const string RecordVoidStep = "protection-record-void";
 
     // How long a protect verb waits for the device change lock: longer than \Earshot\Gate's PT2M limit, so a
     // block, allow or boot block that holds it has finished or been stopped by the scheduler. What is left of
@@ -83,7 +84,20 @@ internal sealed class ProtectionGateRunner
         }
 
         var intent = new ProtectionIntentFile(ctx.Store.Folder);
-        GateExitCode? refused = CheckNodes(ctx);
+        GateExitCode? refused = CheckNodes(ctx, out NodeReadResult nodes);
+        if (refused == GateExitCode.NotFound && !protect && IsRemovedFromThisPc(nodes, _api, ctx.Identity.Address, ctx.Steps))
+        {
+            // Nothing is left to turn back on, so protect-off can no longer stand in the way of choosing a device.
+            if (!TryReadRecord(ctx, out ProtectionRecord gone))
+            {
+                ctx.Outcome = GateExitCode.Failed;
+                return;
+            }
+
+            Finish(ctx, intent, gone.DisabledServices.Count == 0 ? GateExitCode.Success : VoidRecord(ctx.Store, ctx.Identity.Address, ctx.Steps, ctx.Log));
+            return;
+        }
+
         if (refused is not null)
         {
             if (refused == BlockedExit)
@@ -164,7 +178,14 @@ internal sealed class ProtectionGateRunner
             return;
         }
 
-        GateExitCode? refused = CheckNodes(ctx);
+        GateExitCode? refused = CheckNodes(ctx, out NodeReadResult nodes);
+        if (refused == GateExitCode.NotFound && IsRemovedFromThisPc(nodes, _api, ctx.Identity.Address, ctx.Steps))
+        {
+            // Otherwise uninstall could never finish for a device that was removed from Windows first.
+            ctx.Outcome = VoidRecord(ctx.Store, ctx.Identity.Address, ctx.Steps, ctx.Log);
+            return;
+        }
+
         if (refused is not null)
         {
             ctx.Outcome = refused.Value;
@@ -187,10 +208,52 @@ internal sealed class ProtectionGateRunner
         : ok > 0 ? GateExitCode.Partial
         : GateExitCode.Failed;
 
-    // Null when every target node is enabled and the device node is present; otherwise the exit code.
-    private static GateExitCode? CheckNodes(GateRunContext ctx)
+    // True when the device is no longer on this PC: a full devnode list (present and non-present nodes alike)
+    // has no node that carries its address, none that may belong to it went unread, and the paired device
+    // list, read in full, does not have it either. Removing a device from Windows uninstalls its devnodes and
+    // ends its pairing, and the service state that protection.json records goes with them; pairing again starts
+    // from the services the device offers. A read that failed, or a node still listed (a device on a radio
+    // that is off keeps its nodes as non-present), never counts as removed.
+    // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_get_device_id_listw
+    // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothfindfirstdevice
+    internal static bool IsRemovedFromThisPc(NodeReadResult read, IBluetoothServiceReader? api, string address12, IList<StepOutcome> steps)
     {
-        NodeReadResult read = new NodeStateReader(ctx.Nodes).Read(ctx.Identity.ContainerId, ctx.Identity.Address);
+        ArgumentNullException.ThrowIfNull(read);
+        ArgumentNullException.ThrowIfNull(steps);
+        if (api is null || !read.Listed || read.Nodes.Count > 0 || read.Unread.Count > 0)
+        {
+            return false;
+        }
+
+        BluetoothDeviceEntry? paired = BluetoothDeviceLookup.Find(api, address12, steps, out bool listFailed);
+        return paired is null && !listFailed;
+    }
+
+    // Empties protection.json for a device that is no longer on this PC (IsRemovedFromThisPc), with a step that
+    // says why. Success, or Failed when the file could not be written.
+    internal static GateExitCode VoidRecord(GateStore store, string address12, IList<StepOutcome> steps, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(log);
+        StepOutcome written = store.WriteProtection(new ProtectionRecord());
+        steps.Add(written);
+        if (!written.Ok)
+        {
+            return GateExitCode.Failed;
+        }
+
+        string detail = "The device " + address12 + " is no longer on this PC (no device node and not paired), so the services " +
+                        "protection.json listed for it went with its pairing. The list is emptied and nothing is turned back on.";
+        steps.Add(new StepOutcome(RecordVoidStep, Ok: true, NativeCodes.NotAttempted, NativeCodes.Name(NativeCodes.NotAttempted), detail));
+        log.Info(RecordVoidStep + ": " + detail);
+        return GateExitCode.Success;
+    }
+
+    // Null when every target node is enabled and the device node is present; otherwise the exit code.
+    private static GateExitCode? CheckNodes(GateRunContext ctx, out NodeReadResult read)
+    {
+        read = new NodeStateReader(ctx.Nodes).Read(ctx.Identity.ContainerId, ctx.Identity.Address);
         foreach (StepOutcome step in read.Steps)
         {
             ctx.Steps.Add(step);

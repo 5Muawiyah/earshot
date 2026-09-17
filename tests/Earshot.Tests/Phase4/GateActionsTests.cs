@@ -1,7 +1,10 @@
+using Earshot.AudioProtection;
+using Earshot.AudioProtection.Gate;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Tests.Phase6;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase4;
@@ -15,8 +18,9 @@ public sealed class GateActionsTests
     {
         private readonly TempFolder _temp = new();
 
-        public Harness(FakeNodeApi? nodes = null)
+        public Harness(FakeNodeApi? nodes = null, IBluetoothServiceApi? bluetooth = null)
         {
+            Bluetooth = bluetooth;
             Machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
             Directory.CreateDirectory(Machine);
             Store = new GateStore(Machine);
@@ -33,9 +37,11 @@ public sealed class GateActionsTests
 
         public CapturingLog Log { get; } = new();
 
+        public IBluetoothServiceApi? Bluetooth { get; }
+
         // Each verb in the mode its task runs it in.
         public GateExitCode Run(string verb, string? address = null) =>
-            new GateActions(Nodes, Store, Folders, Log, new ManualTime())
+            new GateActions(Nodes, Store, Folders, Log, new ManualTime(), bluetooth: Bluetooth)
                 .Run(new GateRequest(verb, Nonce, address, GateModes.IsProtectVerb(verb) ? GateMode.Protect : GateMode.Gate));
 
         public GateStatusFile Status()
@@ -435,6 +441,77 @@ public sealed class GateActionsTests
         Assert.Contains("Turn Protect audio quality off first", h.Status().Steps.Last(s => s.Step == "set-device").Detail!);
         Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.AirPodsAddress), "Re-pinning the same device is fine.");
     }
+
+    // The AirPods were removed from Windows (their nodes and their pairing are gone) while protection.json still
+    // listed Handsfree for them. Nothing can turn it back on and nothing needs to, so the entries are emptied and
+    // the new device is pinned, where before every way out refused.
+    [TestMethod]
+    public void SetDeviceEmptiesTheRecordOfADeviceRemovedFromWindows()
+    {
+        FakeBluetoothServices paired = FakeBluetoothServices.AirPods();
+        paired.Remove(RecordedNodes.AirPodsAddress);
+        using var h = new Harness(WithoutTheAirPods(), paired);
+        h.Pin(RecordedNodes.AirPods());
+        Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord { DisabledServices = { ProtectedServices.Handsfree } }).Ok);
+
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+
+        Assert.AreEqual(RecordedNodes.HeadphonesContainer, h.Store.ReadDevice().Value!.ContainerId);
+        Assert.IsEmpty(h.Store.ReadProtection().Value!.DisabledServices);
+        StepOutcome voided = h.Status().Steps.Single(s => s.Step == ProtectionGateRunner.RecordVoidStep);
+        Assert.IsTrue(voided.Ok);
+        Assert.Contains(RecordedNodes.AirPodsAddress, voided.Detail!);
+        Assert.IsEmpty(paired.SetCalls);
+        Assert.IsEmpty(h.Nodes.Calls);
+    }
+
+    // With no node left but the device still paired, the paired list unreadable, or no Bluetooth API to ask,
+    // nothing shows the service state is gone, so the refusal stands.
+    [TestMethod]
+    public void SetDeviceKeepsTheRecordWhileTheOldDeviceMayStillBePaired()
+    {
+        FakeBluetoothServices stillPaired = FakeBluetoothServices.AirPods();
+        FakeBluetoothServices listFails = FakeBluetoothServices.AirPods();
+        listFails.Remove(RecordedNodes.AirPodsAddress);
+        listFails.FindResult = BluetoothApis.ERROR_REVISION_MISMATCH;
+
+        foreach (FakeBluetoothServices? bluetooth in new[] { stillPaired, listFails, null })
+        {
+            using var h = new Harness(WithoutTheAirPods(), bluetooth);
+            h.Pin(RecordedNodes.AirPods());
+            Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord { DisabledServices = { ProtectedServices.Handsfree } }).Ok);
+
+            Assert.AreEqual(GateExitCode.OtherDeviceProtected, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+
+            Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
+            CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, h.Store.ReadProtection().Value!.DisabledServices);
+        }
+    }
+
+    // A node of the old device still listed, even when not present (a radio that is off), keeps the record: the
+    // device may still be paired with its Handsfree still off.
+    [TestMethod]
+    public void SetDeviceKeepsTheRecordWhileANodeOfTheOldDeviceIsStillListed()
+    {
+        FakeBluetoothServices unpaired = FakeBluetoothServices.AirPods();
+        unpaired.Remove(RecordedNodes.AirPodsAddress);
+        FakeNodeApi table = RecordedNodes.TableWithHeadphones();
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            table[id].Present = false;
+        }
+
+        using var h = new Harness(table, unpaired);
+        h.Pin(RecordedNodes.AirPods());
+        Assert.IsTrue(h.Store.WriteProtection(new ProtectionRecord { DisabledServices = { ProtectedServices.Handsfree } }).Ok);
+
+        Assert.AreEqual(GateExitCode.OtherDeviceProtected, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+        CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, h.Store.ReadProtection().Value!.DisabledServices);
+    }
+
+    // The node table with the headphones and without any node of the AirPods, as after removing them in Windows.
+    private static FakeNodeApi WithoutTheAirPods() =>
+        new(RecordedNodes.TableWithHeadphones().Nodes.Where(n => n.Container != RecordedNodes.AirPodsContainer));
 
     [TestMethod]
     public void SetDeviceRefusesToMoveThePinWhileProtectionCannotBeRead()

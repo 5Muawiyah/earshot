@@ -23,8 +23,9 @@ public sealed class ProtectionGateTests
 
         private readonly bool _withBluetooth;
 
-        public Harness(bool pair = true, bool pin = true)
+        public Harness(bool pair = true, bool pin = true, FakeNodeApi? nodes = null)
         {
+            Nodes = nodes ?? RecordedNodes.Table();
             Machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
             Directory.CreateDirectory(Machine);
             Store = new GateStore(Machine);
@@ -39,7 +40,7 @@ public sealed class ProtectionGateTests
 
         public GateStore Store { get; }
 
-        public FakeNodeApi Nodes { get; } = RecordedNodes.Table();
+        public FakeNodeApi Nodes { get; }
 
         public FakeBluetoothServices Bluetooth { get; } = FakeBluetoothServices.AirPods();
 
@@ -553,6 +554,92 @@ public sealed class ProtectionGateTests
         Assert.DoesNotContain(FakeBluetoothServices.Avrcp, h.AirPods.Enabled);
         Assert.IsFalse(result.Steps.Any(s => s.Step == "protection-restore"), "The restore hook ran, so nothing is reported as not available.");
     }
+
+    // The AirPods were removed from Windows with Handsfree still recorded as turned off by Earshot. Their pairing,
+    // and the service state with it, is gone, so protect-off and the uninstall restore empty the record instead
+    // of refusing for good.
+    [TestMethod]
+    public void ProtectOffForADeviceRemovedFromWindowsEmptiesTheRecord()
+    {
+        using var h = new Harness(nodes: WithoutTheAirPods());
+        h.Record(ProtectedServices.Handsfree);
+        h.Bluetooth.Remove(RecordedNodes.AirPodsAddress);
+
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.ProtectOff));
+
+        Assert.IsEmpty(h.Recorded());
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
+        Assert.IsTrue(Step(h.Status(), ProtectionGateRunner.RecordVoidStep).Ok);
+    }
+
+    [TestMethod]
+    public void UninstallFinishesForADeviceRemovedFromWindows()
+    {
+        using var h = new Harness(nodes: WithoutTheAirPods());
+        h.Record(ProtectedServices.Handsfree);
+        h.Bluetooth.Remove(RecordedNodes.AirPodsAddress);
+        string source = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(h.Machine)!)!, "unzip");
+        string install = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(h.Machine)!)!, "ProgramFiles", "Earshot");
+
+        InstallResult result = new UninstallActions(new InstallLayout(source, install, h.Machine), new FakeFolderSecurity(), h.Nodes,
+            new FakeTaskRegistrar(), new RebootDeleteRecorder(), h.Log, bluetooth: h.Bluetooth).Run();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, string.Join(Environment.NewLine, result.Steps.Where(s => !s.Ok).Select(GateActions.Describe)));
+        Assert.IsTrue(result.Steps.Any(s => s.Step == ProtectionGateRunner.RecordVoidStep));
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
+        Assert.IsFalse(Directory.Exists(h.Machine), "Nothing is kept for a restore that can never run.");
+    }
+
+    // Gone from the node list but still paired, or still listed but no longer paired: either may still have
+    // Handsfree off, so the record stays. Protect-on for a removed device has nothing to protect and stays
+    // NotFound.
+    [TestMethod]
+    public void ARecordIsKeptUnlessTheDeviceIsGoneFromBothTheNodesAndThePairedList()
+    {
+        using (var paired = new Harness(nodes: WithoutTheAirPods()))
+        {
+            paired.Record(ProtectedServices.Handsfree);
+            Assert.AreEqual(GateExitCode.NotFound, paired.Run(GateVerbs.ProtectOff));
+            CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, paired.Recorded());
+        }
+
+        using (var listed = new Harness())
+        {
+            listed.Record(ProtectedServices.Handsfree);
+            listed.Bluetooth.Remove(RecordedNodes.AirPodsAddress);
+            foreach (string id in RecordedNodes.AirPodsTargets)
+            {
+                listed.Nodes[id].Present = false;
+            }
+
+            Assert.AreNotEqual(GateExitCode.Success, listed.Run(GateVerbs.ProtectOff));
+            CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, listed.Recorded());
+        }
+
+        using (var protect = new Harness(nodes: WithoutTheAirPods()))
+        {
+            protect.Record(ProtectedServices.Handsfree);
+            protect.Bluetooth.Remove(RecordedNodes.AirPodsAddress);
+            Assert.AreEqual(GateExitCode.NotFound, protect.Run(GateVerbs.ProtectOn));
+            CollectionAssert.AreEqual(new[] { ProtectedServices.Handsfree }, protect.Recorded());
+        }
+    }
+
+    // A node that may be the device's but whose container cannot be read may be disabled, so no service changes.
+    [TestMethod]
+    public void ANodeThatMayBeTheDevicesButCannotBeReadStopsTheRequest()
+    {
+        using var h = new Harness();
+        h.Nodes[RecordedNodes.AirPodsTargets[0]].ContainerReadResult = CfgMgr32.CR_FAILURE;
+
+        Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.ProtectOn));
+
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
+        StringAssert.Contains(Step(h.Status(), ProtectionGateRunner.DeviceNodeStep).Detail, "could not be read");
+    }
+
+    private static FakeNodeApi WithoutTheAirPods() =>
+        new(RecordedNodes.Table().Nodes.Where(n => n.Container != RecordedNodes.AirPodsContainer));
 
     [TestMethod]
     public void RestoreWithNothingRecordedTouchesNothingEvenWhileBlocked()
