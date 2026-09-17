@@ -818,7 +818,7 @@ internal sealed class TrayContext : ApplicationContext
             // A change still running when the wait ran out may leave the nodes enabled, with nothing left here
             // to block them; the BootBlock task is then what blocks them at the next start.
             string? notice = _coordinator.ClosingNotice ??
-                             (gaveUp && _coordinator.IsBusy && BlockStatus?.BlockAtBoot != false ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
+                             (gaveUp && _coordinator.IsBusy && BlockStatus is not { BlockAtBoot: false, BlockAtBootKnown: true } ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
             if (notice is not null)
             {
                 _log.Info("Exit: " + notice);

@@ -420,13 +420,14 @@ internal sealed class BlockCoordinator : IDisposable
                 _blockReadApplied = read;
                 _blockStatus = status;
                 _blockStatusFresh = true;
-                if (status.BlockAtBoot && CoordinatorRules.NodesEnabled(status))
-                {
-                    _mayBeEnabled = true;
-                }
-                else if (!status.BlockAtBoot || status.State == BlockState.Blocked)
+                // A setting that was not read says nothing about whether the nodes are meant to be enabled.
+                if (status.State == BlockState.Blocked || (status.BlockAtBootKnown && !status.BlockAtBoot))
                 {
                     _mayBeEnabled = false;
+                }
+                else if (status.BlockAtBoot && CoordinatorRules.NodesEnabled(status))
+                {
+                    _mayBeEnabled = true;
                 }
 
                 if (_statusAtIdleFailure is { } before &&
@@ -679,7 +680,7 @@ internal sealed class BlockCoordinator : IDisposable
 
         if (!status.BlockAtBoot)
         {
-            return "Block at boot is off";
+            return BlockAtBootOffReason(status);
         }
 
         if (status.State == BlockState.NotSetUp)
@@ -719,7 +720,7 @@ internal sealed class BlockCoordinator : IDisposable
 
         if (!status.BlockAtBoot)
         {
-            return "Block at boot is off";
+            return BlockAtBootOffReason(status);
         }
 
         if (status.State == BlockState.NotSetUp)
@@ -1186,7 +1187,8 @@ internal sealed class BlockCoordinator : IDisposable
             bool blockAtBoot = status?.BlockAtBoot ?? cleanup.BlockAtBoot ?? false;
             if (!blockAtBoot)
             {
-                _log.Info("connect clean-up: Block at boot is " + (status is null && cleanup.BlockAtBoot is null ? "not known" : "off") + ", so the nodes are not blocked.");
+                bool known = status?.BlockAtBootKnown ?? cleanup.BlockAtBoot is not null;
+                _log.Info("connect clean-up: Block at boot is " + (known ? "off" : "not known") + ", so the nodes are not blocked.");
                 return ConnectCleanUpOutcome.NodesLeftEnabled;
             }
 
@@ -1598,7 +1600,7 @@ internal sealed class BlockCoordinator : IDisposable
     {
         if (status is { BlockAtBoot: false })
         {
-            return "Block at boot is now off";
+            return status.BlockAtBootKnown ? "Block at boot is now off" : BlockAtBootOffReason(status);
         }
 
         if (ProtectMayRun)
@@ -1944,9 +1946,16 @@ internal sealed class BlockCoordinator : IDisposable
             return ("the boot block is not set up", IdleVerdict.Settled);
         }
 
+        // Read again while the nodes may be enabled: the setting may read later (a file that was in use), or be
+        // written again from the menu.
+        if (!_blockStatus.BlockAtBootKnown && _blockStatus.State != BlockState.Blocked)
+        {
+            return (BlockAtBootOffReason(_blockStatus), CoordinatorRules.NodesEnabled(_blockStatus) ? IdleVerdict.Unsettled : unknown);
+        }
+
         if (!_blockStatus.BlockAtBoot)
         {
-            return ("Block at boot is off", IdleVerdict.Settled);
+            return (BlockAtBootOffReason(_blockStatus), IdleVerdict.Settled);
         }
 
         if (_blockStatus.State == BlockState.Blocked)
@@ -2487,7 +2496,11 @@ internal sealed class BlockCoordinator : IDisposable
         untilSettled > TimeSpan.Zero && untilSettled < delay ? untilSettled : delay;
 
     private static string Describe(BootBlockStatus status) =>
-        status.State + ", Block at boot " + (status.BlockAtBoot ? "on" : "off");
+        status.State + ", Block at boot " + (!status.BlockAtBootKnown ? "not known" : status.BlockAtBoot ? "on" : "off");
+
+    // Why nothing is blocked for a status whose BlockAtBoot is false.
+    private static string BlockAtBootOffReason(BootBlockStatus status) =>
+        status.BlockAtBootKnown ? "Block at boot is off" : "Block at boot could not be read";
 
     private static string Seconds(TimeSpan span) =>
         span.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) + " s";

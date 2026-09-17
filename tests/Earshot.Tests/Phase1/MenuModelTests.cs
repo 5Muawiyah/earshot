@@ -159,6 +159,16 @@ public sealed class MenuModelTests
     }
 
     [TestMethod]
+    public void ABlockAtBootSettingThatCouldNotBeReadShowsNeitherState()
+    {
+        MenuState state = Build(block: Block(BlockState.Allowed, blockAtBoot: false) with { BlockAtBootKnown = false });
+
+        Assert.IsFalse(state.BlockAtBoot.Checked);
+        Assert.IsTrue(state.BlockAtBoot.Indeterminate, "A setting that was not read is shown as neither on nor off.");
+        Assert.IsTrue(state.BlockAtBoot.Enabled, "Clicking it writes the setting again.");
+    }
+
+    [TestMethod]
     [DataRow(true, true)]
     [DataRow(false, false)]
     public void BlockAtBootReflectsTheGateSetting(bool blockAtBoot, bool expected)

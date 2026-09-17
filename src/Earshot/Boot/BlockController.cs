@@ -314,8 +314,17 @@ internal sealed class BlockController : IBlockController, IDisposable
             steps.Add(config.Step);
         }
 
-        // Before setup there is no config.json; the menu then shows the shipped default.
-        bool blockAtBoot = config.IsOk && config.Value is not null ? config.Value.BlockAtBoot : new GateConfig().BlockAtBoot;
+        // Before setup there is no config.json; the menu then shows the shipped default. After setup a config.json
+        // that is missing, not valid or unreadable is not taken as either value: the gate's boot verb refuses on it
+        // too, so nothing blocks at boot, and the tray does not act on a setting it never read.
+        bool configRead = config.IsOk && config.Value is not null;
+        bool blockAtBootKnown = configRead || (config.Status == GateReadStatus.Missing && !installed);
+        if (!blockAtBootKnown && config.Status == GateReadStatus.Missing)
+        {
+            steps.Add(StepOutcomes.NotAttempted("config-read", "config.json is missing although the tasks are set up."));
+        }
+
+        bool blockAtBoot = configRead ? config.Value!.BlockAtBoot : blockAtBootKnown && new GateConfig().BlockAtBoot;
 
         DeviceIdentity? identity = ResolveIdentity(steps);
         NodeReadResult read = identity is null ? NodeReadResult.NoIdentity : _reader.Read(identity.ContainerId, identity.Address);
@@ -336,7 +345,10 @@ internal sealed class BlockController : IBlockController, IDisposable
             }
         }
 
-        return new BootBlockStatus(state, identity?.ContainerId ?? Guid.Empty, read.Nodes, installed, blockAtBoot);
+        return new BootBlockStatus(state, identity?.ContainerId ?? Guid.Empty, read.Nodes, installed, blockAtBoot)
+        {
+            BlockAtBootKnown = blockAtBootKnown,
+        };
     }
 
     private bool VerifyTasks(List<StepOutcome> steps)

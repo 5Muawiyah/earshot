@@ -61,13 +61,15 @@ internal static class MenuModel
         bool connected = connection == ConnectionState.Connected;
 
         // The check shows what is in force. Before setup nothing blocks at boot, so it is unchecked (clicking it runs
-        // setup, which turns it on); before the first status read it is not known, so it shows neither state.
+        // setup, which turns it on); before the first status read, or when the setting could not be read, it is not
+        // known, so it shows neither state (clicking it then turns it on, which writes the setting again).
         bool blockAtBoot = block is { State: not BlockState.NotSetUp, BlockAtBoot: true };
+        bool blockAtBootUnknown = block is null || (block.State != BlockState.NotSetUp && !block.BlockAtBootKnown);
 
         return new MenuState(
             SafeMode: new MenuItemState(SafeMode, Checked: false, Enabled: false, Visible: safeMode),
             Toggle: new MenuItemState(connected ? Disconnect : Connect, Checked: false, Enabled: !busy && !changing, Visible: true),
-            BlockAtBoot: new MenuItemState(BlockAtBoot, Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: block is null),
+            BlockAtBoot: new MenuItemState(BlockAtBoot, Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
             ProtectAudio: new MenuItemState(
                 ProtectAudioQuality,
                 Checked: settings.ProtectAudioQuality,

@@ -1,5 +1,6 @@
 using Earshot.App;
 using Earshot.Contracts;
+using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Integration.Coordinator;
@@ -509,6 +510,31 @@ public sealed class IdleRuleTests
         h.Advance(BlockCoordinator.UnwatchedRecheckLimit + BlockCoordinator.IdleGrace);
 
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The AirPods leaving was not acted on within the read limit and the grace period.");
+    }
+
+    [TestMethod]
+    public void ABlockAtBootSettingThatCouldNotBeReadBlocksNothingAndIsReadAgain()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false) with { BlockAtBootKnown = false };
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+
+        Assert.IsEmpty(h.Block.Calls, "The start-up check acted on a setting it never read.");
+        Assert.IsFalse(h.Coordinator.IdleWaitRunning);
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the setting again.");
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: no block issued, because Block at boot could not be read."));
+
+        // The setting reads again, and the idle rule acts on it.
+        h.Block.Status = Statuses.Allowed();
+        h.Advance(BlockCoordinator.RecheckDelay);
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning);
+
+        h.Advance(BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
     }
 
     [TestMethod]

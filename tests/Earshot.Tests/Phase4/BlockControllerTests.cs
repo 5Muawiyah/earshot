@@ -104,6 +104,7 @@ public sealed class BlockControllerTests
         Assert.AreEqual(BlockState.NotSetUp, status.State);
         Assert.IsFalse(status.TasksInstalled);
         Assert.IsTrue(status.BlockAtBoot, "The shipped default before setup.");
+        Assert.IsTrue(status.BlockAtBootKnown);
         Assert.AreEqual(RecordedNodes.AirPodsContainer, status.TargetContainerId);
         Assert.HasCount(9, status.Nodes);
         Assert.IsFalse(h.Controller.IsSetUp);
@@ -411,6 +412,36 @@ public sealed class BlockControllerTests
 
         Assert.AreEqual(OpStatus.Partial, result.Status, result.UserMessage);
         Assert.AreEqual(BlockController.AllowNotPersistentMessage, result.UserMessage);
+    }
+
+    [TestMethod]
+    public async Task AfterSetupASettingThatDoesNotReadIsNotKnownAndNeverOn()
+    {
+        using var h = new Harness();
+
+        File.WriteAllText(h.Store.ConfigFile, "{ \"SchemaVersion\": 1, \"BlockAtBoot\": \"yes\" }");
+        BootBlockStatus invalid = await h.Controller.GetStatusAsync();
+
+        BootBlockStatus unreadable;
+        using (new FileStream(h.Store.ConfigFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            unreadable = await h.Controller.GetStatusAsync();
+        }
+
+        File.Delete(h.Store.ConfigFile);
+        BootBlockStatus missing = await h.Controller.GetStatusAsync();
+
+        foreach (BootBlockStatus status in new[] { invalid, unreadable, missing })
+        {
+            Assert.IsFalse(status.BlockAtBootKnown);
+            Assert.IsFalse(status.BlockAtBoot, "A setting that was not read is never taken as on.");
+            Assert.AreEqual(BlockState.Allowed, status.State, "The nodes are still read.");
+        }
+
+        Assert.IsTrue(h.Store.WriteConfig(new GateConfig()).Ok);
+        BootBlockStatus read = await h.Controller.GetStatusAsync();
+        Assert.IsTrue(read.BlockAtBootKnown);
+        Assert.IsTrue(read.BlockAtBoot);
     }
 
     [TestMethod]

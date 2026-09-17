@@ -51,7 +51,13 @@ public sealed record BootBlockStatus(
     Guid TargetContainerId,
     IReadOnlyList<BluetoothNode> Nodes,
     bool TasksInstalled,
-    bool BlockAtBoot);
+    bool BlockAtBoot)
+{
+    // False when the setting was not read (config.json missing after setup, not valid or unreadable). BlockAtBoot is
+    // then false, since the gate's boot verb refuses on such a file too, but it is not a choice anyone made: nothing
+    // is decided from it, and the state is read again.
+    public bool BlockAtBootKnown { get; init; } = true;
+}
 
 public sealed record AudioProtectionSnapshot(
     AudioProtectionState State,
