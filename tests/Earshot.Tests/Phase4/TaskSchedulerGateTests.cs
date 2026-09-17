@@ -328,6 +328,22 @@ public sealed class TaskSchedulerGateTests
         Assert.IsEmpty(h.Tasks.Runs);
     }
 
+    // Each verb goes only to the task whose token accepts it: the protect verbs to \Earshot\Protect
+    // (gate-protect), everything else to \Earshot\Gate.
+    [TestMethod]
+    [DataRow(GateVerbs.ProtectOn, TaskPlan.GateTaskName)]
+    [DataRow(GateVerbs.ProtectOff, TaskPlan.GateTaskName)]
+    [DataRow(GateVerbs.Block, TaskPlan.ProtectTaskName)]
+    [DataRow(GateVerbs.Allow, TaskPlan.ProtectTaskName)]
+    [DataRow(GateVerbs.SetBootOn, TaskPlan.ProtectTaskName)]
+    public void AVerbIsNeverSentToTheOtherTask(string verb, string taskName)
+    {
+        using var h = new Harness();
+
+        Assert.ThrowsExactly<ArgumentException>(() => h.Gate.Run(taskName, verb, Nonce, null, TimeSpan.FromSeconds(1), CancellationToken.None));
+        Assert.IsEmpty(h.Tasks.Runs);
+    }
+
     // The status file is read before the run state, so a gate that writes it and exits in between would
     // otherwise be completed with no steps at all.
     [TestMethod]

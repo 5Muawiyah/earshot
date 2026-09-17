@@ -30,16 +30,17 @@
     </PropertyGroup>
     <ItemGroup>
       <EarshotPublishedFile Include="$(EarshotPublishRoot)**\*" Exclude="$(EarshotManifestPath)" />
+      <!-- The relative path is taken here, from the wildcard's RecursiveDir: GetFileHash hands back copies of the
+           items that keep custom metadata but not RecursiveDir, which would put every file in a culture folder at
+           the top level. The manifest records "/" whatever the build ran on, so the reader never meets an escaped
+           backslash. -->
+      <EarshotPublishedFile>
+        <ManifestPath>$([System.String]::Copy('%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '/'))</ManifestPath>
+      </EarshotPublishedFile>
     </ItemGroup>
     <GetFileHash Files="@(EarshotPublishedFile)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Items" ItemName="EarshotHashedFile" />
     </GetFileHash>
-    <ItemGroup>
-      <!-- The manifest records "/" whatever the build ran on, so the reader never meets an escaped backslash. -->
-      <EarshotHashedFile>
-        <ManifestPath>$([System.String]::Copy('%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '/'))</ManifestPath>
-      </EarshotHashedFile>
-    </ItemGroup>
     <PropertyGroup>
       <EarshotManifestEntries>@(EarshotHashedFile->'    { "Path": "%(ManifestPath)", "Sha256": "%(FileHash)" }', ',%0D%0A')</EarshotManifestEntries>
       <EarshotManifestText>{%0D%0A  "SchemaVersion": 1,%0D%0A  "Files": [%0D%0A$(EarshotManifestEntries)%0D%0A  ]%0D%0A}</EarshotManifestText>

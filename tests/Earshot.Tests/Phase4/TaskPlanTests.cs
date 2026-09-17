@@ -201,6 +201,21 @@ public sealed class TaskPlanTests
         Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(userGate, userId: "S-1-5-21-1-2-3-1002"), userGate, Lookups.None, null));
     }
 
+    // A Protect task still registered with the gate token (an install from before gate-protect) would send protect
+    // verbs that gate refuses, and a Gate task given gate-protect would run service changes under PT2M. The
+    // read-back check calls either one needing repair.
+    [TestMethod]
+    public void TheReadBackCheckTellsTheTwoTokensApart()
+    {
+        TaskSpec gate = Spec(TaskPlan.GateTaskName);
+        TaskSpec protect = Spec(TaskPlan.ProtectTaskName);
+
+        Assert.IsEmpty(TaskXmlCheck.Verify(TaskXml.For(protect), protect, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(protect, arguments: TaskPlan.GateArguments), protect, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(protect, arguments: "gate-protect $(Arg0) $(Arg1) $(Arg2)"), protect, Lookups.None, null));
+        Assert.IsNotEmpty(TaskXmlCheck.Verify(TaskXml.For(gate, arguments: TaskPlan.ProtectArguments), gate, Lookups.None, null));
+    }
+
     [TestMethod]
     public void VerifyInstalledAcceptsEitherPrincipalForGateButOnlySystemForBootBlock()
     {
