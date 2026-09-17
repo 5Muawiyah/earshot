@@ -242,11 +242,21 @@ internal sealed class TrayContext : ApplicationContext
     internal TrayMenu Menu => _menu;
 
     // Shows the current state on a card, for example when a second copy of Earshot is started. It follows the
-    // user's own action, so it is placed like a card after a click.
+    // user's own action, so it is placed like a card after a click. While Exit waits for a change in flight the icon
+    // is already gone and this process still holds the single-instance lock, so the second copy has exited: the card
+    // then says Earshot is closing, rather than leave the start unanswered.
     public void ShowStatusCard()
     {
-        if (_closing || _closed)
+        if (_closed)
         {
+            _log.Info("Earshot was started again after it closed; no card is shown.");
+            return;
+        }
+
+        if (_closing)
+        {
+            _log.Info("Earshot was started again while it is closing; it says so on a card.");
+            CardPlace.NearCursor.Show(_registry.Cards, TrayStatus.AppName, ClosingMessage);
             return;
         }
 

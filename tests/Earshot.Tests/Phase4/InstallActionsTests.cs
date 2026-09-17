@@ -16,8 +16,9 @@ public sealed class InstallActionsTests
     {
         private readonly TempFolder _temp = new();
 
-        public Harness()
+        public Harness(FakeNodeApi? nodes = null)
         {
+            Nodes = nodes ?? RecordedNodes.Table();
             Source = Path.Combine(_temp.Path, "unzip", "Earshot");
             Install = Path.Combine(_temp.Path, "ProgramFiles", "Earshot");
             Machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
@@ -57,7 +58,7 @@ public sealed class InstallActionsTests
 
         public FakeTaskRegistrar Tasks { get; } = new();
 
-        public FakeNodeApi Nodes { get; } = RecordedNodes.Table();
+        public FakeNodeApi Nodes { get; }
 
         public RebootDeleteRecorder Reboot { get; } = new();
 
@@ -112,6 +113,8 @@ public sealed class InstallActionsTests
     private static readonly string[] KeptRecordFiles = ["device.json", "protection.json"];
 
     private static readonly string[] ProtectionRecordOnly = ["protection.json"];
+
+    private static readonly string[] DeviceRecordOnly = ["device.json"];
 
     private static string Fail(InstallResult result) =>
         string.Join(Environment.NewLine, result.Steps.Where(s => !s.Ok).Select(GateActions.Describe));
@@ -320,7 +323,9 @@ public sealed class InstallActionsTests
         Directory.CreateDirectory(Path.Combine(h.Machine, "sub"));
         File.WriteAllText(Path.Combine(h.Machine, "device.json"), "{\"planted\":true}");
         File.WriteAllText(Path.Combine(h.Machine, "sub", "keep.txt"), "user file");
+        // Read once to see whether it holds records to check, once more before it would be used.
         h.Folders.Queue(h.Machine,
+            "O:" + TestUsers.Sid + "G:SYD:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;CIID;0x116;;;BU)",
             "O:" + TestUsers.Sid + "G:SYD:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;CIID;0x116;;;BU)",
             Sddl.MachineFolder);
 
@@ -610,6 +615,68 @@ public sealed class InstallActionsTests
         StringAssert.Contains(result.Steps.Last(s => s.Step == "remove-machine-folder").Detail, "is kept with device.json and protection.json");
         Assert.IsFalse(h.Tasks.FolderExists, "The tasks are still removed.");
         Assert.IsFalse(Directory.Exists(h.Install), "The install folder is still removed.");
+    }
+
+    // A partial uninstall kept the records of the AirPods (a node it could not enable). Setting up for another device
+    // over them would lose the only record of what to allow, so install refuses, as set-device does, and changes
+    // nothing. Setting up for the AirPods again works.
+    [TestMethod]
+    public void InstallForAnotherDeviceRefusesWhileTheKeptRecordsSayTheOldOneIsStillBlocked()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Nodes[RecordedNodes.AirPodsDeviceNode].MarkDisabled(persistent: true);
+        h.Nodes[RecordedNodes.AirPodsDeviceNode].EnableResult = CfgMgr32.CR_ACCESS_DENIED;
+        Assert.AreEqual(GateExitCode.Partial, h.RunUninstall().Outcome);
+        int taskCalls = h.Tasks.Calls.Count;
+
+        InstallResult other = h.RunInstall(RecordedNodes.HeadphonesAddress, RecordedNodes.HeadphonesContainer);
+
+        Assert.AreEqual(GateExitCode.OtherDeviceBlocked, other.Outcome, Fail(other));
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, new GateStore(h.Machine).ReadDevice().Value!.Address);
+        CollectionAssert.AreEquivalent(DeviceRecordOnly, Directory.GetFiles(h.Machine).Select(Path.GetFileName).ToArray());
+        Assert.IsFalse(Directory.Exists(h.Install), "Files were copied for a refused install.");
+        Assert.HasCount(taskCalls, h.Tasks.Calls, "The task namespace was touched for a refused install.");
+        StringAssert.Contains(other.Steps.Last(s => s.Step == "install-device").Detail, "run uninstall again");
+
+        h.Nodes[RecordedNodes.AirPodsDeviceNode].EnableResult = CfgMgr32.CR_SUCCESS;
+        InstallResult same = h.RunInstall();
+        Assert.AreEqual(GateExitCode.Success, same.Outcome, Fail(same));
+    }
+
+    [TestMethod]
+    public void InstallForAnotherDeviceRefusesWhileTheKeptRecordsListServicesTurnedOff()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        Assert.IsTrue(new GateStore(h.Machine).WriteProtection(new ProtectionRecord { DisabledServices = { Handsfree } }).Ok);
+        Assert.AreEqual(GateExitCode.Partial, h.RunUninstall().Outcome, "Without a Bluetooth API nothing is turned back on.");
+
+        InstallResult other = h.RunInstall(RecordedNodes.HeadphonesAddress, RecordedNodes.HeadphonesContainer);
+
+        Assert.AreEqual(GateExitCode.OtherDeviceProtected, other.Outcome, Fail(other));
+        var store = new GateStore(h.Machine);
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, store.ReadDevice().Value!.Address);
+        CollectionAssert.AreEqual(new[] { Handsfree }, store.ReadProtection().Value!.DisabledServices);
+        Assert.IsFalse(Directory.Exists(h.Install));
+    }
+
+    // A machine folder that fails its check is never read, so a device.json a standard user planted there cannot
+    // stop install; the folder check refuses it later, as before.
+    [TestMethod]
+    public void InstallNeverReadsTheRecordsOfAMachineFolderThatFailsItsCheck()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones());
+        Directory.CreateDirectory(h.Machine);
+        Assert.IsTrue(new GateStore(h.Machine).WriteDevice(RecordedNodes.AirPods()).Ok);
+        h.Nodes[RecordedNodes.AirPodsDeviceNode].MarkDisabled(persistent: true);
+        h.Folders.SddlFor = path => string.Equals(path, h.Machine, StringComparison.OrdinalIgnoreCase)
+            ? "O:" + TestUsers.Sid + "G:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)"
+            : null;
+
+        InstallResult result = h.RunInstall(RecordedNodes.HeadphonesAddress, RecordedNodes.HeadphonesContainer);
+
+        Assert.AreEqual(GateExitCode.FolderNotSecure, result.Outcome, Fail(result));
     }
 
     [TestMethod]

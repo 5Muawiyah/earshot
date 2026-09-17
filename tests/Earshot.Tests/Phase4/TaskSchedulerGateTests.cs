@@ -78,6 +78,14 @@ public sealed class TaskSchedulerGateTests
         h.Tasks.Tasks[@"\Earshot\Gate"] = good with { Sddl = spec.Sddl, Xml = TaskXml.For(spec, command: @"C:\Users\Public\Earshot.exe") };
         Assert.AreEqual(TaskHealth.NeedsRepair, h.Gate.Verify(TaskPlan.GateTaskName).Health);
 
+        TaskReadback ready = FakeScheduledTasks.Healthy(TaskPlan.ProtectTaskName, InstallFolder);
+        h.Tasks.Tasks[@"\Earshot\Protect"] = ready with { Xml = null };
+        TaskVerification noXml = h.Gate.Verify(TaskPlan.ProtectTaskName);
+        Assert.AreEqual(TaskHealth.Unreadable, noXml.Health, "A definition that could not be read is not one that differs.");
+        Assert.AreEqual("The task's security or definition could not be read.", noXml.Problems.Single());
+        h.Tasks.Tasks[@"\Earshot\Protect"] = ready with { Sddl = null };
+        Assert.AreEqual(TaskHealth.Unreadable, h.Gate.Verify(TaskPlan.ProtectTaskName).Health);
+
         h.Tasks.ReadResult = unchecked((int)0x80070005);
         Assert.AreEqual(TaskHealth.Unreadable, h.Gate.Verify(TaskPlan.GateTaskName).Health);
     }
@@ -105,7 +113,11 @@ public sealed class TaskSchedulerGateTests
         Assert.IsTrue(repair.Steps.Any(s => s.Step == "task-check:Gate"));
 
         h.Tasks.ReadResult = unchecked((int)0x80070005);
-        Assert.AreEqual(GateRunOutcome.RunFailed, h.Run().Outcome);
+        Assert.AreEqual(GateRunOutcome.TaskUnreadable, h.Run().Outcome);
+        h.Tasks.ReadResult = 0;
+
+        h.Tasks.Tasks[@"\Earshot\Gate"] = good with { Sddl = null };
+        Assert.AreEqual(GateRunOutcome.TaskUnreadable, h.Run().Outcome, "A security descriptor that could not be read is not a task that needs repair.");
 
         Assert.IsEmpty(h.Tasks.Runs);
     }

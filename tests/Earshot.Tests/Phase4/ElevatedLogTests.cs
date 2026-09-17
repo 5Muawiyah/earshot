@@ -51,6 +51,29 @@ public sealed class ElevatedLogTests
         StringAssert.Contains(unsafeFolder, "did not pass its check");
     }
 
+    // A gate run queued behind uninstall holds a machine log chosen while the folder was still there. Once uninstall
+    // has removed the folder, a write must not create it again: it would inherit the access list of its parent, and a
+    // later install would refuse it. The write fails and is counted instead. The logs folder itself is still created
+    // inside a machine folder that exists.
+    [TestMethod]
+    public void TheMachineLogNeverCreatesTheMachineFolderAgain()
+    {
+        using var temp = new TempFolder();
+        Paths paths = PathsUnder(temp);
+        Directory.CreateDirectory(paths.MachineFolder);
+        FileLog log = Program.MachineLog(paths, new FakeFolderSecurity(), out _)!;
+
+        log.Info("before uninstall");
+        Assert.IsTrue(File.Exists(log.FilePath));
+
+        Directory.Delete(paths.MachineFolder, recursive: true);
+        log.Error("gate block: folder-acl-read ERROR_PATH_NOT_FOUND");
+
+        Assert.IsFalse(Directory.Exists(paths.MachineFolder), "A log write created the machine folder again.");
+        Assert.AreEqual(1, log.FailedWrites);
+        StringAssert.Contains(log.LastWriteError, "was not created");
+    }
+
     [TestMethod]
     public void AHeldLogWritesNothingUntilItIsFlushedAndThenKeepsTheOrder()
     {

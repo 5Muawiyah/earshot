@@ -57,6 +57,11 @@ public sealed record BootBlockStatus(
     // then false, since the gate's boot verb refuses on such a file too, but it is not a choice anyone made: nothing
     // is decided from it, and the state is read again.
     public bool BlockAtBootKnown { get; init; } = true;
+
+    // False when a task could not be read (Task Scheduler failed to open it, or to return its security descriptor or
+    // XML). The state is then Unknown, not NotSetUp: one failed read is not taken as "not set up", so setup is not
+    // offered, and the state is read again.
+    public bool TasksKnown { get; init; } = true;
 }
 
 public sealed record AudioProtectionSnapshot(

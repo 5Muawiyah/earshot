@@ -89,6 +89,7 @@ internal static class CoordinatorRules
     public static string? AllowFirstRefusal(BootBlockStatus? status, Guid container) => status?.State switch
     {
         null => BlockCoordinator.BlockStatusUnreadableMessage,
+        _ when !status.TasksKnown => BlockCoordinator.BlockStatusUnreadableMessage,
         BlockState.Blocked or BlockState.Mixed => status.TargetContainerId == container ? null : BlockCoordinator.OtherDeviceMessage,
         BlockState.NotSetUp => ConnectMessages.BootBlockNotSetUp,
         BlockState.NotFound => ConnectMessages.NotFound,

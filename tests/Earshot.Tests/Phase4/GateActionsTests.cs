@@ -25,6 +25,9 @@ public sealed class GateActionsTests
             Directory.CreateDirectory(Machine);
             Store = new GateStore(Machine);
             Nodes = nodes ?? RecordedNodes.Table();
+
+            // Install writes config.json; without it every verb that changes a device refuses (NoConfig).
+            Assert.IsTrue(Store.WriteConfig(new GateConfig()).Ok);
         }
 
         public string Machine { get; }
@@ -211,6 +214,38 @@ public sealed class GateActionsTests
 
         Assert.IsEmpty(h.Nodes.Calls);
         Assert.AreEqual("no-identity", h.Status().Result);
+    }
+
+    // An uninstall that could not restore everything keeps device.json and protection.json but deletes config.json.
+    // A run that was queued behind it then changes nothing: no task is left to undo what it would do.
+    [TestMethod]
+    public void WithoutConfigTheVerbsThatChangeADeviceChangeNothing()
+    {
+        using var h = new Harness(RecordedNodes.TableWithHeadphones(), FakeBluetoothServices.AirPods());
+        h.Pin(RecordedNodes.AirPods());
+        foreach (string id in RecordedNodes.AirPodsTargets)
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        File.Delete(h.Store.ConfigFile);
+
+        foreach (string verb in new[] { GateVerbs.Block, GateVerbs.Allow, GateVerbs.ProtectOn, GateVerbs.ProtectOff })
+        {
+            Assert.AreEqual(GateExitCode.NoConfig, h.Run(verb), verb);
+            Assert.AreEqual("no-config", h.Status().Result);
+        }
+
+        Assert.AreEqual(GateExitCode.NoConfig, h.Run(GateVerbs.SetDevice, RecordedNodes.HeadphonesAddress));
+        Assert.IsEmpty(h.Nodes.Calls);
+        Assert.AreEqual(RecordedNodes.AirPodsAddress, h.Store.ReadDevice().Value!.Address);
+        Assert.Contains("config.json is missing", h.Status().Steps.Single(s => s.Step == "config-check").Detail!);
+
+        // Reading the state and writing the setting do not need it.
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.Status));
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.SetBootOn));
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.Allow));
+        Assert.HasCount(9, h.Nodes.Calls);
     }
 
     [TestMethod]
@@ -578,6 +613,7 @@ public sealed class GateActionsTests
         string machine = Path.Combine(temp.Path, "ProgramData", "Earshot");
         Directory.CreateDirectory(machine);
         var store = new GateStore(machine);
+        Assert.IsTrue(store.WriteConfig(new GateConfig()).Ok);
 
         GateExitCode exit = new GateActions(new FakeNodeApi(nodes), store, new FakeFolderSecurity(), new CapturingLog(), new ManualTime())
             .Run(new GateRequest(GateVerbs.SetDevice, Nonce, "AABBCCDDEEFF"));
@@ -591,6 +627,7 @@ public sealed class GateActionsTests
     {
         using var h = new Harness();
         h.Pin(RecordedNodes.AirPods());
+        File.Delete(h.Store.ConfigFile);
 
         Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.Boot), "No config is not permission.");
         Assert.IsEmpty(h.Nodes.Calls);

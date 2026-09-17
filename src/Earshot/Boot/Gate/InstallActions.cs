@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Interop;
 
@@ -309,7 +310,11 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 // failure that would leave something unsafe (fail closed):
 //   0. check the device with the same rule set-device applies (GateActions.ResolveAudioDevice): a
 //      BTHENUM\DEV_<address> node whose container is the one given, with an A2DP sink node, so setup can never
-//      pin a phone and the tray and the gate always name the same device. Nothing is changed before this passes;
+//      pin a phone and the tray and the gate always name the same device. Then, when %ProgramData%\Earshot already
+//      exists and passes its check, apply set-device's guards to the device.json in it (GateActions.CheckPinMove):
+//      an uninstall that could not restore everything keeps device.json and protection.json as the only record of
+//      what to allow and turn back on, and pinning another device over them would lose that record. Nothing is
+//      changed before this passes, except the protection.json of a device removed from Windows, which is emptied;
 //   1. read the publish manifest (Earshot.files.json) next to the running exe, copy exactly the files it lists,
 //      and the manifest itself, to %ProgramFiles%\Earshot with IntegrityCopy (staged, then swapped in), check
 //      each copy against the hash the manifest records, and check the install folder grants no one but
@@ -332,10 +337,14 @@ internal sealed class InstallActions
     private readonly ITaskRegistrar _tasks;
     private readonly Func<string, AccountLookup> _accountToSid;
     private readonly ILog _log;
+    private readonly IBluetoothServiceReader? _bluetooth;
     private bool _manifestMissing;
 
-    // nodes is only read, to check the device before anything is changed.
-    public InstallActions(InstallLayout layout, IFolderSecurity folders, INodeReader nodes, ITaskRegistrar tasks, Func<string, AccountLookup> accountToSid, ILog log)
+    // nodes is only read, to check the device before anything is changed. bluetooth is only read, to tell whether a
+    // device pinned before has been removed from Windows; without it such a device's record is never taken as void.
+    public InstallActions(
+        InstallLayout layout, IFolderSecurity folders, INodeReader nodes, ITaskRegistrar tasks, Func<string, AccountLookup> accountToSid, ILog log,
+        IBluetoothServiceReader? bluetooth = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(folders);
@@ -349,6 +358,7 @@ internal sealed class InstallActions
         _tasks = tasks;
         _accountToSid = accountToSid;
         _log = log;
+        _bluetooth = bluetooth;
     }
 
     // Nothing here is allowed to end the process without a record: an unexpected failure is logged and
@@ -375,6 +385,12 @@ internal sealed class InstallActions
         if (device != GateExitCode.Success)
         {
             return new InstallResult(device, steps);
+        }
+
+        GateExitCode kept = CheckKeptRecords(request, steps);
+        if (kept != GateExitCode.Success)
+        {
+            return new InstallResult(kept, steps);
         }
 
         if (!CopyApplication(steps))
@@ -422,6 +438,38 @@ internal sealed class InstallActions
         steps.Add(new StepOutcome("install-device", true, 0, "S_OK",
             request.Address + " in container " + container.ToString("D") + " has an A2DP sink node."));
         return GateExitCode.Success;
+    }
+
+    // The records an earlier install or a partial uninstall left in the machine folder. A folder that does not exist has
+    // none; one that fails its check is never read (PrepareMachineFolder refuses it later), so nothing a standard user
+    // may have put there can stop or steer install.
+    private GateExitCode CheckKeptRecords(InstallRequest request, List<StepOutcome> steps)
+    {
+        string machine = _layout.MachineFolder;
+        if (!Directory.Exists(machine))
+        {
+            return GateExitCode.Success;
+        }
+
+        // The check is repeated before the folder is used; its failure is recorded there, not twice.
+        var trust = new List<StepOutcome>();
+        if (!FolderTrust.IsTrusted(_folders, machine, AclCheck.CheckMachineFolder, "machine-folder-acl", trust))
+        {
+            steps.Add(new StepOutcome("install-kept-records", true, NativeCodes.NotAttempted, NativeCodes.Name(NativeCodes.NotAttempted),
+                machine + " did not pass its check, so no record in it was read."));
+            return GateExitCode.Success;
+        }
+
+        steps.AddRange(trust);
+
+        GateExitCode move = GateActions.CheckPinMove(_nodes, _bluetooth, new GateStore(machine), request.Address, request.ContainerId, "install-device", steps, _log);
+        if (move is GateExitCode.OtherDeviceBlocked or GateExitCode.OtherDeviceProtected)
+        {
+            steps.Add(StepOutcomes.NotAttempted("install-device",
+                "device.json names another device that Earshot still has to allow or turn back on. Set up for that device, or run uninstall again, first."));
+        }
+
+        return move;
     }
 
     private bool CopyApplication(List<StepOutcome> steps)

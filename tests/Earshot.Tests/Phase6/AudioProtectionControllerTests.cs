@@ -35,6 +35,7 @@ public sealed class AudioProtectionControllerTests
             {
                 Tasks.InstallAll(InstallFolder);
                 Assert.IsTrue(Store.WriteDevice(RecordedNodes.AirPods()).Ok);
+                Assert.IsTrue(Store.WriteConfig(new GateConfig()).Ok);
             }
 
             Tasks.OnRun = PlayTheGate;

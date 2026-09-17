@@ -475,6 +475,23 @@ public sealed class ConnectSequenceTests
         Assert.IsTrue(h.Log.Has(LogLevel.Error, "block-status failed ERROR_FILE_NOT_FOUND (0x80070002)"));
     }
 
+    // A Task Scheduler read that failed leaves the state Unknown with the tasks not known: the card says the status
+    // could not be read, not that Bluetooth may be off.
+    [TestMethod]
+    public void NothingIsAllowedWhenTheTasksCouldNotBeRead()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Unknown() with { TasksInstalled = false, TasksKnown = false };
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(BlockCoordinator.BlockStatusUnreadableMessage, report.UserMessage);
+        Assert.IsEmpty(h.Block.Calls);
+    }
+
     [TestMethod]
     public void AFailedConnectLeavesTheNodesAloneWhenBlockAtBootIsOff()
     {

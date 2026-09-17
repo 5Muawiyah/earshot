@@ -174,6 +174,13 @@ internal sealed class BlockCoordinator : IDisposable
     private DateTimeOffset _protectSettlesAt = DateTimeOffset.MinValue;
     private int _protectVerbsRunning;
 
+    // Allows this tray has sent and is still waiting for. A node read taken before one ends can still say Blocked.
+    private int _allowsRunning;
+
+    // A good read this run has shown the gate tasks set up. A later read that says not set up is then unexpected
+    // (another uninstall, or a read of a task that changed under it) and is read again rather than settled.
+    private bool _tasksSeenInstalled;
+
     // The last protect verb's end was not seen. The next Block sequence then blocks without another protect-on,
     // so a Protect task that keeps running out of time cannot hold the block back for good.
     private bool _lastProtectUnsettled;
@@ -274,8 +281,8 @@ internal sealed class BlockCoordinator : IDisposable
     // The protection request this tray keeps, for tests.
     internal bool? PendingProtect => _pendingProtect;
 
-    // An allow this tray sent may still enable the nodes.
-    internal bool AllowMayLand => _time.GetUtcNow() < _allowSettlesAt;
+    // An allow this tray sent is still being waited for, or may still enable the nodes.
+    internal bool AllowMayLand => _allowsRunning > 0 || _time.GetUtcNow() < _allowSettlesAt;
 
     // A protect verb this tray sent is running or may still run.
     internal bool ProtectMayRun => _protectVerbsRunning > 0 || _time.GetUtcNow() < _protectSettlesAt;
@@ -417,6 +424,7 @@ internal sealed class BlockCoordinator : IDisposable
                 _blockReadApplied = read;
                 _blockStatus = status;
                 _blockStatusFresh = true;
+                _tasksSeenInstalled |= status.TasksInstalled;
                 if (_statusAtIdleFailure is { } before &&
                     (before.State != status.State || before.BlockAtBoot != status.BlockAtBoot))
                 {
@@ -627,6 +635,14 @@ internal sealed class BlockCoordinator : IDisposable
         if (why.Length > 0)
         {
             _log.Info("Session ending: no block issued, because " + why + ".");
+            if (_blockStatus is { BlockAtBoot: true, State: not BlockState.NotSetUp } && _currentCancel is { } inFlight)
+            {
+                // With Block at boot on, the operation in flight must not go on to send an allow as the session ends; it
+                // stops at its next step, and its clean-up blocks again anything it already allowed.
+                _log.Info("Session ending: " + (_currentName ?? "the operation in flight") + " is stopped.");
+                inFlight.Cancel();
+            }
+
             return;
         }
 
@@ -1535,6 +1551,7 @@ internal sealed class BlockCoordinator : IDisposable
     private async Task<ControllerResult> SendAllowAsync(string action, List<StepOutcome> steps)
     {
         ControllerResult allow;
+        _allowsRunning++;
         try
         {
             allow = await _block.AllowAsync(CancellationToken.None);
@@ -1544,6 +1561,10 @@ internal sealed class BlockCoordinator : IDisposable
             _allowSettlesAt = _time.GetUtcNow() + UnsettledGateWindow;
             _log.Warn(action + ": failed, and the gate may still have been started, so it is taken as possibly still running until " + Utc(_allowSettlesAt) + ".", ex);
             throw;
+        }
+        finally
+        {
+            _allowsRunning--;
         }
 
         Record(steps, action, allow);
@@ -1954,11 +1975,14 @@ internal sealed class BlockCoordinator : IDisposable
             return ("the boot block status is not known", IdleVerdict.Unsettled);
         }
 
-        // Nothing can block without the gate tasks, so reading again changes nothing; the read after setup finishes
-        // evaluates the rule afresh.
+        // Nothing can block without the gate tasks, so before setup reading again changes nothing; the read after setup
+        // finishes evaluates the rule afresh. Once a read this run has shown them set up, one that says they are not
+        // is read again: the nodes may still be enabled, and a later read may show the tasks again.
         if (_blockStatus.State == BlockState.NotSetUp)
         {
-            return ("the boot block is not set up", IdleVerdict.Settled);
+            return _tasksSeenInstalled
+                ? ("the boot block read as not set up after it read as set up", IdleVerdict.Unsettled)
+                : ("the boot block is not set up", IdleVerdict.Settled);
         }
 
         // Read again while the nodes may be enabled: the setting may read later (a file that was in use), or be

@@ -43,7 +43,8 @@ internal enum GateExitCode
     OtherDeviceProtected = 13, // set-device while protection.json lists services turned off on the device pinned now
     NoManifest = 14,         // install without a valid Earshot.files.json next to the running exe
     DeviceMismatch = 15,     // install with a container that is not the container of the address's device node
-    UnsafeEnvironment = 16,  // a gate run not as SYSTEM whose environment names code for the .NET runtime to load
+    UnsafeEnvironment = 16,  // a gate, install or uninstall run whose environment names code for the .NET runtime to load
+    NoConfig = 17,           // a node change, set-device or protect verb while config.json is missing: not set up, or uninstall kept only the records
     Rejected = 20,          // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
@@ -69,6 +70,7 @@ internal static class GateExitCodes
         [GateExitCode.NoManifest] = "no-manifest",
         [GateExitCode.DeviceMismatch] = "device-mismatch",
         [GateExitCode.UnsafeEnvironment] = "unsafe-environment",
+        [GateExitCode.NoConfig] = "no-config",
         [GateExitCode.Rejected] = "rejected",
         [GateExitCode.NotElevated] = "not-elevated",
         [GateExitCode.RunningAsSystem] = "running-as-system",
@@ -287,19 +289,21 @@ internal sealed partial class GateActions
         VerbResult result;
         try
         {
-            result = held is null ? new VerbResult(GateExitCode.Failed, null) : request.Verb switch
-            {
-                GateVerbs.Block => Block(steps),
-                GateVerbs.Allow => Allow(steps),
-                GateVerbs.Status => Status(steps),
-                GateVerbs.SetBootOn => SetBoot(true, steps),
-                GateVerbs.SetBootOff => SetBoot(false, steps),
-                GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
-                GateVerbs.Boot => Boot(steps),
-                GateVerbs.ProtectOn => Protect(request, protect: true, steps),
-                GateVerbs.ProtectOff => Protect(request, protect: false, steps),
-                _ => new VerbResult(GateExitCode.Rejected, null),
-            };
+            result = held is null ? new VerbResult(GateExitCode.Failed, null)
+                : NeedsConfig(request.Verb) && !ConfigPresent(steps) ? new VerbResult(GateExitCode.NoConfig, null)
+                : request.Verb switch
+                {
+                    GateVerbs.Block => Block(steps),
+                    GateVerbs.Allow => Allow(steps),
+                    GateVerbs.Status => Status(steps),
+                    GateVerbs.SetBootOn => SetBoot(true, steps),
+                    GateVerbs.SetBootOff => SetBoot(false, steps),
+                    GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
+                    GateVerbs.Boot => Boot(steps),
+                    GateVerbs.ProtectOn => Protect(request, protect: true, steps),
+                    GateVerbs.ProtectOff => Protect(request, protect: false, steps),
+                    _ => new VerbResult(GateExitCode.Rejected, null),
+                };
         }
         catch (Exception ex)
         {
@@ -353,6 +357,28 @@ internal sealed partial class GateActions
         }
 
         return problems.Count == 0;
+    }
+
+    // The verbs that change a device or the pin. Boot refuses without a valid config.json on its own, status only
+    // reads, and set-boot-on and set-boot-off are what write the file.
+    private static bool NeedsConfig(string verb) =>
+        verb is GateVerbs.Block or GateVerbs.Allow or GateVerbs.SetDevice or GateVerbs.ProtectOn or GateVerbs.ProtectOff;
+
+    // Install writes config.json, and uninstall deletes it. An uninstall that could not restore everything keeps only
+    // device.json and protection.json, so a run that was queued behind it, or one started although setup never
+    // finished, finds no config.json and changes nothing: there are no tasks left to undo what it would do. A file
+    // that is present but not valid or not readable does not stop an allow or a restore; only a missing one does.
+    private bool ConfigPresent(List<StepOutcome> steps)
+    {
+        GateRead<GateConfig> config = _store.ReadConfig();
+        if (config.Status != GateReadStatus.Missing)
+        {
+            return true;
+        }
+
+        steps.Add(config.Step);
+        steps.Add(StepOutcomes.NotAttempted("config-check", "config.json is missing, so Earshot is not set up here and nothing was changed."));
+        return false;
     }
 
     private DeviceIdentity? ReadIdentity(List<StepOutcome> steps)
@@ -458,7 +484,7 @@ internal sealed partial class GateActions
     // attacker-controlled: it only ever selects a BTHENUM\DEV_<address> node, and the container is read from
     // that node, never taken from the command line.
     //
-    // Guards, each refusing with nothing written:
+    // Guards, each refusing with nothing written (the last two are CheckPinMove, which install applies too):
     //   - the device must be one ResolveAudioDevice accepts: headphones or speakers, never a paired phone;
     //   - moving the pin away from a device whose nodes are still disabled would leave it disabled with nothing
     //     in Earshot able to allow it again;
@@ -488,11 +514,41 @@ internal sealed partial class GateActions
             return new VerbResult(resolved, resolved == GateExitCode.NotFound ? nameof(BlockState.NotFound) : null);
         }
 
-        GateRead<DeviceIdentity> current = _store.ReadDevice();
+        GateExitCode move = CheckPinMove(_nodes, _bluetooth, _store, address, container, "set-device", steps, _log);
+        if (move != GateExitCode.Success)
+        {
+            return new VerbResult(move, null);
+        }
+
+        StepOutcome written = _store.WriteDevice(new DeviceIdentity { Address = address, ContainerId = container });
+        steps.Add(written);
+        return new VerbResult(written.Ok ? GateExitCode.Success : GateExitCode.Failed, null);
+    }
+
+    // Whether device.json may name the device with this address and container instead of the one it names now: the
+    // guards set-device applies, shared with install, which writes device.json too. Success when nothing is pinned, the
+    // same device is, or the pin may move. Otherwise nothing is written (except the voided record below):
+    //   OtherDeviceBlocked    the device pinned now still has a disabled node, or one carrying the persistent flag,
+    //                         which nothing in Earshot could allow again once the pin moves;
+    //   OtherDeviceProtected  protection.json lists services turned off (or cannot be read), which protect-off and the
+    //                         uninstall restore would then turn on for the new device and never for the old one. The
+    //                         one exception is a device pinned now that has been removed from Windows (no node, not
+    //                         paired): its entries went with its pairing, so they are emptied here;
+    //   Failed                device.json or the old device's nodes could not be read, which says nothing either way.
+    // step names the steps this adds (set-device, install-device).
+    internal static GateExitCode CheckPinMove(
+        INodeReader nodes, IBluetoothServiceReader? bluetooth, GateStore store, string address, Guid container, string step, IList<StepOutcome> steps, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(step);
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(log);
+        GateRead<DeviceIdentity> current = store.ReadDevice();
         if (current.Status == GateReadStatus.Unreadable)
         {
             steps.Add(current.Step);
-            return new VerbResult(GateExitCode.Failed, null);
+            return GateExitCode.Failed;
         }
 
         if (current.Status == GateReadStatus.Invalid)
@@ -502,61 +558,66 @@ internal sealed partial class GateActions
 
         bool samePin = current.IsOk && current.Value is { } same &&
                        string.Equals(same.Address, address, StringComparison.Ordinal) && same.ContainerId == container;
-        if (!samePin)
+        if (samePin)
         {
-            NodeReadResult? old = null;
-            if (current.IsOk && current.Value is { } pinned)
+            return GateExitCode.Success;
+        }
+
+        NodeReadResult? old = null;
+        if (current.IsOk && current.Value is { } pinned)
+        {
+            old = new NodeStateReader(nodes).Read(pinned.ContainerId, pinned.Address);
+            if (!old.Listed)
             {
-                old = new NodeStateReader(_nodes).Read(pinned.ContainerId, pinned.Address);
-                if (!old.Listed)
+                foreach (StepOutcome read in old.Steps)
                 {
-                    steps.AddRange(old.Steps);
-                    return new VerbResult(GateExitCode.Failed, null);
+                    steps.Add(read);
                 }
 
-                if (old.Nodes.Any(n => n.Status == NodeBlockStatus.Disabled || n.ConfigFlagsDisabledBit))
-                {
-                    steps.Add(StepOutcomes.NotAttempted("set-device", "The device pinned now is still blocked. Allow it first."));
-                    return new VerbResult(GateExitCode.OtherDeviceBlocked, null);
-                }
-
-                if (old.Unread.Count > 0)
-                {
-                    steps.AddRange(old.Steps.Where(s => !s.Ok));
-                    steps.Add(StepOutcomes.NotAttempted("set-device",
-                        "Whether the device pinned now is still blocked could not be read, so the pin was not moved."));
-                    return new VerbResult(GateExitCode.Failed, null);
-                }
+                return GateExitCode.Failed;
             }
 
-            GateRead<ProtectionRecord> protection = _store.ReadProtection();
-            if (protection.Status != GateReadStatus.Missing && !(protection.IsOk && protection.Value is { DisabledServices.Count: 0 }))
+            if (old.Nodes.Any(n => n.Status == NodeBlockStatus.Disabled || n.ConfigFlagsDisabledBit))
             {
-                // The entries of a device removed from Windows are void (ProtectionGateRunner.IsRemovedFromThisPc):
-                // its pairing, and the service state with it, is gone, so they must not hold the pin for good.
-                if (protection.IsOk && old is not null && current.Value is { } gone &&
-                    ProtectionGateRunner.IsRemovedFromThisPc(old, _bluetooth, gone.Address, steps))
+                steps.Add(StepOutcomes.NotAttempted(step, "The device pinned now is still blocked. Allow it first."));
+                return GateExitCode.OtherDeviceBlocked;
+            }
+
+            if (old.Unread.Count > 0)
+            {
+                foreach (StepOutcome read in old.Steps.Where(s => !s.Ok))
                 {
-                    if (ProtectionGateRunner.VoidRecord(_store, gone.Address, steps, _log) != GateExitCode.Success)
-                    {
-                        return new VerbResult(GateExitCode.Failed, null);
-                    }
+                    steps.Add(read);
                 }
-                else
-                {
-                    steps.Add(protection.Step);
-                    steps.Add(StepOutcomes.NotAttempted("set-device",
-                        protection.IsOk
-                            ? "protection.json lists services turned off on the device pinned now. Turn them back on (protect-off) first."
-                            : "protection.json could not be read, so it may list services turned off on the device pinned now."));
-                    return new VerbResult(GateExitCode.OtherDeviceProtected, null);
-                }
+
+                steps.Add(StepOutcomes.NotAttempted(step,
+                    "Whether the device pinned now is still blocked could not be read, so the pin was not moved."));
+                return GateExitCode.Failed;
             }
         }
 
-        StepOutcome written = _store.WriteDevice(new DeviceIdentity { Address = address, ContainerId = container });
-        steps.Add(written);
-        return new VerbResult(written.Ok ? GateExitCode.Success : GateExitCode.Failed, null);
+        GateRead<ProtectionRecord> protection = store.ReadProtection();
+        if (protection.Status == GateReadStatus.Missing || (protection.IsOk && protection.Value is { DisabledServices.Count: 0 }))
+        {
+            return GateExitCode.Success;
+        }
+
+        // The entries of a device removed from Windows are void (ProtectionGateRunner.IsRemovedFromThisPc): its
+        // pairing, and the service state with it, is gone, so they must not hold the pin for good.
+        if (protection.IsOk && old is not null && current.Value is { } gone &&
+            ProtectionGateRunner.IsRemovedFromThisPc(old, bluetooth, gone.Address, steps))
+        {
+            return ProtectionGateRunner.VoidRecord(store, gone.Address, steps, log) == GateExitCode.Success
+                ? GateExitCode.Success
+                : GateExitCode.Failed;
+        }
+
+        steps.Add(protection.Step);
+        steps.Add(StepOutcomes.NotAttempted(step,
+            protection.IsOk
+                ? "protection.json lists services turned off on the device pinned now. Turn them back on (protect-off) first."
+                : "protection.json could not be read, so it may list services turned off on the device pinned now."));
+        return GateExitCode.OtherDeviceProtected;
     }
 
     // The instance id prefix of an A2DP sink service node: BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_...

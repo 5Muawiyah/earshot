@@ -96,7 +96,7 @@ public sealed class DisconnectSequenceTests
             h.Block.Status = Statuses.Blocked();
             h.Monitor.Publish(Devices.NotPresent(3));
             return Task.FromResult(new ControllerResult(OpStatus.Partial,
-                "Connect the AirPods to this PC once from Windows Bluetooth settings, then try Block again.", []));
+                "Connect the AirPods to this PC once from Windows Bluetooth settings, so Earshot can block them.", []));
         };
 
         ToggleReport report = h.Toggle(connect: false);

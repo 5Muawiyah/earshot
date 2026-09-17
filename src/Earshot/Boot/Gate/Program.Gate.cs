@@ -24,6 +24,8 @@ namespace Earshot;
 // it starts, before any Earshot code runs, so such a program can run its own code in those elevated runs. install
 // logs this as a warning when the flag is given, InstallUsage says it, and a gate run that is not SYSTEM refuses to
 // act while such a variable is set (RuntimeCodeLoadingVariables), which tells the owner but cannot keep the code out.
+// install and uninstall start from the user's session through the UAC prompt with the same environment, so they
+// refuse on the same variables.
 // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
 //
 // Program.Dispatch has already refused all of them in safe mode and while EARSHOT_DATA_ROOT is set. The
@@ -83,7 +85,10 @@ internal static partial class Program
 
     // %ProgramData%\Earshot\logs once the machine folder passes its ACL check (its inheritable entries protect the
     // subfolder too, and no standard user can create anything inside it), or null with why not. The one file an
-    // elevated run started by a user may write its log to.
+    // elevated run started by a user may write its log to. Each write creates only the logs folder and never the
+    // machine folder: a run that was queued behind uninstall would otherwise create %ProgramData%\Earshot again with
+    // the permissive access list it inherits from %ProgramData%, which a later install refuses and the owner then
+    // has to remove by hand. Such a write fails, and goes to the debugger output instead.
     internal static FileLog? MachineLog(Paths paths, IFolderSecurity folders, out string whyNot)
     {
         ArgumentNullException.ThrowIfNull(paths);
@@ -102,7 +107,25 @@ internal static partial class Program
         }
 
         whyNot = "";
-        return new FileLog(Path.Combine(paths.MachineFolder, "logs"));
+        return new FileLog(Path.Combine(paths.MachineFolder, "logs"), createFolder: CreateLastFolderOnly);
+    }
+
+    // Creates the folder when its parent exists, and throws IOException (with the Win32 error as its HRESULT) when the
+    // parent does not, rather than create the parent.
+    internal static void CreateLastFolderOnly(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (Interop.FileApis.CreateDirectory(path, 0))
+        {
+            return;
+        }
+
+        int error = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
+        if (error != Interop.FileApis.ERROR_ALREADY_EXISTS)
+        {
+            throw new IOException("The folder " + path + " was not created (Win32 error " + error.ToString(CultureInfo.InvariantCulture) + ").",
+                unchecked((int)(0x80070000u | ((uint)error & 0xFFFFu))));
+        }
     }
 
     // The token for choosing the log, or null when it cannot be read. RunGate reads it again, and a failure there
@@ -134,7 +157,7 @@ internal static partial class Program
             {
                 // Task Scheduler COM runs on an MTA thread, as it does in the tray.
                 using var worker = new SystemWorker(log);
-                return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log).Run(request))
+                return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log, new BluetoothServiceReader()).Run(request))
                     .GetAwaiter().GetResult();
             }));
         }
@@ -223,11 +246,13 @@ internal static partial class Program
     // The names, in the order given, of the environment variables that make the .NET runtime or its host load code
     // other than the application's, or connect to a diagnostics client that can tell it to: a profiler (CORECLR_*,
     // COR_ENABLE_PROFILING and COR_PROFILER*, and the DOTNET_ spellings, notification profilers included), startup
-    // hooks, additional deps files, a runtime package store, and diagnostic ports. Names are compared as Windows
-    // compares them, ignoring case. The value is never read or logged.
+    // hooks, additional deps files, a runtime package store, diagnostic ports, and a standalone garbage collector
+    // (GCPath, a native library loaded from a full path, and GCName, one loaded by name). Names are compared as
+    // Windows compares them, ignoring case. The value is never read or logged.
     // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
     // https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-environment-variables
     // https://learn.microsoft.com/en-us/dotnet/core/diagnostics/diagnostic-port
+    // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/garbage-collector#standalone-gc
     internal static IReadOnlyList<string> RuntimeCodeLoadingVariables(IEnumerable<string> names)
     {
         ArgumentNullException.ThrowIfNull(names);
@@ -239,7 +264,7 @@ internal static partial class Program
     private static readonly string[] CodeLoadingKnobs =
     [
         "ENABLE_PROFILING", "PROFILER", "ENABLE_NOTIFICATION_PROFILERS", "NOTIFICATION_PROFILERS",
-        "STARTUP_HOOKS", "ADDITIONAL_DEPS", "SHARED_STORE", "DiagnosticPorts",
+        "STARTUP_HOOKS", "ADDITIONAL_DEPS", "SHARED_STORE", "DiagnosticPorts", "GCPath", "GCName",
     ];
 
     private static bool IsRuntimeCodeLoadingVariable(string name)
@@ -271,7 +296,8 @@ internal static partial class Program
     private static IEnumerable<string> CurrentEnvironmentNames() =>
         Environment.GetEnvironmentVariables().Keys.OfType<string>();
 
-    internal static GateExitCode RunInstall(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<InstallRequest, InstallResult> run)
+    // environmentNames: as for RunGate.
+    internal static GateExitCode RunInstall(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<InstallRequest, InstallResult> run, IEnumerable<string>? environmentNames = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(token);
@@ -290,6 +316,11 @@ internal static partial class Program
             return GateExitCode.Rejected;
         }
 
+        if (EnvironmentRefusal("install", environmentNames, log) is { } unsafeEnvironment)
+        {
+            return unsafeEnvironment;
+        }
+
         log.Info("install for " + request.UserSid + ", device " + request.Address + ", container " +
                  request.ContainerId.ToString("D") + ", " + request.Principal + " principal.");
         if (request.Principal == TaskPrincipalMode.InteractiveUser)
@@ -301,7 +332,8 @@ internal static partial class Program
         return result.Outcome;
     }
 
-    internal static GateExitCode RunUninstall(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<InstallResult> run)
+    // environmentNames: as for RunGate.
+    internal static GateExitCode RunUninstall(IReadOnlyList<string> args, IProcessToken token, ILog log, Func<InstallResult> run, IEnumerable<string>? environmentNames = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(token);
@@ -320,9 +352,33 @@ internal static partial class Program
             return GateExitCode.Rejected;
         }
 
+        if (EnvironmentRefusal("uninstall", environmentNames, log) is { } unsafeEnvironment)
+        {
+            return unsafeEnvironment;
+        }
+
         InstallResult result = run();
         LogSteps(log, "uninstall", result);
         return result.Outcome;
+    }
+
+    // install and uninstall are elevated from the user's own session through the UAC prompt, so they start with that
+    // user's environment (HKCU\Environment included), which any program the user runs can change without elevation.
+    // As for a gate run that is not SYSTEM, they change nothing while it names code for the .NET runtime to load, and
+    // say which variable. Such code may already have run in this process; the refusal tells the owner.
+    // https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling
+    private static GateExitCode? EnvironmentRefusal(string mode, IEnumerable<string>? environmentNames, ILog log)
+    {
+        IReadOnlyList<string> loaders = RuntimeCodeLoadingVariables(environmentNames ?? CurrentEnvironmentNames());
+        if (loaders.Count == 0)
+        {
+            return null;
+        }
+
+        log.Warn(mode + ": refused, because this elevated run started from a user's session and its environment sets " +
+                 string.Join(", ", loaders) + ", which make the .NET runtime load code that is not Earshot's. That code may already have run in " +
+                 "this process. Remove the variables from the user's environment, then run " + mode + " again.");
+        return GateExitCode.UnsafeEnvironment;
     }
 
     // install and uninstall run from a user's UAC prompt: never as SYSTEM, and only with an elevated token.

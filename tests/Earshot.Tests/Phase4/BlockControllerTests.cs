@@ -4,6 +4,7 @@ using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Interop;
+using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase4;
@@ -145,6 +146,54 @@ public sealed class BlockControllerTests
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "task-check:BootBlock"));
     }
 
+    // A Task Scheduler read that fails says nothing about setup. The state is Unknown rather than NotSetUp, so setup
+    // (a UAC prompt) is not offered, nothing that blocks is turned off, and the state is read again.
+    [TestMethod]
+    public async Task ATaskThatCouldNotBeReadIsNotTakenAsNotSetUp()
+    {
+        using var h = new Harness();
+        h.Tasks.ReadResult = unchecked((int)0x800706BA); // RPC_S_SERVER_UNAVAILABLE
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.AreEqual(BlockState.Unknown, status.State);
+        Assert.IsFalse(status.TasksKnown);
+        Assert.IsFalse(status.TasksInstalled);
+        Assert.IsTrue(status.BlockAtBootKnown, "config.json was read.");
+        Assert.IsTrue(status.BlockAtBoot);
+        Assert.IsFalse(TrayStatus.NeedsSetUp(status));
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, @"task-open:\Earshot\Gate"));
+
+        ControllerResult block = await h.Controller.BlockAsync();
+        Assert.AreEqual(BlockController.TaskUnreadableMessage, block.UserMessage);
+        Assert.IsEmpty(h.Tasks.Runs);
+
+        h.Tasks.ReadResult = 0;
+        BootBlockStatus again = await h.Controller.GetStatusAsync();
+        Assert.AreEqual(BlockState.Allowed, again.State);
+        Assert.IsTrue(again.TasksKnown);
+    }
+
+    // The same for a task that opened but whose security descriptor or XML could not be read: that is not a task
+    // that needs repair. Without config.json the setting is not known either.
+    [TestMethod]
+    public async Task ATaskWhoseDefinitionCouldNotBeReadIsNotTakenAsNotSetUp()
+    {
+        using var h = new Harness();
+        TaskReadback good = h.Tasks.Tasks[@"\Earshot\Protect"];
+        h.Tasks.Tasks[@"\Earshot\Protect"] = good with { Xml = null, Steps = [StepOutcomes.FromHResult(@"task-xml:\Earshot\Protect", unchecked((int)0x8007000E))] };
+        File.Delete(h.Store.ConfigFile);
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.AreEqual(BlockState.Unknown, status.State);
+        Assert.IsFalse(status.TasksKnown);
+        Assert.IsFalse(status.BlockAtBootKnown, "A missing config.json does not mean before setup while the tasks are not known.");
+        Assert.IsFalse(status.BlockAtBoot);
+        Assert.IsFalse(h.Controller.IsSetUp);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, @"task-xml:\Earshot\Protect"));
+    }
+
     [TestMethod]
     public async Task StatusWithNothingPinnedIsNotFound()
     {
@@ -235,7 +284,7 @@ public sealed class BlockControllerTests
         ControllerResult result = await h.Controller.BlockAsync();
 
         Assert.AreEqual(OpStatus.Failed, result.Status);
-        Assert.AreEqual("Connect the AirPods to this PC once from Windows Bluetooth settings, then try Block again.", result.UserMessage);
+        Assert.AreEqual("Connect the AirPods to this PC once from Windows Bluetooth settings, so Earshot can block them.", result.UserMessage);
         Assert.IsTrue(result.Steps.Any(s => s.CodeName == "CR_NO_SUCH_DEVNODE"));
     }
 
@@ -262,6 +311,44 @@ public sealed class BlockControllerTests
 
         Assert.AreEqual(OpStatus.Failed, result.Status);
         Assert.AreEqual(BlockController.TimedOutMessage, result.UserMessage);
+    }
+
+    // A gate run that is not SYSTEM refuses before it does anything while its environment names code for the .NET
+    // runtime to load, so it writes no status file and only LastTaskResult carries the reason. Trying again cannot
+    // work, so the card names the reason instead of saying to try again.
+    [TestMethod]
+    public async Task AGateRunRefusedForItsEnvironmentSaysWhyRatherThanTryAgain()
+    {
+        using var h = new Harness();
+        h.GateActs = false;
+        h.Tasks.OnRun = _ => h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, (int)GateExitCode.UnsafeEnvironment, h.Tasks.Current.LastRunTime + 1);
+
+        ControllerResult block = await h.Controller.BlockAsync();
+        ControllerResult setting = await h.Controller.SetBlockAtBootAsync(false);
+
+        Assert.AreEqual(OpStatus.Failed, block.Status);
+        Assert.AreEqual(BlockController.UnsafeEnvironmentMessage, block.UserMessage);
+        Assert.AreEqual(BlockController.UnsafeEnvironmentMessage, setting.UserMessage);
+        Assert.IsTrue(block.Steps.Any(s => s.CodeName == "unsafe-environment"));
+        Assert.DoesNotContain("Try again", block.UserMessage);
+    }
+
+    // The gate refuses a node change without config.json; the card says how to write it again.
+    [TestMethod]
+    public async Task AGateRunRefusedForAMissingConfigSaysHowToWriteItAgain()
+    {
+        using var h = new Harness();
+        File.Delete(h.Store.ConfigFile);
+
+        ControllerResult block = await h.Controller.BlockAsync();
+
+        Assert.AreEqual(OpStatus.Failed, block.Status);
+        Assert.AreEqual(BlockController.NoConfigMessage, block.UserMessage);
+        Assert.IsEmpty(h.Nodes.Calls);
+
+        ControllerResult setting = await h.Controller.SetBlockAtBootAsync(true);
+        Assert.AreEqual(OpStatus.Success, setting.Status);
+        Assert.AreEqual(OpStatus.Success, (await h.Controller.BlockAsync()).Status);
     }
 
     [TestMethod]
@@ -564,6 +651,15 @@ public sealed class BlockControllerTests
         h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.DeviceMismatch, StepOutcomes.FromWin32("runas", 0));
         Assert.AreEqual(BlockController.SetupDeviceChangedMessage, (await h.Controller.RunSetupAsync()).UserMessage);
 
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.OtherDeviceBlocked, StepOutcomes.FromWin32("runas", 0));
+        Assert.AreEqual(BlockController.SetupOtherDeviceBlockedMessage, (await h.Controller.RunSetupAsync()).UserMessage);
+
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.OtherDeviceProtected, StepOutcomes.FromWin32("runas", 0));
+        Assert.AreEqual(BlockController.SetupOtherDeviceProtectedMessage, (await h.Controller.RunSetupAsync()).UserMessage);
+
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.UnsafeEnvironment, StepOutcomes.FromWin32("runas", 0));
+        Assert.AreEqual(BlockController.SetupUnsafeEnvironmentMessage, (await h.Controller.RunSetupAsync()).UserMessage);
+
         h.Launcher.Result = _ => new ElevatedRun(77, StepOutcomes.FromWin32("runas", 0));
         ControllerResult refused = await h.Controller.RunSetupAsync();
         Assert.AreEqual(BlockController.SetupFailedMessage, refused.UserMessage);
@@ -571,6 +667,12 @@ public sealed class BlockControllerTests
 
         h.Launcher.Result = _ => new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0));
         Assert.AreEqual(BlockController.NeedsRepairMessage, (await h.Controller.RunSetupAsync()).UserMessage, "Exit 0 without tasks is not success.");
+
+        h.Tasks.InstallAll(InstallFolder);
+        h.Tasks.ReadResult = unchecked((int)0x800706BA);
+        ControllerResult unread = await h.Controller.RunSetupAsync();
+        Assert.AreEqual(OpStatus.Partial, unread.Status, "Exit 0 with tasks that could not be read back is neither success nor a repair.");
+        Assert.AreEqual(BlockController.SetupNotReadBackMessage, unread.UserMessage);
     }
 
     [TestMethod]
@@ -582,6 +684,10 @@ public sealed class BlockControllerTests
         h.Launcher.Result = _ => new ElevatedRun(null, StepOutcomes.FromWin32("runas", 1223));
         Assert.AreEqual(BlockController.RemoveCancelledMessage, (await h.Controller.UninstallAsync()).UserMessage);
         Assert.IsTrue(h.Controller.IsSetUp);
+
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.UnsafeEnvironment, StepOutcomes.FromWin32("runas", 0));
+        Assert.AreEqual(BlockController.RemoveUnsafeEnvironmentMessage, (await h.Controller.UninstallAsync()).UserMessage);
+        Assert.IsTrue(h.Controller.IsSetUp, "Nothing was removed.");
 
         h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.Partial, StepOutcomes.FromWin32("runas", 0));
         ControllerResult partial = await h.Controller.UninstallAsync();

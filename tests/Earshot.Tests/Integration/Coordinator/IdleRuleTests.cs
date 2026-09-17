@@ -157,6 +157,42 @@ public sealed class IdleRuleTests
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
     }
 
+    // After reads that showed the tasks set up, one read that says they are not does not settle the rule: the nodes
+    // may still be enabled, and no notification may follow.
+    [TestMethod]
+    public void OneNotSetUpReadAfterTheTasksReadAsSetUpIsReadAgainAndTheNodesAreBlocked()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Block.NextReadStates.Enqueue(BlockState.NotSetUp);
+
+        h.Publish(Devices.Idle(2));
+        Assert.AreEqual(BlockState.NotSetUp, h.Coordinator.BlockStatus?.State);
+        Assert.IsFalse(h.Coordinator.IdleWaitRunning, "The idle rule acted on a read that said not set up.");
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the state again after one read said not set up.");
+
+        // No notification arrives: the AirPods are on the phone.
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+        Assert.IsFalse(h.Coordinator.RecheckRunning);
+    }
+
+    // Before setup nothing can block, so a read that says not set up settles the rule with nothing scheduled.
+    [TestMethod]
+    public void BeforeSetUpANotSetUpReadSchedulesNothing()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.NotSetUp();
+        h.Monitor.Set(Devices.Idle(1));
+
+        h.Start();
+        h.Advance(BlockCoordinator.IdleRetryLimit);
+
+        Assert.IsFalse(h.Coordinator.RecheckRunning);
+        Assert.IsFalse(h.Coordinator.IdleWaitRunning);
+        Assert.IsEmpty(h.Block.Calls);
+    }
+
     [TestMethod]
     public void OneDeviceReadThatFailsIsReadAgainWithoutANotification()
     {
@@ -751,7 +787,7 @@ public sealed class IdleRuleTests
     }
 
     private const string BusyMessage = "Another change to the AirPods is still running. Try again.";
-    private const string NotPresentBlockMessage = "Connect the AirPods to this PC once from Windows Bluetooth settings, then try Block again.";
+    private const string NotPresentBlockMessage = "Connect the AirPods to this PC once from Windows Bluetooth settings, so Earshot can block them.";
 
     private static ControllerResult Busy() =>
         ControllerResult.Fail(BusyMessage, [StepOutcomes.FromWin32("device-change-lock", 32)]);

@@ -18,6 +18,9 @@ namespace Earshot.Infra;
 // rolls false: the file is only ever appended to, never renamed or replaced. Program.Dispatch uses that for the
 // elevated modes. An elevated run never writes under a standard user's profile at all (Program.ModeLog, HeldLog),
 // since appending by path there could follow a link the user planted.
+//
+// createFolder, when given, replaces Directory.CreateDirectory (which creates every missing folder on the path)
+// before each write; the machine log passes one that creates only the last folder (Program.MachineLog).
 internal sealed class FileLog : ILog
 {
     public const long DefaultMaxBytes = 1024 * 1024;
@@ -30,10 +33,11 @@ internal sealed class FileLog : ILog
     private readonly string _rolledFile;
     private readonly long _maxBytes;
     private readonly bool _rolls;
+    private readonly Action<string>? _createFolder;
     private int _failedWrites;
     private string? _lastWriteError;
 
-    public FileLog(string folder, string fileName = "earshot.log", long maxBytes = DefaultMaxBytes, bool rolls = true)
+    public FileLog(string folder, string fileName = "earshot.log", long maxBytes = DefaultMaxBytes, bool rolls = true, Action<string>? createFolder = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
@@ -44,6 +48,7 @@ internal sealed class FileLog : ILog
         _rolledFile = Path.Combine(folder, Path.GetFileNameWithoutExtension(fileName) + ".1" + Path.GetExtension(fileName));
         _maxBytes = maxBytes;
         _rolls = rolls;
+        _createFolder = createFolder;
     }
 
     public string FilePath => _file;
@@ -80,7 +85,15 @@ internal sealed class FileLog : ILog
                 AppendEntry(entry, now, level, message, ex);
                 byte[] bytes = Utf8NoBom.GetBytes(entry.ToString());
 
-                Directory.CreateDirectory(_folder);
+                if (_createFolder is null)
+                {
+                    Directory.CreateDirectory(_folder);
+                }
+                else
+                {
+                    _createFolder(_folder);
+                }
+
                 RollIfFull(bytes.Length);
                 using (var stream = new FileStream(_file, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
                 {

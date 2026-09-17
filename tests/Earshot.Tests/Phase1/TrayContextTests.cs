@@ -709,6 +709,37 @@ public sealed class TrayContextTests
         });
     }
 
+    // While Exit waits for a change in flight the icon is gone but this process still holds the single-instance lock,
+    // so a second copy exits and asks this one to show its card. The card says Earshot is closing rather than leave
+    // the start unanswered.
+    [TestMethod]
+    public void StartingEarshotAgainWhileItClosesSaysItIsClosing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
+            var release = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Connection.OnConnect = _ => release.Task;
+
+            tray.Ui.Post(
+                _ =>
+                {
+                    tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+                    tray.ClickMenu(MenuModel.Exit);
+                    tray.Context.ShowStatusCard();
+                    release.SetResult(new ConnectResult(ConnectOutcome.Failed, "Cancelled", []));
+                },
+                null);
+            Application.Run(tray.Context);
+
+            CardShown[] closing = tray.Cards.Shown.Where(c => c.Content.Status == TrayContext.ClosingMessage).ToArray();
+            Assert.HasCount(2, closing, "The start while closing got no card of its own.");
+            Assert.AreEqual(CardAnchor.NearCursor, closing[1].Anchor);
+            Assert.AreEqual(TrayStatus.AppName, closing[1].Content.Title);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Earshot was started again while it is closing"));
+        });
+    }
+
     [TestMethod]
     public void ExitBlocksEnabledNodesThatAreNotInUseBeforeClosing()
     {

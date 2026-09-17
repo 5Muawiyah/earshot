@@ -65,11 +65,15 @@ internal sealed class ShellRunasLauncher : IElevatedLauncher
 // show the nodes before setup.
 internal sealed class BlockController : IBlockController, IDisposable
 {
+    // Where an elevated run that is not SYSTEM writes its log (Program.MachineLog), which names the variables.
+    internal const string MachineLogHint = @"See ProgramData\Earshot\logs.";
     internal const string NotSetUpMessage = "Boot block is not set up yet. Choose Set up Earshot.";
     internal const string NeedsRepairMessage = "Boot block needs repair. Choose Set up Earshot.";
     internal const string CouldNotStartMessage = "The boot block task did not start. Choose Set up Earshot.";
+    internal const string TaskUnreadableMessage = "Could not read the boot block task. Try again.";
+    internal const string UnsafeEnvironmentMessage = "The boot block task stopped because the environment sets .NET runtime variables. " + MachineLogHint;
     internal const string NotFoundMessage = "AirPods not found. Connect them to this PC once from Windows Bluetooth settings.";
-    internal const string NotPresentBlockMessage = "Connect the AirPods to this PC once from Windows Bluetooth settings, then try Block again.";
+    internal const string NotPresentBlockMessage = "Connect the AirPods to this PC once from Windows Bluetooth settings, so Earshot can block them.";
     internal const string NotPresentAllowMessage = "Connect the AirPods to this PC once from Windows Bluetooth settings, then try again.";
     internal const string UnreadableMessage = "Could not read the AirPods state. Try again.";
     internal const string BlockedMessage = "Blocked at boot";
@@ -97,6 +101,10 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string NothingPinnedMessage = "Choose your AirPods first, then set up Earshot.";
     internal const string NoUserMessage = "Setup needs a signed-in Windows user.";
     internal const string SetupDoneMessage = "Earshot is set up";
+    internal const string SetupNotReadBackMessage = "Earshot is set up, but its tasks could not be read back yet.";
+    internal const string SetupOtherDeviceBlockedMessage = "Earshot still blocks the AirPods chosen before. Choose them again, then set up Earshot.";
+    internal const string SetupOtherDeviceProtectedMessage = "Earshot turned off the microphone of the AirPods chosen before. Choose them again, then set up Earshot.";
+    internal const string SetupUnsafeEnvironmentMessage = "Setup stopped because the environment sets .NET runtime variables that load code.";
     internal const string SetupCancelledMessage = "Setup was cancelled";
     internal const string SetupNeedsAdminMessage = "Setup needs administrator approval.";
     internal const string SetupUnsafeFolderMessage = "Setup stopped because a folder it uses was not safe.";
@@ -107,6 +115,8 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string RemovedPartlyMessage = "Earshot is mostly removed. Some parts could not be undone.";
     internal const string RemoveCancelledMessage = "Removal was cancelled";
     internal const string RemoveFailedMessage = "Removal did not finish. Try again.";
+    internal const string RemoveUnsafeEnvironmentMessage = "Removal stopped because the environment sets .NET runtime variables that load code.";
+    internal const string NoConfigMessage = "Earshot's boot block setting is missing. Choose Block at boot, then try again.";
 
     // The step that carries the gate's exit code for a set-device that did not move the pin, so the block
     // coordinator can tell a refusal it can work through from one it cannot.
@@ -258,14 +268,17 @@ internal sealed class BlockController : IBlockController, IDisposable
                 (int)GateExitCode.NotAudioSink => NotAudioSinkMessage,
                 (int)GateExitCode.NotFound => NotFoundMessage,
                 (int)GateExitCode.DeviceMismatch => SetupDeviceChangedMessage,
+                (int)GateExitCode.OtherDeviceBlocked => SetupOtherDeviceBlockedMessage,
+                (int)GateExitCode.OtherDeviceProtected => SetupOtherDeviceProtectedMessage,
+                (int)GateExitCode.UnsafeEnvironment => SetupUnsafeEnvironmentMessage,
                 _ => SetupFailedMessage,
             };
             return Finish("install", ControllerResult.Fail(message, steps));
         }
 
         BootBlockStatus status = await GetStatusAsync(ct).ConfigureAwait(false);
-        return Finish("install", status.TasksInstalled
-            ? ControllerResult.Ok(SetupDoneMessage, steps)
+        return Finish("install", status.TasksInstalled ? ControllerResult.Ok(SetupDoneMessage, steps)
+            : !status.TasksKnown ? new ControllerResult(OpStatus.Partial, SetupNotReadBackMessage, steps)
             : ControllerResult.Fail(NeedsRepairMessage, steps));
     }
 
@@ -291,6 +304,7 @@ internal sealed class BlockController : IBlockController, IDisposable
         {
             (int)GateExitCode.Success => ControllerResult.Ok(RemovedMessage, steps),
             (int)GateExitCode.Partial => new ControllerResult(OpStatus.Partial, RemovedPartlyMessage, steps),
+            (int)GateExitCode.UnsafeEnvironment => ControllerResult.Fail(RemoveUnsafeEnvironmentMessage, steps),
             _ => ControllerResult.Fail(RemoveFailedMessage, steps),
         };
         if (exitCode is (int)GateExitCode.Success or (int)GateExitCode.Partial)
@@ -306,7 +320,8 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal BootBlockStatus ReadStatus()
     {
         var steps = new List<StepOutcome>();
-        bool installed = VerifyTasks(steps);
+        TasksRead tasks = VerifyTasks(steps);
+        bool installed = tasks == TasksRead.Installed;
 
         GateRead<GateConfig> config = _store.ReadConfig();
         if (config.Status is GateReadStatus.Invalid or GateReadStatus.Unreadable)
@@ -316,10 +331,11 @@ internal sealed class BlockController : IBlockController, IDisposable
 
         // Before setup there is no config.json; the menu then shows the shipped default. After setup a config.json
         // that is missing, not valid or unreadable is not taken as either value: the gate's boot verb refuses on it
-        // too, so nothing blocks at boot, and the tray does not act on a setting it never read.
+        // too, so nothing blocks at boot, and the tray does not act on a setting it never read. While the tasks could
+        // not be read, a missing config.json is not known to mean "before setup" either.
         bool configRead = config.IsOk && config.Value is not null;
-        bool blockAtBootKnown = configRead || (config.Status == GateReadStatus.Missing && !installed);
-        if (!blockAtBootKnown && config.Status == GateReadStatus.Missing)
+        bool blockAtBootKnown = configRead || (config.Status == GateReadStatus.Missing && tasks == TasksRead.NotInstalled);
+        if (!blockAtBootKnown && config.Status == GateReadStatus.Missing && installed)
         {
             steps.Add(StepOutcomes.NotAttempted("config-read", "config.json is missing although the tasks are set up."));
         }
@@ -329,7 +345,9 @@ internal sealed class BlockController : IBlockController, IDisposable
         DeviceIdentity? identity = ResolveIdentity(steps);
         NodeReadResult read = identity is null ? NodeReadResult.NoIdentity : _reader.Read(identity.ContainerId, identity.Address);
         steps.AddRange(read.Steps);
-        BlockState state = BlockStateClassifier.Classify(installed, identity is not null, read);
+        BlockState state = tasks == TasksRead.Unknown
+            ? BlockState.Unknown
+            : BlockStateClassifier.Classify(installed, identity is not null, read);
 
         // Status reads run on the thread pool, so more than one can be in flight.
         string problems = string.Join(" | ", steps.Where(s => !s.Ok).Select(GateActions.Describe));
@@ -348,12 +366,23 @@ internal sealed class BlockController : IBlockController, IDisposable
         return new BootBlockStatus(state, identity?.ContainerId ?? Guid.Empty, read.Nodes, installed, blockAtBoot)
         {
             BlockAtBootKnown = blockAtBootKnown,
+            TasksKnown = tasks != TasksRead.Unknown,
         };
     }
 
-    private bool VerifyTasks(List<StepOutcome> steps)
+    private enum TasksRead
+    {
+        Installed,     // every task read in full and verified
+        NotInstalled,  // every task read, and one is missing or differs from what install registers: setup repairs it
+        Unknown,       // a task could not be read, so whether Earshot is set up is not known
+    }
+
+    // One Task Scheduler read that fails is not "not set up": that would stop the idle rule and the blocks at session
+    // end and at Exit, and offer setup (a UAC prompt) where none is needed. Only reads that worked decide it.
+    private TasksRead VerifyTasks(List<StepOutcome> steps)
     {
         bool all = true;
+        bool unread = false;
         foreach (string name in TaskPlan.TaskNames)
         {
             TaskVerification check = _gate.Verify(name);
@@ -367,10 +396,11 @@ internal sealed class BlockController : IBlockController, IDisposable
             }
 
             all &= check.Health == TaskHealth.Ready;
+            unread |= check.Health == TaskHealth.Unreadable;
         }
 
         _isSetUp = all;
-        return all;
+        return all ? TasksRead.Installed : unread ? TasksRead.Unknown : TasksRead.NotInstalled;
     }
 
     // device.json when valid (what the gate acts on), otherwise the pinned settings, otherwise none.
@@ -401,8 +431,13 @@ internal sealed class BlockController : IBlockController, IDisposable
         if (!device.IsOk || device.Value is null)
         {
             steps.Add(device.Step);
-            bool installed = VerifyTasks(steps);
-            return Finish(verb, ControllerResult.Fail(installed ? NeedsRepairMessage : NotSetUpMessage, steps));
+            string message = VerifyTasks(steps) switch
+            {
+                TasksRead.Installed => NeedsRepairMessage,
+                TasksRead.NotInstalled => NotSetUpMessage,
+                _ => TaskUnreadableMessage,
+            };
+            return Finish(verb, ControllerResult.Fail(message, steps));
         }
 
         DeviceIdentity identity = device.Value;
@@ -603,6 +638,16 @@ internal sealed class BlockController : IBlockController, IDisposable
 
     private ControllerResult? RunRefusal(GateRunResult run)
     {
+        if (RefusedForEnvironment(run))
+        {
+            return ControllerResult.Fail(UnsafeEnvironmentMessage, []);
+        }
+
+        if (run.Status?.ExitCode == (int)GateExitCode.NoConfig)
+        {
+            return ControllerResult.Fail(NoConfigMessage, []);
+        }
+
         switch (run.Outcome)
         {
             case GateRunOutcome.NotSetUp:
@@ -614,9 +659,21 @@ internal sealed class BlockController : IBlockController, IDisposable
             case GateRunOutcome.RunFailed:
             case GateRunOutcome.TaskDisabled:
                 return ControllerResult.Fail(CouldNotStartMessage, []);
+            case GateRunOutcome.TaskUnreadable:
+                return ControllerResult.Fail(TaskUnreadableMessage, []);
             default:
                 return null;
         }
+    }
+
+    // A gate run that refused before it did anything because it is not SYSTEM and its environment names code for the
+    // .NET runtime to load (install --principal user). It writes no status file, so the refusal is seen only in
+    // LastTaskResult, which is advisory; but trying again cannot work, so it is named rather than reported as a
+    // failure to try again.
+    internal static bool RefusedForEnvironment(GateRunResult run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        return run.Outcome == GateRunOutcome.Completed && run.Status is null && run.LastTaskResult == (int)GateExitCode.UnsafeEnvironment;
     }
 
     private ControllerResult Finish(string action, ControllerResult result)

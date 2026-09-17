@@ -5,7 +5,8 @@ namespace Earshot.Interop;
 
 // The kernel32 file calls the elevated install and uninstall make: opening a file or folder for a check that a
 // path is what it claims to be (CreateFileW, GetFileInformationByHandle, GetFinalPathNameByHandleW), and
-// scheduling a delete for the next restart (MoveFileExW). Declared here, with the rest of the native surface,
+// scheduling a delete for the next restart (MoveFileExW). The elevated gate log also creates its folder with
+// CreateDirectoryW, which never creates a missing parent. Declared here, with the rest of the native surface,
 // rather than next to their callers.
 internal static unsafe partial class FileApis
 {
@@ -33,6 +34,15 @@ internal static unsafe partial class FileApis
     // MoveFileExW: delete (a NULL new name) at the next restart. Needs an administrator or Local System.
     // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw
     internal const uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004;
+
+    // CreateDirectoryW creates only the last folder of the path: it fails with ERROR_PATH_NOT_FOUND when a folder above
+    // it does not exist, rather than create that one too, and with ERROR_ALREADY_EXISTS when the folder is there.
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createdirectoryw
+    internal const int ERROR_ALREADY_EXISTS = 183;
+
+    [LibraryImport(Kernel32, EntryPoint = "CreateDirectoryW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CreateDirectory(string lpPathName, nint lpSecurityAttributes);
 
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
     [LibraryImport(Kernel32, EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]

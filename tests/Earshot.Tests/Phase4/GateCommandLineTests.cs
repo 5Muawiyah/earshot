@@ -226,6 +226,7 @@ public sealed class GateCommandLineTests
         Directory.CreateDirectory(machine);
         var store = new GateStore(machine);
         Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        Assert.IsTrue(store.WriteConfig(new GateConfig()).Ok);
         FakeNodeApi nodes = RecordedNodes.Table();
         var log = new CapturingLog();
 
@@ -289,6 +290,10 @@ public sealed class GateCommandLineTests
     [DataRow("DOTNET_DiagnosticPorts")]
     [DataRow("COMPlus_DiagnosticPorts")]
     [DataRow("complus_enable_profiling")]
+    [DataRow("DOTNET_GCPath")]
+    [DataRow("COMPlus_GCPath")]
+    [DataRow("DOTNET_GCName")]
+    [DataRow("complus_gcname")]
     public void AGateRunNotAsSystemRefusesWhileItsEnvironmentNamesCodeForTheRuntimeToLoad(string name)
     {
         var log = new CapturingLog();
@@ -311,6 +316,7 @@ public sealed class GateCommandLineTests
         Directory.CreateDirectory(machine);
         var store = new GateStore(machine);
         Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        Assert.IsTrue(store.WriteConfig(new GateConfig()).Ok);
         FakeNodeApi nodes = RecordedNodes.Table();
         var log = new CapturingLog();
         string[] names = ["Path", "TEMP", "DOTNET_CLI_TELEMETRY_OPTOUT", "DOTNET_ROOT", "DOTNET_NOLOGO", "COMPlus_gcServer", "CORE_ROOT", "COR_X"];
@@ -332,6 +338,7 @@ public sealed class GateCommandLineTests
         Directory.CreateDirectory(machine);
         var store = new GateStore(machine);
         Assert.IsTrue(store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        Assert.IsTrue(store.WriteConfig(new GateConfig()).Ok);
         FakeNodeApi nodes = RecordedNodes.Table();
         var log = new CapturingLog();
 
@@ -348,9 +355,9 @@ public sealed class GateCommandLineTests
         var log = new CapturingLog();
 
         Program.RunInstall(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal", "user"], FakeToken.ElevatedUser, log,
-            _ => new InstallResult(GateExitCode.Success, []));
+            _ => new InstallResult(GateExitCode.Success, []), []);
         Program.RunInstall(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container], FakeToken.ElevatedUser, log,
-            _ => new InstallResult(GateExitCode.Success, []));
+            _ => new InstallResult(GateExitCode.Success, []), []);
         Assert.AreEqual(1, log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains(Program.InstallPrincipalUserWarning, StringComparison.Ordinal)),
             "Only the user principal is warned about.");
 
@@ -422,6 +429,37 @@ public sealed class GateCommandLineTests
         Assert.AreEqual(GateExitCode.Rejected, Program.RunUninstall(["uninstall", "now"], FakeToken.ElevatedUser, log, NeverRunUninstall));
     }
 
+    // install and uninstall are elevated from the user's own session, with that user's environment, so they refuse on
+    // the same variables as a gate run that is not SYSTEM, and change nothing.
+    [TestMethod]
+    [DataRow("CORECLR_ENABLE_PROFILING")]
+    [DataRow("DOTNET_STARTUP_HOOKS")]
+    [DataRow("DOTNET_GCPath")]
+    public void InstallAndUninstallRefuseWhileTheirEnvironmentNamesCodeForTheRuntimeToLoad(string name)
+    {
+        var log = new CapturingLog();
+
+        GateExitCode install = Program.RunInstall(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container], FakeToken.ElevatedUser, log, NeverRun, ["Path", name]);
+        GateExitCode uninstall = Program.RunUninstall(["uninstall"], FakeToken.ElevatedUser, log, NeverRunUninstall, [name, "TEMP"]);
+
+        Assert.AreEqual(GateExitCode.UnsafeEnvironment, install);
+        Assert.AreEqual(GateExitCode.UnsafeEnvironment, uninstall);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "install: refused, because this elevated run started from a user's session and its environment sets " + name + ","));
+        Assert.IsTrue(log.Has(LogLevel.Warn, "uninstall: refused, because this elevated run started from a user's session and its environment sets " + name + ","));
+    }
+
+    [TestMethod]
+    public void OrdinaryVariablesDoNotStopInstallOrUninstall()
+    {
+        var log = new CapturingLog();
+        string[] names = ["Path", "TEMP", "DOTNET_ROOT", "COMPlus_gcServer"];
+
+        Assert.AreEqual(GateExitCode.Success, Program.RunInstall(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container], FakeToken.ElevatedUser, log,
+            _ => new InstallResult(GateExitCode.Success, []), names));
+        Assert.AreEqual(GateExitCode.Success, Program.RunUninstall(["uninstall"], FakeToken.ElevatedUser, log,
+            () => new InstallResult(GateExitCode.Success, []), names));
+    }
+
     [TestMethod]
     public void AnAcceptedInstallRunsWithTheParsedRequestAndReturnsItsOutcome()
     {
@@ -436,7 +474,8 @@ public sealed class GateCommandLineTests
             {
                 seen = request;
                 return new InstallResult(GateExitCode.Partial, [StepOutcomes.FromHResult("x", unchecked((int)0x80070005))]);
-            });
+            },
+            []);
 
         Assert.AreEqual(GateExitCode.Partial, exit);
         Assert.AreEqual(TaskPrincipalMode.InteractiveUser, seen!.Principal);

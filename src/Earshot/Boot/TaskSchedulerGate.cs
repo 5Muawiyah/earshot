@@ -198,8 +198,8 @@ internal enum TaskHealth
 {
     Ready,          // present, and its SDDL and XML match what install registers
     Missing,        // 0x80070002: not set up
-    NeedsRepair,    // present but its security or definition differs
-    Unreadable,     // any other failure to read it
+    NeedsRepair,    // present, read in full, and its security or definition differs
+    Unreadable,     // any other failure to open it, or to read its security descriptor or XML
 }
 
 internal sealed record TaskVerification(string TaskName, TaskHealth Health, IReadOnlyList<string> Problems, IReadOnlyList<StepOutcome> Steps, TaskReadback? Task);
@@ -210,6 +210,7 @@ internal enum GateRunOutcome
     NotSetUp,
     NeedsRepair,
     RunFailed,      // RunEx or a state read failed
+    TaskUnreadable, // the task could not be read before RunEx, so nothing was sent
     TaskDisabled,   // RunEx on a disabled task returns S_OK and does nothing
     TimedOut,
     Cancelled,
@@ -291,6 +292,14 @@ internal sealed class TaskSchedulerGate
         }
 
         steps.AddRange(task.Steps);
+
+        // A security descriptor or definition that could not be read (its failed step is in task.Steps) says nothing
+        // about the task, so it is neither ready nor in need of repair.
+        if (task.Sddl is null || task.Xml is null)
+        {
+            return new TaskVerification(taskName, TaskHealth.Unreadable, ["The task's security or definition could not be read."], steps, task);
+        }
+
         if (!Sddl.IsUserSid(_userSid))
         {
             return new TaskVerification(taskName, TaskHealth.NeedsRepair, ["The current user has no usable SID."], steps, task);
@@ -333,7 +342,7 @@ internal sealed class TaskSchedulerGate
             case TaskHealth.NeedsRepair:
                 return new GateRunResult(GateRunOutcome.NeedsRepair, null, null, steps);
             case TaskHealth.Unreadable:
-                return new GateRunResult(GateRunOutcome.RunFailed, null, null, steps);
+                return new GateRunResult(GateRunOutcome.TaskUnreadable, null, null, steps);
         }
 
         TaskReadback before = check.Task!;

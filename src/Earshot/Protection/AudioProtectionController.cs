@@ -20,6 +20,9 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
     internal const string NotSetUpMessage = "Protect audio quality is not set up yet. Choose Set up Earshot.";
     internal const string NeedsRepairMessage = "Protect audio quality needs repair. Choose Set up Earshot.";
     internal const string CouldNotStartMessage = "The protection task did not start. Choose Set up Earshot.";
+    internal const string TaskUnreadableMessage = "Could not read the protection task. Try again.";
+    internal const string UnsafeEnvironmentMessage = "The protection task stopped because the environment sets .NET runtime variables. " + BlockController.MachineLogHint;
+    internal const string NoConfigMessage = BlockController.NoConfigMessage;
     internal const string ProtectedMessage = "Audio quality protected";
     internal const string AlreadyProtectedMessage = "Audio quality is already protected";
     internal const string OffMessage = "Audio quality protection is off";
@@ -193,7 +196,13 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
             steps.Add(device.Step);
             TaskVerification check = _gate.Verify(TaskPlan.ProtectTaskName);
             steps.AddRange(check.Steps);
-            return Finish(verb, ControllerResult.Fail(check.Health == TaskHealth.Missing ? NotSetUpMessage : NeedsRepairMessage, steps));
+            string message = check.Health switch
+            {
+                TaskHealth.Missing => NotSetUpMessage,
+                TaskHealth.Unreadable => TaskUnreadableMessage,
+                _ => NeedsRepairMessage,
+            };
+            return Finish(verb, ControllerResult.Fail(message, steps));
         }
 
         string address = device.Value.Address;
@@ -247,6 +256,16 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
             steps.AddRange(run.Status.Steps);
         }
 
+        if (BlockController.RefusedForEnvironment(run))
+        {
+            return Finish(verb, ControllerResult.Fail(UnsafeEnvironmentMessage, steps));
+        }
+
+        if (run.Status?.ExitCode == (int)GateExitCode.NoConfig)
+        {
+            return Finish(verb, ControllerResult.Fail(NoConfigMessage, steps));
+        }
+
         switch (run.Outcome)
         {
             case GateRunOutcome.NotSetUp:
@@ -256,6 +275,8 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
             case GateRunOutcome.RunFailed:
             case GateRunOutcome.TaskDisabled:
                 return Finish(verb, ControllerResult.Fail(CouldNotStartMessage, steps));
+            case GateRunOutcome.TaskUnreadable:
+                return Finish(verb, ControllerResult.Fail(TaskUnreadableMessage, steps));
         }
 
         if (run.Status is { } status)

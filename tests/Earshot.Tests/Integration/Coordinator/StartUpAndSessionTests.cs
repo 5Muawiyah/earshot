@@ -12,6 +12,8 @@ public sealed class StartUpAndSessionTests
 {
     private static readonly string[] BlockOnly = ["block"];
     private static readonly string[] AllowThenBlock = ["allow", "block"];
+    private static readonly string[] AllowOnly = ["allow"];
+    private static readonly string[] AllowThenBlockTwice = ["allow", "block", "block"];
 
     private static SessionEndingEventArgs Query() => new(isQuery: true, ending: true, flags: 0);
 
@@ -144,6 +146,71 @@ public sealed class StartUpAndSessionTests
         h.Publish(Devices.NotPresent(2));
         h.Coordinator.OnSessionEnding(Query());
         Assert.IsEmpty(h.Block.Calls);
+    }
+
+    // Windows starts to end the session while this tray's own allow is still running. The node read taken before the
+    // allow still says Blocked, but the allow is about to enable the nodes, so a block is queued for the session end,
+    // the connect is stopped, and its clean-up blocks again what the allow enabled.
+    [TestMethod]
+    public void ASessionEndWhileThisTraysAllowStillRunsQueuesABlockAndStopsTheConnect()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        var allowing = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnAllow = _ => allowing.Task;
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+        CollectionAssert.AreEqual(AllowOnly, h.Block.Calls);
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
+
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "No block was queued for the session end while the allow still ran.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: block queued at "));
+        Assert.IsFalse(h.Log.Has(LogLevel.Info, "the nodes are already blocked"));
+        h.Pump();
+
+        // The allow lands and enables the nodes.
+        h.Block.Status = Statuses.Allowed();
+        allowing.SetResult(ControllerResult.Ok("Allowed"));
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.IsTrue(toggle.GetAwaiter().GetResult().Cancelled, "The connect went on as the session ended.");
+        CollectionAssert.AreEqual(AllowThenBlockTwice, h.Block.Calls);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    // With Block at boot on, a session end stops the operation in flight even when no block is needed yet, so a
+    // connect that has not sent its allow does not send it as the session ends.
+    [TestMethod]
+    public void ASessionEndStopsAConnectThatHasNotSentItsAllowYet()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        var connecting = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(token =>
+        {
+            token.Register(() => connecting.TrySetResult(Results.NodesBlocked()));
+            return connecting.Task;
+        });
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: no block issued, because the nodes are already blocked."));
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.IsTrue(toggle.GetAwaiter().GetResult().Cancelled);
+        Assert.IsEmpty(h.Block.Calls, "An allow went out as the session ended.");
     }
 
     [TestMethod]

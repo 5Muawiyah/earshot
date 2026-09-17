@@ -30,6 +30,9 @@ public sealed class ProtectionGateTests
             Directory.CreateDirectory(Machine);
             Store = new GateStore(Machine);
             _withBluetooth = pair;
+
+            // Install writes config.json; without it the protect verbs refuse (NoConfig).
+            Assert.IsTrue(Store.WriteConfig(new GateConfig()).Ok);
             if (pin)
             {
                 Assert.IsTrue(Store.WriteDevice(RecordedNodes.AirPods()).Ok);
