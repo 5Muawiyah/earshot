@@ -74,7 +74,9 @@ internal static partial class Program
             return StartupFailure(ExitCodes.Config, ex.Message);
         }
 
-        return Dispatch(args, paths, new FileLog(paths.LogFolder));
+        // An elevated mode never renames a file in the log folder, which may be the user's own (see FileLog).
+        bool privileged = args.Length > 0 && PrivilegedModes.Contains(args[0]);
+        return Dispatch(args, paths, new FileLog(paths.LogFolder, rolls: !privileged));
     }
 
     // Runs the mode named by args[0] and returns the process exit code.

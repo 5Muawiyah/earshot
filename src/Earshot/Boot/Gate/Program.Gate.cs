@@ -22,6 +22,14 @@ namespace Earshot;
 // command line is attacker-controlled (anyone who may start the gate task chooses $(Arg0) to $(Arg2)), so
 // it is matched exactly and never used in a shell, a path or a query. A command line that does not match
 // exits with GateExitCode.Rejected and does nothing else.
+// A log with no file, for an elevated run that has nowhere safe to write one: every entry goes to the debugger
+// output with the reason, so it is not lost silently to anyone watching.
+internal sealed class DebugOutputLog(string why) : ILog
+{
+    public void Write(LogLevel level, string message, Exception? ex = null) =>
+        System.Diagnostics.Trace.WriteLine("Earshot (no log file, because " + why + ") " + level + " " + message + (ex is null ? "" : " " + ex));
+}
+
 internal static partial class Program
 {
     internal const string InstallPrincipalFlag = "--principal";
@@ -30,15 +38,61 @@ internal static partial class Program
     static partial void TryRunGate(RunContext ctx)
     {
         Paths paths = Paths.Current;
-        var log = new FileLog(paths.LogFolder);
+        ILog log = GateLog(paths, CurrentTokenOrNull(), new NtfsFolderSecurity());
         ctx.ExitCode = (int)Guarded(log, "gate", () =>
             RunGate(ctx.Args, WindowsProcessToken.Current(), log, () => GateActions.ForMachine(paths.MachineFolder, log)));
+    }
+
+    // The log of a gate run, in a folder no standard user can redirect, since an elevated write that follows a
+    // junction or link a user planted can land on any file.
+    //   As SYSTEM (the default principal): SYSTEM's own profile, which only administrators can change.
+    //   As the interactive user (install --principal user): that user can write their own profile and can start
+    //   the task, so the log goes to %ProgramData%\Earshot\logs once the machine folder passes its ACL check (its
+    //   inheritable entries protect the subfolder too). When it does not pass, no file is written: the run
+    //   refuses anyway and its exit code says why.
+    // Running as the user is itself a same-user elevation surface: that user can also set .NET runtime variables
+    // in HKCU\Environment, which a task started with the user's environment would load. That is why SYSTEM is the
+    // default and the user principal is only the fall-back the owner's live test may choose.
+    // https://learn.microsoft.com/en-us/windows/win32/taskschd/security-contexts-for-running-tasks
+    internal static ILog GateLog(Paths paths, IProcessToken? token, IFolderSecurity folders)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(folders);
+        if (token is { IsLocalSystem: true })
+        {
+            return new FileLog(paths.LogFolder);
+        }
+
+        StepOutcome read = folders.ReadSddl(paths.MachineFolder, out string? sddl);
+        if (read.Ok && AclCheck.CheckMachineFolder(sddl).Count == 0)
+        {
+            return new FileLog(Path.Combine(paths.MachineFolder, "logs"));
+        }
+
+        return new DebugOutputLog("the machine folder did not pass its check (" + read.Step + " " + read.CodeName + ")");
+    }
+
+    // The token for choosing the log, or null when it cannot be read. RunGate reads it again, and a failure there
+    // is logged by Guarded.
+    private static WindowsProcessToken? CurrentTokenOrNull()
+    {
+        try
+        {
+            return WindowsProcessToken.Current();
+        }
+        catch (System.Security.SecurityException ex)
+        {
+            System.Diagnostics.Trace.WriteLine("Earshot gate: the process token could not be read: " + ex.Message);
+            return null;
+        }
     }
 
     static partial void TryRunInstall(RunContext ctx)
     {
         Paths paths = Paths.Current;
-        var log = new FileLog(paths.LogFolder);
+
+        // Elevated under the user's own profile: append only (see FileLog).
+        var log = new FileLog(paths.LogFolder, rolls: false);
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
         ctx.ExitCode = (int)Guarded(log, "install", () => RunInstall(ctx.Args, WindowsProcessToken.Current(), log, request =>
         {
@@ -52,7 +106,9 @@ internal static partial class Program
     static partial void TryRunUninstall(RunContext ctx)
     {
         Paths paths = Paths.Current;
-        var log = new FileLog(paths.LogFolder);
+
+        // Elevated under the user's own profile: append only (see FileLog).
+        var log = new FileLog(paths.LogFolder, rolls: false);
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
         ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
         {

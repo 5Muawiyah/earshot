@@ -1,6 +1,7 @@
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Infra;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase4;
@@ -10,6 +11,28 @@ namespace Earshot.Tests.Phase4;
 [TestClass]
 public sealed class GateCommandLineTests
 {
+    // The gate as SYSTEM logs in SYSTEM's profile. As the interactive user (the fall-back principal) its profile is
+    // the user's own, so the log goes to the checked machine folder, or to no file when that fails its check.
+    [TestMethod]
+    public void TheGateLogIsNeverInAFolderTheUserCanRedirect()
+    {
+        using var temp = new TempFolder();
+        Paths paths = Paths.FromEnvironment(name => name == Paths.DataRootVariable ? temp.Path : null);
+        Directory.CreateDirectory(paths.MachineFolder);
+        var folders = new FakeFolderSecurity();
+
+        ILog system = Program.GateLog(paths, FakeToken.System, folders);
+        ILog user = Program.GateLog(paths, FakeToken.ElevatedUser, folders);
+        ILog unknown = Program.GateLog(paths, null, folders);
+        folders.DefaultMachineSddl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)";
+        ILog unsafeFolder = Program.GateLog(paths, FakeToken.ElevatedUser, folders);
+
+        Assert.AreEqual(Path.Combine(paths.LogFolder, "earshot.log"), ((FileLog)system).FilePath);
+        Assert.AreEqual(Path.Combine(paths.MachineFolder, "logs", "earshot.log"), ((FileLog)user).FilePath);
+        Assert.AreEqual(Path.Combine(paths.MachineFolder, "logs", "earshot.log"), ((FileLog)unknown).FilePath);
+        Assert.IsInstanceOfType<DebugOutputLog>(unsafeFolder);
+    }
+
     private const string Nonce = "0123456789abcdef0123456789abcdef";
     private const string Container = "5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13";
 

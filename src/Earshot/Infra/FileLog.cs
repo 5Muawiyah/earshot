@@ -14,6 +14,10 @@ namespace Earshot.Infra;
 //
 // Write never throws. A write that cannot reach the disk is counted, sent to the debugger output,
 // kept in LastWriteError, and reported at the top of the next entry that does reach the file.
+//
+// rolls false: the file is only ever appended to, never renamed or replaced. An elevated run that logs under a
+// user's own profile uses that, so a link the user planted there cannot turn the roll's rename into a
+// replacement of some other file; the unelevated tray still rolls the same file.
 internal sealed class FileLog : ILog
 {
     public const long DefaultMaxBytes = 1024 * 1024;
@@ -25,10 +29,11 @@ internal sealed class FileLog : ILog
     private readonly string _file;
     private readonly string _rolledFile;
     private readonly long _maxBytes;
+    private readonly bool _rolls;
     private int _failedWrites;
     private string? _lastWriteError;
 
-    public FileLog(string folder, string fileName = "earshot.log", long maxBytes = DefaultMaxBytes)
+    public FileLog(string folder, string fileName = "earshot.log", long maxBytes = DefaultMaxBytes, bool rolls = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
@@ -38,6 +43,7 @@ internal sealed class FileLog : ILog
         _file = Path.Combine(folder, fileName);
         _rolledFile = Path.Combine(folder, Path.GetFileNameWithoutExtension(fileName) + ".1" + Path.GetExtension(fileName));
         _maxBytes = maxBytes;
+        _rolls = rolls;
     }
 
     public string FilePath => _file;
@@ -96,6 +102,11 @@ internal sealed class FileLog : ILog
 
     private void RollIfFull(int incomingBytes)
     {
+        if (!_rolls)
+        {
+            return;
+        }
+
         var info = new FileInfo(_file);
         if (info.Exists && info.Length + incomingBytes > _maxBytes)
         {

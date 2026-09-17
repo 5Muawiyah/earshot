@@ -54,6 +54,24 @@ public sealed class FileLogTests
         Assert.IsLessThanOrEqualTo(4096L, new FileInfo(log.RolledFilePath).Length);
     }
 
+    // An elevated run logging under a user's profile never renames or replaces a file there.
+    [TestMethod]
+    public void ALogThatDoesNotRollOnlyAppends()
+    {
+        using var temp = new TempFolder();
+        var log = new FileLog(temp.Path, maxBytes: 4096, rolls: false);
+        string line = new('x', 200);
+
+        for (int i = 0; i < 60; i++)
+        {
+            log.Info(line);
+        }
+
+        Assert.IsFalse(File.Exists(log.RolledFilePath));
+        Assert.IsGreaterThan(4096L, new FileInfo(log.FilePath).Length);
+        Assert.AreEqual(0, log.FailedWrites);
+    }
+
     [TestMethod]
     public void WriteNeverThrowsAndReportsTheFailureLater()
     {

@@ -70,7 +70,11 @@ internal static class TaskPlan
 
     public static string TaskPath(string name) => FolderPath + "\\" + name;
 
-    // The one place a task principal is chosen.
+    // The one place a task principal is chosen. SYSTEM is the default. The interactive user principal (install
+    // --principal user) runs the gate elevated with that user's own profile and environment, both of which the
+    // same user can change without elevation (%LOCALAPPDATA%, and .NET runtime variables in HKCU\Environment), so
+    // it is a same-user elevation surface: only a fall-back for when the owner's live test finds SYSTEM does not
+    // work, and the gate then keeps its log out of that profile (Program.GateLog).
     public static TaskPrincipal PrincipalFor(string taskName, TaskPrincipalMode mode, string userSid)
     {
         ArgumentNullException.ThrowIfNull(taskName);
