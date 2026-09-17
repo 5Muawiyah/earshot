@@ -33,6 +33,37 @@ internal sealed record ConnectReport(
     DateTimeOffset? RequestedUtc,
     DateTimeOffset FinishedUtc);
 
+// A connect or disconnect cancelled after at least one request went to a filter. Steps holds every step up to
+// then, the per-filter ks-reconnect or ks-disconnect steps included (KsConnectPath.RoleOfStep reads their role).
+internal sealed class ConnectCancelledException : OperationCanceledException
+{
+    public ConnectCancelledException()
+        : this([], null, CancellationToken.None)
+    {
+    }
+
+    public ConnectCancelledException(string message)
+        : base(message)
+    {
+        Steps = [];
+    }
+
+    public ConnectCancelledException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+        Steps = [];
+    }
+
+    public ConnectCancelledException(IReadOnlyList<StepOutcome> steps, Exception? inner, CancellationToken token)
+        : base("The connect or disconnect was cancelled after a request was sent.", inner, token)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        Steps = steps.ToArray();
+    }
+
+    public IReadOnlyList<StepOutcome> Steps { get; }
+}
+
 // Connect and disconnect over Core Audio and IKsControl (design section F). No elevation.
 //
 //   1. On the audio worker, in one work item: enumerate the endpoints and keep the container's, decide, and when
@@ -67,7 +98,8 @@ internal sealed record ConnectReport(
 // Cancellation. A token cancelled before the work item starts, or while it reads the endpoints, stops the
 // operation before anything is sent; cancelled between two filters, it stops the walk before the next one. Once
 // a request is sent it is not recalled: cancellation then ends only the wait, the requests already sent are
-// logged, and OperationCanceledException is thrown.
+// logged, and ConnectCancelledException (an OperationCanceledException) is thrown carrying every step, so the
+// caller can see what was sent before it decides what to undo.
 //
 // A stalled driver. KsProperty is a synchronous call on the single audio worker and Microsoft documents no
 // latency for it, so the pass is awaited with a budget (PassBudget): if the work item has not returned by then
@@ -200,10 +232,10 @@ internal sealed class ConnectionController : IConnectionController
         {
             confirmation = await _waiter.WaitAsync(container, action, ConfirmationWaiter.TimeoutFor(action), pass.Sequence, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
             _log.Info(name + ": the wait was cancelled. Requests already sent stay sent: " + Describe(steps));
-            throw;
+            throw new ConnectCancelledException(steps, ex, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

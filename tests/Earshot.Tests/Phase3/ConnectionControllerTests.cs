@@ -598,8 +598,10 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
             }
         };
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => _controller.ConnectAsync(AirPodsContainer, cts.Token).WaitAsync(Guard));
+        ConnectCancelledException cancelled = await Assert.ThrowsExactlyAsync<ConnectCancelledException>(
+            () => _controller.ConnectAsync(AirPodsContainer, cts.Token).WaitAsync(Guard));
 
+        Assert.AreEqual(NativeCodes.NotAttempted, cancelled.Steps.Single(s => s.Step == "ks-reconnect:wave").Code, "The Hands-Free filter was sent nothing.");
         Assert.IsTrue(_log.Entries.Any(e => e.Message.Contains("cancelled before this filter", StringComparison.Ordinal)),
             "The Hands-Free filter was sent nothing, and the log says why.");
         Assert.IsTrue(_log.Entries.Any(e => e.Message.Contains("ks-reconnect:src S_OK", StringComparison.Ordinal)),
@@ -617,7 +619,12 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
         await Armed();
         await cts.CancelAsync();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => connecting.WaitAsync(Guard));
+        ConnectCancelledException cancelled = await Assert.ThrowsExactlyAsync<ConnectCancelledException>(() => connecting.WaitAsync(Guard));
+        Assert.IsInstanceOfType<OperationCanceledException>(cancelled, "A caller that catches OperationCanceledException still does.");
+        Assert.AreEqual(cts.Token, cancelled.CancellationToken);
+        StepOutcome sent = cancelled.Steps.Single(s => s.Step == "ks-reconnect:src");
+        Assert.AreEqual(0, sent.Code, "The steps say what was sent before the cancel.");
+        Assert.AreEqual(FilterRole.A2dp, KsConnectPath.RoleOfStep(sent));
         Assert.HasCount(1, _path.Sends, "The request was sent once and not recalled.");
         Assert.IsTrue(_log.Has(LogLevel.Info, "the wait was cancelled"));
         Assert.IsTrue(_log.Has(LogLevel.Info, "ks-reconnect:src S_OK"), "The requests already sent are logged.");

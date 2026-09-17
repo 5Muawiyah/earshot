@@ -496,7 +496,7 @@ public sealed class GateActionsTests
     }
 
     [TestMethod]
-    public void ProtectVerbsAreNotAvailableWithoutTheProtectionFeature()
+    public void ProtectVerbsAreNotAvailableWithoutABluetoothServiceApi()
     {
         using var h = new Harness();
         h.Pin(RecordedNodes.AirPods());
