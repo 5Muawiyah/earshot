@@ -26,8 +26,8 @@ internal interface ICardSurface : IDisposable
 }
 
 // The popup card: a small borderless window with the device name on one line and a status on the next.
-// There is no battery element, no placeholder and no empty slot for one: phase 0 found no battery source
-// on this hardware, so the card draws those two lines and nothing else.
+// There is no battery element, no placeholder and no empty slot for one: the battery check found no battery
+// source on this hardware (README, Battery), so the card draws those two lines and nothing else.
 //
 // It never takes focus or activation:
 //   ShowWithoutActivation   true, in case anything ever calls Show

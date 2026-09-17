@@ -3,11 +3,11 @@ using Earshot.Popup;
 
 namespace Earshot.Tests.Phase5;
 
-// Desktops for the placement tests, in physical pixels. The first matches the owner's PC as recorded in
-// the research: two 1920x1080 displays, the primary on the left with a 48 px bottom taskbar.
+// Desktops for the placement tests, in physical pixels. The first matches the owner's PC: two 1920x1080
+// displays, the primary on the left with a 48 px bottom taskbar.
 internal static class Desktops
 {
-    // The owner's device name as recorded in phase 0, with its curly apostrophe (U+2019).
+    // A device name spelled as Windows spells it, with its curly apostrophe (U+2019).
     public const string AirPodsName = "Jonathan\u2019s AirPods Pro";
 
     public static readonly Rectangle Primary = new(0, 0, 1920, 1080);

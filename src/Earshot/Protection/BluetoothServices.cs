@@ -75,10 +75,10 @@ internal class BluetoothServiceReader : IBluetoothServiceReader
     }
 }
 
-// The real service API. hRadio is NULL: the SDK header marks it optional and the research probe used NULL
-// for the device and service reads on this machine. The API page describes hRadio as a radio handle, so the
-// owner's live test can also make the call with the first local radio's handle (SetServiceStateOnFirstRadio)
-// when the NULL call is rejected with ERROR_INVALID_PARAMETER.
+// The real service API. hRadio is NULL: the SDK header marks it optional, and the device and service reads
+// worked with NULL on the owner's PC. The API page describes hRadio as a radio handle, so a hardware test
+// (diag protect-unelevated) can also make the call with the first local radio's handle
+// (SetServiceStateOnFirstRadio) when the NULL call is rejected with ERROR_INVALID_PARAMETER.
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothsetservicestate
 internal sealed class BluetoothServiceApi : BluetoothServiceReader, IBluetoothServiceApi
 {

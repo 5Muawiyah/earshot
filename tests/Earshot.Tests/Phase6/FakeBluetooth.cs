@@ -19,7 +19,7 @@ internal sealed class FakeBluetoothServices : IBluetoothServiceApi
     public static readonly Guid Uarps = new("4715650B-5E9D-4AC2-B898-A4FC0AA5DF78");
     public static readonly Guid AapServer = new("74EC2172-0BAD-4D01-8F77-997B2BE0722A");
 
-    // The eight installed services recorded on the owner's AirPods in phase 0. Headset is not among them.
+    // The eight installed services recorded on the owner's AirPods. Headset is not among them.
     public static readonly Guid[] RecordedAirPodsServices =
     [
         Sdp, ProtectedServices.AudioSink, AvrcpTarget, Avrcp, ProtectedServices.Handsfree, Gatt, Uarps, AapServer,

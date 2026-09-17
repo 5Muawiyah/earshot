@@ -136,7 +136,7 @@ public sealed class DiagBatterySweepTests
     public void TheWatchedKeysAreTheBatteryOnes()
     {
         Assert.IsTrue(Earshot.BatterySweep.IsWatched(BatteryKey));
-        Assert.IsTrue(Earshot.BatterySweep.IsWatched(new DEVPROPKEY(BatteryKey.fmtid, 7)), "Any key in the phase 0 set.");
+        Assert.IsTrue(Earshot.BatterySweep.IsWatched(new DEVPROPKEY(BatteryKey.fmtid, 7)), "Any key in the {104EA319-6EE2-4701-BD47-8DDBF425BBE5} set.");
         Assert.IsTrue(Earshot.BatterySweep.IsWatched(BatteryLife));
         Assert.IsTrue(Earshot.BatterySweep.IsWatched(new DEVPROPKEY(BatteryLife.fmtid, 22)));
         Assert.IsTrue(Earshot.BatterySweep.IsWatched(new DEVPROPKEY(BatteryLife.fmtid, 23)));

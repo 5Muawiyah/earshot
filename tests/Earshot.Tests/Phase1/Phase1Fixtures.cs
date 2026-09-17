@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase1;
 
-// Device states for the tray tests, using the ids and names recorded on the owner's PC in phase 0.
+// Device states for the tray tests, using the ids and names recorded on the owner's PC.
 internal static class Phase1Fixtures
 {
     public const string AirPodsAddress = "0A1B2C3D4E8C";

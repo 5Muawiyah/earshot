@@ -1,6 +1,6 @@
 namespace Earshot.Contracts.Null;
 
-// The shipping battery provider for v1. Phase 0 found no battery property on this hardware, so
+// The shipping battery provider for v1. The battery check (README, Battery) found no battery property on this hardware, so
 // there is no source and never a value: Percent is null, and the UI omits the battery element entirely.
 public sealed class NoBatterySource : IBatteryProvider
 {

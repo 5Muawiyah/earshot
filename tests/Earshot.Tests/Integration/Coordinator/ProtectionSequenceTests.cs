@@ -242,7 +242,7 @@ public sealed class ProtectionSequenceTests
         h.Monitor.Set(Devices.Idle(1));
         h.Start();
 
-        // Connecting brings Handsfree back, as the research says it can.
+        // Connecting brings Handsfree back, as a reconnect can.
         h.Connection.Connects.Enqueue(_ =>
         {
             h.Protection.State = AudioProtectionState.NotProtected;

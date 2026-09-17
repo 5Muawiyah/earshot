@@ -6,8 +6,9 @@ using Earshot.Interop;
 
 namespace Earshot;
 
-// diag battery-sweep: the battery check of the brief's phase 0, as evidence for the owner's live test 11 (the leg
-// with the AirPods disconnected). It only reads, and like every diag target it runs only when the owner runs it.
+// diag battery-sweep: the battery check recorded in the README's Battery section, repeated as evidence, above all
+// for the leg with the AirPods disconnected. It only reads, and like every diag target it runs only when the owner
+// runs it.
 //
 //   1. Device nodes, the Get-PnpDevice and Get-PnpDeviceProperty sweep done with CfgMgr32: every device id,
 //      including nodes that are not present; the nodes whose friendly name or name contains the device match
@@ -17,7 +18,7 @@ namespace Earshot;
 //      containers with all their properties (DevGetObjects), those matching the name or the pinned container,
 //      and the value of each watched key on them.
 //
-// Watched keys: any property in the {104EA319-6EE2-4701-BD47-8DDBF425BBE5} set (the key the phase 0 sweep filtered
+// Watched keys: any property in the {104EA319-6EE2-4701-BD47-8DDBF425BBE5} set (the key the first check filtered
 // on), and System.Devices.BatteryLife, System.Devices.BatteryPlusCharging, System.Devices.BatteryPlusChargingText
 // and System.Devices.Notifications.LowBattery (propkey.h).
 //

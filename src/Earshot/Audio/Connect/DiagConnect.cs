@@ -13,8 +13,8 @@ namespace Earshot;
 
 // diag connect | diag disconnect | diag ks <reconnect|disconnect> <src|wave|all> [buffer4]
 //
-// LIVE. These send KSPROPSETID_BtAudio requests to the owner's device and exist only for the owner's live tests
-// (research unknowns: whether the A2DP filter honours the one-shot requests, the HRESULTs, whether a driver wants
+// LIVE. These send KSPROPSETID_BtAudio requests to the owner's device and exist only for the owner's hardware
+// tests (the open questions: whether the A2DP filter honours the one-shot requests, the HRESULTs, whether a driver wants
 // a data buffer, the latency to the endpoint state change, and the thread and apartment of the notification
 // callbacks). Program.RunDiag refuses every target in safe mode before these run, and each target refuses again
 // on its own when the services it is given are in safe mode, before any worker item is queued. They are never

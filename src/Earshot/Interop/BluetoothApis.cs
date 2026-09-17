@@ -7,8 +7,8 @@ namespace Earshot.Interop;
 //
 // DLL: the documented DLL is bthprops.cpl, but on this Windows build every one of its exports is a
 // forwarder to the ext-ms-win-bluetooth-apis API set, while System32\BluetoothApis.dll exports the same
-// functions directly. The research probe ran these declarations against BluetoothApis.dll on
-// net10.0-windows x64. The page metadata lists both DLLs.
+// functions directly. These declarations were run against BluetoothApis.dll on net10.0-windows x64
+// on the owner's PC. The page metadata lists both DLLs.
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothsetservicestate
 //
 // Struct sizes are x64 (the project is x64 only). dwSize must be set from sizeof, never a literal:

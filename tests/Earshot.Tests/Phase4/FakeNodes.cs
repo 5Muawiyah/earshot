@@ -181,7 +181,7 @@ internal sealed class FakeNodeApi : INodeApi
     private FakeNode Node(uint devInst) => _nodes[(int)devInst - 1];
 }
 
-// The device-node set recorded on the owner's PC during phase 0 (the same ids as the NodeMatch safety test):
+// The device-node set recorded on the owner's PC (the same ids as the NodeMatch safety test):
 // the AirPods container, the paired iPhone in its own container and the Bluetooth radio in the PC container.
 internal static class RecordedNodes
 {
@@ -250,7 +250,7 @@ internal static class RecordedNodes
     public static IEnumerable<string> AllIds() => AirPodsTargets.Concat(AirPodsNonTargets).Concat(IPhoneNodes).Append(RadioNode);
 
     // A fresh table. The AirPods audio endpoints are non-present when the AirPods are not connected, as
-    // phase 0 observed; every BTHENUM node is present and enabled.
+    // recorded on that PC; every BTHENUM node is present and enabled.
     public static FakeNodeApi Table()
     {
         var nodes = new List<FakeNode>();

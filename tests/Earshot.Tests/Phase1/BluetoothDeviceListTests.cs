@@ -5,7 +5,7 @@ using static Earshot.Tests.Phase1.Phase1Fixtures;
 
 namespace Earshot.Tests.Phase1;
 
-// Instance ids exactly as Windows spelled them on the owner's PC during phase 0.
+// Instance ids spelled as Windows spelled them on the owner's PC.
 [TestClass]
 public sealed class BluetoothDeviceListTests
 {

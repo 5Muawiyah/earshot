@@ -92,7 +92,7 @@ internal static partial class PropVariantInterop
     }
 
     // Reads a VT_CLSID property (puuid points to the GUID) and always clears the PROPVARIANT.
-    // PKEY_Device_ContainerId arrives this way through an endpoint property store (research probe).
+    // PKEY_Device_ContainerId arrives this way through an endpoint property store (seen on the owner's PC).
     internal static PropertyRead<Guid> ReadGuid(IPropertyStore store, PROPERTYKEY key)
     {
         ArgumentNullException.ThrowIfNull(store);

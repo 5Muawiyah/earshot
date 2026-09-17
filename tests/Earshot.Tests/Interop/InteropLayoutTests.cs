@@ -6,7 +6,7 @@ using KSPROPERTY = Earshot.Interop.KSIDENTIFIER;
 
 namespace Earshot.Tests.Interop;
 
-// Struct sizes and field offsets against the x64 layouts verified in the research probe and the SDK headers.
+// Struct sizes and field offsets against the x64 layouts in the SDK headers, as measured on this machine.
 [TestClass]
 public sealed class InteropLayoutTests
 {

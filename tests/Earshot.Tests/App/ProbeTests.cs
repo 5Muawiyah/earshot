@@ -80,7 +80,7 @@ public sealed class ProbeTests
         Assert.IsTrue(text.Contains("== battery ==", StringComparison.Ordinal));
         Assert.IsTrue(text.Contains("Battery source: none", StringComparison.Ordinal));
         Assert.IsTrue(text.Contains("Reading: no value", StringComparison.Ordinal));
-        Assert.IsTrue(text.Contains("live test 11", StringComparison.Ordinal));
+        Assert.IsTrue(text.Contains("Disconnected check: Not run yet. Repeat the check with the AirPods disconnected", StringComparison.Ordinal));
         Assert.IsFalse(text.Contains('%', StringComparison.Ordinal), "No percentage is ever printed.");
     }
 
@@ -99,7 +99,7 @@ public sealed class ProbeTests
         Assert.IsFalse(root.GetProperty("hasSource").GetBoolean());
         Assert.IsFalse(root.GetProperty("hasValue").GetBoolean());
         Assert.IsFalse(root.TryGetProperty("percent", out _));
-        Assert.IsGreaterThan(0, root.GetProperty("phase0").GetProperty("findings").GetArrayLength());
+        Assert.IsGreaterThan(0, root.GetProperty("evidence").GetProperty("findings").GetArrayLength());
     }
 
     [TestMethod]

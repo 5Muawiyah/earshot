@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace Earshot.Contracts;
 
 // Pure, hardware-free device-node predicate shared verbatim by tray verification (Interop\CfgMgr32
-// reads) and the SYSTEM gate action, so selection logic cannot drift. The brief regex alone is
+// reads) and the SYSTEM gate action, so selection logic cannot drift. The prototype's prefix regex alone is
 // NOT sufficient: ^(BTHENUM|BTHLE|BTHLEDEVICE|BTH)\\ also matches the radio bus node
 // BTH\MS_BTHBRB\... The real guards are container + address.
 public static partial class NodeMatch

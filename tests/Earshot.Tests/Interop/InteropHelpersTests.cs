@@ -16,7 +16,7 @@ public sealed class InteropHelpersTests
     private static readonly string[] TwoItems = ["a", "b"];
 
     // BluetoothEnumerateInstalledServices returned ERROR_MORE_DATA with the whole count for a buffer that was too
-    // small (research probe). A result whose count leaves room in the buffer holds every service.
+    // small, when this was tried on the owner's PC. A result whose count leaves room in the buffer holds every service.
     [TestMethod]
     public void AnInstalledServiceListThatFitsIsCompleteWhateverTheCallSaid()
     {

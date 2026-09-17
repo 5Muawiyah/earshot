@@ -189,7 +189,7 @@ internal interface IMMDevice
     int GetState(out uint pdwState);
 }
 
-// Endpoints only. Adapter devices from GetDevice(adapterId) do not support it (research probe).
+// Endpoints only. Adapter devices from GetDevice(adapterId) did not support it on the owner's PC.
 // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immendpoint
 [ComImport]
 [Guid("1BE09788-6894-4089-8586-9A2A6C265AC5")]

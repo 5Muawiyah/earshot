@@ -7,7 +7,7 @@ namespace Earshot.Interop;
 // drift fails at once instead of corrupting memory in a native call. Runs first in every mode.
 internal static class InteropLayout
 {
-    // Verified x64 sizes (research probe, Marshal.SizeOf and C# sizeof).
+    // Verified x64 sizes (Marshal.SizeOf and C# sizeof, measured on this machine).
     internal const int PropVariantBytes = 24;
     internal const int KsIdentifierBytes = 24;
     internal const int KspPinBytes = 32;

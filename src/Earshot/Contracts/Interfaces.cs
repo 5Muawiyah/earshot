@@ -64,7 +64,7 @@ public interface IAudioProtectionController
     Task<bool?> GetPendingProtectAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
 }
 
-// Phase 0 resolved: no battery source on this hardware. Kept so a future AACP/WinRT source
+// The battery check found no battery source on this hardware (README, Battery). Kept so a future AACP/WinRT source
 // can be added without touching the UI contract. HasSource is false in v1; the UI omits the element.
 public interface IBatteryProvider
 {

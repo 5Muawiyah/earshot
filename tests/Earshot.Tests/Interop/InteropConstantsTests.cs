@@ -6,8 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Interop;
 
-// GUIDs and constants against the values recorded in the verified research (SDK 10.0.26100.0 headers and
-// the linked Microsoft docs). The expected strings are typed out independently of the declarations.
+// GUIDs and constants against the values in the SDK 10.0.26100.0 headers and the linked Microsoft docs. The expected strings are typed out independently of the declarations.
 [TestClass]
 public sealed class InteropConstantsTests
 {
