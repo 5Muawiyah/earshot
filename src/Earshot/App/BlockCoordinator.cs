@@ -45,9 +45,10 @@ namespace Earshot.App;
 // IdleGrace with nothing in flight, block. Any operation, or render going ACTIVE, restarts the wait. A block that
 // does not take is shown once and tried again after a longer wait (up to IdleRetryLimit), so the nodes are never
 // left enabled for good and a gate that keeps failing is not run every IdleGrace.
-// Reads again. A read that fails, or shows a node or device state nothing can act on, while the nodes may be
-// enabled, is followed by another after RecheckDelay (doubling up to IdleRetryLimit). One failed read never turns
-// the idle rule off until some other notification happens to arrive.
+// Reads again. Only a good read can rule out enabled nodes (Block at boot off, not set up, or blocked), whatever an
+// earlier read showed. A read that fails, or shows a node or device state nothing can act on, is followed by
+// another after RecheckDelay (doubling up to IdleRetryLimit). One failed read never turns the idle rule off until
+// some other notification happens to arrive.
 // Every automatic block checks again, just before the block is sent, that Block at boot is still on and the
 // AirPods are still not in use, since protection may have been changed first and that takes time.
 // Start-up. Once the first good snapshot and the first node read are in: nodes enabled and not in use, block at
@@ -158,10 +159,6 @@ internal sealed class BlockCoordinator : IDisposable
     private AudioProtectionSnapshot? _protectionStatus;
     private long _serviceReadsStarted;
     private long _serviceReadApplied;
-
-    // True from a good node read that showed Block at boot on and the nodes enabled, until a good read shows them
-    // blocked or Block at boot off. A read that fails or shows Unknown leaves it as it was.
-    private bool _mayBeEnabled;
 
     // The protection request kept by this tray while it could not be applied (ProtectionPolicy KeepIntent, or a
     // change that did not take), or null.
@@ -420,16 +417,6 @@ internal sealed class BlockCoordinator : IDisposable
                 _blockReadApplied = read;
                 _blockStatus = status;
                 _blockStatusFresh = true;
-                // A setting that was not read says nothing about whether the nodes are meant to be enabled.
-                if (status.State == BlockState.Blocked || (status.BlockAtBootKnown && !status.BlockAtBoot))
-                {
-                    _mayBeEnabled = false;
-                }
-                else if (status.BlockAtBoot && CoordinatorRules.NodesEnabled(status))
-                {
-                    _mayBeEnabled = true;
-                }
-
                 if (_statusAtIdleFailure is { } before &&
                     (before.State != status.State || before.BlockAtBoot != status.BlockAtBoot))
                 {
@@ -585,11 +572,27 @@ internal sealed class BlockCoordinator : IDisposable
             },
             ct);
 
-    // Runs a menu action (setup, Block at boot) as an operation, so it never overlaps a connect or a block.
+    // Runs a menu action (setup) as an operation, so it never overlaps a connect or a block. Such an action changes
+    // what the boot block status reads (setup installs the tasks), so the status is read again before the
+    // operation ends, however it ended: the idle rule then evaluates the state the action left, never the one read
+    // before it.
     public Task<ControllerResult> RunAsync(string name, Func<CancellationToken, Task<ControllerResult>> operation, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        return RunExclusiveAsync(name, operation, ct);
+        return RunExclusiveAsync(
+            name,
+            async token =>
+            {
+                try
+                {
+                    return await operation(token);
+                }
+                finally
+                {
+                    await ReadBlockStatusAsync(CancellationToken.None);
+                }
+            },
+            ct);
     }
 
     // WM_QUERYENDSESSION and WM_ENDSESSION. Never waits: the block is started and its result logged later, if the
@@ -1925,18 +1928,20 @@ internal sealed class BlockCoordinator : IDisposable
             return ("an operation is in flight", IdleVerdict.Held);
         }
 
-        // Nothing seen yet rules out enabled nodes: a good read showed them enabled, the start-up check has not run,
-        // or an allow may still land.
-        bool mayBeEnabled = _mayBeEnabled || !_startChecked || AllowMayLand;
-        IdleVerdict unknown = mayBeEnabled ? IdleVerdict.Unsettled : IdleVerdict.Settled;
+        // Only the latest node read, and only when it worked, can rule out enabled nodes: Block at boot read off, the
+        // boot block not set up, or the nodes blocked with no allow of this tray's still on its way. Anything else
+        // (a read that failed or has not run, nodes Unknown or NotFound, a setting that did not read) leaves them
+        // possibly enabled, whatever an earlier read showed, since no notification may follow (the AirPods are on
+        // the phone, or the nodes were enabled outside Earshot). Such a state is read again on the timer, the wait
+        // doubling up to IdleRetryLimit, so the idle rule never stops with nothing scheduled.
         if (ProtectMayRun)
         {
-            return (ProtectMayRunReason, unknown);
+            return (ProtectMayRunReason, IdleVerdict.Unsettled);
         }
 
         if (!_blockStatusFresh || _blockStatus is null)
         {
-            return ("the boot block status is not known", unknown);
+            return ("the boot block status is not known", IdleVerdict.Unsettled);
         }
 
         // Nothing can block without the gate tasks, so reading again changes nothing; the read after setup finishes
@@ -1950,7 +1955,7 @@ internal sealed class BlockCoordinator : IDisposable
         // written again from the menu.
         if (!_blockStatus.BlockAtBootKnown && _blockStatus.State != BlockState.Blocked)
         {
-            return (BlockAtBootOffReason(_blockStatus), CoordinatorRules.NodesEnabled(_blockStatus) ? IdleVerdict.Unsettled : unknown);
+            return (BlockAtBootOffReason(_blockStatus), IdleVerdict.Unsettled);
         }
 
         if (!_blockStatus.BlockAtBoot)
@@ -1965,7 +1970,7 @@ internal sealed class BlockCoordinator : IDisposable
 
         if (!CoordinatorRules.NodesEnabled(_blockStatus))
         {
-            return ("the nodes read " + _blockStatus.State, unknown);
+            return ("the nodes read " + _blockStatus.State, IdleVerdict.Unsettled);
         }
 
         // In use settles nothing while changes are not watched: no notification would say when that ends.

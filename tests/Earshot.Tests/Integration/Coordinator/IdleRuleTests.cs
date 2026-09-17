@@ -14,6 +14,8 @@ public sealed class IdleRuleTests
 {
     private static readonly TimeSpan JustUnderGrace = BlockCoordinator.IdleGrace - TimeSpan.FromSeconds(1);
     private static readonly string[] BlockOnly = ["block"];
+    private static readonly string[] SetBootOnThenBlock = ["setboot-on", "block"];
+    private static readonly string[] SetUpThenBlock = ["setup", "block"];
 
     // In use on this PC with the nodes enabled: the one state in which the nodes are meant to be enabled.
     private static CoordinatorHarness InUse(bool blockAtBoot = true)
@@ -166,6 +168,156 @@ public sealed class IdleRuleTests
         h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
 
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    // Nothing but a good read rules out enabled nodes, whatever the reads before it showed. Each case below leaves
+    // the nodes enabled and not in use with Block at boot on, and no notification follows the read that could not
+    // settle it (the AirPods are on the phone), so only a read on the timer can block them before the next boot.
+    [TestMethod]
+    public void TurningBlockAtBootOnWithAReadThatFailsReadsAgainAndBlocks()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        Assert.IsFalse(h.Coordinator.RecheckRunning, "Block at boot off settles the rule.");
+
+        h.Block.StatusFailuresLeft = 1;
+        Task<ControllerResult> set = h.Coordinator.SetBlockAtBootAsync(true, CardPlace.NearCursor);
+        h.Pump();
+
+        Assert.IsTrue(set.IsCompleted);
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the nodes again after the read that followed turning Block at boot on failed.");
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(SetBootOnThenBlock, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void TurningBlockAtBootOnWithAnUnknownNodeReadReadsAgainAndBlocks()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+
+        h.Block.NextReadStates.Enqueue(BlockState.Unknown);
+        Task<ControllerResult> set = h.Coordinator.SetBlockAtBootAsync(true, CardPlace.NearCursor);
+        h.Pump();
+
+        Assert.IsTrue(set.IsCompleted);
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(SetBootOnThenBlock, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void AReadThatFailsRightAfterSetUpIsReadAgainAndTheNodesAreBlocked()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.NotSetUp();
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+
+        // Setup installs the tasks and leaves the nodes enabled; the coordinator's read after it and the one the
+        // tray asks for both fail.
+        Task<ControllerResult> setup = h.Coordinator.RunAsync("setup", ct =>
+        {
+            h.Block.Status = Statuses.Allowed();
+            h.Block.StatusFailuresLeft = 2;
+            return h.Block.RunSetupAsync(ct);
+        });
+        _ = h.Coordinator.RefreshStatusAsync();
+        h.Pump();
+        Assert.IsTrue(setup.IsCompleted);
+        Assert.AreEqual(0, h.Block.StatusFailuresLeft);
+
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the nodes again after the first read after setup failed.");
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(SetUpThenBlock, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void AnUnknownNodeReadRightAfterSetUpIsReadAgainAndTheNodesAreBlocked()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.NotSetUp();
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+
+        Task<ControllerResult> setup = h.Coordinator.RunAsync("setup", ct =>
+        {
+            h.Block.Status = Statuses.Allowed();
+            h.Block.NextReadStates.Enqueue(BlockState.Unknown);
+            h.Block.NextReadStates.Enqueue(BlockState.Unknown);
+            return h.Block.RunSetupAsync(ct);
+        });
+        _ = h.Coordinator.RefreshStatusAsync();
+        h.Pump();
+        Assert.IsTrue(setup.IsCompleted);
+        Assert.IsEmpty(h.Block.NextReadStates);
+
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(SetUpThenBlock, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void AStartUpCheckOnAnUnknownNodeReadIsFollowedByAnotherReadAndTheNodesAreBlocked()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+
+        // The first read and the start-up check's own read both show Unknown.
+        h.Block.NextReadStates.Enqueue(BlockState.Unknown);
+        h.Block.NextReadStates.Enqueue(BlockState.Unknown);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+
+        Assert.IsEmpty(h.Block.Calls, "The start-up check acted on nodes it could not read.");
+        Assert.IsTrue(h.Coordinator.RecheckRunning || h.Coordinator.IdleWaitRunning, "Nothing reads the nodes again after a start-up check that could not read them.");
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void NodesEnabledOutsideEarshotAfterABlockedReadAreReadAgainWhenTheReadOnTheChangeFails()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        Assert.IsFalse(h.Coordinator.RecheckRunning);
+
+        // Enabled in Device Manager: the endpoints come back, and the node read on that notification fails.
+        h.Block.Status = Statuses.Allowed();
+        h.Block.StatusFailuresLeft = 1;
+        h.Publish(Devices.Idle(2));
+
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "An earlier Blocked read was taken to rule out enabled nodes.");
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void NodesThatStayUnknownAreReadAgainLessOftenForAsLongAsTheyDo()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Unknown();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        int before = h.Block.StatusReads;
+
+        h.Advance(TimeSpan.FromHours(4));
+
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.IsTrue(h.Coordinator.RecheckRunning);
+        int reads = h.Block.StatusReads - before;
+        Assert.IsGreaterThanOrEqualTo(10, reads, "Unknown nodes were not read again.");
+        Assert.IsLessThan(30, reads, "Unknown nodes were read again every " + BlockCoordinator.RecheckDelay + ".");
     }
 
     [TestMethod]
