@@ -9,7 +9,7 @@ namespace Earshot.Tests.Composition;
 public sealed class SafeDecoratorsTests
 {
     private static readonly string[] ReadCallsBlock = ["IsSetUp", "GetStatusAsync"];
-    private static readonly string[] ReadCallsProtection = ["GetStatusAsync"];
+    private static readonly string[] ReadCallsProtection = ["GetStatusAsync", "GetPendingProtectAsync"];
 
     // Records every call. Live members fail the test if they are ever reached.
     private sealed class RecordingBlock : IBlockController
@@ -84,6 +84,12 @@ public sealed class SafeDecoratorsTests
             Calls.Add("LIVE");
             throw new AssertFailedException("A live protection action reached the real controller in safe mode.");
         }
+
+        public Task<bool?> GetPendingProtectAsync(CancellationToken ct = default)
+        {
+            Calls.Add("GetPendingProtectAsync");
+            return Task.FromResult<bool?>(true);
+        }
     }
 
     private static void AssertRefused(ControllerResult result)
@@ -156,6 +162,7 @@ public sealed class SafeDecoratorsTests
         IAudioProtectionController safe = SafeDecorators.Wrap(inner, log);
 
         Assert.AreSame(RecordingProtection.Status, await safe.GetStatusAsync());
+        Assert.IsTrue(await safe.GetPendingProtectAsync(), "The kept request is a read and passes through.");
         AssertRefused(await safe.ApplyAsync(true));
         AssertRefused(await safe.ApplyAsync(false));
 

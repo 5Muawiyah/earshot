@@ -118,6 +118,25 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
     public Task<GateRead<ProtectionIntent>> GetPendingIntentAsync(CancellationToken ct = default) =>
         Task.Run(() => new ProtectionIntentFile(_store.Folder).Read(), ct);
 
+    // The same kept request as the contract reports it: true to protect, false to restore, null when none is kept.
+    // A file that is there but cannot be read or is not valid throws an IOException carrying the read's own code,
+    // which the block coordinator records and logs. Read-only, so safe mode passes it through.
+    public async Task<bool?> GetPendingProtectAsync(CancellationToken ct = default) =>
+        KeptRequest(await GetPendingIntentAsync(ct).ConfigureAwait(false));
+
+    internal static bool? KeptRequest(GateRead<ProtectionIntent> read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        return read.Status switch
+        {
+            GateReadStatus.Ok when read.Value is { } intent => intent.Protect,
+            GateReadStatus.Missing => null,
+            _ => throw new IOException(
+                "The kept protection request could not be read (" + read.Status + "): " + read.Step.CodeName + (read.Step.Detail is null ? "" : ", " + read.Step.Detail),
+                read.Step.Code),
+        };
+    }
+
     public void Dispose() => _ownedWorker?.Dispose();
 
     internal AudioProtectionSnapshot ReadStatus()

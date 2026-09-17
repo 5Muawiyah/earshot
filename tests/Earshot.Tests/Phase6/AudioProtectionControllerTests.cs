@@ -428,6 +428,7 @@ public sealed class AudioProtectionControllerTests
     {
         using var h = new Harness();
         Assert.AreEqual(GateReadStatus.Missing, (await h.Controller.GetPendingIntentAsync()).Status);
+        Assert.IsNull(await h.Controller.GetPendingProtectAsync());
         h.BlockAll();
         await h.Controller.ApplyAsync(protect: true);
 
@@ -435,6 +436,7 @@ public sealed class AudioProtectionControllerTests
 
         Assert.IsTrue(pending.IsOk, pending.Step.Detail);
         Assert.IsTrue(pending.Value!.Protect);
+        Assert.IsTrue(await h.Controller.GetPendingProtectAsync(), "The contract member reports the same kept request.");
     }
 
     [TestMethod]

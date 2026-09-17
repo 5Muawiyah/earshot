@@ -121,6 +121,9 @@ internal sealed class SafeAudioProtectionController : IAudioProtectionController
 
     public Task<AudioProtectionSnapshot> GetStatusAsync(CancellationToken ct = default) => _inner.GetStatusAsync(ct);
 
+    // A read of the request the gate kept; it changes nothing.
+    public Task<bool?> GetPendingProtectAsync(CancellationToken ct = default) => _inner.GetPendingProtectAsync(ct);
+
     public Task<ControllerResult> ApplyAsync(bool protect, CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.Refuse(_log, protect ? "protect-on" : "protect-off"));
 }

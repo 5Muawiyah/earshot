@@ -188,9 +188,8 @@ internal static partial class Program
             {
                 var settings = new JsonSettingsStore(paths.SettingsFile, log);
                 registry = CompositionRoot.Build(log, settings, action => ui.Post(static state => ((Action)state!)(), action), paths.IsSafeMode);
-                // CoordinatorProtection lets the coordinator see a protection request the gate kept across a restart.
                 coordinator = new BlockCoordinator(
-                    registry.Monitor, registry.Connection, registry.Block, CoordinatorProtection.For(registry.Protection), registry.Settings,
+                    registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon));
                 context = new TrayContext(registry, coordinator, new TrayStartOptions(
