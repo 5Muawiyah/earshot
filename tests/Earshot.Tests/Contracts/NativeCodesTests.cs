@@ -98,6 +98,7 @@ public sealed class NativeCodesTests
     [DataRow(259u, "ERROR_NO_MORE_ITEMS")]
     [DataRow(1060u, "ERROR_SERVICE_DOES_NOT_EXIST")]
     [DataRow(1168u, "ERROR_NOT_FOUND")]
+    [DataRow(1332u, "ERROR_NONE_MAPPED")]
     [DataRow(1223u, "ERROR_CANCELLED")]
     [DataRow(1306u, "ERROR_REVISION_MISMATCH")]
     [DataRow(0x80070057u, "E_INVALIDARG")]

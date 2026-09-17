@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Earshot.Contracts;
+using Earshot.Interop;
 using Microsoft.Win32.SafeHandles;
 
 namespace Earshot.Boot.Gate;
@@ -37,20 +38,6 @@ internal static unsafe partial class IntegrityCopy
 {
     public const int MaxFiles = 5000;
     private const int BufferSize = 81920;
-
-    // CreateFileW and GetFileInformationByHandle values (fileapi.h, winnt.h).
-    private const uint FILE_LIST_DIRECTORY = 0x00000001;
-    private const uint FILE_READ_ATTRIBUTES = 0x00000080;
-    private const uint FILE_SHARE_READ = 0x00000001;
-    private const uint FILE_SHARE_WRITE = 0x00000002;
-    private const uint OPEN_EXISTING = 3;
-    private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
-    private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
-    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
-    private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
-
-    // GetFinalPathNameByHandleW flags: FILE_NAME_NORMALIZED | VOLUME_NAME_DOS.
-    private const uint FinalPathFlags = 0;
 
     // files: the relative paths to copy, in the order they were listed. Every one must be there.
     public static IntegrityCopyResult Copy(string sourceFolder, string destinationFolder, IReadOnlyList<string> files) =>
@@ -205,8 +192,9 @@ internal static unsafe partial class IntegrityCopy
     private static bool TryHoldSourceFolder(string source, List<StepOutcome> steps, out SafeFileHandle? handle, out string? finalPath)
     {
         finalPath = null;
-        handle = CreateFile(source, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+        handle = FileApis.CreateFile(source, FileApis.FILE_LIST_DIRECTORY | FileApis.FILE_READ_ATTRIBUTES,
+            FileApis.FILE_SHARE_READ | FileApis.FILE_SHARE_WRITE, 0, FileApis.OPEN_EXISTING,
+            FileApis.FILE_FLAG_BACKUP_SEMANTICS | FileApis.FILE_FLAG_OPEN_REPARSE_POINT, 0);
         if (handle.IsInvalid)
         {
             uint error = unchecked((uint)Marshal.GetLastPInvokeError());
@@ -216,19 +204,19 @@ internal static unsafe partial class IntegrityCopy
             return false;
         }
 
-        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+        if (!FileApis.GetFileInformationByHandle(handle, out BY_HANDLE_FILE_INFORMATION info))
         {
             steps.Add(StepOutcomes.FromWin32("copy-app", unchecked((uint)Marshal.GetLastPInvokeError()), "The source folder could not be read: " + source));
             return false;
         }
 
-        if ((info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        if ((info.FileAttributes & FileApis.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
         {
             steps.Add(StepOutcomes.NotAttempted("copy-app", "The source folder is a reparse point."));
             return false;
         }
 
-        if ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        if ((info.FileAttributes & FileApis.FILE_ATTRIBUTE_DIRECTORY) == 0)
         {
             steps.Add(StepOutcomes.NotAttempted("copy-app", "The source is not a folder: " + source));
             return false;
@@ -255,12 +243,12 @@ internal static unsafe partial class IntegrityCopy
             return StepOutcomes.NotAttempted(step, "The file opened is not the one listed; the source changed after it was listed: " + final);
         }
 
-        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+        if (!FileApis.GetFileInformationByHandle(handle, out BY_HANDLE_FILE_INFORMATION info))
         {
             return StepOutcomes.FromWin32(step, unchecked((uint)Marshal.GetLastPInvokeError()), "The file could not be read.");
         }
 
-        if ((info.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+        if ((info.FileAttributes & (FileApis.FILE_ATTRIBUTE_DIRECTORY | FileApis.FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
         {
             return StepOutcomes.NotAttempted(step, "The file opened is a folder or a reparse point.");
         }
@@ -282,7 +270,7 @@ internal static unsafe partial class IntegrityCopy
             uint length;
             fixed (char* p = buffer)
             {
-                length = GetFinalPathNameByHandle(handle, p, capacity, FinalPathFlags);
+                length = FileApis.GetFinalPathNameByHandle(handle, p, capacity, FileApis.FILE_NAME_NORMALIZED_VOLUME_NAME_DOS);
             }
 
             if (length == 0)
@@ -311,36 +299,4 @@ internal static unsafe partial class IntegrityCopy
         return p.Equals(f, StringComparison.OrdinalIgnoreCase) ||
                p.StartsWith(f + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
-
-    // BY_HANDLE_FILE_INFORMATION, 52 bytes.
-    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-by_handle_file_information
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ByHandleFileInformation
-    {
-        public uint FileAttributes;
-        public uint CreationTimeLow;
-        public uint CreationTimeHigh;
-        public uint LastAccessTimeLow;
-        public uint LastAccessTimeHigh;
-        public uint LastWriteTimeLow;
-        public uint LastWriteTimeHigh;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
-
-    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    private static partial SafeFileHandle CreateFile(
-        string lpFileName, uint dwDesiredAccess, uint dwShareMode, nint lpSecurityAttributes, uint dwCreationDisposition,
-        uint dwFlagsAndAttributes, nint hTemplateFile);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetFileInformationByHandle(SafeFileHandle hFile, out ByHandleFileInformation lpFileInformation);
-
-    [LibraryImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true)]
-    private static partial uint GetFinalPathNameByHandle(SafeFileHandle hFile, char* lpszFilePath, uint cchFilePath, uint dwFlags);
 }

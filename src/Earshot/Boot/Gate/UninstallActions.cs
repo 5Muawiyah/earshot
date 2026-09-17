@@ -14,23 +14,17 @@ internal interface IRebootDelete
 // MoveFileEx(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT). Needs an administrator or Local System; a folder is
 // removed at restart only if it is empty by then, so files are scheduled before their folders.
 // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw
-internal sealed partial class MoveFileRebootDelete : IRebootDelete
+internal sealed class MoveFileRebootDelete : IRebootDelete
 {
-    private const uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004;
-
     public StepOutcome ScheduleDelete(string path)
     {
-        if (MoveFileEx(path, null, MOVEFILE_DELAY_UNTIL_REBOOT))
+        if (FileApis.MoveFileEx(path, null, FileApis.MOVEFILE_DELAY_UNTIL_REBOOT))
         {
             return StepOutcomes.FromWin32("delete-at-restart", 0, path);
         }
 
         return StepOutcomes.FromWin32("delete-at-restart", unchecked((uint)Marshal.GetLastPInvokeError()), path);
     }
-
-    [LibraryImport("kernel32.dll", EntryPoint = "MoveFileExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool MoveFileEx(string lpExistingFileName, string? lpNewFileName, uint dwFlags);
 }
 
 // uninstall, run elevated from the tray with one UAC prompt. Each reversal is a step and a failure does not

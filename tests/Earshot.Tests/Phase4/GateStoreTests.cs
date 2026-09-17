@@ -313,8 +313,11 @@ public sealed class GateStoreTests
         File.WriteAllText(Path.Combine(temp.Path, "status-notanonce.json"), "{}");
         string staleTemp = Path.Combine(temp.Path, "device.json.tmp-" + new string('a', 32));
         string freshTemp = Path.Combine(temp.Path, "config.json.tmp-" + new string('b', 32));
+        string staleIntentTemp = Path.Combine(temp.Path, "protection-intent.json.tmp-" + new string('c', 32));
         File.WriteAllText(staleTemp, "");
         File.SetLastWriteTimeUtc(staleTemp, now.AddHours(-2));
+        File.WriteAllText(staleIntentTemp, "");
+        File.SetLastWriteTimeUtc(staleIntentTemp, now.AddHours(-2));
         File.WriteAllText(freshTemp, "");
         File.SetLastWriteTimeUtc(freshTemp, now.AddMinutes(-5));
 
@@ -330,6 +333,7 @@ public sealed class GateStoreTests
 
         Assert.IsTrue(File.Exists(Path.Combine(temp.Path, "config.json")));
         Assert.IsFalse(File.Exists(staleTemp));
+        Assert.IsFalse(File.Exists(staleIntentTemp), "A kept protection request's temporary file left by a crash is pruned too.");
         Assert.IsTrue(File.Exists(freshTemp));
     }
 

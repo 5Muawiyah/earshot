@@ -411,7 +411,7 @@ internal sealed partial class GateStore
     [GeneratedRegex("^status-[0-9a-f]{32}\\.json$", RegexOptions.CultureInvariant)]
     private static partial Regex StatusName();
 
-    [GeneratedRegex("^(status-[0-9a-f]{32}|config|device|protection)\\.json\\.tmp-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^(status-[0-9a-f]{32}|config|device|protection|protection-intent)\\.json\\.tmp-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
     private static partial Regex TempName();
 
     // ---- shared plumbing ----

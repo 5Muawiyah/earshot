@@ -89,7 +89,8 @@ public sealed partial class SharedSystemWorkerTests
         Assert.IsEmpty(offenders, string.Join(Environment.NewLine, offenders));
     }
 
-    [GeneratedRegex(@"\.Inner\b")]
+    // Any use of the name, so a property pattern ({ Inner: ... }) or nameof counts as well as member access.
+    [GeneratedRegex(@"\bInner\b")]
     private static partial Regex InnerAccess();
 
     private static void Release(ServiceRegistry registry)

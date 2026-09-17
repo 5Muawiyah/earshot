@@ -26,6 +26,14 @@ public sealed class InteropLayoutTests
     }
 
     [TestMethod]
+    public void ByHandleFileInformationIs52BytesWithTheLinkCountAt40()
+    {
+        Assert.AreEqual(52, Marshal.SizeOf<BY_HANDLE_FILE_INFORMATION>());
+        Assert.AreEqual(0, Offset<BY_HANDLE_FILE_INFORMATION>(nameof(BY_HANDLE_FILE_INFORMATION.FileAttributes)));
+        Assert.AreEqual(40, Offset<BY_HANDLE_FILE_INFORMATION>(nameof(BY_HANDLE_FILE_INFORMATION.NumberOfLinks)));
+    }
+
+    [TestMethod]
     public void ProcessIsSixtyFourBit()
     {
         Assert.AreEqual(8, IntPtr.Size);
