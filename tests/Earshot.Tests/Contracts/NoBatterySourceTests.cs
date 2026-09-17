@@ -21,7 +21,7 @@ public sealed class NoBatterySourceTests
         {
             BatteryReading reading = source.Read(container);
             Assert.IsFalse(reading.HasValue);
-            Assert.AreEqual(0, reading.Percent);
+            Assert.IsNull(reading.Percent, "No figure is made up for a source that has none.");
         }
     }
 }

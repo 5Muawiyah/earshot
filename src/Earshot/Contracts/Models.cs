@@ -58,4 +58,11 @@ public sealed record AudioProtectionSnapshot(
     bool HandsfreeInstalled,    // 0000111E present == not protected
     bool HeadsetInstalled);     // 00001108 (these AirPods never advertise it)
 
-public readonly record struct BatteryReading(bool HasValue, int Percent);
+// A battery figure, or none. Percent is null when there is no measured value, so no caller can show a
+// number that was never read.
+public readonly record struct BatteryReading(int? Percent)
+{
+    public static BatteryReading None => new(Percent: null);
+
+    public bool HasValue => Percent is not null;
+}
