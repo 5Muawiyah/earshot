@@ -19,8 +19,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\00-Restore.ps1 -ExePath "C
 ```
 
 It reads the state, offers to enable the nodes, asks whether you want Handsfree on
-or off, and leaves a record of the state it finished in. Add `-OfferUninstall` to
-be offered a full uninstall at the end, which also restores everything.
+or off, puts Block at boot back on if a test left it off, and leaves a record of the
+state it finished in. Add `-OfferUninstall` to be offered a full uninstall at the
+end, which also restores everything.
+
+Two things it cannot put back, because both need either the tray or an administrator.
+It reads each one and says so, rather than leaving a wrong one to be found by a block:
+
+- **The pinned device** in `%ProgramData%\Earshot\device.json`. If it names the wrong
+  device, move it with "Choose device..." in the tray menu, or uninstall and install
+  again. Nothing in the restore script can move it.
+- **The task principal**, if test 07 was run with `-AllowPlanB`. That registers a task
+  as your user rather than as SYSTEM, which is not how Earshot ships. Only uninstalling
+  and installing again without `--principal user` undoes it.
 
 If the scheduled tasks are gone, the restore script cannot enable the nodes,
 because enabling them needs administrator rights and Earshot only ever asks for
@@ -39,6 +50,16 @@ Windows keeps the pairing either way, so nothing needs pairing again.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -List
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -Test 01 -ExePath "C:\Program Files\Earshot\Earshot.exe"
 ```
+
+Four tests take an option of their own. The launcher passes each one on, and refuses
+it for a test that does not take it rather than dropping it quietly:
+
+| Option | Test | What it is for |
+|---|---|---|
+| `-Variant 1` to `-Variant 5` | 10 | Which kind of restart to raise. Run the test once per variant. |
+| `-AllowPlanB` | 07 | Also try the `--principal user` fallback, which raises an administrator prompt. |
+| `-Note "fast startup on"` | 04 | Free text kept with the run, to record the setting it was run under. |
+| `-OfferUninstall` | 00 | Offer a full uninstall at the end of the restore. |
 
 The tests are numbered riskiest first. Test 08 is the acceptance test the whole
 application exists for: after a full power cycle, the AirPods are still connected
@@ -138,7 +159,7 @@ unknown rather than assumed.
 | 004, 005, 006, 012, 016 | 08 (`click-once`, `menu`, `clean-exit`, `startup-value`, `startup-agrees`, `single-instance`) |
 | 007, 013 | 10, all five variants (`query-arrived`, `end-arrived`) |
 | 009, 015 | 14 (`picker-lists-devices`). The greyed entries, the rename and the re-pin are not asked. |
-| 017, 064, 080 | 08 (`left-click-connects`, `click-agrees-with-endpoints`, `no-admin-prompt`, `card-no-focus`), 01, 02 |
+| 017, 064, 080 | 08, both halves of the click: `left-click-connects`, `click-agrees-with-endpoints`, `no-admin-prompt`, then `left-click-disconnects`, `disconnect-agrees-with-endpoints`, `no-admin-prompt-disconnect`, `blocked-again-after-click`, plus `card-no-focus`. 01 and 02 settle the driver requests underneath them. |
 | 018, 021, 027, 060, 071, 079, 122 | 12 |
 | 019 | 06, 12 (`protection-churn`) |
 | 020, 025, 026, 037, 049, 078 | 04 |
@@ -148,7 +169,7 @@ unknown rather than assumed.
 | 032, 048, 125 | 07 (`ace-present`), 15 (`install-again`) |
 | 033, 034, 035, 047, 051, 110, 116, 124 | 07 |
 | 036 | 04, 06, 07: any gate run that completes |
-| 038, 111, 126, 127, 138 | 08 (`ACCEPTANCE`, `still-blocked`) |
+| 038, 111, 126, 127, 138 | 08 (`ACCEPTANCE`, `still-blocked`). Need 126 also asks for Fast Startup, and **that half is not asked**: see below. |
 | 039, 114 | 05 |
 | 040, 133 | 09 (`not-paged-at-boot`, `nodes-after-boot`) |
 | 041 | 07 (`setboot-round-trip`), 14 (the set-device half) |
@@ -180,6 +201,7 @@ unknown rather than assumed.
 | 107 | **Not asked.** A protection intent kept while blocked and applied after the next allow. |
 | 109 | **Not asked.** The DACL on `device-change.lock`. |
 | 123, 135 | **Not asked.** Removing a paired device while it is blocked. |
+| 126, Fast Startup half | **Not asked.** No script turns Fast Startup on, reads it, or has a criterion for it. Test 08 powers down with whatever the machine is set to, and does not record which. To cover it by hand, turn Fast Startup on and run `04-BlockAndReboot.ps1 -Note "fast startup on"`, then read the note back beside `persisted`. Until then the answer is unknown, not settled. |
 
 When a sitting ends, tick the needs the run actually answered against this table in
 `PROMPTING_RESPONSES.md`, so an unasked question is never read as a settled one.
