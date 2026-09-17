@@ -4,6 +4,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>Earshot</AssemblyName>
     <RootNamespace>Earshot</RootNamespace>
+    <!-- The one place the release version is written. tools\build-release.ps1 reads Version from here,
+         names the zip after it, and checks the published Earshot.exe reports the same. -->
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>            <!-- [LibraryImport] needs it (SYSLIB1062) -->
