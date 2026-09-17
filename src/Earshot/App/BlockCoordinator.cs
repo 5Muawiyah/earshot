@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.ExceptionServices;
+using Earshot.Audio.Connect;
 using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Tray;
@@ -799,6 +800,12 @@ internal sealed class BlockCoordinator : IDisposable
         }
         catch (Exception ex)
         {
+            // A connect cancelled once its walk to the filters began carries what was sent to which filter.
+            if (ex is ConnectCancelledException sent)
+            {
+                steps.AddRange(sent.Steps);
+            }
+
             bool cancelled = ex is OperationCanceledException && ct.IsCancellationRequested;
             if (cancelled)
             {
@@ -1040,8 +1047,14 @@ internal sealed class BlockCoordinator : IDisposable
             result = await _connection.DisconnectAsync(request.Container, ct);
             steps.AddRange(result.Steps);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
+            // A disconnect cancelled once its walk to the filters began carries what was sent to which filter.
+            if (ex is ConnectCancelledException sent)
+            {
+                steps.AddRange(sent.Steps);
+            }
+
             cancelled = true;
             _log.Info("disconnect: cancelled; the block still follows when Block at boot is on.");
         }
@@ -1262,7 +1275,7 @@ internal sealed class BlockCoordinator : IDisposable
             }
 
             progress = progress.After(action);
-            if (ProtectionPolicy.IsDeviceChange(action) || action == ProtectionAction.StoreIntent)
+            if (ProtectionPolicy.IsDeviceChange(action))
             {
                 // A node change makes the old node read stale. A service change only removes or adds the service's
                 // own nodes, so a failed read after one keeps the node state that was known.

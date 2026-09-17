@@ -204,6 +204,38 @@ public sealed class DisconnectSequenceTests
         h.AssertAtRest();
     }
 
+    // The connection controller throws ConnectCancelledException once the walk to the filters has begun, carrying
+    // what went to which filter. The report keeps those steps ahead of the block that follows.
+    [TestMethod]
+    public void ADisconnectCancelledDuringTheWalkKeepsItsFilterStepsAndStillBlocks()
+    {
+        using CoordinatorHarness h = Connected();
+        StepOutcome sent = StepOutcomes.FromHResult("ks-disconnect:src", 0, "a2dp: adapter");
+        StepOutcome notSent = StepOutcomes.NotAttempted("ks-disconnect:wave", "hands-free: adapter: no request was sent because the request was cancelled before this filter.");
+        h.Connection.OnDisconnect = token =>
+        {
+            var waiting = new TaskCompletionSource<ConnectResult>();
+            token.Register(() => waiting.TrySetException(new ConnectCancelledException([sent, notSent], null, token)));
+            return waiting.Task;
+        };
+
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+
+        using var cancel = new CancellationTokenSource();
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: false), cancel.Token);
+        h.Pump();
+        cancel.Cancel();
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted);
+        ToggleReport report = toggle.GetAwaiter().GetResult();
+        Assert.IsTrue(report.Cancelled);
+        Assert.AreSame(sent, report.Steps[0], "The filter steps of the cancelled walk were lost.");
+        Assert.AreSame(notSent, report.Steps[1]);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+        h.AssertAtRest();
+    }
+
     private static ConnectResult NoFilterTookIt() => new(
         ConnectOutcome.NoFiltersResponded, ConnectMessages.CouldNotReachDriver,
         [StepOutcomes.FromHResult("ks-disconnect:src", unchecked((int)0x80004005), "a2dp: adapter")]);

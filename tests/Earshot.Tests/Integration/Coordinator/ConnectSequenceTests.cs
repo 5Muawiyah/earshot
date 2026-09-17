@@ -312,6 +312,39 @@ public sealed class ConnectSequenceTests
         Assert.IsTrue(report.Cancelled);
     }
 
+    // The connection controller throws ConnectCancelledException once the walk to the filters has begun, carrying
+    // what went to which filter. The report keeps those steps, and the allow is still undone.
+    [TestMethod]
+    public void AConnectCancelledDuringTheWalkKeepsItsFilterStepsAndBlocksAgain()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        StepOutcome sent = StepOutcomes.FromHResult("ks-reconnect:src", 0, "a2dp: adapter");
+        StepOutcome notSent = StepOutcomes.NotAttempted("ks-reconnect:wave", "hands-free: adapter: no request was sent because the request was cancelled before this filter.");
+        h.Connection.Connects.Enqueue(token =>
+        {
+            var waiting = new TaskCompletionSource<ConnectResult>();
+            token.Register(() => waiting.TrySetException(new ConnectCancelledException([sent, notSent], null, token)));
+            return waiting.Task;
+        });
+
+        using var cancel = new CancellationTokenSource();
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true), cancel.Token);
+        h.Pump();
+        cancel.Cancel();
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted);
+        ToggleReport report = toggle.GetAwaiter().GetResult();
+        Assert.IsTrue(report.Cancelled);
+        CollectionAssert.Contains(report.Steps.ToList(), sent, "The filter steps of the cancelled walk were lost.");
+        CollectionAssert.Contains(report.Steps.ToList(), notSent);
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The cancelled connect did not block again.");
+    }
+
     [TestMethod]
     public void AConnectThatSucceedsAfterItWasCancelledLeavesTheNodesEnabled()
     {
