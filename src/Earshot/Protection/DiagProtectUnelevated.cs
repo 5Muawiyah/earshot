@@ -9,6 +9,7 @@ using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Interop;
 
 namespace Earshot;
 
@@ -20,8 +21,10 @@ namespace Earshot;
 //   off  BLUETOOTH_SERVICE_ENABLE on Handsfree (0000111E); Headset is not advertised by these AirPods, so
 //        the on evidence shows whether its call changed anything
 // A2DP sink (0000110B) is never called. Every call is made whatever the installed list says, because the raw
-// return is the evidence (0, 5, 1060 or E_INVALIDARG). The JSON evidence holds each raw return with its name
-// and duration, and the installed services and node state before and after.
+// return is the evidence (0, 5, 1060 or E_INVALIDARG). Each call passes a NULL radio handle, as the shipped gate
+// does; when that call returns ERROR_INVALID_PARAMETER the same call is made once more with the first local
+// radio's handle, so the evidence tells a rejected NULL radio from rejected flags. The JSON evidence holds each
+// raw return with its name, radio and duration, and the installed services and node state before and after.
 //
 // It refuses to run elevated or as SYSTEM (the evidence would not be unelevated), and refuses while the
 // device counts as blocked by the rule the gate keeps (ProtectionGateRunner.BlockedNodes). Program.RunDiag
@@ -35,7 +38,14 @@ internal static partial class Program
 
     internal sealed record DiagProtectPlan(bool Protect, IReadOnlyList<DiagProtectCall> Calls);
 
-    private sealed record DiagProtectResult(DiagProtectCall Call, uint Code, long Milliseconds, DateTimeOffset StartedUtc);
+    // Radio: "null" for the call with no radio handle, "first-radio" for the call with the first radio's handle.
+    private sealed record DiagProtectResult(DiagProtectCall Call, string Radio, uint Code, long Milliseconds, DateTimeOffset StartedUtc);
+
+    internal const string DiagNullRadio = "null";
+    internal const string DiagFirstRadio = "first-radio";
+
+    // True when a NULL-radio call's result calls for the same call with a radio handle.
+    internal static bool RetryWithRadioHandle(uint rc) => rc == BluetoothApis.ERROR_INVALID_PARAMETER;
 
     static partial void DiagProtectUnelevated(DiagContext ctx)
     {
@@ -118,10 +128,38 @@ internal static partial class Program
                 long t0 = Stopwatch.GetTimestamp();
                 uint rc = api.SetServiceState(entry, call.Service, call.Enable);
                 long ms = (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
-                results.Add(new DiagProtectResult(call, rc, ms, callStarted));
+                results.Add(new DiagProtectResult(call, DiagNullRadio, rc, ms, callStarted));
                 StepOutcome step = ServiceStateResults.Step(call.Service, call.Enable, rc, TimeSpan.FromMilliseconds(ms));
                 steps.Add(step);
                 log.Info("diag protect-unelevated: " + GateActions.Describe(step));
+
+                if (!RetryWithRadioHandle(rc))
+                {
+                    continue;
+                }
+
+                callStarted = DateTimeOffset.UtcNow;
+                t0 = Stopwatch.GetTimestamp();
+                uint? radioRc = BluetoothServiceApi.SetServiceStateOnFirstRadio(entry, call.Service, call.Enable, out uint radioError, out uint closeError);
+                ms = (long)Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+                if (closeError != BluetoothApis.ERROR_SUCCESS)
+                {
+                    steps.Add(StepOutcomes.FromWin32("bt-radio-close", closeError, "A radio handle did not close."));
+                }
+
+                if (radioRc is not uint withRadio)
+                {
+                    StepOutcome noRadio = StepOutcomes.FromWin32("bt-find-radio", radioError, "No radio handle, so the call was not repeated with one.");
+                    steps.Add(noRadio);
+                    log.Warn("diag protect-unelevated: " + GateActions.Describe(noRadio));
+                    continue;
+                }
+
+                results.Add(new DiagProtectResult(call, DiagFirstRadio, withRadio, ms, callStarted));
+                StepOutcome radioStep = ServiceStateResults.Step(call.Service, call.Enable, withRadio, TimeSpan.FromMilliseconds(ms));
+                radioStep = radioStep with { Step = radioStep.Step + ":" + DiagFirstRadio };
+                steps.Add(radioStep);
+                log.Info("diag protect-unelevated: " + GateActions.Describe(radioStep));
             }
 
             afterCode = ServiceStateReader.ReadServices(api, entry, "bt-installed-services-after", steps, out servicesAfter);
@@ -152,6 +190,7 @@ internal static partial class Program
                 w.WriteString("service", result.Call.Service.ToString("D"));
                 w.WriteString("label", ProtectedServices.Label(result.Call.Service));
                 w.WriteString("flags", result.Call.Enable ? "BLUETOOTH_SERVICE_ENABLE" : "BLUETOOTH_SERVICE_DISABLE");
+                w.WriteString("radio", result.Radio);
                 w.WriteString("startedUtc", result.StartedUtc.ToString("O", CultureInfo.InvariantCulture));
                 w.WriteNumber("milliseconds", result.Milliseconds);
                 w.WriteString("returnCode", "0x" + result.Code.ToString("X8", CultureInfo.InvariantCulture));
@@ -177,7 +216,8 @@ internal static partial class Program
 
         foreach (DiagProtectResult result in results)
         {
-            ctx.Out.WriteLine(ProtectedServices.Label(result.Call.Service) + (result.Call.Enable ? " enable: " : " disable: ") +
+            ctx.Out.WriteLine(ProtectedServices.Label(result.Call.Service) + (result.Call.Enable ? " enable" : " disable") +
+                              (result.Radio == DiagFirstRadio ? " with the radio handle: " : ": ") +
                               NativeCodes.Win32(result.Code) + " in " + result.Milliseconds.ToString(CultureInfo.InvariantCulture) + " ms");
         }
 
@@ -190,7 +230,7 @@ internal static partial class Program
         ctx.ExitCode = !saved ? ExitCodes.IoError
             : nodeRefusal is not null ? ExitCodes.Refused
             : entry is null ? ExitCodes.OsError
-            : results.All(r => ServiceStateResults.IsOk(ServiceStateResults.Map(r.Code))) ? ExitCodes.Ok
+            : plan.Calls.All(call => results.Any(r => r.Call == call && ServiceStateResults.IsOk(ServiceStateResults.Map(r.Code)))) ? ExitCodes.Ok
             : ExitCodes.Software;
     }
 

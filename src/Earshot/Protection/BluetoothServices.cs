@@ -76,7 +76,9 @@ internal class BluetoothServiceReader : IBluetoothServiceReader
 }
 
 // The real service API. hRadio is NULL: the SDK header marks it optional and the research probe used NULL
-// for the device and service reads on this machine.
+// for the device and service reads on this machine. The API page describes hRadio as a radio handle, so the
+// owner's live test can also make the call with the first local radio's handle (SetServiceStateOnFirstRadio)
+// when the NULL call is rejected with ERROR_INVALID_PARAMETER.
 // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothsetservicestate
 internal sealed class BluetoothServiceApi : BluetoothServiceReader, IBluetoothServiceApi
 {
@@ -86,6 +88,31 @@ internal sealed class BluetoothServiceApi : BluetoothServiceReader, IBluetoothSe
         BLUETOOTH_DEVICE_INFO info = device.Info;
         uint flags = enable ? BluetoothApis.BLUETOOTH_SERVICE_ENABLE : BluetoothApis.BLUETOOTH_SERVICE_DISABLE;
         return BluetoothApis.BluetoothSetServiceState(0, &info, &service, flags);
+    }
+
+    // diag protect-unelevated only. The same call with the handle of the first local radio. radioError is the
+    // Win32 error from finding the radio (ERROR_NO_MORE_ITEMS when there is none); the call is then not made and
+    // the result is null. closeError is the first error from closing the handles, or 0.
+    public static unsafe uint? SetServiceStateOnFirstRadio(BluetoothDeviceEntry device, Guid service, bool enable, out uint radioError, out uint closeError)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        closeError = BluetoothApis.ERROR_SUCCESS;
+        radioError = BluetoothApis.OpenFirstRadio(out nint find, out nint radio);
+        if (radioError != BluetoothApis.ERROR_SUCCESS)
+        {
+            return null;
+        }
+
+        try
+        {
+            BLUETOOTH_DEVICE_INFO info = device.Info;
+            uint flags = enable ? BluetoothApis.BLUETOOTH_SERVICE_ENABLE : BluetoothApis.BLUETOOTH_SERVICE_DISABLE;
+            return BluetoothApis.BluetoothSetServiceState(radio, &info, &service, flags);
+        }
+        finally
+        {
+            closeError = BluetoothApis.CloseRadio(find, radio);
+        }
     }
 }
 
@@ -114,7 +141,7 @@ internal enum ServiceChange
     Changed,         // 0
     AlreadyInState,  // E_INVALIDARG (0x80070057 in the DWORD): already enabled or disabled, not an error
     NotSupported,    // ERROR_SERVICE_DOES_NOT_EXIST (1060): the device has no such service, nothing to do
-    BadFlags,        // ERROR_INVALID_PARAMETER (87): invalid dwServiceFlags, a fault in Earshot
+    BadFlags,        // ERROR_INVALID_PARAMETER (87): the call's parameters were rejected (the flags, or perhaps the NULL radio)
     Failed,          // anything else, including a possible ERROR_ACCESS_DENIED
 }
 
@@ -153,7 +180,7 @@ internal static class ServiceStateResults
             ServiceChange.Changed => enable ? "Turned on." : "Turned off.",
             ServiceChange.AlreadyInState => (enable ? "Already on" : "Already off") + " (E_INVALIDARG), not an error.",
             ServiceChange.NotSupported => "This device does not have the service, nothing to do.",
-            ServiceChange.BadFlags => "Invalid service flags. This is a fault in Earshot.",
+            ServiceChange.BadFlags => "Windows rejected the call parameters (ERROR_INVALID_PARAMETER).",
             _ => "Windows did not change the service.",
         };
         string ms = ((long)took.TotalMilliseconds).ToString(CultureInfo.InvariantCulture);

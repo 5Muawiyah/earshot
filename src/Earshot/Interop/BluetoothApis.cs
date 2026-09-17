@@ -146,6 +146,41 @@ internal static unsafe partial class BluetoothApis
         return result;
     }
 
+    // Opens the first local radio. Returns 0 with both handles set (close them with CloseRadio), ERROR_NO_MORE_ITEMS
+    // when there is no radio, or the Win32 error from BluetoothFindFirstRadio; the handles are 0 then.
+    // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothfindfirstradio
+    internal static uint OpenFirstRadio(out nint find, out nint radio)
+    {
+        var findParams = new BLUETOOTH_FIND_RADIO_PARAMS { dwSize = (uint)sizeof(BLUETOOTH_FIND_RADIO_PARAMS) };
+        nint handle = 0;
+        find = BluetoothFindFirstRadio(&findParams, &handle);
+        if (find == 0)
+        {
+            radio = 0;
+            return (uint)Marshal.GetLastPInvokeError();
+        }
+
+        radio = handle;
+        return ERROR_SUCCESS;
+    }
+
+    // Closes what OpenFirstRadio opened. Returns the first close error, or 0.
+    internal static uint CloseRadio(nint find, nint radio)
+    {
+        uint closeError = ERROR_SUCCESS;
+        if (radio != 0 && !NativeMethods.CloseHandle(radio))
+        {
+            closeError = (uint)Marshal.GetLastPInvokeError();
+        }
+
+        if (find != 0 && !BluetoothFindRadioClose(find) && closeError == ERROR_SUCCESS)
+        {
+            closeError = (uint)Marshal.GetLastPInvokeError();
+        }
+
+        return closeError;
+    }
+
     // Enumerates remembered, authenticated and connected Classic devices from the local cache. It never
     // issues an inquiry (fIssueInquiry = 0), so no device is paged. Returns 0 when the enumeration ran
     // to its end (including no device), otherwise the Win32 error that stopped it; devices holds what

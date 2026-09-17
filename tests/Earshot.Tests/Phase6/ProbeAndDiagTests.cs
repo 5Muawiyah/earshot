@@ -183,6 +183,19 @@ public sealed class ProbeAndDiagTests
         Assert.IsFalse(Program.TryPlanDiagProtect([], out _, out _));
     }
 
+    // ERROR_INVALID_PARAMETER from the NULL-radio call may be the radio, not the flags, so only that result makes
+    // the live test repeat the call with a radio handle.
+    [TestMethod]
+    [DataRow(87u, true)]
+    [DataRow(0u, false)]
+    [DataRow(0x80070057u, false)]
+    [DataRow(1060u, false)]
+    [DataRow(5u, false)]
+    public void DiagRepeatsACallWithARadioHandleOnlyAfterInvalidParameter(uint rc, bool repeat)
+    {
+        Assert.AreEqual(repeat, Program.RetryWithRadioHandle(rc));
+    }
+
     [TestMethod]
     public void DiagRefusesToRunElevatedOrAsSystem()
     {

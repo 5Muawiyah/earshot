@@ -349,16 +349,20 @@ public sealed class AudioProtectionControllerTests
         Assert.IsEmpty(h.Bluetooth.SetCalls);
     }
 
+    // A kept request that already matches the services would otherwise stay pending for ever, so the gate is
+    // started to clear it.
     [TestMethod]
-    public async Task AKeptRequestThatMatchesStartsNothing()
+    public async Task AKeptRequestThatMatchesIsClearedByTheGate()
     {
         using var h = new Harness();
         Assert.IsTrue(h.Intent.Write(false).Ok);
 
         ControllerResult result = await h.Controller.ApplyAsync(protect: false);
 
-        Assert.AreEqual(OpStatus.AlreadyInState, result.Status);
-        Assert.IsEmpty(h.Tasks.Runs);
+        Assert.AreEqual(OpStatus.Success, result.Status, result.UserMessage);
+        Assert.HasCount(1, h.Tasks.Runs);
+        Assert.IsFalse(File.Exists(h.Intent.FilePath), "The request is no longer pending.");
+        Assert.IsEmpty(h.Bluetooth.SetCalls);
     }
 
     [TestMethod]
@@ -464,15 +468,38 @@ public sealed class AudioProtectionControllerTests
         var completed = new GateRunResult(GateRunOutcome.Completed, null, 0, []);
         var timedOut = new GateRunResult(GateRunOutcome.TimedOut, null, null, []);
         var cancelled = new GateRunResult(GateRunOutcome.Cancelled, null, null, []);
+        DateTimeOffset now = DateTimeOffset.UnixEpoch;
+        var clean = new GateRunResult(GateRunOutcome.Completed,
+            new GateStatusFile(GateStore.SchemaVersion, "0123456789abcdef0123456789abcdef", GateVerbs.ProtectOn, now, now, "success", 0, null, [], StepsTruncated: false),
+            0, []);
 
-        Assert.AreEqual(OpStatus.Success, AudioProtectionController.MapReadBack(true, AudioProtectionState.Protected, timedOut, []).Status);
-        Assert.AreEqual(OpStatus.Success, AudioProtectionController.MapReadBack(false, AudioProtectionState.NotProtected, completed, []).Status);
+        Assert.AreEqual(OpStatus.Success, AudioProtectionController.MapReadBack(true, AudioProtectionState.Protected, clean, []).Status);
+        Assert.AreEqual(OpStatus.Success, AudioProtectionController.MapReadBack(false, AudioProtectionState.NotProtected, clean, []).Status);
         Assert.AreEqual(OpStatus.Partial, AudioProtectionController.MapReadBack(true, AudioProtectionState.Partial, completed, []).Status);
         Assert.AreEqual(AudioProtectionController.OffFailedMessage, AudioProtectionController.MapReadBack(false, AudioProtectionState.Partial, completed, []).UserMessage);
         Assert.AreEqual(AudioProtectionController.TimedOutMessage, AudioProtectionController.MapReadBack(true, AudioProtectionState.NotProtected, timedOut, []).UserMessage);
         Assert.AreEqual(AudioProtectionController.CancelledMessage, AudioProtectionController.MapReadBack(true, AudioProtectionState.NotProtected, cancelled, []).UserMessage);
         Assert.AreEqual(AudioProtectionController.UnreadableMessage, AudioProtectionController.MapReadBack(true, AudioProtectionState.Unknown, completed, []).UserMessage);
         Assert.AreEqual(AudioProtectionController.OffFailedMessage, AudioProtectionController.MapReadBack(false, AudioProtectionState.Protected, completed, []).UserMessage);
+    }
+
+    // With no status file the gate's outcome is unknown, so a matching read-back is not a clean success either.
+    [TestMethod]
+    [DataRow(true, AudioProtectionState.Protected, AudioProtectionController.ProtectedWithProblemMessage)]
+    [DataRow(false, AudioProtectionState.NotProtected, AudioProtectionController.OffWithProblemMessage)]
+    public void AMatchingReadBackWithoutAStatusFileIsPartial(bool protect, AudioProtectionState state, string message)
+    {
+        foreach (GateRunResult run in new[]
+                 {
+                     new GateRunResult(GateRunOutcome.Completed, null, 0, []),
+                     new GateRunResult(GateRunOutcome.TimedOut, null, null, []),
+                 })
+        {
+            ControllerResult result = AudioProtectionController.MapReadBack(protect, state, run, []);
+
+            Assert.AreEqual(OpStatus.Partial, result.Status, run.Outcome.ToString());
+            Assert.AreEqual(message, result.UserMessage);
+        }
     }
 
     [TestMethod]

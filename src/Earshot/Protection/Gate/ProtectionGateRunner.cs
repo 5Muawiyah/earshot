@@ -342,12 +342,14 @@ internal sealed class ProtectionGateRunner
                 }
             }
 
+            // Only a change is progress. Already off and not on the device are neither progress nor failure, like
+            // a service the complete list skips, so they cannot turn a failed Handsfree change into a partial one.
             ServiceChange change = Call(ctx, device, service, enable: false);
-            if (ServiceStateResults.IsOk(change))
+            if (change == ServiceChange.Changed)
             {
                 ok++;
             }
-            else
+            else if (!ServiceStateResults.IsOk(change))
             {
                 failed++;
             }

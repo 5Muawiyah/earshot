@@ -265,7 +265,9 @@ public sealed class ProtectionGateTests
         h.Bluetooth.IncompleteList = [ProtectedServices.Handsfree];
         h.Bluetooth.SetResult = (service, _) => service == ProtectedServices.Handsfree ? BluetoothApis.ERROR_ACCESS_DENIED : null;
 
-        Assert.AreEqual(GateExitCode.Partial, h.Run(GateVerbs.ProtectOn), "Headset was called on the incomplete list and is not on the device.");
+        Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.ProtectOn),
+            "Headset was called on the incomplete list and is not on the device: nothing to do, not progress, so the failed Handsfree change is a failure.");
+        Assert.AreEqual("ERROR_SERVICE_DOES_NOT_EXIST", Step(h.Status(), "bt-service-disable:Headset").CodeName);
 
         Assert.IsEmpty(h.Recorded(), "The list shows it is still on, so Earshot did not turn it off.");
         Assert.IsFalse(h.Status().Steps.Any(st => st.Step.StartsWith(ProtectionGateRunner.RecordKeptStepPrefix, StringComparison.Ordinal)));

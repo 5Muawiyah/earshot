@@ -182,12 +182,13 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
         AudioProtectionState beforeState = ProtectionClassifier.Snapshot(before).State;
         bool satisfied = ProtectionPolicy.IsSatisfied(protect, beforeState);
 
-        // A request kept from while the device was blocked that differs from this one would otherwise be
-        // applied at the next allow, so the gate is started to replace or clear it even when the services
-        // already match.
+        // A request kept from while the device was blocked would otherwise stay pending: one that differs would be
+        // applied at the next allow, and one that matches would keep reporting a pending change. So whenever one is
+        // kept the gate is started, even when the services already match; it clears the request on success and
+        // keeps (or rewrites) it while the device is still blocked.
         GateRead<ProtectionIntent> intent = new ProtectionIntentFile(_store.Folder).Read();
-        bool intentDiffers = intent.Status != GateReadStatus.Missing && !(intent.IsOk && intent.Value?.Protect == protect);
-        if (intentDiffers)
+        bool intentKept = intent.Status != GateReadStatus.Missing;
+        if (intentKept)
         {
             steps.Add(intent.Step);
         }
@@ -205,15 +206,15 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
             staleRecord = satisfied && listsTurnedOff;
         }
 
-        if (satisfied && !intentDiffers && !staleRecord)
+        if (satisfied && !intentKept && !staleRecord)
         {
             return Finish(verb, ControllerResult.Already(protect ? AlreadyProtectedMessage : AlreadyOffMessage));
         }
 
         // When Handsfree is off and protection.json lists nothing, the gate would change nothing, so it is not
-        // started unless a kept request has to be replaced.
+        // started unless a kept request has to be replaced or cleared.
         bool offOutsideEarshot = !protect && nothingRecorded && beforeState is AudioProtectionState.Protected or AudioProtectionState.Partial;
-        if (offOutsideEarshot && !intentDiffers)
+        if (offOutsideEarshot && !intentKept)
         {
             steps.AddRange(before.Steps);
             steps.Add(StepOutcomes.NotAttempted(verb, "protection.json lists no service Earshot turned off."));
@@ -279,8 +280,10 @@ internal sealed class AudioProtectionController : IAudioProtectionController, ID
         if (ProtectionPolicy.IsSatisfied(protect, state))
         {
             // The services match, but a gate that reported a failed step (a protection.json write, say) may
-            // have left the restore record wrong, so this is not a clean success.
-            if (run.Status is { } status && status.ExitCode != (int)GateExitCode.Success)
+            // have left the restore record wrong, so this is not a clean success. The same holds when the gate's
+            // outcome is unknown because no status file could be read. LastTaskResult alone is advisory (what it
+            // holds for a task's exit code is undocumented), so it neither makes nor breaks a clean result.
+            if (run.Status?.ExitCode != (int)GateExitCode.Success)
             {
                 return new ControllerResult(OpStatus.Partial, protect ? ProtectedWithProblemMessage : OffWithProblemMessage, steps);
             }
