@@ -16,6 +16,8 @@ public sealed class IdleRuleTests
     private static readonly string[] BlockOnly = ["block"];
     private static readonly string[] SetBootOnThenBlock = ["setboot-on", "block"];
     private static readonly string[] SetUpThenBlock = ["setup", "block"];
+    private static readonly string[] ProtectOnOnly = ["protect-on"];
+    private static readonly string[] ProtectOnThenBlock = ["protect-on", "block"];
 
     // In use on this PC with the nodes enabled: the one state in which the nodes are meant to be enabled.
     private static CoordinatorHarness InUse(bool blockAtBoot = true)
@@ -616,6 +618,51 @@ public sealed class IdleRuleTests
 
         Assert.IsEmpty(h.Block.Calls, "The idle block acted on a snapshot the device no longer showed.");
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "no block sent, because the AirPods are in use"));
+    }
+
+    // The sequence reads the nodes when it starts; Block at boot goes off after that read and before the block.
+    [TestMethod]
+    public void AnIdleBlockReadsBlockAtBootAgainJustBeforeItIsSent()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Publish(Devices.Idle(2));
+        h.Block.BeforeReads.Enqueue(() => { });
+        h.Block.BeforeReads.Enqueue(() => h.Block.Status = Statuses.Allowed(blockAtBoot: false));
+
+        h.Advance(BlockCoordinator.IdleGrace);
+
+        Assert.IsEmpty(h.Block.Calls, "The block went out on a Block at boot setting read before the last read.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "no block sent, because Block at boot is now off"));
+        Assert.IsFalse(h.Coordinator.IdleWaitRunning);
+    }
+
+    // With protection on, protect-on runs first; the node read after it fails, and so does the one just before the
+    // block, so the block is not sent on the read from before protect-on. A later read that works blocks.
+    [TestMethod]
+    public void AnIdleBlockAfterProtectOnIsNotSentWhenTheNodesCannotBeReadAgain()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Protection.State = AudioProtectionState.Protected;
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        h.Protection.State = AudioProtectionState.NotProtected;
+        h.Protection.OnApply = (protect, _) =>
+        {
+            h.Protection.State = protect ? AudioProtectionState.Protected : AudioProtectionState.NotProtected;
+            h.Block.StatusFailuresLeft = 2;
+            return Task.FromResult(ControllerResult.Ok("Audio quality protected"));
+        };
+        h.Publish(Devices.Idle(2));
+        h.Advance(BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(ProtectOnOnly, h.Trace, "A block was sent although the nodes could not be read after protect-on.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "no block sent, because the node state is not known"));
+
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(ProtectOnThenBlock, h.Trace);
     }
 
     [TestMethod]

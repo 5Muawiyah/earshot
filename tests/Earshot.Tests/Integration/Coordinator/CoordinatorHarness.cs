@@ -506,6 +506,9 @@ internal sealed class FakeBlock : IBlockController
     // The next reads that show this state, once each, while the real state is Status.
     public Queue<BlockState> NextReadStates { get; } = new();
 
+    // Run once each, in order, as the next reads start, so a test can change the world at one exact read.
+    public Queue<Action> BeforeReads { get; } = new();
+
     public List<string> Calls { get; } = new();
 
     public List<string>? Trace { get; init; }
@@ -524,6 +527,11 @@ internal sealed class FakeBlock : IBlockController
     public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default)
     {
         StatusReads++;
+        if (BeforeReads.Count > 0)
+        {
+            BeforeReads.Dequeue()();
+        }
+
         if (StatusFailure is not null)
         {
             return Task.FromException<BootBlockStatus>(StatusFailure);

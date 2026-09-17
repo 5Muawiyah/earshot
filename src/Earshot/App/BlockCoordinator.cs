@@ -1599,8 +1599,19 @@ internal sealed class BlockCoordinator : IDisposable
     // clean-up undoes its own allow unless Block at boot is now off or the AirPods are in use after all. A
     // disconnect blocks unless Block at boot is now off: the block is what drops a link the request did not. None
     // is sent while a protect verb this tray started may still run.
+    //
+    // An automatic block acts only on reads taken just before it is sent: the nodes and Block at boot are read
+    // again, then the device, and nothing is awaited between the last read and the block. The reads the sequence
+    // took when it started may be older than a protect verb that ran since, and one that failed after it would
+    // otherwise leave the read from before it in hand.
     private async Task<string?> BlockSkipReasonAsync(BlockCheck check, BootBlockStatus? status, bool refreshSnapshot)
     {
+        bool automatic = check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.Closing;
+        if (automatic)
+        {
+            status = await ReadBlockStatusAsync(CancellationToken.None);
+        }
+
         if (status is { BlockAtBoot: false })
         {
             return status.BlockAtBootKnown ? "Block at boot is now off" : BlockAtBootOffReason(status);
@@ -1611,7 +1622,6 @@ internal sealed class BlockCoordinator : IDisposable
             return ProtectMayRunReason;
         }
 
-        bool automatic = check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.Closing;
         if (automatic && status is null)
         {
             return "the node state is not known";
