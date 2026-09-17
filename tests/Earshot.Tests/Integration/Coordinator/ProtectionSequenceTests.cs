@@ -130,6 +130,51 @@ public sealed class ProtectionSequenceTests
     }
 
     [TestMethod]
+    public void ARestoreKeptWhileTheNodeStateWasUnknownIsAppliedAfterARestart()
+    {
+        // Earshot turned Handsfree off earlier. The user turns protection off while the nodes cannot be read: the
+        // tray saves the setting, and the request is kept in memory only.
+        using (CoordinatorHarness before = Protecting(AudioProtectionState.Protected))
+        {
+            before.Block.StatusFailure = new IOException("no status");
+            before.Monitor.Set(Devices.Idle(1));
+            before.Start();
+            ControllerResult kept = before.SetProtection(protect: false);
+            Assert.AreEqual(BlockCoordinator.SavedForNextConnectMessage, kept.UserMessage);
+            Assert.IsEmpty(before.Protection.Applies);
+        }
+
+        // Earshot restarts with the saved setting off and the services still protected.
+        using CoordinatorHarness h = Protecting(AudioProtectionState.Protected, settingOn: false);
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        CollectionAssert.AreEqual(OffOnly, h.Protection.Applies, "The restore the card promised was lost at the restart.");
+        Assert.AreEqual(AudioProtectionState.NotProtected, h.Protection.State);
+    }
+
+    [TestMethod]
+    public void ARestoreTheControllerDoesNotTakeIsNotAskedForAgainInTheSameRun()
+    {
+        using CoordinatorHarness h = Protecting(AudioProtectionState.Protected, settingOn: false);
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+
+        // Handsfree was turned off outside Earshot, so the controller leaves it off.
+        h.Protection.OnApply = (_, _) => Task.FromResult(new ControllerResult(OpStatus.NotAttempted,
+            "Handsfree was turned off outside Earshot, so it stays off.", [StepOutcomes.NotAttempted("protect-off", "protection.json lists no service Earshot turned off.")]));
+        h.Start();
+        CollectionAssert.AreEqual(OffOnly, h.Protection.Applies);
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Success, report.Status);
+        CollectionAssert.AreEqual(OffOnly, h.Protection.Applies, "The restore was asked for again at every connect.");
+        CollectionAssert.DoesNotContain(h.Cards.Statuses, "Handsfree was turned off outside Earshot, so it stays off.");
+    }
+
+    [TestMethod]
     public void TheAllowSequenceAppliesTheRequestThatWasKept()
     {
         using CoordinatorHarness h = Protecting(settingOn: true);

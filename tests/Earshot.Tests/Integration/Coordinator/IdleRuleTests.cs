@@ -120,6 +120,97 @@ public sealed class IdleRuleTests
     }
 
     [TestMethod]
+    public void OneNodeReadThatFailsAsTheAirPodsLeaveIsReadAgainAndTheNodesAreBlocked()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Block.StatusFailuresLeft = 1;
+
+        h.Publish(Devices.Idle(2));
+        Assert.IsFalse(h.Coordinator.IdleWaitRunning, "The idle rule acted on a read that failed.");
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the nodes again.");
+
+        // No notification arrives: the AirPods are on the phone.
+        h.Advance(BlockCoordinator.RecheckDelay);
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning);
+        h.Advance(BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+        Assert.IsFalse(h.Coordinator.RecheckRunning);
+    }
+
+    [TestMethod]
+    public void OneUnknownNodeReadAsTheAirPodsLeaveIsReadAgainAndTheNodesAreBlocked()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Block.NextReadStates.Enqueue(BlockState.Unknown);
+
+        h.Publish(Devices.Idle(2));
+        Assert.IsFalse(h.Coordinator.IdleWaitRunning);
+
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void OneDeviceReadThatFailsIsReadAgainWithoutANotification()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Publish(Devices.Idle(2));
+        h.Publish(Devices.Unreadable(3));
+        Assert.IsFalse(h.Coordinator.IdleWaitRunning);
+
+        // The next enumeration works, but nothing has changed, so the monitor raises nothing.
+        h.Monitor.Set(Devices.Idle(4));
+        h.Advance(BlockCoordinator.RecheckDelay + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void AReadThatKeepsFailingIsTriedLessOftenAndNothingIsBlockedUntilItWorks()
+    {
+        using CoordinatorHarness h = InUse();
+        h.Block.StatusFailure = new IOException("The system cannot find the file specified.", unchecked((int)0x80070002));
+        h.Publish(Devices.Idle(2));
+        int before = h.Block.StatusReads;
+
+        h.Advance(TimeSpan.FromHours(2));
+
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.IsTrue(h.Coordinator.RecheckRunning);
+        int reads = h.Block.StatusReads - before;
+        Assert.IsGreaterThanOrEqualTo(6, reads, "The state was not read again.");
+        Assert.IsLessThan(20, reads, "A read that keeps failing was retried every " + BlockCoordinator.RecheckDelay + ".");
+
+        h.Block.StatusFailure = null;
+        h.Advance(BlockCoordinator.IdleRetryLimit + BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    [TestMethod]
+    public void ABlockWhoseResultCountsANodeThatIsNotPresentHasTakenWhenTheNodesReadBlocked()
+    {
+        using CoordinatorHarness h = InUse();
+
+        // A phantom node of a service protection removed makes the result Partial, though every present node is blocked.
+        h.Block.OnBlock = _ =>
+        {
+            h.Block.Status = Statuses.Blocked();
+            h.Monitor.Publish(Devices.NotPresent(3));
+            return Task.FromResult(new ControllerResult(OpStatus.Partial, NotPresentBlockMessage, []));
+        };
+
+        h.Publish(Devices.Idle(2));
+        h.Advance(BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+        Assert.AreEqual(0, h.Coordinator.IdleFailures);
+        Assert.IsEmpty(h.Cards.Shown, "A block that held was shown as a failure.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "but the nodes read Blocked, so it took"));
+    }
+
+    [TestMethod]
     public void NothingIsBlockedWhenTheNodesAreNotKnownToBeEnabled()
     {
         using CoordinatorHarness h = InUse();
@@ -349,6 +440,7 @@ public sealed class IdleRuleTests
     }
 
     private const string BusyMessage = "Another change to the AirPods is still running. Try again.";
+    private const string NotPresentBlockMessage = "Connect the AirPods to this PC once from Windows Bluetooth settings, then try Block again.";
 
     private static ControllerResult Busy() =>
         ControllerResult.Fail(BusyMessage, [StepOutcomes.FromWin32("device-change-lock", 32)]);

@@ -12,6 +12,7 @@ public sealed class ConnectSequenceTests
 {
     private static readonly string[] Allow = ["allow"];
     private static readonly string[] AllowThenBlock = ["allow", "block"];
+    private static readonly string[] BlockOnly = ["block"];
     private static readonly string[] ConnectingThenConnected = ["Connecting", "Connected"];
     private static readonly string[] ConnectingAllowingConnected = ["Connecting", BlockCoordinator.AllowingStatus, "Connected"];
     private static readonly string[] SetDevice = ["set-device:" + Devices.Address];
@@ -53,7 +54,7 @@ public sealed class ConnectSequenceTests
     }
 
     [TestMethod]
-    public void AConnectThatTimesOutAfterAnAllowBlocksAgainBeforeItReports()
+    public void AConnectThatTimesOutAfterAnAllowBlocksAgainAndDoesNotSayItIsStillConnecting()
     {
         using var h = new CoordinatorHarness();
         h.Block.Status = Statuses.Blocked();
@@ -65,10 +66,165 @@ public sealed class ConnectSequenceTests
         ToggleReport report = h.Toggle(connect: true);
 
         Assert.AreEqual(OpStatus.Failed, report.Status);
-        Assert.AreEqual(ConnectMessages.StillConnecting, report.UserMessage);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
         Assert.AreEqual(BlockState.Blocked, h.Coordinator.BlockStatus?.State);
-        Assert.AreEqual(ConnectMessages.StillConnecting, h.Cards.Statuses[^1]);
+
+        // The nodes are disabled again, so nothing can still be connecting.
+        Assert.AreEqual(BlockCoordinator.DidNotConnectMessage, report.UserMessage);
+        Assert.AreEqual(BlockCoordinator.DidNotConnectMessage, h.Cards.Statuses[^1]);
+        CollectionAssert.DoesNotContain(h.Cards.Statuses, ConnectMessages.StillConnecting);
+    }
+
+    [TestMethod]
+    public void AConnectThatTimesOutWithNothingPutBackMayStillConnect()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Publish(Devices.Idle(2));
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.TimedOut()));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        // Nothing was allowed, so the connect blocks nothing, and the request may still be taken.
+        Assert.AreEqual(ConnectMessages.StillConnecting, report.UserMessage);
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning, "The idle rule still blocks the nodes if it never connects.");
+    }
+
+    [TestMethod]
+    public void AConnectFoundInUseByItsCleanUpIsReportedConnected()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+
+        // The confirmation wait runs out just before the AirPods reach ACTIVE, with no notification yet.
+        h.Connection.Connects.Enqueue(_ =>
+        {
+            h.Monitor.Set(Devices.Active(60));
+            return Task.FromResult(Results.TimedOut());
+        });
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Success, report.Status);
+        Assert.AreEqual(ConnectMessages.Connected, h.Cards.Statuses[^1]);
+        CollectionAssert.AreEqual(Allow, h.Block.Calls, "The AirPods are in use, so the nodes stay enabled.");
+    }
+
+    [TestMethod]
+    public void TheAllowIsWaitedForWhenTheConnectIsCancelledAndThenBlockedAgain()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+
+        // The gate takes a while to enable the nodes, and has already been started when the click is cancelled.
+        var allowing = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnAllow = _ => allowing.Task;
+
+        using var cancel = new CancellationTokenSource();
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true), cancel.Token);
+        h.Pump();
+        cancel.Cancel();
+        h.Pump();
+
+        Assert.IsFalse(toggle.IsCompleted, "The connect ended before the allow it sent.");
+        CollectionAssert.AreEqual(Allow, h.Block.Calls, "A node read before the allow ends still says Blocked, so nothing is blocked yet.");
+        Assert.IsEmpty(h.Block.CancellableChanges, "A gate change was given a token that stops the wait for it.");
+
+        // The allow lands.
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Publish(Devices.Idle(5));
+        allowing.SetResult(ControllerResult.Ok("Allowed"));
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.IsTrue(toggle.GetAwaiter().GetResult().Cancelled);
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    [TestMethod]
+    public void AnAllowWhoseEndWasNotSeenIsReadAgainAndBlockedOnceItLands()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        h.Block.OnAllow = _ => Task.FromResult(Results.GateWaitRanOut("Gate", "The boot block did not finish in time. Try again."));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        CollectionAssert.AreEqual(Allow, h.Block.Calls, "The nodes read Blocked after the allow, so there is nothing to block yet.");
+        Assert.IsTrue(h.Coordinator.AllowMayLand);
+        Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the nodes again for an allow that may still land.");
+
+        // The pin does not move under an allow that may still enable the nodes of the device pinned now.
+        Task<ControllerResult> pin = h.Coordinator.ChangeDeviceAsync(Devices.Address);
+        h.Pump();
+        Assert.AreEqual(BlockCoordinator.ChangeStillRunningMessage, pin.GetAwaiter().GetResult().UserMessage);
+        CollectionAssert.AreEqual(Allow, h.Block.Calls);
+
+        // The gate enables the nodes a little later, with no notification for the tray.
+        h.Advance(TimeSpan.FromSeconds(20));
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Idle(7));
+        h.Advance(BlockCoordinator.RecheckDelay);
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning, "The read after the allow landed did not start the idle rule.");
+        h.Advance(BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+
+        // Once the window has passed, the device can be changed again and nothing is read again.
+        h.Advance(BlockCoordinator.UnsettledGateWindow);
+        Assert.IsFalse(h.Coordinator.RecheckRunning);
+        pin = h.Coordinator.ChangeDeviceAsync(Devices.Address);
+        h.Pump();
+        Assert.AreEqual(OpStatus.Success, pin.GetAwaiter().GetResult().Status);
+    }
+
+    [TestMethod]
+    public void TheConnectingCardIsShownOnlyOnceTheConnectRuns()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        // An idle block is running through the gate when the click comes.
+        var blocking = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnBlock = _ => blocking.Task;
+        h.Publish(Devices.Idle(2));
+        h.Advance(BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+
+        using var cancel = new CancellationTokenSource();
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true), cancel.Token);
+        h.Pump();
+        Assert.IsEmpty(h.Cards.Shown, "A Connecting card went up for a connect that is still waiting.");
+
+        // Another device is chosen before the connect's turn: it never runs, and no card claimed it would.
+        cancel.Cancel();
+        h.Pump();
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.IsTrue(toggle.GetAwaiter().GetResult().Cancelled);
+        Assert.IsEmpty(h.Connection.Calls);
+        Assert.IsEmpty(h.Cards.Shown);
+
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Publish(Devices.NotPresent(3));
+        blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
+        h.Pump();
     }
 
     [TestMethod]

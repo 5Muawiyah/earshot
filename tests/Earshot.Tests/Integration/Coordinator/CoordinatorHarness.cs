@@ -84,9 +84,10 @@ internal sealed class CoordinatorHarness : IDisposable
     }
 
     // The at-rest invariant as the fakes stand now: with Block at boot on, the nodes are blocked, or the AirPods
-    // are in use, or Earshot still has something in hand that ends in one of those (an operation in flight or an
-    // idle wait running). A state nothing has observed cannot be acted on, so a failing read, unknown nodes and a
-    // boot block that is not set up are allowed too.
+    // are in use, or Earshot still has something in hand that ends in one of those (an operation in flight, an
+    // idle wait running, or a read of the state scheduled). A state nothing can observe cannot be acted on, so a
+    // read that fails now, unknown nodes and a boot block that is not set up are allowed too, but only while the
+    // fault lasts: once it clears, the coordinator must still have something in hand.
     public void AssertAtRest(string when = "at the end")
     {
         BootBlockStatus status = Block.Status;
@@ -99,6 +100,7 @@ internal sealed class CoordinatorHarness : IDisposable
         if (CoordinatorRules.RenderOf(now, Devices.Container) == RenderState.Active ||
             Coordinator.IsBusy ||
             Coordinator.IdleWaitRunning ||
+            Coordinator.RecheckRunning ||
             Block.StatusFailure is not null ||
             now.ReadStatus != SnapshotReadStatus.Ok)
         {
@@ -106,7 +108,7 @@ internal sealed class CoordinatorHarness : IDisposable
         }
 
         Assert.Fail("The at-rest invariant does not hold " + when + ": the nodes are " + status.State +
-            " with Block at boot on, the AirPods are not in use, and Earshot has nothing in flight and no idle wait.");
+            " with Block at boot on, the AirPods are not in use, and Earshot has nothing in flight, no idle wait and no read scheduled.");
     }
 
     // Moves the clock, firing every timer due in that time, then runs what they posted.
@@ -365,6 +367,13 @@ internal static class Results
         new(ConnectOutcome.NoFiltersResponded, ConnectMessages.CouldNotReachDriver,
             [StepOutcomes.FromHResult("ks-reconnect:src", unchecked((int)0x80004005), "a2dp: adapter")]);
 
+    // A gate change the Task Scheduler accepted whose end was never seen, because the wait for it ran out.
+    public static ControllerResult GateWaitRanOut(string task, string message) => ControllerResult.Fail(message,
+    [
+        StepOutcomes.FromHResult(CoordinatorRules.TaskRunStepPrefix + "\\Earshot\\" + task, 0, "0123456789abcdef0123456789abcdef"),
+        StepOutcomes.NotAttempted("task-wait:" + task, "No result within 150 s."),
+    ]);
+
     // Nothing was sent to the A2DP filter, so the Hands-Free assisted way does not apply.
     public static ConnectResult NothingSent() =>
         new(ConnectOutcome.NoFiltersResponded, ConnectMessages.CouldNotReachDriver,
@@ -484,11 +493,20 @@ internal sealed class FakeBlock : IBlockController
 
     public Exception? StatusFailure { get; set; }
 
+    // The next reads that fail, once each, before reads work again. The fault has cleared once they are used up.
+    public int StatusFailuresLeft { get; set; }
+
+    // The next reads that show this state, once each, while the real state is Status.
+    public Queue<BlockState> NextReadStates { get; } = new();
+
     public List<string> Calls { get; } = new();
 
     public List<string>? Trace { get; init; }
 
     public int StatusReads { get; private set; }
+
+    // Gate changes that were handed a token that can be cancelled. The coordinator waits for every gate change.
+    public List<string> CancellableChanges { get; } = new();
 
     public Func<CancellationToken, Task<ControllerResult>>? OnBlock { get; set; }
 
@@ -499,13 +517,25 @@ internal sealed class FakeBlock : IBlockController
     public Task<BootBlockStatus> GetStatusAsync(CancellationToken ct = default)
     {
         StatusReads++;
-        return StatusFailure is null ? Task.FromResult(Status) : Task.FromException<BootBlockStatus>(StatusFailure);
+        if (StatusFailure is not null)
+        {
+            return Task.FromException<BootBlockStatus>(StatusFailure);
+        }
+
+        if (StatusFailuresLeft > 0)
+        {
+            StatusFailuresLeft--;
+            return Task.FromException<BootBlockStatus>(new IOException("The process cannot access the file.", unchecked((int)0x80070020)));
+        }
+
+        return Task.FromResult(NextReadStates.Count > 0 ? Status with { State = NextReadStates.Dequeue() } : Status);
     }
 
     public Task<ControllerResult> BlockAsync(CancellationToken ct = default)
     {
         Calls.Add("block");
         Trace?.Add("block");
+        NoteToken("block", ct);
         if (OnBlock is { } block)
         {
             return block(ct);
@@ -530,6 +560,7 @@ internal sealed class FakeBlock : IBlockController
     {
         Calls.Add("allow");
         Trace?.Add("allow");
+        NoteToken("allow", ct);
         if (OnAllow is { } allow)
         {
             return allow(ct);
@@ -547,11 +578,14 @@ internal sealed class FakeBlock : IBlockController
         return Task.FromResult(ControllerResult.Ok("Block at boot is " + (blockAtBoot ? "on" : "off")));
     }
 
+    public Func<CancellationToken, Task<ControllerResult>>? OnSetDevice { get; set; }
+
     public Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default)
     {
         Calls.Add("set-device:" + address12);
         Trace?.Add("set-device");
-        return Task.FromResult(ControllerResult.Ok("Device chosen"));
+        NoteToken("set-device", ct);
+        return OnSetDevice is { } setDevice ? setDevice(ct) : Task.FromResult(ControllerResult.Ok("Device chosen"));
     }
 
     public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default)
@@ -565,6 +599,14 @@ internal sealed class FakeBlock : IBlockController
         Calls.Add("uninstall");
         return Task.FromResult(ControllerResult.Ok("Earshot is removed"));
     }
+
+    private void NoteToken(string call, CancellationToken ct)
+    {
+        if (ct.CanBeCanceled)
+        {
+            CancellableChanges.Add(call);
+        }
+    }
 }
 
 internal sealed class FakeProtection : IAudioProtectionController
@@ -576,6 +618,9 @@ internal sealed class FakeProtection : IAudioProtectionController
     public Exception? StatusFailure { get; set; }
 
     public List<bool> Applies { get; } = new();
+
+    // Protect verbs that were handed a token that can be cancelled. The coordinator waits for every gate change.
+    public int CancellableApplies { get; private set; }
 
     public List<string>? Trace { get; set; }
 
@@ -601,6 +646,11 @@ internal sealed class FakeProtection : IAudioProtectionController
     {
         Applies.Add(protect);
         Trace?.Add(protect ? "protect-on" : "protect-off");
+        if (ct.CanBeCanceled)
+        {
+            CancellableApplies++;
+        }
+
         Effect?.Invoke(protect);
         if (OnApply is { } apply)
         {

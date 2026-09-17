@@ -95,18 +95,40 @@ internal static class CoordinatorRules
 
     // The message for a connect that did not reach ACTIVE and whose other way is not taken. The controller's
     // "Trying another way" and "Allowing first" promise actions that only the coordinator takes, so they are
-    // replaced whenever that action does not follow.
-    public static string ConnectFailureMessage(ConnectResult result)
+    // replaced whenever that action does not follow. Once the clean-up has blocked the nodes again (blockedAgain),
+    // the connect cannot still be going, so "Still connecting" is replaced too.
+    public static string ConnectFailureMessage(ConnectResult result, bool blockedAgain)
     {
         ArgumentNullException.ThrowIfNull(result);
         return result.Outcome switch
         {
             ConnectOutcome.NoFiltersResponded => BlockCoordinator.CouldNotReachDriverMessage,
             ConnectOutcome.NodesBlocked => BlockCoordinator.DidNotComeBackMessage,
+            ConnectOutcome.AttemptedTimedOut when blockedAgain => BlockCoordinator.DidNotConnectMessage,
             _ when result.UserMessage == ConnectMessages.CouldNotReachDriver => BlockCoordinator.CouldNotReachDriverMessage,
             _ when result.UserMessage == ConnectMessages.AllowingFirst => BlockCoordinator.DidNotComeBackMessage,
+            _ when blockedAgain && result.UserMessage == ConnectMessages.StillConnecting => BlockCoordinator.DidNotConnectMessage,
             _ => result.UserMessage,
         };
+    }
+
+    // The step names TaskSchedulerGate records for a run the Task Scheduler accepted (a prefix, followed by the
+    // task path) and for the end of that run. The gate records the second only once it has seen the run end.
+    internal const string TaskRunStepPrefix = "task-run:";
+    internal const string TaskEndedStep = "task-last-result";
+
+    // True when a gate change was sent but its end was not seen, so it may still run: the Task Scheduler accepted
+    // the run (a task-run step that worked) and no task-last-result step shows it ended, because the wait for it
+    // ran out, was stopped, or a task state read failed while it was polled. A request refused before RunEx, a run
+    // seen to end, and a result from a controller that sends nothing through a task are all false.
+    // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iregisteredtask-runex
+    // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iregisteredtask-get_state
+    public static bool MayStillRun(ControllerResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        bool sent = result.Steps.Any(s => s.Ok && s.Step.StartsWith(TaskRunStepPrefix, StringComparison.Ordinal));
+        bool ended = result.Steps.Any(s => string.Equals(s.Step, TaskEndedStep, StringComparison.Ordinal));
+        return sent && !ended;
     }
 
     // The message for a disconnect that was not observed, with no other way taken (Block at boot off or not known).

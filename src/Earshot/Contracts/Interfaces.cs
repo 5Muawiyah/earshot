@@ -56,8 +56,8 @@ public interface IAudioProtectionController
     Task<ControllerResult> ApplyAsync(bool protect, CancellationToken ct = default); // via SYSTEM gate only
 
     // A protection request kept while the device was blocked and not applied yet: true to protect, false to
-    // restore. Null when none is kept or the record could not be read. Read-only, non-admin. A controller that
-    // keeps no request has nothing to report.
+    // restore. Null when none is kept. A record that is there but cannot be read or is not valid throws, with the
+    // read's own code as the HResult. Read-only, non-admin. A controller that keeps no request has nothing to report.
     Task<bool?> GetPendingProtectAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
 }
 

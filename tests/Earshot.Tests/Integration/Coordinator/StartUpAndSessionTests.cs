@@ -174,6 +174,8 @@ public sealed class StartUpAndSessionTests
         h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
 
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "The session end was cancelled"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "issued while the AirPods were in use, so they may have been disconnected"),
+            "A block that may have dropped a user who kept the session was not recorded.");
         Assert.HasCount(1, h.Block.Calls);
 
         // The nodes are enabled again (a driver re-enumeration, say) and the next session end blocks again.

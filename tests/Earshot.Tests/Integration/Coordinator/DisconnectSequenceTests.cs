@@ -88,6 +88,24 @@ public sealed class DisconnectSequenceTests
     }
 
     [TestMethod]
+    public void ADisconnectWhoseBlockCountsANodeThatIsNotPresentIsAStraightSuccess()
+    {
+        using CoordinatorHarness h = Connected();
+        h.Block.OnBlock = _ =>
+        {
+            h.Block.Status = Statuses.Blocked();
+            h.Monitor.Publish(Devices.NotPresent(3));
+            return Task.FromResult(new ControllerResult(OpStatus.Partial,
+                "Connect the AirPods to this PC once from Windows Bluetooth settings, then try Block again.", []));
+        };
+
+        ToggleReport report = h.Toggle(connect: false);
+
+        Assert.AreEqual(OpStatus.Success, report.Status);
+        CollectionAssert.AreEqual(Disconnected, h.Cards.Statuses);
+    }
+
+    [TestMethod]
     public void ADisconnectThatIsNotObservedIsReportedHonestly()
     {
         using CoordinatorHarness h = Connected();
