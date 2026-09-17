@@ -456,12 +456,37 @@ public sealed class EndpointModelBuilderTests
             Assert.AreEqual(AirPodsContainer, model.Snapshot.Target?.ContainerId, match);
         }
 
-        // With the AirPods endpoints gone (a boot block removes them), the match still never lands on the phone.
-        List<EndpointReading> blocked = machine.Where(r => r.Endpoint.ContainerId != AirPodsContainer).ToList();
-        Assert.IsNull(Build(blocked).Snapshot.Target);
-        EndpointModel pinned = Build(blocked, pinned: AirPodsContainer);
+        // With the AirPods endpoints removed (unpaired, or the driver reinstalled), the match still never lands
+        // on the phone.
+        List<EndpointReading> removed = machine.Where(r => r.Endpoint.ContainerId != AirPodsContainer).ToList();
+        Assert.IsNull(Build(removed).Snapshot.Target);
+        EndpointModel pinned = Build(removed, pinned: AirPodsContainer);
         Assert.IsNull(pinned.Snapshot.Target);
         Assert.AreEqual(TargetResolution.PinnedAbsent, pinned.Resolution);
+    }
+
+    // The boot block disables the AirPods device nodes, and their endpoints stay enumerated as NOTPRESENT; the
+    // names of a NOTPRESENT endpoint may not read (0xE000020B). A pinned device in that state is still the
+    // target, disconnected, with an empty name rather than "not found".
+    [TestMethod]
+    public void APinnedDeviceWhoseEndpointsAreAllNotPresentAndNamelessIsStillTheTarget()
+    {
+        List<EndpointReading> machine = Machine().Where(r => r.Endpoint.ContainerId != AirPodsContainer).ToList();
+        machine.Insert(0, IPhoneHandsFree());
+        machine.Add(new EndpointReading(AirPodsRender(EndpointState.NotPresent).Endpoint with { FriendlyName = null }, InterfaceName: null));
+        machine.Add(new EndpointReading(AirPodsCapture(EndpointState.NotPresent).Endpoint with { FriendlyName = null }, InterfaceName: null));
+
+        EndpointModel pinned = Build(machine, pinned: AirPodsContainer);
+
+        Assert.AreEqual(TargetResolution.Pinned, pinned.Resolution);
+        Assert.AreEqual(AirPodsContainer, pinned.Snapshot.Target?.ContainerId);
+        Assert.AreEqual(ConnectionState.Disconnected, pinned.Snapshot.Target?.Connection);
+        Assert.AreEqual("", pinned.Snapshot.Target?.DisplayName);
+
+        // Without a pin nothing names the AirPods, so the name match finds nothing, and never the phone.
+        EndpointModel unpinned = Build(machine);
+        Assert.IsNull(unpinned.Snapshot.Target);
+        Assert.AreEqual(TargetResolution.NotFound, unpinned.Resolution);
     }
 
     [TestMethod]
