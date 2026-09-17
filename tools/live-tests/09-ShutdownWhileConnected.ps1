@@ -114,7 +114,7 @@ try
 
         Add-Criterion -Run $run -Id 'end-session-logged' -Criterion 'The end-session messages reached Earshot and were logged with their flags.' `
             -Outcome $(if ($querySession.Count -gt 0 -or $endSession.Count -gt 0) { 'pass' } else { 'fail' }) `
-            -Detail ($querySession.Count + ' query lines, ' + $endSession.Count + ' end lines.')
+            -Detail ([string]$querySession.Count + ' query lines, ' + $endSession.Count + ' end lines.')
 
         Add-Finding -Run $run -Name 'sessionEndBlockQueued' -Value $(if ($queued.Count -gt 0) { 'yes' } else { 'no' })
         Add-Finding -Run $run -Name 'preShutdownServiceNeeded' `

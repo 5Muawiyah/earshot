@@ -73,7 +73,7 @@ function Measure-TargetNodes
         if ($disabledBit -eq $true) { $counts.Disabled = $counts.Disabled + 1 }
         if ($problem -eq 22) { $counts.Problem22 = $counts.Problem22 + 1 }
         if ((Get-Field -Object $node -Name 'present') -eq $true) { $counts.Present = $counts.Present + 1 }
-        $line = (Get-Field -Object $node -Name 'instanceId') + ': present ' + (Get-Field -Object $node -Name 'present') +
+        $line = [string](Get-Field -Object $node -Name 'instanceId') + ': present ' + (Get-Field -Object $node -Name 'present') +
             ', status ' + (Get-Field -Object $node -Name 'status') + ', problem ' + $problem + ', disabled bit ' + $disabledBit
         $counts.Rows = $counts.Rows + @($line)
         Write-Line -Run $Run -Text ('  ' + $line)
@@ -127,11 +127,11 @@ try
                     $after = Measure-TargetNodes -Run $run -Label 'nodes-after-block'
                     Add-Criterion -Run $run -Id 'disabled-now' -Criterion 'Every target node reads disabled, at problem 22, with the disabled bit set.' `
                         -Outcome $(if ($after.Targets -gt 0 -and $after.Disabled -eq $after.Targets -and $after.Problem22 -eq $after.Targets) { 'pass' } else { 'fail' }) `
-                        -Detail ($after.Disabled + ' of ' + $after.Targets + ' carry the bit, ' + $after.Problem22 + ' are at problem 22.')
+                        -Detail ([string]$after.Disabled + ' of ' + $after.Targets + ' carry the bit, ' + $after.Problem22 + ' are at problem 22.')
 
                     Add-Criterion -Run $run -Id 'locatable' -Criterion 'A disabled node is still found by a non-elevated read, so the tray can report Blocked.' `
                         -Outcome $(if ($after.Present -gt 0) { 'pass' } else { 'fail' }) `
-                        -Detail ($after.Present + ' of ' + $after.Targets + ' target nodes were still readable.')
+                        -Detail ([string]$after.Present + ' of ' + $after.Targets + ' target nodes were still readable.')
 
                     Add-Finding -Run $run -Name 'nodesBlockedBeforeRestart' -Value ($after.Disabled.ToString() + '/' + $after.Targets.ToString())
                 }
@@ -151,7 +151,7 @@ try
         $after = Measure-TargetNodes -Run $run -Label 'nodes-after-restart'
         Add-Criterion -Run $run -Id 'persisted' -Criterion 'Every target node is still disabled after the restart.' `
             -Outcome $(if ($after.Targets -gt 0 -and $after.Disabled -eq $after.Targets -and $after.Problem22 -eq $after.Targets) { 'pass' } else { 'fail' }) `
-            -Detail ($after.Disabled + ' of ' + $after.Targets + ' carry the disabled bit, ' + $after.Problem22 + ' are at problem 22, state ' + $after.State + '.')
+            -Detail ([string]$after.Disabled + ' of ' + $after.Targets + ' carry the disabled bit, ' + $after.Problem22 + ' are at problem 22, state ' + $after.State + '.')
 
         Add-Finding -Run $run -Name 'persistentDisableSurvivesRestart' -Value $(if ($after.Targets -gt 0 -and $after.Disabled -eq $after.Targets) { 'yes' } else { 'no' })
 

@@ -134,14 +134,14 @@ try
 
         Add-Criterion -Run $run -Id 'query-arrived' -Criterion 'WM_QUERYENDSESSION reached Earshot and was logged with its flags.' `
             -Outcome $(if ($query.Count -gt 0) { 'pass' } else { 'fail' }) `
-            -Detail ($query.Count + ' line(s). A forced restart is allowed to skip the query; that is the finding, not a defect.')
+            -Detail ([string]$query.Count + ' line(s). A forced restart is allowed to skip the query; that is the finding, not a defect.')
 
         Add-Criterion -Run $run -Id 'end-arrived' -Criterion 'WM_ENDSESSION reached Earshot and was logged with its flags.' `
-            -Outcome $(if ($end.Count -gt 0) { 'pass' } else { 'fail' }) -Detail ($end.Count + ' line(s).')
+            -Outcome $(if ($end.Count -gt 0) { 'pass' } else { 'fail' }) -Detail ([string]$end.Count + ' line(s).')
 
         Add-Criterion -Run $run -Id 'block-queued' -Criterion 'A block was queued at session end, or the log says why not.' `
             -Outcome $(if ($queued.Count -gt 0 -or $noBlock.Count -gt 0) { 'pass' } else { 'inconclusive' }) `
-            -Detail ($queued.Count + ' queued, ' + $noBlock.Count + ' explained.')
+            -Detail ([string]$queued.Count + ' queued, ' + $noBlock.Count + ' explained.')
 
         Add-Finding -Run $run -Name ('variant' + $Variant + 'Messages') `
             -Value ('query ' + $query.Count + ', end ' + $end.Count + ', queued ' + $queued.Count + ', no block ' + $noBlock.Count)

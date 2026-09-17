@@ -116,7 +116,7 @@ try
                 $summary = Read-SweepEvidence -Run $run -Evidence $evidence
                 Add-Criterion -Run $run -Id 'sweep-disconnected' -Criterion 'The sweep read the AirPods device properties while disconnected.' `
                     -Outcome $(if ($summary.Matched -gt 0 -and $summary.Control -eq $true) { 'pass' } else { 'inconclusive' }) `
-                    -Detail ($summary.Matched + ' nodes matched; the positive control (a container id could be read) was ' + $summary.Control + '.')
+                    -Detail ([string]$summary.Matched + ' nodes matched; the positive control (a container id could be read) was ' + $summary.Control + '.')
                 Add-Criterion -Run $run -Id 'no-battery-disconnected' -Criterion 'No battery property returns a value while disconnected.' `
                     -Outcome $(if ($summary.Values.Count -eq 0) { 'pass' } else { 'fail' }) `
                     -Detail $(if ($summary.Values.Count -eq 0) { 'Nothing returned a value, which matches the phase 0 answer.' } else { 'Something did return a value: ' + ($summary.Values -join ' | ') })

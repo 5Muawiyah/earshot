@@ -88,7 +88,7 @@ try
             $Container = '' + (Get-Field -Object $nodes -Name 'container')
             $Sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
             Write-Line -Run $run -Text ('Account ' + $Sid + ', device ' + $Address + ', container ' + $Container)
-            Set-Content -LiteralPath (Join-Path $run.Folder 'identity.txt') -Value ($Sid + "`r`n" + $Address + "`r`n" + $Container) -Encoding UTF8
+            Set-Content -LiteralPath (Join-Path $run.Folder 'identity.txt') -Value ([string]$Sid + "`r`n" + $Address + "`r`n" + $Container) -Encoding UTF8
 
             if ((Get-Field -Object $nodes -Name 'nodeState') -ne 'Blocked')
             {
@@ -150,7 +150,7 @@ try
 
                 Add-Criterion -Run $run -Id 'data-folder-removed' -Criterion 'The ProgramData folder is gone.' `
                     -Outcome $(if (-not $foldersAfter.DataExists) { 'pass' } else { 'fail' }) `
-                    -Detail ($foldersAfter.Data + ' exists: ' + $foldersAfter.DataExists + '.')
+                    -Detail ([string]$foldersAfter.Data + ' exists: ' + $foldersAfter.DataExists + '.')
 
                 if ($fromInstalled)
                 {
@@ -163,7 +163,7 @@ try
                 {
                     Add-Criterion -Run $run -Id 'program-folder' -Criterion 'The program folder is gone.' `
                         -Outcome $(if (-not $foldersAfter.ProgramExists) { 'pass' } else { 'fail' }) `
-                        -Detail ($foldersAfter.Program + ' exists: ' + $foldersAfter.ProgramExists + '.')
+                        -Detail ([string]$foldersAfter.Program + ' exists: ' + $foldersAfter.ProgramExists + '.')
                 }
             }
 

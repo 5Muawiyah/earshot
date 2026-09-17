@@ -184,7 +184,7 @@ try
         $stopped = Get-EarshotLogLines -Run $run -Pattern 'Tray stopped.'
         Add-Criterion -Run $run -Id 'clean-exit' -Criterion 'The tray exits cleanly, with the notification client unregistered and no late callback.' `
             -Outcome $(if ($stopped.Count -gt 0) { 'pass' } else { 'inconclusive' }) `
-            -Detail ($stopped.Count + ' clean stop line(s) in the log, ' + $unregister.Count + ' unregister line(s).')
+            -Detail ([string]$stopped.Count + ' clean stop line(s) in the log, ' + $unregister.Count + ' unregister line(s).')
 
         Save-EarshotLog -Run $run
     }

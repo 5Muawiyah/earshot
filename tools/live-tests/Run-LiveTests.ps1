@@ -171,7 +171,7 @@ function Show-Tests
     Write-Host ''
     foreach ($row in $tests)
     {
-        Write-Host ($row.Number + '  ' + $row.Title)
+        Write-Host ([string]$row.Number + '  ' + $row.Title)
         Write-Host ('    settles: ' + $row.Settles)
         Write-Host ('    needs:   ' + $row.Needs)
         Write-Host ('    halves:  ' + $row.Halves + '    script: ' + $row.Script)
@@ -215,7 +215,7 @@ else
 
     $script = Join-Path $PSScriptRoot $match.Script
     Write-Host ''
-    Write-Host ($match.Number + '  ' + $match.Title)
+    Write-Host ([string]$match.Number + '  ' + $match.Title)
     Write-Host ('    settles: ' + $match.Settles)
     Write-Host ('    needs:   ' + $match.Needs)
     Write-Host ''

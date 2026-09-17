@@ -107,7 +107,7 @@ try
 
         Add-Criterion -Run $run -Id 'topology-reachable' -Criterion 'The walk reaches IKsControl on at least one filter before anything is sent.' `
             -Outcome $(if ($activatedBefore -gt 0) { 'pass' } else { 'fail' }) `
-            -Detail ($activatedBefore + ' filter(s) activated IKsControl while disconnected.')
+            -Detail ([string]$activatedBefore + ' filter(s) activated IKsControl while disconnected.')
 
         $nodeState = Get-Field -Object $nodes -Name 'nodeState'
         $protection = Get-Field -Object $services -Name 'protection'
@@ -169,7 +169,7 @@ try
                 {
                     Add-Criterion -Run $run -Id 'K1-budget' -Criterion ('The render endpoint reaches ACTIVE within the ' + $ConnectBudgetMilliseconds + ' ms connect budget.') `
                         -Outcome $(if ([int]$srcOn.MillisToState -le $ConnectBudgetMilliseconds) { 'pass' } else { 'fail' }) `
-                        -Detail ($srcOn.MillisToState + ' ms.')
+                        -Detail ([string]$srcOn.MillisToState + ' ms.')
                     Add-Finding -Run $run -Name 'a2dpReconnectMilliseconds' -Value $srcOn.MillisToState -Detail 'protection on'
                 }
 
@@ -287,7 +287,7 @@ try
                     -Consequence 'Asks to connect while already connected, to record what the drivers return.'
                 if ($null -ne $redundant)
                 {
-                    Add-Finding -Run $run -Name 'reconnectWhileActive' -Value (($redundant.Filters | ForEach-Object { $_.role + '=' + $_.hrName }) -join ' ')
+                    Add-Finding -Run $run -Name 'reconnectWhileActive' -Value (($redundant.Filters | ForEach-Object { [string]$_.role + '=' + $_.hrName }) -join ' ')
                 }
             }
 

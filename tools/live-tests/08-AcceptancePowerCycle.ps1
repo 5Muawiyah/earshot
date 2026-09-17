@@ -139,7 +139,7 @@ try
 
             Add-Criterion -Run $run -Id 'blocked-before-power-cycle' -Criterion 'Every target node is disabled before the machine is powered down.' `
                 -Outcome $(if ($before.Targets -gt 0 -and $before.Disabled -eq $before.Targets) { 'pass' } else { 'fail' }) `
-                -Detail ($before.Disabled + ' of ' + $before.Targets + ' are disabled, state ' + $before.State + '.')
+                -Detail ([string]$before.Disabled + ' of ' + $before.Targets + ' are disabled, state ' + $before.State + '.')
 
             Save-EarshotLog -Run $run
             Write-Section -Run $run -Title 'Now power the machine down'
@@ -159,7 +159,7 @@ try
         $after = Measure-TargetNodes -Run $run -Label 'nodes-after-power-cycle'
         Add-Criterion -Run $run -Id 'still-blocked' -Criterion 'Every target node is still disabled after the power cycle.' `
             -Outcome $(if ($after.Targets -gt 0 -and $after.Disabled -eq $after.Targets) { 'pass' } else { 'fail' }) `
-            -Detail ($after.Disabled + ' of ' + $after.Targets + ' are disabled, state ' + $after.State + '.')
+            -Detail ([string]$after.Disabled + ' of ' + $after.Targets + ' are disabled, state ' + $after.State + '.')
 
         Add-Criterion -Run $run -Id 'no-fresh-handsfree-node' -Criterion 'No enabled Handsfree node appeared outside the disabled set.' `
             -Outcome $(if ($after.HandsfreeEnabled -eq 0) { 'pass' } else { 'fail' }) `

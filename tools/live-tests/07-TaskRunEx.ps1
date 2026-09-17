@@ -63,7 +63,7 @@ function Show-Tasks
     $rows = @()
     foreach ($row in (Get-Field -Object $task -Name 'tasks'))
     {
-        $line = (Get-Field -Object $row -Name 'path') + ': present ' + (Get-Field -Object $row -Name 'present') +
+        $line = [string](Get-Field -Object $row -Name 'path') + ': present ' + (Get-Field -Object $row -Name 'present') +
             ', principal ' + (Get-Field -Object $row -Name 'userId') +
             ', logon ' + (Get-Field -Object $row -Name 'logonType') +
             ', run level ' + (Get-Field -Object $row -Name 'runLevel') +

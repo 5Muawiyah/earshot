@@ -120,10 +120,10 @@ try
 
                     $after = Measure-TargetNodes -Run $run -Label 'nodes-after-allow'
                     Add-Criterion -Run $run -Id 'problem-cleared' -Criterion 'No target node is left at problem 22.' `
-                        -Outcome $(if ($after.Problem22 -eq 0) { 'pass' } else { 'fail' }) -Detail ($after.Problem22 + ' are still at problem 22.')
+                        -Outcome $(if ($after.Problem22 -eq 0) { 'pass' } else { 'fail' }) -Detail ([string]$after.Problem22 + ' are still at problem 22.')
                     Add-Criterion -Run $run -Id 'bit-cleared' -Criterion 'The disabled bit in ConfigFlags is cleared on every target node.' `
                         -Outcome $(if ($after.Disabled -eq 0) { 'pass' } else { 'fail' }) `
-                        -Detail ($after.Disabled + ' still carry it. A node that keeps the bit comes back disabled at the next boot.')
+                        -Detail ([string]$after.Disabled + ' still carry it. A node that keeps the bit comes back disabled at the next boot.')
                     Add-Finding -Run $run -Name 'enableClearsConfigFlagsDisabled' -Value $(if ($after.Disabled -eq 0) { 'yes' } else { 'no' })
 
                     Write-Section -Run $run -Title 'Do the endpoints come back?'

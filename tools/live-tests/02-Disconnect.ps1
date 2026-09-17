@@ -125,7 +125,7 @@ try
                 {
                     Add-Criterion -Run $run -Id 'disconnect-budget' -Criterion ('The render endpoint leaves ACTIVE within the ' + $DisconnectBudgetMilliseconds + ' ms disconnect budget.') `
                         -Outcome $(if ([int]$src.MillisToState -le $DisconnectBudgetMilliseconds) { 'pass' } else { 'fail' }) `
-                        -Detail ($src.MillisToState + ' ms.')
+                        -Detail ([string]$src.MillisToState + ' ms.')
                     Add-Finding -Run $run -Name 'disconnectMilliseconds' -Value $src.MillisToState
                 }
             }
@@ -172,7 +172,7 @@ try
                     -Consequence 'Asks to disconnect while already disconnected, to record what the drivers return.'
                 if ($null -ne $redundant)
                 {
-                    Add-Finding -Run $run -Name 'disconnectWhileUnplugged' -Value (($redundant.Filters | ForEach-Object { $_.role + '=' + $_.hrName }) -join ' ')
+                    Add-Finding -Run $run -Name 'disconnectWhileUnplugged' -Value (($redundant.Filters | ForEach-Object { [string]$_.role + '=' + $_.hrName }) -join ' ')
                 }
             }
 

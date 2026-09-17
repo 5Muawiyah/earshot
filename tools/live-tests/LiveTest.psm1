@@ -105,7 +105,7 @@ function Assert-LiveEnvironment
     foreach ($name in @('EARSHOT_SAFE_MODE', 'EARSHOT_DATA_ROOT'))
     {
         $value = [System.Environment]::GetEnvironmentVariable($name)
-        if (-not [string]::IsNullOrEmpty($value)) { $set += ($name + '=' + $value) }
+        if (-not [string]::IsNullOrEmpty($value)) { $set += ([string]$name + '=' + $value) }
     }
 
     if ($set.Count -gt 0)
@@ -475,8 +475,8 @@ function Invoke-Earshot
         Write-Line -Run $Run -Text ('Reading (changes nothing): ' + $line)
     }
 
-    $stdout = Join-Path $Run.Folder ($index + '-' + $Label + '.stdout.txt')
-    $stderr = Join-Path $Run.Folder ($index + '-' + $Label + '.stderr.txt')
+    $stdout = Join-Path $Run.Folder ([string]$index + '-' + $Label + '.stdout.txt')
+    $stderr = Join-Path $Run.Folder ([string]$index + '-' + $Label + '.stderr.txt')
     $step.stdoutFile = $stdout
     $step.stderrFile = $stderr
 
@@ -502,7 +502,7 @@ function Invoke-Earshot
         $clock.Stop()
         $step.timedOut = $true
         $step.error = ('It did not finish within ' + $TimeoutSeconds + ' s.')
-        Write-Failure -Run $Run -Message ($Label + ': ' + $step.error)
+        Write-Failure -Run $Run -Message ([string]$Label + ': ' + $step.error)
         if (Confirm-Step -Run $Run -Prompt 'Stop that Earshot process now?' -Consequence 'Ends the run that is still going.')
         {
             try { $process.Kill() } catch { Write-Failure -Run $Run -Message ('It could not be stopped: ' + ($_ | Out-String).Trim()) }
@@ -628,7 +628,7 @@ function Invoke-EarshotElevated
         $step.timedOut = $true
         $step.error = ('It did not finish within ' + $TimeoutSeconds + ' s.')
         [void]$Run.Steps.Add($step)
-        Write-Failure -Run $Run -Message ($Label + ': ' + $step.error)
+        Write-Failure -Run $Run -Message ([string]$Label + ': ' + $step.error)
         return $null
     }
 
@@ -832,7 +832,7 @@ function Get-NodeState
         [string]$Label = 'nodes'
     )
 
-    $evidence = Join-Path $Run.Folder ($Label + '.json')
+    $evidence = Join-Path $Run.Folder ([string]$Label + '.json')
     $result = Invoke-Earshot -Run $Run -Label $Label -Command @('probe', 'nodes', '--json', '--out', $evidence)
     if ($null -eq $result) { return $null }
     return $result.json
@@ -845,7 +845,7 @@ function Get-AudioState
         [string]$Label = 'audio'
     )
 
-    $evidence = Join-Path $Run.Folder ($Label + '.json')
+    $evidence = Join-Path $Run.Folder ([string]$Label + '.json')
     $result = Invoke-Earshot -Run $Run -Label $Label -Command @('probe', 'audio', '--json', '--out', $evidence)
     if ($null -eq $result) { return $null }
     return $result.json
@@ -860,7 +860,7 @@ function Get-TopologyState
         [string]$Label = 'topology'
     )
 
-    $evidence = Join-Path $Run.Folder ($Label + '.json')
+    $evidence = Join-Path $Run.Folder ([string]$Label + '.json')
     $result = Invoke-Earshot -Run $Run -Label $Label -Command @('probe', 'topology', '--json', '--out', $evidence)
     if ($null -eq $result) { return $null }
     foreach ($adapter in (Get-Field -Object $result.json -Name 'adapters'))
@@ -881,7 +881,7 @@ function Get-ServiceState
         [string]$Label = 'services'
     )
 
-    $evidence = Join-Path $Run.Folder ($Label + '.json')
+    $evidence = Join-Path $Run.Folder ([string]$Label + '.json')
     $result = Invoke-Earshot -Run $Run -Label $Label -Command @('probe', 'services', '--json', '--out', $evidence)
     if ($null -eq $result) { return $null }
     return $result.json
@@ -894,7 +894,7 @@ function Get-TaskState
         [string]$Label = 'task'
     )
 
-    $evidence = Join-Path $Run.Folder ($Label + '.json')
+    $evidence = Join-Path $Run.Folder ([string]$Label + '.json')
     $result = Invoke-Earshot -Run $Run -Label $Label -Command @('probe', 'task', '--json', '--out', $evidence)
     if ($null -eq $result) { return $null }
     return $result.json
@@ -924,7 +924,7 @@ function Get-TargetEndpointStates
         {
             $flow = Get-Field -Object $endpoint -Name 'flow'
             $state = Get-Field -Object $endpoint -Name 'state'
-            $states.Names += ($flow + ' ' + $state + ' ' + (Get-Field -Object $endpoint -Name 'friendlyName'))
+            $states.Names += ([string]$flow + ' ' + $state + ' ' + (Get-Field -Object $endpoint -Name 'friendlyName'))
             if ($flow -eq 'Render' -and ($null -eq $states.Render -or $state -eq 'Active')) { $states.Render = $state }
             if ($flow -eq 'Capture' -and ($null -eq $states.Capture -or $state -eq 'Active')) { $states.Capture = $state }
         }
@@ -954,7 +954,7 @@ function Read-EarshotJsonFile
     }
     catch
     {
-        Write-Failure -Run $Run -Message ($Path + ' could not be read: ' + ($_ | Out-String).Trim())
+        Write-Failure -Run $Run -Message ([string]$Path + ' could not be read: ' + ($_ | Out-String).Trim())
         return $null
     }
 }
@@ -1081,7 +1081,7 @@ function Add-Finding
 
     [void]$Run.Findings.Add([ordered]@{ name = $Name; value = $Value; detail = $Detail; utc = (Get-UtcNowText) })
     $text = 'FINDING ' + $Name + ' = ' + $Value
-    if (-not [string]::IsNullOrEmpty($Detail)) { $text = $text + ' (' + $Detail + ')' }
+    if (-not [string]::IsNullOrEmpty($Detail)) { $text = [string]$text + ' (' + $Detail + ')' }
     Write-Line -Run $Run -Text $text
 }
 
@@ -1109,7 +1109,7 @@ function Write-ResumeInstruction
 
     $command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $ScriptPath + '" -ExePath "' + $Run.ExePath +
         '" -RunRoot "' + $Run.RunRoot + '" -Resume'
-    if (-not [string]::IsNullOrEmpty($ExtraArguments)) { $command = $command + ' ' + $ExtraArguments }
+    if (-not [string]::IsNullOrEmpty($ExtraArguments)) { $command = [string]$command + ' ' + $ExtraArguments }
     $file = Join-Path $Run.Folder 'resume.txt'
     Set-Content -LiteralPath $file -Value $command -Encoding UTF8
     Write-Line -Run $Run -Text ''

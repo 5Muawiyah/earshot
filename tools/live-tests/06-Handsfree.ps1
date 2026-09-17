@@ -58,7 +58,7 @@ function Show-Services
     $listed = @()
     foreach ($service in (Get-Field -Object $services -Name 'installedServices'))
     {
-        $listed = $listed + @((Get-Field -Object $service -Name 'label') + ' ' + (Get-Field -Object $service -Name 'guid'))
+        $listed = $listed + @([string](Get-Field -Object $service -Name 'label') + ' ' + (Get-Field -Object $service -Name 'guid'))
     }
 
     Write-Line -Run $Run -Text ('  protection ' + (Get-Field -Object $services -Name 'protection') +
@@ -79,7 +79,7 @@ function Read-UnelevatedEvidence
     $rows = @()
     foreach ($step in (Get-Field -Object $Evidence -Name 'steps'))
     {
-        $line = (Get-Field -Object $step -Name 'step') + ': ' + (Get-Field -Object $step -Name 'codeName') +
+        $line = [string](Get-Field -Object $step -Name 'step') + ': ' + (Get-Field -Object $step -Name 'codeName') +
             ' (' + (Get-Field -Object $step -Name 'code') + ') ' + (Get-Field -Object $step -Name 'detail')
         $rows = $rows + @($line)
         Write-Line -Run $Run -Text ('  ' + $line)
@@ -170,7 +170,7 @@ try
             {
                 Add-Criterion -Run $run -Id 'within-task-limit' -Criterion ('The call finishes inside the ' + $ProtectTaskLimitSeconds + ' s limit on the Protect task.') `
                     -Outcome $(if ([int]$runMs -le ($ProtectTaskLimitSeconds * 1000)) { 'pass' } else { 'fail' }) `
-                    -Detail ($runMs + ' ms.')
+                    -Detail ([string]$runMs + ' ms.')
                 Add-Finding -Run $run -Name 'protectOnMilliseconds' -Value $runMs
             }
 
@@ -214,7 +214,7 @@ try
                     -Detail 'compare with servicesAtBaseline; the same list means the read is trustworthy while blocked'
                 Add-Criterion -Run $run -Id 'services-readable-while-blocked' -Criterion 'The installed services are still readable while the nodes are disabled.' `
                     -Outcome $(if ($blockedServices.Services.Count -gt 0) { 'pass' } else { 'fail' }) `
-                    -Detail ($blockedServices.Services.Count + ' services were listed, protection read ' + $blockedServices.Protection + '.')
+                    -Detail ([string]$blockedServices.Services.Count + ' services were listed, protection read ' + $blockedServices.Protection + '.')
 
                 $allow = Invoke-Earshot -Run $run -Label 'gate-allow' -Command @('diag', 'gate', 'allow') -Live `
                     -Consequence 'Enables the nodes again.'

@@ -91,6 +91,26 @@ public sealed class LiveTestScriptTests
         Assert.IsGreaterThan(0, Scripts.Files.Count, "No script was found to parse.");
     }
 
+    // Parsing is not enough: a script that parses can still throw on its first criterion. PowerShell
+    // converts the right operand of '+' to the type of the left one, so ($report.Disabled + ' of ')
+    // throws "Cannot convert value" when Disabled is a number, which is what every count read out of
+    // a JSON report is. The script's own try/catch turns that into "run: fail" with nothing recorded,
+    // so the owner loses the sitting. Every text join must therefore start with a string.
+    [TestMethod]
+    public void EveryTextJoinStartsWithText()
+    {
+        var problems = Scripts.Concatenations
+            .Select(c => c.File + " line " + c.Line.ToString(CultureInfo.InvariantCulture) +
+                " starts with " + c.Head + ": " + c.Text)
+            .ToList();
+
+        Assert.IsEmpty(
+            problems,
+            "A '+' that builds text starts with something that is not text. Put [string] in front of the first " +
+            "operand, or write a literal first, or PowerShell will throw instead of building the text:" +
+            Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
     [TestMethod]
     public void EveryExpectedScriptIsThere()
     {
@@ -415,6 +435,7 @@ public sealed class LiveTestScriptTests
         var files = new List<ScriptFile>();
         var calls = new List<CommandCall>();
         var fieldReads = new List<FieldRead>();
+        var concatenations = new List<Concatenation>();
         using JsonDocument document = JsonDocument.Parse(json);
         foreach (JsonElement file in Items(document.RootElement, "files"))
         {
@@ -427,6 +448,15 @@ public sealed class LiveTestScriptTests
             foreach (JsonElement read in Items(file, "fieldReads"))
             {
                 fieldReads.Add(new FieldRead(name, read.GetProperty("line").GetInt32(), ReadStrings(read, "names")));
+            }
+
+            foreach (JsonElement join in Items(file, "concatenations"))
+            {
+                concatenations.Add(new Concatenation(
+                    name,
+                    join.GetProperty("line").GetInt32(),
+                    join.GetProperty("head").GetString() ?? "",
+                    join.GetProperty("text").GetString() ?? ""));
             }
 
             foreach (JsonElement call in Items(file, "calls"))
@@ -448,7 +478,7 @@ public sealed class LiveTestScriptTests
             }
         }
 
-        return new ScriptSet(files, calls, fieldReads);
+        return new ScriptSet(files, calls, fieldReads, concatenations);
     }
 
     // Some PowerShell versions write a list of one as that one value rather than as a list, so a
@@ -511,7 +541,11 @@ public sealed class LiveTestScriptTests
     private sealed record ScriptSet(
         IReadOnlyList<ScriptFile> Files,
         IReadOnlyList<CommandCall> Calls,
-        IReadOnlyList<FieldRead> FieldReads);
+        IReadOnlyList<FieldRead> FieldReads,
+        IReadOnlyList<Concatenation> Concatenations);
+
+    // One '+' chain that builds text, with the operand it starts with.
+    private sealed record Concatenation(string File, int Line, string Head, string Text);
 
     private sealed record ScriptFile(string Name, IReadOnlyList<string> Errors, IReadOnlyList<string> Strings);
 
@@ -573,6 +607,20 @@ public sealed class LiveTestScriptTests
             return @($Argument)
         }
 
+        # The operands of a '+' chain, flattened. ('a' + $b + 'c') is two nested binary expressions,
+        # and this returns the three values in the order they were written.
+        function Get-PlusOperands
+        {
+            param($Node)
+
+            if ($Node -is [System.Management.Automation.Language.BinaryExpressionAst] -and $Node.Operator -eq 'Plus')
+            {
+                return @(Get-PlusOperands -Node $Node.Left) + @(Get-PlusOperands -Node $Node.Right)
+            }
+
+            return @($Node)
+        }
+
         $files = @()
         $scripts = @(Get-ChildItem -LiteralPath $Root -Recurse -File |
             Where-Object { $_.Extension -eq '.ps1' -or $_.Extension -eq '.psm1' } |
@@ -593,8 +641,47 @@ public sealed class LiveTestScriptTests
             $calls = @()
             $strings = @()
             $fieldReads = @()
+            $concatenations = @()
             if ($null -ne $ast)
             {
+                # A '+' chain that builds text must start with a string, because PowerShell converts
+                # the right operand to the type of the left one. An integer on the left of ' of '
+                # throws "Cannot convert value" at run time instead of producing text, and a throw
+                # inside a criterion aborts the whole test. A [string] cast or .ToString() on the
+                # first operand settles the type of the chain.
+                # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_arithmetic_operators
+                foreach ($b in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.BinaryExpressionAst] -and $args[0].Operator -eq 'Plus' }, $true))
+                {
+                    # Only the outermost link of a chain, so one chain is reported once.
+                    if ($b.Parent -is [System.Management.Automation.Language.BinaryExpressionAst] -and $b.Parent.Operator -eq 'Plus') { continue }
+
+                    $operands = @(Get-PlusOperands -Node $b)
+                    $buildsText = $false
+                    foreach ($o in $operands)
+                    {
+                        if ($o -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+                            $o -is [System.Management.Automation.Language.ExpandableStringExpressionAst])
+                        {
+                            $buildsText = $true
+                        }
+                    }
+
+                    # No string literal in the chain, so it is arithmetic or an array join, not text.
+                    if (-not $buildsText) { continue }
+
+                    $first = $operands[0]
+                    if ($first -is [System.Management.Automation.Language.StringConstantExpressionAst]) { continue }
+                    if ($first -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) { continue }
+
+                    $head = $first.Extent.Text
+                    if ($head.StartsWith('[string]')) { continue }
+                    if ($head.EndsWith('.ToString()')) { continue }
+
+                    $whole = ($b.Extent.Text -replace '\s+', ' ')
+                    if ($whole.Length -gt 160) { $whole = $whole.Substring(0, 160) + '...' }
+                    $concatenations += [ordered]@{ line = $b.Extent.StartLineNumber; head = $head; text = $whole }
+                }
+
                 # Every literal name a script reads out of a JSON report, so that each one can be
                 # checked against the writer that is supposed to produce it.
                 foreach ($c in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true))
@@ -690,6 +777,7 @@ public sealed class LiveTestScriptTests
                 errors = $messages
                 calls = $calls
                 fieldReads = $fieldReads
+                concatenations = $concatenations
                 strings = $strings
             }
         }
