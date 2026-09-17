@@ -41,6 +41,8 @@ public sealed class FileManifestTests
         Assert.AreEqual(Hash, manifest.HashOf("Earshot.dll"));
         Assert.AreEqual(Hash, manifest.HashOf(Path.Combine("runtimes", "win-x64", "native", "one.dll")));
         Assert.IsNull(manifest.HashOf("somethingelse.dll"));
+        Assert.AreEqual(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(Path.Combine(temp.Path, FileManifest.FileName)))), manifest.ContentSha256,
+            "The manifest's own hash covers the bytes as read, byte order mark included.");
     }
 
     [TestMethod]
@@ -65,6 +67,7 @@ public sealed class FileManifestTests
     [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"a.dll\", \"Sha256\": \"" + Hash + "\", \"Size\": 1 } ] }")]
     [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"a.dll\", \"Sha256\": \"" + Hash + "\" }, { \"Path\": \"A.DLL\", \"Sha256\": \"" + Hash + "\" } ] }")]
     [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": 1, \"Sha256\": \"" + Hash + "\" } ] }")]
+    [DataRow("{ \"SchemaVersion\": 1, \"Files\": [ { \"Path\": \"Earshot.files.json\", \"Sha256\": \"" + Hash + "\" } ] }")]
     public void AnythingButThePublishedShapeIsRefused(string content)
     {
         using var temp = new TempFolder();

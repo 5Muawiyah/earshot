@@ -138,7 +138,9 @@ public sealed class InstallActionsTests
         Assert.AreEqual(Sddl.RunnableTask(TestUsers.Sid), h.Tasks.Tasks[@"\Earshot\Gate"].Sddl);
         Assert.AreEqual(Sddl.ReadableTask(TestUsers.Sid), h.Tasks.Tasks[@"\Earshot\BootBlock"].Sddl);
         CollectionAssert.AreEqual(FreshInstallCalls, h.Tasks.Calls);
-        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok && s.Detail!.Contains("3 published files", StringComparison.Ordinal)));
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "copy-app" && s.Ok && s.Detail!.Contains("4 published files", StringComparison.Ordinal)), "The three listed files and the manifest.");
+        CollectionAssert.AreEqual(File.ReadAllBytes(Path.Combine(h.Source, FileManifest.FileName)), File.ReadAllBytes(Path.Combine(h.Install, FileManifest.FileName)),
+            "The manifest is installed with the files, for a repair run.");
     }
 
     [TestMethod]
@@ -185,6 +187,39 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
         Assert.AreEqual(NativeCodes.NotAttempted, result.Steps.Single(s => s.Step == "copy-app").Code);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "verify-installed" && s.Ok && s.Detail!.Contains("3 installed files", StringComparison.Ordinal)));
+    }
+
+    // A repair run from the installed copy follows the manifest rule too: no manifest there, no repair.
+    [TestMethod]
+    public void RunningFromTheInstallFolderWithoutAManifestIsRefused()
+    {
+        using var h = new Harness();
+        Directory.Move(h.Source, h.Install);
+        h.Source = h.Install;
+        File.Delete(Path.Combine(h.Install, FileManifest.FileName));
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.NoManifest, result.Outcome);
+        StringAssert.Contains(result.Steps.Single(s => s.Step == FileManifest.ReadStep).Detail, FileManifest.MissingMessage);
+        Assert.IsEmpty(h.Tasks.Calls);
+        Assert.IsFalse(Directory.Exists(h.Machine));
+    }
+
+    [TestMethod]
+    public void RunningFromTheInstallFolderWithAChangedFileIsRefused()
+    {
+        using var h = new Harness();
+        Directory.Move(h.Source, h.Install);
+        h.Source = h.Install;
+        File.WriteAllText(Path.Combine(h.Install, "runtimes", "native.txt"), "changed after install");
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        StringAssert.Contains(result.Steps.Single(s => s.Step == "verify-installed:" + Path.Combine("runtimes", "native.txt")).Detail, "does not match the hash");
+        Assert.IsEmpty(h.Tasks.Calls);
     }
 
     [TestMethod]
@@ -444,7 +479,7 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
         Assert.IsTrue(Directory.Exists(h.Install), "In use, so left for the restart.");
-        Assert.HasCount(5, h.Reboot.Scheduled);
+        Assert.HasCount(6, h.Reboot.Scheduled, "Four files, including the manifest, then two folders.");
         Assert.AreEqual(h.Install, h.Reboot.Scheduled[^1], "The folder itself goes last.");
         Assert.AreEqual(Path.Combine(h.Install, "runtimes"), h.Reboot.Scheduled[^2], "Folders after every file.");
     }
@@ -642,7 +677,7 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
         CollectionAssert.AreEquivalent(
-            new[] { "Earshot.exe", "Earshot.dll", Path.Combine("runtimes", "native.txt") },
+            new[] { "Earshot.exe", "Earshot.dll", Path.Combine("runtimes", "native.txt"), FileManifest.FileName },
             Directory.GetFiles(h.Install, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(h.Install, f)).ToArray());
         Assert.IsTrue(result.Steps.Any(s => s.Step == "verify-manifest" && s.Ok));
     }

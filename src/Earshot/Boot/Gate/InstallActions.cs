@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using Earshot.Contracts;
 using Earshot.Interop;
@@ -306,10 +307,12 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 // install <userSid> <addr12> <containerGuid> [--principal user], run elevated from the tray with one UAC
 // prompt. The request is already validated. Each step is a StepOutcome and install stops at the first
 // failure that would leave something unsafe (fail closed):
-//   1. read the publish manifest (Earshot.files.json) next to the running exe, copy exactly the files it lists
-//      to %ProgramFiles%\Earshot with IntegrityCopy (staged, then swapped in), check each copy against the hash
-//      the manifest records, and check the install folder grants no one but administrators write. Without a
-//      valid manifest nothing is copied: install runs from a release build;
+//   1. read the publish manifest (Earshot.files.json) next to the running exe, copy exactly the files it lists,
+//      and the manifest itself, to %ProgramFiles%\Earshot with IntegrityCopy (staged, then swapped in), check
+//      each copy against the hash the manifest records, and check the install folder grants no one but
+//      administrators write. Without a valid manifest nothing is copied: install runs from a release build. Run
+//      from the install folder itself (a repair), nothing is copied, but the folder check, the installed
+//      manifest and the hash of every file it lists must all pass;
 //   2. create %ProgramData%\Earshot with the protected DACL, read it back and fail closed; a folder that
 //      already existed and fails the check stops install and is left for the user to remove;
 //   3. write device.json (the validated identity) and config.json (BlockAtBoot kept from a valid existing
@@ -391,8 +394,23 @@ internal sealed class InstallActions
 
         if (string.Equals(source, install, StringComparison.OrdinalIgnoreCase))
         {
+            // A repair run from the installed copy. The manifest rule holds here too: the folder must pass its check,
+            // hold the manifest install copied into it, and every file it lists must still match its hash.
             steps.Add(StepOutcomes.NotAttempted("copy-app", "Running from the install folder, so there is nothing to copy."));
-            return CheckInstallFolder(install, steps);
+            if (!CheckInstallFolder(install, steps))
+            {
+                return false;
+            }
+
+            FileManifest? installed = FileManifest.Read(install, out StepOutcome installedStep);
+            steps.Add(installedStep);
+            if (installed is null)
+            {
+                _manifestMissing = true;
+                return false;
+            }
+
+            return VerifyInstalledFiles(install, installed, steps);
         }
 
         FileManifest? manifest = FileManifest.Read(source, out StepOutcome manifestStep);
@@ -407,7 +425,9 @@ internal sealed class InstallActions
         string suffix = Guid.NewGuid().ToString("N");
         string staging = Path.Combine(parent, Path.GetFileName(install) + ".staging-" + suffix);
 
-        IntegrityCopyResult copy = IntegrityCopy.Copy(source, staging, manifest.Files.Select(f => f.RelativePath).ToList());
+        // The manifest goes with the files it lists, for a later repair run from the install folder.
+        List<string> toCopy = manifest.Files.Select(f => f.RelativePath).Append(FileManifest.FileName).ToList();
+        IntegrityCopyResult copy = IntegrityCopy.Copy(source, staging, toCopy);
         steps.AddRange(copy.Steps);
         if (!copy.Ok)
         {
@@ -468,12 +488,15 @@ internal sealed class InstallActions
     }
 
     // Every copied file matches the hash the manifest recorded when it was published, so a file changed
-    // between publishing and installing is refused even though the copy itself was faithful.
+    // between publishing and installing is refused even though the copy itself was faithful. The copy of the
+    // manifest itself must be the manifest that was read.
     private static bool MatchesManifest(FileManifest manifest, IntegrityCopyResult copy, List<StepOutcome> steps)
     {
         foreach (CopiedFile file in copy.Files)
         {
-            string? expected = manifest.HashOf(file.RelativePath);
+            string? expected = string.Equals(file.RelativePath, FileManifest.FileName, StringComparison.OrdinalIgnoreCase)
+                ? manifest.ContentSha256
+                : manifest.HashOf(file.RelativePath);
             if (expected is null || !string.Equals(expected, file.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 steps.Add(StepOutcomes.NotAttempted("verify-manifest:" + file.RelativePath,
@@ -485,6 +508,48 @@ internal sealed class InstallActions
         }
 
         steps.Add(new StepOutcome("verify-manifest", true, 0, "S_OK", copy.Files.Count + " files match the published hashes."));
+        return true;
+    }
+
+    // A repair run: hashes each file the installed manifest lists, in place. The folder has passed its check, so
+    // only administrators can change what is in it while this reads. Earshot.exe must be listed.
+    private static bool VerifyInstalledFiles(string install, FileManifest manifest, List<StepOutcome> steps)
+    {
+        if (manifest.HashOf(TaskPlan.ExecutableName) is null)
+        {
+            steps.Add(StepOutcomes.NotAttempted("verify-installed", TaskPlan.ExecutableName + " is not in the published file list."));
+            return false;
+        }
+
+        foreach (ManifestFile file in manifest.Files)
+        {
+            string path = Path.Combine(install, file.RelativePath);
+            string actual;
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.SequentialScan);
+                actual = Convert.ToHexString(SHA256.HashData(stream));
+            }
+            catch (IOException ex)
+            {
+                steps.Add(StepOutcomes.FromHResult("verify-installed:" + file.RelativePath, ex.HResult, path + ": " + ex.Message));
+                return false;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                steps.Add(StepOutcomes.FromHResult("verify-installed:" + file.RelativePath, ex.HResult, path + ": " + ex.Message));
+                return false;
+            }
+
+            if (!string.Equals(actual, file.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(StepOutcomes.NotAttempted("verify-installed:" + file.RelativePath,
+                    "The installed file does not match the hash recorded when it was published. " + FileManifest.MissingMessage));
+                return false;
+            }
+        }
+
+        steps.Add(new StepOutcome("verify-installed", true, 0, "S_OK", manifest.Files.Count + " installed files match the published hashes."));
         return true;
     }
 

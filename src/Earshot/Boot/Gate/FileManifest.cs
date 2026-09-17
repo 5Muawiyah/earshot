@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Earshot.Contracts;
 
@@ -10,7 +11,8 @@ internal sealed record ManifestFile(string RelativePath, string Sha256);
 // Earshot.files.json, written next to the published files by the publish step and read by install. It lists
 // every published file except itself, so install copies exactly what was published and nothing else that may
 // sit in the folder the release was unzipped into, and can check each copy against the hash recorded at
-// publish time.
+// publish time. Install copies the manifest too, so a repair run from the install folder has one to check the
+// installed files against.
 //
 // The file sits in a user-writable folder, so it is read as strictly as the gate's own files: a size cap, no
 // reparse point, exactly the expected members with the expected types, and a relative path that cannot leave
@@ -35,9 +37,16 @@ internal sealed class FileManifest
         MaxDepth = 8,
     };
 
-    private FileManifest(IReadOnlyList<ManifestFile> files) => Files = files;
+    private FileManifest(IReadOnlyList<ManifestFile> files, string sha256)
+    {
+        Files = files;
+        ContentSha256 = sha256;
+    }
 
     public IReadOnlyList<ManifestFile> Files { get; }
+
+    // The SHA-256 of the manifest file's bytes as read, as upper-case hex, so a copy of it can be checked too.
+    public string ContentSha256 { get; }
 
     // The manifest in folder, or null with a failed step saying why. A missing file and an invalid one are both
     // refusals: install only ever runs from a published folder.
@@ -144,6 +153,12 @@ internal sealed class FileManifest
                     return null;
                 }
 
+                if (string.Equals(relative, FileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    step = Invalid(path, "The manifest lists itself.");
+                    return null;
+                }
+
                 if (!IsSha256(hash))
                 {
                     step = Invalid(path, "A file hash is not 64 hex characters.");
@@ -160,7 +175,7 @@ internal sealed class FileManifest
             }
 
             step = new StepOutcome(ReadStep, true, 0, "S_OK", path + ": " + read.Count + " files.");
-            return new FileManifest(read);
+            return new FileManifest(read, Convert.ToHexString(SHA256.HashData(bytes)));
         }
         catch (JsonException ex)
         {
