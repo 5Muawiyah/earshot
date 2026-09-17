@@ -19,6 +19,9 @@ internal sealed record TrayStartOptions(
     // How long Exit waits for actions already in flight before it ends the message loop.
     public TimeSpan ExitWaitLimit { get; init; } = TrayContext.DefaultExitWaitLimit;
 
+    // How long Exit waits in all while the block coordinator still has work in flight after ExitWaitLimit.
+    public TimeSpan CoordinatorExitWaitLimit { get; init; } = TrayContext.DefaultCoordinatorExitWaitLimit;
+
     // How long Exit keeps the loop running after a card it shows as Earshot closes, so the card can be read.
     public TimeSpan ExitNoticeTime { get; init; } = TrayContext.DefaultExitNoticeTime;
 
@@ -74,9 +77,12 @@ internal sealed record TrayStartOptions(
 //
 // Exit: no new input, cancel what is in flight, then wait for it and for the coordinator (at most
 // ExitWaitLimit) before the message loop ends, so a cancelled connect can finish putting the device nodes
-// back to blocked and the coordinator can block enabled nodes that are not in use. The Exit click shows a
-// card that Earshot waits for the current change only when a change other than the check before closing is
-// in flight; "Blocking" is shown only once the coordinator is about to send the block. What the user should
+// back to blocked and the coordinator can block enabled nodes that are not in use. When the coordinator is still
+// busy then (a gate change it sent is still running, and its block follows only once that has ended), Exit keeps
+// waiting for the coordinator alone, up to CoordinatorExitWaitLimit in all: every wait inside it has a limit of its
+// own, and a process that has ended can no longer send the block that keeps the nodes disabled at rest. The Exit
+// click shows a card that Earshot waits for the current change only when a change other than the check before
+// closing is in flight; "Blocking" is shown only once the coordinator is about to send the block. What the user should
 // know as Earshot closes (it closed while the AirPods were in use, before a change finished, or that block
 // did not take) is shown at the Exit click and kept up for ExitNoticeTime.
 internal sealed class TrayContext : ApplicationContext
@@ -99,6 +105,13 @@ internal sealed class TrayContext : ApplicationContext
     // running. Whatever is still in flight when it runs out is logged by name.
     public static readonly TimeSpan DefaultExitWaitLimit = TimeSpan.FromSeconds(30);
 
+    // How long Exit waits in all for the block coordinator once DefaultExitWaitLimit has run out with it still busy.
+    // The coordinator waits for no gate run longer than TaskSchedulerGate allows it, and for no device read longer
+    // than its own budgets, so its work ends; the longest sequence that can still be in flight at Exit is a protect
+    // verb it must wait for, then the block after it. A waiting budget, not a measured figure.
+    public static readonly TimeSpan DefaultCoordinatorExitWaitLimit =
+        Boot.TaskSchedulerGate.ProtectTimeout + Boot.TaskSchedulerGate.GateTimeout + TimeSpan.FromMinutes(1);
+
     // How long a card shown as Earshot closes stays readable before the process ends: about one card's own
     // dismiss time. A UI timing choice, not a measurement.
     public static readonly TimeSpan DefaultExitNoticeTime = TimeSpan.FromSeconds(4);
@@ -114,6 +127,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly BluetoothDeviceList _devices;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TimeSpan _exitWaitLimit;
+    private readonly TimeSpan _coordinatorExitWaitLimit;
     private readonly TimeSpan _exitNoticeTime;
     private readonly Func<Point> _cursorPosition;
     private readonly Func<long> _tickCount;
@@ -153,6 +167,7 @@ internal sealed class TrayContext : ApplicationContext
         _coordinator = coordinator;
         _log = registry.Log;
         _exitWaitLimit = options.ExitWaitLimit;
+        _coordinatorExitWaitLimit = options.CoordinatorExitWaitLimit;
         _exitNoticeTime = options.ExitNoticeTime;
         _cursorPosition = options.CursorPosition;
         _tickCount = options.TickCount;
@@ -800,18 +815,25 @@ internal sealed class TrayContext : ApplicationContext
                 }
 
                 Task all = Task.WhenAll(_pending.Keys.Append(_coordinator.WhenIdleAsync()));
-                using var limit = new CancellationTokenSource();
-                Task first = await Task.WhenAny(all, Task.Delay(_exitWaitLimit, limit.Token));
-                await limit.CancelAsync();
+                TimeSpan waited = _exitWaitLimit;
+                if (!await CompletesWithinAsync(all, _exitWaitLimit) && _coordinator.IsBusy && _coordinatorExitWaitLimit > _exitWaitLimit)
+                {
+                    // What the coordinator has in flight may still end in the block that keeps the nodes disabled at
+                    // rest, and every wait inside it has a limit of its own.
+                    _log.Info("Still waiting for the block coordinator after " + Seconds(_exitWaitLimit) + ", up to " +
+                        Seconds(_coordinatorExitWaitLimit) + " in all, so a block its work ends with is still sent.");
+                    await CompletesWithinAsync(_coordinator.WhenIdleAsync(), _coordinatorExitWaitLimit - _exitWaitLimit);
+                    waited = _coordinatorExitWaitLimit;
+                }
+
                 if (all.IsFaulted)
                 {
                     _log.Error("An action failed while Earshot was closing.", all.Exception);
                 }
-                else if (first != all)
+                else if (!all.IsCompleted)
                 {
                     gaveUp = true;
-                    _log.Warn("Closing after " + _exitWaitLimit.TotalSeconds.ToString(CultureInfo.InvariantCulture) +
-                        " s with " + DescribePending() + " still in flight.");
+                    _log.Warn("Closing after " + Seconds(waited) + " with " + DescribePending() + " still in flight.");
                 }
             }
 
@@ -835,6 +857,18 @@ internal sealed class TrayContext : ApplicationContext
             ExitThread();
         }
     }
+
+    // True when task completed within limit.
+    private static async Task<bool> CompletesWithinAsync(Task task, TimeSpan limit)
+    {
+        using var cancel = new CancellationTokenSource();
+        Task first = await Task.WhenAny(task, Task.Delay(limit, cancel.Token));
+        await cancel.CancelAsync();
+        return first == task;
+    }
+
+    private static string Seconds(TimeSpan span) =>
+        span.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) + " s";
 
     private string DescribePending() =>
         _pending.Count.ToString(CultureInfo.InvariantCulture) + " action(s) (" + string.Join(", ", _pending.Values) + ")" +

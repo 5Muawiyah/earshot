@@ -866,6 +866,49 @@ public sealed class TrayContextTests
         });
     }
 
+    // A connect whose allow is still running through the gate when Exit's first wait runs out. The coordinator ends
+    // that work within its own limits, and the block its clean-up sends is what keeps the nodes disabled at rest.
+    [TestMethod]
+    public void ExitWaitsPastItsLimitForTheBlockAfterAGateAllowThatIsStillRunning()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                exitWaitLimit: TimeSpan.FromMilliseconds(100),
+                coordinatorExitWaitLimit: TimeSpan.FromSeconds(10),
+                arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(ConnectOutcome.NodesBlocked, Earshot.Audio.Connect.ConnectMessages.AllowingFirst, []));
+            tray.Block.OnAllow = async _ =>
+            {
+                await Task.Delay(500, CancellationToken.None);
+                tray.Block.Status = Block(BlockState.Allowed);
+                return ControllerResult.Ok("Allowed");
+            };
+            tray.Block.OnBlock = _ =>
+            {
+                tray.Block.Status = Block(BlockState.Blocked);
+                return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
+            };
+
+            tray.Ui.Post(
+                _ =>
+                {
+                    tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+                    tray.ClickMenu(MenuModel.Exit);
+                },
+                null);
+            Application.Run(tray.Context);
+
+            CollectionAssert.AreEqual(AllowThenBlock, tray.Block.Calls, "Earshot closed before the clean-up blocked the nodes the allow enabled.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Still waiting for the block coordinator"));
+            Assert.IsFalse(tray.Log.Has(LogLevel.Warn, "still in flight"));
+            CollectionAssert.DoesNotContain(tray.Cards.Statuses, BlockCoordinator.ClosedBeforeChangeEndedMessage);
+        });
+    }
+
+    private static readonly string[] AllowThenBlock = ["allow", "block"];
+
     private const string RefusedDeviceMessage = "That device cannot be blocked at boot.";
 
     // Pumps the tray until task is done, then rethrows anything it threw.
@@ -911,7 +954,8 @@ internal sealed class TrayHarness : IDisposable
         SettingsLoadStatus? settingsStatus = null,
         Func<long>? tickCount = null,
         string? installedExePath = null,
-        Func<string, bool>? fileExists = null)
+        Func<string, bool>? fileExists = null,
+        TimeSpan? coordinatorExitWaitLimit = null)
     {
         // An exception in a posted callback fails the test instead of opening the WinForms error dialog.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
@@ -961,7 +1005,12 @@ internal sealed class TrayHarness : IDisposable
         };
         if (exitWaitLimit is { } limit)
         {
-            options = options with { ExitWaitLimit = limit };
+            // Unless a test asks for a longer wait for the coordinator, Exit gives up at the same limit.
+            options = options with { ExitWaitLimit = limit, CoordinatorExitWaitLimit = coordinatorExitWaitLimit ?? limit };
+        }
+        else if (coordinatorExitWaitLimit is { } coordinatorLimit)
+        {
+            options = options with { CoordinatorExitWaitLimit = coordinatorLimit };
         }
 
         // The registry's controllers, so safe mode wraps what the coordinator calls, exactly as the tray does.
@@ -1129,7 +1178,18 @@ internal sealed class FakeBlockController : IBlockController
         return OnBlock(ct);
     }
 
-    public Task<ControllerResult> AllowAsync(CancellationToken ct = default) => Record("allow");
+    public Func<CancellationToken, Task<ControllerResult>>? OnAllow { get; set; }
+
+    public Task<ControllerResult> AllowAsync(CancellationToken ct = default)
+    {
+        if (OnAllow is null)
+        {
+            return Record("allow");
+        }
+
+        Calls.Add("allow");
+        return OnAllow(ct);
+    }
 
     public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default) =>
         Record(blockAtBoot ? "setboot-on" : "setboot-off");

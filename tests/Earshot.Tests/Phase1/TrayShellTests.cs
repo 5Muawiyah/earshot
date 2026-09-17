@@ -108,6 +108,19 @@ public sealed class TrayShellTests
         Assert.IsTrue(Program.AudioWorkerStopLimit < Earshot.App.TrayContext.DefaultExitWaitLimit, "Closing stays bounded.");
     }
 
+    // Exit waits longer for the block coordinator than for anything else, long enough for the longest gate sequence
+    // it may still have to finish (a protect verb, then the block after it), and no longer than a fixed limit.
+    [TestMethod]
+    public void ExitWaitsForTheCoordinatorLongEnoughForAProtectVerbAndTheBlockAfterIt()
+    {
+        TimeSpan limit = Earshot.App.TrayContext.DefaultCoordinatorExitWaitLimit;
+
+        Assert.IsGreaterThan(Earshot.App.TrayContext.DefaultExitWaitLimit, limit);
+        Assert.IsGreaterThanOrEqualTo(Earshot.Boot.TaskSchedulerGate.ProtectTimeout + Earshot.Boot.TaskSchedulerGate.GateTimeout, limit);
+        Assert.IsLessThanOrEqualTo(TimeSpan.FromMinutes(15), limit);
+        Assert.AreEqual(limit, new Earshot.App.TrayStartOptions(false, Earshot.Infra.SettingsLoadStatus.Loaded, null, new FakeStartupRegistry()).CoordinatorExitWaitLimit);
+    }
+
     private sealed class StuckWorker(Task? stopsAt = null) : IAudioWorker
     {
         private readonly Task _stopped = stopsAt ?? new TaskCompletionSource().Task;
