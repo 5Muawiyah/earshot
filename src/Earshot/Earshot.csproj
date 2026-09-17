@@ -18,26 +18,41 @@
     <InternalsVisibleTo Include="Earshot.Tests" />
   </ItemGroup>
   <!-- Writes Earshot.files.json beside the published files: the path (relative, with "/" separators) and the
-       SHA-256 of every published file except the manifest itself. install copies only what this lists and
-       checks each copy against these hashes, so a release installs exactly what was published and nothing
-       else out of the folder it was unzipped into. Hashes come from the built-in GetFileHash task.
+       SHA-256 of every file this publish wrote, except the manifest itself. The list is @(ResolvedFileToPublish)
+       at its RelativePath, the items the SDK's publish copies, not whatever the folder holds. The folder must hold
+       exactly those files: one left there by an earlier publish, or a listed file that is missing, stops the
+       publish with no manifest, so a leftover is never listed and install never copies one into the install
+       folder. install copies only what this lists and checks each copy against these hashes. Hashes come from the
+       built-in GetFileHash task.
        https://learn.microsoft.com/en-us/visualstudio/msbuild/getfilehash-task
-       https://learn.microsoft.com/en-us/visualstudio/msbuild/writelinestofile-task -->
+       https://learn.microsoft.com/en-us/visualstudio/msbuild/writelinestofile-task
+       https://learn.microsoft.com/en-us/visualstudio/msbuild/msbuild-transforms -->
   <Target Name="WriteEarshotFileManifest" AfterTargets="Publish">
     <PropertyGroup>
       <EarshotPublishRoot>$([System.IO.Path]::GetFullPath('$(PublishDir)'))</EarshotPublishRoot>
       <EarshotManifestPath>$(EarshotPublishRoot)Earshot.files.json</EarshotManifestPath>
     </PropertyGroup>
+    <!-- A manifest from an earlier publish never survives a publish that stops below. -->
+    <Delete Files="$(EarshotManifestPath)" />
     <ItemGroup>
-      <EarshotPublishedFile Include="$(EarshotPublishRoot)**\*" Exclude="$(EarshotManifestPath)" />
-      <!-- The relative path is taken here, from the wildcard's RecursiveDir: GetFileHash hands back copies of the
-           items that keep custom metadata but not RecursiveDir, which would put every file in a culture folder at
-           the top level. The manifest records "/" whatever the build ran on, so the reader never meets an escaped
-           backslash. -->
-      <EarshotPublishedFile>
-        <ManifestPath>$([System.String]::Copy('%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '/'))</ManifestPath>
-      </EarshotPublishedFile>
+      <EarshotResolvedFile Include="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.CopyToPublishDirectory)' != 'Never'" />
+      <EarshotListedFile Include="@(EarshotResolvedFile->'$(EarshotPublishRoot)%(RelativePath)')" />
+      <!-- The manifest records "/" whatever the build ran on, so the reader never meets an escaped backslash. The
+           path is kept as metadata because GetFileHash hands back copies that keep custom metadata only. -->
+      <EarshotListedFile>
+        <ManifestPath>$([System.String]::Copy('%(RelativePath)').Replace('\', '/'))</ManifestPath>
+      </EarshotListedFile>
     </ItemGroup>
+    <RemoveDuplicates Inputs="@(EarshotListedFile)">
+      <Output TaskParameter="Filtered" ItemName="EarshotPublishedFile" />
+    </RemoveDuplicates>
+    <ItemGroup>
+      <EarshotFolderFile Include="$(EarshotPublishRoot)**\*" Exclude="$(EarshotManifestPath)" />
+      <EarshotUnlistedFile Include="@(EarshotFolderFile)" Exclude="@(EarshotPublishedFile)" />
+      <EarshotMissingFile Include="@(EarshotPublishedFile)" Exclude="@(EarshotFolderFile)" />
+    </ItemGroup>
+    <Error Condition="'@(EarshotUnlistedFile)' != ''" Text="$(EarshotPublishRoot) holds files this publish did not write, so no file manifest was written: @(EarshotUnlistedFile->'%(FullPath)', ', '). Publish into an empty folder." />
+    <Error Condition="'@(EarshotMissingFile)' != ''" Text="Files this publish lists are not in $(EarshotPublishRoot), so no file manifest was written: @(EarshotMissingFile->'%(FullPath)', ', ')." />
     <GetFileHash Files="@(EarshotPublishedFile)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Items" ItemName="EarshotHashedFile" />
     </GetFileHash>

@@ -25,7 +25,7 @@ public sealed class PublishManifestTests
         string artifacts = Path.Combine(temp.Path, "artifacts");
         string project = Path.Combine(RepositoryRoot(), "src", "Earshot", "Earshot.csproj");
 
-        (int exit, string log) = Publish(project, output, artifacts);
+        (int exit, string log) = Publish(project, output, artifacts, selfContained: true);
         if (exit != 0 && log.Contains("error NU1", StringComparison.Ordinal))
         {
             Assert.Inconclusive("The runtime packages for a self-contained publish could not be restored here:" + Environment.NewLine + Tail(log));
@@ -55,7 +55,34 @@ public sealed class PublishManifestTests
         }
     }
 
-    private static (int Exit, string Log) Publish(string project, string output, string artifacts)
+    // A file an earlier publish left in the folder is never listed: the publish stops, with no manifest, and
+    // says to publish into an empty folder. Framework-dependent, which is enough here and quicker.
+    [TestMethod]
+    public void APublishIntoAFolderHoldingOtherFilesWritesNoManifest()
+    {
+        using var temp = new TempFolder();
+        string output = Path.Combine(temp.Path, "out dir");
+        string artifacts = Path.Combine(temp.Path, "artifacts");
+        string project = Path.Combine(RepositoryRoot(), "src", "Earshot", "Earshot.csproj");
+        Directory.CreateDirectory(Path.Combine(output, "de"));
+        File.WriteAllText(Path.Combine(output, "leftover-from-earlier.dll"), "not published now");
+        File.WriteAllText(Path.Combine(output, "de", "leftover.resources.dll"), "not published now");
+        File.WriteAllText(Path.Combine(output, FileManifest.FileName), "{ \"stale\": true }");
+
+        (int exit, string log) = Publish(project, output, artifacts, selfContained: false);
+        if (exit != 0 && log.Contains("error NU1", StringComparison.Ordinal))
+        {
+            Assert.Inconclusive("The packages for the publish could not be restored here:" + Environment.NewLine + Tail(log));
+        }
+
+        Assert.AreNotEqual(0, exit, "The publish must stop:" + Environment.NewLine + Tail(log));
+        StringAssert.Contains(log, "Publish into an empty folder.");
+        StringAssert.Contains(log, "leftover-from-earlier.dll");
+        StringAssert.Contains(log, "leftover.resources.dll");
+        Assert.IsFalse(File.Exists(Path.Combine(output, FileManifest.FileName)), "No manifest, not even the stale one, is left.");
+    }
+
+    private static (int Exit, string Log) Publish(string project, string output, string artifacts, bool selfContained)
     {
         var info = new ProcessStartInfo(DotnetHost())
         {
@@ -64,11 +91,12 @@ public sealed class PublishManifestTests
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        foreach (string argument in new[]
-                 {
-                     "publish", project, "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-p:PublishSingleFile=false",
-                     "-o", output, "--artifacts-path", artifacts, "-nologo", "-v:minimal",
-                 })
+        string[] mode = selfContained
+            ? ["-r", "win-x64", "--self-contained", "true", "-p:PublishSingleFile=false"]
+            : [];
+        foreach (string argument in new[] { "publish", project, "-c", "Release" }
+                     .Concat(mode)
+                     .Concat(["-o", output, "--artifacts-path", artifacts, "-nologo", "-v:minimal"]))
         {
             info.ArgumentList.Add(argument);
         }
