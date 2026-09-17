@@ -57,7 +57,9 @@ internal sealed record TrayStartOptions(
 //
 // Left click: MouseClick with the left button only (Click and MouseClick also fire for the right and
 // middle buttons, with X = Y = 0), ignored with a card while a menu action is in flight, and ignored while the
-// device itself reports the link is changing, which is when the menu item is disabled too. A click while a
+// device itself reports the link is changing, which is when the menu item is disabled too. A click while the
+// coordinator finishes work of its own (the start-up check, an automatic block, the session-end block) waits for
+// it, with a card at once so the click is never left unanswered; the menu item is disabled then. A click while a
 // connect or disconnect is in flight is a newer intent: the one in flight is cancelled and, once its clean-up
 // (a re-block included) has finished, the opposite runs. Clicks within the double-click time of the one that
 // started it are the same click, so a fast double or triple click never toggles twice.
@@ -86,6 +88,7 @@ internal sealed class TrayContext : ApplicationContext
     public const string SettingsUnreadableMessage = "Settings could not be read.";
     public const string SettingsNewerMessage = "Settings are from a newer Earshot. Changes will not be saved.";
     public const string BusyMessage = "Another change is still running. Try again shortly.";
+    public const string FinishingFirstMessage = "Finishing another change first.";
     public const string ClosingMessage = "Closing once the current change finishes.";
     public const string BlockingBeforeClosingMessage = "Blocking the AirPods before closing.";
     public const string BlockStatusUnreadableMessage = "Could not read the boot block status.";
@@ -457,6 +460,13 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         bool wanted = connect ?? intent.Connect;
+        if (_coordinator.IsBusy)
+        {
+            // Work the coordinator started itself, which a connect or disconnect waits for.
+            _log.Info("Click: the " + (wanted ? "connect" : "disconnect") + " waits for the block coordinator's own work to finish.");
+            ShowCard(intent.DeviceName, FinishingFirstMessage, place);
+        }
+
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         _toggle = cts;
         _toggleInFlight = true;
@@ -560,7 +570,7 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private MenuState CurrentMenuState() =>
-        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy, _startupState, _registry.SafeMode);
+        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode);
 
     private void UpdatePresentation(bool forceIcon)
     {

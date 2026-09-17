@@ -240,6 +240,38 @@ public sealed class TrayContextTests
     }
 
     [TestMethod]
+    public void AClickWhileTheCoordinatorFinishesItsOwnWorkSaysSoAtOnceAndGoesAheadAfterIt()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            var blocking = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Block.OnBlock = _ => blocking.Task;
+
+            // The session-end block runs outside any action the tray started.
+            tray.Context.OnSessionEnding(null, new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+            Application.DoEvents();
+            Assert.IsTrue(tray.Coordinator.IsBusy);
+            Assert.IsFalse(tray.Context.IsBusy);
+
+            tray.Context.Menu.Refresh();
+            Assert.IsFalse(tray.MenuItem(MenuModel.Disconnect).Enabled, "The menu toggle is enabled while the coordinator is busy.");
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            Application.DoEvents();
+
+            Assert.AreEqual(TrayContext.FinishingFirstMessage, tray.Cards.Shown[^1].Content.Status, "The click had no answer.");
+            Assert.IsEmpty(tray.Connection.Calls, "The disconnect ran beside the coordinator's own work.");
+
+            blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
+            tray.PumpUntilIdle();
+
+            Assert.HasCount(1, tray.Connection.Calls, "Once that work has finished, the click goes ahead.");
+            Assert.IsFalse(tray.Connection.Calls[0].Connect);
+        });
+    }
+
+    [TestMethod]
     public void TheMicrophoneNoticeIsShownOnceAndRemembered()
     {
         StaThread.Run(() =>
