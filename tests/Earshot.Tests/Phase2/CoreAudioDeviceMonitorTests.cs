@@ -321,7 +321,7 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         Assert.AreEqual(TargetResolution.PinnedAbsent, refresh.Resolution);
         Assert.AreEqual(TargetResolution.PinnedAbsent, _monitor.Resolution);
         Assert.AreEqual(SnapshotReadStatus.Ok, _monitor.ReadStatus);
-        Assert.IsTrue(_log.Has(LogLevel.Info, "no target device, the pinned container {1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d} has no endpoints"));
+        Assert.IsTrue(_log.Has(LogLevel.Info, "no target device, the pinned container {5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13} has no endpoints"));
 
         _source.SetReadings(Machine(EndpointState.Unplugged, EndpointState.Unplugged));
         await _monitor.RefreshAsync().WaitAsync(Timeout);

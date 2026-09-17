@@ -50,7 +50,7 @@ internal sealed class FakeBluetoothServices : IBluetoothServiceApi
     public static FakeBluetoothServices AirPods()
     {
         var fake = new FakeBluetoothServices();
-        fake.Add(RecordedNodes.AirPodsAddress, "Owner\u2019s AirPods Pro", connected: true, RecordedAirPodsServices);
+        fake.Add(RecordedNodes.AirPodsAddress, "Jonathan\u2019s AirPods Pro", connected: true, RecordedAirPodsServices);
         fake.Add(RecordedNodes.IPhoneAddress, "iPhone", connected: false, [Sdp, AvrcpTarget, Avrcp]);
         return fake;
     }

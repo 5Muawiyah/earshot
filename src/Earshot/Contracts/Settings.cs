@@ -9,7 +9,7 @@ public sealed class EarshotSettings
     public bool   ProtectAudioNoticeShown { get; set; }             // one-time mic-notice latch
     public bool   OpenOnStartup         { get; set; } = true;       // tray must run to enforce the invariant
     public Guid   PinnedContainerId     { get; set; } = Guid.Empty; // learned once from discovery
-    public string PinnedAddress         { get; set; } = "";         // 12 hex uppercase, e.g. "5A6B7C8D9EAF"
+    public string PinnedAddress         { get; set; } = "";         // 12 hex uppercase, e.g. "0A1B2C3D4E8C"
     // NOTE: BlockAtBoot is NOT here. Its authority is the SYSTEM-owned GateConfig, because the
     // BootBlock task (SYSTEM, no user session) must read it and cannot read HKCU/%APPDATA%.
 }

@@ -161,8 +161,8 @@ public sealed class GateActionsTests
 
     [TestMethod]
     [DataRow(null)]
-    [DataRow("{\"Address\":\"\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"00000000-0000-0000-ffff-ffffffffffff\"}")]
+    [DataRow("{\"Address\":\"\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"00000000-0000-0000-ffff-ffffffffffff\"}")]
     public void WithoutAValidDeviceFileNothingIsTouched(string? content)
     {
         using var h = new Harness();
@@ -448,7 +448,7 @@ public sealed class GateActionsTests
     {
         using var h = new Harness();
 
-        Assert.AreEqual(GateExitCode.Rejected, h.Run(GateVerbs.SetDevice, "5A6b7C8d9Eaf"));
+        Assert.AreEqual(GateExitCode.Rejected, h.Run(GateVerbs.SetDevice, "0a1b2c3d4e8c"));
         Assert.IsFalse(File.Exists(h.Store.DeviceFile));
     }
 

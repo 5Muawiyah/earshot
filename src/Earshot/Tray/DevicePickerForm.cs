@@ -124,7 +124,7 @@ internal sealed class DevicePickerForm : Form
         CancelButton = cancel;
     }
 
-    // Formats a 12-hex address as pairs, for example 5A:6B:7C:8D:9E:AF.
+    // Formats a 12-hex address as pairs, for example 0A:1B:2C:3D:4E:8C.
     internal static string FormatAddress(string address12)
     {
         if (!BoundaryValidation.IsAddress12(address12))

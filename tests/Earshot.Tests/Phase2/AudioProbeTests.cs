@@ -15,7 +15,7 @@ namespace Earshot.Tests.Phase2;
 public sealed class AudioProbeTests
 {
     private const string SrcAdapter =
-        "{2}.\\\\?\\bthenum#{0000110b-0000-1000-8000-00805f9b34fb}_vid&0001004c_pid&2027#b&1a2b3c4d&0&5A6b7C8d9Eaf_c00000000#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\src";
+        "{2}.\\\\?\\bthenum#{0000110b-0000-1000-8000-00805f9b34fb}_vid&0001004c_pid&2027#b&1a2b3c4d&0&0a1b2c3d4e8c_c00000000#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\src";
 
     private const string WaveAdapter =
         "{2}.\\\\?\\bthhfenum#bthhfpaudio#c&2b3c4d5e&1&97#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\wave";
@@ -48,13 +48,13 @@ public sealed class AudioProbeTests
 
             string text = output.ToString();
             StringAssert.Contains(text, "Endpoints: 8 (EnumAudioEndpoints eAll, DEVICE_STATEMASK_ALL)");
-            StringAssert.Contains(text, "Group {1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D} \"" + AirPodsName + "\", Connected");
+            StringAssert.Contains(text, "Group {5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13} \"" + AirPodsName + "\", Connected");
             StringAssert.Contains(text, "Group {00000000-0000-0000-FFFF-FFFFFFFFFFFF} (this PC, never a target)");
             StringAssert.Contains(text, "Render  Active     \"Headphones (" + AirPodsName + ")\"  interface \"" + AirPodsName + "\"");
-            StringAssert.Contains(text, "id " + AirPodsRenderId + "  container {1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D}");
+            StringAssert.Contains(text, "id " + AirPodsRenderId + "  container {5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13}");
             StringAssert.Contains(text, "Capture Disabled   \"Stereo Mix (Realtek(R) Audio)\"");
             StringAssert.Contains(text, "(name not readable)");
-            StringAssert.Contains(text, "Target: {1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D} \"" + AirPodsName + "\", Connected, matched by name");
+            StringAssert.Contains(text, "Target: {5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13} \"" + AirPodsName + "\", Connected, matched by name");
             StringAssert.Contains(text, "Failed reads: 1");
             StringAssert.Contains(text, "ERROR_NO_SUCH_DEVINST");
             Assert.IsFalse(text.Contains((char)0x2014, StringComparison.Ordinal), "No em-dash in probe output.");
@@ -100,7 +100,7 @@ public sealed class AudioProbeTests
         {
             Program.WriteAudioProbe(text, refresh, settings);
 
-            StringAssert.Contains(textOutput.ToString(), "Pinned container: {1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D}");
+            StringAssert.Contains(textOutput.ToString(), "Pinned container: {5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13}");
             StringAssert.Contains(textOutput.ToString(), "Target: none found, the pinned container has no endpoints");
         }
 

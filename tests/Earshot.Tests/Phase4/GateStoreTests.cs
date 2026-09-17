@@ -53,19 +53,19 @@ public sealed class GateStoreTests
     [DataRow("not json")]
     [DataRow("[]")]
     [DataRow("{}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\"}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\",\"Extra\":1}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\",\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
-    [DataRow("{\"address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
-    [DataRow("{\"Address\":\"5A6b7C8d9Eaf\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF0\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
-    [DataRow("{\"Address\":300,\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"00000000-0000-0000-ffff-ffffffffffff\"}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"00000000-0000-0000-0000-000000000000\"}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"{1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d}\"}")]
-    [DataRow("{\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\",}")]
-    [DataRow("{/* c */\"Address\":\"5A6B7C8D9EAF\",\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
-    [DataRow("{\"Address\":null,\"ContainerId\":\"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\",\"Extra\":1}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\",\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
+    [DataRow("{\"address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
+    [DataRow("{\"Address\":\"0a1b2c3d4e8c\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C0\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
+    [DataRow("{\"Address\":300,\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"00000000-0000-0000-ffff-ffffffffffff\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"00000000-0000-0000-0000-000000000000\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"{5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13}\"}")]
+    [DataRow("{\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\",}")]
+    [DataRow("{/* c */\"Address\":\"0A1B2C3D4E8C\",\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
+    [DataRow("{\"Address\":null,\"ContainerId\":\"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\"}")]
     public void AnythingButAValidDeviceIsInvalid(string content)
     {
         using var temp = new TempFolder();
@@ -85,7 +85,7 @@ public sealed class GateStoreTests
     {
         using var temp = new TempFolder();
         var store = new GateStore(temp.Path);
-        File.WriteAllText(store.DeviceFile, "{ \"Address\": \"5A6B7C8D9EAF\", \"ContainerId\": \"1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D\" }");
+        File.WriteAllText(store.DeviceFile, "{ \"Address\": \"0A1B2C3D4E8C\", \"ContainerId\": \"5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13\" }");
 
         Assert.IsTrue(store.ReadDevice().IsOk);
     }
@@ -191,7 +191,7 @@ public sealed class GateStoreTests
         using var temp = new TempFolder();
         var store = new GateStore(temp.Path);
 
-        StepOutcome step = store.WriteDevice(new DeviceIdentity { Address = "5A6b7C8d9Eaf", ContainerId = RecordedNodes.AirPodsContainer });
+        StepOutcome step = store.WriteDevice(new DeviceIdentity { Address = "0a1b2c3d4e8c", ContainerId = RecordedNodes.AirPodsContainer });
 
         Assert.IsFalse(step.Ok);
         Assert.AreEqual(NativeCodes.NotAttempted, step.Code);

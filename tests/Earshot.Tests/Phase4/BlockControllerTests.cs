@@ -411,7 +411,7 @@ public sealed class BlockControllerTests
     {
         using var h = new Harness(nodes: RecordedNodes.TableWithHeadphones());
 
-        ControllerResult invalid = await h.Controller.SetDeviceAsync("5A6b7C8d9Eaf");
+        ControllerResult invalid = await h.Controller.SetDeviceAsync("0a1b2c3d4e8c");
         ControllerResult blockedFirst;
         h.Nodes[RecordedNodes.AirPodsTargets[0]].MarkDisabled(persistent: true);
         blockedFirst = await h.Controller.SetDeviceAsync(RecordedNodes.HeadphonesAddress);
@@ -480,7 +480,7 @@ public sealed class BlockControllerTests
 
         Assert.AreEqual(OpStatus.Success, result.Status, result.UserMessage);
         Assert.AreEqual(BlockController.SetupDoneMessage, result.UserMessage);
-        Assert.AreEqual((Exe, "install " + TestUsers.Sid + " 5A6B7C8D9EAF 1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d"), h.Launcher.Launches.Single());
+        Assert.AreEqual((Exe, "install " + TestUsers.Sid + " 0A1B2C3D4E8C 5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13"), h.Launcher.Launches.Single());
         Assert.IsTrue(h.Controller.IsSetUp);
         Assert.IsTrue(Program.TryParseInstallArgs(h.Launcher.Launches[0].Arguments.Split(' '), out _, out string? problem), "Install accepts what setup sends: " + problem);
     }

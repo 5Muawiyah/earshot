@@ -43,7 +43,7 @@ public sealed class NullObjectsTests
             await controller.AllowAsync(),
             await controller.SetBlockAtBootAsync(true),
             await controller.SetBlockAtBootAsync(false),
-            await controller.SetDeviceAsync("5A6B7C8D9EAF"),
+            await controller.SetDeviceAsync("0A1B2C3D4E8C"),
             await controller.RunSetupAsync(),
             await controller.UninstallAsync(),
         ];
@@ -117,7 +117,7 @@ public sealed class NullObjectsTests
         var log = new CapturingLog();
         ICardPresenter cards = new NullCardPresenter(log);
 
-        cards.Show(new CardContent("Owner’s AirPods Pro", "Connected"), CardAnchor.NearCursor, new System.Drawing.Point(960, 1056));
+        cards.Show(new CardContent("Jonathan’s AirPods Pro", "Connected"), CardAnchor.NearCursor, new System.Drawing.Point(960, 1056));
 
         Assert.HasCount(1, log.Entries);
         Assert.AreEqual(LogLevel.Debug, log.Entries[0].Level);
@@ -130,7 +130,7 @@ public sealed class NullObjectsTests
         var log = new CapturingLog();
         var cards = new NullCardPresenter(log);
 
-        cards.Show(new CardContent("Owner\u2019s AirPods Pro", "Connected"), CardAnchor.NearCursor);
+        cards.Show(new CardContent("Jonathan\u2019s AirPods Pro", "Connected"), CardAnchor.NearCursor);
         cards.Hide();
 
         Assert.HasCount(1, log.Entries);

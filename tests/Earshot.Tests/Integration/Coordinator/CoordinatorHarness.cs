@@ -273,10 +273,10 @@ internal sealed class ManualTimer : ITimer
 // protection has removed it, a Hands-Free capture endpoint.
 internal static class Devices
 {
-    public const string Address = "5A6B7C8D9EAF";
-    public const string Name = "Owner’s AirPods Pro";
+    public const string Address = "0A1B2C3D4E8C";
+    public const string Name = "Jonathan’s AirPods Pro";
 
-    public static readonly Guid Container = new("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D");
+    public static readonly Guid Container = new("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13");
 
     // In use on this PC: the render endpoint is ACTIVE.
     public static DeviceSnapshot Active(long sequence, bool capture = true) =>

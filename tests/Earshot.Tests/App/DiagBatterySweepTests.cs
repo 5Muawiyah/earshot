@@ -11,26 +11,26 @@ namespace Earshot.Tests.App;
 [TestClass]
 public sealed class DiagBatterySweepTests
 {
-    private static readonly Guid AirPodsContainer = new("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D");
-    private static readonly Guid PhoneContainer = new("4FB94536-5965-549C-A947-0B115F3D9B56");
+    private static readonly Guid AirPodsContainer = new("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13");
+    private static readonly Guid PhoneContainer = new("7E2D4C8A-1B3F-5A6E-B9D0-6C4A2F8E1D35");
     private static readonly DEVPROPKEY BatteryKey = new(new Guid(Earshot.BatterySweep.BatteryKeySet), 2);
     private static readonly DEVPROPKEY BatteryLife = new(new Guid("49CD1F76-5626-4B17-A4E8-18B4AA1A2213"), 10);
     private static readonly DEVPROPKEY AepContainerId = new(new Guid("E7C3FB29-CAA7-4F47-8C8B-BE59B330D4C5"), 2);
-    private static readonly string[] MatchedNodes = [@"BTHENUM\DEV_5A6B7C8D9EAF\7&1", @"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2024\7&2"];
+    private static readonly string[] MatchedNodes = [@"BTHENUM\DEV_0A1B2C3D4E8C\7&1", @"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2024\7&2"];
 
     private static byte[] Utf16(string s) => Encoding.Unicode.GetBytes(s + "\0");
 
     private static FakeSweepReader Machine()
     {
         var reader = new FakeSweepReader();
-        reader.Node(@"BTHENUM\DEV_5A6B7C8D9EAF\7&1", present: false, friendly: "Owner’s AirPods Pro", container: AirPodsContainer)
+        reader.Node(@"BTHENUM\DEV_0A1B2C3D4E8C\7&1", present: false, friendly: "Jonathan’s AirPods Pro", container: AirPodsContainer)
               .Set(BatteryKey, DevQuery.DEVPROP_TYPE_BYTE, [0x55]);
         reader.Node(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2024\7&2", present: false, friendly: null, container: AirPodsContainer);
-        reader.Node(@"BTHENUM\DEV_3410BE0E0ABB\7&3", present: true, friendly: "iPhone", container: PhoneContainer);
+        reader.Node(@"BTHENUM\DEV_1A2B3C4D5E6F\7&3", present: true, friendly: "iPhone", container: PhoneContainer);
         reader.Node(@"BTH\MS_BTHBRB\a&3c4d5e6&0&1", present: true, friendly: "Microsoft Bluetooth Enumerator", container: NodeMatch.PcContainer);
 
-        reader.Aep("Bluetooth#Bluetooth20:0b:74:41:fe:d2-5A:6b:7C:8d:9E:af", "Owner’s AirPods Pro", AirPodsContainer);
-        reader.Aep("Bluetooth#Bluetooth20:0b:74:41:fe:d2-34:10:be:0e:0a:bb", "iPhone", PhoneContainer);
+        reader.Aep("Bluetooth#Bluetooth0c:1d:2e:3f:40:51-0a:1b:2c:3d:4e:8c", "Jonathan’s AirPods Pro", AirPodsContainer);
+        reader.Aep("Bluetooth#Bluetooth0c:1d:2e:3f:40:51-1a:2b:3c:4d:5e:6f", "iPhone", PhoneContainer);
         return reader;
     }
 
@@ -50,7 +50,7 @@ public sealed class DiagBatterySweepTests
         SweepObjectQuery aeps = report.Objects.Single(q => q.Kind == "aep");
         Assert.AreEqual(2, aeps.Paired);
         Assert.AreEqual(2, aeps.WithPairedKey);
-        Assert.AreEqual("Bluetooth#Bluetooth20:0b:74:41:fe:d2-5A:6b:7C:8d:9E:af", aeps.Matched.Single().Id);
+        Assert.AreEqual("Bluetooth#Bluetooth0c:1d:2e:3f:40:51-0a:1b:2c:3d:4e:8c", aeps.Matched.Single().Id);
 
         SweepProperty value = report.WatchedValues.Single();
         Assert.AreEqual("{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2", value.Key);
@@ -82,7 +82,7 @@ public sealed class DiagBatterySweepTests
     public void NothingFoundWithBothControlsIsAnAnswer()
     {
         FakeSweepReader reader = Machine();
-        reader.Remove(@"BTHENUM\DEV_5A6B7C8D9EAF\7&1", BatteryKey);
+        reader.Remove(@"BTHENUM\DEV_0A1B2C3D4E8C\7&1", BatteryKey);
 
         BatterySweepReport report = Earshot.BatterySweep.Run(reader, "AirPods", AirPodsContainer, TimeProvider.System);
 
@@ -122,11 +122,11 @@ public sealed class DiagBatterySweepTests
     public void ANameThatCouldNotBeReadIsOnRecord()
     {
         FakeSweepReader reader = Machine();
-        reader.FailingNameRead = @"BTHENUM\DEV_3410BE0E0ABB\7&3";
+        reader.FailingNameRead = @"BTHENUM\DEV_1A2B3C4D5E6F\7&3";
 
         BatterySweepReport report = Earshot.BatterySweep.Run(reader, "AirPods", AirPodsContainer, TimeProvider.System);
 
-        StepOutcome failed = report.Steps.Single(s => s.Step.StartsWith("cm-property:BTHENUM\\DEV_3410BE0E0ABB", StringComparison.Ordinal));
+        StepOutcome failed = report.Steps.Single(s => s.Step.StartsWith("cm-property:BTHENUM\\DEV_1A2B3C4D5E6F", StringComparison.Ordinal));
         Assert.IsFalse(failed.Ok);
         Assert.AreEqual("CR_FAILURE", failed.CodeName);
         Assert.Contains("could not be matched", failed.Detail!);

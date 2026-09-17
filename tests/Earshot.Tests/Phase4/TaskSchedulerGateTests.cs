@@ -253,8 +253,8 @@ public sealed class TaskSchedulerGateTests
         using var h = new Harness();
         h.Tasks.OnRun = _ => h.WriteStatus(Nonce);
 
-        Assert.AreEqual(GateRunOutcome.Completed, h.Run(GateVerbs.SetDevice, "5A6B7C8D9EAF").Outcome);
-        CollectionAssert.AreEqual(new[] { GateVerbs.SetDevice, Nonce, "5A6B7C8D9EAF" }, h.Tasks.Runs[0]);
+        Assert.AreEqual(GateRunOutcome.Completed, h.Run(GateVerbs.SetDevice, "0A1B2C3D4E8C").Outcome);
+        CollectionAssert.AreEqual(new[] { GateVerbs.SetDevice, Nonce, "0A1B2C3D4E8C" }, h.Tasks.Runs[0]);
     }
 
     [TestMethod]
@@ -317,9 +317,9 @@ public sealed class TaskSchedulerGateTests
     [DataRow(GateVerbs.Boot, Nonce, null)]
     [DataRow("install", Nonce, null)]
     [DataRow(GateVerbs.Block, "nonce", null)]
-    [DataRow(GateVerbs.Block, Nonce, "5A6B7C8D9EAF")]
+    [DataRow(GateVerbs.Block, Nonce, "0A1B2C3D4E8C")]
     [DataRow(GateVerbs.SetDevice, Nonce, null)]
-    [DataRow(GateVerbs.SetDevice, Nonce, "5A6b7C8d9Eaf")]
+    [DataRow(GateVerbs.SetDevice, Nonce, "0a1b2c3d4e8c")]
     public void OnlyRequestsTheTraySendsAreAccepted(string verb, string nonce, string? address)
     {
         using var h = new Harness();

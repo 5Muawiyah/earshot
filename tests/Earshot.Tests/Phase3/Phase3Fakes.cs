@@ -13,7 +13,7 @@ namespace Earshot.Tests.Phase3;
 internal static class ConnectFixtures
 {
     public const string SrcAdapter =
-        "{2}.\\\\?\\bthenum#{0000110b-0000-1000-8000-00805f9b34fb}_vid&0001004c_pid&2027#b&1a2b3c4d&0&5A6b7C8d9Eaf_c00000000#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\src";
+        "{2}.\\\\?\\bthenum#{0000110b-0000-1000-8000-00805f9b34fb}_vid&0001004c_pid&2027#b&1a2b3c4d&0&0a1b2c3d4e8c_c00000000#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\src";
 
     public const string WaveAdapter =
         "{2}.\\\\?\\bthhfenum#bthhfpaudio#c&2b3c4d5e&1&97#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\wave";

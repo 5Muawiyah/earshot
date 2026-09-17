@@ -28,7 +28,7 @@ public sealed class TrayStatusTests
     public void TooltipNamesTheDeviceAndItsState(ConnectionState connection, string word)
     {
         Assert.AreEqual(
-            "Earshot: Owner\u2019s AirPods Pro - " + word,
+            "Earshot: Jonathan\u2019s AirPods Pro - " + word,
             TrayStatus.Tooltip(Target(connection), Block(BlockState.Allowed), Settings()));
     }
 
@@ -36,9 +36,9 @@ public sealed class TrayStatusTests
     public void TooltipSaysBlockedWhenTheNodesAreBlocked()
     {
         Assert.AreEqual("Earshot: AirPods - blocked", TrayStatus.Tooltip(NoDevice(), Block(BlockState.Blocked), Settings()));
-        Assert.AreEqual("Earshot: Owner\u2019s AirPods Pro - blocked",
+        Assert.AreEqual("Earshot: Jonathan\u2019s AirPods Pro - blocked",
             TrayStatus.Tooltip(Target(ConnectionState.Disconnected), Block(BlockState.Blocked), Settings()));
-        Assert.AreEqual("Earshot: Owner\u2019s AirPods Pro - connected",
+        Assert.AreEqual("Earshot: Jonathan\u2019s AirPods Pro - connected",
             TrayStatus.Tooltip(Target(ConnectionState.Connected), Block(BlockState.Blocked), Settings()));
     }
 
@@ -256,7 +256,7 @@ public sealed class TrayStatusTests
         Assert.IsNull(TrayStatus.PinCandidate(Target(ConnectionState.Connected, name: "iPhone"), Settings()));
         Assert.IsNull(TrayStatus.PinCandidate(Target(ConnectionState.Connected, NodeMatch.PcContainer), Settings()));
         Assert.IsNull(TrayStatus.PinCandidate(Target(ConnectionState.Connected, Guid.Empty), Settings()));
-        Assert.IsNotNull(TrayStatus.PinCandidate(Target(ConnectionState.Connected, name: "Owner\u2019s airpods pro"), Settings()));
+        Assert.IsNotNull(TrayStatus.PinCandidate(Target(ConnectionState.Connected, name: "jonathan\u2019s airpods pro"), Settings()));
     }
 
     [TestMethod]

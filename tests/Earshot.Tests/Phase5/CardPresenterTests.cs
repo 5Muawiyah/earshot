@@ -12,7 +12,7 @@ namespace Earshot.Tests.Phase5;
 [TestClass]
 public sealed class CardPresenterTests
 {
-    private const string AirPodsName = "Owner\u2019s AirPods Pro";
+    private const string AirPodsName = "Jonathan\u2019s AirPods Pro";
     private static readonly CardContent Connecting = new(AirPodsName, "Connecting");
     private static readonly CardContent Connected = new(AirPodsName, "Connected");
     private static readonly TimeSpan ClickAnchorExpired = CardPresenter.ClickAnchorLifetime + TimeSpan.FromTicks(1);

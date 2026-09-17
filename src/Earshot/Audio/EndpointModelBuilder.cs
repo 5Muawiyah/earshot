@@ -28,7 +28,7 @@ internal sealed record EndpointModel(DeviceSnapshot Snapshot, TargetResolution R
 // render first, then by endpoint id. The order is deterministic, so two snapshots of the same devices
 // compare equal and "the first matching group" is stable across enumerations.
 //
-// Display name. The first readable PKEY_DeviceInterface_FriendlyName ("Owner’s AirPods Pro - Find
+// Display name. The first readable PKEY_DeviceInterface_FriendlyName ("Jonathan’s AirPods Pro - Find
 // My"), else the adapter part of the first readable PKEY_Device_FriendlyName, whose documented form is
 // "Speakers (XYZ Audio Adapter)", else the whole friendly name, else "". Endpoints are tried render
 // first, then ACTIVE, UNPLUGGED, DISABLED, NOTPRESENT. Names are used exactly as read, so the curly
@@ -174,7 +174,7 @@ internal static class EndpointModelBuilder
         return "";
     }
 
-    // "Headphones (Owner’s AirPods Pro - Find My)" gives "Owner’s AirPods Pro - Find My", and
+    // "Headphones (Jonathan’s AirPods Pro - Find My)" gives "Jonathan’s AirPods Pro - Find My", and
     // "Speakers (Realtek(R) Audio)" gives "Realtek(R) Audio": the text between the first " (" and the
     // final ")". A name without that shape is returned whole.
     public static string AdapterPart(string friendlyName)

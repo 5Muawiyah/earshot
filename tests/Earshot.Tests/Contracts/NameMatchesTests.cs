@@ -11,7 +11,7 @@ public sealed class NameMatchesTests
 {
     private const char CurlyApostrophe = (char)0x2019;
 
-    private static readonly string WindowsName = "Muawiyah" + CurlyApostrophe + "s AirPods Pro";
+    private static readonly string WindowsName = "Jonathan" + CurlyApostrophe + "s AirPods Pro";
 
     [TestMethod]
     public void DefaultMatchFindsTheCurlyApostropheName()
@@ -32,15 +32,15 @@ public sealed class NameMatchesTests
     [TestMethod]
     public void CurlyApostropheMatchesCurly()
     {
-        Assert.IsTrue(NodeMatch.NameMatches(WindowsName, "Muawiyah" + CurlyApostrophe + "s"));
-        Assert.IsTrue(NodeMatch.NameMatches(WindowsName, "MUAWIYAH" + CurlyApostrophe + "S AIRPODS"));
+        Assert.IsTrue(NodeMatch.NameMatches(WindowsName, "Jonathan" + CurlyApostrophe + "s"));
+        Assert.IsTrue(NodeMatch.NameMatches(WindowsName, "JONATHAN" + CurlyApostrophe + "S AIRPODS"));
     }
 
     [TestMethod]
     public void StraightApostropheDoesNotMatchCurly()
     {
-        Assert.IsFalse(NodeMatch.NameMatches(WindowsName, "Muawiyah's"));
-        Assert.IsFalse(NodeMatch.NameMatches("Owner's AirPods Pro", "Muawiyah" + CurlyApostrophe + "s"));
+        Assert.IsFalse(NodeMatch.NameMatches(WindowsName, "Jonathan's"));
+        Assert.IsFalse(NodeMatch.NameMatches("Jonathan's AirPods Pro", "Jonathan" + CurlyApostrophe + "s"));
     }
 
     [TestMethod]

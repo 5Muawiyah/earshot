@@ -8,12 +8,12 @@ namespace Earshot.Tests.Phase1;
 // Device states for the tray tests, using the ids and names recorded on the owner's PC in phase 0.
 internal static class Phase1Fixtures
 {
-    public const string AirPodsAddress = "5A6B7C8D9EAF";
-    public const string IPhoneAddress = "3410BE0E0ABB";
-    public const string AirPodsName = "Owner\u2019s AirPods Pro";
+    public const string AirPodsAddress = "0A1B2C3D4E8C";
+    public const string IPhoneAddress = "1A2B3C4D5E6F";
+    public const string AirPodsName = "Jonathan\u2019s AirPods Pro";
 
-    public static readonly Guid AirPodsContainer = new("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D");
-    public static readonly Guid IPhoneContainer = new("4FB94536-5965-549C-A947-0B115F3D9B56");
+    public static readonly Guid AirPodsContainer = new("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13");
+    public static readonly Guid IPhoneContainer = new("7E2D4C8A-1B3F-5A6E-B9D0-6C4A2F8E1D35");
 
     // Nothing has been enumerated yet: not an observation of anything.
     public static DeviceSnapshot NoDevice() =>

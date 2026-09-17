@@ -178,7 +178,7 @@ public sealed class EndpointModelBuilderTests
     }
 
     [TestMethod]
-    [DataRow("Headphones (Owner’s AirPods Pro - Find My)", "Owner’s AirPods Pro - Find My")]
+    [DataRow("Headphones (Jonathan’s AirPods Pro - Find My)", "Jonathan’s AirPods Pro - Find My")]
     [DataRow("Speakers (Realtek(R) Audio)", "Realtek(R) Audio")]
     [DataRow("Speakers", "Speakers")]
     [DataRow("(Odd)", "(Odd)")]
@@ -311,8 +311,8 @@ public sealed class EndpointModelBuilderTests
     [TestMethod]
     public void AStraightApostropheDoesNotMatchTheCurlyOne()
     {
-        Assert.IsNull(Build(Machine(), match: "Muawiyah's").Snapshot.Target);
-        Assert.AreEqual(AirPodsContainer, Build(Machine(), match: "Muawiyah’s").Snapshot.Target?.ContainerId);
+        Assert.IsNull(Build(Machine(), match: "Jonathan's").Snapshot.Target);
+        Assert.AreEqual(AirPodsContainer, Build(Machine(), match: "Jonathan’s").Snapshot.Target?.ContainerId);
     }
 
     [TestMethod]
@@ -325,7 +325,7 @@ public sealed class EndpointModelBuilderTests
     [TestMethod]
     public void AnEndpointFriendlyNameCanMatchWhenTheDisplayNameDoesNot()
     {
-        Assert.AreEqual(AirPodsContainer, Build(Machine(), match: "Headphones (Muawiyah").Snapshot.Target?.ContainerId);
+        Assert.AreEqual(AirPodsContainer, Build(Machine(), match: "Headphones (Jonathan").Snapshot.Target?.ContainerId);
     }
 
     [TestMethod]
@@ -381,17 +381,17 @@ public sealed class EndpointModelBuilderTests
     {
         var phone = new EndpointReading(
             new AudioEndpoint("{0.0.1.00000000}.{44444444-5555-4666-8777-888888888802}", EndpointFlow.Capture, EndpointState.Active,
-                "Headset (Muawiyah’s iPhone)", IPhoneContainer),
-            "Muawiyah’s iPhone");
+                "Headset (Jonathan’s iPhone)", IPhoneContainer),
+            "Jonathan’s iPhone");
         var otherBuds = new EndpointReading(
             new AudioEndpoint("{0.0.0.00000000}.{55555555-6666-4777-8888-999999999901}", EndpointFlow.Render, EndpointState.Active,
-                "Headphones (Owner’s AirPods)", new Guid("7e2a9c40-1b3d-4f5e-8a6b-0c1d2e3f4a5b")),
-            "Owner’s AirPods");
+                "Headphones (Jonathan’s AirPods)", new Guid("7e2a9c40-1b3d-4f5e-8a6b-0c1d2e3f4a5b")),
+            "Jonathan’s AirPods");
         List<EndpointReading> airPodsAbsent = Machine().Where(r => r.Endpoint.ContainerId != AirPodsContainer).ToList();
         airPodsAbsent.Add(phone);
         airPodsAbsent.Add(otherBuds);
 
-        foreach (string match in new[] { "Muawiyah", "AirPods", "iPhone" })
+        foreach (string match in new[] { "Jonathan", "AirPods", "iPhone" })
         {
             Assert.IsNotNull(Build(airPodsAbsent, match: match).Snapshot.Target, "Unpinned, the name matches another device: " + match);
 
@@ -402,7 +402,7 @@ public sealed class EndpointModelBuilderTests
 
         // The pinned AirPods coming back are chosen again, ahead of the other matching devices.
         airPodsAbsent.Add(AirPodsRender(EndpointState.Unplugged));
-        EndpointModel back = Build(airPodsAbsent, match: "Muawiyah", pinned: AirPodsContainer);
+        EndpointModel back = Build(airPodsAbsent, match: "Jonathan", pinned: AirPodsContainer);
         Assert.AreEqual(AirPodsContainer, back.Snapshot.Target?.ContainerId);
         Assert.AreEqual(TargetResolution.Pinned, back.Resolution);
     }
@@ -450,7 +450,7 @@ public sealed class EndpointModelBuilderTests
         List<EndpointReading> machine = Machine();
         machine.Insert(0, IPhoneHandsFree());
 
-        foreach (string match in new[] { "AirPods", "AirPods Pro", "Muawiyah" })
+        foreach (string match in new[] { "AirPods", "AirPods Pro", "Jonathan" })
         {
             EndpointModel model = Build(machine, match: match);
             Assert.AreEqual(AirPodsContainer, model.Snapshot.Target?.ContainerId, match);

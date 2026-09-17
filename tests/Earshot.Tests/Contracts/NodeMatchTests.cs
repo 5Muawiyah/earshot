@@ -10,53 +10,53 @@ namespace Earshot.Tests.Contracts;
 [TestClass]
 public sealed class NodeMatchTests
 {
-    private const string AirPodsAddress = "5A6B7C8D9EAF";
-    private const string IPhoneAddress = "3410BE0E0ABB";
+    private const string AirPodsAddress = "0A1B2C3D4E8C";
+    private const string IPhoneAddress = "1A2B3C4D5E6F";
 
-    private static readonly Guid AirPodsContainer = new("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D");
-    private static readonly Guid IPhoneContainer = new("4FB94536-5965-549C-A947-0B115F3D9B56");
+    private static readonly Guid AirPodsContainer = new("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13");
+    private static readonly Guid IPhoneContainer = new("7E2D4C8A-1B3F-5A6E-B9D0-6C4A2F8E1D35");
 
     private sealed record Node(string InstanceId, Guid Container, string? Name);
 
     // The nine nodes a block must disable. The first four have no friendly name on this PC.
     private static readonly Node[] AirPodsTargets =
     [
-        new(@"BTHENUM\{00001000-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, null),
-        new(@"BTHENUM\{00001801-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, null),
-        new(@"BTHENUM\{74EC2172-0BAD-4D01-8F77-997B2BE0722A}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, null),
-        new(@"BTHENUM\{4715650B-5E9D-4AC2-B898-A4FC0AA5DF78}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, null),
-        new(@"BTHENUM\{0000110C-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, "Owner\u2019s AirPods Pro - Find My Avrcp Transport"),
-        new(@"BTHENUM\DEV_5A6B7C8D9EAF\b&1a2b3c4d&0&BLUETOOTHDEVICE_5A6B7C8D9EAF", AirPodsContainer, "Owner\u2019s AirPods Pro"),
-        new(@"BTHENUM\{0000110E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, "Owner\u2019s AirPods Pro - Find My Avrcp Transport"),
-        new(@"BTHENUM\{0000111E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, "Owner\u2019s AirPods Pro - Find My Hands-Free AG"),
-        new(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000", AirPodsContainer, "Owner\u2019s AirPods Pro - Find My"),
+        new(@"BTHENUM\{00001000-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, null),
+        new(@"BTHENUM\{00001801-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, null),
+        new(@"BTHENUM\{74EC2172-0BAD-4D01-8F77-997B2BE0722A}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, null),
+        new(@"BTHENUM\{4715650B-5E9D-4AC2-B898-A4FC0AA5DF78}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, null),
+        new(@"BTHENUM\{0000110C-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, "Jonathan\u2019s AirPods Pro - Find My Avrcp Transport"),
+        new(@"BTHENUM\DEV_0A1B2C3D4E8C\b&1a2b3c4d&0&BLUETOOTHDEVICE_0A1B2C3D4E8C", AirPodsContainer, "Jonathan\u2019s AirPods Pro"),
+        new(@"BTHENUM\{0000110E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, "Jonathan\u2019s AirPods Pro - Find My Avrcp Transport"),
+        new(@"BTHENUM\{0000111E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, "Jonathan\u2019s AirPods Pro - Find My Hands-Free AG"),
+        new(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000", AirPodsContainer, "Jonathan\u2019s AirPods Pro - Find My"),
     ];
 
     // In the AirPods container but never disable targets.
     private static readonly Node[] AirPodsNonTargets =
     [
-        new(@"BTHHFENUM\BTHHFPAUDIO\c&2b3c4d5e&1&97", AirPodsContainer, "Owner\u2019s AirPods Pro - Find My Hands-Free"),
-        new(@"SWD\MMDEVAPI\{0.0.1.00000000}.{0B46D234-B82D-4B72-B995-E8E3CA2937C9}", AirPodsContainer, "Headset (Owner\u2019s AirPods Pro - Find My)"),
-        new(@"SWD\MMDEVAPI\{0.0.0.00000000}.{A2901F31-DC17-41B7-B0AD-2F77A5F04490}", AirPodsContainer, "Headset (Owner\u2019s AirPods Pro - Find My Hands-Free)"),
-        new(@"SWD\MMDEVAPI\{0.0.0.00000000}.{6D6E788A-3608-4EF8-8B08-08DB2F516970}", AirPodsContainer, "Headphones (Owner\u2019s AirPods Pro - Find My)"),
+        new(@"BTHHFENUM\BTHHFPAUDIO\c&2b3c4d5e&1&97", AirPodsContainer, "Jonathan\u2019s AirPods Pro - Find My Hands-Free"),
+        new(@"SWD\MMDEVAPI\{0.0.1.00000000}.{0B46D234-B82D-4B72-B995-E8E3CA2937C9}", AirPodsContainer, "Headset (Jonathan\u2019s AirPods Pro - Find My)"),
+        new(@"SWD\MMDEVAPI\{0.0.0.00000000}.{A2901F31-DC17-41B7-B0AD-2F77A5F04490}", AirPodsContainer, "Headset (Jonathan\u2019s AirPods Pro - Find My Hands-Free)"),
+        new(@"SWD\MMDEVAPI\{0.0.0.00000000}.{6D6E788A-3608-4EF8-8B08-08DB2F516970}", AirPodsContainer, "Headphones (Jonathan\u2019s AirPods Pro - Find My)"),
     ];
 
     // The paired iPhone, exactly as Windows spelled the ids.
     private static readonly Node[] IPhoneNodes =
     [
-        new(@"BTHENUM\Dev_3410BE0E0ABB\b&1a2b3c4d&0&BluetoothDevice_3410BE0E0ABB", IPhoneContainer, "iPhone"),
-        new(@"BTHENUM\{00000000-deca-fade-deca-deafdecacafe}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{00001000-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{0000110a-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{0000110c-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{0000110e-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{00001116-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{0000111f-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{0000112f-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{00001132-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{00001801-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{02030302-1d19-415f-86f2-22a2106a0a77}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
-        new(@"BTHENUM\{1ff31936-572e-4b36-a2bf-b2409b1aa6f4}_VID&0001004c_PID&0000\b&1a2b3c4d&0&3410BE0E0ABB_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\Dev_1A2B3C4D5E6F\b&1a2b3c4d&0&BluetoothDevice_1A2B3C4D5E6F", IPhoneContainer, "iPhone"),
+        new(@"BTHENUM\{00000000-deca-fade-deca-deafdecacafe}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{00001000-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{0000110a-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{0000110c-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{0000110e-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{00001116-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{0000111f-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{0000112f-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{00001132-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{00001801-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{02030302-1d19-415f-86f2-22a2106a0a77}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
+        new(@"BTHENUM\{1ff31936-572e-4b36-a2bf-b2409b1aa6f4}_VID&0001004c_PID&0000\b&1a2b3c4d&0&1A2B3C4D5E6F_C00000000", IPhoneContainer, null),
         new(@"BTHHFENUM\BTHHFPAUDIO\c&4d5e6f7&0&97", IPhoneContainer, "iPhone Hands-Free HF Audio"),
     ];
 
@@ -175,7 +175,7 @@ public sealed class NodeMatchTests
         Assert.IsEmpty(Select(AllNodes(), NodeMatch.PcContainer, AirPodsAddress));
 
         // Even a Bluetooth node in the PC container that carries the address is refused.
-        var planted = new Node(@"BTHENUM\DEV_5A6B7C8D9EAF\PLANTED", NodeMatch.PcContainer, null);
+        var planted = new Node(@"BTHENUM\DEV_0A1B2C3D4E8C\PLANTED", NodeMatch.PcContainer, null);
         Assert.IsFalse(NodeMatch.IsDisableTarget(planted.InstanceId, planted.Container, NodeMatch.PcContainer, AirPodsAddress));
     }
 
@@ -191,15 +191,15 @@ public sealed class NodeMatchTests
     // Each node is in the AirPods container and carries the AirPods address, so only the Bluetooth
     // prefix guard stands between it and a disable.
     [TestMethod]
-    [DataRow(@"SWD\X\5A6B7C8D9EAF")]
-    [DataRow(@"BTHHFENUM\X\5A6B7C8D9EAF")]
-    [DataRow(@"BTHHFENUM\BTHHFPAUDIO\5A6B7C8D9EAF")]
-    [DataRow(@"USB\VID_004C&PID_2027\5A6B7C8D9EAF")]
-    [DataRow(@"SWD\MMDEVAPI\BTHENUM\5A6B7C8D9EAF")]
-    [DataRow(@"XBTHENUM\DEV_5A6B7C8D9EAF")]
-    [DataRow(@"BTHENUMX\DEV_5A6B7C8D9EAF")]
-    [DataRow(@"BTHENUM_DEV_5A6B7C8D9EAF")]
-    [DataRow(@"5A6B7C8D9EAF\BTHENUM\X")]
+    [DataRow(@"SWD\X\0A1B2C3D4E8C")]
+    [DataRow(@"BTHHFENUM\X\0A1B2C3D4E8C")]
+    [DataRow(@"BTHHFENUM\BTHHFPAUDIO\0A1B2C3D4E8C")]
+    [DataRow(@"USB\VID_004C&PID_2027\0A1B2C3D4E8C")]
+    [DataRow(@"SWD\MMDEVAPI\BTHENUM\0A1B2C3D4E8C")]
+    [DataRow(@"XBTHENUM\DEV_0A1B2C3D4E8C")]
+    [DataRow(@"BTHENUMX\DEV_0A1B2C3D4E8C")]
+    [DataRow(@"BTHENUM_DEV_0A1B2C3D4E8C")]
+    [DataRow(@"0A1B2C3D4E8C\BTHENUM\X")]
     public void ANonBluetoothPrefixIsRefusedEvenWithTheContainerAndAddress(string instanceId)
     {
         Assert.IsTrue(instanceId.Contains(AirPodsAddress, StringComparison.Ordinal));
@@ -208,11 +208,11 @@ public sealed class NodeMatchTests
     }
 
     [TestMethod]
-    [DataRow(@"BTHENUM\DEV_5A6B7C8D9EAF\X")]
-    [DataRow(@"BTHLE\DEV_5A6B7C8D9EAF\X")]
-    [DataRow(@"BTHLEDEVICE\{00001800-0000-1000-8000-00805F9B34FB}_DEV_5A6B7C8D9EAF\X")]
-    [DataRow(@"BTH\X\5A6B7C8D9EAF")]
-    [DataRow(@"bthenum\dev_5A6b7C8d9Eaf\x")]
+    [DataRow(@"BTHENUM\DEV_0A1B2C3D4E8C\X")]
+    [DataRow(@"BTHLE\DEV_0A1B2C3D4E8C\X")]
+    [DataRow(@"BTHLEDEVICE\{00001800-0000-1000-8000-00805F9B34FB}_DEV_0A1B2C3D4E8C\X")]
+    [DataRow(@"BTH\X\0A1B2C3D4E8C")]
+    [DataRow(@"bthenum\dev_0a1b2c3d4e8c\x")]
     public void EachBluetoothPrefixPassesThePrefixGuard(string instanceId)
     {
         Assert.IsTrue(NodeMatch.IsDisableTarget(instanceId, AirPodsContainer, AirPodsContainer, AirPodsAddress));
@@ -223,16 +223,16 @@ public sealed class NodeMatchTests
     [TestMethod]
     [DataRow("")]
     [DataRow(" ")]
-    [DataRow("5A6b7C8d9Eaf")]
-    [DataRow("5A6B7C8d9EAF")]
-    [DataRow("300E431D048")]
-    [DataRow("00E431D048C")]
-    [DataRow("5A6B7C8D9EAF0")]
-    [DataRow("E431D048C")]
+    [DataRow("0a1b2c3d4e8c")]
+    [DataRow("0A1B2C3d4E8C")]
+    [DataRow("0A1B2C3D4E8")]
+    [DataRow("A1B2C3D4E8C")]
+    [DataRow("0A1B2C3D4E8C0")]
+    [DataRow("B2C3D4E8C")]
     [DataRow("0")]
-    [DataRow("300E431D048G")]
-    [DataRow("5A6B:7C8D:9EAF")]
-    [DataRow(" 5A6B7C8D9EAF")]
+    [DataRow("0A1B2C3D4E8G")]
+    [DataRow("0A1B:2C3D:4E8C")]
+    [DataRow(" 0A1B2C3D4E8C")]
     public void AnEmptyOrMalformedAddressSelectsNothing(string address)
     {
         Assert.IsEmpty(Select(AllNodes(), AirPodsContainer, address));

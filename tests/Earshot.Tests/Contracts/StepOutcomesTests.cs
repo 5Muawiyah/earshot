@@ -10,7 +10,7 @@ public sealed partial class StepOutcomesTests
     [TestMethod]
     public void AConfigRetIsDecodedAsACfgMgr32Code()
     {
-        StepOutcome step = StepOutcomes.FromConfigRet("cm-locate:BTHENUM\\DEV_5A6B7C8D9EAF", 0x5);
+        StepOutcome step = StepOutcomes.FromConfigRet("cm-locate:BTHENUM\\DEV_0A1B2C3D4E8C", 0x5);
 
         Assert.IsFalse(step.Ok);
         Assert.AreEqual(5, step.Code);

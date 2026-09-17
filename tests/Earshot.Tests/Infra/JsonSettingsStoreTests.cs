@@ -9,7 +9,7 @@ namespace Earshot.Tests.Infra;
 [TestClass]
 public sealed class JsonSettingsStoreTests : IDisposable
 {
-    private const string ValidJson = "{ \"SchemaVersion\": 1, \"DeviceMatch\": \"Beats\", \"ProtectAudioQuality\": false, \"PinnedAddress\": \"5A6B7C8D9EAF\" }";
+    private const string ValidJson = "{ \"SchemaVersion\": 1, \"DeviceMatch\": \"Beats\", \"ProtectAudioQuality\": false, \"PinnedAddress\": \"0A1B2C3D4E8C\" }";
 
     private readonly TempFolder _temp = new();
     private readonly CapturingLog _log = new();
@@ -84,27 +84,27 @@ public sealed class JsonSettingsStoreTests : IDisposable
     [TestMethod]
     public void UpdateRoundTripsEveryField()
     {
-        var container = new Guid("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D");
+        var container = new Guid("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13");
         Open().Update(s =>
         {
-            s.DeviceMatch = "Owner\u2019s AirPods";
+            s.DeviceMatch = "Jonathan\u2019s AirPods";
             s.ProtectAudioQuality = false;
             s.ProtectAudioNoticeShown = true;
             s.OpenOnStartup = false;
             s.PinnedContainerId = container;
-            s.PinnedAddress = "5A6B7C8D9EAF";
+            s.PinnedAddress = "0A1B2C3D4E8C";
         });
 
         JsonSettingsStore reopened = Open();
         EarshotSettings s = reopened.Current;
 
         Assert.AreEqual(SettingsLoadStatus.Loaded, reopened.LastLoadStatus);
-        Assert.AreEqual("Owner\u2019s AirPods", s.DeviceMatch);
+        Assert.AreEqual("Jonathan\u2019s AirPods", s.DeviceMatch);
         Assert.IsFalse(s.ProtectAudioQuality);
         Assert.IsTrue(s.ProtectAudioNoticeShown);
         Assert.IsFalse(s.OpenOnStartup);
         Assert.AreEqual(container, s.PinnedContainerId);
-        Assert.AreEqual("5A6B7C8D9EAF", s.PinnedAddress);
+        Assert.AreEqual("0A1B2C3D4E8C", s.PinnedAddress);
     }
 
     [TestMethod]
@@ -258,9 +258,9 @@ public sealed class JsonSettingsStoreTests : IDisposable
     [DataRow("[]")]
     [DataRow("{ \"SchemaVersion\": 0 }")]
     [DataRow("{ \"SchemaVersion\": -1 }")]
-    [DataRow("{ \"PinnedAddress\": \"5A6b7C8d9Eaf\" }")]
-    [DataRow("{ \"PinnedAddress\": \"300E431D048\" }")]
-    [DataRow("{ \"PinnedAddress\": \"5A6B:7C8D:9EAF\" }")]
+    [DataRow("{ \"PinnedAddress\": \"0a1b2c3d4e8c\" }")]
+    [DataRow("{ \"PinnedAddress\": \"0A1B2C3D4E8\" }")]
+    [DataRow("{ \"PinnedAddress\": \"0A1B:2C3D:4E8C\" }")]
     [DataRow("{ \"PinnedAddress\": \" \" }")]
     [DataRow("{ \"PinnedContainerId\": \"00000000-0000-0000-ffff-ffffffffffff\" }")]
     [DataRow("{ \"SchemaVersion\": \"1\" }")]
@@ -282,19 +282,19 @@ public sealed class JsonSettingsStoreTests : IDisposable
     [TestMethod]
     public void WellFormedPinsLoad()
     {
-        File.WriteAllText(SettingsPath, "{ \"PinnedAddress\": \"5A6B7C8D9EAF\", \"PinnedContainerId\": \"1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d\" }");
+        File.WriteAllText(SettingsPath, "{ \"PinnedAddress\": \"0A1B2C3D4E8C\", \"PinnedContainerId\": \"5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13\" }");
 
         JsonSettingsStore store = Open();
 
         Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
-        Assert.AreEqual("5A6B7C8D9EAF", store.Current.PinnedAddress);
-        Assert.AreEqual(new Guid("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D"), store.Current.PinnedContainerId);
+        Assert.AreEqual("0A1B2C3D4E8C", store.Current.PinnedAddress);
+        Assert.AreEqual(new Guid("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13"), store.Current.PinnedContainerId);
     }
 
     [TestMethod]
-    [DataRow("5A6b7C8d9Eaf")]
-    [DataRow("300E431D048")]
-    [DataRow("5A6B7C8D9EAF0")]
+    [DataRow("0a1b2c3d4e8c")]
+    [DataRow("0A1B2C3D4E8")]
+    [DataRow("0A1B2C3D4E8C0")]
     [DataRow("not an address")]
     public void UpdateRejectsAMalformedPinnedAddress(string address)
     {
@@ -523,7 +523,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
         {
             Assert.AreEqual("Beats", s.DeviceMatch);
             Assert.IsFalse(s.ProtectAudioQuality, "The user's choice survives.");
-            Assert.AreEqual("5A6B7C8D9EAF", s.PinnedAddress);
+            Assert.AreEqual("0A1B2C3D4E8C", s.PinnedAddress);
             Assert.IsFalse(s.OpenOnStartup, "The change is saved.");
         }
 

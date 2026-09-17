@@ -40,7 +40,7 @@ public sealed class NodeStateReaderTests
     public void ANodeWithTheAddressInAnotherContainerIsNotSelected()
     {
         var nodes = RecordedNodes.Table().Nodes.ToList();
-        nodes.Add(new FakeNode(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000001", RecordedNodes.IPhoneContainer));
+        nodes.Add(new FakeNode(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000001", RecordedNodes.IPhoneContainer));
         var table = new FakeNodeApi(nodes);
 
         NodeScanResult scan = NodeScan.FindTargets(table, RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
@@ -74,9 +74,9 @@ public sealed class NodeStateReaderTests
     [TestMethod]
     [DataRow("00000000-0000-0000-0000-000000000000", RecordedNodes.AirPodsAddress)]
     [DataRow("00000000-0000-0000-FFFF-FFFFFFFFFFFF", RecordedNodes.AirPodsAddress)]
-    [DataRow("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D", "")]
-    [DataRow("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D", "5A6b7C8d9Eaf")]
-    [DataRow("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D", "300E431D04")]
+    [DataRow("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13", "")]
+    [DataRow("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13", "0a1b2c3d4e8c")]
+    [DataRow("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13", "0A1B2C3D4E")]
     public void AnInvalidIdentitySelectsNothingAndListsNothing(string container, string address)
     {
         FakeNodeApi table = RecordedNodes.Table();
@@ -150,7 +150,7 @@ public sealed class NodeStateReaderTests
         Assert.AreEqual(NodeBlockStatus.Enabled, byId[RecordedNodes.AirPodsTargets[4]].Status, "A problem other than 22 is not a disable.");
         Assert.AreEqual(10u, byId[RecordedNodes.AirPodsTargets[4]].ProblemCode);
         Assert.AreEqual("BTHENUM", byId[RecordedNodes.AirPodsDeviceNode].EnumeratorPrefix);
-        Assert.AreEqual("Owner\u2019s AirPods Pro", byId[RecordedNodes.AirPodsDeviceNode].Name);
+        Assert.AreEqual("Jonathan\u2019s AirPods Pro", byId[RecordedNodes.AirPodsDeviceNode].Name);
         Assert.IsTrue(read.Steps.Any(s => s.Step.StartsWith("cm-locate:", StringComparison.Ordinal) && s.CodeName == "CR_NO_SUCH_DEVNODE"));
         Assert.IsTrue(read.Steps.Any(s => s.Step.StartsWith("cm-status:", StringComparison.Ordinal) && s.CodeName == "CR_FAILURE"));
     }

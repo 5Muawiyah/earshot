@@ -46,7 +46,7 @@ internal sealed partial class BluetoothDeviceList
     [GeneratedRegex(@"^BTHENUM\\DEV_([0-9A-F]{12})\\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DeviceNodeId();
 
-    // The address of a per-device node such as BTHENUM\DEV_5A6B7C8D9EAF\b&1a2b3c4d&0&BLUETOOTHDEVICE_5A6B7C8D9EAF.
+    // The address of a per-device node such as BTHENUM\DEV_0A1B2C3D4E8C\b&1a2b3c4d&0&BLUETOOTHDEVICE_0A1B2C3D4E8C.
     // Windows spells the prefix in either case (Dev_ for some devices), so it is matched case-insensitively
     // and the address is returned upper-case.
     public static bool TryParseAddress(string? instanceId, out string address12)

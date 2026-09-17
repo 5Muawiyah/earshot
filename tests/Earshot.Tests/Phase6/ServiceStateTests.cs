@@ -48,7 +48,7 @@ public sealed class ServiceStateTests
         Assert.IsTrue(read.DeviceFound);
         Assert.IsTrue(read.Listed);
         Assert.IsTrue(read.Complete);
-        Assert.AreEqual("Owner\u2019s AirPods Pro", read.DeviceName);
+        Assert.AreEqual("Jonathan\u2019s AirPods Pro", read.DeviceName);
         Assert.HasCount(8, read.Services);
         Assert.AreEqual(AudioProtectionState.NotProtected, snapshot.State);
         Assert.IsTrue(snapshot.HandsfreeInstalled);
@@ -130,8 +130,8 @@ public sealed class ServiceStateTests
 
     [TestMethod]
     [DataRow("")]
-    [DataRow("5A6b7C8d9Eaf")]
-    [DataRow("300E431D04")]
+    [DataRow("0a1b2c3d4e8c")]
+    [DataRow("0A1B2C3D4E")]
     public void AMalformedAddressIsNeverLookedUp(string address)
     {
         FakeBluetoothServices fake = FakeBluetoothServices.AirPods();
@@ -167,13 +167,13 @@ public sealed class ServiceStateTests
     [TestMethod]
     public void BoolFieldsAreTestedAgainstZero()
     {
-        var connected = new BLUETOOTH_DEVICE_INFO { Address = 0x5A6B7C8D9EAFUL, fConnected = 32 };
-        var away = new BLUETOOTH_DEVICE_INFO { Address = 0x5A6B7C8D9EAFUL, fConnected = 0 };
+        var connected = new BLUETOOTH_DEVICE_INFO { Address = 0x0A1B2C3D4E8CUL, fConnected = 32 };
+        var away = new BLUETOOTH_DEVICE_INFO { Address = 0x0A1B2C3D4E8CUL, fConnected = 0 };
 
         BluetoothDeviceEntry on = BluetoothDeviceEntry.FromInfo(connected);
 
         Assert.IsTrue(on.Connected, "fConnected read 32 on this hardware, never 1.");
-        Assert.AreEqual("5A6B7C8D9EAF", on.Address12);
+        Assert.AreEqual("0A1B2C3D4E8C", on.Address12);
         Assert.IsFalse(BluetoothDeviceEntry.FromInfo(away).Connected);
     }
 

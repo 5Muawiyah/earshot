@@ -48,7 +48,7 @@ public sealed class GateVerbsTests
     [DataRow("$(Arg0)")]
     [DataRow("$(Arg2)")]
     [DataRow("setboot")]
-    [DataRow("set-device=5A6B7C8D9EAF")]
+    [DataRow("set-device=0A1B2C3D4E8C")]
     [DataRow("prote\u0441t-on")]
     [DataRow("\uFF42lock")]
     public void RejectsAnythingElse(string candidate)
@@ -120,7 +120,7 @@ public sealed class GateVerbsTests
 public sealed class BoundaryValidationTests
 {
     private const string ValidNonce = "0123456789abcdef0123456789abcdef";
-    private const string ValidAddress = "5A6B7C8D9EAF";
+    private const string ValidAddress = "0A1B2C3D4E8C";
 
     [TestMethod]
     [DataRow(ValidNonce)]
@@ -155,7 +155,7 @@ public sealed class BoundaryValidationTests
 
     [TestMethod]
     [DataRow(ValidAddress)]
-    [DataRow("3410BE0E0ABB")]
+    [DataRow("1A2B3C4D5E6F")]
     [DataRow("000000000000")]
     [DataRow("FFFFFFFFFFFF")]
     public void IsAddress12AcceptsUpperCaseHex12(string address)
@@ -166,20 +166,20 @@ public sealed class BoundaryValidationTests
     [TestMethod]
     [DataRow(null)]
     [DataRow("")]
-    [DataRow("5A6b7C8d9Eaf")]
-    [DataRow("300E431D048")]
-    [DataRow("5A6B7C8D9EAF0")]
-    [DataRow("300E431D048G")]
-    [DataRow("5A:6B:7C:8D:9E:AF")]
+    [DataRow("0a1b2c3d4e8c")]
+    [DataRow("0A1B2C3D4E8")]
+    [DataRow("0A1B2C3D4E8C0")]
+    [DataRow("0A1B2C3D4E8G")]
+    [DataRow("0A:1B:2C:3D:4E:8C")]
     [DataRow("5A-6B-7C-8D-9E-AF")]
-    [DataRow(" 5A6B7C8D9EAF")]
-    [DataRow("5A6B7C8D9EAF ")]
-    [DataRow("300E431D04\n8C")]
-    [DataRow("5A6B7C8D9EAF;")]
+    [DataRow(" 0A1B2C3D4E8C")]
+    [DataRow("0A1B2C3D4E8C ")]
+    [DataRow("0A1B2C3D4E\n8C")]
+    [DataRow("0A1B2C3D4E8C;")]
     [DataRow("$(Arg2)")]
-    [DataRow("0x300E431D04")]
+    [DataRow("0x0A1B2C3D4E")]
     [DataRow("..\\..\\Windo")]
-    [DataRow("\u0663\u0660\u0660E431D048C")]
+    [DataRow("\u0663\u0660\u0660B2C3D4E8C")]
     public void IsAddress12RejectsEverythingElse(string? candidate)
     {
         Assert.IsFalse(BoundaryValidation.IsAddress12(candidate));

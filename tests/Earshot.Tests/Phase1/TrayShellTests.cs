@@ -68,7 +68,7 @@ public sealed class TrayShellTests
     [TestMethod]
     public void AddressesAreShownAsPairs()
     {
-        Assert.AreEqual("5A:6B:7C:8D:9E:AF", DevicePickerForm.FormatAddress(AirPodsAddress));
+        Assert.AreEqual("0A:1B:2C:3D:4E:8C", DevicePickerForm.FormatAddress(AirPodsAddress));
         Assert.AreEqual("not-an-address", DevicePickerForm.FormatAddress("not-an-address"));
     }
 
@@ -86,7 +86,7 @@ public sealed class TrayShellTests
         Assert.IsFalse(DevicePickerForm.CanAccept(null, "AirPods"));
         Assert.IsFalse(DevicePickerForm.CanAccept(airPods with { ContainerId = Guid.Empty }, "AirPods"));
         Assert.IsFalse(DevicePickerForm.CanAccept(airPods with { ContainerId = Earshot.Contracts.NodeMatch.PcContainer }, "AirPods"));
-        Assert.IsFalse(DevicePickerForm.CanAccept(airPods with { Address = "5A6b7C8d9Eaf" }, "AirPods"));
+        Assert.IsFalse(DevicePickerForm.CanAccept(airPods with { Address = "0a1b2c3d4e8c" }, "AirPods"));
     }
 
     [TestMethod]

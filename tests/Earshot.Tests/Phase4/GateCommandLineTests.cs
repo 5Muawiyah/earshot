@@ -11,7 +11,7 @@ namespace Earshot.Tests.Phase4;
 public sealed class GateCommandLineTests
 {
     private const string Nonce = "0123456789abcdef0123456789abcdef";
-    private const string Container = "1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d";
+    private const string Container = "5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13";
 
     [TestMethod]
     [DataRow("block")]
@@ -48,7 +48,7 @@ public sealed class GateCommandLineTests
     [DataRow("gate-protect", "allow", Nonce)]
     [DataRow("gate-protect", "status", Nonce)]
     [DataRow("gate-protect", "setboot-off", Nonce)]
-    [DataRow("gate-protect", "set-device", Nonce, "5A6B7C8D9EAF")]
+    [DataRow("gate-protect", "set-device", Nonce, "0A1B2C3D4E8C")]
     [DataRow("gate-protect", "boot")]
     [DataRow("gate-protect", "Protect-On", Nonce)]
     [DataRow("gate-protect", "protect-on", "0123456789ABCDEF0123456789ABCDEF")]
@@ -74,8 +74,8 @@ public sealed class GateCommandLineTests
     [TestMethod]
     public void SetDeviceCarriesTheAddress()
     {
-        Assert.IsTrue(Program.TryParseGateArgs(["gate", "set-device", Nonce, "5A6B7C8D9EAF"], out GateRequest? request, out _));
-        Assert.AreEqual("5A6B7C8D9EAF", request.Address);
+        Assert.IsTrue(Program.TryParseGateArgs(["gate", "set-device", Nonce, "0A1B2C3D4E8C"], out GateRequest? request, out _));
+        Assert.AreEqual("0A1B2C3D4E8C", request.Address);
     }
 
     [TestMethod]
@@ -92,7 +92,7 @@ public sealed class GateCommandLineTests
     [TestMethod]
     [DataRow("gate")]
     [DataRow("gate", "block")]
-    [DataRow("gate", "block", Nonce, "5A6B7C8D9EAF")]
+    [DataRow("gate", "block", Nonce, "0A1B2C3D4E8C")]
     [DataRow("gate", "block", Nonce, "", "")]
     [DataRow("gate", "Block", Nonce)]
     [DataRow("gate", "BLOCK", Nonce)]
@@ -114,12 +114,12 @@ public sealed class GateCommandLineTests
     [DataRow("gate", "boot", "")]
     [DataRow("gate", "set-device", Nonce)]
     [DataRow("gate", "set-device", Nonce, "$(Arg2)")]
-    [DataRow("gate", "set-device", Nonce, "5A6b7C8d9Eaf")]
-    [DataRow("gate", "set-device", Nonce, "300E431D048")]
-    [DataRow("gate", "set-device", Nonce, "5A6B7C8D9EAF\"")]
-    [DataRow("gate", "set-device", Nonce, "5A6B7C8D9EAF & calc")]
-    [DataRow("gate", "set-device", "bad", "5A6B7C8D9EAF")]
-    [DataRow("gate", "set-device", Nonce, "5A6B7C8D9EAF", "extra")]
+    [DataRow("gate", "set-device", Nonce, "0a1b2c3d4e8c")]
+    [DataRow("gate", "set-device", Nonce, "0A1B2C3D4E8")]
+    [DataRow("gate", "set-device", Nonce, "0A1B2C3D4E8C\"")]
+    [DataRow("gate", "set-device", Nonce, "0A1B2C3D4E8C & calc")]
+    [DataRow("gate", "set-device", "bad", "0A1B2C3D4E8C")]
+    [DataRow("gate", "set-device", Nonce, "0A1B2C3D4E8C", "extra")]
     [DataRow("install", "block", Nonce)]
     [DataRow("Gate", "block", Nonce)]
     public void RejectsEverythingElse(params string[] args)
@@ -266,29 +266,29 @@ public sealed class GateCommandLineTests
     [TestMethod]
     public void InstallParsesTheIdentityAndThePrincipal()
     {
-        Assert.IsTrue(Program.TryParseInstallArgs(["install", TestUsers.Sid, "5A6B7C8D9EAF", Container], out InstallRequest? request, out string? problem), problem);
-        Assert.AreEqual(new InstallRequest(TestUsers.Sid, "5A6B7C8D9EAF", RecordedNodes.AirPodsContainer, TaskPrincipalMode.System), request);
+        Assert.IsTrue(Program.TryParseInstallArgs(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container], out InstallRequest? request, out string? problem), problem);
+        Assert.AreEqual(new InstallRequest(TestUsers.Sid, "0A1B2C3D4E8C", RecordedNodes.AirPodsContainer, TaskPrincipalMode.System), request);
 
-        Assert.IsTrue(Program.TryParseInstallArgs(["install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "user"], out request, out _));
+        Assert.IsTrue(Program.TryParseInstallArgs(["install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal", "user"], out request, out _));
         Assert.AreEqual(TaskPrincipalMode.InteractiveUser, request.Principal);
     }
 
     [TestMethod]
     [DataRow("install")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "system")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "User")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--elevate", "user")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "user", "x")]
-    [DataRow("install", "S-1-5-18", "5A6B7C8D9EAF", Container)]
-    [DataRow("install", "S-1-1-0", "5A6B7C8D9EAF", Container)]
-    [DataRow("install", TestUsers.Sid, "5A6b7C8d9Eaf", Container)]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "{1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d}")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "bfbe83037d9b522cab7ee6a0a93ae36f")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "00000000-0000-0000-0000-000000000000")]
-    [DataRow("install", TestUsers.Sid, "5A6B7C8D9EAF", "00000000-0000-0000-ffff-ffffffffffff")]
-    [DataRow("uninstall", TestUsers.Sid, "5A6B7C8D9EAF", Container)]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal", "system")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal", "User")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--elevate", "user")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal", "user", "x")]
+    [DataRow("install", "S-1-5-18", "0A1B2C3D4E8C", Container)]
+    [DataRow("install", "S-1-1-0", "0A1B2C3D4E8C", Container)]
+    [DataRow("install", TestUsers.Sid, "0a1b2c3d4e8c", Container)]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", "{5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13}")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", "5c3a9e214b7d5f189a6c2d8e0b4f7a13")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", "00000000-0000-0000-0000-000000000000")]
+    [DataRow("install", TestUsers.Sid, "0A1B2C3D4E8C", "00000000-0000-0000-ffff-ffffffffffff")]
+    [DataRow("uninstall", TestUsers.Sid, "0A1B2C3D4E8C", Container)]
     public void InstallRejectsAnythingElse(params string[] args)
     {
         Assert.IsFalse(Program.TryParseInstallArgs(args, out InstallRequest? request, out string? problem));
@@ -299,7 +299,7 @@ public sealed class GateCommandLineTests
     [TestMethod]
     public void InstallAndUninstallRefuseSystemAndUnelevatedTokens()
     {
-        string[] install = ["install", TestUsers.Sid, "5A6B7C8D9EAF", Container];
+        string[] install = ["install", TestUsers.Sid, "0A1B2C3D4E8C", Container];
         var log = new CapturingLog();
 
         Assert.AreEqual(GateExitCode.RunningAsSystem, Program.RunInstall(install, FakeToken.System, log, NeverRun));
@@ -317,7 +317,7 @@ public sealed class GateCommandLineTests
         var log = new CapturingLog();
 
         GateExitCode exit = Program.RunInstall(
-            ["install", TestUsers.Sid, "5A6B7C8D9EAF", Container, "--principal", "user"],
+            ["install", TestUsers.Sid, "0A1B2C3D4E8C", Container, "--principal", "user"],
             FakeToken.ElevatedUser,
             log,
             request =>

@@ -17,7 +17,7 @@ public sealed class NoBatterySourceTests
     public void ReadNeverHasAValue()
     {
         var source = new NoBatterySource();
-        foreach (Guid container in new[] { Guid.Empty, NodeMatch.PcContainer, new Guid("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D") })
+        foreach (Guid container in new[] { Guid.Empty, NodeMatch.PcContainer, new Guid("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13") })
         {
             BatteryReading reading = source.Read(container);
             Assert.IsFalse(reading.HasValue);

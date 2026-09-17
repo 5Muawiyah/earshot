@@ -422,7 +422,7 @@ public sealed class ProtectionGateTests
     [TestMethod]
     public void TheBlockedRuleCountsWhatTheTrayCounts()
     {
-        const string service = @"BTHENUM\{0000111E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&5A6B7C8D9EAF_C00000000";
+        const string service = @"BTHENUM\{0000111E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000";
         static BluetoothNode Node(string id, bool present, NodeBlockStatus status, bool flag) =>
             new(id, "BTHENUM", null, present, status, status == NodeBlockStatus.Disabled ? CfgMgr32.CM_PROB_DISABLED : 0, flag);
 

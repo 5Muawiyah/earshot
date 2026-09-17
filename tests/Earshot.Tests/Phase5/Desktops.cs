@@ -8,7 +8,7 @@ namespace Earshot.Tests.Phase5;
 internal static class Desktops
 {
     // The owner's device name as recorded in phase 0, with its curly apostrophe (U+2019).
-    public const string AirPodsName = "Owner\u2019s AirPods Pro";
+    public const string AirPodsName = "Jonathan\u2019s AirPods Pro";
 
     public static readonly Rectangle Primary = new(0, 0, 1920, 1080);
     public static readonly Rectangle Secondary = new(1920, 0, 1920, 1080);

@@ -10,8 +10,8 @@ namespace Earshot.Tests.Interop;
 [TestClass]
 public sealed class InteropHelpersTests
 {
-    private static readonly Guid SampleContainer = new("1A2B3C4D-5E6F-5A7B-8C9D-0E1F2A3B4C5D");
-    private static readonly string[] ExpectedIds = ["BTHENUM\\DEV_5A6B7C8D9EAF\\X", "BTH\\MS_BTHBRB\\a&3c4d5e6&0&1"];
+    private static readonly Guid SampleContainer = new("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13");
+    private static readonly string[] ExpectedIds = ["BTHENUM\\DEV_0A1B2C3D4E8C\\X", "BTH\\MS_BTHBRB\\a&3c4d5e6&0&1"];
     private static readonly string[] Unterminated = ["unterminated"];
     private static readonly string[] TwoItems = ["a", "b"];
 
@@ -178,7 +178,7 @@ public sealed class InteropHelpersTests
     [TestMethod]
     public void ParseMultiSzSplitsTheList()
     {
-        string[] ids = CfgMgr32.ParseMultiSz("BTHENUM\\DEV_5A6B7C8D9EAF\\X\0BTH\\MS_BTHBRB\\a&3c4d5e6&0&1\0\0".AsSpan());
+        string[] ids = CfgMgr32.ParseMultiSz("BTHENUM\\DEV_0A1B2C3D4E8C\\X\0BTH\\MS_BTHBRB\\a&3c4d5e6&0&1\0\0".AsSpan());
 
         CollectionAssert.AreEqual(ExpectedIds, ids);
         Assert.IsEmpty(CfgMgr32.ParseMultiSz("\0\0".AsSpan()));
@@ -189,10 +189,10 @@ public sealed class InteropHelpersTests
     [TestMethod]
     public void DecodesDevPropStrings()
     {
-        byte[] data = Encoding.Unicode.GetBytes("Owner’s AirPods Pro\0");
+        byte[] data = Encoding.Unicode.GetBytes("Jonathan’s AirPods Pro\0");
 
         Assert.IsTrue(CfgMgr32.TryDecodeString(CfgMgr32.DEVPROP_TYPE_STRING, data, out string? value));
-        Assert.AreEqual("Owner’s AirPods Pro", value);
+        Assert.AreEqual("Jonathan’s AirPods Pro", value);
         Assert.IsFalse(CfgMgr32.TryDecodeString(CfgMgr32.DEVPROP_TYPE_GUID, data, out _));
 
         byte[] list = Encoding.Unicode.GetBytes("a\0b\0\0");
@@ -222,7 +222,7 @@ public sealed class InteropHelpersTests
     [TestMethod]
     public void FormatsTheAddressAsTwelveHexDigits()
     {
-        Assert.AreEqual("5A6B7C8D9EAF", BluetoothApis.FormatAddress12(0x5A6B7C8D9EAFUL));
+        Assert.AreEqual("0A1B2C3D4E8C", BluetoothApis.FormatAddress12(0x0A1B2C3D4E8CUL));
         Assert.AreEqual("000000000001", BluetoothApis.FormatAddress12(1));
         Assert.AreEqual("FFFFFFFFFFFF", BluetoothApis.FormatAddress12(ulong.MaxValue));
     }

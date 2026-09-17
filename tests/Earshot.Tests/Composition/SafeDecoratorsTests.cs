@@ -126,7 +126,7 @@ public sealed class SafeDecoratorsTests
         AssertRefused(await safe.AllowAsync());
         AssertRefused(await safe.SetBlockAtBootAsync(true));
         AssertRefused(await safe.SetBlockAtBootAsync(false));
-        AssertRefused(await safe.SetDeviceAsync("5A6B7C8D9EAF"));
+        AssertRefused(await safe.SetDeviceAsync("0A1B2C3D4E8C"));
         AssertRefused(await safe.RunSetupAsync());
         AssertRefused(await safe.UninstallAsync());
 

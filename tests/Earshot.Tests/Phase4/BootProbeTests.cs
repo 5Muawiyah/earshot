@@ -90,7 +90,7 @@ public sealed class BootProbeTests
         using JsonDocument doc = JsonDocument.Parse(json.ToString());
         Assert.AreEqual(9, doc.RootElement.GetProperty("targets").GetInt32());
         Assert.AreEqual(13, doc.RootElement.GetProperty("nodes").GetArrayLength());
-        Assert.AreEqual("1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d", doc.RootElement.GetProperty("container").GetString());
+        Assert.AreEqual("5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13", doc.RootElement.GetProperty("container").GetString());
         StringAssert.Contains(text.ToString(), "disable targets: 9");
         StringAssert.Contains(text.ToString(), "[target] " + RecordedNodes.AirPodsDeviceNode);
         StringAssert.Contains(text.ToString(), "Target node state: Allowed");

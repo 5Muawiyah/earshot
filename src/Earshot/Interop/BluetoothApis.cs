@@ -324,7 +324,7 @@ internal static unsafe partial class BluetoothApis
     }
 
     // The 48-bit address as 12 uppercase hex digits, the form used in BTHENUM instance ids
-    // (for example 5A6B7C8D9EAF).
+    // (for example 0A1B2C3D4E8C).
     internal static string FormatAddress12(ulong address) =>
         (address & 0xFFFF_FFFF_FFFFUL).ToString("X12", CultureInfo.InvariantCulture);
 }
