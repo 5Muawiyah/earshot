@@ -1,5 +1,6 @@
 using Earshot.App;
 using Earshot.Audio.Connect;
+using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -127,6 +128,29 @@ public sealed class ProtectionSequenceTests
         Assert.AreEqual(BlockCoordinator.SavedForNextConnectMessage, result.UserMessage);
         Assert.AreEqual(true, h.Coordinator.PendingProtect);
         Assert.IsEmpty(h.Protection.Applies, "Nothing was asked of the gate while the nodes were unreadable.");
+    }
+
+    // Before setup there is no gate to change the services, so nothing would apply a kept request. The card says
+    // what is needed instead of promising the next connect, and a connect then changes nothing.
+    [TestMethod]
+    public void BeforeSetUpAProtectionChangeSaysSetUpIsNeededAndKeepsNothing()
+    {
+        using CoordinatorHarness h = Protecting();
+        h.Block.Status = Statuses.NotSetUp();
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+
+        ControllerResult result = h.SetProtection(protect: true);
+
+        Assert.AreEqual(OpStatus.NotAttempted, result.Status);
+        Assert.AreEqual(AudioProtectionController.NotSetUpMessage, result.UserMessage);
+        Assert.IsNull(h.Coordinator.PendingProtect);
+        Assert.IsEmpty(h.Protection.Applies);
+
+        ToggleReport connect = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Success, connect.Status);
+        Assert.IsEmpty(h.Protection.Applies);
     }
 
     [TestMethod]

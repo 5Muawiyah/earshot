@@ -92,6 +92,9 @@ internal sealed class BlockCoordinator : IDisposable
     public const string AlreadyProtectedMessage = "Audio quality is already protected";
     public const string AlreadyOffMessage = "Audio quality protection is already off";
     public const string SomethingWentWrongMessage = "Something went wrong. See the log.";
+    public const string BlockAtBootOffMessage = "Block at boot is off";
+    public const string BlockAtBootOffStillBlockedMessage = "Block at boot is off, but the AirPods are still blocked. Connect to allow them.";
+    public const string BlockAtBootOffMayStillBeBlockedMessage = "Block at boot is off, but the AirPods may still be blocked. Connect to allow them.";
 
     // How long render must stay not ACTIVE, with nothing in flight, before the nodes are blocked again. A
     // conservative waiting budget, not a measured figure: long enough that the churn of a protection change or a
@@ -485,6 +488,15 @@ internal sealed class BlockCoordinator : IDisposable
                     return change with { Steps = run.Steps };
                 }
 
+                if (run.IntentKept && run.Status?.State == BlockState.NotSetUp)
+                {
+                    // Protection only runs through the gate, which setup installs, so nothing would apply a kept
+                    // request before then. The saved setting is what the checks after setup act on.
+                    _pendingProtect = null;
+                    run.Steps.Add(StepOutcomes.NotAttempted("protect-intent", "The boot block is not set up, so there is no gate to change the services."));
+                    return new ControllerResult(OpStatus.NotAttempted, AudioProtectionController.NotSetUpMessage, run.Steps);
+                }
+
                 if (run.IntentKept)
                 {
                     run.Steps.Add(StepOutcomes.NotAttempted("protect-intent", "The node state could not be read, so the request is kept until the AirPods next connect."));
@@ -508,6 +520,55 @@ internal sealed class BlockCoordinator : IDisposable
     // Block at boot is on (a Block sequence, which turns protection back on first), otherwise protection alone.
     public Task<ControllerResult> ChangeDeviceAsync(string address12, CancellationToken ct = default) =>
         RunExclusiveAsync(GateVerbs.SetDevice, token => ChangeDeviceCoreAsync(address12, token), ct);
+
+    // The Block at boot menu toggle. Turning it off also allows nodes a good read shows blocked, in the same
+    // operation and in ProtectionPolicy's Allow order (the nodes, then protection again if Handsfree came back): with
+    // the setting off the nodes are enabled at rest, as Windows has them, and nothing else would allow them before
+    // the next connect. Turning it on changes no node; the idle rule blocks enabled nodes that are not in use.
+    public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CardPlace place, CancellationToken ct = default) =>
+        RunExclusiveAsync(
+            blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff,
+            async token =>
+            {
+                // A gate change, so its result is waited for (see the class comment).
+                ControllerResult set = await _block.SetBlockAtBootAsync(blockAtBoot, CancellationToken.None);
+                if (!set.IsSuccess)
+                {
+                    return set;
+                }
+
+                // Read at once either way, so the idle rule acts on the new setting as soon as this operation ends.
+                BootBlockStatus? status = await ReadBlockStatusAsync(CancellationToken.None);
+                if (blockAtBoot)
+                {
+                    return set;
+                }
+
+                var steps = new List<StepOutcome>(set.Steps);
+                if (status is null)
+                {
+                    _log.Warn("setboot-off: the nodes could not be read, so whether they are still blocked is not known.");
+                    return new ControllerResult(OpStatus.Partial, BlockAtBootOffMayStillBeBlockedMessage, steps);
+                }
+
+                if (status.State is not (BlockState.Blocked or BlockState.Mixed))
+                {
+                    return set;
+                }
+
+                _log.Info("setboot-off: the nodes read " + Describe(status) + ", so they are allowed now.");
+                ProtectionRun run = await RunProtectionAsync(ProtectionGoal.Allow, Settings.ProtectAudioQuality, place, notice: true, token);
+                steps.AddRange(run.Steps);
+                if (CoordinatorRules.PhaseOf(run.Status) != NodePhase.Allowed)
+                {
+                    return new ControllerResult(OpStatus.Partial, BlockAtBootOffStillBlockedMessage, steps);
+                }
+
+                return run.ServiceChangeFailed
+                    ? new ControllerResult(OpStatus.Partial, run.ServiceChange?.UserMessage ?? BlockAtBootOffMessage, steps)
+                    : ControllerResult.Ok(BlockAtBootOffMessage, steps);
+            },
+            ct);
 
     // Runs a menu action (setup, Block at boot) as an operation, so it never overlaps a connect or a block.
     public Task<ControllerResult> RunAsync(string name, Func<CancellationToken, Task<ControllerResult>> operation, CancellationToken ct = default)
@@ -1824,6 +1885,13 @@ internal sealed class BlockCoordinator : IDisposable
         if (!_blockStatusFresh || _blockStatus is null)
         {
             return ("the boot block status is not known", unknown);
+        }
+
+        // Nothing can block without the gate tasks, so reading again changes nothing; the read after setup finishes
+        // evaluates the rule afresh.
+        if (_blockStatus.State == BlockState.NotSetUp)
+        {
+            return ("the boot block is not set up", IdleVerdict.Settled);
         }
 
         if (!_blockStatus.BlockAtBoot)

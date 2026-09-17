@@ -222,6 +222,31 @@ public sealed class IdleRuleTests
         Assert.IsEmpty(h.Block.Calls);
     }
 
+    // Nothing can block before setup, so the state is not read again every RecheckDelay for as long as the tray
+    // runs, even while the endpoints cannot be read and the start-up check has not run. The read after setup
+    // evaluates the rule afresh.
+    [TestMethod]
+    public void BeforeSetUpTheStateIsNotReadAgainAndAgain()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.NotSetUp();
+        h.Monitor.Set(Devices.Unreadable(1));
+        h.Start();
+        int reads = h.Block.StatusReads;
+
+        Assert.IsFalse(h.Coordinator.RecheckRunning);
+        h.Advance(TimeSpan.FromHours(1));
+
+        Assert.AreEqual(reads, h.Block.StatusReads, "The state was read again although nothing could block.");
+        Assert.IsEmpty(h.Block.Calls);
+
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Idle(2));
+        h.Publish(Devices.Idle(3));
+
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning, "Once set up, enabled nodes that are not in use are blocked after the grace period.");
+    }
+
     [TestMethod]
     public void NothingIsBlockedWithBlockAtBootOff()
     {

@@ -522,10 +522,8 @@ internal sealed class TrayContext : ApplicationContext
         string action = blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff;
 
         // A gate change: once it is running it is waited for, so the block before closing reads the setting it left.
-        await RunOperationAsync(
-            action,
-            ct => _coordinator.RunAsync(action, _ => _registry.Block.SetBlockAtBootAsync(blockAtBoot, CancellationToken.None), ct),
-            place);
+        // Turning it off also allows nodes that are still blocked (see BlockCoordinator.SetBlockAtBootAsync).
+        await RunOperationAsync(action, ct => _coordinator.SetBlockAtBootAsync(blockAtBoot, place, ct), place);
     }
 
     private void OnProtectAudioClicked()
