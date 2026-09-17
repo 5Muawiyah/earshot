@@ -380,12 +380,23 @@ internal sealed partial class GateActions
 
         if (scan.Targets.Count == 0)
         {
-            return new VerbResult(GateExitCode.NotFound, nameof(BlockState.NotFound));
+            return NoTargets(scan);
         }
 
         NodeChangeSummary summary = ApplyBlock(_nodes, scan.Targets, steps);
-        return new VerbResult(summary.Outcome, ReadState(identity));
+        return new VerbResult(WithUnreadable(summary.Outcome, scan), ReadState(identity));
     }
+
+    // No node to change: NotFound, unless a node that may belong to the device could not be read.
+    private static VerbResult NoTargets(NodeScanResult scan) =>
+        scan.Unreadable.Count > 0
+            ? new VerbResult(GateExitCode.Failed, nameof(BlockState.Unknown))
+            : new VerbResult(GateExitCode.NotFound, nameof(BlockState.NotFound));
+
+    // A node that may belong to the device but could not be read was not changed, so every other node changing
+    // is only part of the job.
+    private static GateExitCode WithUnreadable(GateExitCode outcome, NodeScanResult scan) =>
+        outcome == GateExitCode.Success && scan.Unreadable.Count > 0 ? GateExitCode.Partial : outcome;
 
     private VerbResult Allow(List<StepOutcome> steps)
     {
@@ -410,11 +421,11 @@ internal sealed partial class GateActions
 
         if (scan.Targets.Count == 0)
         {
-            return new VerbResult(GateExitCode.NotFound, nameof(BlockState.NotFound));
+            return NoTargets(scan);
         }
 
         NodeChangeSummary summary = ApplyAllow(_nodes, scan.Targets, steps);
-        return new VerbResult(summary.Outcome, ReadState(identity));
+        return new VerbResult(WithUnreadable(summary.Outcome, scan), ReadState(identity));
     }
 
     private VerbResult Status(List<StepOutcome> steps)

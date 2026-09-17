@@ -336,6 +336,30 @@ public sealed class BlockControllerTests
         Assert.IsTrue(result.Steps.Any(s => s.Step == "cm-locate:" + RecordedNodes.AirPodsTargets[5] && s.CodeName == "CR_FAILURE"));
     }
 
+    // Every other target is blocked, but one still enabled has a container that cannot be read: the gate runs,
+    // changes only the nodes it can verify, and nothing is reported as blocked.
+    [TestMethod]
+    public async Task BlockWithANodeWhoseContainerCannotBeReadIsNotAlreadyBlocked()
+    {
+        using var h = new Harness();
+        string handsFree = RecordedNodes.AirPodsTargets.Single(id => id.Contains("{0000111E", StringComparison.Ordinal));
+        foreach (string id in RecordedNodes.AirPodsTargets.Where(id => id != handsFree))
+        {
+            h.Nodes[id].MarkDisabled(persistent: true);
+        }
+
+        h.Nodes[handsFree].ContainerReadResult = 0x1Du; // CR_REGISTRY_ERROR
+
+        ControllerResult result = await h.Controller.BlockAsync();
+
+        Assert.HasCount(1, h.Tasks.Runs, "The gate must run.");
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        Assert.AreEqual(BlockController.UnreadableMessage, result.UserMessage);
+        Assert.IsFalse(h.Nodes[handsFree].IsDisabled, "A node whose device could not be verified is never changed.");
+        Assert.IsFalse(h.Nodes.Calls.Any(c => c.InstanceId == handsFree));
+        Assert.AreEqual(BlockState.Unknown, (await h.Controller.GetStatusAsync()).State);
+    }
+
     // The check before the gate and the read after it follow the same rule, so a node that is not present and
     // not marked disabled gives the same answer every time rather than alternating with "already blocked".
     [TestMethod]

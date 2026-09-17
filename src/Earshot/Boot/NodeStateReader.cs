@@ -84,22 +84,34 @@ internal sealed record TargetNode(string InstanceId, Guid ContainerId, uint Phan
     public bool IsDeviceNode => InstanceId.StartsWith(@"BTHENUM\DEV_", StringComparison.OrdinalIgnoreCase);
 }
 
-internal sealed record NodeScanResult(bool Listed, IReadOnlyList<TargetNode> Targets, IReadOnlyList<StepOutcome> Steps);
+internal sealed record NodeScanResult(bool Listed, IReadOnlyList<TargetNode> Targets, IReadOnlyList<StepOutcome> Steps)
+{
+    // Instance ids that pass every guard but the container one, and whose container could not be read (each
+    // failure is in Steps). They may belong to the pinned device, so they are never changed, and no rule that
+    // decides "blocked", "allowed", "already blocked" or "already allowed" treats the device as read in full
+    // while one is here.
+    public IReadOnlyList<string> Unreadable { get; init; } = Array.Empty<string>();
+}
 
 // Finds nodes by the shared NodeMatch predicate over the full devnode list, so the tray, the probe and the
 // gate select exactly the same set.
 internal static class NodeScan
 {
     // Every disable target of the pinned identity: in the pinned container, a Bluetooth bus node, and
-    // carrying the 12-hex address. Non-present nodes are included; a node whose container cannot be read
-    // is never selected.
+    // carrying the 12-hex address. Non-present nodes are included. A node that carries the address and the bus
+    // prefix but whose container cannot be read is never selected; it is listed in Unreadable instead, because
+    // the PnP manager gives every devnode a container, so a failed read says nothing about which device it is.
+    // A node gone between the list and the locate (CR_NO_SUCH_DEVNODE even with the phantom flag) is not there
+    // to read and is left out.
     // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_get_device_id_listw
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/overview-of-container-ids
     public static NodeScanResult FindTargets(INodeReader nodes, Guid pinnedContainer, string address12)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(address12);
         var steps = new List<StepOutcome>();
         var targets = new List<TargetNode>();
+        var unreadable = new List<string>();
 
         if (!NodeMatch.IsValidTargetContainer(pinnedContainer) || !BoundaryValidation.IsAddress12(address12))
         {
@@ -123,19 +135,28 @@ internal static class NodeScan
                 continue;
             }
 
-            if (!TryReadContainer(nodes, id, steps, out uint devInst, out Guid container))
+            ContainerRead read = TryReadContainer(nodes, id, steps, out uint devInst, out Guid container);
+            if (read == ContainerRead.Unreadable)
             {
+                // Every guard but the container: the same predicate, with the node's container taken as the
+                // pinned one.
+                if (NodeMatch.IsDisableTarget(id, pinnedContainer, pinnedContainer, address12))
+                {
+                    unreadable.Add(id);
+                }
+
                 continue;
             }
 
-            if (NodeMatch.IsDisableTarget(id, container, pinnedContainer, address12))
+            if (read == ContainerRead.Ok && NodeMatch.IsDisableTarget(id, container, pinnedContainer, address12))
             {
                 targets.Add(new TargetNode(id, container, devInst));
             }
         }
 
         targets.Sort(static (a, b) => string.CompareOrdinal(a.InstanceId, b.InstanceId));
-        return new NodeScanResult(true, targets, steps);
+        unreadable.Sort(StringComparer.Ordinal);
+        return new NodeScanResult(true, targets, steps) { Unreadable = unreadable };
     }
 
     // Every node of any enumerator in the container, for the probe's dump.
@@ -182,24 +203,37 @@ internal static class NodeScan
         return new NodeScanResult(true, found, steps);
     }
 
-    private static bool TryReadContainer(INodeReader nodes, string id, List<StepOutcome> steps, out uint devInst, out Guid container)
+    private enum ContainerRead
+    {
+        Ok,
+        Gone,        // listed, then removed before it could be located
+        Unreadable,  // it exists, but where it belongs could not be read
+    }
+
+    private static ContainerRead TryReadContainer(INodeReader nodes, string id, List<StepOutcome> steps, out uint devInst, out Guid container)
     {
         container = Guid.Empty;
         uint cr = nodes.Locate(id, includeNonPresent: true, out devInst);
+        if (cr == CfgMgr32.CR_NO_SUCH_DEVNODE)
+        {
+            steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + id, cr, "Listed, but gone before it could be located."));
+            return ContainerRead.Gone;
+        }
+
         if (cr != CfgMgr32.CR_SUCCESS)
         {
             steps.Add(StepOutcomes.FromConfigRet("cm-locate-phantom:" + id, cr, "Listed but could not be located."));
-            return false;
+            return ContainerRead.Unreadable;
         }
 
         cr = nodes.GetContainerId(devInst, out container);
         if (cr != CfgMgr32.CR_SUCCESS)
         {
             steps.Add(StepOutcomes.FromConfigRet("cm-container:" + id, cr, "Container unreadable, so the node is not selected."));
-            return false;
+            return ContainerRead.Unreadable;
         }
 
-        return true;
+        return ContainerRead.Ok;
     }
 }
 
@@ -207,10 +241,15 @@ internal sealed record NodeReadResult(bool Listed, IReadOnlyList<BluetoothNode> 
 {
     public static NodeReadResult NoIdentity { get; } = new(false, Array.Empty<BluetoothNode>(), Array.Empty<StepOutcome>());
 
-    // Instance ids of targets whose persistent disable flag, presence or status could not be read (each failure
-    // is in Steps). Such a node's IsPresent and ConfigFlagsDisabledBit are defaults, not observations, so no rule
-    // that decides "already blocked", "already allowed" or "not blocked" counts it as either.
+    // Instance ids of targets whose persistent disable flag, presence or status could not be read, and of nodes
+    // that may be targets but whose container could not be read (each failure is in Steps). What was not read
+    // is a default, not an observation, so no rule that decides "already blocked", "already allowed" or "not
+    // blocked" counts such a node as either.
     public IReadOnlyCollection<string> Unread { get; init; } = Array.Empty<string>();
+
+    // The nodes that may be targets but whose container could not be read (NodeScanResult.Unreadable). They are
+    // not in Nodes, since nothing about them is known.
+    public IReadOnlyCollection<string> Unselectable { get; init; } = Array.Empty<string>();
 }
 
 // Reads the real state of the target nodes without elevation. This is the ground truth for the boot
@@ -245,7 +284,8 @@ internal sealed class NodeStateReader
             }
         }
 
-        return new NodeReadResult(scan.Listed, result, steps) { Unread = unread };
+        unread.AddRange(scan.Unreadable);
+        return new NodeReadResult(scan.Listed, result, steps) { Unread = unread, Unselectable = scan.Unreadable };
     }
 
     public static BluetoothNode ReadNode(INodeReader nodes, TargetNode target, List<StepOutcome> steps) =>
@@ -324,8 +364,9 @@ internal static class BlockStateClassifier
 {
     // tasksInstalled: \Earshot\Gate (and its sibling tasks) present and verified.
     // identityKnown:  a valid pinned container and address were available.
-    // Only present nodes decide Allowed, Blocked or Mixed; a node whose status could not be read makes the
-    // state Unknown unless disabled and enabled nodes are both seen, which is Mixed whatever the rest are.
+    // Only present nodes decide Allowed, Blocked or Mixed; a node whose status could not be read, or that may be
+    // a target but whose container could not be read, makes the state Unknown unless disabled and enabled nodes
+    // are both seen, which is Mixed whatever the rest are.
     public static BlockState Classify(bool tasksInstalled, bool identityKnown, NodeReadResult read)
     {
         ArgumentNullException.ThrowIfNull(read);
@@ -346,10 +387,10 @@ internal static class BlockStateClassifier
 
         if (read.Nodes.Count == 0)
         {
-            return BlockState.NotFound;
+            return read.Unselectable.Count > 0 ? BlockState.Unknown : BlockState.NotFound;
         }
 
-        int disabled = 0, enabled = 0, unknown = 0;
+        int disabled = 0, enabled = 0, unknown = read.Unselectable.Count;
         foreach (BluetoothNode node in read.Nodes)
         {
             if (!node.IsPresent)

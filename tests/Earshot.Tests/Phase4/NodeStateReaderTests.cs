@@ -60,6 +60,74 @@ public sealed class NodeStateReaderTests
         Assert.HasCount(1, scan.Steps);
         Assert.AreEqual("CR_NO_SUCH_VALUE", scan.Steps[0].CodeName);
         Assert.IsFalse(scan.Steps[0].Ok);
+        CollectionAssert.AreEqual(new[] { RecordedNodes.AirPodsDeviceNode }, scan.Unreadable.ToArray(), "It may be the device's node, so it is named.");
+    }
+
+    // A node of another device whose container cannot be read does not carry the pinned address, so it says
+    // nothing about the pinned device; a node that is gone between the list and the locate is not there at all.
+    [TestMethod]
+    public void OnlyANodeThatMayBeATargetIsNamedAsUnreadable()
+    {
+        FakeNodeApi table = RecordedNodes.Table();
+        table[RecordedNodes.IPhoneDeviceNode].ContainerReadResult = 0x1Du; // CR_REGISTRY_ERROR
+        table[RecordedNodes.AirPodsTargets[2]].PhantomLocateResult = CfgMgr32.CR_NO_SUCH_DEVNODE;
+        table[RecordedNodes.AirPodsTargets[3]].PhantomLocateResult = CfgMgr32.CR_FAILURE;
+
+        NodeScanResult scan = NodeScan.FindTargets(table, RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+
+        Assert.HasCount(7, scan.Targets);
+        CollectionAssert.AreEqual(new[] { RecordedNodes.AirPodsTargets[3] }, scan.Unreadable.ToArray());
+        Assert.IsTrue(scan.Steps.Any(s => s.Step == "cm-locate-phantom:" + RecordedNodes.AirPodsTargets[2] && s.CodeName == "CR_NO_SUCH_DEVNODE"));
+    }
+
+    // Every target persistently disabled but one, which is still enabled and whose container cannot be read: that
+    // node is not in the read, so without naming it the read would say Blocked and "already blocked" would skip
+    // the gate while it stays enabled.
+    [TestMethod]
+    public void ANodeWhoseContainerCannotBeReadKeepsTheReadFromSayingBlocked()
+    {
+        FakeNodeApi table = RecordedNodes.Table();
+        string handsFree = RecordedNodes.AirPodsTargets.Single(id => id.Contains("{0000111E", StringComparison.Ordinal));
+        foreach (string id in RecordedNodes.AirPodsTargets.Where(id => id != handsFree))
+        {
+            table[id].MarkDisabled(persistent: true);
+        }
+
+        table[handsFree].ContainerReadResult = 0x1Du; // CR_REGISTRY_ERROR
+
+        NodeReadResult read = new NodeStateReader(table).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+
+        Assert.HasCount(8, read.Nodes);
+        CollectionAssert.AreEqual(new[] { handsFree }, read.Unread.ToArray());
+        CollectionAssert.AreEqual(new[] { handsFree }, read.Unselectable.ToArray());
+        Assert.AreEqual(BlockState.Unknown, BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, read));
+        Assert.IsFalse(BlockStateClassifier.IsFullyBlocked(read));
+        Assert.IsTrue(read.Steps.Any(s => s.Step == "cm-container:" + handsFree && s.CodeName == "CR_REGISTRY_ERROR"));
+
+        foreach (string id in RecordedNodes.AirPodsTargets.Where(id => id != handsFree))
+        {
+            table[id].Status &= ~CfgMgr32.DN_HAS_PROBLEM;
+            table[id].Problem = 0;
+            table[id].ConfigFlags = 0;
+        }
+
+        read = new NodeStateReader(table).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+        Assert.AreEqual(BlockState.Unknown, BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, read));
+        Assert.IsFalse(BlockStateClassifier.IsFullyAllowed(read), "Nor is it already allowed.");
+    }
+
+    [TestMethod]
+    public void WhenTheOnlyCandidateCannotBeReadTheDeviceIsUnknownNotMissing()
+    {
+        var table = new FakeNodeApi(
+        [
+            new FakeNode(RecordedNodes.AirPodsDeviceNode, RecordedNodes.AirPodsContainer) { ContainerReadResult = CfgMgr32.CR_FAILURE },
+        ]);
+
+        NodeReadResult read = new NodeStateReader(table).Read(RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress);
+
+        Assert.IsEmpty(read.Nodes);
+        Assert.AreEqual(BlockState.Unknown, BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, read));
     }
 
     [TestMethod]

@@ -442,7 +442,7 @@ internal sealed class BlockController : IBlockController, IDisposable
 
             case BlockState.Unknown:
                 return ControllerResult.Fail(
-                    after.Listed && after.Nodes.All(n => !n.IsPresent)
+                    after.Listed && after.Nodes.Count > 0 && after.Unselectable.Count == 0 && after.Nodes.All(n => !n.IsPresent)
                         ? (block ? NotPresentBlockMessage : NotPresentAllowMessage)
                         : UnreadableMessage,
                     steps);

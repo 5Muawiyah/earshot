@@ -277,7 +277,8 @@ internal sealed class UninstallActions
         }
     }
 
-    // Complete when every target is enabled without the persistent disable flag, or not present without it.
+    // Complete when every target is enabled without the persistent disable flag, or not present without it, and
+    // no node that may belong to the device was left unread (it may still be disabled).
     private bool AllowNodes(DeviceIdentity identity, List<StepOutcome> steps)
     {
         NodeScanResult scan = NodeScan.FindTargets(_nodes, identity.ContainerId, identity.Address);
@@ -287,14 +288,20 @@ internal sealed class UninstallActions
             return false;
         }
 
+        if (scan.Unreadable.Count > 0)
+        {
+            steps.Add(StepOutcomes.NotAttempted("allow-nodes",
+                "The container of " + string.Join(", ", scan.Unreadable) + " could not be read, so it was not enabled and may still be disabled."));
+        }
+
         if (scan.Targets.Count == 0)
         {
             steps.Add(StepOutcomes.NotAttempted("allow-nodes", "No node matched the pinned device."));
-            return true;
+            return scan.Unreadable.Count == 0;
         }
 
         NodeChangeSummary summary = GateActions.ApplyAllow(_nodes, scan.Targets, steps);
-        return summary.Failed == 0;
+        return summary.Failed == 0 && scan.Unreadable.Count == 0;
     }
 
     private bool RestoreProtection(DeviceIdentity identity, GateStore store, List<StepOutcome> steps)

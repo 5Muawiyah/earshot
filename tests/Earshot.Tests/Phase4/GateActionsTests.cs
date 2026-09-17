@@ -115,6 +115,33 @@ public sealed class GateActionsTests
     }
 
     [TestMethod]
+    public void ANodeWhoseContainerCannotBeReadIsLeftAloneAndMakesTheBlockPartial()
+    {
+        using var h = new Harness();
+        h.Pin(RecordedNodes.AirPods());
+        h.Nodes[RecordedNodes.AirPodsTargets[4]].ContainerReadResult = 0x1Du; // CR_REGISTRY_ERROR
+
+        Assert.AreEqual(GateExitCode.Partial, h.Run(GateVerbs.Block));
+
+        Assert.HasCount(8, h.Nodes.Calls);
+        Assert.IsFalse(h.Nodes.Calls.Any(c => c.InstanceId == RecordedNodes.AirPodsTargets[4]));
+        Assert.AreEqual(nameof(BlockState.Unknown), h.Status().State);
+    }
+
+    [TestMethod]
+    public void AnAllowWhoseOnlyCandidateCannotBeReadIsAFailureNotNotFound()
+    {
+        var table = new FakeNodeApi([new FakeNode(RecordedNodes.AirPodsDeviceNode, RecordedNodes.AirPodsContainer) { ContainerReadResult = CfgMgr32.CR_FAILURE }]);
+        using var h = new Harness(table);
+        h.Pin(RecordedNodes.AirPods());
+
+        Assert.AreEqual(GateExitCode.Failed, h.Run(GateVerbs.Allow));
+
+        Assert.IsEmpty(h.Nodes.Calls);
+        Assert.AreEqual(nameof(BlockState.Unknown), h.Status().State);
+    }
+
+    [TestMethod]
     public void EveryNodeFailingIsAFailure()
     {
         using var h = new Harness();

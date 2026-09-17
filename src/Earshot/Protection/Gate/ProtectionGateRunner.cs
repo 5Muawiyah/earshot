@@ -203,6 +203,14 @@ internal sealed class ProtectionGateRunner
             return GateExitCode.Failed;
         }
 
+        if (read.Unselectable.Count > 0)
+        {
+            // It may be one of the device's nodes, disabled, and nothing documents a service change then.
+            ctx.Steps.Add(StepOutcomes.NotAttempted(DeviceNodeStep,
+                "A node that may belong to the device could not be read, so no service was changed."));
+            return GateExitCode.Failed;
+        }
+
         BluetoothNode? deviceNode = read.Nodes.FirstOrDefault(IsDeviceNode);
         if (deviceNode is null)
         {
