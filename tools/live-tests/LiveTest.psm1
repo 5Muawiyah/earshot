@@ -645,15 +645,21 @@ function Invoke-EarshotElevated
 
 # The name install, uninstall and the gate use for an exit code, so the summary reads
 # the way the log does. Anything else is reported as the number it was.
+#
+# The first block is GateExitCode in src\Earshot\Boot\Gate\GateActions.cs, value for value:
+# install and uninstall exit with exactly those numbers, so a wrong name here would point
+# the owner at the wrong remedy. GateExitNameTableTests holds the two tables to each other.
+# There is no 1: no mode returns it, and a .NET crash does.
 function Get-GateExitName
 {
     param([int]$ExitCode)
 
     $names = @{
-        0 = 'success'; 1 = 'partial'; 2 = 'failed'; 3 = 'not-present'; 4 = 'not-found'
-        5 = 'no-identity'; 6 = 'not-available'; 8 = 'other-device-blocked'; 9 = 'status-not-written'
+        0 = 'success'; 2 = 'partial'; 3 = 'failed'; 4 = 'not-present'; 5 = 'not-found'
+        6 = 'no-identity'; 7 = 'not-available'; 8 = 'other-device-blocked'; 9 = 'status-not-written'
         10 = 'folder-not-secure'; 11 = 'device-blocked'; 12 = 'not-audio-sink'; 13 = 'other-device-protected'
         14 = 'no-manifest'; 15 = 'device-mismatch'; 16 = 'unsafe-environment'; 17 = 'no-config'
+        20 = 'rejected'; 21 = 'not-elevated'; 22 = 'running-as-system'
         1223 = 'the administrator prompt was declined'
         64 = 'bad command line'; 69 = 'not available in this build'; 77 = 'refused'
     }
