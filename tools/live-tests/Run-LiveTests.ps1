@@ -31,11 +31,32 @@
 .PARAMETER Resume
     Run the second half of a test, after a restart.
 
+.PARAMETER Variant
+    Test 10 only: which kind of restart to raise, 1 to 5. Run it once per variant.
+
+.PARAMETER AllowPlanB
+    Test 07 only: also try the --principal user fallback, which raises an
+    administrator prompt. Its default path deliberately raises none.
+
+.PARAMETER Note
+    Test 04 only: free text kept with the run, for example "fast startup on".
+
+.PARAMETER OfferUninstall
+    Restore (00) only: offer a full uninstall at the end.
+
+.NOTES
+    An option is only forwarded to a test that declares it. Passing one to a test
+    that does not take it stops the run and says which tests do, rather than
+    running the test with the option silently dropped.
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -List
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -Test 01 -ExePath "C:\Program Files\Earshot\Earshot.exe"
+
+.EXAMPLE
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -Test 10 -Variant 3 -ExePath "C:\Program Files\Earshot\Earshot.exe"
 #>
 
 #Requires -Version 5.1
@@ -46,7 +67,11 @@ param(
     [string]$Test = '',
     [string]$ExePath = '',
     [string]$RunRoot = '',
-    [switch]$Resume
+    [switch]$Resume,
+    [int]$Variant = 0,
+    [switch]$AllowPlanB,
+    [string]$Note = '',
+    [switch]$OfferUninstall
 )
 
 Set-StrictMode -Version 2.0
@@ -226,8 +251,56 @@ if (-not (Test-Path -LiteralPath $script -PathType Leaf))
     throw ('That test script is missing: ' + $script)
 }
 
+# The parameters the chosen script declares, read from its own param block. Forwarding is driven by
+# that list rather than a table kept here, so a test that gains or loses an option cannot leave the
+# launcher advertising something it will not pass on.
+function Get-ScriptParameters
+{
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $errors = $null
+    $tokens = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0)
+    {
+        throw ('That test script does not parse: ' + $Path + ' (' + $errors[0].Message + ')')
+    }
+
+    $names = @{}
+    if ($null -ne $ast.ParamBlock)
+    {
+        foreach ($parameter in $ast.ParamBlock.Parameters)
+        {
+            $names[$parameter.Name.VariablePath.UserPath] = $true
+        }
+    }
+
+    return $names
+}
+
+$declared = Get-ScriptParameters -Path $script
+
+# Every option the owner passed, and which tests take it. An option the chosen test does not declare
+# stops the run: passing -Variant to a test that ignores it would look like it had been honoured.
+$options = @(
+    [ordered]@{ Name = 'RunRoot'; Passed = (-not [string]::IsNullOrEmpty($RunRoot)); Value = $RunRoot; Takers = '04, 05, 08, 09, 10, 15' }
+    [ordered]@{ Name = 'Resume'; Passed = [bool]$Resume; Value = $true; Takers = '04, 05, 08, 09, 10, 15' }
+    [ordered]@{ Name = 'Variant'; Passed = ($Variant -ne 0); Value = $Variant; Takers = '10' }
+    [ordered]@{ Name = 'AllowPlanB'; Passed = [bool]$AllowPlanB; Value = $true; Takers = '07' }
+    [ordered]@{ Name = 'Note'; Passed = (-not [string]::IsNullOrEmpty($Note)); Value = $Note; Takers = '04' }
+    [ordered]@{ Name = 'OfferUninstall'; Passed = [bool]$OfferUninstall; Value = $true; Takers = '00' }
+)
+
 $forward = @{ ExePath = $ExePath }
-if (-not [string]::IsNullOrEmpty($RunRoot)) { $forward['RunRoot'] = $RunRoot }
-if ($Resume) { $forward['Resume'] = $true }
+foreach ($option in $options)
+{
+    if (-not $option.Passed) { continue }
+    if (-not $declared.ContainsKey($option.Name))
+    {
+        throw ('This test does not take -' + $option.Name + '. The tests that take it are: ' + $option.Takers + '.')
+    }
+
+    $forward[$option.Name] = $option.Value
+}
 
 & $script @forward
