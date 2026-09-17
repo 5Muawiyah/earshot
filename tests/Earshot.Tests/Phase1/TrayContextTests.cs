@@ -124,6 +124,80 @@ public sealed class TrayContextTests
         });
     }
 
+    // The connect in flight is waiting on a change that cannot be cancelled (a protect verb after it connected, say),
+    // so the disconnect the later click asked for can start only minutes later. The click is answered at once.
+    [TestMethod]
+    public void ALaterClickWhileTheConnectWaitsOnAChangeIsAnsweredAtOnce()
+    {
+        StaThread.Run(() =>
+        {
+            long now = 0;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), tickCount: () => now);
+            var protectVerb = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Connection.OnConnect = _ => protectVerb.Task;
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            now += 1000;
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            Application.DoEvents();
+
+            CardShown answer = tray.Cards.Shown[^1];
+            Assert.AreEqual(TrayContext.FinishingFirstMessage, answer.Content.Status, "The click had no answer while the connect finished.");
+            Assert.AreEqual(TrayHarness.ClickPoint, answer.ClickPoint);
+            Assert.HasCount(1, tray.Connection.Calls, "The disconnect started before the connect ended.");
+
+            protectVerb.SetResult(Confirmed("Connected"));
+            tray.PumpUntilIdle();
+
+            Assert.HasCount(2, tray.Connection.Calls);
+            Assert.IsFalse(tray.Connection.Calls[1].Connect);
+        });
+    }
+
+    // Open on startup is off and the Run value still starts a copy that is gone (uninstall removed %ProgramFiles%\Earshot,
+    // which cannot reach this user's value): the value is removed at start. One that starts a file that is there is left.
+    [TestMethod]
+    [DataRow(false, 1)]
+    [DataRow(true, 0)]
+    public void WithOpenOnStartupOffARunValueWhoseProgramIsGoneIsRemovedAtStart(bool programThere, int deletes)
+    {
+        StaThread.Run(() =>
+        {
+            const string Removed = @"C:\Program Files\Earshot\Earshot.exe";
+            using var tray = new TrayHarness(
+                settings: s => s.OpenOnStartup = false,
+                startup: r => r.Run[StartupRegistration.ValueName] = StartupRegistration.CommandFor(Removed),
+                fileExists: path => programThere && path == Removed);
+
+            Assert.AreEqual(deletes, tray.Startup.Deletes);
+            Assert.AreEqual(0, tray.Startup.Writes);
+            Assert.AreEqual(programThere, tray.Startup.Run.ContainsKey(StartupRegistration.ValueName));
+        });
+    }
+
+    [TestMethod]
+    public void ARunValueWhoseProgramIsGoneIsNotRemovedInSafeModeOrWhenTheSettingsCouldNotBeRead()
+    {
+        string stale = StartupRegistration.CommandFor(@"C:\Program Files\Earshot\Earshot.exe");
+        StaThread.Run(() =>
+        {
+            using var safe = new TrayHarness(safeMode: true, settings: s => s.OpenOnStartup = false, startup: r => r.Run[StartupRegistration.ValueName] = stale);
+
+            Assert.AreEqual(0, safe.Startup.Deletes);
+            Assert.IsTrue(safe.Log.Has(LogLevel.Info, "which is no longer there, and was not removed"));
+        });
+
+        StaThread.Run(() =>
+        {
+            using var unread = new TrayHarness(
+                settings: s => s.OpenOnStartup = false,
+                startup: r => r.Run[StartupRegistration.ValueName] = stale,
+                settingsStatus: SettingsLoadStatus.ReadFailed);
+
+            Assert.AreEqual(0, unread.Startup.Deletes);
+        });
+    }
+
     // The coordinator cancels a connect itself when the session ends; the log says so rather than blaming a device
     // change.
     [TestMethod]

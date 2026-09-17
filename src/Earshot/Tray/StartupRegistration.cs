@@ -183,6 +183,43 @@ internal sealed class StartupRegistration
         }
     }
 
+    // The file the Run value starts, when the value is there in the form CommandFor writes and names a full path;
+    // otherwise null. Reads only; a registry error is logged and gives null.
+    public string? RunValueTarget()
+    {
+        try
+        {
+            return TargetOf(_registry.ReadRunValue(ValueName));
+        }
+        catch (Exception ex) when (IsRegistryError(ex))
+        {
+            _log.Warn("Open on startup could not be read from HKCU.", ex);
+            return null;
+        }
+    }
+
+    // True when the Run value starts a file that is no longer there, for example the copy in %ProgramFiles%\Earshot
+    // after uninstall removed it. A value in any other form, or one that could not be read, is not reported.
+    public bool RunValueTargetMissing() => RunValueTarget() is { } target && !_fileExists(target);
+
+    // The quoted path at the start of a command in the form CommandFor writes, when it is a full path.
+    internal static string? TargetOf(string? command)
+    {
+        if (command is null || command.Length < 2 || command[0] != '"')
+        {
+            return null;
+        }
+
+        int end = command.IndexOf('"', 1);
+        if (end <= 1 || !string.Equals(command[(end + 1)..], " " + StartupArgument, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string path = command[1..end];
+        return Path.IsPathFullyQualified(path) ? path : null;
+    }
+
     // Turns Open on startup on or off. Never touches StartupApproved.
     public ControllerResult Apply(bool openOnStartup)
     {

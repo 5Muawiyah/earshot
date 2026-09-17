@@ -231,6 +231,39 @@ public sealed class StartupRegistrationTests
         Assert.AreEqual(0, registry.Writes, "Checking never writes.");
     }
 
+    // Only a value in the form Earshot writes names a program to look for; anything else is never reported as gone.
+    [TestMethod]
+    [DataRow("\"C:\\Program Files\\Earshot\\Earshot.exe\" --startup", "C:\\Program Files\\Earshot\\Earshot.exe")]
+    [DataRow("\"D:\\Unzipped\\Earshot\\Earshot.exe\" --startup", "D:\\Unzipped\\Earshot\\Earshot.exe")]
+    [DataRow("C:\\Program Files\\Earshot\\Earshot.exe --startup", null)]
+    [DataRow("\"C:\\Program Files\\Earshot\\Earshot.exe\"", null)]
+    [DataRow("\"C:\\Program Files\\Earshot\\Earshot.exe\" --startup --other", null)]
+    [DataRow("\"Earshot.exe\" --startup", null)]
+    [DataRow("\"\" --startup", null)]
+    [DataRow("\"C:\\Program Files\\Earshot\\Earshot.exe --startup", null)]
+    [DataRow("", null)]
+    public void TheRunValueTargetIsTheQuotedFullPathOfACommandInEarshotsForm(string? command, string? target) =>
+        Assert.AreEqual(target, StartupRegistration.TargetOf(command));
+
+    [TestMethod]
+    public void ARunValueIsReportedMissingOnlyWhenItsProgramIsGone()
+    {
+        var registry = new FakeStartupRegistry();
+        bool there = true;
+        var startup = new StartupRegistration(registry, new CapturingLog(), safeMode: false, ExePath, fileExists: _ => there);
+
+        Assert.IsNull(StartupRegistration.TargetOf(null));
+        Assert.IsFalse(startup.RunValueTargetMissing(), "No value.");
+        registry.Run["Earshot"] = Command;
+        Assert.IsFalse(startup.RunValueTargetMissing(), "The program is there.");
+        there = false;
+        Assert.IsTrue(startup.RunValueTargetMissing());
+        registry.Run["Earshot"] = "not a command Earshot writes";
+        Assert.IsFalse(startup.RunValueTargetMissing());
+        Assert.IsFalse(new StartupRegistration(new FakeStartupRegistry { ReadFailure = new SecurityException("denied") }, new CapturingLog(), false, ExePath,
+            fileExists: _ => false).RunValueTargetMissing(), "A value that could not be read is not reported as gone.");
+    }
+
     [TestMethod]
     public void TheRepairCheckLogsAndDeclinesWhenItCannotRead()
     {

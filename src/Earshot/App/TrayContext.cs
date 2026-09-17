@@ -64,8 +64,9 @@ internal sealed record TrayStartOptions(
 // coordinator finishes work of its own (the start-up check, an automatic block, the session-end block) waits for
 // it, with a card at once so the click is never left unanswered; the menu item is disabled then. A click while a
 // connect or disconnect is in flight is a newer intent: the one in flight is cancelled and, once its clean-up
-// (a re-block included) has finished, the opposite runs. Clicks within the double-click time of the one that
-// started it are the same click, so a fast double or triple click never toggles twice.
+// (a re-block included) has finished, the opposite runs, with a card at once as for the coordinator's own work.
+// Clicks within the double-click time of the one that started it are the same click, so a fast double or triple
+// click never toggles twice.
 // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.notifyicon.mouseclick
 //
 // Cancellation: each connect or disconnect has its own token, cancelled by a newer click, when a different
@@ -413,7 +414,8 @@ internal sealed class TrayContext : ApplicationContext
 
     // A click while a connect or disconnect is in flight asks for the opposite. The one in flight is cancelled and
     // the new one runs only once it has ended, clean-up included, so a re-block after a cancelled allow always
-    // comes first.
+    // comes first. That can take minutes (a gate change already sent is waited for, a protect verb included), so the
+    // click is answered with a card at once.
     private async Task SupersedeToggleAsync(CardPlace place, long clickedAt)
     {
         bool connect = !_toggleConnect;
@@ -422,6 +424,7 @@ internal sealed class TrayContext : ApplicationContext
         _toggleSuperseded = true;
         _toggleCancelReason = "a newer click asked to " + next;
         _log.Info("Click: the " + (connect ? "disconnect" : "connect") + " in flight is cancelled, and a " + next + " follows once it has finished.");
+        ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), FinishingFirstMessage, place);
         _toggle?.Cancel();
         try
         {
@@ -747,6 +750,11 @@ internal sealed class TrayContext : ApplicationContext
     // Any later start with Open on startup on: the Run value is written again when it is missing or
     // starts another file, for example after the Earshot folder moved. The tray owns this value.
     //
+    // With Open on startup off, a Run value is removed only when the file it starts is no longer there: uninstall
+    // removes %ProgramFiles%\Earshot but runs elevated, so it cannot reach this user's Run value (a separate profile
+    // under Administrator protection), and the tray has no removal of its own. Earshot run again after uninstall then
+    // leaves no entry behind that starts nothing; with the setting on, the repair below points it at this copy.
+    //
     // It is left alone when the settings could not be read (the default would be written over the user's
     // choice), and when Windows started Earshot from that same value, which Microsoft's Run key guidance
     // asks a program not to write while it runs.
@@ -755,6 +763,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (!_registry.Settings.Current.OpenOnStartup)
         {
+            RemoveStartupIfTargetGone(status);
             return;
         }
 
@@ -783,6 +792,26 @@ internal sealed class TrayContext : ApplicationContext
 
         _log.Info("Open on startup is on, but the Run value is missing or starts another file. Writing it again.");
         Report("open-on-startup (repair)", _startup.Apply(true), CardPlace.NearTray);
+        _startupState = _startup.Read();
+    }
+
+    // Open on startup is off: a Run value left behind that starts a file which is no longer there is removed.
+    private void RemoveStartupIfTargetGone(SettingsLoadStatus status)
+    {
+        if (!SettingsWereRead(status) || _startedAtLogon || !_startup.RunValueTargetMissing())
+        {
+            return;
+        }
+
+        if (_startup.WritesBlocked)
+        {
+            _log.Info(_startup.BlockedMessage + " The Open on startup Run value starts " + _startup.RunValueTarget() +
+                ", which is no longer there, and was not removed.");
+            return;
+        }
+
+        _log.Info("Open on startup is off, and the Run value starts " + _startup.RunValueTarget() + ", which is no longer there. Removing it.");
+        Report("open-on-startup (remove stale value)", _startup.Apply(false), CardPlace.NearTray);
         _startupState = _startup.Read();
     }
 
