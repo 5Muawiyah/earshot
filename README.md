@@ -33,7 +33,11 @@ administrator prompt; nothing after that does.
 
 ## Install
 
-1. Download `Earshot-1.0.0-win-x64.zip`.
+1. Get `Earshot-1.0.0-win-x64.zip`. There is no download page: the zip is built
+   from this repository by `tools\build-release.ps1`, which writes it to
+   `artifacts\` and prints its size and SHA-256. Check that hash against the
+   copy you were given before you unzip it, because setup copies these files
+   into Program Files.
 2. Unzip it anywhere. You get an `Earshot` folder.
 3. Run `Earshot.exe`. An earbud icon appears in the notification area.
 4. Right click the icon and choose **Set up Earshot...**. Windows shows one
@@ -61,9 +65,10 @@ Setup, in that one elevated run:
   running as SYSTEM: `Gate` (on demand, blocks and allows the device nodes),
   `Protect` (on demand, changes the Bluetooth services, with a longer time
   limit because that installs and removes drivers) and `BootBlock` (at
-  startup). Each task grants your account read and execute only. That
-  permission is what lets the tray start them later with no prompt, and it
-  cannot be used to change what they run.
+  startup). `Gate` and `Protect` grant your account read and execute, which is
+  what lets the tray start them later with no prompt, and that permission
+  cannot be used to change what they run. `BootBlock` grants read only: nothing
+  but its own startup trigger ever starts it, so you cannot start it either.
 
 Setup never changes your pairing, and never touches the registry Run key. Your
 own settings stay in `%APPDATA%\Earshot\settings.json` and the log in
@@ -86,7 +91,8 @@ The icon has four states:
 | Outlined earbuds with one diagonal slash | Blocked at boot |
 
 The tooltip reads `Earshot: <device name> - connected`, and likewise
-`disconnected`, `blocked` or `not found`.
+`disconnected`, `blocked` or `not found`. It reads `unknown` when the audio
+devices could not be read at all, so a failed read is never shown as a state.
 
 **Right click** opens the menu. Top to bottom, with the exact wording:
 
@@ -149,13 +155,13 @@ only asks the AirPods to disconnect.
 ## Protect audio quality
 
 On by default. **While it is on, the AirPods microphone does not work on this
-PC.**
+PC**, apart from the moment during a connect described below.
 
 Windows switches a Bluetooth headset from stereo A2DP to the Hands-Free profile
 whenever an application opens a microphone or plays through the communications
-category. Hands-Free is mono at 8 or 16 kHz. That switch, not the codec, is what
-makes the AirPods suddenly sound like a phone call, and browsers, chat apps and
-games trigger it constantly:
+category. Hands-Free is a narrow mono voice channel. That switch, not the codec,
+is what makes the AirPods suddenly sound like a phone call, and browsers, chat
+apps and games trigger it constantly:
 https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio
 
 Earshot turns off the Hands-Free and Headset services for the AirPods and leaves
@@ -169,10 +175,18 @@ The change can lapse: reconnecting or restarting can bring the Hands-Free
 service back. Earshot re-reads the installed services after a connect and after
 boot, and applies it again when it has reverted.
 
+**Connect can take the protection off for a moment.** The one-shot reconnect is
+a Hands-Free property, so turning Hands-Free off also takes away the filter that
+carries the request. If the A2DP filter refuses it, the card says "Trying another
+way": Earshot turns the protection off, connects, and turns it back on. The
+microphone works on this PC while that runs, and it is not instant, because the
+change installs and removes profile drivers. If the protection cannot be put
+back, the card says "Connected, but audio quality protection did not apply." and
+the microphone stays available until a later connect puts it back.
+
 There is no equaliser and no codec setting, and there will not be one. Windows
-10 offers SBC and aptX; Windows 11 21H2 added AAC. Windows picks the codec
-itself, from what both ends support, and exposes no public way to override that
-choice. A control that claimed to would be doing nothing.
+picks the codec itself, from what both ends support, and exposes no public way to
+override that choice. A control that claimed to would be doing nothing.
 
 ## Battery
 
@@ -212,14 +226,16 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe` | The tray application. `--startup` is the same thing, and is what the startup value passes. |
 | `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer above. It changes nothing. |
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
-| `Earshot.exe install` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` for you. |
-| `Earshot.exe gate <verb> <nonce> [address]` | The elevated worker. Started by Earshot's own scheduled task, not by hand. |
-| `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **These change the state of the device.** They exist for the live tests in `tools\live-tests` and are not part of normal use. |
+| `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
+| `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
+| `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep change the state of the device**; the sweep only reads. They exist for the live tests in `tools\live-tests` and are not part of normal use. |
 
 Two variables help testing. `EARSHOT_DATA_ROOT=<absolute folder>` moves every
 data folder under that folder. `EARSHOT_SAFE_MODE=1` turns every device action
-off, so only reads happen. `install`, `uninstall` and `gate` refuse to run while
-either is set, and in safe mode every `diag` target is refused.
+off, so only reads happen. `install`, `uninstall`, `gate` and `gate-protect`
+refuse to run while either is set. A `diag` target is refused in safe mode only,
+so the live test scripts stop the run themselves when `EARSHOT_DATA_ROOT` is set
+rather than let a real device action write its evidence somewhere else.
 
 ## Known caveats
 
@@ -237,9 +253,11 @@ either is set, and in safe mode every `diag` target is refused.
 - **Whether the A2DP driver accepts the connect request is unverified.** The
   one-shot reconnect and disconnect properties are documented for Hands-Free
   filters, and the audio protection removes the Hands-Free filter. If the A2DP
-  filter rejects the request, connect falls back to enabling the nodes and
-  reports honestly when the AirPods still do not arrive; disconnect always ends
-  in a block when Block at boot is on, so it works either way.
+  filter rejects the request, connect turns the protection off, connects with
+  the Hands-Free filter back in place, and turns the protection on again, as
+  described under Protect audio quality; it reports honestly when the AirPods
+  still do not arrive. Disconnect always ends in a block when Block at boot is
+  on, so it works either way.
 - **Administrator protection**, the newer Windows elevation model, is off by
   default on this machine and has not been tested with. Setup follows
   Microsoft's guidance for a highest-privilege task, and passes the device
