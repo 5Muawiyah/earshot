@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Security;
+using System.Security.Principal;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
@@ -50,7 +52,7 @@ internal static partial class Program
                 NativeMethods.LOAD_LIBRARY_SEARCH_SYSTEM32 | NativeMethods.LOAD_LIBRARY_SEARCH_APPLICATION_DIR))
         {
             int error = Marshal.GetLastPInvokeError();
-            return StartupFailure(ExitCodes.OsError,
+            return StartupFailure(args, ExitCodes.OsError,
                 "SetDefaultDllDirectories failed with Win32 error " + error.ToString(CultureInfo.InvariantCulture) +
                 ". Earshot does not run without a safe DLL search order.");
         }
@@ -61,7 +63,7 @@ internal static partial class Program
         }
         catch (InvalidOperationException ex)
         {
-            return StartupFailure(ExitCodes.Software, ex.Message);
+            return StartupFailure(args, ExitCodes.Software, ex.Message);
         }
 
         Paths paths;
@@ -71,12 +73,46 @@ internal static partial class Program
         }
         catch (InvalidOperationException ex)
         {
-            return StartupFailure(ExitCodes.Config, ex.Message);
+            return StartupFailure(args, ExitCodes.Config, ex.Message);
         }
 
-        // An elevated mode never renames a file in the log folder, which may be the user's own (see FileLog).
-        bool privileged = args.Length > 0 && PrivilegedModes.Contains(args[0]);
-        return Dispatch(args, paths, new FileLog(paths.LogFolder, rolls: !privileged));
+        return Dispatch(args, paths, ModeLog(paths, IsPrivileged(args), RunningAsLocalSystem));
+    }
+
+    private static bool IsPrivileged(string[] args) => args.Length > 0 && PrivilegedModes.Contains(args[0]);
+
+    // The log Dispatch and a start-up failure write to. An elevated mode never writes under a standard user's
+    // profile, where appending by path could follow a junction or link that user planted: as SYSTEM the log folder
+    // is SYSTEM's own profile, which only administrators can change, and it only ever appends there; any other
+    // elevated run writes to the debugger output here, and install and uninstall hold their own log (HeldLog).
+    internal static ILog ModeLog(Paths paths, bool privileged, Func<bool> isLocalSystem)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(isLocalSystem);
+        if (!privileged)
+        {
+            return new FileLog(paths.LogFolder);
+        }
+
+        return isLocalSystem()
+            ? new FileLog(paths.LogFolder, rolls: false)
+            : new DebugOutputLog("an elevated run started by a user does not write under that user's profile");
+    }
+
+    // False when the token cannot be read, so a failure never leads to a file write.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.security.principal.windowsidentity.issystem
+    private static bool RunningAsLocalSystem()
+    {
+        try
+        {
+            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+            return identity.IsSystem;
+        }
+        catch (SecurityException ex)
+        {
+            Trace.WriteLine("Earshot: the process token could not be read: " + ex.Message);
+            return false;
+        }
     }
 
     // Runs the mode named by args[0] and returns the process exit code.
@@ -162,14 +198,14 @@ internal static partial class Program
     static partial void TryRunProbe(RunContext ctx);
     static partial void TryRunDiag(RunContext ctx);
 
-    // A failure before any mode runs. Written to the debugger output, and to the log when the
+    // A failure before any mode runs. Written to the debugger output, and to the log ModeLog chooses when the
     // log folder can be resolved.
-    private static int StartupFailure(int exitCode, string message)
+    private static int StartupFailure(string[] args, int exitCode, string message)
     {
         Trace.WriteLine("Earshot startup failed: " + message);
         try
         {
-            new FileLog(Paths.Current.LogFolder).Error("Startup failed: " + message);
+            ModeLog(Paths.Current, IsPrivileged(args), RunningAsLocalSystem).Error("Startup failed: " + message);
         }
         catch (InvalidOperationException ex)
         {

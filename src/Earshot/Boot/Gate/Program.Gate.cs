@@ -63,13 +63,31 @@ internal static partial class Program
             return new FileLog(paths.LogFolder);
         }
 
+        return MachineLog(paths, folders, out string whyNot) ?? (ILog)new DebugOutputLog(whyNot);
+    }
+
+    // %ProgramData%\Earshot\logs once the machine folder passes its ACL check (its inheritable entries protect the
+    // subfolder too, and no standard user can create anything inside it), or null with why not. The one file an
+    // elevated run started by a user may write its log to.
+    internal static FileLog? MachineLog(Paths paths, IFolderSecurity folders, out string whyNot)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(folders);
         StepOutcome read = folders.ReadSddl(paths.MachineFolder, out string? sddl);
-        if (read.Ok && AclCheck.CheckMachineFolder(sddl).Count == 0)
+        if (!read.Ok)
         {
-            return new FileLog(Path.Combine(paths.MachineFolder, "logs"));
+            whyNot = "the machine folder could not be checked (" + read.Step + " " + read.CodeName + ")";
+            return null;
         }
 
-        return new DebugOutputLog("the machine folder did not pass its check (" + read.Step + " " + read.CodeName + ")");
+        if (AclCheck.CheckMachineFolder(sddl).Count > 0)
+        {
+            whyNot = "the machine folder did not pass its check";
+            return null;
+        }
+
+        whyNot = "";
+        return new FileLog(Path.Combine(paths.MachineFolder, "logs"));
     }
 
     // The token for choosing the log, or null when it cannot be read. RunGate reads it again, and a failure there
@@ -91,31 +109,47 @@ internal static partial class Program
     {
         Paths paths = Paths.Current;
 
-        // Elevated under the user's own profile: append only (see FileLog).
-        var log = new FileLog(paths.LogFolder, rolls: false);
+        // Elevated from the user's own session: held, and written to the checked machine folder once the run has
+        // ended (HeldLog). Install creates that folder, so a first install has one by then.
+        var log = new HeldLog("install");
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
-        ctx.ExitCode = (int)Guarded(log, "install", () => RunInstall(ctx.Args, WindowsProcessToken.Current(), log, request =>
+        try
         {
-            // Task Scheduler COM runs on an MTA thread, as it does in the tray.
-            using var worker = new SystemWorker(log);
-            return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log).Run(request))
-                .GetAwaiter().GetResult();
-        }));
+            ctx.ExitCode = (int)Guarded(log, "install", () => RunInstall(ctx.Args, WindowsProcessToken.Current(), log, request =>
+            {
+                // Task Scheduler COM runs on an MTA thread, as it does in the tray.
+                using var worker = new SystemWorker(log);
+                return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log).Run(request))
+                    .GetAwaiter().GetResult();
+            }));
+        }
+        finally
+        {
+            log.FlushTo(MachineLog(paths, new NtfsFolderSecurity(), out string whyNot), whyNot);
+        }
     }
 
     static partial void TryRunUninstall(RunContext ctx)
     {
         Paths paths = Paths.Current;
 
-        // Elevated under the user's own profile: append only (see FileLog).
-        var log = new FileLog(paths.LogFolder, rolls: false);
+        // As for install. An uninstall that removed the machine folder leaves its log in the debugger output only,
+        // rather than create the folder again.
+        var log = new HeldLog("uninstall");
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
-        ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
+        try
         {
-            using var worker = new SystemWorker(log);
-            return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(), new BluetoothServiceApi()).Run())
-                .GetAwaiter().GetResult();
-        }));
+            ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
+            {
+                using var worker = new SystemWorker(log);
+                return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(), new BluetoothServiceApi()).Run())
+                    .GetAwaiter().GetResult();
+            }));
+        }
+        finally
+        {
+            log.FlushTo(MachineLog(paths, new NtfsFolderSecurity(), out string whyNot), whyNot);
+        }
     }
 
     // The actions record their own failures; this is the last resort for anything around them (the worker, the

@@ -24,6 +24,17 @@ public sealed class FileLogTests
     }
 
     [TestMethod]
+    public void AnEntryWrittenLaterKeepsTheTimeItWasMade()
+    {
+        using var temp = new TempFolder();
+        var log = new FileLog(temp.Path);
+
+        log.WriteAt(new DateTime(2026, 9, 15, 20, 30, 1, 250, DateTimeKind.Utc), LogLevel.Info, "Held");
+
+        Assert.AreEqual("2026-09-15T20:30:01.250Z INFO Held", File.ReadAllLines(log.FilePath).Single());
+    }
+
+    [TestMethod]
     public void ExceptionTextIsIndentedUnderItsEntry()
     {
         using var temp = new TempFolder();

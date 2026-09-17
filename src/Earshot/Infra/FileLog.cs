@@ -15,9 +15,9 @@ namespace Earshot.Infra;
 // Write never throws. A write that cannot reach the disk is counted, sent to the debugger output,
 // kept in LastWriteError, and reported at the top of the next entry that does reach the file.
 //
-// rolls false: the file is only ever appended to, never renamed or replaced. An elevated run that logs under a
-// user's own profile uses that, so a link the user planted there cannot turn the roll's rename into a
-// replacement of some other file; the unelevated tray still rolls the same file.
+// rolls false: the file is only ever appended to, never renamed or replaced. Program.Dispatch uses that for the
+// elevated modes. An elevated run never writes under a standard user's profile at all (Program.ModeLog, HeldLog),
+// since appending by path there could follow a link the user planted.
 internal sealed class FileLog : ILog
 {
     public const long DefaultMaxBytes = 1024 * 1024;
@@ -61,9 +61,11 @@ internal sealed class FileLog : ILog
         get { lock (_gate) { return _lastWriteError; } }
     }
 
-    public void Write(LogLevel level, string message, Exception? ex = null)
+    public void Write(LogLevel level, string message, Exception? ex = null) => WriteAt(DateTime.UtcNow, level, message, ex);
+
+    // Write with the time the entry was made rather than now, for entries kept and written later (HeldLog).
+    internal void WriteAt(DateTime now, LogLevel level, string message, Exception? ex = null)
     {
-        DateTime now = DateTime.UtcNow;
         lock (_gate)
         {
             try
