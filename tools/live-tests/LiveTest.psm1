@@ -28,6 +28,35 @@ $script:UnclearOutcome = 'inconclusive'
 
 # ---------------------------------------------------------------- small helpers
 
+# WHY EVERY HELPER BELOW THAT ANSWERS WITH A LIST RETURNS ", $value" RATHER THAN "$value"
+#
+# PowerShell unrolls whatever a function writes to the pipeline, so a function ending
+# "return $found" hands the caller $null when $found is empty and the bare element when it
+# holds exactly one. Under Set-StrictMode -Version 2.0, which every one of these scripts
+# runs under, both of those then throw PropertyNotFoundStrict on a later .Count: $null has
+# no Count, and neither does a bare [string]. The throw lands in the script's own catch,
+# which records "run: fail" and abandons every criterion after it, and it fires hardest on
+# the success path, where the answer is "no matching line".
+#
+# ", $value" returns a one element array holding the value. The pipeline unrolls that one
+# layer and the caller gets $value back exactly as it was, list or not.
+#
+# The second half of the rule, for callers: assign the call plainly, and put @() around the
+# VARIABLE wherever .Count, .Length or an index is read from it.
+#
+#     $lines = Get-EarshotLogLines -Run $run -Pattern '...'      # plain
+#     if (@($lines).Count -gt 0) { ... }                         # @() around the variable
+#
+# Not around the call. @(Get-EarshotLogLines ...) wraps the whole list in another list, because
+# the comma has already made it one object by the time @() collects it, so .Count would read 1
+# for every answer including none. @($lines) is a no-op when the comma is there and repairs the
+# value when somebody takes it away, which is what makes the two halves belt and braces rather
+# than one contradicting the other. tools\live-tests\selftest proves both halves by running the
+# scripts, and LiveTestScriptTests holds the rule to the source.
+# https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_return
+# https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_strict_mode
+# https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_arrays
+
 # A property of a parsed JSON object, or $null when the object or the property is
 # not there. Strict mode makes a plain $object.name throw for a missing member, and
 # probe output leaves members out, so every read goes through here.
@@ -41,13 +70,13 @@ function Get-Field
     if ($null -eq $Object) { return $null }
     if ($Object -is [System.Collections.IDictionary])
     {
-        if ($Object.Contains($Name)) { return $Object[$Name] }
+        if ($Object.Contains($Name)) { return ,$Object[$Name] }
         return $null
     }
 
     $property = $Object.PSObject.Properties[$Name]
     if ($null -eq $property) { return $null }
-    return $property.Value
+    return ,$property.Value
 }
 
 # Get-Field along a path, for example Get-FieldPath $json @('device', 'connection').
@@ -65,7 +94,7 @@ function Get-FieldPath
         if ($null -eq $current) { return $null }
     }
 
-    return $current
+    return ,$current
 }
 
 function Join-Parts
@@ -443,7 +472,7 @@ function Get-QuotedArguments
         else { $quoted += $argument }
     }
 
-    return $quoted
+    return ,$quoted
 }
 
 # Runs Earshot.exe with the given command line.
@@ -770,13 +799,14 @@ function Get-DiagEvidence
 {
     param([Parameter(Mandatory = $true)]$Run)
 
-    if ($Run.LastCopied.Count -eq 0)
+    $copied = @($Run.LastCopied)
+    if ($copied.Count -eq 0)
     {
         Write-Line -Run $Run -Text '  That run wrote no evidence file of its own.'
         return $null
     }
 
-    $path = $Run.LastCopied[$Run.LastCopied.Count - 1]
+    $path = $copied[$copied.Count - 1]
     try
     {
         return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json)
@@ -1062,7 +1092,7 @@ function Get-EarshotLogLines
     )
 
     $found = @()
-    if (-not (Test-Path -LiteralPath $Run.LogFolder)) { return $found }
+    if (-not (Test-Path -LiteralPath $Run.LogFolder)) { return ,$found }
     foreach ($file in (Get-ChildItem -LiteralPath $Run.LogFolder -Filter '*.log' -File | Sort-Object LastWriteTimeUtc))
     {
         foreach ($line in (Get-Content -LiteralPath $file.FullName))
@@ -1081,7 +1111,7 @@ function Get-EarshotLogLines
         }
     }
 
-    return $found
+    return ,$found
 }
 
 # Copies the Earshot log into the evidence folder, so a later run or a log roll cannot lose it.

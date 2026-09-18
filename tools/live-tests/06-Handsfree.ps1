@@ -85,7 +85,8 @@ function Read-UnelevatedEvidence
         Write-Line -Run $Run -Text ('  ' + $line)
     }
 
-    return $rows
+    # ", $rows" rather than "$rows": see the note above Get-Field in LiveTest.psm1.
+    return ,$rows
 }
 
 try
@@ -126,7 +127,7 @@ try
                 -Detail 'the raw BluetoothSetServiceState results from a non-elevated process'
             $afterUnelevated = Show-Services -Run $run -Label 'services-after-unelevated-on'
             Add-Criterion -Run $run -Id 'unelevated-recorded' -Criterion 'The unelevated return codes are recorded.' `
-                -Outcome $(if ($rows.Count -gt 0) { 'pass' } else { 'inconclusive' }) `
+                -Outcome $(if (@($rows).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
                 -Detail ('protection now reads ' + $afterUnelevated.Protection + '.')
             Add-Finding -Run $run -Name 'unelevatedProtectWorks' -Value $(if ($afterUnelevated.Protection -eq 'Protected') { 'yes' } else { 'no' }) `
                 -Detail 'yes would mean a v1.1 fast path is possible without the scheduled task'

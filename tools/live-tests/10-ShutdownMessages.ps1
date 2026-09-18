@@ -126,25 +126,34 @@ try
         $noBlock = Get-EarshotLogLines -Run $run -Pattern 'Session ending: no block issued' -SinceUtc $since
         $stopped = Get-EarshotLogLines -Run $run -Pattern 'Tray stopped.' -SinceUtc $since
 
-        foreach ($group in @(@('query', $query), @('end', $end), @('queued', $queued), @('no block', $noBlock), @('stopped', $stopped)))
+        # One entry per group, as an ordered table rather than a nested array: PowerShell flattens
+        # @('end', @('a', 'b')) into three items, so an array of pairs would read the second line of
+        # one group as the name of the next.
+        foreach ($group in @(
+                [ordered]@{ Name = 'query'; Lines = $query }
+                [ordered]@{ Name = 'end'; Lines = $end }
+                [ordered]@{ Name = 'queued'; Lines = $queued }
+                [ordered]@{ Name = 'no block'; Lines = $noBlock }
+                [ordered]@{ Name = 'stopped'; Lines = $stopped }))
         {
-            Write-Line -Run $run -Text ('  ' + $group[0] + ': ' + $group[1].Count + ' line(s)')
-            foreach ($line in $group[1]) { Write-Line -Run $run -Text ('    ' + $line) }
+            $lines = @($group.Lines)
+            Write-Line -Run $run -Text ('  ' + $group.Name + ': ' + $lines.Count + ' line(s)')
+            foreach ($line in $lines) { Write-Line -Run $run -Text ('    ' + $line) }
         }
 
         Add-Criterion -Run $run -Id 'query-arrived' -Criterion 'WM_QUERYENDSESSION reached Earshot and was logged with its flags.' `
-            -Outcome $(if ($query.Count -gt 0) { 'pass' } else { 'fail' }) `
-            -Detail ([string]$query.Count + ' line(s). A forced restart is allowed to skip the query; that is the finding, not a defect.')
+            -Outcome $(if (@($query).Count -gt 0) { 'pass' } else { 'fail' }) `
+            -Detail ([string]@($query).Count + ' line(s). A forced restart is allowed to skip the query; that is the finding, not a defect.')
 
         Add-Criterion -Run $run -Id 'end-arrived' -Criterion 'WM_ENDSESSION reached Earshot and was logged with its flags.' `
-            -Outcome $(if ($end.Count -gt 0) { 'pass' } else { 'fail' }) -Detail ([string]$end.Count + ' line(s).')
+            -Outcome $(if (@($end).Count -gt 0) { 'pass' } else { 'fail' }) -Detail ([string]@($end).Count + ' line(s).')
 
         Add-Criterion -Run $run -Id 'block-queued' -Criterion 'A block was queued at session end, or the log says why not.' `
-            -Outcome $(if ($queued.Count -gt 0 -or $noBlock.Count -gt 0) { 'pass' } else { 'inconclusive' }) `
-            -Detail ([string]$queued.Count + ' queued, ' + $noBlock.Count + ' explained.')
+            -Outcome $(if (@($queued).Count -gt 0 -or @($noBlock).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
+            -Detail ([string]@($queued).Count + ' queued, ' + @($noBlock).Count + ' explained.')
 
         Add-Finding -Run $run -Name ('variant' + $Variant + 'Messages') `
-            -Value ('query ' + $query.Count + ', end ' + $end.Count + ', queued ' + $queued.Count + ', no block ' + $noBlock.Count)
+            -Value ('query ' + @($query).Count + ', end ' + @($end).Count + ', queued ' + @($queued).Count + ', no block ' + @($noBlock).Count)
 
         $nodes = Get-NodeState -Run $run -Label 'nodes-after'
         $nodeState = Get-Field -Object $nodes -Name 'nodeState'

@@ -118,10 +118,10 @@ try
         foreach ($line in ($queued | Select-Object -Last 3)) { Write-Line -Run $run -Text ('  ' + $line) }
 
         Add-Criterion -Run $run -Id 'end-session-logged' -Criterion 'The end-session messages reached Earshot and were logged with their flags.' `
-            -Outcome $(if ($querySession.Count -gt 0 -or $endSession.Count -gt 0) { 'pass' } else { 'fail' }) `
-            -Detail ([string]$querySession.Count + ' query lines, ' + $endSession.Count + ' end lines.')
+            -Outcome $(if (@($querySession).Count -gt 0 -or @($endSession).Count -gt 0) { 'pass' } else { 'fail' }) `
+            -Detail ([string]@($querySession).Count + ' query lines, ' + @($endSession).Count + ' end lines.')
 
-        Add-Finding -Run $run -Name 'sessionEndBlockQueued' -Value $(if ($queued.Count -gt 0) { 'yes' } else { 'no' })
+        Add-Finding -Run $run -Name 'sessionEndBlockQueued' -Value $(if (@($queued).Count -gt 0) { 'yes' } else { 'no' })
         Add-Finding -Run $run -Name 'preShutdownServiceNeeded' `
             -Value $(if ($nodeState -eq 'Blocked' -and $paged -eq 'no') { 'no' } else { 'yes' }) `
             -Detail 'yes means the v1.1 pre-shutdown SYSTEM service should be built, because the best-effort hook did not hold'

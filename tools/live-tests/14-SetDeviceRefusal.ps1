@@ -74,7 +74,8 @@ function Get-OtherAddresses
         }
     }
 
-    return $found
+    # ", $found" rather than "$found": see the note above Get-Field in LiveTest.psm1.
+    return ,$found
 }
 
 try

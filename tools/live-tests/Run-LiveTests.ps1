@@ -281,9 +281,12 @@ function Get-ScriptParameters
     $errors = $null
     $tokens = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
-    if ($errors.Count -gt 0)
+    # @(...) because ParseFile leaves $errors as a list this code must be able to count whether it
+    # holds nothing, one error or several.
+    $parseErrors = @($errors)
+    if ($parseErrors.Count -gt 0)
     {
-        throw ('That test script does not parse: ' + $Path + ' (' + $errors[0].Message + ')')
+        throw ('That test script does not parse: ' + $Path + ' (' + $parseErrors[0].Message + ')')
     }
 
     $names = @{}

@@ -67,7 +67,9 @@ function Read-Notifications
 
     Write-Line -Run $Run -Text ('  ' + $What + ': ' + $count + ' notification(s), thread(s) ' + ($threads -join ', ') +
         ', apartment(s) ' + ($apartments -join ', '))
-    return [ordered]@{ Count = $count; Threads = $threads; Apartments = $apartments }
+    # Total, not Count: a dictionary has a Count of its own, so a reader of $found.Count could not
+    # tell how many notifications arrived from how many members this table has.
+    return [ordered]@{ Total = $count; Threads = @($threads); Apartments = @($apartments) }
 }
 
 try
@@ -93,7 +95,7 @@ try
             $evidence = Get-DiagEvidence -Run $run
             $summary = Read-KsEvidence -Run $run -Evidence $evidence
             $connectFound = Read-Notifications -Run $run -Evidence $evidence -What 'connect'
-            Add-Finding -Run $run -Name 'connectNotifications' -Value $connectFound.Count
+            Add-Finding -Run $run -Name 'connectNotifications' -Value $connectFound.Total
             Add-Finding -Run $run -Name 'connectConfirmationSource' -Value ('' + $summary.Source)
         }
 
@@ -107,7 +109,7 @@ try
             $evidence = Get-DiagEvidence -Run $run
             [void](Read-KsEvidence -Run $run -Evidence $evidence)
             $disconnectFound = Read-Notifications -Run $run -Evidence $evidence -What 'disconnect'
-            Add-Finding -Run $run -Name 'disconnectNotifications' -Value $disconnectFound.Count
+            Add-Finding -Run $run -Name 'disconnectNotifications' -Value $disconnectFound.Total
         }
 
         $threads = @()
@@ -115,8 +117,8 @@ try
         foreach ($found in @($connectFound, $disconnectFound))
         {
             if ($null -eq $found) { continue }
-            foreach ($thread in $found.Threads) { if (-not ($threads -contains $thread)) { $threads = $threads + @($thread) } }
-            foreach ($apartment in $found.Apartments) { if (-not ($apartments -contains $apartment)) { $apartments = $apartments + @($apartment) } }
+            foreach ($thread in @($found.Threads)) { if (-not ($threads -contains $thread)) { $threads = $threads + @($thread) } }
+            foreach ($apartment in @($found.Apartments)) { if (-not ($apartments -contains $apartment)) { $apartments = $apartments + @($apartment) } }
         }
 
         Add-Criterion -Run $run -Id 'notifications-arrive' -Criterion 'Notifications arrive for both a connect and a disconnect.' `
@@ -183,8 +185,8 @@ try
         foreach ($line in ($unregister | Select-Object -Last 5)) { Write-Line -Run $run -Text ('  ' + $line) }
         $stopped = Get-EarshotLogLines -Run $run -Pattern 'Tray stopped.'
         Add-Criterion -Run $run -Id 'clean-exit' -Criterion 'The tray exits cleanly, with the notification client unregistered and no late callback.' `
-            -Outcome $(if ($stopped.Count -gt 0) { 'pass' } else { 'inconclusive' }) `
-            -Detail ([string]$stopped.Count + ' clean stop line(s) in the log, ' + $unregister.Count + ' unregister line(s).')
+            -Outcome $(if (@($stopped).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
+            -Detail ([string]@($stopped).Count + ' clean stop line(s) in the log, ' + @($unregister).Count + ' unregister line(s).')
 
         Save-EarshotLog -Run $run
     }

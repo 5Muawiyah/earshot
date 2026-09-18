@@ -184,7 +184,7 @@ try
         $bootLines = Get-EarshotLogLines -Run $run -Pattern 'boot'
         foreach ($line in ($bootLines | Select-Object -Last 10)) { Write-Line -Run $run -Text ('  ' + $line) }
         $startUpLines = Get-EarshotLogLines -Run $run -Pattern 'connected at start-up'
-        if ($startUpLines.Count -gt 0)
+        if (@($startUpLines).Count -gt 0)
         {
             foreach ($line in $startUpLines) { Write-Line -Run $run -Text ('  ' + $line) }
             Add-Finding -Run $run -Name 'connectedAtStartUp' -Value 'yes' -Detail 'the tray saw the AirPods already on this PC when it started, so the block did not hold'
@@ -290,7 +290,7 @@ try
             -Detail ('You answered ' + $themed + '.')
 
         $themeLines = Get-EarshotLogLines -Run $run -Pattern 'TaskbarCreated received.'
-        Add-Finding -Run $run -Name 'taskbarCreatedSeen' -Value $themeLines.Count `
+        Add-Finding -Run $run -Name 'taskbarCreatedSeen' -Value @($themeLines).Count `
             -Detail 'restart Explorer from Task Manager to raise one, and the icon should come straight back'
 
         $focus = Read-Answer -Run $run -Question 'When the card appeared, did your keyboard focus stay where it was, in whatever you were typing in?'
@@ -362,8 +362,8 @@ try
         $ghost = Read-Answer -Run $run -Question 'Did the icon disappear cleanly, with no ghost left behind?'
         $stopped = Get-EarshotLogLines -Run $run -Pattern 'Tray stopped.'
         Add-Criterion -Run $run -Id 'clean-exit' -Criterion 'Exit removes the icon cleanly and the log ends with a clean stop.' `
-            -Outcome $(if ($ghost -eq 'yes' -and $stopped.Count -gt 0) { 'pass' } elseif ($ghost -eq 'no') { 'fail' } else { 'inconclusive' }) `
-            -Detail ('You answered ' + $ghost + '; the log holds ' + $stopped.Count + ' clean stop line(s).')
+            -Outcome $(if ($ghost -eq 'yes' -and @($stopped).Count -gt 0) { 'pass' } elseif ($ghost -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $ghost + '; the log holds ' + @($stopped).Count + ' clean stop line(s).')
 
         Save-EarshotLog -Run $run
         Write-Line -Run $run -Text ''

@@ -69,7 +69,7 @@ try
         Wait-Owner -Run $run -Text 'Connect the AirPods to this PC and use them for a few minutes, with at least one pause between tracks longer than ten seconds.'
 
         $duringUse = Get-EarshotLogLines -Run $run -Pattern 'Blocking the nodes: the AirPods were not in use for'
-        $blockedDuringUse = $duringUse.Count
+        $blockedDuringUse = @($duringUse).Count
         $nodes = Get-NodeState -Run $run -Label 'nodes-during-use'
         $audio = Get-AudioState -Run $run -Label 'audio-during-use'
         $states = Get-TargetEndpointStates -AudioJson $audio
@@ -95,7 +95,7 @@ try
             Wait-Seconds -Run $run -Seconds 15 -Reason 'watching for the idle rule to block the nodes'
             $seconds = $seconds + 15
             $lines = Get-EarshotLogLines -Run $run -Pattern 'Blocking the nodes: the AirPods were not in use for' -SinceUtc $stoppedAt
-            if ($lines.Count -gt 0)
+            if (@($lines).Count -gt 0)
             {
                 $blocked = $true
                 foreach ($line in $lines) { Write-Line -Run $run -Text ('  ' + $line) }
@@ -118,7 +118,7 @@ try
             -Detail ('About ' + $seconds + ' s, watched in 15 s steps. A much longer wait usually means something kept restarting it; the "not issued" lines say what.')
 
         Add-Finding -Run $run -Name 'secondsFromIdleToBlock' -Value $seconds -Detail 'measured in 15 s steps, so treat it as a bound'
-        Add-Finding -Run $run -Name 'idleBlockDeferrals' -Value $notIssued.Count -Detail 'how many times the rule decided not to block; the reasons are in the log lines'
+        Add-Finding -Run $run -Name 'idleBlockDeferrals' -Value @($notIssued).Count -Detail 'how many times the rule decided not to block; the reasons are in the log lines'
         Add-Finding -Run $run -Name 'suggestedIdleGraceSeconds' -Value $IdleGraceSeconds `
             -Detail 'change it only if this test shows churn keeping the endpoint non-ACTIVE for longer than the wait, or a block landing during use'
 
@@ -127,7 +127,7 @@ try
         Write-Line -Run $run -Text 'single change is longer than the grace window, the rule can never settle.'
         $churn = Get-EarshotLogLines -Run $run -Pattern 'Idle rule re-armed'
         foreach ($line in ($churn | Select-Object -Last 10)) { Write-Line -Run $run -Text ('  ' + $line) }
-        Add-Finding -Run $run -Name 'idleRuleReArmed' -Value $churn.Count
+        Add-Finding -Run $run -Name 'idleRuleReArmed' -Value @($churn).Count
 
         Save-EarshotLog -Run $run
     }
