@@ -1,0 +1,748 @@
+<#
+.SYNOPSIS
+    The fake machine the live test scripts are run against by the self-test.
+
+.DESCRIPTION
+    Nothing here touches a device, a scheduled task, the registry outside a read, or any
+    folder outside the sandbox the runner makes under %TEMP%. Earshot.exe is never started:
+    Invoke-Earshot and Invoke-EarshotElevated are replaced, and Start-Process is replaced
+    with one that throws, so a helper that grew a new way of starting something would stop
+    the self-test rather than run it.
+
+    Three things are faked.
+
+    1. A small world: node state, render endpoint, protection, whether the tasks are set up.
+       Each shipped command moves it the way the real one would, so a script that blocks and
+       then reads the nodes sees Blocked, and a criterion's outcome follows from the fake
+       inputs rather than from a table of answers.
+
+    2. The reports. Every probe and diag target answers with the members the scripts read.
+       The reports are written to the same files the real ones would be written to and read
+       back through the real helpers, so Get-DiagEvidence, Copy-AppEvidence, Read-KsEvidence
+       and Read-EarshotJsonFile all run for real.
+
+    3. The Earshot log, and the evidence lists the scripts count: notifications, unelevated
+       steps, watched battery values, installed services. Each of those holds 0, 1 or 2 items
+       depending on the case, because 0 and 1 are where PowerShell unrolls a returned list
+       into $null and into a bare value, and where a later .Count throws under strict mode.
+
+    The owner is never asked anything: Read-Answer, Read-Note and Read-Host are answered from
+    the tables below. A question that is not in a table is written to unanswered.txt, which
+    the runner reads and fails the case on, so a new question cannot be answered by accident.
+#>
+
+#Requires -Version 5.1
+
+Set-StrictMode -Version 2.0
+
+# ----------------------------------------------------------------- the log fixture
+
+# Every pattern the shipped scripts pass to Get-EarshotLogLines. The self-test writes each one
+# 0, 1 or 2 times, so a run sees the empty answer, the single answer that PowerShell hands back
+# as a bare string, and the list. No line matches more than one of these patterns.
+$script:LogFixtures = @(
+    [ordered]@{ Pattern = 'Blocking the nodes: the AirPods were not in use for'; Text = 'Blocking the nodes: the AirPods were not in use for 30 s' }
+    [ordered]@{ Pattern = 'Idle block not issued'; Text = 'Idle block not issued: an operation was still in flight' }
+    [ordered]@{ Pattern = 'Idle rule re-armed'; Text = 'Idle rule re-armed: the render endpoint changed' }
+    [ordered]@{ Pattern = 'Session ending: block queued at'; Text = 'Session ending: block queued at 12:00:00' }
+    [ordered]@{ Pattern = 'Session ending: no block issued'; Text = 'Session ending: no block issued, the nodes were already Blocked' }
+    [ordered]@{ Pattern = 'WM_ENDSESSION received'; Text = 'WM_ENDSESSION received, flags 0x00000001' }
+    [ordered]@{ Pattern = 'WM_QUERYENDSESSION received'; Text = 'WM_QUERYENDSESSION received, flags 0x00000000' }
+    [ordered]@{ Pattern = 'Tray stopped.'; Text = 'Tray stopped.' }
+    [ordered]@{ Pattern = 'TaskbarCreated received.'; Text = 'TaskbarCreated received.' }
+    [ordered]@{ Pattern = 'connected at start-up'; Text = 'Logon check: connected at start-up' }
+    [ordered]@{ Pattern = 'boot'; Text = 'Boot task finished at boot' }
+    [ordered]@{ Pattern = 'args:'; Text = 'Gate rejected the args: status 1234' }
+    [ordered]@{ Pattern = 'unregister'; Text = 'Notification client unregister requested' }
+)
+
+# The one pattern that is also written with a stamp in the past, so the -SinceUtc filter in
+# Get-EarshotLogLines has a line to drop. Only test 13 reads it, and only with -SinceUtc.
+$script:PastStampedPattern = 'Idle block not issued'
+
+# ------------------------------------------------------------------ the fake world
+
+# Where each test starts. The state is the one that test's own preconditions describe, so the
+# script takes the path the owner would take on a machine that is set up properly.
+$script:StartStates = @{
+    '00-restore|first'                   = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'NotProtected'; SetUp = $true }
+    '01-a2dp-oneshot|first'              = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'NotProtected'; SetUp = $true }
+    '02-disconnect|first'                = @{ NodeState = 'Allowed'; Render = 'Active'; Protection = 'NotProtected'; SetUp = $true }
+    '03-allow-pages|first'               = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '04-block-and-reboot|first'          = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '04-block-and-reboot|resume'         = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '05-allow|first'                     = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '05-allow|resume'                    = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '06-handsfree|first'                 = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'NotProtected'; SetUp = $true }
+    '07-task-runex|first'                = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '08-acceptance-power-cycle|first'    = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '08-acceptance-power-cycle|resume'   = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '09-shutdown-while-connected|first'  = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '09-shutdown-while-connected|resume' = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '10-shutdown-messages-v1|first'      = @{ NodeState = 'Allowed'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
+    '10-shutdown-messages-v1|resume'     = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '11-battery-disconnected|first'      = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '12-callback-thread|first'           = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '13-grace-window|first'              = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '14-set-device-refusal|first'        = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '15-uninstall-reversal|first'        = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '15-uninstall-reversal|resume'       = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'NotProtected'; SetUp = $true }
+}
+
+# The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
+# speaker that has one. None of the three addresses is real. They are only twelve hexadecimal
+# characters of the right shape, so no real device identifier is committed.
+$script:PinnedAddress = '0A1B2C3D4E8C'
+$script:OtherAddress = 'B4C5D6E7F809'
+$script:SpeakerAddress = 'C7D8E9F0A1B2'
+$script:ContainerId = '5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13'
+$script:SystemSid = 'S-1-5-18'
+
+# What the owner answers. The key is a piece of the question, matched without case; the value is
+# the answer, which must be one of the options the question offers.
+$script:Answers = [ordered]@{
+    'which state do you want to finish in'             = 'on'
+    'leave protection on, as earshot ships'            = 'on'
+    'did the audio move from your phone to this pc'    = 'yes'
+    'did the audio stop playing on this pc'            = 'yes'
+    'did the audio ever leave your phone'              = 'no'
+    'did the airpods stay on your phone'               = 'yes'
+    'do you want to restart now'                       = 'yes'
+    'did the airpods stay connected to your phone'     = 'yes'
+    'did the airpods connect to this pc after'         = 'yes'
+    'did the airpods disconnect from this pc after'    = 'yes'
+    'did any administrator prompt appear'              = 'no'
+    'are the airpods playing from the phone again'     = 'yes'
+    'is the tray glyph sharp'                          = 'yes'
+    'did the icon come back at the right size'         = 'yes'
+    'did the glyph ink flip'                           = 'yes'
+    'did your keyboard focus stay'                     = 'yes'
+    'did a fast double click still toggle only once'   = 'yes'
+    'did the right click open the menu'                = 'yes'
+    'could you reach the icon and open its menu'       = 'yes'
+    'after turning it off in task manager'             = 'yes'
+    'start earshot a second time'                      = 'yes'
+    'with a second display attached'                   = 'yes'
+    'with the taskbar set to hide itself'              = 'yes'
+    'during a full-screen game'                        = 'yes'
+    'in a contrast theme'                              = 'yes'
+    'did the icon disappear cleanly'                   = 'yes'
+    'did the airpods connect to this pc by themselves' = 'no'
+    'did earshot ever cut the connection'              = 'no'
+    'did the list show your airpods and your phone'    = 'yes'
+    'were devices that are not present now shown'      = 'yes'
+    'did the first half install earshot again'         = 'yes'
+}
+
+# What the owner types for a free-text note.
+$script:Notes = [ordered]@{
+    'twelve character address of your phone'  = 'B4C5D6E7F809'
+    'how did the unsupplied third argument'   = 'the literal placeholder arrived'
+    'what did the card near the tray say'     = 'Connected.'
+    'what did the card say that time'         = 'Back on your phone.'
+}
+
+$script:World = $null
+$script:Context = $null
+
+function Initialize-FakeMachine
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$SandboxRoot,
+        [Parameter(Mandatory = $true)][string]$TestId,
+        [Parameter(Mandatory = $true)][ValidateSet('first', 'resume')][string]$Half,
+        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two')][string]$Case
+    )
+
+    $counts = @{ none = 0; one = 1; two = 2 }
+    $key = [string]$TestId + '|' + $Half
+    if (-not $script:StartStates.ContainsKey($key))
+    {
+        throw ('The self-test has no start state for ' + $key + '. Add one to StartStates in Fakes.psm1.')
+    }
+
+    $start = $script:StartStates[$key]
+    $script:Context = [ordered]@{
+        SandboxRoot   = $SandboxRoot
+        TestId        = $TestId
+        Half          = $Half
+        Case          = $Case
+        Items         = $counts[$Case]
+        ExePath       = (Join-Path (Join-Path $SandboxRoot 'release') 'Earshot.exe')
+        ProgramFolder = (Join-Path (Join-Path $SandboxRoot 'programfiles') 'Earshot')
+        DataFolder    = (Join-Path (Join-Path $SandboxRoot 'programdata') 'Earshot')
+        Unanswered    = (Join-Path $SandboxRoot 'unanswered.txt')
+        Evidence      = 0
+    }
+
+    $script:World = [ordered]@{
+        NodeState  = $start.NodeState
+        Render     = $start.Render
+        Protection = $start.Protection
+        SetUp      = $start.SetUp
+    }
+}
+
+function Get-FakeContext
+{
+    if ($null -eq $script:Context) { throw 'Initialize-FakeMachine was not called.' }
+    return $script:Context
+}
+
+# ------------------------------------------------------------------- the sandbox
+
+# Builds the folders, the fake log and the JSON files Earshot owns. Everything is under
+# $SandboxRoot, which the runner puts in %TEMP%: no real ProgramData, Program Files or
+# Earshot folder is written to, and the child process has LOCALAPPDATA, APPDATA,
+# ProgramData and ProgramFiles pointed here.
+function New-FakeSandbox
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$SandboxRoot,
+        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two')][string]$Case
+    )
+
+    $counts = @{ none = 0; one = 1; two = 2 }
+    $items = $counts[$Case]
+    $local = Join-Path $SandboxRoot 'local'
+    $data = Join-Path (Join-Path $SandboxRoot 'programdata') 'Earshot'
+    $folders = @(
+        $local
+        (Join-Path $SandboxRoot 'roaming')
+        (Join-Path (Join-Path $SandboxRoot 'programfiles') 'Earshot')
+        (Join-Path $SandboxRoot 'release')
+        $data
+        (Join-Path (Join-Path $local 'Earshot') 'logs')
+        (Join-Path (Join-Path $local 'Earshot') 'livetest')
+        (Join-Path (Join-Path $SandboxRoot 'roaming') 'Earshot')
+    )
+
+    foreach ($folder in $folders) { New-Item -ItemType Directory -Force -Path $folder | Out-Null }
+
+    # The log lines are stamped an hour ahead of now. Several scripts read the log with
+    # -SinceUtc set from a time they take part way through the run, and a line stamped when the
+    # sandbox was built would be dropped by that filter, which would hide the very counts this
+    # self-test is about. One line per the pattern named in PastStampedPattern is stamped in
+    # 2001 instead, so the filter has something it must drop.
+    $ahead = (Get-Date).ToUniversalTime().AddHours(1)
+    $lines = @()
+    $index = 0
+    foreach ($fixture in $script:LogFixtures)
+    {
+        for ($i = 0; $i -lt $items; $i++)
+        {
+            $index = $index + 1
+            $stamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+            $lines = $lines + @([string]$stamp + ' INFO  ' + $fixture.Text + ' (' + ($i + 1) + ')')
+        }
+
+        if ($fixture.Pattern -eq $script:PastStampedPattern)
+        {
+            $lines = $lines + @('2001-02-03T04:05:06.007Z INFO  ' + $fixture.Text + ' (before the window)')
+        }
+    }
+
+    # A line with no stamp at all and a line no pattern looks for, so reading a log that holds
+    # more than the searched lines is covered too.
+    $lines = $lines + @('no stamp on this line at all, and no pattern looks for it')
+    $lines = $lines + @('2001-02-03T04:05:06.008Z INFO  a line no pattern looks for')
+
+    Set-Content -LiteralPath (Join-Path (Join-Path (Join-Path $local 'Earshot') 'logs') 'earshot.log') `
+        -Value $lines -Encoding UTF8
+
+    Write-FakeMachineFiles -DataFolder $data -BlockAtBoot $true -Items $items
+    Set-Content -LiteralPath (Join-Path (Join-Path $SandboxRoot 'roaming') 'Earshot\settings.json') `
+        -Value (@{ ProtectAudioQuality = $true; OpenOnStartup = $true } | ConvertTo-Json) -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path (Join-Path $SandboxRoot 'release') 'Earshot.files.json') `
+        -Value (@{ files = @() } | ConvertTo-Json) -Encoding UTF8
+}
+
+# config.json, device.json and protection.json, as the SYSTEM side of Earshot writes them.
+function Write-FakeMachineFiles
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$DataFolder,
+        [Parameter(Mandatory = $true)][bool]$BlockAtBoot,
+        [Parameter(Mandatory = $true)][int]$Items
+    )
+
+    New-Item -ItemType Directory -Force -Path $DataFolder | Out-Null
+    Set-Content -LiteralPath (Join-Path $DataFolder 'config.json') `
+        -Value (@{ BlockAtBoot = $BlockAtBoot } | ConvertTo-Json) -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $DataFolder 'device.json') `
+        -Value ([ordered]@{ Address = $script:PinnedAddress; ContainerId = $script:ContainerId } | ConvertTo-Json) -Encoding UTF8
+
+    # ProtectionRecord keeps plain GUIDs, so that is what this writes.
+    $disabled = @()
+    for ($i = 0; $i -lt $Items; $i++)
+    {
+        $disabled = $disabled + @('0000111' + $i + '-0000-1000-8000-00805F9B34FB')
+    }
+
+    Set-Content -LiteralPath (Join-Path $DataFolder 'protection.json') `
+        -Value ([ordered]@{ DisabledServices = $disabled; PendingProtect = $null } | ConvertTo-Json -Depth 5) -Encoding UTF8
+}
+
+# ------------------------------------------------------------------- the reports
+
+function Get-FakeNodes
+{
+    $nodes = @()
+    $disabled = ($script:World.NodeState -eq 'Blocked')
+    $problem = 0
+    if ($disabled) { $problem = 22 }
+
+    foreach ($service in @('0000110B', '0000111E', '0000110A'))
+    {
+        $nodes = $nodes + @([ordered]@{
+                instanceId          = ('BTHENUM\{' + $service + '-0000-1000-8000-00805F9B34FB}_VID&0001005D_PID&2038\8&' + $script:PinnedAddress + '&0&' + $script:PinnedAddress + '_C00000000')
+                target              = $true
+                present             = $true
+                status              = '0x0180200A'
+                problem             = $problem
+                configFlagsDisabled = $disabled
+            })
+    }
+
+    # One node belonging to another paired device, so the address sweep in test 14 has
+    # something other than the pinned device to find.
+    $nodes = $nodes + @([ordered]@{
+            instanceId          = ('BTHENUM\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&0002\7&' + $script:OtherAddress + '&0&' + $script:OtherAddress + '_C00000000')
+            target              = $false
+            present             = $true
+            status              = '0x0180200A'
+            problem             = 0
+            configFlagsDisabled = $false
+        })
+
+    return [ordered]@{
+        address   = $script:PinnedAddress
+        container = $script:ContainerId
+        nodeState = $script:World.NodeState
+        nodes     = $nodes
+    }
+}
+
+function Get-FakeAudio
+{
+    $render = $script:World.Render
+    $capture = 'NotPresent'
+    $connection = 'Disconnected'
+    if ($render -eq 'Active')
+    {
+        $connection = 'Connected'
+        if ($script:World.Protection -ne 'Protected') { $capture = 'Active' }
+    }
+
+    return [ordered]@{
+        resolution = 'Pinned'
+        device     = [ordered]@{ connection = $connection; containerId = $script:ContainerId; address = $script:PinnedAddress }
+        groups     = @(
+            [ordered]@{
+                containerId = $script:ContainerId
+                endpoints   = @(
+                    [ordered]@{ flow = 'Render'; state = $render; friendlyName = 'AirPods Pro 3 (Stereo)' }
+                    [ordered]@{ flow = 'Capture'; state = $capture; friendlyName = 'AirPods Pro 3 (Hands-Free)' }
+                )
+            })
+    }
+}
+
+function Get-FakeServices
+{
+    $listed = @()
+    for ($i = 0; $i -lt $script:Context.Items; $i++)
+    {
+        $listed = $listed + @([ordered]@{ label = ('Service ' + ($i + 1)); guid = ('0000111' + $i + '-0000-1000-8000-00805F9B34FB') })
+    }
+
+    return [ordered]@{
+        protection        = $script:World.Protection
+        complete          = $true
+        connected         = ($script:World.Render -eq 'Active')
+        installedServices = $listed
+    }
+}
+
+function Get-FakeTask
+{
+    $rows = @()
+    foreach ($name in @('\Earshot\Boot', '\Earshot\Gate', '\Earshot\Protect'))
+    {
+        $rows = $rows + @([ordered]@{
+                path           = $name
+                present        = $script:World.SetUp
+                userId         = $script:SystemSid
+                logonType      = 'ServiceAccount'
+                runLevel       = 'Highest'
+                trayMayRun     = $true
+                userMask       = '0x00000113'
+                lastTaskResult = 0
+            })
+    }
+
+    return [ordered]@{ setUp = $script:World.SetUp; tasks = $rows }
+}
+
+function Get-FakeTopology
+{
+    return [ordered]@{
+        adapters = @(
+            [ordered]@{ adapterId = 'A2DP source filter'; guardPassed = $true; ksControlActivated = $true; pinCount = 2 }
+            [ordered]@{ adapterId = 'Handsfree filter'; guardPassed = $true; ksControlActivated = $true; pinCount = 3 }
+        )
+    }
+}
+
+# The filters a diag ks run finds, for the filter word the script passed. With protection on
+# there is no Handsfree filter, which is what test 01 and test 02 are checking.
+function Get-FakeKsFilters
+{
+    param([Parameter(Mandatory = $true)][string]$Filter)
+
+    $roles = @()
+    if ($Filter -eq 'src' -or $Filter -eq 'all') { $roles = $roles + @('A2DP') }
+    if (($Filter -eq 'wave' -or $Filter -eq 'all') -and $script:World.Protection -ne 'Protected') { $roles = $roles + @('HFP') }
+
+    $rows = @()
+    foreach ($role in $roles)
+    {
+        $rows = $rows + @([ordered]@{
+                role              = $role
+                name              = ([string]$role + ' filter')
+                guardPassed       = $true
+                ksControlActivated = $true
+                requestSent       = $true
+                notSentReason     = $null
+                hr                = '0x00000000'
+                hrName            = 'S_OK'
+                accepted          = $true
+                bytesReturned     = 0
+                callMilliseconds  = 40
+            })
+    }
+
+    return ,$rows
+}
+
+function Get-FakeKsEvidence
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$Action,
+        [Parameter(Mandatory = $true)][string]$Filter,
+        [string]$FilterChoice = ''
+    )
+
+    # Plain, not @(...): Get-FakeKsFilters returns its list with a leading comma, and @() round
+    # the call would wrap that list in another one.
+    $filters = Get-FakeKsFilters -Filter $Filter
+    $reached = (@($filters).Count -gt 0)
+    $notifications = @()
+    if ($reached)
+    {
+        for ($i = 0; $i -lt $script:Context.Items; $i++)
+        {
+            $notifications = $notifications + @([ordered]@{
+                    sequence                 = ($i + 1)
+                    utc                      = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+                    kind                     = 'StateChanged'
+                    newState                 = $(if ($Action -eq 'reconnect') { 'Active' } else { 'Unplugged' })
+                    millisecondsAfterRequest = (400 * ($i + 1))
+                    threadId                 = (7000 + $i)
+                    apartment                = 'MTA'
+                })
+        }
+    }
+
+    $choice = $Filter
+    if (-not [string]::IsNullOrEmpty($FilterChoice)) { $choice = $FilterChoice }
+    return [ordered]@{
+        action                                    = $Action
+        filterChoice                              = $choice
+        payload                                   = 'documented'
+        error                                     = $null
+        sendFault                                 = $null
+        filters                                   = $filters
+        notifications                             = $notifications
+        confirmation                              = [ordered]@{ reached = $reached; unreachable = (-not $reached); source = 'notification' }
+        millisecondsToFirstWantedStateNotification = $(if ($reached) { 1200 } else { $null })
+    }
+}
+
+function Get-FakeGateEvidence
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$Verb,
+        [string]$Argument = ''
+    )
+
+    # set-device is the one verb the gate is meant to refuse. The phone has no A2DP sink, so it
+    # is refused with 12; the speaker has one, so it is refused with 13 instead, because the
+    # device pinned now still has services turned off.
+    $exit = 0
+    $result = 'Success'
+    if ($Verb -eq 'set-device')
+    {
+        $exit = 12
+        $result = 'NotAudioSink'
+        if ($Argument -eq $script:SpeakerAddress)
+        {
+            $exit = 13
+            $result = 'OtherDeviceProtected'
+        }
+    }
+
+    return [ordered]@{
+        outcome            = 'Completed'
+        nonce              = '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64'
+        runMilliseconds    = 12000
+        lastTaskResult     = $exit
+        lastTaskResultCode = $exit
+        statusFile         = [ordered]@{ exitCode = $exit; result = $result; nonce = '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64' }
+    }
+}
+
+function Get-FakeUnelevatedEvidence
+{
+    param([Parameter(Mandatory = $true)][string]$Mode)
+
+    $steps = @()
+    for ($i = 0; $i -lt $script:Context.Items; $i++)
+    {
+        $steps = $steps + @([ordered]@{
+                step     = ('BluetoothSetServiceState ' + $Mode + ' ' + ($i + 1))
+                code     = 5
+                codeName = 'ERROR_ACCESS_DENIED'
+                detail   = 'a non-elevated caller was refused'
+            })
+    }
+
+    return [ordered]@{ steps = $steps }
+}
+
+function Get-FakeSweepEvidence
+{
+    $matched = @()
+    foreach ($suffix in @('A', 'B'))
+    {
+        $matched = $matched + @([ordered]@{
+                instanceId   = ('BTHENUM\DEV_' + $script:PinnedAddress + '_' + $suffix)
+                friendlyName = ('AirPods Pro 3 node ' + $suffix)
+                present      = $true
+                keys         = 41
+            })
+    }
+
+    $values = @()
+    for ($i = 0; $i -lt $script:Context.Items; $i++)
+    {
+        $values = $values + @([ordered]@{ key = ('{104EA319-6EE2-4701-BD47-8DDBF425BBE5} ' + ($i + 2)); value = (70 + $i) })
+    }
+
+    return [ordered]@{
+        matched                          = $matched
+        watchedValues                    = $values
+        containerIdReadOnAMatchedNode    = $true
+    }
+}
+
+function Get-FakeBattery
+{
+    return [ordered]@{ hasSource = $false; hasValue = $false }
+}
+
+# ------------------------------------------------------------- how a command moves the world
+
+# Whether a ks run reached the state it asked for. The evidence is the table this module built,
+# so it is read straight rather than through the shipped Get-FieldPath, which keeps the fakes
+# independent of the module they are used to test.
+function Test-FakeReached
+{
+    param($Evidence)
+
+    if ($null -eq $Evidence) { return $false }
+    if (-not ($Evidence -is [System.Collections.IDictionary])) { return $false }
+    if (-not $Evidence.Contains('confirmation')) { return $false }
+    return ($Evidence['confirmation']['reached'] -eq $true)
+}
+
+# The one place a shipped command changes the fake machine. It is deliberately the same shape
+# as the real effect, so a criterion that reads the state back after a step gets the answer the
+# real gate would have given.
+function Update-FakeWorld
+{
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Command,
+        $Evidence
+    )
+
+    $text = ($Command -join ' ')
+    switch -Regex ($text)
+    {
+        '^diag gate allow' { $script:World.NodeState = 'Allowed' }
+        '^diag gate block' { $script:World.NodeState = 'Blocked'; $script:World.Render = 'Unplugged' }
+        '^diag gate protect-on' { $script:World.Protection = 'Protected' }
+        '^diag gate protect-off' { $script:World.Protection = 'NotProtected' }
+        '^diag gate setboot-off' { Write-FakeMachineFiles -DataFolder $script:Context.DataFolder -BlockAtBoot $false -Items $script:Context.Items }
+        '^diag gate setboot-on' { Write-FakeMachineFiles -DataFolder $script:Context.DataFolder -BlockAtBoot $true -Items $script:Context.Items }
+        '^diag (ks reconnect|connect)'
+        {
+            if (Test-FakeReached -Evidence $Evidence) { $script:World.Render = 'Active' }
+        }
+        '^diag (ks disconnect|disconnect)'
+        {
+            if (Test-FakeReached -Evidence $Evidence) { $script:World.Render = 'Unplugged' }
+        }
+        '^uninstall'
+        {
+            $script:World.NodeState = 'Allowed'
+            $script:World.Protection = 'NotProtected'
+            $script:World.SetUp = $false
+            foreach ($folder in @($script:Context.ProgramFolder, $script:Context.DataFolder))
+            {
+                if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
+            }
+        }
+        '^install'
+        {
+            $script:World.SetUp = $true
+            New-Item -ItemType Directory -Force -Path $script:Context.ProgramFolder | Out-Null
+            Write-FakeMachineFiles -DataFolder $script:Context.DataFolder -BlockAtBoot $true -Items $script:Context.Items
+        }
+    }
+}
+
+# The report a command answers with, and the evidence file it writes beside the run folders.
+# Both come back so the caller can write them where the real command would have.
+function Get-FakeCommandAnswer
+{
+    param([Parameter(Mandatory = $true)][string[]]$Command)
+
+    $report = $null
+    $evidence = $null
+    $text = ($Command -join ' ')
+
+    if ($Command[0] -eq 'probe')
+    {
+        switch ($Command[1])
+        {
+            'nodes' { $report = Get-FakeNodes }
+            'audio' { $report = Get-FakeAudio }
+            'services' { $report = Get-FakeServices }
+            'task' { $report = Get-FakeTask }
+            'topology' { $report = Get-FakeTopology }
+            'battery' { $report = Get-FakeBattery }
+            default { $report = [ordered]@{ target = $Command[1] } }
+        }
+    }
+    elseif ($Command[0] -eq 'diag')
+    {
+        switch ($Command[1])
+        {
+            'ks' { $evidence = Get-FakeKsEvidence -Action $Command[2] -Filter $Command[3] -FilterChoice $(if ($Command.Count -gt 4) { [string]$Command[4] } else { '' }) }
+            'connect' { $evidence = Get-FakeKsEvidence -Action 'reconnect' -Filter 'all' }
+            'disconnect' { $evidence = Get-FakeKsEvidence -Action 'disconnect' -Filter 'all' }
+            'gate' { $evidence = Get-FakeGateEvidence -Verb $Command[2] -Argument $(if ($Command.Count -gt 3) { [string]$Command[3] } else { '' }) }
+            'protect-unelevated' { $evidence = Get-FakeUnelevatedEvidence -Mode $Command[2] }
+            'battery-sweep' { $evidence = Get-FakeSweepEvidence }
+            default { $evidence = [ordered]@{ target = $Command[1] } }
+        }
+    }
+
+    return [ordered]@{ Report = $report; Evidence = $evidence; Text = $text }
+}
+
+# ---------------------------------------------------------------- answering the owner
+
+function Get-FakeAnswer
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$Question,
+        [Parameter(Mandatory = $true)][string[]]$Options
+    )
+
+    $lower = $Question.ToLowerInvariant()
+    foreach ($key in $script:Answers.Keys)
+    {
+        if ($lower.Contains($key))
+        {
+            $answer = $script:Answers[$key]
+            if (-not ($Options -contains $answer))
+            {
+                Write-FakeGap -Text ('The answer "' + $answer + '" is not one of the options ' + ($Options -join '/') + ' for: ' + $Question)
+                return $Options[0]
+            }
+
+            return $answer
+        }
+    }
+
+    Write-FakeGap -Text ('No answer in Fakes.psm1 for the question: ' + $Question)
+    return $Options[0]
+}
+
+function Get-FakeNote
+{
+    param([Parameter(Mandatory = $true)][string]$Question)
+
+    $lower = $Question.ToLowerInvariant()
+    foreach ($key in $script:Notes.Keys)
+    {
+        if ($lower.Contains($key)) { return $script:Notes[$key] }
+    }
+
+    Write-FakeGap -Text ('No note in Fakes.psm1 for the question: ' + $Question)
+    return 'nothing was typed'
+}
+
+# What Wait-Owner asks the owner to do by hand is the other way the machine changes during a
+# run, so the fake owner does it. The phrases that hand the AirPods back are matched first,
+# because several of them also hold the word connect.
+function Update-FakeWorldForOwnerAction
+{
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    $lower = $Text.ToLowerInvariant()
+    foreach ($away in @('once more', 'stop using', 'disconnect the airpods'))
+    {
+        if ($lower.Contains($away))
+        {
+            $script:World.Render = 'Unplugged'
+            return
+        }
+    }
+
+    # "left-click its tray icon once" is the acceptance test's way of saying connect them.
+    foreach ($towards in @('connect', 'left-click'))
+    {
+        if ($lower.Contains($towards))
+        {
+            $script:World.Render = 'Active'
+            return
+        }
+    }
+}
+
+# A question, an option or a command the fakes do not cover. The runner fails the case on it
+# rather than letting the run carry on with a value nobody chose.
+function Write-FakeGap
+{
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    Add-Content -LiteralPath $script:Context.Unanswered -Value $Text -Encoding UTF8
+}
+
+function Get-FakeEvidenceName
+{
+    param([Parameter(Mandatory = $true)][string]$Label)
+
+    $script:Context.Evidence = $script:Context.Evidence + 1
+    return ('{0:d3}-{1}.json' -f $script:Context.Evidence, $Label)
+}
+
+Export-ModuleMember -Function `
+    Initialize-FakeMachine, Get-FakeContext, New-FakeSandbox, Write-FakeMachineFiles,
+    Get-FakeNodes, Get-FakeAudio, Get-FakeServices, Get-FakeTask, Get-FakeTopology,
+    Get-FakeKsFilters, Get-FakeKsEvidence, Get-FakeGateEvidence, Get-FakeUnelevatedEvidence,
+    Get-FakeSweepEvidence, Get-FakeBattery, Test-FakeReached, Update-FakeWorld, Get-FakeCommandAnswer,
+    Get-FakeAnswer, Get-FakeNote, Update-FakeWorldForOwnerAction, Write-FakeGap, Get-FakeEvidenceName
