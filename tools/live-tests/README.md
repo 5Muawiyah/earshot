@@ -220,6 +220,29 @@ unknown rather than assumed.
 When a sitting ends, tick the needs the run actually answered against this table in
 `PROMPTING_RESPONSES.md`, so an unasked question is never read as a settled one.
 
+## How these scripts are themselves tested
+
+The scripts run under `Set-StrictMode -Version 2.0`, where a script that parses
+cleanly can still throw on its first criterion. PowerShell unrolls whatever a
+function writes to the pipeline, so a helper that ends `return $found` hands back
+`$null` when nothing matched and a bare string when one thing did, and `.Count` on
+either throws. The script's own `catch` turns that into `run: fail` with every
+criterion after it lost, and it happens on the success path, because "no matching
+line" is what a boot block that held produces.
+
+`tools\live-tests\selftest` runs every script in this folder, and both halves of
+every resumable one, against a fake machine: sixteen scripts, twenty-two halves,
+three sets of fake inputs holding 0, 1 and 2 matching lines and list items, so
+sixty-six runs. Only the device-touching and owner-prompting helpers are replaced;
+`Get-EarshotLogLines`, `Get-DiagEvidence`, `Copy-AppEvidence`, `Read-KsEvidence`,
+`Read-EarshotJsonFile`, `Add-Criterion` and `Complete-LiveTestRun` all run for
+real. Nothing there touches a device, registers a task, elevates or starts
+`Earshot.exe`.
+
+`tools\check.ps1` runs it, so a change to a script that would lose a criterion on
+the owner's machine fails the gate instead. `tools\live-tests\selftest\README.md`
+explains it, and says what to add when a test is added.
+
 ## A note on numbers
 
 Never write a figure into the README or anywhere else that a test did not measure.

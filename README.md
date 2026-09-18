@@ -331,6 +331,12 @@ recorded as one.
 `tools\live-tests\README.md` before the first run, so you know how to run it
 before you need it.
 
+The scripts themselves are tested by `tools\live-tests\selftest`, which runs
+every one of them, and both halves of each that needs a restart, against a fake
+machine with no device, no scheduled task and no `Earshot.exe` anywhere in it.
+That is what proves a script reaches the end and records every criterion it
+should, which reading the source cannot. It runs as part of `tools\check.ps1`.
+
 ## Uninstall
 
 Turn **Open on startup** off in the menu first, then close Earshot. The startup

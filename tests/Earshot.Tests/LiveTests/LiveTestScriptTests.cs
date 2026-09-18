@@ -140,6 +140,64 @@ public sealed class LiveTestScriptTests
             Environment.NewLine + string.Join(Environment.NewLine, problems));
     }
 
+    // The third shape, and the one that has come back twice after being fixed twice.
+    //
+    // PowerShell unrolls what a function writes to the pipeline. A helper that ends "return $found"
+    // hands the caller $null when $found is empty and the bare element when it holds one, and under
+    // Set-StrictMode -Version 2.0 both $null.Count and 'one line'.Count throw PropertyNotFoundStrict.
+    // .Length works and .Count does not, so a version bump is not a fix. The throw lands in the
+    // script's own catch, which records "run: fail" and abandons every criterion after it, and it
+    // fires on the success path: "no matching line" is exactly the answer a boot block that held
+    // produces.
+    //
+    // The rule has two halves, and this holds the caller's half: a .Count, a .Length or an index
+    // read on a variable that came straight from a command is written @($lines).Count. That is a
+    // no-op when the helper wraps its answer and it repairs the value when somebody takes the
+    // wrapping away, so neither half alone has to be right.
+    //
+    // tools\live-tests\selftest is the other proof, and the one that matters: it runs the scripts.
+    [TestMethod]
+    public void EveryCountOnACommandResultIsWrappedInAnArraySubexpression()
+    {
+        var problems = Scripts.CollectionReads
+            .Where(r => !r.Wrapped)
+            .Select(r => r.File + " line " + r.Line.ToString(CultureInfo.InvariantCulture) + " reads " + r.Member +
+                " from $" + r.Variable + ", assigned from a command on line " + r.AssignedLine.ToString(CultureInfo.InvariantCulture) +
+                ": " + r.Text)
+            .ToList();
+
+        Assert.IsEmpty(
+            problems,
+            "A count or an index is read straight off what a command returned. PowerShell unrolls that answer, so it " +
+            "is $null for no matches and a bare value for one, and both throw under strict mode. Write @($variable) " +
+            "round the read:" + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    // The other half of the caller's rule, and the trap in the first half. @() collects what the
+    // pipeline emits, and a helper that returns ", $found" has already made its whole list one
+    // object by then, so @(Get-EarshotLogLines ...) is a list holding a list and .Count reads 1 for
+    // every answer, including none. The call is assigned plainly and the variable is wrapped.
+    [TestMethod]
+    public void NoCallToAHelperThatWrapsItsAnswerIsPutInAnArraySubexpression()
+    {
+        var problems = Scripts.ArrayWrappedCalls
+            .Where(c => Scripts.WrappingFunctions.Contains(c.Command))
+            .Select(c => c.File + " line " + c.Line.ToString(CultureInfo.InvariantCulture) + ": " + c.Text)
+            .ToList();
+
+        Assert.IsEmpty(
+            problems,
+            "A helper that returns its list whole is called inside @(), which wraps it a second time and makes every " +
+            "count read 1. Assign the call plainly and put @() round the variable instead:" +
+            Environment.NewLine + string.Join(Environment.NewLine, problems));
+
+        Assert.Contains(
+            "Get-EarshotLogLines",
+            Scripts.WrappingFunctions,
+            "Get-EarshotLogLines no longer returns its list with a leading comma, so an empty answer is $null again " +
+            "and a single line is a bare string again.");
+    }
+
     // The other half of the same rule. Add-Finding records a value the run measured, and a report
     // writes null for a value it could not read, which is itself the finding. A Mandatory parameter
     // rejects $null with "Cannot bind argument to parameter 'Value' because it is null", so the
@@ -191,11 +249,15 @@ public sealed class LiveTestScriptTests
         string launcherText = File.ReadAllText(Path.Combine(ScriptFolder(), launcher.Name));
         var declared = launcher.Parameters.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Only the tests the owner runs. The scripts under selftest are run by the test project,
+        // never by the launcher, and their options are the self-test's own.
+        var shipped = ExpectedScripts.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var problems = new List<string>();
         foreach (ScriptFile file in Scripts.Files)
         {
             if (file.Name.EndsWith(".psm1", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(file.Name, launcher.Name, StringComparison.OrdinalIgnoreCase))
+                string.Equals(file.Name, launcher.Name, StringComparison.OrdinalIgnoreCase) ||
+                !shipped.Contains(file.Name))
             {
                 continue;
             }
@@ -547,6 +609,9 @@ public sealed class LiveTestScriptTests
         var fieldReads = new List<FieldRead>();
         var concatenations = new List<Concatenation>();
         var methodCalls = new List<MethodOnCommand>();
+        var collectionReads = new List<CollectionRead>();
+        var arrayWrappedCalls = new List<ArrayWrappedCall>();
+        var wrappingFunctions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         using JsonDocument document = JsonDocument.Parse(json);
         foreach (JsonElement file in Items(document.RootElement, "files"))
         {
@@ -556,6 +621,32 @@ public sealed class LiveTestScriptTests
                 ReadStrings(file, "errors"),
                 ReadStrings(file, "strings"),
                 ReadStrings(file, "parameters")));
+
+            foreach (string function in ReadStrings(file, "wrappingFunctions"))
+            {
+                wrappingFunctions.Add(function);
+            }
+
+            foreach (JsonElement read in Items(file, "collectionReads"))
+            {
+                collectionReads.Add(new CollectionRead(
+                    name,
+                    read.GetProperty("line").GetInt32(),
+                    read.GetProperty("variable").GetString() ?? "",
+                    read.GetProperty("member").GetString() ?? "",
+                    read.GetProperty("wrapped").GetBoolean(),
+                    read.GetProperty("assignedLine").GetInt32(),
+                    read.GetProperty("text").GetString() ?? ""));
+            }
+
+            foreach (JsonElement wrapped in Items(file, "arrayWrappedCalls"))
+            {
+                arrayWrappedCalls.Add(new ArrayWrappedCall(
+                    name,
+                    wrapped.GetProperty("line").GetInt32(),
+                    wrapped.GetProperty("command").GetString() ?? "",
+                    wrapped.GetProperty("text").GetString() ?? ""));
+            }
 
             foreach (JsonElement read in Items(file, "fieldReads"))
             {
@@ -600,7 +691,7 @@ public sealed class LiveTestScriptTests
             }
         }
 
-        return new ScriptSet(files, calls, fieldReads, concatenations, methodCalls);
+        return new ScriptSet(files, calls, fieldReads, concatenations, methodCalls, collectionReads, arrayWrappedCalls, wrappingFunctions);
     }
 
     // Some PowerShell versions write a list of one as that one value rather than as a list, so a
@@ -665,7 +756,16 @@ public sealed class LiveTestScriptTests
         IReadOnlyList<CommandCall> Calls,
         IReadOnlyList<FieldRead> FieldReads,
         IReadOnlyList<Concatenation> Concatenations,
-        IReadOnlyList<MethodOnCommand> MethodCalls);
+        IReadOnlyList<MethodOnCommand> MethodCalls,
+        IReadOnlyList<CollectionRead> CollectionReads,
+        IReadOnlyList<ArrayWrappedCall> ArrayWrappedCalls,
+        IReadOnlySet<string> WrappingFunctions);
+
+    // One .Count, .Length or index read on a variable that was assigned straight from a command.
+    private sealed record CollectionRead(string File, int Line, string Variable, string Member, bool Wrapped, int AssignedLine, string Text);
+
+    // One @( a single bare command ).
+    private sealed record ArrayWrappedCall(string File, int Line, string Command, string Text);
 
     // One '+' chain that builds text, with the operand it starts with.
     private sealed record Concatenation(string File, int Line, string Head, string Text);
@@ -747,6 +847,44 @@ public sealed class LiveTestScriptTests
             return @($Node)
         }
 
+        # The one command inside an expression, when that is all it is: a bare invocation whose
+        # result PowerShell unrolls. ($x + 1), a pipeline and a literal all come back as $null.
+        function Get-BareCommand
+        {
+            param($Expression)
+
+            $node = $Expression
+            while ($node -is [System.Management.Automation.Language.ParenExpressionAst]) { $node = $node.Pipeline }
+            if ($node -is [System.Management.Automation.Language.PipelineAst])
+            {
+                if ($node.PipelineElements.Count -ne 1) { return $null }
+                $only = $node.PipelineElements[0]
+                if ($only -is [System.Management.Automation.Language.CommandAst]) { return $only }
+                if ($only -is [System.Management.Automation.Language.CommandExpressionAst]) { return (Get-BareCommand -Expression $only.Expression) }
+                return $null
+            }
+
+            if ($node -is [System.Management.Automation.Language.CommandAst]) { return $node }
+            return $null
+        }
+
+        # The variable an array subexpression holds, when it holds nothing else: @($lines) gives
+        # 'lines'. Anything else, including @(Get-Something ...), gives $null.
+        function Get-WrappedVariableName
+        {
+            param($Expression)
+
+            if (-not ($Expression -is [System.Management.Automation.Language.ArrayExpressionAst])) { return $null }
+            $statements = $Expression.SubExpression.Statements
+            if ($statements.Count -ne 1) { return $null }
+            if (-not ($statements[0] -is [System.Management.Automation.Language.PipelineAst])) { return $null }
+            if ($statements[0].PipelineElements.Count -ne 1) { return $null }
+            $only = $statements[0].PipelineElements[0]
+            if (-not ($only -is [System.Management.Automation.Language.CommandExpressionAst])) { return $null }
+            if (-not ($only.Expression -is [System.Management.Automation.Language.VariableExpressionAst])) { return $null }
+            return $only.Expression.VariablePath.UserPath
+        }
+
         $files = @()
         $scripts = @(Get-ChildItem -LiteralPath $Root -Recurse -File |
             Where-Object { $_.Extension -eq '.ps1' -or $_.Extension -eq '.psm1' } |
@@ -769,6 +907,9 @@ public sealed class LiveTestScriptTests
             $fieldReads = @()
             $concatenations = @()
             $methodCalls = @()
+            $wrappingFunctions = @()
+            $collectionReads = @()
+            $arrayWrappedCalls = @()
             # Named apart from the $parameters each Invoke-Earshot call is read into below, which is
             # reset per call: one name for both would report a call's parameters as the script's.
             $scriptParameters = @()
@@ -849,6 +990,124 @@ public sealed class LiveTestScriptTests
                         line = $m.Extent.StartLineNumber
                         command = ('' + $element.GetCommandName())
                         method = $method
+                        text = $whole
+                    }
+                }
+
+                # The third shape of the same failure, and the one that has come back twice. A
+                # function that ends "return $found" has its answer unrolled by the pipeline, so the
+                # caller gets $null for an empty list and a bare value for a list of one, and
+                # .Count on either throws under strict mode. The rule is: the function returns
+                # ", $found" so nothing is unrolled, and the caller puts @() round the VARIABLE
+                # wherever it reads .Count, .Length or an index.
+                #
+                # Three things are collected here. First, the functions that already wrap their
+                # answer. Second, every .Count, .Length or index read on a variable that was
+                # assigned straight from a command, with whether that read is wrapped. Third,
+                # every @( one bare command ), because @() round a call that already wraps its
+                # answer wraps it twice and .Count then reads 1 for every answer, including none.
+                # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_arrays
+                foreach ($f in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))
+                {
+                    foreach ($r in $f.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.ReturnStatementAst] }, $true))
+                    {
+                        $value = $r.Pipeline
+                        if ($value -is [System.Management.Automation.Language.PipelineAst] -and $value.PipelineElements.Count -eq 1)
+                        {
+                            $value = $value.PipelineElements[0]
+                        }
+
+                        if ($value -is [System.Management.Automation.Language.CommandExpressionAst]) { $value = $value.Expression }
+                        if ($value -is [System.Management.Automation.Language.ArrayLiteralAst] -and $value.Elements.Count -eq 1)
+                        {
+                            if (-not ($wrappingFunctions -contains $f.Name)) { $wrappingFunctions += $f.Name }
+                        }
+                    }
+                }
+
+                # Which variables were assigned straight from a command, and so hold whatever the
+                # pipeline made of that command's answer.
+                $fromCommand = @{}
+                foreach ($a in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true))
+                {
+                    if (-not ($a.Left -is [System.Management.Automation.Language.VariableExpressionAst])) { continue }
+                    if ($null -eq (Get-BareCommand -Expression $a.Right)) { continue }
+                    $fromCommand[$a.Left.VariablePath.UserPath] = $a.Extent.StartLineNumber
+                }
+
+                foreach ($m in $ast.FindAll({
+                            $args[0] -is [System.Management.Automation.Language.MemberExpressionAst] -or
+                            $args[0] -is [System.Management.Automation.Language.IndexExpressionAst] }, $true))
+                {
+                    # A method call is the other guard's business, not this one.
+                    if ($m -is [System.Management.Automation.Language.InvokeMemberExpressionAst]) { continue }
+
+                    $member = 'an index'
+                    if ($m -is [System.Management.Automation.Language.IndexExpressionAst])
+                    {
+                        # Only a numbered index. $table['name'] and $table[$key] are dictionary
+                        # lookups, which say nothing about whether the value is a list.
+                        $index = $m.Index
+                        $numbered = ($index -is [System.Management.Automation.Language.BinaryExpressionAst])
+                        if ($index -is [System.Management.Automation.Language.ConstantExpressionAst] -and
+                            -not ($index -is [System.Management.Automation.Language.StringConstantExpressionAst]))
+                        {
+                            $numbered = $true
+                        }
+
+                        if (-not $numbered) { continue }
+                        $target = $m.Target
+                    }
+                    else
+                    {
+                        $target = $m.Expression
+                        if (-not ($m.Member -is [System.Management.Automation.Language.StringConstantExpressionAst])) { continue }
+                        $member = $m.Member.Value
+                        if ($member -ne 'Count' -and $member -ne 'Length') { continue }
+                    }
+
+                    # $x[0].Count is read through the same rule as $x.Count.
+                    while ($target -is [System.Management.Automation.Language.IndexExpressionAst]) { $target = $target.Target }
+
+                    $wrapped = $false
+                    $name = $null
+                    if ($target -is [System.Management.Automation.Language.VariableExpressionAst])
+                    {
+                        $name = $target.VariablePath.UserPath
+                    }
+                    else
+                    {
+                        $name = Get-WrappedVariableName -Expression $target
+                        if ($null -ne $name) { $wrapped = $true }
+                    }
+
+                    if ($null -eq $name) { continue }
+                    if (-not $fromCommand.ContainsKey($name)) { continue }
+
+                    $whole = ($m.Extent.Text -replace '\s+', ' ')
+                    if ($whole.Length -gt 160) { $whole = $whole.Substring(0, 160) + '...' }
+                    $collectionReads += [ordered]@{
+                        line = $m.Extent.StartLineNumber
+                        variable = $name
+                        member = $member
+                        wrapped = $wrapped
+                        assignedLine = $fromCommand[$name]
+                        text = $whole
+                    }
+                }
+
+                foreach ($a in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.ArrayExpressionAst] }, $true))
+                {
+                    $statements = $a.SubExpression.Statements
+                    if ($statements.Count -ne 1) { continue }
+                    $inner = Get-BareCommand -Expression $statements[0]
+                    if ($null -eq $inner) { continue }
+
+                    $whole = ($a.Extent.Text -replace '\s+', ' ')
+                    if ($whole.Length -gt 160) { $whole = $whole.Substring(0, 160) + '...' }
+                    $arrayWrappedCalls += [ordered]@{
+                        line = $a.Extent.StartLineNumber
+                        command = ('' + $inner.GetCommandName())
                         text = $whole
                     }
                 }
@@ -951,6 +1210,9 @@ public sealed class LiveTestScriptTests
                 fieldReads = $fieldReads
                 concatenations = $concatenations
                 methodCalls = $methodCalls
+                wrappingFunctions = $wrappingFunctions
+                collectionReads = $collectionReads
+                arrayWrappedCalls = $arrayWrappedCalls
                 strings = $strings
             }
         }
