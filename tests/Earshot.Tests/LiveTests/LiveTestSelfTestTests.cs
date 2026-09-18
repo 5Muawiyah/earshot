@@ -72,7 +72,7 @@ public sealed class LiveTestSelfTestTests
         // quieter run. The runner names any shipped script it has no row for, which catches the
         // other direction.
         Assert.AreEqual(ExpectedScripts, result.GetProperty("scripts").GetInt32(), "The self-test ran a different number of scripts than expected.");
-        Assert.AreEqual(ExpectedHalves, result.GetProperty("runs").GetInt32() / ExpectedCases, "The self-test ran a different number of halves than expected.");
+        Assert.AreEqual(ExpectedHalves, result.GetProperty("halves").GetInt32(), "The self-test ran a different number of halves than expected.");
         Assert.AreEqual(ExpectedHalves * ExpectedCases, result.GetProperty("runs").GetInt32(), "The self-test ran a different number of cases than expected.");
         Assert.AreEqual(0, exit, "The self-test exited " + exit.ToString(CultureInfo.InvariantCulture) + " with nothing to report.");
     }

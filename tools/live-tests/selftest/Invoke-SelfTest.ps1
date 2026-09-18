@@ -322,6 +322,7 @@ foreach ($row in $tests)
     }
 
     $result.scripts = $result.scripts + 1
+    $result.halves = $result.halves + @($row.Halves).Count
     $seen[$row.Script] = $true
     foreach ($caseName in $cases)
     {
@@ -424,8 +425,6 @@ if ([string]::IsNullOrEmpty($Test))
     }
 }
 
-$result.halves = $result.runs
-if (-not [string]::IsNullOrEmpty($Case)) { $result.halves = -1 }
 $result.ok = ($result.problems.Count -eq 0)
 $result | ConvertTo-Json -Depth 6
 if ($result.ok) { exit 0 } else { exit 1 }
