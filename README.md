@@ -1,7 +1,5 @@
 # Earshot
 
-[![build](https://github.com/5Muawiyah/earshot/actions/workflows/build.yml/badge.svg)](https://github.com/5Muawiyah/earshot/actions/workflows/build.yml)
-
 A Windows 11 tray utility that keeps your AirPods on your phone until you ask
 for them on the PC, connects and disconnects them with one click, and stops
 Windows dropping them to call quality.
