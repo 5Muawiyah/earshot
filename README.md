@@ -50,7 +50,9 @@ tray icon does it.
    acceptance test), both pending a live run.
 2. **Connect and disconnect the AirPods with one click.** Supporting work:
    connection-state unit tests confirm the state machine each click drives.
-   Proof: Tests 01 and 02, pending.
+   Proof: Test 01 passed on the AirPods on 19 September 2026, in the shipping
+   default with Protect audio quality on. Test 02, disconnect in detail, is
+   pending.
 3. **Keep the AirPods on A2DP**, so a browser tab or a game cannot drop them to
    call quality. Supporting work: the read-only walk from the audio endpoints
    to both the A2DP and Hands-Free filters shows both filters answer, so the
@@ -369,10 +371,11 @@ before Earshot existed. They are superseded and kept only for reference.
 
 ### Verification status
 
-Nothing below that needs a live action on the AirPods has been run yet: the
-read-only rows were done on this machine with the AirPods paired and
-connected, and the rest stay pending until the live tests are run on the
-device.
+The read-only rows were done on this machine with the AirPods paired and
+connected. The first live sitting on the AirPods was on 19 September 2026:
+Tests 01 and 05, and ordinary use of the tray with its log read afterwards.
+Every time below is a single run, measured once, not a specification. A row
+stays pending until a run on the device has written the evidence for it.
 
 | What | Status |
 |---|---|
@@ -383,13 +386,13 @@ device.
 | Read-only walk from the endpoints to the audio driver, including reading a pin property from both the A2DP and Hands-Free filters | Done. Both filters answer, so the connect path is reachable |
 | Read-only reads of the device nodes, installed Bluetooth services and scheduled tasks | Done |
 | Self-contained release runs from an unzipped folder | Done |
-| Connect and disconnect on the AirPods | Pending |
-| Connect while blocked: allow, then reconnect | Pending |
-| Block and allow, and the disable surviving a restart | Pending |
+| Connect and disconnect on the AirPods | Connect: done. Test 01 passed all 11 criteria. With Protect audio quality on, the A2DP filter accepted the reconnect request and the AirPods were playing from this PC 2749 ms later, and 3413 ms on the second run, inside the 15 s allowed. The Hands-Free assisted fallback is not needed (`hfpAssistedFallbackNeeded` = no). With protection off one run took 14371 ms, which is close to the limit. Disconnect: each of the three disconnects in Test 01 was confirmed in under 60 ms and the AirPods went back to the phone. Test 02, disconnect in detail, is pending |
+| Connect while blocked: allow, then reconnect | Seen in the application's log during ordinary use: a click while blocked allowed the nodes, and Windows then connected the AirPods itself about a second later. Test 03, which scores it, is pending |
+| Block and allow, and the disable surviving a restart | Block and allow: done. Test 05 showed all 8 device nodes disabled with the persistent flag before the allow, and none after it (`enableClearsConfigFlagsDisabled` = yes); the log shows a block disabling all 8. Test 05 is recorded as failed overall, because the test scripts could not read Earshot's exit code at the time; that fault is fixed and the run was not re-scored. Surviving a restart, Test 04: pending |
 | The power cycle test: after a full power cycle the AirPods stay on the phone | Pending |
 | Shutting down while connected | Pending |
-| Turning the Hands-Free profile off and on | Pending |
-| Starting the SYSTEM task from the tray without a prompt | Pending |
+| Turning the Hands-Free profile off and on | Done through the SYSTEM task, in Test 01 and from the tray: off and on each completed in about 3 to 4 seconds, and the microphone endpoint went and came back with it. Test 06, what the same call returns without elevation, is pending |
+| Starting the SYSTEM task from the tray without a prompt | Seen in the application's log: the tray, not elevated, started the Gate and Protect tasks and both reported success. Test 07, which checks the arguments arrive, is pending |
 | The battery check with the AirPods disconnected | Pending |
 | Fast Startup | Pending |
 
@@ -455,4 +458,4 @@ MIT. See [LICENSE](LICENSE).
 
 ---
 
-<div align="center"><sub>Built by Muawiyah Jahanzaib. MIT licensed. Nothing here has touched a real AirPods device until the live tests are run by hand.</sub></div>
+<div align="center"><sub>Built by Muawiyah Jahanzaib. MIT licensed. The live tests are run by hand on real AirPods; the verification table says which have been.</sub></div>
