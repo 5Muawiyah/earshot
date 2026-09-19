@@ -108,7 +108,10 @@ try {
 
         $result.tests_ok = ($testExit -eq 0 -and $result.tests_failed -eq 0 -and -not $noTests)
         if (-not $result.tests_ok) {
-            $result.problems += ($testText -split "`r?`n" | Where-Object { $_ -match '(?i)failed |error|assert' } | Select-Object -First 30)
+            # The line that names the cause is the one worth keeping, and it does not always carry the
+            # word error or failed. "The term 'x' is not recognized" and a bare exception line were both
+            # being dropped here, which left a failure that said only that something had gone wrong.
+            $result.problems += ($testText -split "`r?`n" | Where-Object { $_ -match '(?i)failed |error|assert|not recognized|exception|is not installed' } | Select-Object -First 40)
         }
     }
 }
