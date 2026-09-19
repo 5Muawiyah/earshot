@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Earshot.Contracts;
+using Earshot.Hotkeys;
 using Earshot.Infra;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -33,6 +34,8 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.AreEqual(d.OpenOnStartup, s.OpenOnStartup);
         Assert.AreEqual(d.PinnedContainerId, s.PinnedContainerId);
         Assert.AreEqual(d.PinnedAddress, s.PinnedAddress);
+        Assert.IsFalse(s.Hotkeys.Enabled);
+        Assert.AreEqual(string.Empty, s.Hotkeys.ToggleConnection);
     }
 
     [TestMethod]
@@ -254,6 +257,8 @@ public sealed class JsonSettingsStoreTests : IDisposable
     [TestMethod]
     [DataRow("{ \"DeviceMatch\": null }")]
     [DataRow("{ \"PinnedAddress\": null }")]
+    [DataRow("{ \"Hotkeys\": null }")]
+    [DataRow("{ \"Hotkeys\": { \"ToggleConnection\": null } }")]
     [DataRow("null")]
     [DataRow("[]")]
     [DataRow("{ \"SchemaVersion\": 0 }")]
@@ -277,6 +282,44 @@ public sealed class JsonSettingsStoreTests : IDisposable
         string[] quarantined = Quarantined();
         Assert.HasCount(1, quarantined);
         Assert.AreEqual(content, File.ReadAllText(quarantined[0]));
+    }
+
+    // Settled by execution, not by reading: one reviewer of the hotkeys feature claimed a settings file
+    // holding "Hotkeys": null deserialises to a null EarshotSettings.Hotkeys that passes validation, so
+    // HotkeyManager.Apply(null) then throws before the tray exists. A second reviewer observed
+    // ResetAfterCorruption for the same input. This test proves the second reviewer right: the Hotkeys
+    // property is a non-nullable reference type, and this store already builds its JSON context with
+    // RespectNullableAnnotations, which turns an explicit null for any such member (DeviceMatch and
+    // PinnedAddress already covered by UnusableContentIsResetAndKept above) into a JsonException during
+    // TryRead, so the whole file is treated as unusable, quarantined, and every setting including the
+    // pinned device is reset to defaults. A null inside Hotkeys (one shortcut's text) reaches the same
+    // path, because RespectNullableAnnotations applies per property regardless of nesting depth.
+    //
+    // A narrower outcome, where only Hotkeys resets to its own defaults and the rest of the file (the
+    // pinned device included) survives, is not implemented: the store has no per-member recovery, only a
+    // whole-file one, and every other non-nullable member already resets the whole file the same way.
+    // Carving out Hotkeys alone would make one member special for no reason a reader of this file could
+    // see, so this follows the store's existing, uniform policy instead.
+    [TestMethod]
+    [DataRow("{ \"Hotkeys\": null }")]
+    [DataRow("{ \"Hotkeys\": { \"ToggleConnection\": null } }")]
+    public void HotkeysNullNeverThrowsAtStartup(string content)
+    {
+        File.WriteAllText(SettingsPath, content);
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.ResetAfterCorruption, store.LastLoadStatus);
+        HotkeySettings hotkeys = store.Current.Hotkeys;
+        Assert.IsNotNull(hotkeys);
+        Assert.IsFalse(hotkeys.Enabled);
+
+        // The exact shape TrayContext's constructor calls at start-up (App/TrayContext.cs, ApplyHotkeys):
+        // it must not throw, whatever the file held.
+        var window = new Earshot.Tests.Hotkeys.FakeMessageWindow();
+        var native = new Earshot.Tests.Hotkeys.FakeNativeHotkeys();
+        var manager = new HotkeyManager(window, native, _log);
+        manager.Apply(hotkeys);
     }
 
     [TestMethod]

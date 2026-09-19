@@ -141,6 +141,17 @@ internal static partial class NativeMethods
     // the new hot key" on every OS this assembly targets: a second RegisterHotKey call for the same id
     // does not replace the first, so the caller must UnregisterHotKey it first.
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey
+    // Returns the id of the thread that created hWnd, and through lpdwProcessId the id of its process.
+    // Used to check that a window call is made on the thread that owns the window, since a captured
+    // managed thread id is not necessarily the same OS thread a window's message queue belongs to.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowthreadprocessid
+    [LibraryImport(User32)]
+    internal static partial uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthreadid
+    [LibraryImport(Kernel32)]
+    internal static partial uint GetCurrentThreadId();
+
     [LibraryImport(User32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool RegisterHotKey(nint hWnd, int id, uint fsModifiers, uint vk);

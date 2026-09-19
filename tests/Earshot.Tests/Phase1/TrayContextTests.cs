@@ -3,8 +3,10 @@ using System.Windows.Forms;
 using Earshot.App;
 using Earshot.Composition;
 using Earshot.Contracts;
+using Earshot.Hotkeys;
 using Earshot.Infra;
 using Earshot.Tray;
+using Earshot.Tests.Hotkeys;
 using Earshot.Tests.Integration.Coordinator;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
@@ -313,8 +315,22 @@ public sealed class TrayContextTests
         });
     }
 
+    // This test used to be named AClickWhileTheCoordinatorFinishesItsOwnWorkSaysSoAtOnceAndGoesAheadAfterIt
+    // and used the session-end block as its example of "the coordinator's own work" that a queued click
+    // waits for and then goes ahead behind. That premise no longer holds: once the session-end block has
+    // been issued, nothing may start a new operation even after it finishes, which is exactly what the
+    // test below now proves instead. RunExclusiveAsync's ordinary wait-for-_current-then-proceed
+    // behaviour, for work that is not the session-end block, is unchanged by that fix and is exercised at
+    // the coordinator level (Integration/Coordinator/StartUpAndSessionTests.cs).
+    //
+    // The at-rest invariant, at the tray: once the session-end block has been issued, a click queued
+    // behind it must not go ahead once that block finishes either, because a process kill right after
+    // would leave the nodes enabled across the shutdown. This is the same fix that closes the gap a
+    // hotkey would otherwise widen (a hotkey and a left click share BlockCoordinator.ToggleAsync), proved
+    // once at the coordinator level (StartUpAndSessionTests.NoOperationStartsOnceTheSessionEndBlockHasFinished)
+    // and here through the tray's own OnIconMouseClick, so the whole path is covered end to end.
     [TestMethod]
-    public void AClickWhileTheCoordinatorFinishesItsOwnWorkSaysSoAtOnceAndGoesAheadAfterIt()
+    public void AClickQueuedBehindTheSessionEndBlockDoesNotGoAheadOnceItFinishes()
     {
         StaThread.Run(() =>
         {
@@ -322,26 +338,21 @@ public sealed class TrayContextTests
             var blocking = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             tray.Block.OnBlock = _ => blocking.Task;
 
-            // The session-end block runs outside any action the tray started.
             tray.Context.OnSessionEnding(null, new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
             Application.DoEvents();
             Assert.IsTrue(tray.Coordinator.IsBusy);
-            Assert.IsFalse(tray.Context.IsBusy);
-
-            tray.Context.Menu.Refresh();
-            Assert.IsFalse(tray.MenuItem(MenuModel.Disconnect).Enabled, "The menu toggle is enabled while the coordinator is busy.");
 
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             Application.DoEvents();
-
-            Assert.AreEqual(TrayContext.FinishingFirstMessage, tray.Cards.Shown[^1].Content.Status, "The click had no answer.");
-            Assert.IsEmpty(tray.Connection.Calls, "The disconnect ran beside the coordinator's own work.");
+            Assert.IsEmpty(tray.Connection.Calls, "The disconnect ran beside the session-end block.");
 
             blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
-            tray.PumpUntilIdle();
+            for (int i = 0; i < 5; i++)
+            {
+                Application.DoEvents();
+            }
 
-            Assert.HasCount(1, tray.Connection.Calls, "Once that work has finished, the click goes ahead.");
-            Assert.IsFalse(tray.Connection.Calls[0].Connect);
+            Assert.IsEmpty(tray.Connection.Calls, "No connect or disconnect may run once the session-end block has finished.");
         });
     }
 
@@ -1060,8 +1071,10 @@ internal sealed class TrayHarness : IDisposable
         Func<long>? tickCount = null,
         string? installedExePath = null,
         Func<string, bool>? fileExists = null,
-        TimeSpan? coordinatorExitWaitLimit = null)
+        TimeSpan? coordinatorExitWaitLimit = null,
+        FakeNativeHotkeys? nativeHotkeys = null)
     {
+        NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // An exception in a posted callback fails the test instead of opening the WinForms error dialog.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -1107,6 +1120,9 @@ internal sealed class TrayHarness : IDisposable
             DoubleClickTime = TimeSpan.FromMilliseconds(500),
             InstalledExePath = installedExePath,
             FileExists = fileExists ?? (_ => false),
+            // A fake, never the real User32Hotkeys: a TrayContext test must never register a real global
+            // hotkey on the machine that runs it.
+            NativeHotkeys = NativeHotkeys,
         };
         if (exitWaitLimit is { } limit)
         {
@@ -1145,6 +1161,8 @@ internal sealed class TrayHarness : IDisposable
     public RecordingCards Cards { get; } = new();
 
     public FakeStartupRegistry Startup { get; } = new();
+
+    public FakeNativeHotkeys NativeHotkeys { get; }
 
     public ServiceRegistry Registry { get; }
 
@@ -1296,8 +1314,17 @@ internal sealed class FakeBlockController : IBlockController
         return OnAllow(ct);
     }
 
-    public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default) =>
-        Record(blockAtBoot ? "setboot-on" : "setboot-off");
+    // A stall hook, for a test that needs a genuine async gap (a burst of calls raised while one is still
+    // in flight): the other fakes here resolve synchronously, so without this every call in a burst would
+    // simply run to completion, one after another, before the next started, proving nothing about the
+    // guard that keeps a burst to one call.
+    public Func<bool, CancellationToken, Task<ControllerResult>>? OnSetBlockAtBoot { get; set; }
+
+    public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default)
+    {
+        Calls.Add(blockAtBoot ? "setboot-on" : "setboot-off");
+        return OnSetBlockAtBoot is { } set ? set(blockAtBoot, ct) : Task.FromResult(ControllerResult.Ok("Block at boot is " + (blockAtBoot ? "on" : "off")));
+    }
 
     public Func<CancellationToken, Task<ControllerResult>>? OnSetDevice { get; set; }
 

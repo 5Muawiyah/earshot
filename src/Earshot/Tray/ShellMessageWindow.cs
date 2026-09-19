@@ -33,13 +33,11 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
 {
     private readonly ILog _log;
     private readonly uint _taskbarCreated;
-    private readonly int _ownerThreadId;
 
     public ShellMessageWindow(ILog log)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
-        _ownerThreadId = Environment.CurrentManagedThreadId;
 
         _taskbarCreated = Shell.RegisterWindowMessage(Shell.TaskbarCreatedMessageName);
         if (_taskbarCreated == 0)
@@ -66,8 +64,10 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
 
     // IMessageWindow.IsOwnedByCurrentThread: RegisterHotKey "fails if you try to associate a hot key
     // with a window created by another thread", and UnregisterHotKey "Frees a hot key previously
-    // registered by the calling thread", so HotkeyManager checks this before either call.
-    public bool IsOwnedByCurrentThread => Environment.CurrentManagedThreadId == _ownerThreadId;
+    // registered by the calling thread", so HotkeyManager checks this before either call. Compares the
+    // OS thread that owns this window's message queue against the OS thread running now, rather than a
+    // captured managed thread id, which is not guaranteed to be the same native thread.
+    public bool IsOwnedByCurrentThread => NativeMethods.GetWindowThreadProcessId(Handle, out _) == NativeMethods.GetCurrentThreadId();
 
     public void Dispose() => DestroyHandle();
 

@@ -840,11 +840,24 @@ internal sealed class BlockCoordinator : IDisposable
 
     // Waits for the operation in flight, then runs body as the one in flight. The task body returns completes only
     // after body has, clean-up included.
+    //
+    // Once the session-end block has been issued, nothing here ever starts a new operation, the session-end
+    // block finishing does not change that: OnSessionEnding cancels _sessionBlockIssued only when the session
+    // end itself is cancelled (a WM_ENDSESSION with wParam false), which is the one condition under which a
+    // later connect, allow or setting change is safe again. Until then this waits rather than proceeds, so a
+    // click or a hotkey pressed after the block has already been sent and finished cannot still queue an allow
+    // behind it; the wait ends only when the caller's own token is cancelled (Earshot closing) or the session end
+    // is cancelled and a fresh call is made. This does not change what OnSessionEnding itself does.
+    // Never completes on its own: used to make RunExclusiveAsync wait on the caller's token alone once the
+    // session-end block has been issued and has already finished, so the wait cancels (Earshot closing, or a
+    // fresh call after the session end is itself cancelled) instead of spinning.
+    private static readonly Task NeverCompletingTask = new TaskCompletionSource().Task;
+
     private async Task<T> RunExclusiveAsync<T>(string name, Func<CancellationToken, Task<T>> body, CancellationToken ct)
     {
-        while (_current is not null || _sessionBlock is { IsCompleted: false })
+        while (_current is not null || _sessionBlock is { IsCompleted: false } || _sessionBlockIssued)
         {
-            Task waitFor = _current ?? _sessionBlock!;
+            Task waitFor = _current ?? (_sessionBlock is { IsCompleted: false } completing ? completing : NeverCompletingTask);
             _log.Write(LogLevel.Debug, name + ": waiting for " + (_currentName ?? "the session-end block") + " to finish.");
             await waitFor.WaitAsync(ct);
         }

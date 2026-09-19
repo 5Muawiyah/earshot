@@ -36,6 +36,37 @@ public sealed class MenuModelTests
         Assert.AreEqual("Exit", state.Exit.Text);
     }
 
+    // Section 9 of the hotkeys spec: the bound shortcut text sits next to its command in the menu.
+    [TestMethod]
+    public void MenuLabelsShowTheirBoundShortcut()
+    {
+        EarshotSettings settings = Settings(s =>
+        {
+            s.Hotkeys.Enabled = true;
+            s.Hotkeys.ToggleConnection = "Ctrl+Alt+C";
+            s.Hotkeys.ToggleBlockAtBoot = "Ctrl+Alt+B";
+            s.Hotkeys.ToggleAudioProtection = "not a shortcut";
+        });
+
+        MenuState state = Build(block: Block(BlockState.NotSetUp), settings: settings);
+
+        Assert.AreEqual("Connect (Ctrl+Alt+C)", state.Toggle.Text);
+        Assert.AreEqual("Block at boot (Ctrl+Alt+B)", state.BlockAtBoot.Text);
+
+        // Unparsable text is not echoed into the menu: the label stays exactly as it is with no shortcut.
+        Assert.AreEqual("Protect audio quality", state.ProtectAudio.Text);
+    }
+
+    [TestMethod]
+    public void MenuLabelsAreUnchangedWithHotkeysOff()
+    {
+        EarshotSettings settings = Settings(s => s.Hotkeys.ToggleConnection = "Ctrl+Alt+C");
+
+        MenuState state = Build(block: Block(BlockState.NotSetUp), settings: settings);
+
+        Assert.AreEqual("Connect", state.Toggle.Text);
+    }
+
     [TestMethod]
     public void NoTextHasAnEmDash()
     {

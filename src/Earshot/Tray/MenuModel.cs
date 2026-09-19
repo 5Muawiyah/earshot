@@ -1,4 +1,5 @@
 using Earshot.Contracts;
+using Earshot.Hotkeys;
 
 namespace Earshot.Tray;
 
@@ -68,10 +69,10 @@ internal static class MenuModel
 
         return new MenuState(
             SafeMode: new MenuItemState(SafeMode, Checked: false, Enabled: false, Visible: safeMode),
-            Toggle: new MenuItemState(connected ? Disconnect : Connect, Checked: false, Enabled: !busy && !changing, Visible: true),
-            BlockAtBoot: new MenuItemState(BlockAtBoot, Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
+            Toggle: new MenuItemState(WithShortcut(connected ? Disconnect : Connect, settings.Hotkeys, HotkeyAction.ToggleConnection), Checked: false, Enabled: !busy && !changing, Visible: true),
+            BlockAtBoot: new MenuItemState(WithShortcut(BlockAtBoot, settings.Hotkeys, HotkeyAction.ToggleBlockAtBoot), Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
             ProtectAudio: new MenuItemState(
-                ProtectAudioQuality,
+                WithShortcut(ProtectAudioQuality, settings.Hotkeys, HotkeyAction.ToggleAudioProtection),
                 Checked: settings.ProtectAudioQuality,
                 Enabled: !busy,
                 Visible: true,
@@ -94,4 +95,23 @@ internal static class MenuModel
             AudioProtectionState.NotProtected => intent,
             _ => false,
         };
+
+    // Section 9 of the hotkeys spec: "put the current shortcut text next to each command in the tray menu."
+    // Only shown when hotkeys are switched on and the text for this action actually parses: an owner mid-way
+    // through typing an invalid shortcut, or with hotkeys off, sees the label exactly as before.
+    private static string WithShortcut(string label, HotkeySettings hotkeys, HotkeyAction action)
+    {
+        if (!hotkeys.Enabled)
+        {
+            return label;
+        }
+
+        string text = hotkeys.TextFor(action);
+        if (string.IsNullOrWhiteSpace(text) || !HotkeyText.TryParse(text, out HotkeyCombination combination, out _))
+        {
+            return label;
+        }
+
+        return label + " (" + HotkeyText.Format(combination) + ")";
+    }
 }

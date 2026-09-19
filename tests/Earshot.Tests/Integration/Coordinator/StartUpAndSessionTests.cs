@@ -130,6 +130,36 @@ public sealed class StartUpAndSessionTests
         Assert.IsFalse(h.Coordinator.IsBusy);
     }
 
+    // At-rest: once the session-end block has been sent and has finished, nothing may start a new connect,
+    // allow or setting change, because a process kill right after would leave the nodes enabled across the
+    // shutdown. This covers every trigger through one shared gate (RunExclusiveAsync): a toggle stands in for
+    // both a left click and a hotkey activation, since both call BlockCoordinator.ToggleAsync the same way.
+    [TestMethod]
+    public void NoOperationStartsOnceTheSessionEndBlockHasFinished()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The session-end block itself must still run.");
+
+        // A toggle asked for after the block has already finished: it must not reach the connection
+        // controller at all, whether it came from a left click or, equally, from a hotkey.
+        Task<ToggleReport> hotkeyToggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+        Task<ToggleReport> leftClickToggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        Assert.IsFalse(hotkeyToggle.IsCompleted, "A toggle after the session-end block finished must not run.");
+        Assert.IsFalse(leftClickToggle.IsCompleted, "A second toggle after the session-end block finished must not run either.");
+        Assert.IsEmpty(h.Connection.Calls, "No connect or disconnect may be sent once the session-end block has finished.");
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "Nothing beyond the session-end block may be sent.");
+    }
+
     [TestMethod]
     public void NoSessionEndBlockIsIssuedWithBlockAtBootOffOrTheNodesAlreadyBlocked()
     {

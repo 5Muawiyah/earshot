@@ -116,6 +116,30 @@ public sealed class HotkeyTextTests
         Assert.AreEqual(HotkeyText.KeyNotLastMessage, error);
     }
 
+    // Not one of the spec's own 31 acceptance tests: an Earshot house rule added on top of it. Shift+letter
+    // is ordinary typing (holding Shift to capitalise a letter), so it must never claim a global shortcut.
+    [TestMethod]
+    public void ParseRejectsShiftAsTheOnlyModifier()
+    {
+        Assert.IsFalse(HotkeyText.TryParse("Shift+P", out HotkeyCombination combination, out string error));
+        Assert.AreEqual(HotkeyText.ShiftAloneMessage, error);
+        Assert.AreEqual(default, combination);
+
+        // Shift combined with another modifier is still an ordinary shortcut.
+        Assert.IsTrue(HotkeyText.TryParse("Ctrl+Shift+P", out _, out _));
+    }
+
+    [TestMethod]
+    public void ParseTruncatesAVeryLongUnknownSegment()
+    {
+        string longSegment = new string('X', 200);
+
+        Assert.IsFalse(HotkeyText.TryParse("Ctrl+" + longSegment, out _, out string error));
+
+        Assert.IsTrue(error.Length < longSegment.Length, "A very long typo must not be echoed back in full.");
+        Assert.IsTrue(error.Contains("...", StringComparison.Ordinal));
+    }
+
     [TestMethod]
     public void FormatUsesFixedModifierOrder()
     {

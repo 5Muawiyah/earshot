@@ -264,4 +264,85 @@ public sealed class HotkeyManagerTests
         Assert.AreEqual(1, entries.Count(e => e.Message.Contains("result=failed error=1409", StringComparison.Ordinal)));
         Assert.IsTrue(entries[2].Message.Contains("id=0x" + BlockId.ToString("X"), StringComparison.Ordinal));
     }
+
+    // Spec section 5: "Apply, ReleaseAll and Dispose must be called on the thread that owns the window."
+    // Apply was already checked (ApplyFromAnotherThreadThrows); this covers the other two, which an
+    // off-thread call would otherwise silently fail to release (UnregisterHotKey frees a hot key only for
+    // the thread that registered it).
+    [TestMethod]
+    public void ReleaseAllFromAnotherThreadThrows()
+    {
+        (HotkeyManager manager, FakeMessageWindow window, FakeNativeHotkeys native, _) = Build();
+        manager.Apply(EnabledWith(connect: "Ctrl+Alt+C"));
+        int afterApply = native.Calls.Count;
+        window.IsOwnedByCurrentThread = false;
+
+        InvalidOperationException ex = Assert.ThrowsExactly<InvalidOperationException>(manager.ReleaseAll);
+
+        Assert.AreEqual("Hotkeys must be applied on the thread that owns the window.", ex.Message);
+        Assert.AreEqual(afterApply, native.Calls.Count, "Nothing must be unregistered off-thread.");
+    }
+
+    [TestMethod]
+    public void DisposeFromAnotherThreadThrowsAndReleasesNothing()
+    {
+        (HotkeyManager manager, FakeMessageWindow window, FakeNativeHotkeys native, _) = Build();
+        manager.Apply(EnabledWith(connect: "Ctrl+Alt+C"));
+        int afterApply = native.Calls.Count;
+        window.IsOwnedByCurrentThread = false;
+
+        Assert.ThrowsExactly<InvalidOperationException>(manager.Dispose);
+
+        Assert.AreEqual(afterApply, native.Calls.Count, "Nothing must be unregistered off-thread.");
+
+        // A second Dispose call, still off-thread, is a no-op: the first call never marked the instance
+        // disposed (it threw before that), but there is nothing new to guard against here either.
+        window.IsOwnedByCurrentThread = true;
+        manager.Dispose();
+        Assert.AreEqual(afterApply + 1, native.Calls.Count, "The on-thread Dispose still releases what was held.");
+    }
+
+    [TestMethod]
+    public void CurrentOutcomesIsEmptyBeforeApplyAndHoldsTheLastResult()
+    {
+        (HotkeyManager manager, _, _, _) = Build();
+
+        Assert.IsEmpty(manager.CurrentOutcomes);
+
+        IReadOnlyList<HotkeyRegistrationOutcome> outcomes = manager.Apply(EnabledWith(connect: "Ctrl+Alt+C"));
+
+        Assert.AreSame(outcomes, manager.CurrentOutcomes);
+        Assert.AreEqual(HotkeyRegistrationState.Registered, manager.CurrentOutcomes.Single(o => o.Action == HotkeyAction.ToggleConnection).State);
+    }
+
+    [TestMethod]
+    public void ApplyReportsTextRejectedWithoutCallingWindows()
+    {
+        (HotkeyManager manager, _, FakeNativeHotkeys native, _) = Build();
+        HotkeySettings settings = EnabledWith(connect: "Ctrl");
+
+        IReadOnlyList<HotkeyRegistrationOutcome> outcomes = manager.Apply(settings);
+
+        HotkeyRegistrationOutcome outcome = outcomes.Single(o => o.Action == HotkeyAction.ToggleConnection);
+        Assert.AreEqual(HotkeyRegistrationState.TextRejected, outcome.State);
+        Assert.AreEqual(0, outcome.ErrorCode);
+        Assert.AreEqual(HotkeyText.NoKeyMessage, outcome.Message);
+        Assert.IsFalse(native.Calls.Any(c => c.Id == ConnectionId));
+    }
+
+    [TestMethod]
+    public void NoEventAfterDispose()
+    {
+        (HotkeyManager manager, FakeMessageWindow window, _, _) = Build();
+        manager.Apply(EnabledWith(connect: "Ctrl+Alt+C"));
+        var raised = new List<HotkeyAction>();
+        manager.Activated += (_, e) => raised.Add(e.Action);
+
+        manager.Dispose();
+
+        // The id is no longer held, and Dispose unsubscribed from MessageReceived first, so this proves
+        // both: the fake still lets the test raise the message the window would no longer deliver.
+        window.Raise(0x0312, ConnectionId, 0);
+        Assert.IsEmpty(raised);
+    }
 }

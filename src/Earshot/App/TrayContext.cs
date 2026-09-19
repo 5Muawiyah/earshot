@@ -51,6 +51,10 @@ internal sealed record TrayStartOptions(
 
     // Whether a file exists, for the installed copy.
     public Func<string, bool> FileExists { get; init; } = File.Exists;
+
+    // The RegisterHotKey/UnregisterHotKey caller HotkeyManager uses, injected the way IStartupRegistry is:
+    // the real one by default, a fake in tests, so a tray-level test never registers a real global hotkey.
+    public INativeHotkeys NativeHotkeys { get; init; } = new User32Hotkeys();
 }
 
 // The tray: icon, tooltip, menu, left click and the cards they raise. Runs on the UI thread only.
@@ -101,6 +105,9 @@ internal sealed class TrayContext : ApplicationContext
     public const string BlockingBeforeClosingMessage = "Blocking the AirPods before closing.";
     public const string BlockStatusUnreadableMessage = "Could not read the boot block status.";
     public const string GateNotRepinnedMessage = "Device saved. Boot block may still use the previous device.";
+    public const string BlockAtBootHotkeyOffRefusedMessage = "Turning off block at boot needs the menu, not a shortcut.";
+    public const string HotkeySetupNeededMessage = "Set up Earshot from the menu first.";
+    public const string HotkeyRegistrationProblemMessage = "One or more shortcuts could not be set. See the log.";
 
     // Long enough for a cancelled connect to finish its own clean-up, which may run the gate once more to
     // block the device nodes; short enough that a controller that never returns cannot keep Earshot
@@ -192,12 +199,12 @@ internal sealed class TrayContext : ApplicationContext
         // Global shortcuts, over the same hidden window: no second window, no second message pump.
         // Every action a shortcut can raise goes through the exact method the matching menu item or the
         // left click already uses, so a hotkey is never a second route to the device.
-        _hotkeys = new HotkeyManager(_window, new User32Hotkeys(), _log);
+        _hotkeys = new HotkeyManager(_window, options.NativeHotkeys, _log);
         _hotkeys.Activated += OnHotkeyActivated;
 
         _menu = new TrayMenu(CurrentMenuState);
         _menu.ToggleClicked += (_, _) => StartToggle();
-        _menu.BlockAtBootClicked += (_, _) => Start("block at boot", BlockAtBootAsync);
+        _menu.BlockAtBootClicked += (_, _) => Start("block at boot", place => BlockAtBootAsync(place));
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
         _menu.OpenOnStartupClicked += (_, _) => OnOpenOnStartupClicked();
         // The click point is read now, before the menu closes and the picker opens.
@@ -343,24 +350,29 @@ internal sealed class TrayContext : ApplicationContext
         _registry.Cards.Hide();
         _notifyIcon.Visible = false;
 
-        // Every exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
-        // registered after Earshot closes. This runs on the UI thread, which owns the window.
+        // Every orderly exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
+        // registered after one of those. This runs on the UI thread, which owns the window. It does not
+        // run at all for a crash or a kill: nothing in the process can release a hot key once the process
+        // is gone, and Windows does not document releasing one for a dead owner either (HotkeyManager's
+        // own header notes UnregisterHotKey must be called explicitly).
         _hotkeys.Dispose();
     }
 
     // The cursor as it is now, for a card that follows this click however long the action takes.
     private CardPlace ClickPlace() => CardPlace.AtClick(_cursorPosition());
 
-    private void StartToggle()
+    // viaHotkey: the trigger was a global shortcut, not the icon. It changes where the card that follows
+    // lands (CardPlace.NearTray, since there is no click point) and whether a success is shown at all.
+    private void StartToggle(bool viaHotkey = false)
     {
-        CardPlace place = ClickPlace();
+        CardPlace place = viaHotkey ? CardPlace.NearTray : ClickPlace();
         long clickedAt = _tickCount();
-        Launch("toggle", () => ToggleAsync(place, clickedAt), place);
+        Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey), place);
     }
 
-    private void Start(string action, Func<CardPlace, Task> work)
+    private void Start(string action, Func<CardPlace, Task> work, bool viaHotkey = false)
     {
-        CardPlace place = ClickPlace();
+        CardPlace place = viaHotkey ? CardPlace.NearTray : ClickPlace();
         Launch(action, () => work(place), place);
     }
 
@@ -409,7 +421,7 @@ internal sealed class TrayContext : ApplicationContext
 
     // Toggles the connection of the pinned (or resolved) device through the coordinator, which owns the
     // block, allow and protection order around it and shows its cards.
-    private async Task ToggleAsync(CardPlace place, long clickedAt)
+    private async Task ToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false)
     {
         if (_toggleInFlight)
         {
@@ -419,18 +431,18 @@ internal sealed class TrayContext : ApplicationContext
                 return;
             }
 
-            await SupersedeToggleAsync(place, clickedAt);
+            await SupersedeToggleAsync(place, clickedAt, viaHotkey);
             return;
         }
 
-        await RunToggleAsync(place, clickedAt, connect: null);
+        await RunToggleAsync(place, clickedAt, connect: null, viaHotkey);
     }
 
     // A click while a connect or disconnect is in flight asks for the opposite. The one in flight is cancelled and
     // the new one runs only once it has ended, clean-up included, so a re-block after a cancelled allow always
     // comes first. That can take minutes (a gate change already sent is waited for, a protect verb included), so the
     // click is answered with a card at once.
-    private async Task SupersedeToggleAsync(CardPlace place, long clickedAt)
+    private async Task SupersedeToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false)
     {
         bool connect = !_toggleConnect;
         string next = connect ? "connect" : "disconnect";
@@ -458,11 +470,11 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        await RunToggleAsync(place, clickedAt, connect);
+        await RunToggleAsync(place, clickedAt, connect, viaHotkey);
     }
 
     // connect: the intent a newer click asked for, or null to take it from the device state.
-    private async Task RunToggleAsync(CardPlace place, long clickedAt, bool? connect)
+    private async Task RunToggleAsync(CardPlace place, long clickedAt, bool? connect, bool viaHotkey = false)
     {
         if (_toggleInFlight)
         {
@@ -533,6 +545,13 @@ internal sealed class TrayContext : ApplicationContext
                 report.UserMessage,
                 report.Steps);
             _log.Write(report.IsSuccess || cancelled ? LogLevel.Info : LogLevel.Warn, text);
+
+            // A click sees the result on the icon; a hotkey has nothing else to show it, so it gets a
+            // card for the outcome, success included.
+            if (viaHotkey && report.IsSuccess && !cancelled)
+            {
+                ShowCard(intent.DeviceName, report.UserMessage, place);
+            }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -600,6 +619,10 @@ internal sealed class TrayContext : ApplicationContext
     // Registers what the current settings ask for and logs what did not take. A failure for one
     // shortcut is reported but never stops the others, and nothing here decides who else holds a
     // combination beyond the one code (1409) the platform documents as meaning that.
+    // Registers what the current settings ask for. Every outcome is logged; if any shortcut did not take
+    // (held by another program, rejected text, a Windows error), the owner sees one card summarising that
+    // rather than nothing, and rather than one card per shortcut, since a settings save can touch all
+    // four at once and four cards for one save would be worse than the silence this replaces.
     private void ApplyHotkeys()
     {
         if (_closed)
@@ -608,6 +631,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         IReadOnlyList<HotkeyRegistrationOutcome> outcomes = _hotkeys.Apply(_registry.Settings.Current.Hotkeys);
+        bool anyProblem = false;
         foreach (HotkeyRegistrationOutcome outcome in outcomes)
         {
             if (outcome.State is HotkeyRegistrationState.NotSet or HotkeyRegistrationState.Registered)
@@ -617,14 +641,22 @@ internal sealed class TrayContext : ApplicationContext
             else
             {
                 _log.Warn("Hotkey " + outcome.Action + ": " + outcome.Message);
+                anyProblem = true;
             }
+        }
+
+        if (anyProblem)
+        {
+            ShowCard(TrayStatus.AppName, HotkeyRegistrationProblemMessage, CardPlace.NearTray);
         }
     }
 
     // The global shortcut fired: hand it to the exact method the matching menu item or the left click
     // already uses, so a hotkey never opens a second route to the device. SpeakStatus has nothing to
-    // call yet: speech is a separate feature this build does not have.
-    private void OnHotkeyActivated(object? sender, HotkeyActivatedEventArgs e)
+    // call yet: speech is a separate feature this build does not have. Internal so tests can raise each
+    // action without registering a real global hotkey, the same way OnIconMouseClick and OnSessionEnding
+    // already are.
+    internal void OnHotkeyActivated(object? sender, HotkeyActivatedEventArgs e)
     {
         if (_closing || _closed)
         {
@@ -635,17 +667,17 @@ internal sealed class TrayContext : ApplicationContext
         {
             case HotkeyAction.ToggleConnection:
                 _log.Info("Hotkey: toggle connection.");
-                StartToggle();
+                StartToggle(viaHotkey: true);
                 break;
 
             case HotkeyAction.ToggleAudioProtection:
                 _log.Info("Hotkey: toggle audio protection.");
-                OnProtectAudioClicked();
+                OnProtectAudioClicked(viaHotkey: true);
                 break;
 
             case HotkeyAction.ToggleBlockAtBoot:
                 _log.Info("Hotkey: toggle block at boot.");
-                Start("block at boot", BlockAtBootAsync);
+                Start("block at boot", place => BlockAtBootAsync(place, viaHotkey: true), viaHotkey: true);
                 break;
 
             case HotkeyAction.SpeakStatus:
@@ -729,54 +761,103 @@ internal sealed class TrayContext : ApplicationContext
         _startupState = _startup.Read();
     }
 
-    private async Task BlockAtBootAsync(CardPlace place)
+    // The menu item and the hotkey both call this one method, so there is one route and one busy guard for
+    // both. The guard is claimed synchronously, before the first await, so a burst of calls (a key held
+    // down, or several hotkey presses queued back to back) lets only the first one through: every later
+    // one in the same burst sees _operationsInFlight already raised and is refused at once, rather than
+    // each starting its own read and queuing its own gate change.
+    //
+    // A hotkey may turn Block at boot on, but never off: turning off the boot protection is a deliberate
+    // act the owner should see happening, which a card confirms but does not itself provide the assurance
+    // the menu does (a checked box the owner chose to uncheck), so it is refused and pointed at the menu.
+    private async Task BlockAtBootAsync(CardPlace place, bool viaHotkey = false)
     {
-        // The cached status is read again whenever the icon is pressed, which happens before the menu
-        // opens; it is read here only when nothing has been read yet.
-        BootBlockStatus? status = BlockStatus ?? await _coordinator.ReadBlockStatusAsync(_lifetime.Token);
-        if (_closing)
+        if (IsBusy || _coordinator.IsBusy)
         {
+            ShowCard(TrayStatus.AppName, BusyMessage, place);
             return;
         }
 
-        if (status is null)
+        _operationsInFlight++;
+        UpdatePresentation(forceIcon: false);
+        try
         {
-            ShowCard(TrayStatus.AppName, BlockStatusUnreadableMessage, place);
-            return;
-        }
+            // The cached status is read again whenever the icon is pressed, which happens before the menu
+            // opens; it is read here only when nothing has been read yet.
+            BootBlockStatus? status = BlockStatus ?? await _coordinator.ReadBlockStatusAsync(_lifetime.Token);
+            if (_closing)
+            {
+                return;
+            }
 
-        // Before setup there is no gate to take the setting, so the click runs setup instead.
-        if (TrayStatus.NeedsSetUp(status))
+            if (status is null)
+            {
+                ShowCard(TrayStatus.AppName, BlockStatusUnreadableMessage, place);
+                return;
+            }
+
+            // Before setup there is no gate to take the setting. The click runs setup instead; a hotkey
+            // never starts setup on its own, because that ends in an elevation prompt the owner did not
+            // visibly ask for.
+            if (TrayStatus.NeedsSetUp(status))
+            {
+                if (viaHotkey)
+                {
+                    ShowCard(TrayStatus.AppName, HotkeySetupNeededMessage, place);
+                    return;
+                }
+
+                await RunSetupAsync(place);
+                return;
+            }
+
+            bool blockAtBoot = !status.BlockAtBoot;
+            if (viaHotkey && !blockAtBoot)
+            {
+                ShowCard(TrayStatus.AppName, BlockAtBootHotkeyOffRefusedMessage, place);
+                return;
+            }
+
+            string action = blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff;
+
+            // A gate change: once it is running it is waited for, so the block before closing reads the setting it left.
+            // Turning it off also allows nodes that are still blocked (see BlockCoordinator.SetBlockAtBootAsync).
+            await RunOperationAsync(action, ct => _coordinator.SetBlockAtBootAsync(blockAtBoot, place, ct), place, alwaysShowCard: viaHotkey);
+        }
+        finally
         {
-            await RunSetupAsync(place);
-            return;
+            _operationsInFlight--;
+            UpdatePresentation(forceIcon: false);
         }
-
-        bool blockAtBoot = !status.BlockAtBoot;
-        string action = blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff;
-
-        // A gate change: once it is running it is waited for, so the block before closing reads the setting it left.
-        // Turning it off also allows nodes that are still blocked (see BlockCoordinator.SetBlockAtBootAsync).
-        await RunOperationAsync(action, ct => _coordinator.SetBlockAtBootAsync(blockAtBoot, place, ct), place);
     }
 
-    private void OnProtectAudioClicked()
+    // See BlockAtBootAsync for why the busy guard sits here, claimed before any await, rather than
+    // relying on RunOperationAsync's own counter alone.
+    private void OnProtectAudioClicked(bool viaHotkey = false)
     {
         if (_closing)
         {
             return;
         }
 
-        CardPlace place = ClickPlace();
+        CardPlace place = viaHotkey ? CardPlace.NearTray : ClickPlace();
+        if (IsBusy || _coordinator.IsBusy)
+        {
+            ShowCard(TrayStatus.AppName, BusyMessage, place);
+            return;
+        }
+
         bool protect = !_registry.Settings.Current.ProtectAudioQuality;
         if (!TryUpdateSettings("protect audio quality", s => s.ProtectAudioQuality = protect, place))
         {
             return;
         }
 
-        // The coordinator applies it in the right order and shows the microphone caveat once.
+        // The coordinator applies it in the right order and shows the microphone caveat once. Claimed
+        // synchronously (_operationsInFlight++ inside RunOperationAsync runs before Launch returns, since
+        // nothing between here and there awaits), so a burst of hotkey presses only starts one of these.
         string action = protect ? GateVerbs.ProtectOn : GateVerbs.ProtectOff;
-        Launch(action, () => RunOperationAsync(action, ct => _coordinator.SetProtectionAsync(protect, place, ct), place), place);
+        Launch(action, () => RunOperationAsync(action, ct => _coordinator.SetProtectionAsync(protect, place, ct), place, alwaysShowCard: viaHotkey), place);
     }
 
     private void OnOpenOnStartupClicked()
@@ -1219,11 +1300,13 @@ internal sealed class TrayContext : ApplicationContext
 
     // Runs one menu action and returns its result, or null when it did not run, was cancelled or threw (each
     // logged, and shown unless Earshot is closing). Its token is cancelled only when Earshot closes: a click or
-    // another action never cancels it.
+    // another action never cancels it. alwaysShowCard is set for a hotkey trigger, which has no menu tick to
+    // show the result: a success then gets a card too, not only a failure.
     private async Task<ControllerResult?> RunOperationAsync(
         string action,
         Func<CancellationToken, Task<ControllerResult>> operation,
-        CardPlace place)
+        CardPlace place,
+        bool alwaysShowCard = false)
     {
         if (_closing)
         {
@@ -1238,7 +1321,7 @@ internal sealed class TrayContext : ApplicationContext
             ControllerResult result = await operation(cts.Token);
 
             // While closing, Report logs the result and shows no card.
-            Report(action, result, place);
+            Report(action, result, place, alwaysShowCard);
             return result;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -1259,13 +1342,19 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    // Logs every result; shows a card for any result that is not a success.
-    private void Report(string action, ControllerResult result, CardPlace place)
+    // Logs every result; shows a card for any result that is not a success, and for a success too when
+    // alwaysShowCard asks for it (a hotkey trigger, which the owner cannot otherwise see the result of).
+    private void Report(string action, ControllerResult result, CardPlace place, bool alwaysShowCard = false)
     {
         string text = TrayReport.Describe(action, result.Status, result.UserMessage, result.Steps);
         if (result.IsSuccess)
         {
             _log.Info(text);
+            if (alwaysShowCard)
+            {
+                ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), result.UserMessage, place);
+            }
+
             return;
         }
 

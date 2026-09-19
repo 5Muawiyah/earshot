@@ -75,10 +75,7 @@ public sealed class HotkeyManager : IDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_window.IsOwnedByCurrentThread)
-        {
-            throw new InvalidOperationException("Hotkeys must be applied on the thread that owns the window.");
-        }
+        ThrowIfNotOwningThread();
 
         ReleaseAllInternal();
 
@@ -110,19 +107,25 @@ public sealed class HotkeyManager : IDisposable
     public void ReleaseAll()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotOwningThread();
         ReleaseAllInternal();
     }
 
     // Unsubscribes from MessageReceived first, then releases everything held, then marks the instance
-    // disposed. Idempotent: a second call does nothing and logs nothing. There is no finaliser: the
-    // handle is not ours, and the unregister must happen on the window's thread, which a finaliser
-    // cannot promise.
+    // disposed. Idempotent: a second call does nothing and logs nothing, on any thread, because there is
+    // nothing left to release. There is no finaliser: the handle is not ours, and the unregister must
+    // happen on the window's thread, which a finaliser cannot promise. An off-thread first call throws
+    // rather than silently freeing nothing: UnregisterHotKey "Frees a hot key previously registered by
+    // the calling thread", so a call from the wrong thread would report success while leaving every held
+    // id registered.
     public void Dispose()
     {
         if (_disposed)
         {
             return;
         }
+
+        ThrowIfNotOwningThread();
 
         if (_messageHandlerAttached)
         {
@@ -132,6 +135,18 @@ public sealed class HotkeyManager : IDisposable
 
         ReleaseAllInternal();
         _disposed = true;
+    }
+
+    // Apply, ReleaseAll and Dispose all enforce this: RegisterHotKey "fails if you try to associate a hot
+    // key with a window created by another thread", and UnregisterHotKey "Frees a hot key previously
+    // registered by the calling thread". A call from the wrong thread does not fail loudly on its own; it
+    // silently frees nothing, which this throws to prevent instead.
+    private void ThrowIfNotOwningThread()
+    {
+        if (!_window.IsOwnedByCurrentThread)
+        {
+            throw new InvalidOperationException("Hotkeys must be applied on the thread that owns the window.");
+        }
     }
 
     private HotkeyRegistrationOutcome ApplyOne(HotkeyAction action, string text, List<HotkeyCombination> claimed)

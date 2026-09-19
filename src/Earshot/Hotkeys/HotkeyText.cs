@@ -13,6 +13,14 @@ public static class HotkeyText
     public const string KeyNotLastMessage = "Put the key last, as in Ctrl+Alt+P.";
     public const string EmptySegmentMessage = "That shortcut has an empty part. Use a form like Ctrl+Alt+P.";
 
+    // Not part of the spec's own acceptance tests: an Earshot house rule (Shift+letter is ordinary
+    // typing, not a shortcut), added and tested alongside the spec's own rejections.
+    public const string ShiftAloneMessage = "Shift alone is not enough. Add Ctrl, Alt or Win as well.";
+
+    // How much of an unrecognised segment is echoed back in a message. Long enough to show a typo, short
+    // enough that a very long pasted string does not turn the rejection into a wall of text.
+    private const int MaxEchoedSegmentLength = 40;
+
     /// <summary>Parses text such as "Ctrl+Alt+P".</summary>
     /// <returns>true on success. On failure, <paramref name="error"/> is one of the parse-error
     /// strings above and <paramref name="combination"/> is default.</returns>
@@ -69,7 +77,7 @@ public static class HotkeyText
                 continue;
             }
 
-            error = "There is no key called \"" + segment + "\".";
+            error = "There is no key called \"" + Echo(segment) + "\".";
             return false;
         }
 
@@ -88,6 +96,16 @@ public static class HotkeyText
         if (keyIndex != segments.Length - 1)
         {
             error = KeyNotLastMessage;
+            return false;
+        }
+
+        // Shift on its own does not tell a shortcut apart from ordinary typing (Shift+P is just "P"), so
+        // it is rejected here rather than left to collide with whatever the owner is typing elsewhere.
+        // Ctrl, Alt and Win are never held down for plain text, which is why they are not restricted the
+        // same way.
+        if (modifiers == HotkeyModifiers.Shift)
+        {
+            error = ShiftAloneMessage;
             return false;
         }
 
@@ -141,6 +159,10 @@ public static class HotkeyText
         text = Format(combination);
         return true;
     }
+
+    // Truncates a segment echoed back in a rejection message, with an ellipsis when it was cut.
+    private static string Echo(string segment) =>
+        segment.Length <= MaxEchoedSegmentLength ? segment : segment[..MaxEchoedSegmentLength] + "...";
 
     private static bool TryMatchModifier(string segment, out HotkeyModifiers modifier)
     {

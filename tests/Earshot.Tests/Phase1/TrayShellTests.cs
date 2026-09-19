@@ -66,6 +66,32 @@ public sealed class TrayShellTests
         Assert.AreEqual(expected, ShellMessageWindow.DescribeEndSessionFlags(flags));
     }
 
+    // Proves IsOwnedByCurrentThread against a real window, not a fake: it compares the OS thread that
+    // owns the window's message queue (GetWindowThreadProcessId) with the OS thread running now
+    // (GetCurrentThreadId), so it must read true on the thread that created the window and false from a
+    // different one, even though both run inside the same process.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowthreadprocessid
+    // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthreadid
+    [TestMethod]
+    public void IsOwnedByCurrentThreadComparesTheRealWindowThread()
+    {
+        var log = new CapturingLog();
+        using var window = new ShellMessageWindow(log);
+
+        Assert.IsTrue(window.IsOwnedByCurrentThread, "The thread that created the window must own it.");
+
+        // A dedicated Thread, not Task.Run: this assembly's tests run with other tests in parallel, and a
+        // thread-pool worker can occasionally be the very same OS thread that created the window once the
+        // pool recycles it, which would make this flaky rather than wrong. A brand new Thread is a
+        // different OS thread by construction.
+        bool? fromOtherThread = null;
+        var thread = new Thread(() => fromOtherThread = window.IsOwnedByCurrentThread);
+        thread.Start();
+        thread.Join();
+
+        Assert.IsFalse(fromOtherThread, "A different OS thread must not be reported as owning the window.");
+    }
+
     [TestMethod]
     public void AddressesAreShownAsPairs()
     {
