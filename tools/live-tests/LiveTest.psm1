@@ -549,7 +549,8 @@ function Invoke-Earshot
 
         # Windows PowerShell 5.1 only fills ExitCode in for a -PassThru process whose handle was
         # read while it was still running. Without this line ExitCode reads null after the wait,
-        # and every live step is recorded as failed whatever Earshot returned.
+        # and every live step is recorded as failed whatever Earshot returned. Proved against a
+        # real launch, not a fake one, in tools\live-tests\selftest\Test-RealLauncher.ps1.
         $null = $process.Handle
     }
     catch
@@ -700,6 +701,22 @@ function Invoke-EarshotElevated
     {
         $step.timedOut = $true
         $step.error = ('It did not finish within ' + $TimeoutSeconds + ' s.')
+        [void]$Run.Steps.Add($step)
+        Write-Failure -Run $Run -Message ([string]$Label + ': ' + $step.error)
+        return $null
+    }
+
+    # No $process.Handle read here. That line is what makes ExitCode reliable for the
+    # -NoNewWindow -PassThru process in Invoke-Earshot above, proved against a real launch
+    # in tools\live-tests\selftest\Test-RealLauncher.ps1. Whether the same is true, false, or
+    # unnecessary for a process started with -Verb RunAs from a non-elevated parent has not
+    # been measured on this machine, and this run cannot raise the administrator prompt that
+    # would let it be, so nothing is guessed: an unreadable exit code is reported as such
+    # below and never scored as a pass or a fail.
+    if ($null -eq $process.ExitCode)
+    {
+        $step.ran = $true
+        $step.error = 'The elevated run started, but PowerShell did not give its exit code, so this step says nothing either way.'
         [void]$Run.Steps.Add($step)
         Write-Failure -Run $Run -Message ([string]$Label + ': ' + $step.error)
         return $null
