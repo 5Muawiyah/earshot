@@ -1,0 +1,25 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: windows-latest
+    permissions:
+      contents: read      # the gate only reads the checkout
+    timeout-minutes: 20   # a wedged build fails here rather than at the platform ceiling
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      # tools\check.ps1 is the repository's own gate. It rebuilds every project from
+      # scratch, runs the tests, and fails on a compiler or analyser warning, on a
+      # suppressed diagnostic anywhere in the solution, and on an em-dash in the source.
+      # It sets EARSHOT_SAFE_MODE itself, so no device action can run here, and it
+      # prints its summary as JSON whether it passes or fails.
+      - run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools\check.ps1 -LogDir "${{ runner.temp }}\earshot-check"
