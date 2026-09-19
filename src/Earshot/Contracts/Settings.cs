@@ -17,6 +17,10 @@ public sealed class EarshotSettings
     // so an older settings file with no Hotkeys member reads as "off, nothing typed" and nothing is
     // registered until the owner asks.
     public Earshot.Hotkeys.HotkeySettings Hotkeys { get; set; } = new();
+
+    // v1.1: spoken status. Defaults off (Earshot.Voice.VoiceOverSettings.Default), so an older settings
+    // file with no VoiceOver member reads as "off" and nothing is ever spoken until the owner asks.
+    public Earshot.Voice.VoiceOverSettings VoiceOver { get; set; } = Earshot.Voice.VoiceOverSettings.Default;
 }
 
 // SYSTEM-owned, %ProgramData%\Earshot\config.json. Users-read, SYSTEM-write via setboot verbs only.

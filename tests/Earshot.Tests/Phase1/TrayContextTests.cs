@@ -1072,9 +1072,14 @@ internal sealed class TrayHarness : IDisposable
         string? installedExePath = null,
         Func<string, bool>? fileExists = null,
         TimeSpan? coordinatorExitWaitLimit = null,
-        FakeNativeHotkeys? nativeHotkeys = null)
+        FakeNativeHotkeys? nativeHotkeys = null,
+        Earshot.Tests.Voice.FakeSpeechEngine? voiceEngine = null)
     {
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
+        // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
+        // SpeechSynthesizer. Reused from tests\Earshot.Tests\Voice\FakeSpeechEngine.cs rather than a
+        // second fake, the same way NativeHotkeys is shared with the Hotkeys suite.
+        Voice = voiceEngine ?? new Earshot.Tests.Voice.FakeSpeechEngine();
         // An exception in a posted callback fails the test instead of opening the WinForms error dialog.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -1123,6 +1128,7 @@ internal sealed class TrayHarness : IDisposable
             // A fake, never the real User32Hotkeys: a TrayContext test must never register a real global
             // hotkey on the machine that runs it.
             NativeHotkeys = NativeHotkeys,
+            VoiceEngineFactory = () => Voice,
         };
         if (exitWaitLimit is { } limit)
         {
@@ -1163,6 +1169,8 @@ internal sealed class TrayHarness : IDisposable
     public FakeStartupRegistry Startup { get; } = new();
 
     public FakeNativeHotkeys NativeHotkeys { get; }
+
+    public Earshot.Tests.Voice.FakeSpeechEngine Voice { get; }
 
     public ServiceRegistry Registry { get; }
 

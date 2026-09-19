@@ -7,6 +7,7 @@ using Earshot.Hotkeys;
 using Earshot.Icons;
 using Earshot.Infra;
 using Earshot.Tray;
+using Earshot.Voice;
 
 namespace Earshot.App;
 
@@ -55,6 +56,11 @@ internal sealed record TrayStartOptions(
     // The RegisterHotKey/UnregisterHotKey caller HotkeyManager uses, injected the way IStartupRegistry is:
     // the real one by default, a fake in tests, so a tray-level test never registers a real global hotkey.
     public INativeHotkeys NativeHotkeys { get; init; } = new User32Hotkeys();
+
+    // Builds the speech engine VoiceOver opens against, injected the same way: the real one by default, a
+    // fake in tests, so a tray-level test never constructs a real SpeechSynthesizer. Called from
+    // ApplyVoiceOver only when settings ask for a running announcer that is not running yet.
+    public Func<ISpeechEngine> VoiceEngineFactory { get; init; } = static () => new SystemSpeechEngine();
 }
 
 // The tray: icon, tooltip, menu, left click and the cards they raise. Runs on the UI thread only.
@@ -132,6 +138,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly TrayMenu _menu;
     private readonly ShellMessageWindow _window;
     private readonly HotkeyManager _hotkeys;
+    private readonly Func<ISpeechEngine> _voiceEngineFactory;
     private readonly TrayIconFactory _icons;
     private readonly StartupRegistration _startup;
     private readonly BluetoothDeviceList _devices;
@@ -167,6 +174,16 @@ internal sealed class TrayContext : ApplicationContext
     private bool _closing;
     private bool _closed;
 
+    // VoiceOver: the running announcer, or null while it is off, and the settings it was last opened
+    // with, so a settings change that asks for nothing different never reopens the speech engine.
+    private SpeechAnnouncer? _voice;
+    private VoiceOverSettings? _voiceApplied;
+
+    // Sticky for the life of the process: once Open has told us there is no usable voice on this
+    // machine (StepOutcomes.NotAvailable), that is a machine fact that will not change while Earshot
+    // runs, so the menu keeps showing "(no voice)" without probing again on every settings change.
+    private bool _voiceKnownNoVoice;
+
     public TrayContext(ServiceRegistry registry, BlockCoordinator coordinator, TrayStartOptions options)
     {
         ArgumentNullException.ThrowIfNull(registry);
@@ -201,12 +218,14 @@ internal sealed class TrayContext : ApplicationContext
         // left click already uses, so a hotkey is never a second route to the device.
         _hotkeys = new HotkeyManager(_window, options.NativeHotkeys, _log);
         _hotkeys.Activated += OnHotkeyActivated;
+        _voiceEngineFactory = options.VoiceEngineFactory;
 
         _menu = new TrayMenu(CurrentMenuState);
         _menu.ToggleClicked += (_, _) => StartToggle();
         _menu.BlockAtBootClicked += (_, _) => Start("block at boot", place => BlockAtBootAsync(place));
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
         _menu.OpenOnStartupClicked += (_, _) => OnOpenOnStartupClicked();
+        _menu.SpeakStatusClicked += (_, _) => OnSpeakStatusClicked();
         // The click point is read now, before the menu closes and the picker opens.
         _menu.ChooseDeviceClicked += (_, _) =>
         {
@@ -243,6 +262,7 @@ internal sealed class TrayContext : ApplicationContext
 
         ReportSettingsLoad(options.SettingsStatus);
         ApplyHotkeys();
+        ApplyVoiceOver();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -356,6 +376,11 @@ internal sealed class TrayContext : ApplicationContext
         // is gone, and Windows does not document releasing one for a dead owner either (HotkeyManager's
         // own header notes UnregisterHotKey must be called explicitly).
         _hotkeys.Dispose();
+
+        // Cancels and disposes the speech engine on every exit path this handles (ExitThreadCore,
+        // Dispose), the same way: a phrase in flight must not keep the process alive, and StopSpeaking() is what
+        // cancels it (drops the mailbox, waits at most ShutdownWaitMilliseconds, then disposes).
+        StopVoice();
     }
 
     // The cursor as it is now, for a card that follows this click however long the action takes.
@@ -552,6 +577,23 @@ internal sealed class TrayContext : ApplicationContext
             {
                 ShowCard(intent.DeviceName, report.UserMessage, place);
             }
+
+            // VoiceOver: announce on the transition itself, never on a poll and never a state the app
+            // only assumed, so a cancelled toggle says nothing. There is no VoiceLine for a failed
+            // disconnect (the closed six-phrase set has no "disconnect failed" line), so that case is
+            // left unspoken rather than widening the set past what the design's own acceptance tests
+            // audited.
+            if (!cancelled)
+            {
+                if (report.IsSuccess)
+                {
+                    AnnounceIfEnabled(wanted ? VoiceLine.Connected : VoiceLine.Disconnected);
+                }
+                else if (wanted)
+                {
+                    AnnounceIfEnabled(VoiceLine.ConnectFailed);
+                }
+            }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -613,6 +655,7 @@ internal sealed class TrayContext : ApplicationContext
             {
                 UpdatePresentation(forceIcon: false);
                 ApplyHotkeys();
+                ApplyVoiceOver();
             }
         });
 
@@ -651,11 +694,177 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
+    // The menu tick toggles the owner's VoiceOver.Enabled setting; ApplyVoiceOver (raised through
+    // Settings.Changed, the same path ApplyHotkeys already uses) is what actually starts or stops the
+    // announcer, so there is exactly one place that opens or closes the speech engine.
+    private void OnSpeakStatusClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool enable = !_registry.Settings.Current.VoiceOver.Enabled;
+        if (!TryUpdateSettings("speak status", s => s.VoiceOver = s.VoiceOver with { Enabled = enable }, place))
+        {
+            return;
+        }
+
+        ShowCard(TrayStatus.AppName, enable ? AnnouncerCopy.SpeechOn : AnnouncerCopy.SpeechOff, place);
+    }
+
+    // Read-only: reads the state the tray already holds (the same snapshot and settings the menu label
+    // and the left click read) and speaks it, and never itself triggers a status probe, a connect or a
+    // node change. If VoiceOver is off or unavailable there is nothing to speak, and this does nothing
+    // else either: it must never fall back to some other action.
+    private void SpeakCurrentStatus()
+    {
+        if (_voice is not { IsAvailable: true } voice)
+        {
+            return;
+        }
+
+        ConnectionState connection = TrayStatus.ActiveTarget(_snapshot, _registry.Settings.Current)?.Connection ?? ConnectionState.Unknown;
+        voice.Announce(connection == ConnectionState.Connected ? VoiceLine.Connected : VoiceLine.Disconnected);
+        LogVoiceOutcomes(voice.Drain());
+    }
+
+    // Announces a state transition the coordinator or this class already observed (never a poll, and
+    // never a state the app only assumed): a connect or disconnect that finished, or a Block at boot
+    // change that finished. Does nothing when VoiceOver is off or unavailable.
+    private void AnnounceIfEnabled(VoiceLine line)
+    {
+        if (_voice is not { IsAvailable: true } voice)
+        {
+            return;
+        }
+
+        voice.Announce(line);
+        LogVoiceOutcomes(voice.Drain());
+    }
+
+    // Opens or closes the speech engine to match what settings.VoiceOver (clamped) now asks for, and does
+    // nothing when a settings change asked for nothing different (comparing the clamped record, the same
+    // way ApplyHotkeys is re-run on every settings change but only changes what actually differs). Called
+    // from the constructor and from OnSettingsChanged, on the UI thread only, the same thread Start and
+    // Stop must run on.
+    private void ApplyVoiceOver()
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        VoiceOverSettings clamped = _registry.Settings.Current.VoiceOver.Clamped(out IReadOnlyList<StepOutcome> notes);
+        foreach (StepOutcome note in notes)
+        {
+            _log.Write(LogLevel.Debug, "VoiceOver " + note.Step + ": " + note.Detail);
+        }
+
+        if (clamped == _voiceApplied)
+        {
+            return;
+        }
+
+        _voiceApplied = clamped;
+        StopVoice();
+
+        if (!clamped.Enabled)
+        {
+            return;
+        }
+
+        var voice = new SpeechAnnouncer(_voiceEngineFactory(), clamped, TimeProvider.System);
+        voice.Stopped += OnVoiceStopped;
+        StepOutcome outcome = voice.Start();
+        LogVoiceOutcomes(voice.Drain());
+
+        if (outcome.Ok)
+        {
+            _voice = voice;
+            return;
+        }
+
+        _log.Warn("VoiceOver open: " + outcome.CodeName + " (" + outcome.Code.ToString(CultureInfo.InvariantCulture) + ") " + outcome.Detail);
+        voice.Stopped -= OnVoiceStopped;
+        voice.Dispose();
+
+        if (outcome.Code == NativeCodes.NotAvailable)
+        {
+            // Not a failure of anything: GetInstalledVoices found no usable voice. The menu shows the
+            // "(no voice)" label and refuses the click from now on (_voiceKnownNoVoice), and the owner's
+            // Enabled choice is left as it is: installing a voice and restarting Earshot should resume
+            // speaking on its own.
+            _voiceKnownNoVoice = true;
+            ShowCard(TrayStatus.AppName, AnnouncerCopy.NoVoiceInstalled, CardPlace.NearTray);
+            return;
+        }
+
+        // The engine threw opening: this is a real failure, not "no voice is installed", so the setting
+        // itself is turned back off, matching AnnouncerCopy.SpeechStopped exactly.
+        ShowCard(TrayStatus.AppName, AnnouncerCopy.SpeechStopped, CardPlace.NearTray);
+        TurnVoiceOverOff();
+    }
+
+    // The worker gave up on its own after FailuresBeforeGivingUp consecutive Speak failures (never for an
+    // explicit Stop). Posted to the UI thread because SpeechAnnouncer raises this from its own worker
+    // thread (see IAnnouncer.Stopped).
+    private void OnVoiceStopped(object? sender, StepOutcome outcome) =>
+        _registry.UiPost(() =>
+        {
+            if (_closed)
+            {
+                return;
+            }
+
+            _log.Warn("VoiceOver speak: " + outcome.CodeName + " (" + outcome.Code.ToString(CultureInfo.InvariantCulture) + ") " +
+                outcome.Detail + " Speech has turned itself off after repeated failures.");
+            ShowCard(TrayStatus.AppName, AnnouncerCopy.SpeechStopped, CardPlace.NearTray);
+            TurnVoiceOverOff();
+        });
+
+    // Stops and disposes whatever announcer is running, and writes the owner's setting back to off, so
+    // the menu tick and the persisted setting both agree that speech is off. Used for the two failures
+    // section 4 of the voiceover design says end with "Earshot has turned it off": the engine throwing on
+    // open, and repeated Speak failures.
+    private void TurnVoiceOverOff()
+    {
+        StopVoice();
+        if (_registry.Settings.Current.VoiceOver.Enabled)
+        {
+            TryUpdateSettings("voiceover (turned off)", s => s.VoiceOver = s.VoiceOver with { Enabled = false }, CardPlace.NearTray);
+        }
+    }
+
+    private void StopVoice()
+    {
+        if (_voice is null)
+        {
+            return;
+        }
+
+        _voice.Stopped -= OnVoiceStopped;
+        _voice.StopSpeaking();
+        _voice.Dispose();
+        _voice = null;
+    }
+
+    private void LogVoiceOutcomes(IReadOnlyList<StepOutcome> outcomes)
+    {
+        foreach (StepOutcome outcome in outcomes)
+        {
+            _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn,
+                "VoiceOver " + outcome.Step + ": " + outcome.CodeName + " (" + outcome.Code.ToString(CultureInfo.InvariantCulture) + ") " + (outcome.Detail ?? ""));
+        }
+    }
+
     // The global shortcut fired: hand it to the exact method the matching menu item or the left click
-    // already uses, so a hotkey never opens a second route to the device. SpeakStatus has nothing to
-    // call yet: speech is a separate feature this build does not have. Internal so tests can raise each
-    // action without registering a real global hotkey, the same way OnIconMouseClick and OnSessionEnding
-    // already are.
+    // already uses, so a hotkey never opens a second route to the device. SpeakStatus is the one
+    // exception to "opens a route to the device": it reads the state the tray already holds and speaks
+    // it, and never itself starts a connect, disconnect or gate change (SpeakCurrentStatus). Internal so
+    // tests can raise each action without registering a real global hotkey, the same way OnIconMouseClick
+    // and OnSessionEnding already are.
     internal void OnHotkeyActivated(object? sender, HotkeyActivatedEventArgs e)
     {
         if (_closing || _closed)
@@ -681,7 +890,8 @@ internal sealed class TrayContext : ApplicationContext
                 break;
 
             case HotkeyAction.SpeakStatus:
-                _log.Info("Hotkey: speak status is not available in this version.");
+                _log.Info("Hotkey: speak status.");
+                SpeakCurrentStatus();
                 break;
 
             default:
@@ -707,7 +917,7 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private MenuState CurrentMenuState() =>
-        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode);
+        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode, !_voiceKnownNoVoice);
 
     private void UpdatePresentation(bool forceIcon)
     {
@@ -822,7 +1032,15 @@ internal sealed class TrayContext : ApplicationContext
 
             // A gate change: once it is running it is waited for, so the block before closing reads the setting it left.
             // Turning it off also allows nodes that are still blocked (see BlockCoordinator.SetBlockAtBootAsync).
-            await RunOperationAsync(action, ct => _coordinator.SetBlockAtBootAsync(blockAtBoot, place, ct), place, alwaysShowCard: viaHotkey);
+            ControllerResult? result = await RunOperationAsync(action, ct => _coordinator.SetBlockAtBootAsync(blockAtBoot, place, ct), place, alwaysShowCard: viaHotkey);
+            if (result is { IsSuccess: true })
+            {
+                AnnounceIfEnabled(blockAtBoot ? VoiceLine.BlockedAtBoot : VoiceLine.AllowedAtBoot);
+            }
+            else if (result is { IsSuccess: false })
+            {
+                AnnounceIfEnabled(VoiceLine.BlockFailed);
+            }
         }
         finally
         {

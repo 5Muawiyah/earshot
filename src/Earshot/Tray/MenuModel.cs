@@ -1,5 +1,6 @@
 using Earshot.Contracts;
 using Earshot.Hotkeys;
+using Earshot.Voice;
 
 namespace Earshot.Tray;
 
@@ -23,6 +24,7 @@ internal sealed record MenuState(
     MenuItemState ProtectAudio,
     MenuItemState ProtectCaveat,
     MenuItemState OpenOnStartup,
+    MenuItemState SpeakStatus,
     MenuItemState ChooseDevice,
     MenuItemState SetUp,
     MenuItemState Exit);
@@ -38,6 +40,10 @@ internal static class MenuModel
     public const string ProtectAudioQuality = "Protect audio quality";
     public const string ProtectCaveat = "Turns off the AirPods microphone";
     public const string OpenOnStartup = "Open on startup";
+    // Kept exactly as AnnouncerCopy has it, referenced rather than duplicated: AnnouncerCopy is where
+    // every string a person hears or reads about VoiceOver lives.
+    public const string SpeakStatusText = AnnouncerCopy.MenuItem;
+    public const string SpeakStatusNoVoice = AnnouncerCopy.MenuItemNoVoice;
     public const string ChooseDevice = "Choose device...";
     public const string SetUpEarshot = "Set up Earshot...";
     public const string Exit = "Exit";
@@ -51,7 +57,8 @@ internal static class MenuModel
         EarshotSettings settings,
         bool busy,
         StartupState startup,
-        bool safeMode = false)
+        bool safeMode = false,
+        bool voiceAvailable = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -79,6 +86,11 @@ internal static class MenuModel
                 Indeterminate: ProtectionDisagrees(settings.ProtectAudioQuality, protection)),
             ProtectCaveat: new MenuItemState(ProtectCaveat, Checked: false, Enabled: false, Visible: true),
             OpenOnStartup: new MenuItemState(OpenOnStartup, Checked: startup == StartupState.On, Enabled: !busy, Visible: true),
+            SpeakStatus: new MenuItemState(
+                voiceAvailable ? SpeakStatusText : SpeakStatusNoVoice,
+                Checked: settings.VoiceOver.Enabled,
+                Enabled: !busy && voiceAvailable,
+                Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
             SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.NeedsSetUp(block)),
             Exit: new MenuItemState(Exit, Checked: false, Enabled: true, Visible: true));

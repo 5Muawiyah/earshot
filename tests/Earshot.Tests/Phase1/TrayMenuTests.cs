@@ -13,7 +13,8 @@ public sealed class TrayMenuTests
     private static readonly string[] DesignedOrder =
     [
         "Connect", "-",
-        "Block at boot", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup", "-",
+        "Block at boot", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
+        "Speak status (no voice)", "-",
         "Choose device...", "Set up Earshot...", "-",
         "Exit",
     ];

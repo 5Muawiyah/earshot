@@ -19,6 +19,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _protectAudio = new();
     private readonly ToolStripMenuItem _protectCaveat = new();
     private readonly ToolStripMenuItem _openOnStartup = new();
+    private readonly ToolStripMenuItem _speakStatus = new();
     private readonly ToolStripMenuItem _chooseDevice = new();
     private readonly ToolStripMenuItem _setUp = new();
     private readonly ToolStripMenuItem _exit = new();
@@ -38,6 +39,7 @@ internal sealed class TrayMenu : IDisposable
             _protectAudio,
             _protectCaveat,
             _openOnStartup,
+            _speakStatus,
             new ToolStripSeparator(),
             _chooseDevice,
             _setUp,
@@ -49,6 +51,7 @@ internal sealed class TrayMenu : IDisposable
         _blockAtBoot.Click += (_, _) => BlockAtBootClicked?.Invoke(this, EventArgs.Empty);
         _protectAudio.Click += (_, _) => ProtectAudioClicked?.Invoke(this, EventArgs.Empty);
         _openOnStartup.Click += (_, _) => OpenOnStartupClicked?.Invoke(this, EventArgs.Empty);
+        _speakStatus.Click += (_, _) => SpeakStatusClicked?.Invoke(this, EventArgs.Empty);
         _chooseDevice.Click += (_, _) => ChooseDeviceClicked?.Invoke(this, EventArgs.Empty);
         _setUp.Click += (_, _) => SetUpClicked?.Invoke(this, EventArgs.Empty);
         _exit.Click += (_, _) => ExitClicked?.Invoke(this, EventArgs.Empty);
@@ -64,6 +67,8 @@ internal sealed class TrayMenu : IDisposable
     public event EventHandler? ProtectAudioClicked;
 
     public event EventHandler? OpenOnStartupClicked;
+
+    public event EventHandler? SpeakStatusClicked;
 
     public event EventHandler? ChooseDeviceClicked;
 
@@ -85,6 +90,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_protectAudio, state.ProtectAudio);
         Set(_protectCaveat, state.ProtectCaveat);
         Set(_openOnStartup, state.OpenOnStartup);
+        Set(_speakStatus, state.SpeakStatus);
         Set(_chooseDevice, state.ChooseDevice);
         Set(_setUp, state.SetUp);
         Set(_exit, state.Exit);
