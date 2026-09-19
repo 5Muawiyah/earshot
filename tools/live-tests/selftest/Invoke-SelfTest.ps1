@@ -113,11 +113,18 @@ $result = [ordered]@{
     problems = @(); observed = @()
 }
 
+# The shipped scripts are run with Windows PowerShell 5.1 on the machine, so every case runs in
+# that host. This used to fall back to the bare name when the path was not there, which handed
+# Start-Process a command it could not resolve and turned a missing host into a
+# CommandNotFoundException some way into the run. It now says which path it looked in.
 function Get-PowerShellHost
 {
     $host51 = Join-Path ([System.Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe'
-    if (Test-Path -LiteralPath $host51 -PathType Leaf) { return $host51 }
-    return 'powershell.exe'
+    if (-not (Test-Path -LiteralPath $host51 -PathType Leaf))
+    {
+        throw ('Windows PowerShell 5.1 is not installed at ' + $host51 + '. The self-test runs the shipped live test scripts in that host.')
+    }
+    return $host51
 }
 
 # Reads a result.json into the two things the expectations talk about: the overall outcome and
