@@ -44,8 +44,32 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'LiveTest.psm1') -Force
 
-# The idle grace the application uses now, in seconds.
-$IdleGraceSeconds = 30
+# There is no read-only surface that reports the idle grace before it has been used: no diag
+# target carries BlockCoordinator.IdleGrace, and the application does not expose it as
+# configuration. The one place it is observable is the log line the idle rule itself writes when
+# it blocks ("...were not in use for <N> s..."), which is Earshot reporting the figure it used,
+# not this script assuming one. Get-MeasuredGraceSeconds below reads that line; nothing here
+# restates 30 as a fallback, because a fallback would be an invented figure wearing a measured
+# one's clothes.
+# src\Earshot\App\BlockCoordinator.cs:108 (IdleGrace), :2385 (the log line this reads)
+
+# Pulls the seconds figure out of a "Blocking the nodes: ... were not in use for <N> s ..." log
+# line. $null when no such line is given, which the caller records as not measured rather than
+# guessed.
+function Get-MeasuredGraceSeconds
+{
+    param([string[]]$Lines)
+
+    foreach ($line in @($Lines))
+    {
+        if ($line -match 'not in use for\s+([0-9]+(?:\.[0-9]+)?)\s*s\b')
+        {
+            return [double]$Matches[1]
+        }
+    }
+
+    return $null
+}
 
 $run = New-LiveTestRun -TestId '13-grace-window' -Title 'Tuning the idle grace window' `
     -Settles 'Whether thirty seconds of idle is the right wait before the nodes are blocked again, measured against real driver churn.' `
@@ -65,7 +89,8 @@ try
     if ($ready)
     {
         Write-Section -Run $run -Title 'Normal use'
-        Write-Line -Run $run -Text ('A pause between tracks must not be treated as idle. That is what the ' + $IdleGraceSeconds + ' s wait is for.')
+        Write-Line -Run $run -Text 'A pause between tracks must not be treated as idle. That is what the idle grace wait is for.'
+        Write-Line -Run $run -Text 'This test reads the grace period from the log line Earshot writes when it blocks, later on; nothing here assumes a figure up front.'
         Wait-Owner -Run $run -Text 'Connect the AirPods to this PC and use them for a few minutes, with at least one pause between tracks longer than ten seconds.'
 
         $duringUse = Get-EarshotLogLines -Run $run -Pattern 'Blocking the nodes: the AirPods were not in use for'
@@ -109,18 +134,41 @@ try
         $stateAfter = Get-Field -Object $nodesAfter -Name 'nodeState'
         Write-Line -Run $run -Text ('Nodes after the watch: ' + $stateAfter)
 
+        # The measured grace, read from the block line itself when there was one. Nothing is
+        # measured when nothing blocked, so this stays $null rather than the watch limit.
+        $measuredGraceSeconds = $(if ($blocked) { Get-MeasuredGraceSeconds -Lines $lines } else { $null })
+
+        # A nodes reading of Blocked with no log line proving the idle rule did it is not proof
+        # the idle rule blocked them: they may have started Blocked, or been blocked for another
+        # reason entirely. That is inconclusive, not a pass, and its detail must say so rather
+        # than contradict the outcome.
         Add-Criterion -Run $run -Id 'blocks-when-idle' -Criterion 'The idle rule blocks the nodes once the AirPods stop being used.' `
-            -Outcome $(if ($blocked -or $stateAfter -eq 'Blocked') { 'pass' } else { 'fail' }) `
-            -Detail $(if ($blocked) { 'It blocked about ' + $seconds + ' s after you stopped (measured in 15 s steps).' } else { 'Nothing blocked within ' + $WatchMinutes + ' minutes; the nodes read ' + $stateAfter + '.' })
+            -Outcome $(if ($blocked) { 'pass' } elseif ($stateAfter -eq 'Blocked') { 'inconclusive' } else { 'fail' }) `
+            -Detail $(
+                if ($blocked) { 'It blocked about ' + $seconds + ' s after you stopped (measured in 15 s steps).' }
+                elseif ($stateAfter -eq 'Blocked') { 'The nodes read Blocked, but no log line shows the idle rule did it within ' + $WatchMinutes + ' minutes.' }
+                else { 'Nothing blocked within ' + $WatchMinutes + ' minutes; the nodes read ' + $stateAfter + '.' }
+            )
 
-        Add-Criterion -Run $run -Id 'not-too-long' -Criterion ('The wait is close to the ' + $IdleGraceSeconds + ' s it is set to, not minutes longer.') `
+        Add-Criterion -Run $run -Id 'not-too-long' -Criterion 'The wait is close to the idle grace Earshot itself reports, not minutes longer.' `
             -Outcome $(if ($blocked -and $seconds -le 120) { 'pass' } elseif ($blocked) { 'fail' } else { 'inconclusive' }) `
-            -Detail ('About ' + $seconds + ' s, watched in 15 s steps. A much longer wait usually means something kept restarting it; the "not issued" lines say what.')
+            -Detail $(
+                if ($blocked) {
+                    'About ' + $seconds + ' s, watched in 15 s steps, against a reported grace of ' +
+                    $(if ($null -ne $measuredGraceSeconds) { $measuredGraceSeconds.ToString() + ' s' } else { 'an unreadable figure' }) +
+                    '. A much longer wait usually means something kept restarting it; the "not issued" lines say what.'
+                }
+                else { 'Nothing blocked within the watch window, so there is no wait to compare.' }
+            )
 
-        Add-Finding -Run $run -Name 'secondsFromIdleToBlock' -Value $seconds -Detail 'measured in 15 s steps, so treat it as a bound'
+        Add-Finding -Run $run -Name 'secondsFromIdleToBlock' -Value $(if ($blocked) { $seconds } else { $null }) `
+            -Detail $(if ($blocked) { 'measured in 15 s steps, so treat it as a bound' } else { 'not measured: nothing blocked within the watch window' })
         Add-Finding -Run $run -Name 'idleBlockDeferrals' -Value @($notIssued).Count -Detail 'how many times the rule decided not to block; the reasons are in the log lines'
-        Add-Finding -Run $run -Name 'suggestedIdleGraceSeconds' -Value $IdleGraceSeconds `
-            -Detail 'change it only if this test shows churn keeping the endpoint non-ACTIVE for longer than the wait, or a block landing during use'
+        Add-Finding -Run $run -Name 'suggestedIdleGraceSeconds' -Value $measuredGraceSeconds `
+            -Detail $(
+                if ($null -ne $measuredGraceSeconds) { 'read from the log line Earshot wrote when it blocked, not assumed' }
+                else { 'could not be read: no log line showed the idle rule blocking, so this is not recorded rather than guessed' }
+            )
 
         Write-Section -Run $run -Title 'Protection churn'
         Write-Line -Run $run -Text 'A protection change adds and removes endpoints, and each one restarts the wait. If the churn from a'

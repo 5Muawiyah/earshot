@@ -11,6 +11,11 @@
     imply. A criterion that is recorded and is not named here is a failure too, so a branch
     that stops being reached cannot go unnoticed.
 
+    Findings is optional, and unlike Criteria it is not exhaustive: only the findings worth
+    pinning down against the fake inputs are named. A value of $null means the finding must be
+    recorded as not measured (Add-Finding's own $null convention); anything else must match
+    exactly. A finding named here that the run does not record is a failure.
+
     Three rules were used to work these out, and only these:
 
       * the fake machine starts in the state that test's own preconditions describe, and each
@@ -233,10 +238,21 @@
     # second idle grace, could not be settled by any sitting. All three criteria are named in
     # all three columns. not-too-long is the counted one: with no block line in the log the
     # rule never fired inside the watch, and inconclusive is the honest answer.
+    # blocks-when-idle is inconclusive, not pass, for "none": nothing blocked in the log, and the
+    # nodes read Blocked only because that is where 13-grace-window|first starts (Fakes.psm1,
+    # StartStates), never because the idle rule was seen to do it. secondsFromIdleToBlock and
+    # suggestedIdleGraceSeconds are $null there for the same reason: nothing was measured.
+    # For "one" and "two" the block line is in the log from the start (Fakes.psm1 stamps it an
+    # hour ahead of now), so it is found on the first 15 s poll: secondsFromIdleToBlock is 15,
+    # and suggestedIdleGraceSeconds is 45, the figure LogFixtures writes into that line, read
+    # back rather than assumed.
     '13-grace-window|first' = @{
-        none = @{ Overall = 'inconclusive'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'inconclusive' } }
-        one  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' } }
-        two  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' } }
+        none = @{ Overall = 'inconclusive'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'inconclusive'; 'not-too-long' = 'inconclusive' }
+            Findings = @{ 'secondsFromIdleToBlock' = $null; 'suggestedIdleGraceSeconds' = $null } }
+        one  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
+            Findings = @{ 'secondsFromIdleToBlock' = 15; 'suggestedIdleGraceSeconds' = 45 } }
+        two  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
+            Findings = @{ 'secondsFromIdleToBlock' = 15; 'suggestedIdleGraceSeconds' = 45 } }
     }
 
     # ------------------------------------------------------ 14 set-device refusal

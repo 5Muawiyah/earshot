@@ -142,6 +142,16 @@ function Read-RunResult
         $criteria[[string]$criterion.id] = [string]$criterion.outcome
     }
 
+    # Findings are kept as-is, $null included: Add-Finding's own convention is that $null means
+    # the read did not answer, and Test-Expectations compares against that literally rather than
+    # against the string "not recorded" the summary prints for a person to read.
+    $findings = [ordered]@{}
+    foreach ($finding in @($json.findings))
+    {
+        if ($null -eq $finding) { continue }
+        $findings[[string]$finding.name] = $finding.value
+    }
+
     $errors = @()
     foreach ($entry in @($json.errors))
     {
@@ -149,7 +159,7 @@ function Read-RunResult
         $errors = $errors + @([string]$entry.message)
     }
 
-    return [ordered]@{ Overall = [string]$json.overall; Criteria = $criteria; Errors = $errors }
+    return [ordered]@{ Overall = [string]$json.overall; Criteria = $criteria; Findings = $findings; Errors = $errors }
 }
 
 # One shipped script, one half, one sandbox. Returns the exit code, the captured output and
@@ -286,6 +296,37 @@ function Test-Expectations
         if (-not $wantedCriteria.Contains($id))
         {
             $problems = $problems + @([string]$Where + ': "' + $id + '" was recorded and expectations.psd1 does not name it.')
+        }
+    }
+
+    # Findings is optional and, unlike Criteria, not exhaustive: only the named ones are checked,
+    # and a run may record others expectations.psd1 says nothing about. $null in the expectation
+    # is a real, checked value (not measured), not "skip this one"; only the string 'any' skips.
+    if ($wanted.Contains('Findings'))
+    {
+        $wantedFindings = $wanted.Findings
+        foreach ($name in $wantedFindings.Keys)
+        {
+            if (-not $Recorded.Findings.Contains($name))
+            {
+                $problems = $problems + @([string]$Where + ': the finding "' + $name + '" was never recorded.')
+                continue
+            }
+
+            $expected = $wantedFindings[$name]
+            if ($expected -is [string] -and $expected -eq 'any') { continue }
+
+            $actual = $Recorded.Findings[$name]
+            $matches = $false
+            if ($null -eq $expected -and $null -eq $actual) { $matches = $true }
+            elseif ($null -ne $expected -and $null -ne $actual -and [string]$expected -eq [string]$actual) { $matches = $true }
+
+            if (-not $matches)
+            {
+                $shownExpected = $(if ($null -eq $expected) { 'null' } else { [string]$expected })
+                $shownActual = $(if ($null -eq $actual) { 'null' } else { [string]$actual })
+                $problems = $problems + @([string]$Where + ': the finding "' + $name + '" was ' + $shownActual + ', and the fake inputs imply ' + $shownExpected + '.')
+            }
         }
     }
 

@@ -41,7 +41,10 @@ Set-StrictMode -Version 2.0
 # 0, 1 or 2 times, so a run sees the empty answer, the single answer that PowerShell hands back
 # as a bare string, and the list. No line matches more than one of these patterns.
 $script:LogFixtures = @(
-    [ordered]@{ Pattern = 'Blocking the nodes: the AirPods were not in use for'; Text = 'Blocking the nodes: the AirPods were not in use for 30 s' }
+    # 45, not 30: deliberately different from BlockCoordinator.IdleGrace's default, so a script
+    # that reads the grace period from this line rather than assuming the shipped constant is
+    # provably reading it, and a script that still hardcodes 30 is provably not.
+    [ordered]@{ Pattern = 'Blocking the nodes: the AirPods were not in use for'; Text = 'Blocking the nodes: the AirPods were not in use for 45 s' }
     [ordered]@{ Pattern = 'Idle block not issued'; Text = 'Idle block not issued: an operation was still in flight' }
     [ordered]@{ Pattern = 'Idle rule re-armed'; Text = 'Idle rule re-armed: the render endpoint changed' }
     [ordered]@{ Pattern = 'Session ending: block queued at'; Text = 'Session ending: block queued at 12:00:00' }
