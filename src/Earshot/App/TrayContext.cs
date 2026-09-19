@@ -243,6 +243,10 @@ internal sealed class TrayContext : ApplicationContext
         _window.DisplayChanged += (_, _) => RefreshIcon(remeasure: true, force: false);
         _window.SessionEnding += OnSessionEnding;
 
+        // WM_CLOSE asks Earshot to close, so it takes the same orderly path as Exit on the menu, the block before
+        // closing included. There is no click to place a card by.
+        _window.CloseRequested += (_, _) => _ = ExitAsync(CardPlace.NearTray, "Windows asked Earshot to close (WM_CLOSE).");
+
         // Global shortcuts, over the same hidden window: no second window, no second message pump.
         // Every action a shortcut can raise goes through the exact method the matching menu item or the
         // left click already uses, so a hotkey is never a second route to the device.
@@ -393,6 +397,9 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private BootBlockStatus? BlockStatus => _coordinator.BlockStatus;
+
+    // The hidden window, for tests that drive its window procedure.
+    internal ShellMessageWindow Window => _window;
 
     private void Close()
     {
@@ -1753,7 +1760,7 @@ internal sealed class TrayContext : ApplicationContext
         status is SettingsLoadStatus.Loaded or SettingsLoadStatus.CreatedDefaults or
                   SettingsLoadStatus.RestoredFromBackup or SettingsLoadStatus.NewerSchema;
 
-    private async Task ExitAsync(CardPlace place)
+    private async Task ExitAsync(CardPlace place, string why = "Exit chosen from the tray menu.")
     {
         if (_closing)
         {
@@ -1761,7 +1768,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         _closing = true;
-        _log.Info("Exit chosen from the tray menu.");
+        _log.Info(why);
         try
         {
             // No more input: the icon goes, the picker closes, and everything in flight is cancelled. The
@@ -2121,14 +2128,6 @@ internal sealed class TrayContext : ApplicationContext
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             _log.Info(action + ": cancelled because Earshot is closing.");
-            return null;
-        }
-        catch (OperationCanceledException) when (_coordinator.SessionEndInProgress)
-        {
-            // The coordinator stops the change in flight when a session end begins (BlockCoordinator.OnSessionEnding),
-            // with its own token, not this one. That is no error: say what happened and why.
-            _log.Info(action + ": stopped because the session is ending.");
-            ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), BlockCoordinator.SessionEndStoppedMessage, place);
             return null;
         }
         catch (Exception ex)

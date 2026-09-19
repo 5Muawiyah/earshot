@@ -66,6 +66,10 @@ internal static partial class NativeMethods
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-themechanged
     internal const int WM_THEMECHANGED = 0x031A;
 
+    // "Sent as a signal that a window or an application should terminate."
+    // https://learn.microsoft.com/windows/win32/winmsg/wm-close
+    internal const int WM_CLOSE = 0x0010;
+
     // Posted to the window that registered a hot key with RegisterHotKey.
     // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-hotkey
     internal const int WM_HOTKEY = 0x0312;

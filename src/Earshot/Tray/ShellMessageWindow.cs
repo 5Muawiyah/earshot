@@ -61,6 +61,9 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
 
     public event EventHandler<SessionEndingEventArgs>? SessionEnding;
 
+    // WM_CLOSE: something asked Earshot to close. The window itself is not closed by it (see WndProc).
+    public event EventHandler? CloseRequested;
+
     // IMessageWindow, for Earshot.Hotkeys.HotkeyManager: raised for every message this window receives,
     // before WndProc falls through to its own handling below or to the base implementation.
     public event EventHandler<Hotkeys.WindowMessageEventArgs>? MessageReceived;
@@ -73,6 +76,10 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
     public bool IsOwnedByCurrentThread => NativeMethods.GetWindowThreadProcessId(Handle, out _) == NativeMethods.GetCurrentThreadId();
 
     public void Dispose() => DestroyHandle();
+
+    // Hands a message to WndProc as the window procedure would, so a test can drive the real handling, the default
+    // handler included, without posting to the window from outside.
+    internal void Dispatch(ref Message m) => WndProc(ref m);
 
     // The ENDSESSION_* bits as words, for the log.
     internal static string DescribeEndSessionFlags(uint flags)
@@ -130,6 +137,21 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
                 case NativeMethods.WM_DISPLAYCHANGE:
                     DisplayChanged?.Invoke(this, EventArgs.Empty);
                     break;
+
+                case NativeMethods.WM_CLOSE:
+                    // Nothing in Earshot sends this window WM_CLOSE, so it comes from outside, and it means the
+                    // application, not this hidden window: the Restart Manager "also sends a WM_CLOSE message for GUI
+                    // applications that do not shut down on receiving WM_ENDSESSION". It is answered (zero, as the page
+                    // asks of an application that processes it) and raised, and the tray takes it as Exit. It never
+                    // reaches DefWindowProc, which "calls the DestroyWindow function to destroy the window": Earshot
+                    // would then run on with no window, deaf to a shutdown, to a cancelled one, to its shortcuts and to
+                    // TaskbarCreated.
+                    // https://learn.microsoft.com/windows/win32/winmsg/wm-close
+                    // https://learn.microsoft.com/windows/win32/rstmgr/guidelines-for-applications
+                    _log.Info("WM_CLOSE received: Earshot was asked to close.");
+                    CloseRequested?.Invoke(this, EventArgs.Empty);
+                    m.Result = 0;
+                    return;
 
                 case NativeMethods.WM_QUERYENDSESSION:
                 {

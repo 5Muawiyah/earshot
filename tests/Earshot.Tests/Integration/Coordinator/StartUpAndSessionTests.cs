@@ -493,9 +493,10 @@ public sealed class StartUpAndSessionTests
         Assert.AreEqual("Could not block the AirPods. Try again.", h.Coordinator.ClosingNotice, "Earshot closed with the nodes enabled and said nothing.");
     }
 
-    // A session-end block that worked is not sent again at Exit.
+    // The session-end block took, and then something outside Earshot enabled the nodes again. Exit, inside the
+    // idle grace, goes by what the nodes read now, not by the block that once took: it blocks them before closing.
     [TestMethod]
-    public void ExitAfterASessionEndBlockThatTookSendsNoSecondBlock()
+    public void ExitAfterASessionEndBlockThatTookStillBlocksNodesEnabledSince()
     {
         using var h = new CoordinatorHarness();
         h.Block.Status = Statuses.Allowed();
@@ -504,17 +505,171 @@ public sealed class StartUpAndSessionTests
         h.Start();
         h.Coordinator.OnSessionEnding(Query());
         h.Pump();
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Idle(300));
+        _ = h.Coordinator.RefreshStatusAsync();
+        h.Pump();
 
         h.Coordinator.BeginShutdown();
         h.Pump();
 
-        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+        CollectionAssert.AreEqual(BlockTwice, h.Block.Calls, "Earshot closed with the nodes enabled because a session-end block had taken earlier.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    // The block sent at WM_QUERYENDSESSION failed, and its result is in by WM_ENDSESSION TRUE: it is sent once more
+    // then, and not a third time.
+    [TestMethod]
+    public void ASessionEndBlockThatFailedIsSentOnceMoreWhenTheSessionIsSaidToEnd()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Stays;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        int blocks = 0;
+        h.Block.OnBlock = _ =>
+        {
+            if (++blocks == 1)
+            {
+                return Task.FromResult(ControllerResult.Fail("Could not block the AirPods. Try again.", []));
+            }
+
+            h.Block.Status = h.Block.Status with { State = BlockState.Blocked };
+            return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
+        };
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
+        h.Pump();
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
+        h.Pump();
+
+        CollectionAssert.AreEqual(BlockTwice, h.Block.Calls);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    // A session-end block that throws before it is even queued leaves what a returned failure leaves: it is sent
+    // once more at WM_ENDSESSION TRUE.
+    [TestMethod]
+    public void ASessionEndBlockThatThrowsIsSentOnceMoreWhenTheSessionIsSaidToEnd()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Stays;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        int blocks = 0;
+        h.Block.OnBlock = _ =>
+        {
+            if (++blocks == 1)
+            {
+                throw new InvalidOperationException("The gate could not be reached.");
+            }
+
+            h.Block.Status = h.Block.Status with { State = BlockState.Blocked };
+            return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
+        };
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
+        h.Pump();
+
+        CollectionAssert.AreEqual(BlockTwice, h.Block.Calls);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    // The same throw, and then the session end is cancelled: the idle wait the session end stopped is running
+    // again, so the nodes are still blocked once the grace window has passed.
+    [TestMethod]
+    public void ASessionEndBlockThatThrowsLeavesTheIdleRuleArmed()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Publish(Devices.Idle(2));
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning);
+        h.CheckInvariantOnPump = false;
+        int blocks = 0;
+        h.Block.OnBlock = _ =>
+        {
+            if (++blocks == 1)
+            {
+                throw new InvalidOperationException("The gate could not be reached.");
+            }
+
+            h.Block.Status = h.Block.Status with { State = BlockState.Blocked };
+            return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
+        };
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
+        h.Pump();
+
+        Assert.IsTrue(h.Coordinator.IdleWaitRunning, "Nothing was left armed after the session-end block threw.");
+        h.Advance(BlockCoordinator.IdleGrace + BlockCoordinator.IdleGrace);
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        h.AssertAtRest();
+    }
+
+    // The coordinator says why it stopped a change, and says it from what happened, not from the flag as it stands
+    // when the change returns: here the session end is cancelled again while the protect verb is still running.
+    [TestMethod]
+    public void AChangeStoppedForASessionEndSaysSoEvenWhenTheSessionEndIsCancelledBeforeItReturns()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        var protecting = new TaskCompletionSource<ControllerResult>();
+        h.Protection.OnApply = (_, _) => protecting.Task;
+        Task<ControllerResult> change = h.Coordinator.SetProtectionAsync(true, CardPlace.NearCursor);
+        h.Pump();
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
+        h.Protection.State = AudioProtectionState.Protected;
+        protecting.SetResult(ControllerResult.Ok("Audio quality protected"));
+        h.Pump();
+
+        Assert.IsTrue(change.IsCompletedSuccessfully, "A change stopped for a session end ended in an exception, not a result.");
+        Assert.AreEqual(BlockCoordinator.SessionEndStoppedMessage, change.GetAwaiter().GetResult().UserMessage);
+        StringAssert.Contains(BlockCoordinator.SessionEndStoppedMessage, "may not have finished", "The card claims more than is known: the verb may well have completed.");
+    }
+
+    [TestMethod]
+    public void AConnectStoppedForASessionEndSaysSoEvenWhenTheSessionEndIsCancelledBeforeItReturns()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        var connecting = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(_ => connecting.Task);
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
+        connecting.SetCanceled();
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.AreEqual("the session is ending", toggle.GetAwaiter().GetResult().CancelledBecause);
     }
 
     // The Restart Manager asks Earshot to close with the same two messages, lParam ENDSESSION_CLOSEAPP. The nodes
     // are blocked for it as for a shutdown, a connect is refused with a card that is true for it too, and
-    // WM_ENDSESSION with wParam FALSE ("the application should not shut down") ends the refusal.
+    // WM_ENDSESSION with wParam FALSE ends the refusal. The Restart Manager's use of the two messages is on the
+    // guidelines page; "If wParam is FALSE, the application should not shut down" is on the WM_ENDSESSION page.
     // https://learn.microsoft.com/windows/win32/rstmgr/guidelines-for-applications
+    // https://learn.microsoft.com/windows/win32/shutdown/wm-endsession
     [TestMethod]
     public void ACloseRequestFromTheRestartManagerIsTreatedAsASessionEnd()
     {

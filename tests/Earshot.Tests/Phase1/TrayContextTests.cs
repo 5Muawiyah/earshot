@@ -485,6 +485,71 @@ public sealed class TrayContextTests
         });
     }
 
+    // The same, with the session end cancelled again before the protect verb returns. The card must not depend on
+    // how the flag stands at that moment: it is still not an error.
+    [TestMethod]
+    public void AChangeStoppedByASessionEndThatIsThenCancelledStillGetsNoErrorCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false);
+            var apply = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Protection.OnApply = (_, _) => apply.Task;
+            tray.ClickMenu(MenuModel.ProtectAudioQuality);
+            TrayHarness.PumpUntil(() => tray.Protection.Calls.Count == 1, "The protection change did not start.");
+
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            tray.Context.OnSessionEnding(null, SessionEndCancelled());
+            apply.SetResult(ControllerResult.Ok("Protected"));
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(BlockCoordinator.SessionEndStoppedMessage, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Cards.Statuses.Contains(TrayContext.SomethingWentWrongMessage));
+            Assert.IsFalse(tray.Log.Has(LogLevel.Error, "protect-on"));
+        });
+    }
+
+    // WM_CLOSE on the hidden window is a request to close Earshot (the Restart Manager sends it after the
+    // end-session messages). It is taken as Exit: the block before closing runs and the message loop ends. It is
+    // not left to DefWindowProc, which "calls the DestroyWindow function to destroy the window" and would leave
+    // Earshot running with no window to hear a shutdown or a cancelled one.
+    // https://learn.microsoft.com/windows/win32/winmsg/wm-close
+    // https://learn.microsoft.com/windows/win32/rstmgr/guidelines-for-applications
+    [TestMethod]
+    public void WmCloseOnTheHiddenWindowIsExitNotTheEndOfTheWindow()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), exitWaitLimit: TimeSpan.FromSeconds(5),
+                arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            tray.Block.Status = Block(BlockState.Allowed);
+            tray.Coordinator.RefreshStatusAsync().GetAwaiter().GetResult();
+            tray.PumpUntilIdle();
+            nint handleAfter = 0;
+            bool timedOut = false;
+            tray.Ui.Post(_ =>
+            {
+                var close = Message.Create(tray.Context.Window.Handle, 0x0010, 0, 0);
+                tray.Context.Window.Dispatch(ref close);
+                handleAfter = tray.Context.Window.Handle;
+            }, null);
+            using var giveUp = new System.Windows.Forms.Timer { Interval = 5000 };
+            giveUp.Tick += (_, _) =>
+            {
+                timedOut = true;
+                Application.ExitThread();
+            };
+            giveUp.Start();
+
+            Application.Run(tray.Context);
+
+            Assert.AreNotEqual((nint)0, handleAfter, "WM_CLOSE destroyed the hidden window.");
+            Assert.IsFalse(timedOut, "WM_CLOSE did not begin Exit: the message loop was still running five seconds later.");
+            Assert.IsTrue(tray.Block.Calls.Contains("block"), "The block before closing did not run.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "WM_CLOSE received"));
+        });
+    }
+
     // WM_ENDSESSION with wParam FALSE after refusals by click and by menu: the tray is fully usable again with no
     // restart. Nothing is busy, the menu toggle is enabled, and the next click connects.
     [TestMethod]

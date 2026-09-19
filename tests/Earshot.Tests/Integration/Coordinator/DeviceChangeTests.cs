@@ -260,6 +260,31 @@ public sealed class DeviceChangeTests
         Assert.AreEqual(BlockCoordinator.SessionEndingMessage, result.UserMessage);
     }
 
+    // With Block at boot off nothing stops a device change in flight when the session starts to end, and its next
+    // step would turn the old device's services back on. No protect verb starts after that point either.
+    [TestMethod]
+    public void ADeviceChangeStartsNoProtectVerbOnceTheSessionStartsToEnd()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Active(1));
+        h.Protection.State = AudioProtectionState.Protected;
+        h.Start();
+        h.Trace.Clear();
+        GateRefusesLikeTheGate(h);
+        h.Block.BeforeReads.Clear();
+        h.Block.BeforeReads.Enqueue(() => h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0)));
+
+        Task<ControllerResult> change = h.Coordinator.ChangeDeviceAsync(OtherAddress);
+        h.Pump();
+
+        CollectionAssert.AreEqual(PinOnly, h.Trace, "A protect verb or a second pin went out after the session started to end.");
+        Assert.IsTrue(change.IsCompleted);
+        Assert.AreEqual(BlockCoordinator.SessionEndingMessage, change.GetAwaiter().GetResult().UserMessage);
+        Assert.AreEqual(AudioProtectionState.Protected, h.Protection.State);
+    }
+
     // The session-end block would go to whichever device the gate pins when it runs, so it is not queued while a pin
     // may still move; the BootBlock task blocks the device pinned then.
     [TestMethod]
