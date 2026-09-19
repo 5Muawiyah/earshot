@@ -10,11 +10,20 @@
          ("defaults to the platform version from the TFM", the frameworks page above), and a build of this
          solution confirmed it: the assembly then declares SupportedOSPlatform("Windows10.0.19041.0") and an
          unguarded WinRT call compiles with no CA1416 at all.
+         A citation and a probe disagree about how the value reaches the assembly, so both are recorded. The
+         frameworks page says it is "burned into the project's compiled assembly as an UnsupportedOSPlatformAttribute
+         assembly attribute". The assemblies this solution builds carry no such attribute: read from the built
+         Earshot.dll, the value is in [assembly: SupportedOSPlatformAttribute("Windows7.0")], beside
+         [assembly: TargetPlatformAttribute("Windows10.0.19041.0")]. The probe is what the tests pin
+         (NoSuppressionsTests reads both attributes off the built Earshot.dll).
+         https://learn.microsoft.com/en-us/dotnet/standard/frameworks#support-older-os-versions
          7.0 is what the built Earshot.dll declared before the moniker changed (SupportedOSPlatform("Windows7.0")),
          so the declared floor does not move and the analyser asks exactly what it asked before, plus a guard on
          every WinRT call site. It is the analyser's floor, not a promise that Earshot runs on Windows 7: the
          README states what Earshot is built and tested for. It cannot be raised to Windows 11 (10.0.22000.0)
-         under this moniker (NETSDK1135), and a value at or above 10.0.19041.0 would switch the guard off. -->
+         under this moniker (NETSDK1135), and a value at or above 10.0.19041.0 would switch the guard off.
+         It is set here and nowhere else: a second value in a project file overrides this one for that project without
+         a word any scan for suppressions would catch, so NoSuppressionsTests fails if one appears. -->
     <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

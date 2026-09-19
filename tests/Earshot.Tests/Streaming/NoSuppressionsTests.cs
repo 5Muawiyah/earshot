@@ -67,29 +67,80 @@ public sealed class NoSuppressionsTests
     }
 
     // The guard on the WinRT calls is only real while the supported Windows version stays below the version that
-    // introduced them. Raising it would silence CA1416 as surely as any of the four above, and no scan for words
-    // would notice, so the number itself is pinned here.
+    // introduced them. Raising it silences CA1416 as surely as any of the words above, and no scan for words notices.
+    // So what ships is read: the two platform attributes on the built Earshot.dll this test project references, not
+    // the ones on the test assembly, which says nothing about a project file that sets its own value.
     [TestMethod]
-    public void TheSupportedWindowsVersionStaysBelowTheOneTheWinRtCallsNeed()
+    public void TheBuiltApplicationStillDeclaresTheFloorBelowTheOneTheWinRtCallsNeed()
     {
-        string props = File.ReadAllText(Path.Combine(SolutionRoot(), "Directory.Build.props"));
-        props = Regex.Replace(props, "<!--[\\s\\S]*?-->", "", RegexOptions.CultureInvariant);
+        System.Reflection.Assembly application = typeof(Earshot.Streaming.StreamingCoordinator).Assembly;
+        Assert.AreEqual("Earshot", application.GetName().Name);
+        Assert.AreNotSame(typeof(NoSuppressionsTests).Assembly, application);
+        StringAssert.EndsWith(application.Location, "Earshot.dll", StringComparison.OrdinalIgnoreCase);
 
-        Match framework = Regex.Match(props, "<TargetFramework>([^<]+)</TargetFramework>", RegexOptions.CultureInvariant);
-        Match supported = Regex.Match(props, "<SupportedOSPlatformVersion>([^<]+)</SupportedOSPlatformVersion>", RegexOptions.CultureInvariant);
+        string[] supported = PlatformAttribute(application, "System.Runtime.Versioning.SupportedOSPlatformAttribute");
+        string[] target = PlatformAttribute(application, "System.Runtime.Versioning.TargetPlatformAttribute");
 
-        Assert.IsTrue(framework.Success, "Directory.Build.props sets no TargetFramework.");
-        Assert.AreEqual("net10.0-windows10.0.19041.0", framework.Groups[1].Value.Trim());
-        Assert.IsTrue(supported.Success, "SupportedOSPlatformVersion must be set on purpose: left out, it silently becomes the version in the moniker.");
-        Assert.IsTrue(Version.Parse(supported.Groups[1].Value.Trim()) < new Version(10, 0, 19041, 0),
-            "At or above 10.0.19041.0 the analyser stops asking for the guard on every WinRT call.");
-
-        // What the build actually stamped on this test assembly, which takes the same two values from the same file.
-        var attribute = (System.Runtime.Versioning.SupportedOSPlatformAttribute?)Attribute.GetCustomAttribute(
-            typeof(NoSuppressionsTests).Assembly, typeof(System.Runtime.Versioning.SupportedOSPlatformAttribute));
-        Assert.IsNotNull(attribute);
-        Assert.AreEqual("Windows7.0", attribute.PlatformName);
+        CollectionAssert.AreEqual(Sequence.Of("Windows7.0"), supported,
+            "Earshot.dll declares SupportedOSPlatform(" + string.Join(", ", supported) + "). At or above Windows10.0.19041.0 the analyser stops asking for the guard on every WinRT call.");
+        CollectionAssert.AreEqual(Sequence.Of("Windows10.0.19041.0"), target);
     }
+
+    // The floor is written in one place. A second SupportedOSPlatformVersion in any project, props or targets file
+    // overrides Directory.Build.props for that project, and an assembly-level attribute in code does the same from
+    // inside; either one takes the guard off without a word the scan above would catch.
+    [TestMethod]
+    public void TheFloorIsSetInDirectoryBuildPropsAndNowhereElse()
+    {
+        string root = SolutionRoot();
+        var projectFiles = new List<string>();
+        var codeFiles = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(root, file);
+            if (relative.StartsWith('.') || !IsSource(file) ||
+                relative.StartsWith("publish" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                relative.StartsWith("artifacts" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            (Path.GetExtension(file) == ".cs" ? codeFiles : projectFiles).Add(file);
+        }
+
+        string floor = "Supported" + "OSPlatform";
+        var set = new List<string>();
+        foreach (string file in projectFiles.Where(f => Path.GetExtension(f) is ".csproj" or ".props" or ".targets"))
+        {
+            string text = Regex.Replace(File.ReadAllText(file), "<!--[\\s\\S]*?-->", "", RegexOptions.CultureInvariant);
+            foreach (Match match in Regex.Matches(text, floor + "[A-Za-z]*", RegexOptions.CultureInvariant))
+            {
+                set.Add(Path.GetRelativePath(root, file) + ": " + match.Value);
+            }
+        }
+
+        CollectionAssert.AreEqual(Sequence.Of("Directory.Build.props: " + floor + "Version", "Directory.Build.props: " + floor + "Version"), set,
+            "The floor must be set exactly once, in Directory.Build.props (an opening and a closing tag). Found: " + string.Join("; ", set));
+
+        string props = Regex.Replace(File.ReadAllText(Path.Combine(root, "Directory.Build.props")), "<!--[\\s\\S]*?-->", "", RegexOptions.CultureInvariant);
+        Match framework = Regex.Match(props, "<TargetFramework>([^<]+)</TargetFramework>", RegexOptions.CultureInvariant);
+        Match supported = Regex.Match(props, "<" + floor + "Version>([^<]+)</" + floor + "Version>", RegexOptions.CultureInvariant);
+        Assert.AreEqual("net10.0-windows10.0.19041.0", framework.Groups[1].Value.Trim());
+        Assert.IsTrue(supported.Success);
+        Assert.IsTrue(Version.Parse(supported.Groups[1].Value.Trim()) < new Version(10, 0, 19041, 0));
+
+        var inCode = new Regex("\\[\\s*assembly\\s*:[^\\]]*" + floor, RegexOptions.CultureInvariant);
+        string[] assemblyLevel = codeFiles.Where(f => inCode.IsMatch(File.ReadAllText(f))).Select(f => Path.GetRelativePath(root, f)).ToArray();
+        Assert.AreEqual(0, assemblyLevel.Length, "An assembly-level platform attribute is written in code: " + string.Join(", ", assemblyLevel));
+        Assert.IsTrue(projectFiles.Count >= 3 && codeFiles.Count >= 100, "Too few files were read for a clean result to mean anything.");
+    }
+
+    // Read as data, so nothing is constructed and the value is exactly what the compiler wrote into the file.
+    private static string[] PlatformAttribute(System.Reflection.Assembly assembly, string attributeType) =>
+        assembly.GetCustomAttributesData()
+            .Where(a => a.AttributeType.FullName == attributeType)
+            .Select(a => (string)a.ConstructorArguments[0].Value!)
+            .ToArray();
 
     private static bool IsSource(string path)
     {
