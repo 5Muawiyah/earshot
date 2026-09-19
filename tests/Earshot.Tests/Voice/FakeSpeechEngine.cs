@@ -32,7 +32,13 @@ internal sealed class FakeSpeechEngine : ISpeechEngine
 
     public bool IsOpen { get; private set; }
 
-    public int DisposeCount { get; private set; }
+    private int _disposeCount;
+
+    // Interlocked, not a plain get/private-set counter: a concurrent-dispose test calls Dispose() from
+    // two threads at once on purpose (SpeechAnnouncerTests.ConcurrentStopSpeakingCallsDisposeTheEngine
+    // ExactlyOnce), and a plain "DisposeCount++" can lose an update under that exact race, which would
+    // hide a real double-dispose defect in the code under test rather than reveal it.
+    public int DisposeCount => Volatile.Read(ref _disposeCount);
 
     public StepOutcome OpenOutcome { get; set; } = StepOutcomes.FromHResult("open", 0);
 
@@ -96,7 +102,7 @@ internal sealed class FakeSpeechEngine : ISpeechEngine
 
     public void Dispose()
     {
-        DisposeCount++;
+        Interlocked.Increment(ref _disposeCount);
         IsOpen = false;
     }
 }

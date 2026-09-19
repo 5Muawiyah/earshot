@@ -48,8 +48,11 @@ public sealed class SpeechAnnouncerTests
         announcer.Announce(VoiceLine.Connected);
         Wait(engine.SpeakEntered, "SpeakEntered");
 
-        // The gate is still closed: the worker is blocked inside Speak, and Announce already returned.
-        Assert.AreEqual(0, engine.ReleaseGate.CurrentCount);
+        // SpeakCompleted has not fired: the worker is still blocked inside Speak, not finished, proving
+        // Announce returned while the engine is still speaking. (ReleaseGate.CurrentCount is 0 here
+        // regardless of anything the code under test does, since nothing has released it yet, so that
+        // was not actually testing the "still speaking" claim.)
+        Assert.AreEqual(0, engine.SpeakCompleted.CurrentCount, "The worker must still be inside Speak.");
 
         engine.ReleaseGate.Release();
         Wait(engine.SpeakCompleted, "SpeakCompleted");
@@ -94,6 +97,12 @@ public sealed class SpeechAnnouncerTests
         Assert.IsTrue(second.Ok);
         Assert.IsTrue(third.Ok, "The middle line (BlockedAtBoot) was accepted before being superseded.");
         Assert.IsTrue(fourth.Ok);
+
+        // The two dropped lines (Disconnected, superseded when BlockedAtBoot arrived; BlockedAtBoot,
+        // superseded when AllowedAtBoot arrived) must themselves be recorded, not just silently replaced
+        // in the mailbox: deleting the Record(...) call for a superseded line must not leave this green.
+        int superseded = announcer.Drain().Count(o => o.Step == "announce" && !o.Ok && o.Detail == "superseded");
+        Assert.AreEqual(2, superseded, "Both dropped lines must be recorded as superseded.");
     }
 
     [TestMethod]
@@ -120,6 +129,33 @@ public sealed class SpeechAnnouncerTests
     }
 
     [TestMethod]
+    public void RepeatGapUsesTheMonotonicClockNotTheWallClock()
+    {
+        var engine = new FakeSpeechEngine();
+        var time = new ManualTime();
+        var settings = VoiceOverSettings.Default with { Enabled = true, RepeatGapMilliseconds = 2000 };
+        using var announcer = new SpeechAnnouncer(engine, settings, time);
+        Assert.IsTrue(announcer.Start().Ok);
+
+        Assert.IsTrue(announcer.Announce(VoiceLine.Connected).Ok);
+        Wait(engine.SpeakCompleted, "SpeakCompleted (first)");
+
+        // The wall clock steps back a full day, as a system clock correction (NTP, the owner's own
+        // change) could do, while no real time passes at all.
+        time.StepWallClockBackwardOnly(TimeSpan.FromDays(1));
+
+        // Real (monotonic) time now advances well past the repeat gap. A wall-clock-based gap would
+        // still see "now" more than a day before the last accepted time and refuse forever; the repeat
+        // gap must be measured on the monotonic clock, which this step never touched.
+        time.Advance(TimeSpan.FromMilliseconds(2001));
+
+        StepOutcome second = announcer.Announce(VoiceLine.Connected);
+        Assert.IsTrue(second.Ok, "The repeat gap must be measured on the monotonic clock, not the wall clock.");
+        Wait(engine.SpeakCompleted, "SpeakCompleted (second)");
+        Assert.AreEqual(2, engine.Utterances.Count);
+    }
+
+    [TestMethod]
     public void FailureLineIsRefusedWhenSpeakFailuresIsFalse()
     {
         var engine = new FakeSpeechEngine();
@@ -130,6 +166,7 @@ public sealed class SpeechAnnouncerTests
         StepOutcome result = announcer.Announce(VoiceLine.ConnectFailed);
 
         Assert.IsFalse(result.Ok);
+        Assert.AreEqual(NativeCodes.NotAttempted, result.Code);
         Assert.IsFalse(string.IsNullOrEmpty(result.Detail));
         Assert.AreEqual(0, engine.Utterances.Count);
     }
@@ -163,15 +200,22 @@ public sealed class SpeechAnnouncerTests
         announcer.Announce(VoiceLine.Connected);
         Wait(engine.SpeakCompleted, "SpeakCompleted (failure)");
 
+        // The next line is still spoken: one failure does not stop the worker. Waiting for it to
+        // complete before draining also closes a race that a fix here found by execution: the fake
+        // signals SpeakCompleted from inside Speak, before Speak returns to RunWorker, which only then
+        // takes the lock and calls Record(outcome) for the failure. Draining right after the first
+        // SpeakCompleted could still race that Record call. RunWorker processes one line fully, Record
+        // included, before it can pick up the next, so once the second SpeakCompleted has fired, the
+        // first line's Record call is guaranteed to have already run on that same worker thread, and
+        // Drain below cannot race it.
+        Assert.IsTrue(announcer.Announce(VoiceLine.Disconnected).Ok);
+        Wait(engine.SpeakCompleted, "SpeakCompleted (next line)");
+        CollectionAssert.Contains((ICollection)engine.Utterances, "Disconnected");
+
         StepOutcome? failure = announcer.Drain().LastOrDefault(o => o.Step == "speak" && !o.Ok);
         Assert.IsNotNull(failure);
         Assert.AreEqual(thrown.HResult, failure!.Code);
         Assert.AreEqual(nameof(InvalidOperationException), failure.CodeName);
-
-        // The next line is still spoken: one failure does not stop the worker.
-        Assert.IsTrue(announcer.Announce(VoiceLine.Disconnected).Ok);
-        Wait(engine.SpeakCompleted, "SpeakCompleted (next line)");
-        CollectionAssert.Contains((ICollection)engine.Utterances, "Disconnected");
     }
 
     [TestMethod]
@@ -243,6 +287,52 @@ public sealed class SpeechAnnouncerTests
     }
 
     [TestMethod]
+    public void ConcurrentStopSpeakingCallsDisposeTheEngineExactlyOnce()
+    {
+        // The worker is held inside Speak (gate closed) until both stop threads have already passed the
+        // barrier and read _worker, and ShutdownWaitMilliseconds is generous: both concurrent Join calls
+        // can then succeed once the gate is released below, which is what actually exercises the bug (a
+        // short-lived, already-idle worker lets both Joins return true almost immediately regardless of
+        // whether the fix is in place, so it would not reliably turn red on the old code).
+        var engine = new FakeSpeechEngine { OpenGateByDefault = false };
+        var settings = VoiceOverSettings.Default with { Enabled = true, ShutdownWaitMilliseconds = 5000 };
+        var announcer = new SpeechAnnouncer(engine, settings, new ManualTime());
+        Assert.IsTrue(announcer.Start().Ok);
+
+        announcer.Announce(VoiceLine.Connected);
+        Wait(engine.SpeakEntered, "SpeakEntered"); // worker is blocked inside Speak, gate closed
+
+        // Two threads race to stop the same announcer, the way an exit path and a settings change could
+        // overlap. _worker is claimed under the lock (see StopSpeaking's comment), so only one of them
+        // can ever see a non-null worker to join and dispose. The gate stays closed until both threads
+        // have started their own StopSpeaking call, so both are blocked inside their own Join (the
+        // worker cannot finish yet) before either can succeed: that is what actually exercises the bug,
+        // since both Joins are then released together when the gate opens and the worker finishes, each
+        // able to see the same pre-read worker reference and proceed to dispose. Releasing the gate
+        // immediately after starting the two tasks, with nothing blocking either Join, lets one call
+        // finish and null _worker before the other has even read it, which does not reproduce the race.
+        using var ready = new Barrier(2);
+        using var bothStarted = new CountdownEvent(2);
+        void StopFromAnotherThread()
+        {
+            ready.SignalAndWait();
+            bothStarted.Signal();
+            announcer.StopSpeaking();
+        }
+
+        Task first = Task.Run(StopFromAnotherThread);
+        Task second = Task.Run(StopFromAnotherThread);
+        Assert.IsTrue(bothStarted.Wait(WaitTimeout), "Both stop threads never started.");
+        engine.ReleaseGate.Release(); // let the in-flight "Connected" finish so both Joins can succeed together
+        Assert.IsTrue(Task.WaitAll([first, second], WaitTimeout), "Both concurrent StopSpeaking calls must return.");
+
+        Assert.AreEqual(1, engine.DisposeCount, "Two concurrent StopSpeaking calls must not both dispose the engine.");
+
+        announcer.Dispose();
+        Assert.AreEqual(1, engine.DisposeCount, "Dispose afterwards must not dispose the engine a second time either.");
+    }
+
+    [TestMethod]
     public void AnnounceAfterStopIsRefused()
     {
         var engine = new FakeSpeechEngine();
@@ -253,6 +343,7 @@ public sealed class SpeechAnnouncerTests
         StepOutcome result = announcer.Announce(VoiceLine.Connected);
 
         Assert.IsFalse(result.Ok);
+        Assert.AreEqual(NativeCodes.NotAttempted, result.Code);
         Assert.AreEqual(0, engine.Utterances.Count);
     }
 
@@ -273,6 +364,36 @@ public sealed class SpeechAnnouncerTests
         Assert.AreEqual(60000, clamped.RepeatGapMilliseconds);
         Assert.AreEqual(3, notes.Count);
         Assert.IsTrue(notes.All(n => n.Ok), "A clamp is a correction, not a failure.");
+    }
+
+    [TestMethod]
+    public void ShutdownWaitMillisecondsIsClampedToTheDocumentedRange()
+    {
+        VoiceOverSettings tooLow = VoiceOverSettings.Default with { ShutdownWaitMilliseconds = 1 };
+        VoiceOverSettings tooHigh = VoiceOverSettings.Default with { ShutdownWaitMilliseconds = 999999 };
+
+        VoiceOverSettings clampedLow = tooLow.Clamped(out IReadOnlyList<StepOutcome> lowNotes);
+        VoiceOverSettings clampedHigh = tooHigh.Clamped(out IReadOnlyList<StepOutcome> highNotes);
+
+        Assert.AreEqual(100, clampedLow.ShutdownWaitMilliseconds);
+        Assert.AreEqual(1, lowNotes.Count);
+        Assert.AreEqual(10000, clampedHigh.ShutdownWaitMilliseconds);
+        Assert.AreEqual(1, highNotes.Count);
+    }
+
+    [TestMethod]
+    public void FailuresBeforeGivingUpIsClampedToTheDocumentedRange()
+    {
+        VoiceOverSettings tooLow = VoiceOverSettings.Default with { FailuresBeforeGivingUp = 0 };
+        VoiceOverSettings tooHigh = VoiceOverSettings.Default with { FailuresBeforeGivingUp = 99 };
+
+        VoiceOverSettings clampedLow = tooLow.Clamped(out IReadOnlyList<StepOutcome> lowNotes);
+        VoiceOverSettings clampedHigh = tooHigh.Clamped(out IReadOnlyList<StepOutcome> highNotes);
+
+        Assert.AreEqual(1, clampedLow.FailuresBeforeGivingUp);
+        Assert.AreEqual(1, lowNotes.Count);
+        Assert.AreEqual(10, clampedHigh.FailuresBeforeGivingUp);
+        Assert.AreEqual(1, highNotes.Count);
     }
 
     [TestMethod]

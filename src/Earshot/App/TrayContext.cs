@@ -383,6 +383,12 @@ internal sealed class TrayContext : ApplicationContext
         // Cancels and disposes the speech engine on every exit path this handles (ExitThreadCore,
         // Dispose), the same way: a phrase in flight must not keep the process alive, and StopSpeaking() is what
         // cancels it (drops the mailbox, waits at most ShutdownWaitMilliseconds, then disposes).
+        //
+        // This blocks the UI thread for up to ShutdownWaitMilliseconds if the worker is still inside
+        // Speak when a session ends: accepted, not a bug. It happens at most once, after the coordinator
+        // has already stopped and every other shutdown step above has run, the bound is the owner's own
+        // setting (VoiceOverSettings.ShutdownWaitMilliseconds, clamped to at most 10 seconds), and the
+        // alternative (not joining at all) risks disposing a synthesiser that is still mid-call.
         StopVoice();
     }
 
@@ -774,6 +780,13 @@ internal sealed class TrayContext : ApplicationContext
     // and the left click read) and speaks it, and never itself triggers a status probe, a connect or a
     // node change. If VoiceOver is off or unavailable there is nothing to speak, and this does nothing
     // else either: it must never fall back to some other action.
+    //
+    // Speaks Connected or Disconnected only when the snapshot says exactly that: Connecting,
+    // Disconnecting and Unknown are states the app only assumed (a read in flight, or no read at all),
+    // and the voiceover design (section 9) says never to announce one of those. The closed six-phrase
+    // set has no line for any of them, so widening it is not an option either. What the owner asked to
+    // hear about is shown instead, as the same short line the tray's own tooltip would show, and the log
+    // records why nothing was spoken.
     private void SpeakCurrentStatus()
     {
         if (_voice is not { IsAvailable: true } voice)
@@ -782,7 +795,21 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         ConnectionState connection = TrayStatus.ActiveTarget(_snapshot, _registry.Settings.Current)?.Connection ?? ConnectionState.Unknown;
-        voice.Announce(connection == ConnectionState.Connected ? VoiceLine.Connected : VoiceLine.Disconnected);
+        VoiceLine? line = connection switch
+        {
+            ConnectionState.Connected => VoiceLine.Connected,
+            ConnectionState.Disconnected => VoiceLine.Disconnected,
+            _ => null,
+        };
+
+        if (line is not { } toSpeak)
+        {
+            _log.Write(LogLevel.Debug, "VoiceOver speak status: nothing spoken, state is " + connection + ".");
+            ShowCard(TrayStatus.AppName, TrayStatus.Tooltip(_snapshot, BlockStatus, _registry.Settings.Current), CardPlace.NearTray);
+            return;
+        }
+
+        voice.Announce(toSpeak);
         LogVoiceOutcomes(voice.Drain());
     }
 
@@ -865,11 +892,17 @@ internal sealed class TrayContext : ApplicationContext
 
     // The worker gave up on its own after FailuresBeforeGivingUp consecutive Speak failures (never for an
     // explicit Stop). Posted to the UI thread because SpeechAnnouncer raises this from its own worker
-    // thread (see IAnnouncer.Stopped).
-    private void OnVoiceStopped(object? sender, StepOutcome outcome) =>
+    // thread (see IAnnouncer.Stopped). Internal so a test can raise it directly, the same seam
+    // OnHotkeyActivated and OnSessionEnding already are.
+    //
+    // sender is the announcer that gave up. By the time the posted action runs, a fast settings change
+    // (or another give-up) could already have replaced _voice with a new announcer: this must not act on
+    // that stale event, or it would stop and disable the current, working announcer over a failure that
+    // belonged to the one it already replaced.
+    internal void OnVoiceStopped(object? sender, StepOutcome outcome) =>
         _registry.UiPost(() =>
         {
-            if (_closed)
+            if (_closed || !ReferenceEquals(sender, _voice))
             {
                 return;
             }
@@ -893,6 +926,11 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
+    // Stops, drains and disposes whatever announcer is running. Every outcome StopSpeaking and Dispose
+    // recorded (including a timed-out "worker still speaking", and any Speak failure that had not yet
+    // been drained because it landed on the worker thread after the last Announce) is logged here rather
+    // than discarded: this used to be the one place a recorded outcome could go missing, since nothing
+    // else ever calls Drain() once the announcer is on its way out.
     private void StopVoice()
     {
         if (_voice is null)
@@ -900,10 +938,13 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        _voice.Stopped -= OnVoiceStopped;
-        _voice.StopSpeaking();
-        _voice.Dispose();
+        SpeechAnnouncer voice = _voice;
         _voice = null;
+        voice.Stopped -= OnVoiceStopped;
+        voice.StopSpeaking();
+        LogVoiceOutcomes(voice.Drain());
+        voice.Dispose();
+        LogVoiceOutcomes(voice.Drain());
     }
 
     private void LogVoiceOutcomes(IReadOnlyList<StepOutcome> outcomes)
@@ -973,7 +1014,7 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private MenuState CurrentMenuState() =>
-        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode, !_voiceKnownNoVoice);
+        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode, _voiceKnownNoVoice);
 
     private void UpdatePresentation(bool forceIcon)
     {

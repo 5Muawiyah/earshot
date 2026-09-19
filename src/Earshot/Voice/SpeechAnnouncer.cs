@@ -15,10 +15,18 @@ namespace Earshot.Voice;
 // thread for as long as constructing a synthesiser and reading the voice list takes; it runs once, from
 // a menu click or a settings load, never on a timer and never in a loop.
 //
-// The mailbox, the stop flag, the last accepted line, the last accepted time, the failure counter and
-// the outcome list are guarded by one private lock object, and that lock is never held across a call
-// into the engine.
-public sealed class SpeechAnnouncer : IAnnouncer
+// The mailbox, the stop flag, the last accepted line, the last accepted time, the worker field, the
+// failure counter and the outcome list are guarded by one private lock object, and that lock is never
+// held across a call into the engine. The worker field is written only under that lock too (both in
+// Start, together with _available, and in StopSpeaking, which claims it by swapping it for null): that
+// is what stops two concurrent StopSpeaking calls both disposing the engine, and what stops a
+// StopSpeaking that races in before the worker thread is started from finding nothing to join and
+// leaking an already-opened engine (see StopSpeaking's own comment).
+//
+// Internal, not public: the constructor takes ISpeechEngine, which is itself internal (see that
+// interface's own header). IAnnouncer, the interface this implements, stays public: nothing on it
+// exposes ISpeechEngine.
+internal sealed class SpeechAnnouncer : IAnnouncer
 {
     private readonly ISpeechEngine _engine;
     private readonly VoiceOverSettings _settings;
@@ -32,9 +40,11 @@ public sealed class SpeechAnnouncer : IAnnouncer
     private bool _stopRequested = true;
     private VoiceLine? _pending;
     private VoiceLine? _lastAccepted;
-    private DateTimeOffset _lastAcceptedAt;
+    private long _lastAcceptedTimestamp;
     private int _consecutiveSpeakFailures;
     private bool _disposed;
+    private bool _workerStarted;
+    private bool _workerJoinConfirmed;
 
     public SpeechAnnouncer(ISpeechEngine engine, VoiceOverSettings settings, TimeProvider time)
     {
@@ -70,12 +80,19 @@ public sealed class SpeechAnnouncer : IAnnouncer
             _available = true;
             _stopRequested = false;
             _consecutiveSpeakFailures = 0;
+
+            // IsBackground: a phrase in flight at exit must never keep the process alive on its own;
+            // StopSpeaking is still what every shutdown path calls, but a crash or a kill leaves nothing
+            // here to wait for. Created and started under the same lock as _available: Thread.Start does
+            // not block (it only schedules the OS thread, which begins with _signal.Wait(), needing no
+            // lock itself), so holding the lock across it costs nothing measurable, and it closes the
+            // window where a concurrent StopSpeaking could see _available true with _worker still null
+            // and return "not running" without ever disposing the engine Open just constructed.
+            _worker = new Thread(RunWorker) { IsBackground = true, Name = "voiceover" };
+            _workerStarted = true;
+            _worker.Start();
         }
 
-        // IsBackground: a phrase in flight at exit must never keep the process alive on its own; Stop is
-        // still what every shutdown path calls, but a crash or a kill leaves nothing here to wait for.
-        _worker = new Thread(RunWorker) { IsBackground = true, Name = "voiceover" };
-        _worker.Start();
         return outcome;
     }
 
@@ -98,8 +115,12 @@ public sealed class SpeechAnnouncer : IAnnouncer
                 return result;
             }
 
-            DateTimeOffset now = _time.GetUtcNow();
-            if (_lastAccepted == line && now - _lastAcceptedAt < TimeSpan.FromMilliseconds(_settings.RepeatGapMilliseconds))
+            // The repeat gap is measured on TimeProvider's monotonic timestamp (GetTimestamp/
+            // GetElapsedTime), never on GetUtcNow: a wall clock can jump, forwards on an NTP correction
+            // or backwards on one the other way, and a gap measured on it could refuse to speak again
+            // for far longer than RepeatGapMilliseconds, or accept a repeat far too early, depending on
+            // which way the wall clock moved (see RepeatGapUsesTheMonotonicClockNotTheWallClock).
+            if (_lastAccepted == line && _time.GetElapsedTime(_lastAcceptedTimestamp) < TimeSpan.FromMilliseconds(_settings.RepeatGapMilliseconds))
             {
                 result = StepOutcomes.NotAttempted("announce", "repeat inside gap");
                 Record(result);
@@ -113,7 +134,7 @@ public sealed class SpeechAnnouncer : IAnnouncer
 
             _pending = line;
             _lastAccepted = line;
-            _lastAcceptedAt = now;
+            _lastAcceptedTimestamp = _time.GetTimestamp();
             result = StepOutcomes.FromHResult("announce", 0, "accepted");
             Record(result);
             _signal.Set();
@@ -124,11 +145,19 @@ public sealed class SpeechAnnouncer : IAnnouncer
 
     public StepOutcome StopSpeaking()
     {
+        // Claims _worker by swapping it for null under the lock: whichever of two concurrent
+        // StopSpeaking calls wins the lock first is the only one that can see a non-null worker, so only
+        // one of them ever joins it or disposes the engine (ConcurrentStopSpeakingCallsDisposeTheEngine
+        // ExactlyOnce proves this). The other sees worker already null and returns "not running" at
+        // once, exactly as it would if StopSpeaking had never had anything to stop.
+        Thread? worker;
         lock (_lock)
         {
             _stopRequested = true;
             _available = false;
             _pending = null;
+            worker = _worker;
+            _worker = null;
         }
 
         // Wakes the worker so it notices the stop flag once it is not blocked inside Speak. A phrase
@@ -136,7 +165,6 @@ public sealed class SpeechAnnouncer : IAnnouncer
         // reach the engine from this thread.
         _signal.Set();
 
-        Thread? worker = _worker;
         if (worker is null)
         {
             StepOutcome nothingToStop = StepOutcomes.FromHResult("stop", 0, "not running");
@@ -145,7 +173,6 @@ public sealed class SpeechAnnouncer : IAnnouncer
         }
 
         bool joined = worker.Join(_settings.ShutdownWaitMilliseconds);
-        _worker = null;
         if (!joined)
         {
             StepOutcome timedOut = StepOutcomes.NotAttempted("stop", "worker still speaking");
@@ -154,6 +181,7 @@ public sealed class SpeechAnnouncer : IAnnouncer
         }
 
         _engine.Dispose();
+        lock (_lock) { _workerJoinConfirmed = true; }
         StepOutcome ok = StepOutcomes.FromHResult("stop", 0);
         lock (_lock) { Record(ok); }
         return ok;
@@ -183,6 +211,21 @@ public sealed class SpeechAnnouncer : IAnnouncer
 
         _disposed = true;
         StopSpeaking();
+
+        // Only disposed once the worker thread is provably done: either it never started at all, or a
+        // Join (in this call or an earlier concurrent one) actually returned true, which the OS
+        // guarantees means the thread has fully exited and will never touch _signal again. When
+        // StopSpeaking timed out ("worker still speaking"), the background thread may still be alive and
+        // may still call _signal.Wait/Reset once more; disposing here would risk an
+        // ObjectDisposedException on a thread this class no longer controls, so _signal is deliberately
+        // left undisposed in that case, the same accepted trade-off already made for the engine itself
+        // (see StopSpeaking's timeout branch and the IsBackground comment on the worker thread).
+        bool safeToDisposeSignal;
+        lock (_lock) { safeToDisposeSignal = !_workerStarted || _workerJoinConfirmed; }
+        if (safeToDisposeSignal)
+        {
+            _signal.Dispose();
+        }
     }
 
     // Runs on the "voiceover" thread only. Waits on the signal, takes the line out of the mailbox under

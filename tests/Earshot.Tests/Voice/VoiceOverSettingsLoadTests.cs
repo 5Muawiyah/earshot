@@ -50,4 +50,41 @@ public sealed class VoiceOverSettingsLoadTests : IDisposable
         Assert.IsNotNull(store.Current.VoiceOver);
         Assert.AreEqual(VoiceOverSettings.Default, store.Current.VoiceOver);
     }
+
+    // Pins the exact member names the shipped build writes, through the real store (JsonSettingsStore,
+    // backed by the source-generated SettingsJsonContext), not a hand-typed sample: the workshop SPEC's
+    // own JSON sample (section 6) is camelCase, and a camelCase block is silently ignored on read as
+    // unknown members (RespectNullableAnnotations only resets the file for an explicit null on a
+    // non-nullable member, never for a member name in the wrong case), so documentation that copied the
+    // spec's sample would be wrong for this product.
+    [TestMethod]
+    public void TheWrittenJsonUsesThesePascalCaseVoiceOverMemberNames()
+    {
+        var store = new JsonSettingsStore(SettingsPath, _log);
+        store.Update(s => s.VoiceOver = s.VoiceOver with { VoiceName = "Zira" });
+
+        string json = File.ReadAllText(SettingsPath);
+
+        foreach (string member in new[]
+        {
+            "\"VoiceOver\"",
+            "\"Enabled\"",
+            "\"SpeakFailures\"",
+            "\"VoiceName\"",
+            "\"Rate\"",
+            "\"Volume\"",
+            "\"RepeatGapMilliseconds\"",
+            "\"ShutdownWaitMilliseconds\"",
+            "\"FailuresBeforeGivingUp\"",
+        })
+        {
+            Assert.IsTrue(json.Contains(member, StringComparison.Ordinal),
+                member + " is not present in the JSON the shipped build wrote: " + json);
+        }
+
+        // The exact camelCase spelling the workshop SPEC's own sample uses, so this fails loudly if this
+        // product ever regresses to matching that sample instead of the shipped, PascalCase store.
+        Assert.IsFalse(json.Contains("\"voiceOver\"", StringComparison.Ordinal),
+            "voiceOver (camelCase) must not be the property name written; the shipped store reads and writes PascalCase.");
+    }
 }

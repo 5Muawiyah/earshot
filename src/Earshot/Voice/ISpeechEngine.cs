@@ -7,7 +7,14 @@ namespace Earshot.Voice;
 // returns a StepOutcome, the same outcome family every other native call in Earshot uses (Contracts\
 // Results.cs, Contracts\StepOutcomes.cs), so speech failures are recorded and decoded exactly like a
 // CfgMgr32 or Bluetooth failure: no bool that loses the reason, no silent catch.
-public interface ISpeechEngine : IDisposable
+//
+// Internal, not public: Speak(string) takes a free string, and VoiceLine.cs claims no free string can
+// reach the synthesiser. That claim only holds inside this assembly if nothing outside it can call
+// Speak directly, which internal (with InternalsVisibleTo Earshot.Tests, Earshot.csproj) enforces; a
+// public interface here would let any caller outside Earshot speak arbitrary text through it, whatever
+// VoiceLine.cs says. TrayContext (the only production caller) and the test project both reach it fine
+// through internal visibility.
+internal interface ISpeechEngine : IDisposable
 {
     bool IsOpen { get; }
 

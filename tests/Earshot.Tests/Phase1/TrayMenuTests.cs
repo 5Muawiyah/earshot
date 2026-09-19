@@ -10,11 +10,14 @@ namespace Earshot.Tests.Phase1;
 [TestClass]
 public sealed class TrayMenuTests
 {
+    // MenuModel.Build's voiceKnownMissing defaults to false (MenuModel.cs), so a caller that leaves it
+    // out, exactly as State() below does, sees the ordinary "Speak status" label, never "(no voice)": a
+    // caller has to say a voice is known missing, not the other way round.
     private static readonly string[] DesignedOrder =
     [
         "Connect", "-",
         "Block at boot", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
-        "Speak status (no voice)", "-",
+        "Speak status", "-",
         "Choose device...", "Set up Earshot...", "-",
         "Exit",
     ];
@@ -27,8 +30,9 @@ public sealed class TrayMenuTests
         bool busy = false,
         EarshotSettings? settings = null,
         AudioProtectionSnapshot? protection = null,
-        bool safeMode = false) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, StartupState.Off, safeMode);
+        bool safeMode = false,
+        bool voiceKnownMissing = false) =>
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, StartupState.Off, safeMode, voiceKnownMissing);
 
     private static string[] AvailableTexts(TrayMenu menu) =>
         menu.Items.Where(i => i.Available).Select(i => i is ToolStripSeparator ? "-" : i.Text ?? "").ToArray();
@@ -41,6 +45,32 @@ public sealed class TrayMenuTests
             using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp)));
 
             CollectionAssert.AreEqual(DesignedOrder, AvailableTexts(menu));
+        });
+    }
+
+    [TestMethod]
+    public void ACallerThatOmitsVoiceKnownMissingSeesTheOrdinaryLabelNotNoVoice()
+    {
+        StaThread.Run(() =>
+        {
+            // MenuModel.Build(...) with no voiceKnownMissing argument at all, the exact call shape every
+            // caller except TrayContext uses.
+            MenuState state = MenuModel.Build(NoDevice(), Block(BlockState.NotSetUp), null, Settings(), busy: false, StartupState.Off);
+
+            Assert.AreEqual(MenuModel.SpeakStatusText, state.SpeakStatus.Text);
+            Assert.IsTrue(state.SpeakStatus.Enabled);
+        });
+    }
+
+    [TestMethod]
+    public void VoiceKnownMissingTrueDisablesTheItemAndRelabelsIt()
+    {
+        StaThread.Run(() =>
+        {
+            using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp), voiceKnownMissing: true));
+
+            ToolStripMenuItem item = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.SpeakStatusNoVoice);
+            Assert.IsFalse(item.Enabled);
         });
     }
 

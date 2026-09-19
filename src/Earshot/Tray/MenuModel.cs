@@ -50,6 +50,14 @@ internal static class MenuModel
 
     // safeMode (EARSHOT_SAFE_MODE) adds one caption at the top and changes nothing else: every item stays as it
     // is, and each action reports the refusal on its own card, so the menu that is tested is the menu that ships.
+    //
+    // voiceKnownMissing defaults to false, so a caller that omits it (every caller except TrayContext,
+    // which passes its own _voiceKnownNoVoice) sees the ordinary "Speak status" label. The parameter used
+    // to be voiceAvailable defaulting to false, which meant every caller that left it out, including the
+    // pinned TrayMenuTests order, saw the "(no voice)" label by default: a build with a perfectly good
+    // voice looked exactly like one with none the moment a caller forgot the argument. Naming and
+    // defaulting it the other way round makes the safe default the normal label, and only a caller that
+    // actually knows the voice is missing has to say so.
     public static MenuState Build(
         DeviceSnapshot snapshot,
         BootBlockStatus? block,
@@ -58,7 +66,7 @@ internal static class MenuModel
         bool busy,
         StartupState startup,
         bool safeMode = false,
-        bool voiceAvailable = false)
+        bool voiceKnownMissing = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -87,9 +95,9 @@ internal static class MenuModel
             ProtectCaveat: new MenuItemState(ProtectCaveat, Checked: false, Enabled: false, Visible: true),
             OpenOnStartup: new MenuItemState(OpenOnStartup, Checked: startup == StartupState.On, Enabled: !busy, Visible: true),
             SpeakStatus: new MenuItemState(
-                voiceAvailable ? SpeakStatusText : SpeakStatusNoVoice,
+                voiceKnownMissing ? SpeakStatusNoVoice : SpeakStatusText,
                 Checked: settings.VoiceOver.Enabled,
-                Enabled: !busy && voiceAvailable,
+                Enabled: !busy && !voiceKnownMissing,
                 Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
             SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.NeedsSetUp(block)),
