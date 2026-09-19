@@ -1,5 +1,6 @@
 using Earshot.Contracts;
 using Earshot.Hotkeys;
+using Earshot.Streaming;
 using Earshot.Voice;
 
 namespace Earshot.Tray;
@@ -20,6 +21,8 @@ internal readonly record struct MenuItemState(string Text, bool Checked, bool En
 internal sealed record MenuState(
     MenuItemState SafeMode,
     MenuItemState Toggle,
+    MenuItemState PlayFromPhone,
+    IReadOnlyList<StreamingMenuItem> PlayFromPhoneItems,
     MenuItemState BlockAtBoot,
     MenuItemState ProtectAudio,
     MenuItemState ProtectCaveat,
@@ -36,6 +39,8 @@ internal static class MenuModel
     public const string SafeMode = "Safe mode: no device actions";
     public const string Connect = "Connect";
     public const string Disconnect = "Disconnect";
+    // Kept exactly as StreamingLabels has it, referenced rather than duplicated, as with AnnouncerCopy below.
+    public const string PlayFromPhone = StreamingLabels.Parent;
     public const string BlockAtBoot = "Block at boot";
     public const string ProtectAudioQuality = "Protect audio quality";
     public const string ProtectCaveat = "Turns off the AirPods microphone";
@@ -58,6 +63,10 @@ internal static class MenuModel
     // voice looked exactly like one with none the moment a caller forgot the argument. Naming and
     // defaulting it the other way round makes the safe default the normal label, and only a caller that
     // actually knows the voice is missing has to say so.
+    //
+    // streaming is what StreamingCoordinator last built, or null while Play from a phone is switched off, which is
+    // the default: the item is then not there at all, and the menu is the one it was before the feature existed.
+    // It is cached state like everything else here, so opening the menu still reads no device.
     public static MenuState Build(
         DeviceSnapshot snapshot,
         BootBlockStatus? block,
@@ -66,7 +75,8 @@ internal static class MenuModel
         bool busy,
         StartupState startup,
         bool safeMode = false,
-        bool voiceKnownMissing = false)
+        bool voiceKnownMissing = false,
+        StreamingMenuModel? streaming = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -85,6 +95,8 @@ internal static class MenuModel
         return new MenuState(
             SafeMode: new MenuItemState(SafeMode, Checked: false, Enabled: false, Visible: safeMode),
             Toggle: new MenuItemState(WithShortcut(connected ? Disconnect : Connect, settings.Hotkeys, HotkeyAction.ToggleConnection), Checked: false, Enabled: !busy && !changing, Visible: true),
+            PlayFromPhone: new MenuItemState(streaming?.ParentText ?? PlayFromPhone, Checked: false, Enabled: streaming is { ParentEnabled: true }, Visible: streaming is not null),
+            PlayFromPhoneItems: streaming?.Items ?? [],
             BlockAtBoot: new MenuItemState(WithShortcut(BlockAtBoot, settings.Hotkeys, HotkeyAction.ToggleBlockAtBoot), Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
             ProtectAudio: new MenuItemState(
                 WithShortcut(ProtectAudioQuality, settings.Hotkeys, HotkeyAction.ToggleAudioProtection),

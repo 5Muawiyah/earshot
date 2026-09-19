@@ -1257,13 +1257,18 @@ internal sealed class TrayHarness : IDisposable
         Func<string, bool>? fileExists = null,
         TimeSpan? coordinatorExitWaitLimit = null,
         FakeNativeHotkeys? nativeHotkeys = null,
-        Earshot.Tests.Voice.FakeSpeechEngine? voiceEngine = null)
+        Earshot.Tests.Voice.FakeSpeechEngine? voiceEngine = null,
+        Earshot.Tests.Streaming.FakeStreamingPlatform? streamingPlatform = null,
+        TimeSpan? streamingShutdownWait = null)
     {
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
         // SpeechSynthesizer. Reused from tests\Earshot.Tests\Voice\FakeSpeechEngine.cs rather than a
         // second fake, the same way NativeHotkeys is shared with the Hotkeys suite.
         Voice = voiceEngine ?? new Earshot.Tests.Voice.FakeSpeechEngine();
+        // A fake, never a real WindowsStreamingPlatform: a TrayContext test must never touch WinRT, read the real
+        // device list or open a connection. Shared with the Streaming suite, as the two fakes above are with theirs.
+        Streaming = streamingPlatform ?? new Earshot.Tests.Streaming.FakeStreamingPlatform();
         // An exception in a posted callback fails the test instead of opening the WinForms error dialog.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -1313,6 +1318,12 @@ internal sealed class TrayHarness : IDisposable
             // hotkey on the machine that runs it.
             NativeHotkeys = NativeHotkeys,
             VoiceEngineFactory = () => Voice,
+            StreamingPlatformFactory = _ =>
+            {
+                StreamingPlatformsBuilt++;
+                return Streaming;
+            },
+            StreamingShutdownWait = streamingShutdownWait ?? TrayContext.DefaultStreamingShutdownWait,
         };
         if (exitWaitLimit is { } limit)
         {
@@ -1355,6 +1366,11 @@ internal sealed class TrayHarness : IDisposable
     public FakeNativeHotkeys NativeHotkeys { get; }
 
     public Earshot.Tests.Voice.FakeSpeechEngine Voice { get; }
+
+    public Earshot.Tests.Streaming.FakeStreamingPlatform Streaming { get; }
+
+    // How many times the tray asked for a streaming platform. None, while Play from a phone is off.
+    public int StreamingPlatformsBuilt { get; private set; }
 
     public ServiceRegistry Registry { get; }
 

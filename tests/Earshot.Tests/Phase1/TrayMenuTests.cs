@@ -1,5 +1,6 @@
 using System.Windows.Forms;
 using Earshot.Contracts;
+using Earshot.Streaming;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
@@ -24,6 +25,19 @@ public sealed class TrayMenuTests
 
     private static readonly string[] CommandOrder = ["toggle", "block", "protect", "startup", "device", "setup", "exit"];
 
+    // The Play from a phone submenu as StreamingCoordinator builds it with one device in use.
+    private static readonly StreamingMenuModel PlayingFromAPhone = new(
+        StreamingLabels.Parent,
+        ParentEnabled: true,
+        [
+            new StreamingMenuItem("Test Phone", Enabled: true, Checked: true, "phone-id", StreamingMenuCommand.Play),
+            StreamingMenuModel.Sentence("Looking for devices."),
+            new StreamingMenuItem("Stop playing from Test Phone", Enabled: true, Checked: false, "phone-id", StreamingMenuCommand.Stop),
+            new StreamingMenuItem(StreamingLabels.Refresh, Enabled: true, Checked: false, null, StreamingMenuCommand.Refresh),
+        ]);
+
+    private static readonly string[] Commands = ["Play:phone-id", "Stop:phone-id", "Refresh:-"];
+
     private static MenuState State(
         DeviceSnapshot? snapshot = null,
         BootBlockStatus? block = null,
@@ -45,6 +59,74 @@ public sealed class TrayMenuTests
             using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp)));
 
             CollectionAssert.AreEqual(DesignedOrder, AvailableTexts(menu));
+        });
+    }
+
+    // Play from a phone is off by default, and then it is not in the menu at all: TheMenuShowsTheDesignedItemsInOrder
+    // above is the same order it always was. Switched on, it sits under the toggle and changes nothing else.
+    [TestMethod]
+    public void PlayFromAPhoneIsAbsentByDefaultAndSitsUnderTheToggleWhenOn()
+    {
+        StaThread.Run(() =>
+        {
+            MenuState off = MenuModel.Build(NoDevice(), Block(BlockState.NotSetUp), null, Settings(), busy: false, StartupState.Off);
+            Assert.IsFalse(off.PlayFromPhone.Visible);
+            Assert.AreEqual(0, off.PlayFromPhoneItems.Count);
+
+            MenuState on = MenuModel.Build(NoDevice(), Block(BlockState.NotSetUp), null, Settings(), busy: false, StartupState.Off, streaming: PlayingFromAPhone);
+            using var menu = new TrayMenu(() => on);
+
+            var expected = DesignedOrder.ToList();
+            expected.Insert(1, "Play from a phone");
+            CollectionAssert.AreEqual(expected, AvailableTexts(menu));
+        });
+    }
+
+    [TestMethod]
+    public void ThePlayFromAPhoneSubmenuShowsItsItemsAndRaisesTheOneClicked()
+    {
+        StaThread.Run(() =>
+        {
+            MenuState state = MenuModel.Build(NoDevice(), Block(BlockState.NotSetUp), null, Settings(), busy: false, StartupState.Off, streaming: PlayingFromAPhone);
+            using var menu = new TrayMenu(() => state);
+            var clicked = new List<StreamingMenuItem>();
+            menu.PlayFromPhoneItemClicked += (_, e) => clicked.Add(e.Item);
+
+            IReadOnlyList<ToolStripMenuItem> items = menu.PlayFromPhoneItems;
+            CollectionAssert.AreEqual(
+                PlayingFromAPhone.Items.Select(i => i.Text).ToArray(),
+                items.Select(i => i.Text).ToArray());
+            Assert.IsTrue(items[0].Checked);
+            Assert.IsFalse(items[1].Enabled, "A sentence is never clickable.");
+            Assert.IsFalse(items.Any(i => (i.Text ?? "").Contains("phone-id", StringComparison.Ordinal)), "The device id rides on the item, never in its text.");
+
+            foreach (ToolStripMenuItem item in items)
+            {
+                item.PerformClick();
+            }
+
+            CollectionAssert.AreEqual(
+                Commands,
+                clicked.Select(i => i.Command + ":" + (i.DeviceId ?? "-")).ToArray());
+
+            // Applying the state again rebuilds the submenu rather than adding to it.
+            menu.Refresh();
+            Assert.AreEqual(4, menu.PlayFromPhoneItems.Count);
+        });
+    }
+
+    [TestMethod]
+    public void AnUnsupportedPlayFromAPhoneIsShownDisabled()
+    {
+        StaThread.Run(() =>
+        {
+            var unsupported = new StreamingMenuModel(StreamingLabels.Parent, ParentEnabled: false, [StreamingMenuModel.Sentence("Needs a newer version of Windows.")]);
+            MenuState state = MenuModel.Build(NoDevice(), Block(BlockState.NotSetUp), null, Settings(), busy: false, StartupState.Off, streaming: unsupported);
+            using var menu = new TrayMenu(() => state);
+
+            ToolStripMenuItem parent = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Play from a phone");
+            Assert.IsTrue(parent.Available);
+            Assert.IsFalse(parent.Enabled);
         });
     }
 

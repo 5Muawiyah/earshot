@@ -81,8 +81,10 @@ catch { Stop-Release ("Could not clear the publish and artifacts folders: " + $_
 $publishLog = $result.log
 # DebugType is left at the SDK default, so Earshot.pdb is published, listed in the manifest and
 # installed with everything else. That is deliberate: FileLog writes ex.ToString() for a failure,
-# and without the symbols beside the exe that stack trace carries no file or line. 247 KB against a
-# 124 MB self-contained folder is a fair price for a log the owner can act on.
+# and without the symbols beside the exe that stack trace carries no file or line. 281 KB against a
+# 150 MB self-contained folder is a fair price for a log the owner can act on. (Measured on the v1.1
+# audio streaming build. The folder was 125 MB before the target framework gained a Windows version:
+# that brought in the WinRT projection, Microsoft.Windows.SDK.NET.dll and WinRT.Runtime.dll, 25 MB.)
 & dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o $publishDir *> $publishLog
 $publishExit = $LASTEXITCODE
 $publishText = Get-Content $publishLog -Raw

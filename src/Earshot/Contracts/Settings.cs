@@ -21,6 +21,11 @@ public sealed class EarshotSettings
     // v1.1: spoken status. Defaults off (Earshot.Voice.VoiceOverSettings.Default), so an older settings
     // file with no VoiceOver member reads as "off" and nothing is ever spoken until the owner asks.
     public Earshot.Voice.VoiceOverSettings VoiceOver { get; set; } = Earshot.Voice.VoiceOverSettings.Default;
+
+    // v1.1: play from a phone, this PC as a Bluetooth audio sink. Defaults off
+    // (Earshot.Streaming.StreamingSettings.Default), so an older settings file with no Streaming member reads
+    // as "off": the menu item does not appear, nothing is enumerated and nothing listens until the owner asks.
+    public Earshot.Streaming.StreamingSettings Streaming { get; set; } = Earshot.Streaming.StreamingSettings.Default;
 }
 
 // SYSTEM-owned, %ProgramData%\Earshot\config.json. Users-read, SYSTEM-write via setboot verbs only.

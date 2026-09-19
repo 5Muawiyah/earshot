@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Earshot.Streaming;
 
 namespace Earshot.Tray;
 
@@ -15,6 +16,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly Func<MenuState> _state;
     private readonly ToolStripMenuItem _safeMode = new();
     private readonly ToolStripMenuItem _toggle = new();
+    private readonly ToolStripMenuItem _playFromPhone = new();
     private readonly ToolStripMenuItem _blockAtBoot = new();
     private readonly ToolStripMenuItem _protectAudio = new();
     private readonly ToolStripMenuItem _protectCaveat = new();
@@ -34,6 +36,7 @@ internal sealed class TrayMenu : IDisposable
         [
             _safeMode,
             _toggle,
+            _playFromPhone,
             new ToolStripSeparator(),
             _blockAtBoot,
             _protectAudio,
@@ -62,6 +65,9 @@ internal sealed class TrayMenu : IDisposable
 
     public event EventHandler? ToggleClicked;
 
+    // One item of the Play from a phone submenu was clicked: a device, Stop, or Refresh the list.
+    public event EventHandler<StreamingMenuItemEventArgs>? PlayFromPhoneItemClicked;
+
     public event EventHandler? BlockAtBootClicked;
 
     public event EventHandler? ProtectAudioClicked;
@@ -81,11 +87,16 @@ internal sealed class TrayMenu : IDisposable
     // The items in display order, for tests.
     internal IReadOnlyList<ToolStripItem> Items => Strip.Items.Cast<ToolStripItem>().ToArray();
 
+    // The Play from a phone submenu in display order, for tests.
+    internal IReadOnlyList<ToolStripMenuItem> PlayFromPhoneItems => _playFromPhone.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
+
     internal void Apply(MenuState state)
     {
         ArgumentNullException.ThrowIfNull(state);
         Set(_safeMode, state.SafeMode);
         Set(_toggle, state.Toggle);
+        Set(_playFromPhone, state.PlayFromPhone);
+        SetPlayFromPhoneItems(state.PlayFromPhoneItems);
         Set(_blockAtBoot, state.BlockAtBoot);
         Set(_protectAudio, state.ProtectAudio);
         Set(_protectCaveat, state.ProtectCaveat);
@@ -102,6 +113,43 @@ internal sealed class TrayMenu : IDisposable
     internal void Refresh() => Apply(_state());
 
     private void OnOpening(object? sender, CancelEventArgs e) => Refresh();
+
+    // The submenu is whatever the state says, rebuilt each time: a sentence is a disabled item, and a device, Stop
+    // and Refresh the list raise PlayFromPhoneItemClicked with the item they were built from. The device id rides on
+    // that item and never reaches any text. A name is whatever the phone's owner typed, so "&" is doubled: on its own
+    // a menu reads it as "underline the next letter".
+    // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.toolstripitem.text
+    private void SetPlayFromPhoneItems(IReadOnlyList<StreamingMenuItem> items)
+    {
+        ToolStripItem[] old = _playFromPhone.DropDownItems.Cast<ToolStripItem>().ToArray();
+        _playFromPhone.DropDownItems.Clear();
+        foreach (ToolStripItem item in old)
+        {
+            item.Click -= OnPlayFromPhoneItemClick;
+            item.Dispose();
+        }
+
+        foreach (StreamingMenuItem item in items)
+        {
+            var child = new ToolStripMenuItem
+            {
+                Text = item.Text.Replace("&", "&&", StringComparison.Ordinal),
+                Checked = item.Checked,
+                Enabled = item.Enabled && item.Command != StreamingMenuCommand.None,
+                Tag = item,
+            };
+            child.Click += OnPlayFromPhoneItemClick;
+            _playFromPhone.DropDownItems.Add(child);
+        }
+    }
+
+    private void OnPlayFromPhoneItemClick(object? sender, EventArgs e)
+    {
+        if (sender is ToolStripMenuItem { Tag: StreamingMenuItem item })
+        {
+            PlayFromPhoneItemClicked?.Invoke(this, new StreamingMenuItemEventArgs(item));
+        }
+    }
 
     private static void Set(ToolStripMenuItem item, MenuItemState state)
     {

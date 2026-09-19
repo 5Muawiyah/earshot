@@ -6,6 +6,7 @@ using Earshot.Contracts;
 using Earshot.Hotkeys;
 using Earshot.Icons;
 using Earshot.Infra;
+using Earshot.Streaming;
 using Earshot.Tray;
 using Earshot.Voice;
 
@@ -61,6 +62,14 @@ internal sealed record TrayStartOptions(
     // fake in tests, so a tray-level test never constructs a real SpeechSynthesizer. Called from
     // ApplyVoiceOver only when settings ask for a running announcer that is not running yet.
     public Func<ISpeechEngine> VoiceEngineFactory { get; init; } = static () => new SystemSpeechEngine();
+
+    // Builds the platform Play from a phone runs against, injected the same way: the real one by default, a fake
+    // in tests, so a tray-level test never touches WinRT, never enumerates a device and never opens a connection.
+    // Called from ApplyStreaming only when settings ask for the feature, which by default they do not.
+    public Func<ILog, IStreamingPlatform> StreamingPlatformFactory { get; init; } = static log => new WindowsStreamingPlatform(log);
+
+    // How long closing waits for the streaming connection to be let go before the process ends anyway.
+    public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
 }
 
 // The tray: icon, tooltip, menu, left click and the cards they raise. Runs on the UI thread only.
@@ -131,6 +140,11 @@ internal sealed class TrayContext : ApplicationContext
     // dismiss time. A UI timing choice, not a measurement.
     public static readonly TimeSpan DefaultExitNoticeTime = TimeSpan.FromSeconds(4);
 
+    // How long closing waits for Windows to let go of a streaming connection. No page gives Dispose a time limit,
+    // so this is the limit: a waiting budget, not a measured figure. The work runs on a pool thread, which cannot
+    // keep the process alive once this runs out.
+    public static readonly TimeSpan DefaultStreamingShutdownWait = TimeSpan.FromSeconds(2);
+
     private readonly ServiceRegistry _registry;
     private readonly BlockCoordinator _coordinator;
     private readonly ILog _log;
@@ -139,6 +153,9 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ShellMessageWindow _window;
     private readonly HotkeyManager _hotkeys;
     private readonly Func<ISpeechEngine> _voiceEngineFactory;
+    private readonly Func<ILog, IStreamingPlatform> _streamingPlatformFactory;
+    private readonly HostBusyGate _streamingGate = new();
+    private readonly TimeSpan _streamingShutdownWait;
     private readonly TrayIconFactory _icons;
     private readonly StartupRegistration _startup;
     private readonly BluetoothDeviceList _devices;
@@ -182,6 +199,16 @@ internal sealed class TrayContext : ApplicationContext
     private SpeechAnnouncer? _voice;
     private VoiceOverSettings? _voiceApplied;
 
+    // Play from a phone: the running coordinator, or null while the feature is off (the default) or still being
+    // started; the settings it was last applied with, the remembered device left out, so a change that asks for
+    // nothing different restarts nothing; a count that a start still under way compares, to see it is no longer
+    // wanted; and whether a start or a read of the list is in flight, so a second click starts no second one.
+    private StreamingCoordinator? _streaming;
+    private StreamingSettings? _streamingApplied;
+    private int _streamingGeneration;
+    private bool _streamingStartInFlight;
+    private bool _streamingRefreshInFlight;
+
     // Sticky for the life of the process: once Open has told us there is no usable voice on this
     // machine (StepOutcomes.NotAvailable), that is a machine fact that will not change while Earshot
     // runs, so the menu keeps showing "(no voice)" without probing again on every settings change.
@@ -222,9 +249,12 @@ internal sealed class TrayContext : ApplicationContext
         _hotkeys = new HotkeyManager(_window, options.NativeHotkeys, _log);
         _hotkeys.Activated += OnHotkeyActivated;
         _voiceEngineFactory = options.VoiceEngineFactory;
+        _streamingPlatformFactory = options.StreamingPlatformFactory;
+        _streamingShutdownWait = options.StreamingShutdownWait;
 
         _menu = new TrayMenu(CurrentMenuState);
         _menu.ToggleClicked += (_, _) => StartToggle();
+        _menu.PlayFromPhoneItemClicked += OnPlayFromPhoneItemClicked;
         _menu.BlockAtBootClicked += (_, _) => Start("block at boot", place => BlockAtBootAsync(place));
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
         _menu.OpenOnStartupClicked += (_, _) => OnOpenOnStartupClicked();
@@ -246,6 +276,7 @@ internal sealed class TrayContext : ApplicationContext
         _notifyIcon = new NotifyIcon { ContextMenuStrip = _menu.Strip };
         _notifyIcon.MouseClick += OnIconMouseClick;
         _notifyIcon.MouseDown += (_, _) => _ = _coordinator.RefreshStatusAsync();
+        _notifyIcon.MouseDown += OnIconMouseDownForStreaming;
         UpdatePresentation(forceIcon: true);
         _notifyIcon.Visible = options.ShowIcon;
 
@@ -266,6 +297,7 @@ internal sealed class TrayContext : ApplicationContext
         ReportSettingsLoad(options.SettingsStatus);
         ApplyHotkeys();
         ApplyVoiceOver();
+        ApplyStreaming();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -280,6 +312,9 @@ internal sealed class TrayContext : ApplicationContext
     internal int PendingActions => _pending.Count;
 
     internal TrayMenu Menu => _menu;
+
+    // The tooltip as it stands, for tests.
+    internal string TooltipText => _notifyIcon.Text;
 
     // Shows the current state on a card, for example when a second copy of Earshot is started. It follows the
     // user's own action, so it is placed like a card after a click. While Exit waits for a change in flight the icon
@@ -339,6 +374,8 @@ internal sealed class TrayContext : ApplicationContext
             _coordinator.Changed -= OnCoordinatorChanged;
             _window.SessionEnding -= OnSessionEnding;
             _notifyIcon.MouseClick -= OnIconMouseClick;
+            _notifyIcon.MouseDown -= OnIconMouseDownForStreaming;
+            _menu.PlayFromPhoneItemClicked -= OnPlayFromPhoneItemClicked;
             _hotkeys.Activated -= OnHotkeyActivated;
 
             // NotifyIcon.Dispose removes the icon from the notification area. The Icon it used is
@@ -390,6 +427,15 @@ internal sealed class TrayContext : ApplicationContext
         // setting (VoiceOverSettings.ShutdownWaitMilliseconds, clamped to at most 10 seconds), and the
         // alternative (not joining at all) risks disposing a synthesiser that is still mid-call.
         StopVoice();
+
+        // Play from a phone: every connection the coordinator enabled is released and disposed on every exit path
+        // this handles, because "the underlying transport is deactivated when all references are released" and a PC
+        // still accepting audio after Earshot has gone is the worst thing this feature could do. The release runs on
+        // a pool thread and this waits for it at most StreamingShutdownWait: no page gives Dispose a time limit, and
+        // a pool thread cannot keep the process alive. A start still in flight was cancelled by _lifetime above and
+        // releases whatever it had enabled when it comes back. There is no watcher to stop: the list is read once per
+        // request and nothing is left running between reads.
+        StopStreaming(wait: true, "Earshot is closing");
     }
 
     // The cursor as it is now, for a card that follows this click however long the action takes.
@@ -669,6 +715,18 @@ internal sealed class TrayContext : ApplicationContext
         if (!_closed)
         {
             _coordinator.OnSessionEnding(e);
+
+            // WM_ENDSESSION with the session really ending: the streaming connection is let go now, without waiting,
+            // because this handler must return at once and how long the process lives afterwards is not documented.
+            // A query is not acted on: the session end may still be cancelled, and the owner's music with it.
+            if (!e.IsQuery && e.Ending)
+            {
+                StopStreaming(wait: false, "the session is ending");
+
+                // Forgotten, not remembered as applied: should Windows abandon the shutdown after all and Earshot stay
+                // open, the next settings change starts the feature again rather than finding nothing different.
+                _streamingApplied = null;
+            }
         }
     }
 
@@ -699,6 +757,7 @@ internal sealed class TrayContext : ApplicationContext
                 UpdatePresentation(forceIcon: false);
                 ApplyHotkeys();
                 ApplyVoiceOver();
+                ApplyStreaming();
             }
         });
 
@@ -961,6 +1020,375 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
+    // Starts or stops Play from a phone to match what settings.Streaming (clamped) now asks for, and does nothing
+    // when a settings change asked for nothing different. Called from the constructor and from OnSettingsChanged, on
+    // the UI thread only. Off is the default, and while it is off no platform is built, no WinRT type is touched,
+    // nothing is enumerated and nothing listens. The remembered device is left out of the comparison: saving it after
+    // a successful start must not restart the coordinator that just started.
+    private void ApplyStreaming()
+    {
+        if (_closed || _closing)
+        {
+            return;
+        }
+
+        StreamingSettings current = _registry.Settings.Current.Streaming;
+        StreamingSettings wanted = current.Clamped(out IReadOnlyList<StepOutcome> notes) with { LastDeviceKey = "" };
+        if (wanted == _streamingApplied)
+        {
+            return;
+        }
+
+        foreach (StepOutcome note in notes)
+        {
+            _log.Warn("Play from a phone " + note.Step + ": " + note.Detail);
+        }
+
+        // Nothing new starts while a session end is in progress. It is not written down as applied, so the next
+        // settings change, or the next start of Earshot, takes it up. Turning the feature off is always honoured.
+        if (wanted.Enabled && _coordinator.SessionEndInProgress)
+        {
+            _log.Info("Play from a phone: not started, because the session is ending.");
+            return;
+        }
+
+        _streamingApplied = wanted;
+        StopStreaming(wait: false, "the setting changed");
+        if (!wanted.Enabled)
+        {
+            return;
+        }
+
+        int generation = _streamingGeneration;
+        StreamingSettings settings = wanted with { LastDeviceKey = current.LastDeviceKey };
+        Launch("play from a phone (switch on)", () => StartStreamingAsync(settings, generation), CardPlace.NearTray);
+    }
+
+    // The support check is a call into WinRT, so the coordinator is built on a pool thread and taken up here, on the
+    // UI thread, only if it is still wanted: not once Earshot is closing, and not once a later settings change or a
+    // session end has moved on.
+    private async Task StartStreamingAsync(StreamingSettings settings, int generation)
+    {
+        IStreamingPlatform platform = _streamingPlatformFactory(_log);
+        if (_registry.SafeMode)
+        {
+            platform = SafeStreamingPlatform.Wrap(platform, _log);
+        }
+
+        StreamingCoordinator streaming = await Task.Run(() => new StreamingCoordinator(platform, _streamingGate, settings, IsManagedDevice, TimeProvider.System));
+        if (_closed || _closing || generation != _streamingGeneration)
+        {
+            _log.Info("Play from a phone: no longer wanted by the time it was ready, so it was not started.");
+            await Task.Run(streaming.Dispose);
+            return;
+        }
+
+        _streaming = streaming;
+        streaming.Changed += OnStreamingChanged;
+        if (streaming.Support != StreamingSupport.Supported)
+        {
+            // A disabled menu item cannot open to show why, so the reason goes on one card, once per switch-on.
+            _log.Warn("Play from a phone: " + streaming.Support + ". " + StreamingLog.Describe(streaming.SupportStep));
+            ShowCard(TrayStatus.AppName, StreamingCopy.ForSupport(streaming.Support), CardPlace.NearTray);
+            UpdatePresentation(forceIcon: false);
+            return;
+        }
+
+        _log.Info("Play from a phone is on. Nothing is enabled or opened until a device is chosen from the menu.");
+        await RefreshStreamingAsync(streaming, clicked: false, CardPlace.NearTray);
+    }
+
+    // The device Earshot manages is never offered, enabled or opened by Play from a phone. Asked by the coordinator,
+    // from whatever thread reads the list; Settings.Current is safe to read from any thread.
+    private bool IsManagedDevice(StreamingDevice device)
+    {
+        EarshotSettings settings = _registry.Settings.Current;
+        bool managed = StreamingExclusion.IsManagedDevice(device, settings.PinnedContainerId, settings.DeviceMatch);
+        if (managed)
+        {
+            _log.Write(LogLevel.Debug, "Play from a phone: device " + StreamingLog.Key(device.DeviceId) + " is the one Earshot manages, so it is not offered.");
+        }
+
+        return managed;
+    }
+
+    // Lets go of everything Play from a phone holds. Closing waits for it, up to StreamingShutdownWait; a settings
+    // change and a session end do not wait, so the UI thread is never held for them.
+    private void StopStreaming(bool wait, string why)
+    {
+        // A start still building its coordinator sees this and disposes what it built.
+        _streamingGeneration++;
+        if (_streaming is not { } streaming)
+        {
+            return;
+        }
+
+        _streaming = null;
+        streaming.Changed -= OnStreamingChanged;
+        _log.Info("Play from a phone: letting go of any connection, because " + why + ".");
+        Task<StreamingReleaseOutcome> release = Task.Run(() =>
+        {
+            StreamingReleaseOutcome outcome = streaming.ReleaseAll();
+            streaming.Dispose();
+            return outcome;
+        });
+
+        if (!wait)
+        {
+            _ = LogStreamingReleaseAsync(release);
+            return;
+        }
+
+        try
+        {
+            if (release.Wait(_streamingShutdownWait))
+            {
+                LogStreamingRelease(release.Result);
+            }
+            else
+            {
+                _log.Warn("Play from a phone: Windows had not let go of the connection after " + Seconds(_streamingShutdownWait) +
+                    ". Earshot closes without waiting longer; the references end with the process.");
+                _ = LogStreamingReleaseAsync(release);
+            }
+        }
+        catch (AggregateException ex)
+        {
+            Exception cause = ex.GetBaseException();
+            _log.Error("Play from a phone: letting go of the connection failed (" + NativeCodes.Name(cause.HResult) + ", " + cause.GetType().Name + ").", cause);
+        }
+    }
+
+    private async Task LogStreamingReleaseAsync(Task<StreamingReleaseOutcome> release)
+    {
+        try
+        {
+            LogStreamingRelease(await release.ConfigureAwait(false));
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Play from a phone: letting go of the connection failed (" + NativeCodes.Name(ex.HResult) + ", " + ex.GetType().Name + ").", ex);
+        }
+    }
+
+    private void LogStreamingRelease(StreamingReleaseOutcome outcome) =>
+        _log.Write(
+            outcome.Released || outcome.Step.Code == NativeCodes.NotAttempted ? LogLevel.Info : LogLevel.Warn,
+            "Play from a phone: released " + (outcome.Released ? "device " + StreamingLog.Key(outcome.DeviceId) : "nothing") + ". " + StreamingLog.Describe(outcome.Step));
+
+    // The coordinator raises this from a pool thread or from the thread Windows reports a link change on.
+    private void OnStreamingChanged(object? sender, EventArgs e) =>
+        _registry.UiPost(() =>
+        {
+            if (!_closed && ReferenceEquals(sender, _streaming))
+            {
+                UpdatePresentation(forceIcon: false);
+            }
+        });
+
+    // The right button is about to open the menu, so the list is read again for it. Opening the menu itself still
+    // reads nothing (TrayMenu.OnOpening). The left button is the AirPods toggle and reads no list.
+    // Internal so a test can press a button without an icon on screen, as with OnIconMouseClick.
+    internal void OnIconMouseDownForStreaming(object? sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right && !_closing && _streaming is { Support: StreamingSupport.Supported } streaming)
+        {
+            Launch("play from a phone (list)", () => RefreshStreamingAsync(streaming, clicked: false, CardPlace.NearTray), CardPlace.NearTray);
+        }
+    }
+
+    // A click in the Play from a phone submenu. Internal so a test can raise one without opening the menu.
+    internal void OnPlayFromPhoneItemClicked(object? sender, StreamingMenuItemEventArgs e)
+    {
+        if (_closing || _streaming is not { } streaming)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        StreamingMenuItem item = e.Item;
+        switch (item.Command)
+        {
+            case StreamingMenuCommand.Play when item.DeviceId is { } deviceId:
+                Launch("play from a phone", () => StartPlayingAsync(streaming, deviceId, place), place);
+                break;
+
+            case StreamingMenuCommand.Stop:
+                Launch("play from a phone (stop)", () => StopPlayingAsync(streaming, place), place);
+                break;
+
+            case StreamingMenuCommand.Refresh:
+                Launch("play from a phone (list)", () => RefreshStreamingAsync(streaming, clicked: true, place), place);
+                break;
+
+            default:
+                _log.Write(LogLevel.Debug, "Play from a phone: a click on a sentence does nothing.");
+                break;
+        }
+    }
+
+    // Reads the list of paired devices that can send audio to this PC. A read of the device store: it scans for
+    // nothing and connects to nothing. clicked: the owner asked for it, so a refusal or a failure gets a card; a read
+    // Earshot started itself only logs, and the menu says what happened.
+    private async Task RefreshStreamingAsync(StreamingCoordinator streaming, bool clicked, CardPlace place)
+    {
+        if (_coordinator.SessionEndInProgress)
+        {
+            if (clicked)
+            {
+                RefusedAtSessionEnd("play from a phone (list)", TrayStatus.AppName, place);
+            }
+            else
+            {
+                _log.Info("Play from a phone (list): not read, because the session is ending.");
+            }
+
+            return;
+        }
+
+        if (_streamingRefreshInFlight)
+        {
+            _log.Write(LogLevel.Debug, "Play from a phone (list): a read is already in flight.");
+            return;
+        }
+
+        _streamingRefreshInFlight = true;
+        try
+        {
+            StreamingDiscovery discovery = await Task.Run(() => streaming.RefreshAsync(_lifetime.Token));
+            if (_closed || !ReferenceEquals(streaming, _streaming))
+            {
+                return;
+            }
+
+            if (discovery.Status == StreamingDiscoveryStatus.Ok)
+            {
+                _log.Info("Play from a phone (list): " + discovery.Devices.Count.ToString(CultureInfo.InvariantCulture) + " device(s) can send audio to this PC.");
+                ForgetLastStreamingDeviceIfGone(discovery);
+            }
+            else
+            {
+                _log.Warn("Play from a phone (list): " + discovery.Status + ". " + StreamingLog.Describe(discovery.Step));
+                if (clicked)
+                {
+                    ShowCard(TrayStatus.AppName, StreamingCopy.CouldNotReadList, place);
+                }
+            }
+
+            UpdatePresentation(forceIcon: false);
+        }
+        finally
+        {
+            _streamingRefreshInFlight = false;
+        }
+    }
+
+    // The remembered device is forgotten once a good read of the list no longer holds it.
+    private void ForgetLastStreamingDeviceIfGone(StreamingDiscovery discovery)
+    {
+        string last = _registry.Settings.Current.Streaming.LastDeviceKey;
+        if (last.Length == 0 || discovery.Devices.Any(d => StreamingLog.Key(d.DeviceId) == last))
+        {
+            return;
+        }
+
+        _log.Info("Play from a phone: the device last played from is no longer in the list, so it is forgotten.");
+        TryUpdateSettings("play from a phone (forget last device)", s => s.Streaming = s.Streaming with { LastDeviceKey = "" }, CardPlace.NearTray);
+    }
+
+    // Starts playing from one device: enable, then open, through the coordinator. Refused with a card, before
+    // anything is asked of Windows, while a session end is in progress and while the tray or the block coordinator is
+    // busy with the AirPods, so the two never meet on the radio. One start at a time: a second click while one is in
+    // flight is answered, not queued. The owner's connect and disconnect are never held up by this.
+    //
+    // Safe mode is not checked here. It is enforced in one place, at the bottom: StartStreamingAsync wraps the platform
+    // in SafeStreamingPlatform, which refuses to enable or open whoever asks, the way the registry wraps the
+    // controllers. The refusal comes back on the outcome and is what the card says.
+    private async Task StartPlayingAsync(StreamingCoordinator streaming, string deviceId, CardPlace place)
+    {
+        if (RefusedAtSessionEnd("play from a phone", TrayStatus.AppName, place))
+        {
+            return;
+        }
+
+        if (IsBusy || _coordinator.IsBusy || _streamingStartInFlight)
+        {
+            _log.Info("Play from a phone: not started, because another change is still running.");
+            ShowCard(TrayStatus.AppName, StreamingCopy.BusyJustNow, place);
+            return;
+        }
+
+        // The coordinator reads the busy state again from a pool thread, through the gate. It is written here from
+        // the check just made, so the two agree at the moment of the click whatever was last presented.
+        _streamingGate.Set(false);
+        _streamingStartInFlight = true;
+        try
+        {
+            StreamingOpenOutcome outcome = await Task.Run(() => streaming.StartPlayingAsync(deviceId, _lifetime.Token));
+            bool open = outcome.Status == StreamingOpenStatus.Open;
+            _log.Write(
+                open ? LogLevel.Info : LogLevel.Warn,
+                "Play from a phone: device " + StreamingLog.Key(deviceId) + ": " + outcome.Status + ". " + StreamingLog.Describe(outcome.Step));
+            if (_closed)
+            {
+                return;
+            }
+
+            // Every outcome with something to tell the owner has left its sentence on the status line. A start that
+            // never began has none, unless it was the busy gate that stopped it.
+            if (outcome.Step.Detail == SafeDecorators.Message)
+            {
+                ShowCard(TrayStatus.AppName, SafeDecorators.Message, place);
+            }
+            else if (outcome.Status != StreamingOpenStatus.NotStarted)
+            {
+                ShowCard(TrayStatus.AppName, streaming.StatusLine, place);
+            }
+            else if (outcome.Step.Detail == HostBusyGate.Reason)
+            {
+                ShowCard(TrayStatus.AppName, StreamingCopy.BusyJustNow, place);
+            }
+
+            if (open)
+            {
+                string key = StreamingLog.Key(deviceId);
+                if (_registry.Settings.Current.Streaming.LastDeviceKey != key)
+                {
+                    TryUpdateSettings("play from a phone (last device)", s => s.Streaming = s.Streaming with { LastDeviceKey = key }, place);
+                }
+            }
+
+            UpdatePresentation(forceIcon: false);
+        }
+        finally
+        {
+            _streamingStartInFlight = false;
+        }
+    }
+
+    // Stops accepting audio from the device in use. Always allowed, a session end included: it only lets go.
+    private async Task StopPlayingAsync(StreamingCoordinator streaming, CardPlace place)
+    {
+        StreamingReleaseOutcome outcome = await Task.Run(streaming.StopPlaying);
+        LogStreamingRelease(outcome);
+        if (_closed)
+        {
+            return;
+        }
+
+        if (outcome.Released)
+        {
+            ShowCard(TrayStatus.AppName, streaming.StatusLine, place);
+        }
+        else if (outcome.Step.Code != NativeCodes.NotAttempted)
+        {
+            // Windows did not confirm it let go, so the card does not say it did.
+            ShowCard(TrayStatus.AppName, SomethingWentWrongMessage, place);
+        }
+
+        UpdatePresentation(forceIcon: false);
+    }
+
     // The global shortcut fired: hand it to the exact method the matching menu item or the left click
     // already uses, so a hotkey never opens a second route to the device. SpeakStatus is the one
     // exception to "opens a route to the device": it reads the state the tray already holds and speaks
@@ -1019,7 +1447,7 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private MenuState CurrentMenuState() =>
-        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode, _voiceKnownNoVoice);
+        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu);
 
     private void UpdatePresentation(bool forceIcon)
     {
@@ -1029,7 +1457,15 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         RefreshIcon(remeasure: forceIcon, force: forceIcon);
-        _notifyIcon.Text = TrayStatus.Tooltip(_snapshot, BlockStatus, _registry.Settings.Current);
+
+        // Every change to the tray's busy state comes through here, so this is where the streaming coordinator's view
+        // of it is kept up to date. The streaming line is added only while a device is in use; at rest the tooltip is
+        // what it always was.
+        _streamingGate.Set(IsBusy || _coordinator.IsBusy);
+        _notifyIcon.Text = StreamingCopy.TooltipWith(
+            TrayStatus.Tooltip(_snapshot, BlockStatus, _registry.Settings.Current),
+            _streaming?.TooltipLine ?? "",
+            TrayStatus.MaxTooltipLength);
     }
 
     private void RefreshIcon(bool remeasure, bool force)
