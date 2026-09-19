@@ -23,7 +23,3 @@ jobs:
       # It sets EARSHOT_SAFE_MODE itself, so no device action can run here, and it
       # prints its summary as JSON whether it passes or fails.
       - run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools\check.ps1 -LogDir "${{ runner.temp }}\earshot-check"
-      # check.ps1 reports the lines it matched, which is enough to see that something broke and
-      # rarely enough to see why. On a failure the log it wrote is what carries the rest.
-      - if: failure()
-        run: Get-Content "${{ runner.temp }}\earshot-check\test.log" -Tail 300 -ErrorAction SilentlyContinue
