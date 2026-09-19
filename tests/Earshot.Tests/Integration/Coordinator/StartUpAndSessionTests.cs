@@ -14,6 +14,9 @@ public sealed class StartUpAndSessionTests
     private static readonly string[] AllowThenBlock = ["allow", "block"];
     private static readonly string[] AllowOnly = ["allow"];
     private static readonly string[] AllowAfterBlock = ["block", "allow"];
+    private static readonly string[] BlockTwice = ["block", "block"];
+    private static readonly string[] DisconnectThenBlock = ["disconnect", "block"];
+    private static readonly string[] ConnectProtectOffConnect = ["connect", "protect-off", "connect"];
     private static readonly string[] AllowThenBlockTwice = ["allow", "block", "block"];
 
     private static SessionEndingEventArgs Query() => new(isQuery: true, ending: true, flags: 0);
@@ -324,6 +327,255 @@ public sealed class StartUpAndSessionTests
         Assert.IsFalse(h.Block.Calls.Contains("allow"));
     }
 
+    // The same with Block at boot on and protection wanted, where the "no allow" half can fail. No block was sent
+    // for the session end (the status had never been read), so the block after the disconnect is the only one, and
+    // it goes straight out: no protect verb is started in front of it while the session ends.
+    [TestMethod]
+    public void ADisconnectWhileTheSessionEndsBlocksAtOnceWithNoProtectVerbInFrontOfTheBlock()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Block.StatusFailure = new IOException("no status");
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "the boot block status was never read"), "This test needs the session end that sends no block.");
+
+        // Readable by the time of the click: the nodes are enabled and Hands-Free is back.
+        h.Block.StatusFailure = null;
+        h.Block.Status = Statuses.Allowed();
+        h.Protection.State = AudioProtectionState.NotProtected;
+        h.Trace.Clear();
+
+        ToggleReport report = h.Toggle(connect: false);
+
+        CollectionAssert.AreEqual(DisconnectThenBlock, h.Trace, "Something other than the block followed the disconnect while the session was ending.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        Assert.AreNotEqual(BlockCoordinator.SessionEndingMessage, report.UserMessage);
+    }
+
+    // The Hands-Free assisted connect turned protection off and then did not connect, after Windows had started to
+    // end a session for which no block was sent (Block at boot is off). Its clean-up starts no protect verb then:
+    // the setting is kept for the next connect.
+    [TestMethod]
+    public void TheConnectCleanUpStartsNoProtectVerbWhileTheSessionEnds()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Protection.State = AudioProtectionState.Protected;
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1, capture: false));
+        h.Start();
+        h.Trace.Clear();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.A2dpRejected()));
+        var second = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(_ => second.Task);
+        h.Protection.Effect = protect =>
+        {
+            h.Protection.State = protect ? AudioProtectionState.Protected : AudioProtectionState.NotProtected;
+            h.Monitor.Publish(Devices.Idle(protect ? 30 : 20, capture: !protect));
+        };
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+        CollectionAssert.AreEqual(ConnectProtectOffConnect, h.Trace);
+
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: no block issued, because Block at boot is off"));
+        second.SetResult(Results.A2dpRejected());
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted);
+        CollectionAssert.AreEqual(ConnectProtectOffConnect, h.Trace, "A protect verb was started while the session was ending.");
+        Assert.AreEqual(true, h.Coordinator.PendingProtect, "Protection is put back at the next connect.");
+    }
+
+    // Windows started to end the session before Earshot's start-up check ran. The AirPods are in use and Hands-Free
+    // is back, which the check would put right with a protect verb; it starts none while the session ends.
+    [TestMethod]
+    public void TheStartUpCheckStartsNoProtectVerbWhileTheSessionEnds()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Protection.State = AudioProtectionState.NotProtected;
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Coordinator.OnSessionEnding(Query());
+
+        h.Start();
+
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "connected at start-up"), "The start-up check did not run.");
+        Assert.IsEmpty(h.Trace, "The start-up check changed something while the session was ending.");
+    }
+
+    // A connect was reading the node state, on its way to the allow, when Windows started to end the session. The
+    // status had never been read before, so nothing told the session end to stop the connect; the allow is still
+    // not sent.
+    [TestMethod]
+    public void AConnectSendsNoAllowOnceTheSessionStartsToEndUnderItsStatusRead()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.StatusFailure = new IOException("no status");
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Block.StatusFailure = null;
+        h.Block.Status = Statuses.Blocked();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        h.Block.BeforeReads.Clear();
+        h.Block.BeforeReads.Enqueue(() => h.Coordinator.OnSessionEnding(Query()));
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        Assert.IsEmpty(h.Block.Calls, "An allow went out after the session started to end.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        Assert.IsTrue(toggle.IsCompleted);
+        ToggleReport report = toggle.GetAwaiter().GetResult();
+        Assert.AreEqual(BlockCoordinator.SessionEndingMessage, report.UserMessage);
+        Assert.AreEqual("the session is ending", report.CancelledBecause);
+        Assert.HasCount(1, h.Connection.Calls, "A second connect request went out after the refused allow.");
+    }
+
+    // A session-end block that fails has blocked nothing, so Exit afterwards still sends the block before closing.
+    private static CoordinatorHarness AfterAFailedSessionEndBlock(Func<int, ControllerResult> blockResult)
+    {
+        var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Stays;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        int blocks = 0;
+        h.Block.OnBlock = _ =>
+        {
+            ControllerResult result = blockResult(++blocks);
+            if (result.IsSuccess)
+            {
+                h.Block.Status = h.Block.Status with { State = BlockState.Blocked };
+            }
+
+            return Task.FromResult(result);
+        };
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "session-end block (queued "), "This test needs a session-end block that failed.");
+
+        // The AirPods are no longer in use by the time Exit is chosen.
+        h.Publish(Devices.Idle(2));
+        return h;
+    }
+
+    [TestMethod]
+    public void ExitAfterAFailedSessionEndBlockStillBlocksBeforeClosing()
+    {
+        using CoordinatorHarness h = AfterAFailedSessionEndBlock(call => call == 1 ? ControllerResult.Fail("Could not block the AirPods. Try again.", []) : ControllerResult.Ok("Blocked at boot"));
+
+        h.Coordinator.BeginShutdown();
+        Task idle = h.Coordinator.WhenIdleAsync();
+        h.Pump();
+
+        Assert.IsTrue(idle.IsCompleted);
+        CollectionAssert.AreEqual(BlockTwice, h.Block.Calls, "No block was sent before closing after the session-end block failed.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        Assert.IsNull(h.Coordinator.ClosingNotice);
+    }
+
+    [TestMethod]
+    public void ExitAfterAFailedSessionEndBlockSaysSoWhenTheBlockBeforeClosingFailsToo()
+    {
+        using CoordinatorHarness h = AfterAFailedSessionEndBlock(_ => ControllerResult.Fail("Could not block the AirPods. Try again.", []));
+        h.CheckInvariantOnPump = false;
+
+        h.Coordinator.BeginShutdown();
+        h.Pump();
+
+        CollectionAssert.AreEqual(BlockTwice, h.Block.Calls);
+        Assert.AreEqual("Could not block the AirPods. Try again.", h.Coordinator.ClosingNotice, "Earshot closed with the nodes enabled and said nothing.");
+    }
+
+    // A session-end block that worked is not sent again at Exit.
+    [TestMethod]
+    public void ExitAfterASessionEndBlockThatTookSendsNoSecondBlock()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+
+        h.Coordinator.BeginShutdown();
+        h.Pump();
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
+    // The Restart Manager asks Earshot to close with the same two messages, lParam ENDSESSION_CLOSEAPP. The nodes
+    // are blocked for it as for a shutdown, a connect is refused with a card that is true for it too, and
+    // WM_ENDSESSION with wParam FALSE ("the application should not shut down") ends the refusal.
+    // https://learn.microsoft.com/windows/win32/rstmgr/guidelines-for-applications
+    [TestMethod]
+    public void ACloseRequestFromTheRestartManagerIsTreatedAsASessionEnd()
+    {
+        const uint CloseApp = 0x1;
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: CloseApp));
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: CloseApp));
+        h.Pump();
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The nodes were not blocked for a close request.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "asked Earshot to close"), "The log does not say this was a close request.");
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "during a close request");
+        StringAssert.Contains(BlockCoordinator.SessionEndingMessage, "closing Earshot", "The card is not true when Windows closes only Earshot.");
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: CloseApp));
+        Assert.IsFalse(h.Coordinator.SessionEndInProgress);
+    }
+
+    // Ending, ending again, cancelled, ending again, as one sequence.
+    [TestMethod]
+    public void TheSessionEndStateFollowsEveryMessageInTurn()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        Assert.IsTrue(h.Coordinator.SessionEndInProgress);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
+        h.Pump();
+        Assert.IsTrue(h.Coordinator.SessionEndInProgress);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The second message for one session end sent a second block.");
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "after ending twice");
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
+        Assert.IsFalse(h.Coordinator.SessionEndInProgress);
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        Assert.AreNotEqual(BlockCoordinator.SessionEndingMessage, h.Toggle(connect: true).UserMessage, "A connect was refused after the session end was cancelled.");
+        CollectionAssert.AreEqual(AllowAfterBlock, h.Block.Calls.Take(2).ToArray());
+
+        // The next session end starts afresh: it blocks again what that connect allowed, and refuses again.
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        int before = h.Block.Calls.Count(c => c == "block");
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        Assert.IsTrue(h.Coordinator.SessionEndInProgress);
+        Assert.AreEqual(before + 1, h.Block.Calls.Count(c => c == "block"), "The second session end sent no block of its own.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "in the second session end");
+    }
+
     // WM_ENDSESSION with wParam FALSE: the session end was cancelled. Whatever was refused meanwhile left nothing
     // behind, so the next connect runs as usual, with no restart.
     [TestMethod]
@@ -459,6 +711,7 @@ public sealed class StartUpAndSessionTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: no block issued, because the nodes are already blocked."));
         Assert.IsTrue(toggle.IsCompleted);
         Assert.IsTrue(toggle.GetAwaiter().GetResult().Cancelled);
+        Assert.AreEqual("the session is ending", toggle.GetAwaiter().GetResult().CancelledBecause, "No block was sent for this session end, and the reason for the cancellation was lost.");
         Assert.IsEmpty(h.Block.Calls, "An allow went out as the session ended.");
     }
 

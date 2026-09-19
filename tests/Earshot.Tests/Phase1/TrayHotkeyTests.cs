@@ -255,6 +255,48 @@ public sealed class TrayHotkeyTests
         });
     }
 
+    // With no status cached, Block at boot first reads it. The refusal comes before that: no read is started on the
+    // system worker while the session ends, no busy guard is raised, and the owner is told why rather than that
+    // the status could not be read. The later check in RunOperationAsync cannot do this; it is never reached.
+    [TestMethod]
+    public void ABlockAtBootHotkeyWithNoStatusCachedIsRefusedBeforeTheStatusIsRead()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(arrange: t => t.Block.StatusFailure = new IOException("no status"));
+            Assert.IsNull(tray.Coordinator.BlockStatus, "This test needs no status cached.");
+            int reads = 0;
+            tray.Block.StatusFailure = null;
+            tray.Block.OnStatus = _ =>
+            {
+                reads++;
+                return Task.FromException<BootBlockStatus>(new IOException("no status"));
+            };
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            int before = reads;
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleBlockAtBoot));
+
+            Assert.IsFalse(tray.Context.IsBusy, "The refused shortcut raised the busy guard.");
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status);
+            tray.PumpUntilIdle();
+            Assert.AreEqual(before, reads, "A status read was started for a change that is refused.");
+            Assert.IsFalse(tray.Cards.Statuses.Contains(TrayContext.BlockStatusUnreadableMessage), "The owner was told the status could not be read, not why nothing was changed.");
+        });
+    }
+
+    // The shortcut text comes from the settings file, so a control character in it never reaches the card.
+    [TestMethod]
+    public void TheRegistrationProblemCardCarriesNoControlCharacters()
+    {
+        var problem = new HotkeyRegistrationOutcome(HotkeyAction.ToggleConnection, "Ctrl+\r\nQ[31m", HotkeyRegistrationState.TextRejected, 0, "There is no key called \"\r\nQ\".");
+
+        string card = TrayContext.HotkeyProblemCard([problem]);
+
+        Assert.IsFalse(card.Any(char.IsControl), "A control character reached the card: " + string.Join(' ', card.Where(char.IsControl).Select(c => ((int)c).ToString("X4", System.Globalization.CultureInfo.InvariantCulture))));
+        StringAssert.Contains(card, "is not a shortcut.");
+    }
+
     // A refused connect is neither a success nor a failed connect, so the voice says nothing for it. The status
     // shortcut afterwards is what proves the announcer was listening: its line is the only one spoken.
     [TestMethod]

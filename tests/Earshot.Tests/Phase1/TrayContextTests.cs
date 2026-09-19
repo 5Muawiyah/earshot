@@ -412,6 +412,79 @@ public sealed class TrayContextTests
         });
     }
 
+    // Before setup the chosen device is only saved: no operation runs, so nothing but the tray's own check stands
+    // between a choice made while the session ends and the settings file.
+    [TestMethod]
+    public void ADeviceChosenBeforeSetupWhileTheSessionEndsIsNotSaved()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.NotSetUp));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+
+            tray.Context.ApplyDeviceChoiceAsync(new PickerChoice("Other", "Other", "AABBCCDDEEFF", Guid.NewGuid()), CardPlace.NearTray).GetAwaiter().GetResult();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(AirPodsAddress, tray.Settings.Current.PinnedAddress, "The refused device change was saved.");
+            Assert.AreEqual(AirPodsContainer, tray.Settings.Current.PinnedContainerId);
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status);
+        });
+    }
+
+    // The session-end block is on the gate, so the coordinator is busy, when the click comes. The tray refuses
+    // before it answers anything else: one card that says why, not "Finishing another change first." and then a
+    // refusal.
+    [TestMethod]
+    public void AClickWhileTheSessionEndBlockRunsGetsOnlyTheRefusalCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            var blocking = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Block.OnBlock = _ => blocking.Task;
+            tray.Block.Status = Block(BlockState.Allowed);
+            tray.Coordinator.RefreshStatusAsync().GetAwaiter().GetResult();
+            tray.PumpUntilIdle();
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            Assert.IsTrue(tray.Coordinator.IsBusy, "This test needs the session-end block in flight.");
+            tray.Cards.Shown.Clear();
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+
+            CollectionAssert.AreEqual(OnlyTheRefusal, tray.Cards.Statuses.ToArray());
+            Assert.IsFalse(tray.Context.IsBusy, "The refused click raised the busy guard.");
+            blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
+            tray.PumpUntilIdle();
+            Assert.IsEmpty(tray.Connection.Calls);
+        });
+    }
+
+    private static readonly string[] OnlyTheRefusal = [BlockCoordinator.SessionEndingMessage];
+
+    // A protection change was already running when Windows started to end the session, and the coordinator stopped
+    // it. That is not an error: the owner is told the change was stopped and why, and the log says the same.
+    [TestMethod]
+    public void AChangeStoppedByTheSessionEndGetsTheSessionCardNotTheErrorCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false);
+            var apply = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Protection.OnApply = (_, _) => apply.Task;
+            tray.ClickMenu(MenuModel.ProtectAudioQuality);
+            TrayHarness.PumpUntil(() => tray.Protection.Calls.Count == 1, "The protection change did not start.");
+
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            apply.SetResult(ControllerResult.Ok("Protected"));
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(BlockCoordinator.SessionEndStoppedMessage, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Cards.Statuses.Contains(TrayContext.SomethingWentWrongMessage), "A change stopped for the session end was shown as an error.");
+            Assert.IsFalse(tray.Log.Has(LogLevel.Error, "protect-on"), "A change stopped for the session end was logged as an unexpected error.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "protect-on: stopped because the session is ending."));
+        });
+    }
+
     // WM_ENDSESSION with wParam FALSE after refusals by click and by menu: the tray is fully usable again with no
     // restart. Nothing is busy, the menu toggle is enabled, and the next click connects.
     [TestMethod]

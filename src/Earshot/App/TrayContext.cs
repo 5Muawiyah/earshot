@@ -556,8 +556,10 @@ internal sealed class TrayContext : ApplicationContext
 
         bool wanted = connect ?? intent.Connect;
 
-        // Before anything is claimed or shown: a refused connect raises no busy guard and says only why. A
-        // disconnect still runs while the session ends (see BlockCoordinator.ToggleAsync).
+        // Before anything is claimed or shown: a refused connect raises no busy guard and says only why. The
+        // coordinator would refuse it too, but only after the tray had answered "Finishing another change first."
+        // to a click made while the session-end block runs. A disconnect still runs while the session ends (see
+        // BlockCoordinator.ToggleAsync).
         if (wanted && RefusedAtSessionEnd("connect", intent.DeviceName, place))
         {
             return;
@@ -753,6 +755,9 @@ internal sealed class TrayContext : ApplicationContext
             reason = "\"" + typed + "\" is not a shortcut. " + reason;
         }
 
+        // The text is whatever the settings file held, and the outcome's message may quote it: no control character
+        // (a line break, a bell, an escape sequence) goes on to the card.
+        reason = string.Concat(reason.Where(c => !char.IsControl(c)));
         return problems.Count == 1 ? reason : reason + HotkeyOthersNotSetSuffix;
     }
 
@@ -1079,6 +1084,10 @@ internal sealed class TrayContext : ApplicationContext
     // the menu does (a checked box the owner chose to uncheck), so it is refused and pointed at the menu.
     private async Task BlockAtBootAsync(CardPlace place, bool viaHotkey = false)
     {
+        // Asked here as well as in RunOperationAsync, which would come too late: with no status cached this method
+        // first raises the busy guard and starts a status read on the system worker, and a read that fails ends in
+        // BlockStatusUnreadableMessage without ever reaching RunOperationAsync. While the session ends none of that
+        // happens, and the owner is told why nothing was changed.
         if (RefusedAtSessionEnd("block at boot", TrayStatus.AppName, place))
         {
             return;
@@ -1676,6 +1685,14 @@ internal sealed class TrayContext : ApplicationContext
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             _log.Info(action + ": cancelled because Earshot is closing.");
+            return null;
+        }
+        catch (OperationCanceledException) when (_coordinator.SessionEndInProgress)
+        {
+            // The coordinator stops the change in flight when a session end begins (BlockCoordinator.OnSessionEnding),
+            // with its own token, not this one. That is no error: say what happened and why.
+            _log.Info(action + ": stopped because the session is ending.");
+            ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), BlockCoordinator.SessionEndStoppedMessage, place);
             return null;
         }
         catch (Exception ex)

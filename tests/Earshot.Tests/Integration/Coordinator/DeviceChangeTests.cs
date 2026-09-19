@@ -240,6 +240,26 @@ public sealed class DeviceChangeTests
         CollectionAssert.AreEqual(before, h.Trace, "Something was sent while the session was ending.");
     }
 
+    // A device change was reading the node state, on its way to allowing the blocked device, when Windows started
+    // to end the session. No allow goes out after that: the nodes stay blocked and the pin does not move.
+    [TestMethod]
+    public void ADeviceChangeSendsNoAllowOnceTheSessionStartsToEndUnderItsStatusRead()
+    {
+        using CoordinatorHarness h = AtRest();
+        GateRefusesLikeTheGate(h);
+        h.Block.BeforeReads.Enqueue(() => h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0)));
+
+        Task<ControllerResult> change = h.Coordinator.ChangeDeviceAsync(OtherAddress);
+        h.Pump();
+
+        Assert.IsFalse(h.Block.Calls.Contains("allow"), "An allow went out after the session started to end.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        Assert.IsTrue(change.IsCompleted, "The device change did not finish.");
+        ControllerResult result = change.GetAwaiter().GetResult();
+        Assert.AreEqual(OpStatus.NotAttempted, result.Status);
+        Assert.AreEqual(BlockCoordinator.SessionEndingMessage, result.UserMessage);
+    }
+
     // The session-end block would go to whichever device the gate pins when it runs, so it is not queued while a pin
     // may still move; the BootBlock task blocks the device pinned then.
     [TestMethod]

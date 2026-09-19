@@ -3,6 +3,7 @@ using System.Runtime.ExceptionServices;
 using Earshot.Audio.Connect;
 using Earshot.AudioProtection;
 using Earshot.Contracts;
+using Earshot.Interop;
 using Earshot.Tray;
 
 namespace Earshot.App;
@@ -56,9 +57,12 @@ namespace Earshot.App;
 // Start-up. Once the first good snapshot and the first node read are in: nodes enabled and not in use, block at
 // once; in use, log the evidence and leave them enabled for the idle rule. Then check protection.
 // Session end. On WM_QUERYENDSESSION, with Block at boot on and the nodes not known to be blocked, start a block
-// and return at once, unless a protect verb or a set-device this tray started may still be running. A windowless
-// app can be ended about five seconds in, so this is a backstop only.
+// and return at once, unless a protect verb or a set-device this tray started may still be running. This is a
+// backstop only: Earshot has no visible window, and such applications "are automatically terminated if they do
+// not respond to WM_QUERYENDSESSION or WM_ENDSESSION within 5 seconds", so both are answered at once, and
+// nothing documented says how long the process lives after it has answered.
 // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession
+// https://learn.microsoft.com/windows/win32/shutdown/shutdown-changes-for-windows-vista
 // Exit. The operation in flight is cancelled; a gate change it already sent is waited for, then its clean-up
 // runs, and a Block sequence starts no new protection step and blocks. Then, with Block at boot on, nodes enabled
 // and the AirPods not in use, the nodes are blocked before Earshot closes. Whether to block is decided from a read
@@ -100,8 +104,12 @@ internal sealed class BlockCoordinator : IDisposable
     public const string BlockAtBootOffMessage = "Block at boot is off";
     public const string BlockAtBootOffStillBlockedMessage = "Block at boot is off, but the AirPods are still blocked. Connect to allow them.";
     public const string BlockAtBootOffMayStillBeBlockedMessage = "Block at boot is off, but the AirPods may still be blocked. Connect to allow them.";
-    public const string SessionEndingMessage = "Windows is shutting down or signing out, so nothing was changed. If it does not, restart Earshot.";
-    public const string ChangesNotWatchedMessage ="Earshot cannot see audio device changes, so blocking may be late.";
+    // True for a shutdown, a sign-out and a close request from the Restart Manager alike: in each Windows is closing
+    // Earshot. The second is for a change that was already running and was stopped, where "nothing was changed"
+    // would not be known to be true.
+    public const string SessionEndingMessage = "Windows is closing Earshot, so nothing was changed. If Earshot stays open, restart it.";
+    public const string SessionEndStoppedMessage = "Windows is closing Earshot, so the change was stopped. If Earshot stays open, restart it.";
+    public const string ChangesNotWatchedMessage = "Earshot cannot see audio device changes, so blocking may be late.";
 
     // How long render must stay not ACTIVE, with nothing in flight, before the nodes are blocked again. A
     // conservative waiting budget, not a measured figure: long enough that the churn of a protection change or a
@@ -211,6 +219,7 @@ internal sealed class BlockCoordinator : IDisposable
     private Task? _sessionBlock;
     private bool _sessionEnding;
     private bool _sessionBlockIssued;
+    private bool _sessionBlockTook;
     private bool _sessionBlockWhileInUse;
     private Task? _closingBlock;
     private CancellationTokenSource? _idleWait;
@@ -679,15 +688,20 @@ internal sealed class BlockCoordinator : IDisposable
 
     // The same for a connect. Reported as cancelled because the session is ending, so the tray logs that reason
     // and treats it neither as a connect that worked nor as one that failed.
-    private ToggleReport RefusedAtSessionEnd(ToggleRequest request)
+    private ToggleReport RefusedAtSessionEnd(ToggleRequest request, List<StepOutcome>? steps = null)
     {
         ShowCard(request, SessionEndingMessage);
-        return new ToggleReport(request.Connect, OpStatus.NotAttempted, SessionEndingMessage,
-            [StepOutcomes.NotAttempted("connect", "The session is ending, so nothing was sent.")], Cancelled: true)
+        IReadOnlyList<StepOutcome> outcome = steps is null
+            ? [StepOutcomes.NotAttempted("connect", "The session is ending, so nothing was sent.")]
+            : steps;
+        return new ToggleReport(request.Connect, OpStatus.NotAttempted, SessionEndingMessage, outcome, Cancelled: true)
         {
             CancelledBecause = "the session is ending",
         };
     }
+
+    private static bool IsSessionEndRefusal(ControllerResult result) =>
+        result.Status == OpStatus.NotAttempted && result.UserMessage == SessionEndingMessage;
 
     // WM_QUERYENDSESSION and WM_ENDSESSION. Never waits: the block is started and its result logged later, if the
     // session survives long enough.
@@ -704,6 +718,19 @@ internal sealed class BlockCoordinator : IDisposable
     // applications have returned from processing this message" is all it says). So there is no documented moment
     // or time after which a session that was said to be ending is known not to be, and nothing here guesses one:
     // the flag then stays set until Earshot is restarted, which SessionEndingMessage says.
+    //
+    // The same two messages also arrive with lParam ENDSESSION_CLOSEAPP (0x1) when the Restart Manager asks Earshot
+    // alone to close, for an installer that needs a file it holds: "If no application returns a value of FALSE,
+    // the Restart Manager sends a WM_ENDSESSION message with the lParam parameter set to ENDSESSION_CLOSEAPP (0x1)
+    // and the wparam parameter set to TRUE", then WM_CLOSE to an application that does not shut down; with wParam
+    // FALSE "the application should not shut down".
+    // https://learn.microsoft.com/windows/win32/rstmgr/guidelines-for-applications
+    // Nothing here branches on the flag beyond the log line. Earshot may be about to be closed or killed either
+    // way, so the nodes are blocked and nothing that could enable them starts, and the card is worded to be true
+    // for both. It is a documented way for the flag to stick: RmShutdown can return ERROR_FAIL_SHUTDOWN (351, "Some
+    // applications could not be shut down") or ERROR_CANCELLED after WM_ENDSESSION TRUE was sent, and neither page
+    // says any message follows then.
+    // https://learn.microsoft.com/windows/win32/api/restartmanager/nf-restartmanager-rmshutdown
     public void OnSessionEnding(SessionEndingEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
@@ -727,6 +754,7 @@ internal sealed class BlockCoordinator : IDisposable
 
             _sessionEnding = false;
             _sessionBlockIssued = false;
+            _sessionBlockTook = false;
             _sessionBlockWhileInUse = false;
             return;
         }
@@ -734,7 +762,8 @@ internal sealed class BlockCoordinator : IDisposable
         if (!_sessionEnding)
         {
             _sessionEnding = true;
-            _log.Info("Session ending: no connect, allow, setting change or device change starts until Windows says the session end was cancelled.");
+            _log.Info(((e.Flags & NativeMethods.ENDSESSION_CLOSEAPP) != 0 ? "Session ending: Windows asked Earshot to close (ENDSESSION_CLOSEAPP). " : "Session ending: ") +
+                "No connect, allow, setting change or device change starts until Windows says it was cancelled.");
         }
 
         if (_sessionBlockIssued || _disposed)
@@ -758,6 +787,7 @@ internal sealed class BlockCoordinator : IDisposable
         }
 
         _sessionBlockIssued = true;
+        _sessionBlockTook = false;
         _sessionBlockWhileInUse = CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) == RenderState.Active;
         CancelIdleWait("the session is ending");
 
@@ -845,9 +875,12 @@ internal sealed class BlockCoordinator : IDisposable
     // them showed.
     private string ClosingBlockBlocker()
     {
-        if (_sessionBlockIssued)
+        // Only a session-end block that is known to have worked stands in for this one. One that failed, or whose
+        // result is not in yet, has blocked nothing that can be relied on: the block before closing is queued, waits
+        // for it (RunExclusiveAsync), reads the state again and blocks what is still enabled.
+        if (_sessionBlockIssued && _sessionBlockTook)
         {
-            return "a block was issued for the session end";
+            return "the block issued for the session end took";
         }
 
         if (_current is not null || BootSettingMayChange)
@@ -884,6 +917,7 @@ internal sealed class BlockCoordinator : IDisposable
         try
         {
             ControllerResult result = await block;
+            _sessionBlockTook = _sessionBlockIssued && result.IsSuccess && !CoordinatorRules.MayStillRun(result);
             string text = TrayReport.Describe("session-end block (queued " + Utc(issued) + ")", result.Status, result.UserMessage, result.Steps);
             _log.Write(result.IsSuccess ? LogLevel.Info : LogLevel.Warn, text);
         }
@@ -1041,6 +1075,12 @@ internal sealed class BlockCoordinator : IDisposable
                     undo.Container = status.TargetContainerId;
                     _log.Info("set-device: the device pinned now is blocked (" + Describe(status) + "), so it is allowed before the pin moves.");
                     ControllerResult allow = await SendAllowAsync("allow (device change)", steps);
+                    if (IsSessionEndRefusal(allow))
+                    {
+                        undo.AllowIssued = false;
+                        return await FailDeviceChangeAsync(OpStatus.NotAttempted, allow.UserMessage, steps, undo);
+                    }
+
                     if (!allow.IsSuccess || CoordinatorRules.MayStillRun(allow))
                     {
                         return await FailDeviceChangeAsync(OpStatus.Failed, allow.UserMessage, steps, undo);
@@ -1188,6 +1228,14 @@ internal sealed class BlockCoordinator : IDisposable
                 ShowCard(request, AllowingStatus);
                 cleanup.AllowIssued = true;
                 ControllerResult allow = await SendAllowAsync("allow (connect)", steps);
+                if (IsSessionEndRefusal(allow))
+                {
+                    // Nothing was sent, so there is no allow to put back; whatever else the connect changed still is.
+                    cleanup.AllowIssued = false;
+                    await CleanUpConnectAsync(request, cleanup, steps);
+                    return RefusedAtSessionEnd(request, steps);
+                }
+
                 if (allow.Status is OpStatus.Failed or OpStatus.NotAttempted)
                 {
                     return await FailConnectAsync(request, cleanup, steps, allow.UserMessage, ct);
@@ -1736,8 +1784,21 @@ internal sealed class BlockCoordinator : IDisposable
 
     // Sends the allow and waits for its result, never cancelled (see the class comment). An allow whose end was not
     // seen may still enable the nodes, so the state is read again until UnsettledGateWindow has passed.
+    //
+    // Every allow goes through here, and none is sent once a session end is in progress, whatever the caller checked
+    // before: an operation that was already past its own checks (a status read still running when
+    // WM_QUERYENDSESSION arrived, say) is refused here with the session-ending result. An allow already sent when
+    // the message arrives is not affected: the session-end block queues behind it and the clean-up blocks again.
     private async Task<ControllerResult> SendAllowAsync(string action, List<StepOutcome> steps)
     {
+        if (_sessionEnding)
+        {
+            _log.Info(action + ": not sent, because the session is ending.");
+            ControllerResult refused = RefusedAtSessionEnd(action);
+            steps.AddRange(refused.Steps);
+            return refused;
+        }
+
         ControllerResult allow;
         _allowsRunning++;
         try

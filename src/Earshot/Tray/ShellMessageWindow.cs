@@ -25,10 +25,13 @@ internal sealed class SessionEndingEventArgs(bool isQuery, bool ending, uint fla
 // https://learn.microsoft.com/en-us/windows/win32/shell/taskbar
 //
 // WM_QUERYENDSESSION is answered TRUE at once and WM_ENDSESSION returns straight away; both are logged
-// with their flags and raised as SessionEnding. A windowless app is ended about five seconds in and a
-// forced shutdown sends no query at all, so this is a best-effort signal only.
+// with their flags and raised as SessionEnding. Applications without a visible window "are automatically
+// terminated if they do not respond to WM_QUERYENDSESSION or WM_ENDSESSION within 5 seconds", which is why
+// neither handler waits for anything; how long the process lives after answering is not documented, so this is a
+// best-effort signal only.
 // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession
 // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession
+// https://learn.microsoft.com/windows/win32/shutdown/shutdown-changes-for-windows-vista
 internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWindow
 {
     private readonly ILog _log;
