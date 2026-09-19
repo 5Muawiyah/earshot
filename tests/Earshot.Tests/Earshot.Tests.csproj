@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- TargetFramework and SupportedOSPlatformVersion come from Directory.Build.props, the one place they are
+         written. A copy here fell out of step the moment the application's moniker gained a Windows version:
+         a net10.0-windows test project cannot reference a net10.0-windows10.0.19041.0 application (NU1201). -->
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

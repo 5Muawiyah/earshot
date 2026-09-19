@@ -1,6 +1,21 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- The Windows version in the moniker is what brings in the WinRT projection that v1.1 audio streaming
+         needs (Windows.Media.Audio.AudioPlaybackConnection, introduced in 10.0.19041.0). A plain net10.0-windows
+         is Windows,Version=7.0 and has no WinRT types at all.
+         https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/winrt-apis-desktop-apps
+         https://learn.microsoft.com/en-us/dotnet/standard/frameworks -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- Set on purpose, in the same change as the moniker. Left out, it defaults to the moniker's version
+         ("defaults to the platform version from the TFM", the frameworks page above), and a build of this
+         solution confirmed it: the assembly then declares SupportedOSPlatform("Windows10.0.19041.0") and an
+         unguarded WinRT call compiles with no CA1416 at all.
+         7.0 is what the built Earshot.dll declared before the moniker changed (SupportedOSPlatform("Windows7.0")),
+         so the declared floor does not move and the analyser asks exactly what it asked before, plus a guard on
+         every WinRT call site. It is the analyser's floor, not a promise that Earshot runs on Windows 7: the
+         README states what Earshot is built and tested for. It cannot be raised to Windows 11 (10.0.22000.0)
+         under this moniker (NETSDK1135), and a value at or above 10.0.19041.0 would switch the guard off. -->
+    <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -11,7 +26,8 @@
          anywhere in the solution. The three analyzers that bite are fixed in code:
          WFO1000 (public props on Control/Form get [DefaultValue] or are kept non-public),
          WFDEV004 (use OnFormClosing/OnFormClosed, never OnClosing/OnClosed),
-         CA1416   (guard Win11-only managed APIs with OperatingSystem.IsWindowsVersionAtLeast). -->
+         CA1416   (guard Win11-only managed APIs, and every WinRT call, with
+                   OperatingSystem.IsWindowsVersionAtLeast; never by raising SupportedOSPlatformVersion). -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <InvariantGlobalization>true</InvariantGlobalization>
