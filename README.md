@@ -1,5 +1,7 @@
 # Earshot
 
+[![build](https://github.com/5Muawiyah/earshot/actions/workflows/build.yml/badge.svg)](https://github.com/5Muawiyah/earshot/actions/workflows/build.yml)
+
 A Windows 11 tray utility that keeps your AirPods on your phone until you ask
 for them on the PC, connects and disconnects them with one click, and stops
 Windows dropping them to call quality.
@@ -91,8 +93,8 @@ The icon has four states:
 | Outlined earbuds with one diagonal slash | Blocked at boot |
 
 The tooltip reads `Earshot: <device name> - connected`, and likewise
-`disconnected`, `blocked` or `not found`. It reads `unknown` when the audio
-devices could not be read at all, so a failed read is never shown as a state.
+`disconnected`, `blocked` or `not found`. If the audio devices cannot be read at
+all it reads `unknown`, rather than picking one of the four and hoping.
 
 **Right click** opens the menu. Top to bottom, with the exact wording:
 
@@ -102,7 +104,7 @@ devices could not be read at all, so a failed read is never shown as a state.
 | `Connect`, or `Disconnect` when connected | The same as a left click. Unavailable while a change is in flight. |
 | `Block at boot` | Tick. Keeps the AirPods' device nodes disabled while they are not in use. Turning it on before setup runs setup. The tick shows what is in force; when the setting cannot be read it shows neither state. |
 | `Protect audio quality` | Tick, on by default. Turns off the Hands-Free profile, as described below. |
-| `Turns off the AirPods microphone` | A caption under that setting. Always visible, never clickable, because it is the cost of the setting above. |
+| `Turns off the AirPods microphone` | A caption under that setting, always visible and never clickable. It is there because that is what the setting costs you. |
 | `Open on startup` | Tick, on by default. Writes one value named `Earshot` under the current user's `Run` key, with the `--startup` argument. Earshot has to be running to put the block back when you stop using the AirPods. |
 | `Choose device...` | Lists the paired Bluetooth devices, with the name to match. Choosing one pins it, and points the elevated worker at the same device. Use this if your AirPods are renamed, so that the default match "AirPods" no longer fits. A device that cannot play audio from this PC, a phone for instance, is refused: "That device cannot play audio from this PC. Choose headphones or speakers." |
 | `Set up Earshot...` | Runs the one-time setup. Shown only while setup is needed. |
@@ -137,10 +139,10 @@ at boot. Nothing has to happen at shutdown for that to hold.
   on a widening interval.
 - **At startup**, `\Earshot\BootBlock` runs as SYSTEM before anyone signs in.
   If Block at boot is on and a target node is present and enabled, it blocks
-  it. This is a safety net for the case where the nodes were left enabled, for
-  example after a crash. Where it falls in the order against Windows' own
-  reconnect is not documented, so it can lose the race. The block held at rest
-  is what the design relies on.
+  it. This is a safety net for the case where the nodes were left enabled, after a
+  crash for instance. Windows does not document where this task falls against
+  its own reconnect, so it can lose the race. The design leans on the nodes
+  already being disabled, not on this task winning.
 - **Shutting down while connected** is the one case the at-rest rule does not
   cover. Earshot answers the shutdown message by starting a block and returning
   at once, but Windows kills a tray program a few seconds into shutdown, and a
@@ -186,13 +188,14 @@ the microphone stays available until a later connect puts it back.
 
 There is no equaliser and no codec setting, and there will not be one. Windows
 picks the codec itself, from what both ends support, and exposes no public way to
-override that choice. A control that claimed to would be doing nothing.
+override that choice. A slider that claimed otherwise would be decoration.
 
 ## Battery
 
 **Earshot shows no battery level, and the tray has no battery element at all.**
-No battery value could be found that Windows exposes for these AirPods, and a
-number that is not measured would be a made-up number.
+I went looking for a battery value Windows exposes for these AirPods and could
+not find one, and I was not willing to show a figure that had not been read off
+the device.
 
 The check was run on 15 September 2026 with the AirPods connected to this PC:
 
@@ -204,8 +207,8 @@ The check was run on 15 September 2026 with the AirPods connected to this PC:
   `{104EA319-6EE2-4701-BD47-8DDBF425BBE5},2` empty for the AirPods audio
   endpoint and for its device nodes.
 
-Each of the three carried a positive control in the same read, so a query that
-was simply broken could not pass as an absent value: the device reported as
+Each of the three checks carried a positive control in the same read, so that a
+broken query could not be mistaken for a missing value: the device reported as
 present and OK in PnP, its endpoints were active in Core Audio, and WinRT
 reported it as connected and paired.
 
@@ -224,7 +227,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | Command | What it does |
 |---|---|
 | `Earshot.exe` | The tray application. `--startup` is the same thing, and is what the startup value passes. |
-| `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer above. It changes nothing. On a machine where Earshot is not set up and no device is pinned it still writes a full report, and exits 78 to say so: the nodes and services targets had no device to read. Read the report, not the exit code. |
+| `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer above. It changes nothing. On a machine where Earshot is not set up and no device is pinned it still writes a full report, and exits 78 to say so: the nodes and services targets had no device to read. So read the report rather than the exit code. |
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
@@ -250,8 +253,8 @@ rather than let a real device action write its evidence somewhere else.
 - **Fast Startup has not been tested.** It was off on the machine this was
   built against. Whether a persistent device-node disable behaves the same
   through a hybrid shutdown is unverified. Tests 08 and 09, the two that power
-  the machine right down, record which it was set to, so a sitting made with it
-  off is never read as having covered it.
+  the machine right down, record which it was set to, so a run made with it off
+  is not later mistaken for one that covered it.
 - **Whether the A2DP driver accepts the connect request is unverified.** The
   one-shot reconnect and disconnect properties are documented for Hands-Free
   filters, and the audio protection removes the Hands-Free filter. If the A2DP
@@ -324,8 +327,8 @@ first half prints the command to run afterwards and saves it as well.
 
 Each run writes its evidence to `%LOCALAPPDATA%\Earshot\livetest`, one folder
 per run, with a `result.json` that records every criterion as pass, fail or
-inconclusive against a stated rule. `inconclusive` is a real answer and is
-recorded as one.
+inconclusive against a stated rule. Where a criterion cannot be settled it goes
+down as inconclusive rather than being left out.
 
 `00-Restore.ps1` puts the machine back if a test stops in the middle. Read
 `tools\live-tests\README.md` before the first run, so you know how to run it
@@ -334,8 +337,9 @@ before you need it.
 The scripts themselves are tested by `tools\live-tests\selftest`, which runs
 every one of them, and both halves of each that needs a restart, against a fake
 machine with no device, no scheduled task and no `Earshot.exe` anywhere in it.
-That is what proves a script reaches the end and records every criterion it
-should, which reading the source cannot. It runs as part of `tools\check.ps1`.
+Reading the source cannot tell you whether a script gets to its end and records
+everything it should; running it against a fake machine can. It runs as part of
+`tools\check.ps1`.
 
 ## Uninstall
 
@@ -376,9 +380,9 @@ every published file against the manifest the build writes, zips it to
 SHA-256. The version comes from `src\Earshot\Earshot.csproj`.
 
 `Earshot.pdb` is published, listed in the manifest and installed on purpose. It
-is 247 KB, and it is what turns the stack trace in a logged exception into file
-names and line numbers you can act on. Since the log is where Earshot reports
-the failures it refuses to swallow, the symbols earn their place.
+is 247 KB, and it turns the stack trace in a logged exception into file names
+and line numbers. The log is where Earshot reports the failures it will not
+swallow, so that seemed worth the space.
 
 `prototype\` holds the three PowerShell scripts that blocked the AirPods before
 Earshot existed. They are superseded and kept only for reference.
