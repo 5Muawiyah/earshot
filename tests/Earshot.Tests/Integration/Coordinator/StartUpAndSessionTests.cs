@@ -13,6 +13,7 @@ public sealed class StartUpAndSessionTests
     private static readonly string[] BlockOnly = ["block"];
     private static readonly string[] AllowThenBlock = ["allow", "block"];
     private static readonly string[] AllowOnly = ["allow"];
+    private static readonly string[] AllowAfterBlock = ["block", "allow"];
     private static readonly string[] AllowThenBlockTwice = ["allow", "block", "block"];
 
     private static SessionEndingEventArgs Query() => new(isQuery: true, ending: true, flags: 0);
@@ -130,12 +131,22 @@ public sealed class StartUpAndSessionTests
         Assert.IsFalse(h.Coordinator.IsBusy);
     }
 
-    // At-rest: once the session-end block has been sent and has finished, nothing may start a new connect,
-    // allow or setting change, because a process kill right after would leave the nodes enabled across the
-    // shutdown. This covers every trigger through one shared gate (RunExclusiveAsync): a toggle stands in for
-    // both a left click and a hotkey activation, since both call BlockCoordinator.ToggleAsync the same way.
+    // At-rest. From the first WM_QUERYENDSESSION until Windows says the session end was cancelled, nothing that
+    // could enable the nodes or change a setting or the device starts: a process kill right after would leave the
+    // nodes enabled across the shutdown. The refusal is a result, at once, never a wait. It does not depend on
+    // whether a block was sent for the session end: the tests below cover the block sent and each reason it is not.
+    private static void AssertRefused(CoordinatorHarness h, Task<ToggleReport> toggle, string when)
+    {
+        Assert.IsTrue(toggle.IsCompleted, "The connect " + when + " was left waiting instead of refused at once.");
+        ToggleReport report = toggle.GetAwaiter().GetResult();
+        Assert.AreEqual(OpStatus.NotAttempted, report.Status, when);
+        Assert.AreEqual(BlockCoordinator.SessionEndingMessage, report.UserMessage, when);
+        Assert.AreEqual(BlockCoordinator.SessionEndingMessage, h.Cards.Shown[^1].Content.Status, "The refusal " + when + " had no card.");
+        Assert.IsFalse(h.Coordinator.IsBusy, "The refusal " + when + " left the coordinator busy.");
+    }
+
     [TestMethod]
-    public void NoOperationStartsOnceTheSessionEndBlockHasFinished()
+    public void AConnectIsRefusedAtOnceOnceTheSessionEndBlockHasBeenSent()
     {
         using var h = new CoordinatorHarness();
         h.Block.Status = Statuses.Allowed();
@@ -147,17 +158,225 @@ public sealed class StartUpAndSessionTests
         h.Pump();
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The session-end block itself must still run.");
 
-        // A toggle asked for after the block has already finished: it must not reach the connection
-        // controller at all, whether it came from a left click or, equally, from a hotkey.
-        Task<ToggleReport> hotkeyToggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
-        h.Pump();
-        Task<ToggleReport> leftClickToggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        // No pump between the call and the assertions: the refusal is synchronous.
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "after the session-end block");
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "asked for a second time");
         h.Pump();
 
-        Assert.IsFalse(hotkeyToggle.IsCompleted, "A toggle after the session-end block finished must not run.");
-        Assert.IsFalse(leftClickToggle.IsCompleted, "A second toggle after the session-end block finished must not run either.");
-        Assert.IsEmpty(h.Connection.Calls, "No connect or disconnect may be sent once the session-end block has finished.");
+        Assert.IsEmpty(h.Connection.Calls, "No connect may be sent while the session ends.");
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "Nothing beyond the session-end block may be sent.");
+    }
+
+    // The resting state: the nodes already read blocked, so no block is sent for the session end. A connect asked
+    // for then must still be refused; it would send the allow that enables the nodes.
+    [TestMethod]
+    public void AConnectIsRefusedWhileTheSessionEndsWithTheNodesAlreadyBlocked()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: no block issued, because the nodes are already blocked."));
+
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "with the nodes already blocked");
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "after WM_ENDSESSION said the session is ending");
+        h.Pump();
+
+        Assert.IsEmpty(h.Block.Calls, "An allow went out while the session was ending.");
+        Assert.IsEmpty(h.Connection.Calls, "A connect went out while the session was ending.");
+        Assert.IsTrue(h.Coordinator.SessionEndInProgress);
+    }
+
+    [TestMethod]
+    public void AConnectIsRefusedWhileTheSessionEndsBeforeTheNodesHaveEverBeenRead()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.StatusFailure = new IOException("no status");
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "the boot block status was never read"));
+
+        // The status can be read by the time of the click, so nothing but the refusal stands in the allow's way.
+        h.Block.StatusFailure = null;
+        h.Block.Status = Statuses.Blocked();
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "with the status never read");
+        h.Pump();
+
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.IsEmpty(h.Connection.Calls);
+    }
+
+    [TestMethod]
+    public void AConnectIsRefusedWhileTheSessionEndsAndAProtectVerbMayStillRun()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Protection.State = AudioProtectionState.Protected;
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Protection.State = AudioProtectionState.NotProtected;
+        h.Protection.OnApply = (_, _) => Task.FromResult(Results.GateWaitRanOut("Protect", "Protection did not finish in time. Try again."));
+        h.Publish(Devices.Idle(2));
+        h.Advance(BlockCoordinator.IdleGrace);
+        Assert.IsTrue(h.Coordinator.ProtectMayRun);
+        string[] before = h.Trace.ToArray();
+
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Session ending: no block issued, because an audio quality change this tray started may still be running"));
+
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "while a protect verb may still run");
+        h.Pump();
+
+        CollectionAssert.AreEqual(before, h.Trace, "Something was sent while the session was ending.");
+    }
+
+    [TestMethod]
+    public void EverySettingAndDeviceChangeIsRefusedWhileTheSessionEnds()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Coordinator.OnSessionEnding(Query());
+        bool setupRan = false;
+
+        Task<ControllerResult>[] refused =
+        [
+            h.Coordinator.SetProtectionAsync(true, CardPlace.NearCursor),
+            h.Coordinator.SetProtectionAsync(false, CardPlace.NearCursor),
+            h.Coordinator.SetBlockAtBootAsync(false, CardPlace.NearCursor),
+            h.Coordinator.SetBlockAtBootAsync(true, CardPlace.NearCursor),
+            h.Coordinator.ChangeDeviceAsync(Devices.Address),
+            h.Coordinator.RunAsync("setup", _ =>
+            {
+                setupRan = true;
+                return Task.FromResult(ControllerResult.Ok("Done"));
+            }),
+        ];
+
+        foreach (Task<ControllerResult> task in refused)
+        {
+            Assert.IsTrue(task.IsCompleted, "A change was left waiting instead of refused at once.");
+            ControllerResult result = task.GetAwaiter().GetResult();
+            Assert.AreEqual(OpStatus.NotAttempted, result.Status);
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, result.UserMessage);
+        }
+
+        h.Pump();
+        Assert.IsFalse(setupRan, "Setup ran while the session was ending.");
+        Assert.IsEmpty(h.Trace, "A gate or protection call went out while the session was ending.");
+        Assert.IsFalse(h.Coordinator.IsBusy);
+    }
+
+    // A connect that was already waiting behind other work when Windows started to end the session is refused as
+    // soon as that work ends; it is never left waiting and never goes ahead.
+    [TestMethod]
+    public void AConnectWaitingBehindOtherWorkIsRefusedOnceTheSessionStartsToEnd()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        var blocking = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnBlock = _ => blocking.Task;
+        h.Publish(Devices.Idle(2));
+        h.Advance(BlockCoordinator.IdleGrace);
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The idle block this test waits behind did not start.");
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+        Assert.IsFalse(toggle.IsCompleted, "The connect did not wait for the idle block.");
+
+        h.Coordinator.OnSessionEnding(Query());
+        h.Block.Status = Statuses.Blocked();
+        blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
+        h.Pump();
+
+        AssertRefused(h, toggle, "that waited behind the idle block");
+        Assert.IsEmpty(h.Connection.Calls);
+        Assert.IsFalse(h.Block.Calls.Contains("allow"), "An allow went out while the session was ending.");
+    }
+
+    // A disconnect sends no allow: its only gate change is the block that follows it. So it may still run while
+    // the session ends, and it never leaves the nodes more enabled than it found them.
+    [TestMethod]
+    public void ADisconnectStillRunsWhileTheSessionEndsAndSendsNoAllow()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsEmpty(h.Block.Calls);
+
+        ToggleReport report = h.Toggle(connect: false);
+
+        Assert.AreNotEqual(BlockCoordinator.SessionEndingMessage, report.UserMessage);
+        Assert.HasCount(1, h.Connection.Calls, "The disconnect was not sent.");
+        Assert.IsFalse(h.Block.Calls.Contains("allow"));
+    }
+
+    // WM_ENDSESSION with wParam FALSE: the session end was cancelled. Whatever was refused meanwhile left nothing
+    // behind, so the next connect runs as usual, with no restart.
+    [TestMethod]
+    public void AfterACancelledSessionEndAConnectRunsAgain()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Coordinator.OnSessionEnding(Query());
+        h.Pump();
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The session-end block did not run with the nodes allowed.");
+        AssertRefused(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true)), "while the session was ending");
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
+        h.Pump();
+        Assert.IsFalse(h.Coordinator.SessionEndInProgress);
+        Assert.IsFalse(h.Coordinator.IsBusy);
+
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreNotEqual(BlockCoordinator.SessionEndingMessage, report.UserMessage);
+        CollectionAssert.AreEqual(AllowAfterBlock, h.Block.Calls.Take(2).ToArray(), "The connect after the cancelled session end did not allow the nodes.");
+        Assert.IsNotEmpty(h.Connection.Calls);
+    }
+
+    // Exit while the session ends: the block before closing is a block, so it is not refused, and WhenIdleAsync,
+    // which Exit waits on, completes.
+    [TestMethod]
+    public void TheBlockBeforeClosingStillRunsWhileTheSessionEnds()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsEmpty(h.Block.Calls, "This test needs the session end that sends no block.");
+
+        // The nodes turn up enabled afterwards (something outside Earshot enabled them), and a read shows it.
+        h.Block.Status = Statuses.Allowed();
+        h.Monitor.Set(Devices.Idle(2));
+        _ = h.Coordinator.RefreshStatusAsync();
+        h.Pump();
+
+        h.Coordinator.BeginShutdown();
+        Task idle = h.Coordinator.WhenIdleAsync();
+        h.Pump();
+
+        Assert.IsTrue(idle.IsCompleted, "WhenIdleAsync did not complete, so Exit would wait out its limit.");
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The block before closing did not run while the session was ending.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
     }
 
     [TestMethod]

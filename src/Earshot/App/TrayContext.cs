@@ -113,7 +113,7 @@ internal sealed class TrayContext : ApplicationContext
     public const string GateNotRepinnedMessage = "Device saved. Boot block may still use the previous device.";
     public const string BlockAtBootHotkeyOffRefusedMessage = "Turning off block at boot needs the menu, not a shortcut.";
     public const string HotkeySetupNeededMessage = "Set up Earshot from the menu first.";
-    public const string HotkeyRegistrationProblemMessage = "One or more shortcuts could not be set. See the log.";
+    public const string HotkeyOthersNotSetSuffix = " Others were not set either. See the log.";
 
     // Long enough for a cancelled connect to finish its own clean-up, which may run the gate once more to
     // block the device nodes; short enough that a controller that never returns cannot keep Earshot
@@ -173,6 +173,9 @@ internal sealed class TrayContext : ApplicationContext
     private bool _blockingCardShown;
     private bool _closing;
     private bool _closed;
+
+    // The shortcut problems the last card was shown for (ApplyHotkeys), "" when there were none.
+    private string _hotkeyProblemsShown = "";
 
     // VoiceOver: the running announcer, or null while it is off, and the settings it was last opened
     // with, so a settings change that asks for nothing different never reopens the speech engine.
@@ -471,6 +474,13 @@ internal sealed class TrayContext : ApplicationContext
     {
         bool connect = !_toggleConnect;
         string next = connect ? "connect" : "disconnect";
+
+        // The disconnect in flight is left alone: the connect that would follow it is refused anyway.
+        if (connect && RefusedAtSessionEnd(next, TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), place))
+        {
+            return;
+        }
+
         TaskCompletionSource? done = _toggleDone;
         _toggleSuperseded = true;
         _toggleCancelReason = "a newer click asked to " + next;
@@ -539,6 +549,14 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         bool wanted = connect ?? intent.Connect;
+
+        // Before anything is claimed or shown: a refused connect raises no busy guard and says only why. A
+        // disconnect still runs while the session ends (see BlockCoordinator.ToggleAsync).
+        if (wanted && RefusedAtSessionEnd("connect", intent.DeviceName, place))
+        {
+            return;
+        }
+
         if (_coordinator.IsBusy)
         {
             // Work the coordinator started itself, which a connect or disconnect waits for.
@@ -614,6 +632,23 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
+    // True, with the card shown, when a session end is in progress, so the caller starts nothing: no connect, no
+    // setting or device change, no setup. Every trigger (left click, menu, hotkey) reaches one of the callers, and
+    // each asks before it saves a setting or claims the busy guard, so a refusal leaves nothing behind and the tray
+    // is usable again as soon as Windows says the session end was cancelled. The coordinator refuses the same
+    // operations itself, for one that was already waiting there when the session end began.
+    private bool RefusedAtSessionEnd(string action, string title, CardPlace place)
+    {
+        if (!_coordinator.SessionEndInProgress)
+        {
+            return false;
+        }
+
+        _log.Info(action + ": not started, because the session is ending.");
+        ShowCard(title, BlockCoordinator.SessionEndingMessage, place);
+        return true;
+    }
+
     // Why the tray cancelled the connect or disconnect in flight.
     private string CancelReason() =>
         _lifetime.IsCancellationRequested ? "Earshot is closing" : _toggleCancelReason ?? "another device was chosen";
@@ -659,13 +694,12 @@ internal sealed class TrayContext : ApplicationContext
             }
         });
 
-    // Registers what the current settings ask for and logs what did not take. A failure for one
-    // shortcut is reported but never stops the others, and nothing here decides who else holds a
-    // combination beyond the one code (1409) the platform documents as meaning that.
-    // Registers what the current settings ask for. Every outcome is logged; if any shortcut did not take
-    // (held by another program, rejected text, a Windows error), the owner sees one card summarising that
-    // rather than nothing, and rather than one card per shortcut, since a settings save can touch all
-    // four at once and four cards for one save would be worse than the silence this replaces.
+    // Registers what the current settings ask for. Every outcome is logged, every time. A failure for one shortcut
+    // never stops the others, and nothing here decides who else holds a combination beyond the one code (1409) the
+    // platform documents as meaning that. If any shortcut did not take (held by another program, rejected text, a
+    // Windows error), the owner sees one card, not one per shortcut, naming the first that failed and why. Every
+    // settings save comes through here, so the card is shown only when what is wrong has changed since the last
+    // time: a shortcut that keeps failing the same way is not reported again on each unrelated save.
     private void ApplyHotkeys()
     {
         if (_closed)
@@ -674,7 +708,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         IReadOnlyList<HotkeyRegistrationOutcome> outcomes = _hotkeys.Apply(_registry.Settings.Current.Hotkeys);
-        bool anyProblem = false;
+        var problems = new List<HotkeyRegistrationOutcome>();
         foreach (HotkeyRegistrationOutcome outcome in outcomes)
         {
             if (outcome.State is HotkeyRegistrationState.NotSet or HotkeyRegistrationState.Registered)
@@ -684,14 +718,36 @@ internal sealed class TrayContext : ApplicationContext
             else
             {
                 _log.Warn("Hotkey " + outcome.Action + ": " + outcome.Message);
-                anyProblem = true;
+                problems.Add(outcome);
             }
         }
 
-        if (anyProblem)
+        string signature = string.Join("\n", problems.Select(p => p.Action + "|" + p.State + "|" + p.ErrorCode.ToString(CultureInfo.InvariantCulture) + "|" + p.RequestedText));
+        if (signature == _hotkeyProblemsShown)
         {
-            ShowCard(TrayStatus.AppName, HotkeyRegistrationProblemMessage, CardPlace.NearTray);
+            return;
         }
+
+        _hotkeyProblemsShown = signature;
+        if (problems.Count > 0)
+        {
+            ShowCard(TrayStatus.AppName, HotkeyProblemCard(problems), CardPlace.NearTray);
+        }
+    }
+
+    // The first shortcut that was not set and why, in the outcome's own words, which name the shortcut except for
+    // rejected text; that is quoted (cut short, since it is whatever was typed). More than one: the log has the rest.
+    internal static string HotkeyProblemCard(IReadOnlyList<HotkeyRegistrationOutcome> problems)
+    {
+        HotkeyRegistrationOutcome first = problems[0];
+        string reason = first.Message;
+        if (first.State == HotkeyRegistrationState.TextRejected)
+        {
+            string typed = first.RequestedText.Length > 24 ? first.RequestedText[..24] + "..." : first.RequestedText;
+            reason = "\"" + typed + "\" is not a shortcut. " + reason;
+        }
+
+        return problems.Count == 1 ? reason : reason + HotkeyOthersNotSetSuffix;
     }
 
     // The menu tick toggles the owner's VoiceOver.Enabled setting; ApplyVoiceOver (raised through
@@ -982,6 +1038,11 @@ internal sealed class TrayContext : ApplicationContext
     // the menu does (a checked box the owner chose to uncheck), so it is refused and pointed at the menu.
     private async Task BlockAtBootAsync(CardPlace place, bool viaHotkey = false)
     {
+        if (RefusedAtSessionEnd("block at boot", TrayStatus.AppName, place))
+        {
+            return;
+        }
+
         if (IsBusy || _coordinator.IsBusy)
         {
             ShowCard(TrayStatus.AppName, BusyMessage, place);
@@ -1037,8 +1098,9 @@ internal sealed class TrayContext : ApplicationContext
             {
                 AnnounceIfEnabled(blockAtBoot ? VoiceLine.BlockedAtBoot : VoiceLine.AllowedAtBoot);
             }
-            else if (result is { IsSuccess: false })
+            else if (result is { IsSuccess: false } && result.UserMessage != BlockCoordinator.SessionEndingMessage)
             {
+                // A change refused because the session began to end meanwhile was not tried, so it did not fail.
                 AnnounceIfEnabled(VoiceLine.BlockFailed);
             }
         }
@@ -1059,6 +1121,14 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         CardPlace place = viaHotkey ? CardPlace.NearTray : ClickPlace();
+
+        // Before the setting is saved: a refused change must not leave the saved setting flipped with nothing
+        // applied. Nothing between this check and the coordinator's own awaits, so the two cannot disagree.
+        if (RefusedAtSessionEnd("protect audio quality", TrayStatus.AppName, place))
+        {
+            return;
+        }
+
         if (IsBusy || _coordinator.IsBusy)
         {
             ShowCard(TrayStatus.AppName, BusyMessage, place);
@@ -1296,6 +1366,12 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        // No picker for a choice that would be refused once made.
+        if (_picker is null && RefusedAtSessionEnd("choose device", TrayStatus.AppName, place))
+        {
+            return;
+        }
+
         // The user asked for the picker again, so bringing the open one forward is expected.
         if (_picker is not null)
         {
@@ -1357,6 +1433,13 @@ internal sealed class TrayContext : ApplicationContext
     internal async Task ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place)
     {
         ArgumentNullException.ThrowIfNull(choice);
+
+        // Asked here as well as in RunOperationAsync: before setup the device is only saved, with no operation.
+        if (RefusedAtSessionEnd(GateVerbs.SetDevice, choice.Name, place))
+        {
+            return;
+        }
+
         BootBlockStatus? status;
         try
         {
@@ -1527,6 +1610,13 @@ internal sealed class TrayContext : ApplicationContext
         bool alwaysShowCard = false)
     {
         if (_closing)
+        {
+            return null;
+        }
+
+        // Every menu action that goes to the gate or to setup comes through here (setup, Block at boot, protection,
+        // the device), so none of them starts while a session end is in progress, and none raises the busy guard.
+        if (RefusedAtSessionEnd(action, TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), place))
         {
             return null;
         }

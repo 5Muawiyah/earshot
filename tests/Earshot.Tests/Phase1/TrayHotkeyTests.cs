@@ -181,6 +181,102 @@ public sealed class TrayHotkeyTests
         });
     }
 
+    private static readonly string[] OnlyDisconnected = ["Disconnected"];
+
+    private static SessionEndingEventArgs SessionQuery() => new(isQuery: true, ending: true, flags: 0);
+
+    // The resting state, then WM_QUERYENDSESSION, then the toggle shortcut. No block is sent for that session end
+    // (the nodes already read blocked), and the shortcut must still not send the allow. Asserted with no pump
+    // between the key press and the card: the refusal is synchronous.
+    [TestMethod]
+    public void AToggleHotkeyWhileTheSessionEndsIsRefusedWithACardAndSendsNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Phase1Fixtures.Block(BlockState.Blocked));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleConnection));
+
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status, "The refused shortcut had no card.");
+            Assert.AreEqual(CardAnchor.NearTray, tray.Cards.Shown[^1].Anchor);
+            Assert.IsFalse(tray.Context.IsWorking, "The refusal left something in flight.");
+            tray.PumpUntilIdle();
+            Assert.IsEmpty(tray.Block.Calls, "An allow went out while the session was ending.");
+            Assert.IsEmpty(tray.Connection.Calls, "A connect went out while the session was ending.");
+        });
+    }
+
+    // The protect shortcut used to save the flipped setting before the operation that was then never run. The
+    // refusal comes before any write, raises no busy guard, and leaves the next left click working once the
+    // session end is cancelled.
+    [TestMethod]
+    public void AProtectHotkeyWhileTheSessionEndsSavesNothingSendsNothingAndLeavesTheTrayUsable()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false,
+                arrange: t => t.Block.Status = Phase1Fixtures.Block(BlockState.Blocked));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleAudioProtection));
+
+            Assert.IsFalse(tray.Settings.Current.ProtectAudioQuality, "The refused change was saved first.");
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Context.IsBusy, "The refusal left the busy guard raised.");
+            Assert.IsFalse(tray.Context.IsWorking);
+            Assert.IsEmpty(tray.Protection.Calls);
+
+            tray.Context.OnSessionEnding(null, new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
+            tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Cards.Statuses.Contains(TrayContext.BusyMessage), "The tray still said another change was running.");
+            Assert.HasCount(1, tray.Connection.Calls, "The click after the cancelled session end did not connect.");
+            Assert.IsFalse(tray.Settings.Current.ProtectAudioQuality);
+            Assert.IsEmpty(tray.Protection.Calls.Where(on => on).ToArray(), "The refused protect-on ran later.");
+        });
+    }
+
+    [TestMethod]
+    public void ABlockAtBootHotkeyWhileTheSessionEndsIsRefusedBeforeAnyGateCall()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(arrange: t => t.Block.Status = Phase1Fixtures.Block(BlockState.Allowed, blockAtBoot: false));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleBlockAtBoot));
+
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Context.IsWorking);
+            tray.PumpUntilIdle();
+            Assert.IsEmpty(tray.Block.Calls);
+        });
+    }
+
+    // A refused connect is neither a success nor a failed connect, so the voice says nothing for it. The status
+    // shortcut afterwards is what proves the announcer was listening: its line is the only one spoken.
+    [TestMethod]
+    public void ARefusedConnectWhileTheSessionEndsIsNotAnnounced()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.VoiceOver = s.VoiceOver with { Enabled = true },
+                arrange: t => t.Block.Status = Phase1Fixtures.Block(BlockState.Blocked));
+            tray.PumpUntilIdle();
+            Assert.IsTrue(tray.Voice.IsOpen, "The announcer must have opened for this test to prove anything.");
+            tray.Context.OnSessionEnding(null, SessionQuery());
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleConnection));
+            tray.PumpUntilIdle();
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.SpeakStatus));
+            Assert.IsTrue(tray.Voice.SpeakCompleted.Wait(TimeSpan.FromSeconds(5)), "SpeakCompleted never arrived.");
+
+            CollectionAssert.AreEqual(OnlyDisconnected, tray.Voice.Utterances.ToArray());
+        });
+    }
+
     // Section 8 of the follow-up review: a registration problem is surfaced as one card summarising it,
     // not one card per shortcut, even when several shortcuts have a problem at once.
     [TestMethod]
@@ -197,8 +293,47 @@ public sealed class TrayHotkeyTests
             });
             tray.PumpUntilIdle();
 
-            Assert.AreEqual(1, tray.Cards.Shown.Count(c => c.Content.Status == TrayContext.HotkeyRegistrationProblemMessage),
+            // The card names the first shortcut that failed and why, and says there are more.
+            const string Expected = "Ctrl+Alt+C is already set for another command here." + TrayContext.HotkeyOthersNotSetSuffix;
+            CollectionAssert.AreEqual(new[] { Expected }, tray.Cards.Statuses.ToArray(),
                 "A registration problem must show exactly one summarising card, not one per shortcut.");
+        });
+    }
+
+    // A shortcut that keeps failing is reported once, not again on every settings save; a save that changes
+    // what is wrong is reported again.
+    [TestMethod]
+    public void TheRegistrationProblemCardIsShownAgainOnlyWhenTheProblemsChange()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(settings: s =>
+            {
+                s.Hotkeys.Enabled = true;
+                s.Hotkeys.ToggleConnection = "Ctrl+Alt+C";
+                s.Hotkeys.ToggleAudioProtection = "Ctrl+Alt+C";
+            });
+            tray.PumpUntilIdle();
+            const string Duplicate = "Ctrl+Alt+C is already set for another command here.";
+            CollectionAssert.AreEqual(new[] { Duplicate }, tray.Cards.Statuses.ToArray());
+
+            // An unrelated save: the same shortcut still fails the same way.
+            tray.Settings.Update(s => s.ProtectAudioNoticeShown = !s.ProtectAudioNoticeShown);
+            tray.PumpUntilIdle();
+            CollectionAssert.AreEqual(new[] { Duplicate }, tray.Cards.Statuses.ToArray(), "The same problem was shown again on an unrelated save.");
+
+            // A different problem is news.
+            tray.Settings.Update(s => s.Hotkeys.ToggleAudioProtection = "Ctrl+F12");
+            tray.PumpUntilIdle();
+            Assert.HasCount(2, tray.Cards.Shown);
+            Assert.AreEqual("F12 is kept by Windows for the debugger, so it cannot be a shortcut.", tray.Cards.Shown[^1].Content.Status);
+
+            // Fixed, then broken the same way again: that is news too.
+            tray.Settings.Update(s => s.Hotkeys.ToggleAudioProtection = "");
+            tray.PumpUntilIdle();
+            tray.Settings.Update(s => s.Hotkeys.ToggleAudioProtection = "Ctrl+F12");
+            tray.PumpUntilIdle();
+            Assert.HasCount(3, tray.Cards.Shown);
         });
     }
 
@@ -214,7 +349,7 @@ public sealed class TrayHotkeyTests
             });
             tray.PumpUntilIdle();
 
-            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == TrayContext.HotkeyRegistrationProblemMessage));
+            Assert.IsEmpty(tray.Cards.Shown);
         });
     }
 

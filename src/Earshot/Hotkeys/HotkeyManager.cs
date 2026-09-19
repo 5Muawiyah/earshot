@@ -118,6 +118,13 @@ public sealed class HotkeyManager : IDisposable
     // rather than silently freeing nothing: UnregisterHotKey "Frees a hot key previously registered by
     // the calling thread", so a call from the wrong thread would report success while leaving every held
     // id registered.
+    //
+    // A window that has already been destroyed is a different case, and IMessageWindow can tell them apart: its
+    // Handle is zero (NativeWindow.Handle is, once the handle is gone), while a window owned by another thread
+    // still has one. IsOwnedByCurrentThread is false for it too, since GetWindowThreadProcessId returns zero for a
+    // handle that is not a window, but there is no window left to pass to UnregisterHotKey and so nothing this
+    // call could release. That is logged, and Dispose finishes (unsubscribed, marked disposed) rather than
+    // throwing out of the tray's Close.
     public void Dispose()
     {
         if (_disposed)
@@ -125,16 +132,34 @@ public sealed class HotkeyManager : IDisposable
             return;
         }
 
+        if (_window.Handle == 0)
+        {
+            if (_held.Count > 0)
+            {
+                _log.Warn("Hotkeys: the window was already destroyed, so UnregisterHotKey was not called for " +
+                    _held.Count.ToString(CultureInfo.InvariantCulture) + " held shortcut(s).");
+                _held.Clear();
+            }
+
+            Unsubscribe();
+            _disposed = true;
+            return;
+        }
+
         ThrowIfNotOwningThread();
 
+        Unsubscribe();
+        ReleaseAllInternal();
+        _disposed = true;
+    }
+
+    private void Unsubscribe()
+    {
         if (_messageHandlerAttached)
         {
             _window.MessageReceived -= OnMessageReceived;
             _messageHandlerAttached = false;
         }
-
-        ReleaseAllInternal();
-        _disposed = true;
     }
 
     // Apply, ReleaseAll and Dispose all enforce this: RegisterHotKey "fails if you try to associate a hot

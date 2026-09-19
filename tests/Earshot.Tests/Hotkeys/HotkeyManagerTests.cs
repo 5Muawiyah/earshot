@@ -302,6 +302,30 @@ public sealed class HotkeyManagerTests
         Assert.AreEqual(afterApply + 1, native.Calls.Count, "The on-thread Dispose still releases what was held.");
     }
 
+    // IMessageWindow can tell the two apart: a destroyed window has no handle (NativeWindow.Handle is zero once
+    // the handle is gone), while a window owned by another thread still has one. Against a destroyed window there
+    // is nothing to pass to UnregisterHotKey, so Dispose logs that and finishes instead of throwing out of Close.
+    [TestMethod]
+    public void DisposeAfterTheWindowIsDestroyedLogsAndFinishesWithoutCallingWindows()
+    {
+        (HotkeyManager manager, FakeMessageWindow window, FakeNativeHotkeys native, CapturingLog log) = Build();
+        manager.Apply(EnabledWith(connect: "Ctrl+Alt+C"));
+        int afterApply = native.Calls.Count;
+        int raised = 0;
+        manager.Activated += (_, _) => raised++;
+        window.Handle = 0;
+        window.IsOwnedByCurrentThread = false;
+
+        manager.Dispose();
+
+        Assert.AreEqual(afterApply, native.Calls.Count, "There is no window to unregister against.");
+        Assert.IsTrue(log.Has(LogLevel.Warn, "the window was already destroyed"), "The skipped release was not logged.");
+        window.Raise(0x0312, ConnectionId, 0);
+        Assert.AreEqual(0, raised, "Dispose did not unsubscribe from the window.");
+        Assert.ThrowsExactly<ObjectDisposedException>(() => manager.Apply(EnabledWith()), "Dispose did not mark the instance disposed.");
+        manager.Dispose();
+    }
+
     [TestMethod]
     public void CurrentOutcomesIsEmptyBeforeApplyAndHoldsTheLastResult()
     {

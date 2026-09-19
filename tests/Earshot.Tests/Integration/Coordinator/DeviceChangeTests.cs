@@ -220,6 +220,26 @@ public sealed class DeviceChangeTests
         CollectionAssert.AreEqual(PinOnly, h.Trace.Where(t => t != "connect").ToArray(), "An allow went out while the pin may still move.");
     }
 
+    // No block is sent for a session end while a pin may still move, and a connect asked for then is still refused
+    // at once: the refusal does not depend on a block having been sent.
+    [TestMethod]
+    public void AConnectIsRefusedWhileTheSessionEndsAndAPinMayStillMove()
+    {
+        using CoordinatorHarness h = AtRest();
+        h.Block.OnSetDevice = _ => Task.FromResult(Results.GateWaitRanOut("Gate", BlockController.TimedOutMessage));
+        Change(h);
+        Assert.IsTrue(h.Coordinator.PinMayMove);
+        string[] before = h.Trace.ToArray();
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+
+        Assert.IsTrue(toggle.IsCompleted, "The connect was left waiting instead of refused at once.");
+        Assert.AreEqual(BlockCoordinator.SessionEndingMessage, toggle.GetAwaiter().GetResult().UserMessage);
+        h.Pump();
+        CollectionAssert.AreEqual(before, h.Trace, "Something was sent while the session was ending.");
+    }
+
     // The session-end block would go to whichever device the gate pins when it runs, so it is not queued while a pin
     // may still move; the BootBlock task blocks the device pinned then.
     [TestMethod]

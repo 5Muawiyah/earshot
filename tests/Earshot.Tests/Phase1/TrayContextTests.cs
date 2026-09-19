@@ -315,44 +315,155 @@ public sealed class TrayContextTests
         });
     }
 
-    // This test used to be named AClickWhileTheCoordinatorFinishesItsOwnWorkSaysSoAtOnceAndGoesAheadAfterIt
-    // and used the session-end block as its example of "the coordinator's own work" that a queued click
-    // waits for and then goes ahead behind. That premise no longer holds: once the session-end block has
-    // been issued, nothing may start a new operation even after it finishes, which is exactly what the
-    // test below now proves instead. RunExclusiveAsync's ordinary wait-for-_current-then-proceed
-    // behaviour, for work that is not the session-end block, is unchanged by that fix and is exercised at
-    // the coordinator level (Integration/Coordinator/StartUpAndSessionTests.cs).
-    //
-    // The at-rest invariant, at the tray: once the session-end block has been issued, a click queued
-    // behind it must not go ahead once that block finishes either, because a process kill right after
-    // would leave the nodes enabled across the shutdown. This is the same fix that closes the gap a
-    // hotkey would otherwise widen (a hotkey and a left click share BlockCoordinator.ToggleAsync), proved
-    // once at the coordinator level (StartUpAndSessionTests.NoOperationStartsOnceTheSessionEndBlockHasFinished)
-    // and here through the tray's own OnIconMouseClick, so the whole path is covered end to end.
+    // The coordinator's own work here is the idle block: the AirPods stopped being used, the grace window ran out
+    // and the block is on the gate. Nothing the tray started is in flight, so only the coordinator is busy.
     [TestMethod]
-    public void AClickQueuedBehindTheSessionEndBlockDoesNotGoAheadOnceItFinishes()
+    public void AClickWhileTheCoordinatorFinishesItsOwnWorkSaysSoAtOnceAndGoesAheadAfterIt()
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
             var blocking = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             tray.Block.OnBlock = _ => blocking.Task;
 
-            tray.Context.OnSessionEnding(null, new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
-            Application.DoEvents();
+            // The nodes turn up enabled with the AirPods not in use, and stay so for the grace window.
+            tray.Block.Status = Block(BlockState.Allowed);
+            tray.Coordinator.RefreshStatusAsync().GetAwaiter().GetResult();
+            tray.PumpUntilIdle();
+            Assert.IsTrue(tray.Coordinator.IdleWaitRunning, "This test needs the idle wait.");
+            tray.Time.Advance(BlockCoordinator.IdleGrace);
+            TrayHarness.PumpUntil(() => tray.Block.Calls.Contains("block"), "The idle block did not start.");
             Assert.IsTrue(tray.Coordinator.IsBusy);
+            Assert.IsFalse(tray.Context.IsBusy);
 
+            tray.Context.Menu.Refresh();
+            Assert.IsFalse(tray.MenuItem(MenuModel.Connect).Enabled, "The menu toggle is enabled while the coordinator is busy.");
+
+            // Asserted with no pump in between: the answer to the click is synchronous.
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
-            Application.DoEvents();
-            Assert.IsEmpty(tray.Connection.Calls, "The disconnect ran beside the session-end block.");
+            Assert.AreEqual(TrayContext.FinishingFirstMessage, tray.Cards.Shown[^1].Content.Status, "The click had no answer.");
+            Assert.IsEmpty(tray.Connection.Calls, "The connect ran beside the coordinator's own work.");
 
             blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
-            for (int i = 0; i < 5; i++)
+            tray.PumpUntilIdle();
+
+            Assert.HasCount(1, tray.Connection.Calls, "Once that work has finished, the click goes ahead.");
+            Assert.IsTrue(tray.Connection.Calls[0].Connect);
+        });
+    }
+
+    private static SessionEndingEventArgs SessionQuery() => new(isQuery: true, ending: true, flags: 0);
+
+    private static SessionEndingEventArgs SessionEndCancelled() => new(isQuery: false, ending: false, flags: 0);
+
+    // The resting state (nodes blocked, AirPods not connected), then WM_QUERYENDSESSION, then a left click. No
+    // block is sent for that session end, and the click must still not send the allow that would enable the nodes:
+    // if the process is killed by the shutdown the nodes would stay enabled across the power cycle. Every assertion
+    // up to the pump is made with no pump in between, since the refusal is synchronous.
+    [TestMethod]
+    public void AClickWhileTheSessionEndsIsRefusedWithACardAndSendsNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            Assert.IsEmpty(tray.Block.Calls, "This test needs the session end that sends no block.");
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status, "The refused click had no card.");
+            Assert.IsFalse(tray.Context.IsBusy, "The refusal raised the busy guard.");
+            Assert.IsFalse(tray.Context.IsWorking, "The refusal left something in flight.");
+            tray.PumpUntilIdle();
+            Assert.IsEmpty(tray.Block.Calls, "An allow went out while the session was ending.");
+            Assert.IsEmpty(tray.Connection.Calls, "A connect went out while the session was ending.");
+        });
+    }
+
+    // The same through the menu, for every command that changes the device, a setting the gate holds, or setup.
+    [TestMethod]
+    public void TheMenuCommandsAreRefusedWhileTheSessionEndsAndNothingIsSavedOrSent()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false,
+                arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+
+            foreach (string command in new[] { MenuModel.Connect, MenuModel.ProtectAudioQuality, MenuModel.BlockAtBoot })
             {
-                Application.DoEvents();
+                tray.Cards.Shown.Clear();
+                tray.ClickMenu(command);
+
+                Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status, command + " had no refusal card.");
+                Assert.IsFalse(tray.Context.IsWorking, command + " left something in flight.");
             }
 
-            Assert.IsEmpty(tray.Connection.Calls, "No connect or disconnect may run once the session-end block has finished.");
+            tray.Cards.Shown.Clear();
+            tray.Context.ApplyDeviceChoiceAsync(new PickerChoice("Other", "Other", "AABBCCDDEEFF", Guid.NewGuid()), CardPlace.NearTray).GetAwaiter().GetResult();
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status, "Choose device had no refusal card.");
+
+            tray.PumpUntilIdle();
+            Assert.IsFalse(tray.Settings.Current.ProtectAudioQuality, "The refused protection change was saved first.");
+            Assert.AreEqual(AirPodsAddress, tray.Settings.Current.PinnedAddress, "The refused device change was saved.");
+            Assert.IsEmpty(tray.Protection.Calls);
+            Assert.IsEmpty(tray.Block.Calls);
+            Assert.IsEmpty(tray.Connection.Calls);
+        });
+    }
+
+    // WM_ENDSESSION with wParam FALSE after refusals by click and by menu: the tray is fully usable again with no
+    // restart. Nothing is busy, the menu toggle is enabled, and the next click connects.
+    [TestMethod]
+    public void AfterACancelledSessionEndTheTrayIsUsableAgainAndTheNextClickConnects()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false,
+                arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.ClickMenu(MenuModel.ProtectAudioQuality);
+            tray.PumpUntilIdle();
+
+            tray.Context.OnSessionEnding(null, SessionEndCancelled());
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Context.IsBusy);
+            Assert.IsFalse(tray.Coordinator.IsBusy);
+            tray.Context.Menu.Refresh();
+            Assert.IsTrue(tray.MenuItem(MenuModel.Connect).Enabled, "The menu toggle stayed disabled after the session end was cancelled.");
+
+            tray.Cards.Shown.Clear();
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            Assert.HasCount(1, tray.Connection.Calls, "The click after the cancelled session end did not connect.");
+            Assert.IsTrue(tray.Connection.Calls[0].Connect);
+            Assert.IsFalse(tray.Cards.Statuses.Contains(TrayContext.BusyMessage), "The tray still said another change was running.");
+            Assert.IsFalse(tray.Cards.Statuses.Contains(BlockCoordinator.SessionEndingMessage));
+        });
+    }
+
+    // Exit while the session ends still completes inside the limits it already has: the message loop ends.
+    [TestMethod]
+    public void ExitWhileTheSessionEndsStillEndsTheMessageLoop()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), exitWaitLimit: TimeSpan.FromSeconds(5),
+                arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleAudioProtection));
+            tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
+            var watch = Stopwatch.StartNew();
+
+            Application.Run(tray.Context);
+
+            Assert.IsLessThan(TimeSpan.FromSeconds(5), watch.Elapsed, "Exit waited out its limit behind something the session end left in flight.");
+            Assert.IsFalse(tray.Log.Has(LogLevel.Warn, "still in flight"), "Exit gave up on something left in flight.");
+            Assert.IsTrue(tray.Coordinator.WhenIdleAsync().IsCompleted);
         });
     }
 
@@ -1208,6 +1319,23 @@ internal sealed class TrayHarness : IDisposable
         }
 
         Application.DoEvents();
+    }
+
+    // Runs posted callbacks until the condition holds, for work that leaves the tray busy on purpose (a stalled
+    // gate call). Fails by name rather than asserting on a fixed number of pumps.
+    public static void PumpUntil(Func<bool> condition, string otherwise)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (watch.Elapsed > TimeSpan.FromSeconds(10))
+            {
+                throw new AssertFailedException(otherwise);
+            }
+
+            Application.DoEvents();
+            Thread.Sleep(1);
+        }
     }
 
     public void Dispose()

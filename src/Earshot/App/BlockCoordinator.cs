@@ -100,7 +100,8 @@ internal sealed class BlockCoordinator : IDisposable
     public const string BlockAtBootOffMessage = "Block at boot is off";
     public const string BlockAtBootOffStillBlockedMessage = "Block at boot is off, but the AirPods are still blocked. Connect to allow them.";
     public const string BlockAtBootOffMayStillBeBlockedMessage = "Block at boot is off, but the AirPods may still be blocked. Connect to allow them.";
-    public const string ChangesNotWatchedMessage = "Earshot cannot see audio device changes, so blocking may be late.";
+    public const string SessionEndingMessage = "Windows is shutting down or signing out, so nothing was changed. If it does not, restart Earshot.";
+    public const string ChangesNotWatchedMessage ="Earshot cannot see audio device changes, so blocking may be late.";
 
     // How long render must stay not ACTIVE, with nothing in flight, before the nodes are blocked again. A
     // conservative waiting budget, not a measured figure: long enough that the churn of a protection change or a
@@ -208,6 +209,7 @@ internal sealed class BlockCoordinator : IDisposable
     private string? _currentName;
     private CancellationTokenSource? _currentCancel;
     private Task? _sessionBlock;
+    private bool _sessionEnding;
     private bool _sessionBlockIssued;
     private bool _sessionBlockWhileInUse;
     private Task? _closingBlock;
@@ -273,6 +275,11 @@ internal sealed class BlockCoordinator : IDisposable
     // True while something other than the block before closing is in flight, or waiting to run before it.
     public bool IsBusyBeyondClosingBlock =>
         (_current is not null && _currentName != ClosingBlockName) || _sessionBlock is { IsCompleted: false };
+
+    // True from the first message that says the session is ending until WM_ENDSESSION says it was cancelled (see
+    // OnSessionEnding). While it is true a connect, an allow, a setting change, a device change and setup are
+    // refused with SessionEndingMessage; the tray asks first so it can refuse before it saves anything.
+    public bool SessionEndInProgress => _sessionEnding;
 
     // True once Earshot is closing and a block is about to be sent, so a card saying so is true.
     public bool BlockingBeforeClosing { get; private set; }
@@ -493,6 +500,17 @@ internal sealed class BlockCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(request);
         string name = request.Connect ? "connect" : "disconnect";
 
+        // A connect may send the allow that enables the nodes, so it is refused while a session end is in
+        // progress. A disconnect still runs: it sends no allow, its only gate change is the block that follows it
+        // (and that Block sequence starts no protect verb while the session ends), so it cannot leave the nodes
+        // more enabled than it found them.
+        Func<ToggleReport>? refused = request.Connect ? () => RefusedAtSessionEnd(request) : null;
+        if (_sessionEnding && refused is not null)
+        {
+            _log.Info(name + ": not started, because the session is ending.");
+            return refused();
+        }
+
         // The user has acted, so the start-up check has nothing left to reconcile.
         if (!_startChecked)
         {
@@ -505,7 +523,8 @@ internal sealed class BlockCoordinator : IDisposable
             return await RunExclusiveAsync(
                 name,
                 token => request.Connect ? ConnectCoreAsync(request, token) : DisconnectCoreAsync(request, token),
-                ct);
+                ct,
+                refused);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -552,7 +571,8 @@ internal sealed class BlockCoordinator : IDisposable
 
                 return new ControllerResult(OpStatus.AlreadyInState, protect ? AlreadyProtectedMessage : AlreadyOffMessage, run.Steps);
             },
-            ct);
+            ct,
+            () => RefusedAtSessionEnd(protect ? GateVerbs.ProtectOn : GateVerbs.ProtectOff));
 
     // Choose device. Waits for the operation in flight, its clean-up included, so a re-block after an allow
     // finishes against the device the gate pins now before the pin moves. Refused while a change this tray sent
@@ -566,7 +586,7 @@ internal sealed class BlockCoordinator : IDisposable
     // would have it without Earshot. If the pin does not move, what this change did is put back: the block when
     // Block at boot is on (a Block sequence, which turns protection back on first), otherwise protection alone.
     public Task<ControllerResult> ChangeDeviceAsync(string address12, CancellationToken ct = default) =>
-        RunExclusiveAsync(GateVerbs.SetDevice, token => ChangeDeviceCoreAsync(address12, token), ct);
+        RunExclusiveAsync(GateVerbs.SetDevice, token => ChangeDeviceCoreAsync(address12, token), ct, () => RefusedAtSessionEnd(GateVerbs.SetDevice));
 
     // The Block at boot menu toggle. Turning it off also allows nodes a good read shows blocked, in the same
     // operation and in ProtectionPolicy's Allow order (the nodes, then protection again if Handsfree came back): with
@@ -625,7 +645,8 @@ internal sealed class BlockCoordinator : IDisposable
                     ? new ControllerResult(OpStatus.Partial, run.ServiceChange?.UserMessage ?? BlockAtBootOffMessage, steps)
                     : ControllerResult.Ok(BlockAtBootOffMessage, steps);
             },
-            ct);
+            ct,
+            () => RefusedAtSessionEnd(blockAtBoot ? GateVerbs.SetBootOn : GateVerbs.SetBootOff));
 
     // Runs a menu action (setup) as an operation, so it never overlaps a connect or a block. Such an action changes
     // what the boot block status reads (setup installs the tasks), so the status is read again before the
@@ -647,16 +668,52 @@ internal sealed class BlockCoordinator : IDisposable
                     await ReadBlockStatusAsync(CancellationToken.None);
                 }
             },
-            ct);
+            ct,
+            () => RefusedAtSessionEnd(name));
+    }
+
+    // The result of a change that was not started because a session end is in progress. The tray shows it as a
+    // card, as it does any result that is not a success.
+    private static ControllerResult RefusedAtSessionEnd(string action) =>
+        new(OpStatus.NotAttempted, SessionEndingMessage, [StepOutcomes.NotAttempted(action, "The session is ending, so nothing was sent.")]);
+
+    // The same for a connect. Reported as cancelled because the session is ending, so the tray logs that reason
+    // and treats it neither as a connect that worked nor as one that failed.
+    private ToggleReport RefusedAtSessionEnd(ToggleRequest request)
+    {
+        ShowCard(request, SessionEndingMessage);
+        return new ToggleReport(request.Connect, OpStatus.NotAttempted, SessionEndingMessage,
+            [StepOutcomes.NotAttempted("connect", "The session is ending, so nothing was sent.")], Cancelled: true)
+        {
+            CancelledBecause = "the session is ending",
+        };
     }
 
     // WM_QUERYENDSESSION and WM_ENDSESSION. Never waits: the block is started and its result logged later, if the
     // session survives long enough.
+    //
+    // Every such message that says the session is ending sets _sessionEnding, whether or not a block is sent for
+    // it, and only WM_ENDSESSION with wParam FALSE clears it. What Windows documents: a window that answers TRUE
+    // to WM_QUERYENDSESSION (ShellMessageWindow always does) "receives the WM_ENDSESSION message, regardless of
+    // how the other applications respond", with wParam "set to the results of the WM_QUERYENDSESSION message", so
+    // a session end another application refuses does reach here as wParam FALSE.
+    // https://learn.microsoft.com/windows/win32/shutdown/wm-queryendsession
+    // https://learn.microsoft.com/windows/win32/shutdown/wm-endsession
+    // What those pages do not promise: how long after the query WM_ENDSESSION arrives, or any message at all when
+    // a session end is abandoned after WM_ENDSESSION with wParam TRUE ("the session can end any time after all
+    // applications have returned from processing this message" is all it says). So there is no documented moment
+    // or time after which a session that was said to be ending is known not to be, and nothing here guesses one:
+    // the flag then stays set until Earshot is restarted, which SessionEndingMessage says.
     public void OnSessionEnding(SessionEndingEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
         if (!e.IsQuery && !e.Ending)
         {
+            if (_sessionEnding && !_sessionBlockIssued)
+            {
+                _log.Info("The session end was cancelled. Connects and changes are taken again.");
+            }
+
             if (_sessionBlockIssued)
             {
                 _log.Info("The session end was cancelled after a block was queued for it.");
@@ -668,9 +725,16 @@ internal sealed class BlockCoordinator : IDisposable
                 }
             }
 
+            _sessionEnding = false;
             _sessionBlockIssued = false;
             _sessionBlockWhileInUse = false;
             return;
+        }
+
+        if (!_sessionEnding)
+        {
+            _sessionEnding = true;
+            _log.Info("Session ending: no connect, allow, setting change or device change starts until Windows says the session end was cancelled.");
         }
 
         if (_sessionBlockIssued || _disposed)
@@ -841,23 +905,30 @@ internal sealed class BlockCoordinator : IDisposable
     // Waits for the operation in flight, then runs body as the one in flight. The task body returns completes only
     // after body has, clean-up included.
     //
-    // Once the session-end block has been issued, nothing here ever starts a new operation, the session-end
-    // block finishing does not change that: OnSessionEnding cancels _sessionBlockIssued only when the session
-    // end itself is cancelled (a WM_ENDSESSION with wParam false), which is the one condition under which a
-    // later connect, allow or setting change is safe again. Until then this waits rather than proceeds, so a
-    // click or a hotkey pressed after the block has already been sent and finished cannot still queue an allow
-    // behind it; the wait ends only when the caller's own token is cancelled (Earshot closing) or the session end
-    // is cancelled and a fresh call is made. This does not change what OnSessionEnding itself does.
-    // Never completes on its own: used to make RunExclusiveAsync wait on the caller's token alone once the
-    // session-end block has been issued and has already finished, so the wait cancels (Earshot closing, or a
-    // fresh call after the session end is itself cancelled) instead of spinning.
-    private static readonly Task NeverCompletingTask = new TaskCompletionSource().Task;
-
-    private async Task<T> RunExclusiveAsync<T>(string name, Func<CancellationToken, Task<T>> body, CancellationToken ct)
+    // refusedAtSessionEnd is given by every operation that could enable the nodes or change a setting, the device
+    // or the set-up (connect, protect, setboot, set-device, setup), and left null by those that can only make the
+    // at-rest state safer or change nothing (disconnect, the idle block, the start-up check, the block before
+    // closing). While a session end is in progress the first kind is refused with that result, at once when asked
+    // for then and as soon as the work it waited behind ends when the session end began meanwhile: if the process
+    // is killed by the shutdown, an allow sent now would leave the nodes enabled across it. Nothing waits for the
+    // session end to be cancelled, so every wait here ends when the work in flight does, and that work has limits
+    // of its own (see the class comment).
+    private async Task<T> RunExclusiveAsync<T>(string name, Func<CancellationToken, Task<T>> body, CancellationToken ct, Func<T>? refusedAtSessionEnd = null)
     {
-        while (_current is not null || _sessionBlock is { IsCompleted: false } || _sessionBlockIssued)
+        while (true)
         {
-            Task waitFor = _current ?? (_sessionBlock is { IsCompleted: false } completing ? completing : NeverCompletingTask);
+            if (_sessionEnding && refusedAtSessionEnd is not null)
+            {
+                _log.Info(name + ": not started, because the session is ending.");
+                return refusedAtSessionEnd();
+            }
+
+            if (_current is null && _sessionBlock is not { IsCompleted: false })
+            {
+                break;
+            }
+
+            Task waitFor = _current ?? _sessionBlock!;
             _log.Write(LogLevel.Debug, name + ": waiting for " + (_currentName ?? "the session-end block") + " to finish.");
             await waitFor.WaitAsync(ct);
         }
@@ -1382,7 +1453,7 @@ internal sealed class BlockCoordinator : IDisposable
             return;
         }
 
-        if (_closing || _sessionBlockIssued)
+        if (_closing || _sessionEnding)
         {
             _pendingProtect = true;
             _log.Info("connect clean-up: " + (_closing ? "Earshot is closing" : "the session is ending") + ", so protection is put back at the next connect.");
@@ -1547,9 +1618,9 @@ internal sealed class BlockCoordinator : IDisposable
 
             var facts = new ProtectionFacts(CoordinatorRules.PhaseOf(run.Status), run.Services?.State ?? AudioProtectionState.Unknown, protect, intentPending);
             ProtectionAction action = ProtectionPolicy.Next(goal, facts, progress);
-            if (blockGoal && (_closing || _sessionBlockIssued || ct.IsCancellationRequested) && action is ProtectionAction.ReadServices or ProtectionAction.ProtectOn)
+            if (blockGoal && (_closing || _sessionEnding || ct.IsCancellationRequested) && action is ProtectionAction.ReadServices or ProtectionAction.ProtectOn)
             {
-                string cutShort = _closing ? "Earshot is closing" : _sessionBlockIssued ? "the session is ending" : "the block was cut short";
+                string cutShort = _closing ? "Earshot is closing" : _sessionEnding ? "the session is ending" : "the block was cut short";
                 _log.Info("protection Block: " + cutShort + ", so the nodes are blocked without changing protection first.");
                 action = ProtectionAction.BlockNodes;
             }
@@ -2396,6 +2467,9 @@ internal sealed class BlockCoordinator : IDisposable
             }
 
             _log.Info("Blocking the nodes: the AirPods were not in use for " + Seconds(delay) + " with nothing in flight (" + Utc(_time.GetUtcNow()) + ").");
+            // CancellationToken.None cannot wait for ever: RunExclusiveAsync only waits for the operation in flight
+            // and the session-end block, which end by limits of their own, never for a session end to be cancelled.
+            // Not refused at a session end: a block only makes the at-rest state safer.
             await RunExclusiveAsync("idle block", token => AutomaticBlockAsync("idle block", BlockReason.Idle, WatchedContainer(), token), CancellationToken.None);
         }
         catch (Exception ex)
@@ -2500,6 +2574,10 @@ internal sealed class BlockCoordinator : IDisposable
     {
         try
         {
+            // CancellationToken.None cannot wait for ever: the only waits in RunExclusiveAsync are for the operation
+            // in flight and the session-end block, each of which ends by limits of its own, and nothing there waits
+            // for a session end to be cancelled. Not refused at a session end: all it can send is a block, and its
+            // protection check is skipped then (StartUpCheckCoreAsync).
             await RunExclusiveAsync("start-up check", StartUpCheckCoreAsync, CancellationToken.None);
         }
         catch (Exception ex)
@@ -2537,6 +2615,14 @@ internal sealed class BlockCoordinator : IDisposable
             }
         }
 
+        if (_sessionEnding)
+        {
+            // Reverify never allows the nodes, but it may start a protect verb, which is a device change like any
+            // other; the check after the next connect or start-up applies it instead.
+            _log.Info("Start-up check: the session is ending, so protection is not checked now.");
+            return true;
+        }
+
         ProtectionRun check;
         try
         {
@@ -2572,6 +2658,10 @@ internal sealed class BlockCoordinator : IDisposable
     {
         try
         {
+            // CancellationToken.None cannot wait for ever: RunExclusiveAsync only waits for the operation in flight
+            // (cancelled by MarkClosing, with limits of its own) and the session-end block, never for a session end
+            // to be cancelled, and Exit bounds the whole wait besides (TrayContext.ExitAsync). Not refused at a
+            // session end: it is a block.
             await RunExclusiveAsync(ClosingBlockName, BlockBeforeClosingCoreAsync, CancellationToken.None);
         }
         catch (Exception ex)
@@ -2654,7 +2744,7 @@ internal sealed class BlockCoordinator : IDisposable
     private ToggleReport CancelledReport(bool connect, OpStatus status, string message, List<StepOutcome> steps) =>
         new(connect, status, message, steps, Cancelled: true)
         {
-            CancelledBecause = _sessionBlockIssued ? "the session is ending" : _closing ? "Earshot is closing" : null,
+            CancelledBecause = _sessionEnding ? "the session is ending" : _closing ? "Earshot is closing" : null,
         };
 
     private ToggleReport Finish(ToggleRequest request, OpStatus status, string message, List<StepOutcome> steps, bool showCard = true)
