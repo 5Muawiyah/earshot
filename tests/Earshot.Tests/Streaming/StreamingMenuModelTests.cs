@@ -13,7 +13,7 @@ public sealed class StreamingMenuModelTests
     private static StreamingDevice Device(string id, string name) => new(id, name, Guid.NewGuid());
 
     private static StreamingCoordinator Make(FakeStreamingPlatform fake, StreamingSettings? settings = null) =>
-        new(fake, new ManualBusyGate(), settings ?? StreamingSettings.Default, _ => false, new TestTimeProvider());
+        new(fake, new ManualBusyGate(), settings ?? StreamingSettings.Default, _ => false, new TestTimeProvider(), new CapturingLog());
 
     private static string[] Describe(StreamingMenuModel menu) =>
         menu.Items.Select(i => (i.Enabled ? "[x] " : "[ ] ") + i.Text + " <" + i.Command + ">").ToArray();
@@ -146,19 +146,19 @@ public sealed class StreamingMenuModelTests
         Assert.IsNull(coordinator.Menu.Items[^1].DeviceId);
     }
 
+    // Remembered for as long as Earshot runs and no longer: nothing about a device is ever saved.
     [TestMethod]
-    public async Task TheDeviceLastPlayedFromComesFirst()
+    public async Task TheDeviceLastPlayedFromComesFirstForTheRestOfTheRun()
     {
         var fake = new FakeStreamingPlatform();
         fake.NextDiscovery(FakeStreamingPlatform.Found(Device("a", "Phone A"), Device("b", "Phone B"), Device("c", "Phone C")));
-        using StreamingCoordinator remembered = Make(fake, StreamingSettings.Default with { LastDeviceKey = StreamingLog.Key("c") });
+        using StreamingCoordinator remembered = Make(fake);
         await remembered.RefreshAsync(CancellationToken.None);
 
         CollectionAssert.AreEqual(
-            Sequence.Of("Phone C", "Phone A", "Phone B"),
+            Sequence.Of("Phone A", "Phone B", "Phone C"),
             remembered.Menu.Items.Where(i => i.Command == StreamingMenuCommand.Play).Select(i => i.Text).ToArray());
 
-        // And a successful start is remembered by the coordinator itself, without waiting for the settings.
         await remembered.StartPlayingAsync("b", CancellationToken.None);
         remembered.StopPlaying();
         CollectionAssert.AreEqual(
@@ -219,5 +219,24 @@ public sealed class StreamingMenuModelTests
         Assert.AreEqual(StreamingLog.Key("x"), StreamingLog.Key("x"));
         Assert.AreNotEqual(StreamingLog.Key("x"), StreamingLog.Key("y"));
         Assert.IsFalse(StreamingLog.Key(StreamingCoordinatorTests.PlaceholderId).Contains("PLACEHOLDER", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // The id Windows gives embeds the device's Bluetooth address, and the rest of it can be guessed, so a plain hash
+    // of it can be undone by trying every address. The key is keyed with a secret made afresh each time Earshot
+    // starts, held in memory and written nowhere: without it a key in the log cannot be worked back to a device.
+    [TestMethod]
+    public void TheKeyCannotBeRecomputedFromTheIdAlone()
+    {
+        string id = StreamingCoordinatorTests.PlaceholderId;
+        string plain = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(id)))[..12];
+
+        Assert.AreNotEqual(plain, StreamingLog.Key(id), "The key is still the unsalted hash of the id.");
+
+        byte[] one = new byte[32];
+        byte[] other = new byte[32];
+        other[0] = 1;
+        Assert.AreEqual(StreamingLog.Key(id, one), StreamingLog.Key(id, one));
+        Assert.AreNotEqual(StreamingLog.Key(id, one), StreamingLog.Key(id, other), "A different secret gives a different key.");
+        Assert.AreNotEqual(plain, StreamingLog.Key(id, one));
     }
 }

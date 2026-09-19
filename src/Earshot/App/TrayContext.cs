@@ -200,8 +200,7 @@ internal sealed class TrayContext : ApplicationContext
     private VoiceOverSettings? _voiceApplied;
 
     // Play from a phone: the running coordinator, or null while the feature is off (the default) or still being
-    // started; the settings it was last applied with, the remembered device left out, so a change that asks for
-    // nothing different restarts nothing; a count that a start still under way compares, to see it is no longer
+    // started; the settings it was last applied with, so a change that asks for nothing different restarts nothing; a count that a start still under way compares, to see it is no longer
     // wanted; and whether a start or a read of the list is in flight, so a second click starts no second one.
     private StreamingCoordinator? _streaming;
     private StreamingSettings? _streamingApplied;
@@ -1030,8 +1029,7 @@ internal sealed class TrayContext : ApplicationContext
     // Starts or stops Play from a phone to match what settings.Streaming (clamped) now asks for, and does nothing
     // when a settings change asked for nothing different. Called from the constructor and from OnSettingsChanged, on
     // the UI thread only. Off is the default, and while it is off no platform is built, no WinRT type is touched,
-    // nothing is enumerated and nothing listens. The remembered device is left out of the comparison: saving it after
-    // a successful start must not restart the coordinator that just started.
+    // nothing is enumerated and nothing listens.
     private void ApplyStreaming()
     {
         if (_closed || _closing)
@@ -1040,7 +1038,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         StreamingSettings current = _registry.Settings.Current.Streaming;
-        StreamingSettings wanted = current.Clamped(out IReadOnlyList<StepOutcome> notes) with { LastDeviceKey = "" };
+        StreamingSettings wanted = current.Clamped(out IReadOnlyList<StepOutcome> notes);
         if (wanted == _streamingApplied)
         {
             return;
@@ -1067,8 +1065,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         int generation = _streamingGeneration;
-        StreamingSettings settings = wanted with { LastDeviceKey = current.LastDeviceKey };
-        Launch("play from a phone (switch on)", () => StartStreamingAsync(settings, generation), CardPlace.NearTray);
+        Launch("play from a phone (switch on)", () => StartStreamingAsync(wanted, generation), CardPlace.NearTray);
     }
 
     // The support check is a call into WinRT, so the coordinator is built on a pool thread and taken up here, on the
@@ -1082,7 +1079,7 @@ internal sealed class TrayContext : ApplicationContext
             platform = SafeStreamingPlatform.Wrap(platform, _log);
         }
 
-        StreamingCoordinator streaming = await Task.Run(() => new StreamingCoordinator(platform, _streamingGate, settings, IsManagedDevice, TimeProvider.System));
+        StreamingCoordinator streaming = await Task.Run(() => new StreamingCoordinator(platform, _streamingGate, settings, IsManagedDevice, TimeProvider.System, _log));
         if (_closed || _closing || generation != _streamingGeneration)
         {
             _log.Info("Play from a phone: no longer wanted by the time it was ready, so it was not started.");
@@ -1120,7 +1117,9 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     // Lets go of everything Play from a phone holds. Closing waits for it, up to StreamingShutdownWait; a settings
-    // change and a session end do not wait, so the UI thread is never held for them.
+    // change and a session end do not wait, so the UI thread is never held for them. The coordinator writes the
+    // outcome of every release to the log itself, with its raw code, as each one happens; what is left to the tray is
+    // to tell the owner, once, when Windows did not confirm one.
     private void StopStreaming(bool wait, string why)
     {
         // A start still building its coordinator sees this and disposes what it built.
@@ -1133,30 +1132,29 @@ internal sealed class TrayContext : ApplicationContext
         _streaming = null;
         streaming.Changed -= OnStreamingChanged;
         _log.Info("Play from a phone: letting go of any connection, because " + why + ".");
-        Task<StreamingReleaseOutcome> release = Task.Run(() =>
-        {
-            StreamingReleaseOutcome outcome = streaming.ReleaseAll();
-            streaming.Dispose();
-            return outcome;
-        });
 
         if (!wait)
         {
-            _ = LogStreamingReleaseAsync(release);
+            // Started now whatever else is going on, Exit included, and kept with the other actions in flight so Exit
+            // waits for it. Not through Launch, which starts nothing once Earshot is closing: this must always run.
+            Task letGo = LetGoOfStreamingAsync(streaming);
+            if (!letGo.IsCompleted)
+            {
+                _pending.Add(letGo, "play from a phone (let go)");
+                _ = ForgetWhenDoneAsync(letGo);
+            }
+
             return;
         }
 
+        Task release = Task.Run(() => LetGoOfEverything(streaming));
         try
         {
-            if (release.Wait(_streamingShutdownWait))
-            {
-                LogStreamingRelease(release.Result);
-            }
-            else
+            if (!release.Wait(_streamingShutdownWait))
             {
                 _log.Warn("Play from a phone: Windows had not let go of the connection after " + Seconds(_streamingShutdownWait) +
                     ". Earshot closes without waiting longer; the references end with the process.");
-                _ = LogStreamingReleaseAsync(release);
+                _ = ObserveStreamingReleaseAsync(release);
             }
         }
         catch (AggregateException ex)
@@ -1166,11 +1164,31 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    private async Task LogStreamingReleaseAsync(Task<StreamingReleaseOutcome> release)
+    private static void LetGoOfEverything(StreamingCoordinator streaming)
+    {
+        streaming.ReleaseAll();
+        streaming.Dispose();
+    }
+
+    private async Task LetGoOfStreamingAsync(StreamingCoordinator streaming)
     {
         try
         {
-            LogStreamingRelease(await release.ConfigureAwait(false));
+            await Task.Run(() => LetGoOfEverything(streaming));
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Play from a phone: letting go of the connection failed (" + NativeCodes.Name(ex.HResult) + ", " + ex.GetType().Name + ").", ex);
+        }
+
+        ShowStreamingReleaseFailure(streaming, CardPlace.NearTray);
+    }
+
+    private async Task ObserveStreamingReleaseAsync(Task release)
+    {
+        try
+        {
+            await release.ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1178,10 +1196,20 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    private void LogStreamingRelease(StreamingReleaseOutcome outcome) =>
-        _log.Write(
-            outcome.Released || outcome.Step.Code == NativeCodes.NotAttempted ? LogLevel.Info : LogLevel.Warn,
-            "Play from a phone: released " + (outcome.Released ? "device " + StreamingLog.Key(outcome.DeviceId) : "nothing") + ". " + StreamingLog.Describe(outcome.Step));
+    // When Windows did not confirm a release, the owner is told once, in the coordinator's own words, that the phone
+    // may still be connected to this PC. Asked for at the end of everything the tray starts on the coordinator, so
+    // whichever step the release failed in, it is said, and said in place of whatever else that step had to say. The
+    // code behind it is already in the log. No card is shown once Earshot is closing (ShowCard); the log still has it.
+    private bool ShowStreamingReleaseFailure(StreamingCoordinator streaming, CardPlace place)
+    {
+        if (streaming.TakeReleaseFailureNotice() is not { } notice)
+        {
+            return false;
+        }
+
+        ShowCard(TrayStatus.AppName, notice, place);
+        return true;
+    }
 
     // The coordinator raises this from a pool thread or from the thread Windows reports a link change on.
     private void OnStreamingChanged(object? sender, EventArgs e) =>
@@ -1221,7 +1249,7 @@ internal sealed class TrayContext : ApplicationContext
                 break;
 
             case StreamingMenuCommand.Stop:
-                Launch("play from a phone (stop)", () => StopPlayingAsync(streaming, place), place);
+                Launch("play from a phone (stop)", () => StopPlayingAsync(streaming, item.DeviceId, place), place);
                 break;
 
             case StreamingMenuCommand.Refresh:
@@ -1271,7 +1299,6 @@ internal sealed class TrayContext : ApplicationContext
             if (discovery.Status == StreamingDiscoveryStatus.Ok)
             {
                 _log.Info("Play from a phone (list): " + discovery.Devices.Count.ToString(CultureInfo.InvariantCulture) + " device(s) can send audio to this PC.");
-                ForgetLastStreamingDeviceIfGone(discovery);
             }
             else
             {
@@ -1282,6 +1309,8 @@ internal sealed class TrayContext : ApplicationContext
                 }
             }
 
+            // A good read lets go of a device in use that it no longer holds; if Windows did not confirm that, say so.
+            ShowStreamingReleaseFailure(streaming, place);
             UpdatePresentation(forceIcon: false);
         }
         finally
@@ -1290,23 +1319,17 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    // The remembered device is forgotten once a good read of the list no longer holds it.
-    private void ForgetLastStreamingDeviceIfGone(StreamingDiscovery discovery)
-    {
-        string last = _registry.Settings.Current.Streaming.LastDeviceKey;
-        if (last.Length == 0 || discovery.Devices.Any(d => StreamingLog.Key(d.DeviceId) == last))
-        {
-            return;
-        }
-
-        _log.Info("Play from a phone: the device last played from is no longer in the list, so it is forgotten.");
-        TryUpdateSettings("play from a phone (forget last device)", s => s.Streaming = s.Streaming with { LastDeviceKey = "" }, CardPlace.NearTray);
-    }
-
     // Starts playing from one device: enable, then open, through the coordinator. Refused with a card, before
-    // anything is asked of Windows, while a session end is in progress and while the tray or the block coordinator is
-    // busy with the AirPods, so the two never meet on the radio. One start at a time: a second click while one is in
-    // flight is answered, not queued. The owner's connect and disconnect are never held up by this.
+    // anything is asked of Windows, while a session end is in progress, and while, at the moment of the click and as
+    // read here on the UI thread, the tray has a connect, a disconnect or a menu action in flight or the block
+    // coordinator has an operation in flight. One start at a time: a second click while one is in flight is answered,
+    // not queued.
+    //
+    // That is all that is guaranteed, and it runs one way only. Nothing holds the AirPods side back once a start is
+    // under way: the owner's connect and disconnect are never held up by this, on purpose, and the block
+    // coordinator's own work (the check at start-up, an automatic block) can begin at any time, so either may run
+    // while Windows is still enabling or opening the phone's connection. What one radio does when the two overlap is
+    // not documented anywhere and is a live-test item; nothing here claims they cannot meet.
     //
     // Safe mode is not checked here. It is enforced in one place, at the bottom: StartStreamingAsync wraps the platform
     // in SafeStreamingPlatform, which refuses to enable or open whoever asks, the way the registry wraps the
@@ -1326,7 +1349,8 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         // The coordinator reads the busy state again from a pool thread, through the gate. It is written here from
-        // the check just made, so the two agree at the moment of the click whatever was last presented.
+        // the check just made, so the two agree at the moment of the click whatever was last presented. By the time
+        // the pool thread reads it, it is a moment old: a second look at the same answer, not a lock.
         _streamingGate.Set(false);
         _streamingStartInFlight = true;
         try
@@ -1341,9 +1365,14 @@ internal sealed class TrayContext : ApplicationContext
                 return;
             }
 
-            // Every outcome with something to tell the owner has left its sentence on the status line. A start that
+            // A release Windows did not confirm is what the owner most needs to know, so it takes the card. Otherwise
+            // every outcome with something to tell the owner has left its sentence on the status line. A start that
             // never began has none, unless it was the busy gate that stopped it.
-            if (outcome.Step.Detail == SafeDecorators.Message)
+            if (ShowStreamingReleaseFailure(streaming, place))
+            {
+                // Said. The reason the start failed is in the log, a line above the release that failed.
+            }
+            else if (outcome.Step.Detail == SafeDecorators.Message)
             {
                 ShowCard(TrayStatus.AppName, SafeDecorators.Message, place);
             }
@@ -1356,15 +1385,6 @@ internal sealed class TrayContext : ApplicationContext
                 ShowCard(TrayStatus.AppName, StreamingCopy.BusyJustNow, place);
             }
 
-            if (open)
-            {
-                string key = StreamingLog.Key(deviceId);
-                if (_registry.Settings.Current.Streaming.LastDeviceKey != key)
-                {
-                    TryUpdateSettings("play from a phone (last device)", s => s.Streaming = s.Streaming with { LastDeviceKey = key }, place);
-                }
-            }
-
             UpdatePresentation(forceIcon: false);
         }
         finally
@@ -1373,24 +1393,20 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    // Stops accepting audio from the device in use. Always allowed, a session end included: it only lets go.
-    private async Task StopPlayingAsync(StreamingCoordinator streaming, CardPlace place)
+    // Stops accepting audio from one device: the one in use, or one Windows has not yet confirmed letting go of, which
+    // keeps its Stop item so that the owner can try again. Always allowed, a session end included: it only lets go.
+    // The card says this PC stopped accepting audio only when Windows confirmed it.
+    private async Task StopPlayingAsync(StreamingCoordinator streaming, string? deviceId, CardPlace place)
     {
-        StreamingReleaseOutcome outcome = await Task.Run(streaming.StopPlaying);
-        LogStreamingRelease(outcome);
+        StreamingReleaseOutcome outcome = await Task.Run(() => streaming.StopPlaying(deviceId));
         if (_closed)
         {
             return;
         }
 
-        if (outcome.Released)
+        if (!ShowStreamingReleaseFailure(streaming, place) && outcome.Released)
         {
             ShowCard(TrayStatus.AppName, streaming.StatusLine, place);
-        }
-        else if (outcome.Step.Code != NativeCodes.NotAttempted)
-        {
-            // Windows did not confirm it let go, so the card does not say it did.
-            ShowCard(TrayStatus.AppName, SomethingWentWrongMessage, place);
         }
 
         UpdatePresentation(forceIcon: false);
@@ -1465,9 +1481,11 @@ internal sealed class TrayContext : ApplicationContext
 
         RefreshIcon(remeasure: forceIcon, force: forceIcon);
 
-        // Every change to the tray's busy state comes through here, so this is where the streaming coordinator's view
-        // of it is kept up to date. The streaming line is added only while a device is in use; at rest the tooltip is
-        // what it always was.
+        // The tray's own busy flags change only beside a call to this method, and the block coordinator's Changed
+        // event ends here too, so this is where the copy of the busy state that the streaming coordinator reads is
+        // refreshed. It is a copy: written here on the UI thread, read later on a pool thread, and so possibly a
+        // moment old when read. StartPlayingAsync explains what that does and does not guarantee. The streaming line
+        // is added only while a device is in use or may still be connected; at rest the tooltip is what it always was.
         _streamingGate.Set(IsBusy || _coordinator.IsBusy);
         _notifyIcon.Text = StreamingCopy.TooltipWith(
             TrayStatus.Tooltip(_snapshot, BlockStatus, _registry.Settings.Current),

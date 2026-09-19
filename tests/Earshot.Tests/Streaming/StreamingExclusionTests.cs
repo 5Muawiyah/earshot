@@ -79,7 +79,7 @@ public sealed class StreamingExclusionTests
         var inner = new FakeStreamingPlatform();
         inner.NextDiscovery(FakeStreamingPlatform.Found(new StreamingDevice("phone", "Test Phone", Other)));
         using var coordinator = new StreamingCoordinator(
-            SafeStreamingPlatform.Wrap(inner, new CapturingLog()), new ManualBusyGate(), StreamingSettings.Default, _ => false, new TestTimeProvider());
+            SafeStreamingPlatform.Wrap(inner, new CapturingLog()), new ManualBusyGate(), StreamingSettings.Default, _ => false, new TestTimeProvider(), new CapturingLog());
         await coordinator.RefreshAsync(CancellationToken.None);
 
         StreamingOpenOutcome outcome = await coordinator.StartPlayingAsync("phone", CancellationToken.None);

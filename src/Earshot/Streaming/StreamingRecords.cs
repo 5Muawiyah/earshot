@@ -25,8 +25,13 @@ internal sealed record StreamingEnableOutcome(StreamingEnableStatus Status, stri
 
 internal sealed record StreamingOpenOutcome(StreamingOpenStatus Status, string DeviceId, StepOutcome Step);
 
-// Released is false when there was nothing to release.
-internal sealed record StreamingReleaseOutcome(bool Released, string DeviceId, StepOutcome Step);
+// Released is false when there was nothing to release, and also when Windows did not confirm the release. Failed
+// tells the two apart: "nothing to release" is an ordinary answer (no call was made, so the step carries one of
+// Earshot's own no-call codes), and anything else that is not a release is a connection that may still be there.
+internal sealed record StreamingReleaseOutcome(bool Released, string DeviceId, StepOutcome Step)
+{
+    public bool Failed => !Released && Step.Code != NativeCodes.NotAttempted && Step.Code != NativeCodes.NotAvailable;
+}
 
 internal sealed record StreamingLinkChanged(string DeviceId, StreamingLinkState State);
 
@@ -43,6 +48,8 @@ internal static class StreamingDetail
     public const string NothingEnabled = "nothing enabled";
     public const string NotEnabled = "not enabled";
     public const string ReleasedMeanwhile = "released meanwhile";
+    public const string ReleaseFailed = "release failed";
+    public const string EnableInFlight = "an enable is already in flight";
     public const string NoExtendedError = "no extended error";
     public const string AlreadyOpen = "already open";
 }

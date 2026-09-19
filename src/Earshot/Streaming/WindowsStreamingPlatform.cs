@@ -24,6 +24,15 @@ namespace Earshot.Streaming;
 //
 // Every call is behind PlatformGuard, and every catch records the raw HRESULT and the exception type on the
 // record it returns. The exception message is never kept: text from Windows can carry a device path.
+// A connection the platform holds, as far as letting go of it is concerned. The real one wraps an
+// AudioPlaybackConnection; a test stands one in, so what Release does when Windows will not close a connection can
+// be run without one.
+internal interface IHeldLink
+{
+    // Releases the connection. Never throws: a failure comes back as a step with the raw HRESULT and the type.
+    StepOutcome Close();
+}
+
 internal sealed class WindowsStreamingPlatform : IStreamingPlatform
 {
     // Asked for so the device Earshot manages can be recognised by its container, without reading the id.
@@ -43,8 +52,13 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
     private readonly Lock _gate = new();
 
     // A connection stays here for as long as it should stay enabled: "the underlying transport is deactivated
-    // when all references are released", so one the collector could reach would stop by itself.
-    private readonly Dictionary<string, Link> _links = new(StringComparer.Ordinal);
+    // when all references are released", so one the collector could reach would stop by itself. It also stays
+    // here when Windows would not close it, so the next Release tries the same connection again.
+    private readonly Dictionary<string, IHeldLink> _links = new(StringComparer.Ordinal);
+
+    // Ids whose connection is being created and enabled right now, so a second call for the same id never makes a
+    // second connection that would then have to be let go of quietly.
+    private readonly HashSet<string> _enabling = new(StringComparer.Ordinal);
 
     public WindowsStreamingPlatform(ILog log)
     {
@@ -119,55 +133,64 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
             {
                 return new StreamingEnableOutcome(StreamingEnableStatus.Enabled, deviceId, StepOutcomes.FromHResult(EnableStep, 0, "already enabled"));
             }
-        }
 
-        AudioPlaybackConnection? connection;
-        try
-        {
-            // "If the specified device does not have support for audio streaming, the return value is null."
-            // https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnection.trycreatefromid
-            connection = AudioPlaybackConnection.TryCreateFromId(deviceId);
-        }
-        catch (Exception ex)
-        {
-            return new StreamingEnableOutcome(StreamingEnableStatus.StartFailed, deviceId, StreamingCoordinator.Failure(CreateStep, ex));
-        }
-
-        if (connection is null)
-        {
-            return new StreamingEnableOutcome(StreamingEnableStatus.NotStreamCapable, deviceId, StepOutcomes.FromHResult(CreateStep, 0, "no connection for this device"));
-        }
-
-        var link = new Link(this, deviceId, connection);
-        bool kept;
-        lock (_gate)
-        {
-            kept = _links.TryAdd(deviceId, link);
-        }
-
-        if (!kept)
-        {
-            // Another call enabled the same device meanwhile. That one stands; this one is let go.
-            LogClose(link.Close());
-            return new StreamingEnableOutcome(StreamingEnableStatus.Enabled, deviceId, StepOutcomes.FromHResult(EnableStep, 0, "already enabled"));
+            if (!_enabling.Add(deviceId))
+            {
+                return new StreamingEnableOutcome(StreamingEnableStatus.StartFailed, deviceId, StepOutcomes.NotAttempted(EnableStep, StreamingDetail.EnableInFlight));
+            }
         }
 
         try
         {
-            // Enabling is its own step: "audio does not play until the connection has been opened".
-            // https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnection.startasync
-            await connection.StartAsync().AsTask(cancellationToken).ConfigureAwait(false);
-            return new StreamingEnableOutcome(StreamingEnableStatus.Enabled, deviceId, StepOutcomes.FromHResult(EnableStep, 0));
+            AudioPlaybackConnection? connection;
+            try
+            {
+                // "If the specified device does not have support for audio streaming, the return value is null."
+                // https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnection.trycreatefromid
+                connection = AudioPlaybackConnection.TryCreateFromId(deviceId);
+            }
+            catch (Exception ex)
+            {
+                return new StreamingEnableOutcome(StreamingEnableStatus.StartFailed, deviceId, StreamingCoordinator.Failure(CreateStep, ex));
+            }
+
+            if (connection is null)
+            {
+                return new StreamingEnableOutcome(StreamingEnableStatus.NotStreamCapable, deviceId, StepOutcomes.FromHResult(CreateStep, 0, "no connection for this device"));
+            }
+
+            // Held from the moment it exists. If anything after this fails or is cancelled it is still held, and the
+            // caller lets go of it through Release, where the outcome of that is recorded (see IStreamingPlatform).
+            var link = new Link(this, deviceId, connection);
+            lock (_gate)
+            {
+                _links[deviceId] = link;
+            }
+
+            try
+            {
+                link.Listen();
+
+                // Enabling is its own step: "audio does not play until the connection has been opened".
+                // https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnection.startasync
+                await connection.StartAsync().AsTask(cancellationToken).ConfigureAwait(false);
+                return new StreamingEnableOutcome(StreamingEnableStatus.Enabled, deviceId, StepOutcomes.FromHResult(EnableStep, 0));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new StreamingEnableOutcome(StreamingEnableStatus.StartFailed, deviceId, StreamingCoordinator.Failure(EnableStep, ex));
+            }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        finally
         {
-            Release(deviceId);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Release(deviceId);
-            return new StreamingEnableOutcome(StreamingEnableStatus.StartFailed, deviceId, StreamingCoordinator.Failure(EnableStep, ex));
+            lock (_gate)
+            {
+                _enabling.Remove(deviceId);
+            }
         }
     }
 
@@ -182,7 +205,7 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
         Link? link;
         lock (_gate)
         {
-            _links.TryGetValue(deviceId, out link);
+            link = _links.TryGetValue(deviceId, out IHeldLink? held) ? held as Link : null;
         }
 
         if (link is null)
@@ -226,10 +249,10 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
             return new StreamingReleaseOutcome(false, deviceId, StepOutcomes.NotAvailable(ReleaseStep, StreamingDetail.Support));
         }
 
-        Link? link;
+        IHeldLink? link;
         lock (_gate)
         {
-            _links.Remove(deviceId, out link);
+            _links.TryGetValue(deviceId, out link);
         }
 
         if (link is null)
@@ -237,8 +260,33 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
             return new StreamingReleaseOutcome(false, deviceId, StepOutcomes.NotAttempted(ReleaseStep, StreamingDetail.NothingEnabled));
         }
 
+        // Forgotten only once Windows has confirmed. One it would not close is kept, so the next Release tries the
+        // same connection again, and the step that says why goes back to the caller, which logs it and tells the owner.
         StepOutcome step = link.Close();
-        return new StreamingReleaseOutcome(step.Ok, deviceId, step);
+        if (!step.Ok)
+        {
+            return new StreamingReleaseOutcome(false, deviceId, step);
+        }
+
+        lock (_gate)
+        {
+            if (_links.TryGetValue(deviceId, out IHeldLink? current) && ReferenceEquals(current, link))
+            {
+                _links.Remove(deviceId);
+            }
+        }
+
+        return new StreamingReleaseOutcome(true, deviceId, step);
+    }
+
+    // Puts a stand-in connection where a real one would be, for the test of Release above. Nothing in the
+    // application calls it.
+    internal void HoldForTest(string deviceId, IHeldLink link)
+    {
+        lock (_gate)
+        {
+            _links[deviceId] = link;
+        }
     }
 
     // How many connections are held, for the tests only.
@@ -256,14 +304,6 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
     [SupportedOSPlatform("windows10.0.10240.0")]
     private static Guid ContainerOf(DeviceInformation information) =>
         information.Properties.TryGetValue(ContainerIdProperty, out object? value) && value is Guid container ? container : Guid.Empty;
-
-    private void LogClose(StepOutcome step)
-    {
-        if (!step.Ok)
-        {
-            _log.Warn("Play from a phone: " + StreamingLog.Describe(step));
-        }
-    }
 
     // Windows calls this on a thread of its own. A handler that throws there would be lost inside the
     // projection, so it is caught and logged here instead.
@@ -283,7 +323,7 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
     // one the connection was created from, so a report never depends on how Windows spells it back. The members
     // that call WinRT carry the platform attribute, not the class: the class is only a holder, and it is named
     // by the dictionary above, which exists on every build of Windows.
-    private sealed class Link
+    private sealed class Link : IHeldLink
     {
         private readonly WindowsStreamingPlatform _owner;
         private readonly string _deviceId;
@@ -294,10 +334,14 @@ internal sealed class WindowsStreamingPlatform : IStreamingPlatform
             _owner = owner;
             _deviceId = deviceId;
             Connection = connection;
-            Connection.StateChanged += OnStateChanged;
         }
 
         public AudioPlaybackConnection Connection { get; }
+
+        // Its own step, not part of construction: subscribing is a call into Windows and can fail, and by then the
+        // connection must already be held, so that whatever happens it is let go of through Release.
+        [SupportedOSPlatform("windows10.0.19041.0")]
+        public void Listen() => Connection.StateChanged += OnStateChanged;
 
         // "Call Dispose to release the reference and free any associated resources."
         [SupportedOSPlatform("windows10.0.19041.0")]

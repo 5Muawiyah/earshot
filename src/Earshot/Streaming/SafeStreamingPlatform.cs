@@ -8,8 +8,11 @@ namespace Earshot.Streaming;
 // says "Safe mode: no device actions." and logs the refusal. The real platform is never called for those.
 // EnableAsync tells Windows to accept audio from a device and OpenAsync connects to it, so both are refused.
 // Release passes through: letting go of a connection is how the radio is left alone, and in safe mode there
-// is never one to let go of. The wrapped platform is held in a private field and exposed to nobody, tests
-// included: nothing may reach past a safe-mode decorator (SharedSystemWorkerTests holds the whole of src to that).
+// is never one to let go of. The wrapped platform is held in a private field and no member hands it out, to
+// tests or to anyone: nothing may reach past a safe-mode decorator. What enforces that is this file having no such
+// member, and review. SharedSystemWorkerTests is a scan of src for one name, the one the other decorators give
+// their accessor (it is not written here, or this comment would trip that scan): it catches a member of that name
+// and would not catch the same member under another.
 internal sealed class SafeStreamingPlatform : IStreamingPlatform
 {
     private readonly IStreamingPlatform _inner;

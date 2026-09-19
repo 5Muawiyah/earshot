@@ -22,7 +22,6 @@ public sealed class StreamingSettingsTests : IDisposable
     {
         Assert.IsFalse(new EarshotSettings().Streaming.Enabled);
         Assert.IsFalse(StreamingSettings.Default.Enabled);
-        Assert.AreEqual("", StreamingSettings.Default.LastDeviceKey);
         Assert.AreEqual(20, StreamingSettings.Default.OpenTimeoutSeconds);
         Assert.AreEqual(5, StreamingSettings.Default.DiscoveryTimeoutSeconds);
     }
@@ -109,7 +108,6 @@ public sealed class StreamingSettingsTests : IDisposable
     [DataRow("{ \"SchemaVersion\": 1, \"Streaming\": { \"OpenTimeoutSeconds\": \"soon\" } }")]
     [DataRow("{ \"SchemaVersion\": 1, \"Streaming\": { \"Enabled\": \"yes\" } }")]
     [DataRow("{ \"SchemaVersion\": 1, \"Streaming\": null }")]
-    [DataRow("{ \"SchemaVersion\": 1, \"Streaming\": { \"LastDeviceKey\": null } }")]
     public void AMemberOfTheWrongTypeResetsTheFileAndNeverThrows(string content)
     {
         File.WriteAllText(SettingsPath, content);
@@ -128,23 +126,37 @@ public sealed class StreamingSettingsTests : IDisposable
     public void TheWrittenJsonUsesThesePascalCaseStreamingMemberNames()
     {
         var store = new JsonSettingsStore(SettingsPath, _log);
-        store.Update(s => s.Streaming = s.Streaming with { Enabled = true, LastDeviceKey = "0123456789AB" });
+        store.Update(s => s.Streaming = s.Streaming with { Enabled = true });
 
         string json = File.ReadAllText(SettingsPath);
 
-        foreach (string member in Sequence.Of("\"Streaming\"", "\"Enabled\"", "\"LastDeviceKey\"", "\"OpenTimeoutSeconds\"", "\"DiscoveryTimeoutSeconds\""))
+        foreach (string member in Sequence.Of("\"Streaming\"", "\"Enabled\"", "\"OpenTimeoutSeconds\"", "\"DiscoveryTimeoutSeconds\""))
         {
             Assert.IsTrue(json.Contains(member, StringComparison.Ordinal), member + " is not in the JSON the shipped build wrote: " + json);
         }
 
-        foreach (string member in Sequence.Of("\"streaming\"", "\"lastDeviceId\"", "\"LastDeviceId\"", "\"openTimeoutSeconds\"", "\"askBeforeStopping\"", "\"AskBeforeStopping\""))
+        foreach (string member in Sequence.Of("\"streaming\"", "\"lastDeviceId\"", "\"LastDeviceId\"", "\"LastDeviceKey\"", "\"openTimeoutSeconds\"", "\"askBeforeStopping\"", "\"AskBeforeStopping\""))
         {
             Assert.IsFalse(json.Contains(member, StringComparison.Ordinal), member + " must not be written: " + json);
         }
 
         var reread = new JsonSettingsStore(SettingsPath, _log);
         Assert.IsTrue(reread.Current.Streaming.Enabled);
-        Assert.AreEqual("0123456789AB", reread.Current.Streaming.LastDeviceKey);
+    }
+
+    // A file the earlier v1.1 build saved may still hold the member that remembered a device. It is an unknown member
+    // now: ignored on the way in, and gone the next time the file is saved.
+    [TestMethod]
+    public void AFileThatStillHoldsARememberedDeviceLoadsAndTheMemberGoesAtTheNextSave()
+    {
+        File.WriteAllText(SettingsPath, "{ \"SchemaVersion\": 1, \"Streaming\": { \"Enabled\": true, \"LastDeviceKey\": \"0123456789AB\" } }");
+
+        var store = new JsonSettingsStore(SettingsPath, _log);
+        Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
+        Assert.IsTrue(store.Current.Streaming.Enabled);
+
+        store.Update(s => s.OpenOnStartup = false);
+        Assert.IsFalse(File.ReadAllText(SettingsPath).Contains("0123456789AB", StringComparison.Ordinal));
     }
 
     // A camelCase block, as in the workshop sample, is unknown members to this build: ignored, not an error, and
@@ -160,9 +172,9 @@ public sealed class StreamingSettingsTests : IDisposable
         Assert.AreEqual(StreamingSettings.Default, store.Current.Streaming);
     }
 
-    // Nothing about a device, a menu or an outcome is ever a setting: only these four members exist.
+    // Nothing about a device, a menu or an outcome is ever a setting: only these three members exist.
     [TestMethod]
-    public void OnlyTheFourMembersArePersisted()
+    public void OnlyTheThreeMembersArePersisted()
     {
         string[] members = typeof(StreamingSettings).GetProperties()
             .Where(p => p.GetMethod is { IsStatic: false } && p.Name != "EqualityContract")
@@ -170,6 +182,6 @@ public sealed class StreamingSettingsTests : IDisposable
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        CollectionAssert.AreEqual(Sequence.Of("DiscoveryTimeoutSeconds", "Enabled", "LastDeviceKey", "OpenTimeoutSeconds"), members);
+        CollectionAssert.AreEqual(Sequence.Of("DiscoveryTimeoutSeconds", "Enabled", "OpenTimeoutSeconds"), members);
     }
 }

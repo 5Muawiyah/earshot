@@ -1324,7 +1324,8 @@ internal sealed class TrayHarness : IDisposable
         FakeNativeHotkeys? nativeHotkeys = null,
         Earshot.Tests.Voice.FakeSpeechEngine? voiceEngine = null,
         Earshot.Tests.Streaming.FakeStreamingPlatform? streamingPlatform = null,
-        TimeSpan? streamingShutdownWait = null)
+        TimeSpan? streamingShutdownWait = null,
+        Queue<Earshot.Tests.Streaming.FakeStreamingPlatform>? streamingPlatforms = null)
     {
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
@@ -1383,10 +1384,12 @@ internal sealed class TrayHarness : IDisposable
             // hotkey on the machine that runs it.
             NativeHotkeys = NativeHotkeys,
             VoiceEngineFactory = () => Voice,
+            // One platform per switch-on when a test supplies a queue of them, so it can tell the first from the second;
+            // otherwise the same one every time.
             StreamingPlatformFactory = _ =>
             {
                 StreamingPlatformsBuilt++;
-                return Streaming;
+                return streamingPlatforms is { Count: > 0 } ? streamingPlatforms.Dequeue() : Streaming;
             },
             StreamingShutdownWait = streamingShutdownWait ?? TrayContext.DefaultStreamingShutdownWait,
         };

@@ -20,6 +20,7 @@ public sealed class TrayStreamingTests
 {
     private const string PhoneId = StreamingCoordinatorTests.PlaceholderId;
     private const string PhoneName = "Test Phone";
+    private const string MayStill = "Test Phone may still be connected to this PC. See the log.";
 
     private static readonly Guid PhoneContainer = IPhoneContainer;
 
@@ -125,23 +126,25 @@ public sealed class TrayStreamingTests
     }
 
     [TestMethod]
-    public void ClickingADeviceEnablesThenOpensAnswersOnACardAndRemembersOnlyAHash()
+    public void ClickingADeviceEnablesThenOpensAnswersOnACardAndSavesNothingAboutIt()
     {
         StaThread.Run(() =>
         {
             FakeStreamingPlatform fake = PlatformWith(Phone());
             using TrayHarness tray = On(fake);
             tray.PumpUntilIdle();
+            string settingsBefore = File.ReadAllText(tray.SettingsPath);
 
             ClickChild(tray, PhoneName);
 
             CollectionAssert.AreEqual(Sequence.Of("List", "Enable(" + PhoneId + ")", "Open(" + PhoneId + ")"), fake.Calls.ToArray());
             Assert.AreEqual("Waiting for Test Phone. Start playing something on it.", tray.Cards.Shown[^1].Content.Status);
-            Assert.AreEqual(StreamingLog.Key(PhoneId), tray.Settings.Current.Streaming.LastDeviceKey);
-
-            // Saving the remembered device must not restart the coordinator that just started.
             Assert.AreEqual(1, tray.StreamingPlatformsBuilt);
             Assert.IsEmpty(fake.CallsNamed("Release("));
+
+            // Nothing about the device is saved, not even a hash of its id: the settings file is what it was.
+            Assert.AreEqual(settingsBefore, File.ReadAllText(tray.SettingsPath));
+            Assert.IsFalse(File.ReadAllText(tray.SettingsPath).Contains(StreamingLog.Key(PhoneId), StringComparison.OrdinalIgnoreCase));
 
             tray.Context.Menu.Refresh();
             Assert.IsTrue(tray.Context.Menu.PlayFromPhoneItems.Single(i => i.Text == PhoneName).Checked);
@@ -204,7 +207,6 @@ public sealed class TrayStreamingTests
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "UnknownFailure"));
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "0x8007048F"), "The raw code Windows gave is recorded.");
             Assert.AreEqual("Release(" + PhoneId + ")", fake.Calls[^1]);
-            Assert.AreEqual("", tray.Settings.Current.Streaming.LastDeviceKey, "A start that failed is not remembered.");
 
             // And the tray carries on: the next click works.
             fake.OpenAnswers(PhoneId, StreamingOpenStatus.Open);
@@ -562,19 +564,196 @@ public sealed class TrayStreamingTests
         });
     }
 
+    // Item by item from the review. A release Windows does not confirm: one card that says the phone may still be
+    // connected, the raw code in the log, and a menu that still offers to let go rather than claiming it happened.
     [TestMethod]
-    public void TheRememberedDeviceIsForgottenOnceAGoodReadNoLongerHoldsIt()
+    public void AReleaseThatFailsGetsOneCardTheCodeInTheLogAndTheStopItemStays()
     {
         StaThread.Run(() =>
         {
             FakeStreamingPlatform fake = PlatformWith(Phone());
-            using var tray = new TrayHarness(
-                settings: s => s.Streaming = s.Streaming with { Enabled = true, LastDeviceKey = StreamingLog.Key("a-phone-that-was-unpaired") },
-                streamingPlatform: fake);
+            fake.OpenAnswers(PhoneId, StreamingOpenStatus.TimedOut);
+            fake.ReleaseFails(PhoneId);
+            using TrayHarness tray = On(fake, snapshot: Target(ConnectionState.Disconnected));
+            tray.PumpUntilIdle();
+            int cardsBefore = tray.Cards.Shown.Count;
+
+            ClickChild(tray, PhoneName);
+
+            Assert.AreEqual(cardsBefore + 1, tray.Cards.Shown.Count, "Told once.");
+            Assert.AreEqual(MayStill, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "0x8000FFFF"), "The failed release is in the log with its raw code.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "E_UNEXPECTED"));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "COMException"));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "TimedOut"), "And so is the reason the open failed.");
+
+            tray.Context.Menu.Refresh();
+            Assert.IsTrue(tray.Context.Menu.PlayFromPhoneItems.Any(i => i.Text == "Stop playing from Test Phone" && i.Enabled));
+            string atRest = TrayStatus.Tooltip(tray.Monitor.Current, tray.Coordinator.BlockStatus, tray.Settings.Current);
+            Assert.AreEqual(atRest + "\n" + MayStill, tray.Context.TooltipText, "While Windows has not confirmed, the tooltip says so.");
+
+            // The owner tries again from the menu, Windows lets go, and the menu and the tooltip say so.
+            fake.ReleaseSucceedsAgain(PhoneId);
+            ClickChild(tray, "Stop playing from Test Phone");
+
+            Assert.AreEqual("This PC is no longer accepting audio from Test Phone.", tray.Cards.Shown[^1].Content.Status);
+            tray.Context.Menu.Refresh();
+            Assert.IsFalse(tray.Context.Menu.PlayFromPhoneItems.Any(i => (i.Text ?? "").StartsWith("Stop playing", StringComparison.Ordinal)));
+            Assert.AreEqual(TrayStatus.Tooltip(tray.Monitor.Current, tray.Coordinator.BlockStatus, tray.Settings.Current), tray.Context.TooltipText);
+        });
+    }
+
+    [TestMethod]
+    public void AStopThatWindowsDoesNotConfirmNeverSaysThisPcStoppedAccepting()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform fake = PlatformWith(Phone());
+            using TrayHarness tray = On(fake);
+            tray.PumpUntilIdle();
+            ClickChild(tray, PhoneName);
+            fake.ReleaseFails(PhoneId);
+
+            ClickChild(tray, "Stop playing from Test Phone");
+
+            Assert.AreEqual(MayStill, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == "This PC is no longer accepting audio from Test Phone."));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "0x8000FFFF"));
+            tray.Context.Menu.Refresh();
+            Assert.IsTrue(tray.Context.Menu.PlayFromPhoneItems.Any(i => i.Text == "Stop playing from Test Phone"));
+        });
+    }
+
+    [TestMethod]
+    public void SwitchingOffWhenWindowsWillNotLetGoTellsTheOwnerOnce()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform fake = PlatformWith(Phone());
+            using TrayHarness tray = On(fake);
+            tray.PumpUntilIdle();
+            ClickChild(tray, PhoneName);
+            fake.ReleaseFails(PhoneId);
+
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = false });
+            TrayHarness.PumpUntil(() => tray.Cards.Shown.Any(c => c.Content.Status == MayStill), "The owner was never told the phone may still be connected.");
             tray.PumpUntilIdle();
 
-            Assert.AreEqual("", tray.Settings.Current.Streaming.LastDeviceKey);
-            Assert.AreEqual(1, tray.StreamingPlatformsBuilt, "Forgetting it is not a reason to restart anything.");
+            Assert.AreEqual(1, tray.Cards.Shown.Count(c => c.Content.Status == MayStill));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "0x8000FFFF"));
+        });
+    }
+
+    [TestMethod]
+    public void ClosingWhenWindowsWillNotLetGoRecordsEveryOutcome()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform fake = PlatformWith(Phone());
+            using TrayHarness tray = On(fake);
+            tray.PumpUntilIdle();
+            ClickChild(tray, PhoneName);
+            fake.ReleaseFails(PhoneId);
+
+            tray.Context.Dispose();
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "0x8000FFFF"), "A release that failed as Earshot closed is still in the log.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "may still be connected"));
+        });
+    }
+
+    // Item 4 of the review. The coordinator is built off the UI thread, so the setting can change again before it is
+    // ready. Here the building is held at the support check, the feature is switched off, and only then is the
+    // building let go: what comes back is no longer wanted and must not be taken up.
+    [TestMethod]
+    public void ACoordinatorThatIsReadyAfterTheFeatureWasSwitchedOffIsNotTakenUp()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform fake = PlatformWith(Phone());
+            var held = new ManualResetEventSlim(false);
+            fake.SupportHeldUntil = held;
+            using var tray = new TrayHarness(streamingPlatform: fake);
+            tray.PumpUntilIdle();
+
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = true });
+            TrayHarness.PumpUntil(() => fake.SupportEntered.IsCompleted, "The coordinator was never built.");
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = false });
+            Application.DoEvents();
+            held.Set();
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Settings.Current.Streaming.Enabled);
+            Assert.IsFalse(Parent(tray).Available, "The feature is off, so the menu item is not there, whatever was being built when it was switched off.");
+            Assert.IsEmpty(fake.Calls, "A coordinator that is no longer wanted reads no list.");
+            Assert.IsFalse(fake.HasLinkSubscribers, "And it is disposed, not left listening.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "no longer wanted by the time it was ready"));
+        });
+    }
+
+    // The same race with a second switch-on in between: the newer coordinator is the one in use, and the older one,
+    // arriving late, must not replace it.
+    [TestMethod]
+    public void ACoordinatorThatIsReadyLateDoesNotReplaceTheNewerOne()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform first = PlatformWith(Phone(name: "From The First"));
+            FakeStreamingPlatform second = PlatformWith(Phone(name: "From The Second"));
+            var held = new ManualResetEventSlim(false);
+            first.SupportHeldUntil = held;
+            var platforms = new Queue<FakeStreamingPlatform>([first, second]);
+            using var tray = new TrayHarness(streamingPlatforms: platforms);
+            tray.PumpUntilIdle();
+
+            // Each change is pumped before the next is made: a settings change is applied by a posted callback that
+            // reads the settings as they are when it runs, so two changes in a row with no pump between them are seen
+            // as one, and this test would then not be the race it says it is.
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = true });
+            TrayHarness.PumpUntil(() => first.SupportEntered.IsCompleted, "The first coordinator was never built.");
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = false });
+            Application.DoEvents();
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = true });
+            TrayHarness.PumpUntil(() => second.CallsNamed("List").Count == 1, "The second coordinator never read its list.");
+            held.Set();
+            tray.PumpUntilIdle();
+
+            tray.Context.Menu.Refresh();
+            CollectionAssert.AreEqual(
+                Sequence.Of("From The Second", "Refresh the list"),
+                tray.Context.Menu.PlayFromPhoneItems.Select(i => i.Text).ToArray());
+            Assert.IsEmpty(first.Calls, "The late one reads nothing.");
+            Assert.IsFalse(first.HasLinkSubscribers, "The late one is disposed.");
+            Assert.IsTrue(second.HasLinkSubscribers);
+
+            ClickChild(tray, "From The Second");
+            Assert.AreEqual("Open(" + PhoneId + ")", second.Calls[^1]);
+            Assert.IsEmpty(first.CallsNamed("Enable("));
+        });
+    }
+
+    // Item 7 of the review. A device pinned as the one Earshot manages after the list was read is still on the menu,
+    // because a pin is no reason to read the list again; the click asks the rule again and is refused.
+    [TestMethod]
+    public void ADevicePinnedAsTheManagedOneAfterTheListWasReadIsRefusedAtTheClick()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform fake = PlatformWith(Phone());
+            using TrayHarness tray = On(fake);
+            tray.PumpUntilIdle();
+            tray.Context.Menu.Refresh();
+            Assert.IsTrue(tray.Context.Menu.PlayFromPhoneItems.Any(i => i.Text == PhoneName), "It was offered before it was pinned.");
+
+            tray.Settings.Update(s => s.PinnedContainerId = IPhoneContainer);
+            tray.PumpUntilIdle();
+            tray.Context.OnPlayFromPhoneItemClicked(null, new StreamingMenuItemEventArgs(new StreamingMenuItem(PhoneName, true, false, PhoneId, StreamingMenuCommand.Play)));
+            tray.PumpUntilIdle();
+
+            Assert.IsEmpty(fake.CallsNamed("Enable("));
+            Assert.IsEmpty(fake.CallsNamed("Open("));
+            tray.Context.Menu.Refresh();
+            Assert.IsFalse(tray.Context.Menu.PlayFromPhoneItems.Any(i => i.Text == PhoneName), "And it is off the menu from then on.");
         });
     }
 

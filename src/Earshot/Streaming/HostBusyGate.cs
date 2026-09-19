@@ -1,9 +1,14 @@
 namespace Earshot.Streaming;
 
-// The tray's busy state, as the streaming coordinator may read it from any thread. The tray writes it on its UI
-// thread every time its presentation changes, which is every time its busy state does; the coordinator reads it
-// wherever StartPlayingAsync happens to run. The tray also checks its own state on the UI thread before it asks
-// for a start at all, so this is the second check, not the only one.
+// A copy of the tray's busy state that the streaming coordinator may read from any thread. The tray writes it on
+// its UI thread, whenever its presentation is refreshed and again at the click that asks for a start; the coordinator
+// reads it wherever StartPlayingAsync happens to run, usually a pool thread, a moment later.
+//
+// What that guarantees is small and is meant to be: a start is not begun when, as last written, the tray had a
+// connect, a disconnect or a menu action in flight, or the block coordinator had an operation in flight. It is a
+// second look at an answer the tray already took on the UI thread, not a lock. It can be out of date by the time it
+// is read, and nothing stops the AirPods side starting work after it was read (TrayContext.StartPlayingAsync says
+// why that is left so). What one radio does when the two overlap is a live-test item.
 internal sealed class HostBusyGate : IBusyGate
 {
     public const string Reason = "the tray is busy with another change";

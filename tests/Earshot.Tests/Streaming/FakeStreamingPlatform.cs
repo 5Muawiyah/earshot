@@ -17,6 +17,8 @@ internal sealed class FakeStreamingPlatform : IStreamingPlatform
     private readonly Dictionary<string, Func<CancellationToken, Task<StreamingEnableOutcome>>> _enables = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Func<CancellationToken, Task<StreamingOpenOutcome>>> _opens = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TaskCompletionSource> _openEntered = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _releaseFails = new(StringComparer.Ordinal);
+    private readonly TaskCompletionSource _supportEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Func<CancellationToken, Task<StreamingDiscovery>> _lastDiscovery = _ => Task.FromResult(Found());
 
     public event EventHandler<StreamingLinkChanged>? LinkChanged;
@@ -104,6 +106,8 @@ internal sealed class FakeStreamingPlatform : IStreamingPlatform
             CheckSupportCalls++;
         }
 
+        _supportEntered.TrySetResult();
+        SupportHeldUntil?.Wait();
         return new StreamingSupportCheck(Support, SupportStep);
     }
 
@@ -152,19 +156,46 @@ internal sealed class FakeStreamingPlatform : IStreamingPlatform
     // Set by a test that wants Windows never to come back from letting go: Release then blocks until it is signalled.
     public ManualResetEventSlim? ReleaseHeldUntil { get; set; }
 
-    // What the next releases answer instead of success, for a test of a release Windows did not confirm.
-    public StepOutcome? ReleaseFailsWith { get; set; }
+    // Set by a test that wants the support check, and so the building of a coordinator, held until it says so.
+    public ManualResetEventSlim? SupportHeldUntil { get; set; }
 
-    public StreamingReleaseOutcome Release(string deviceId)
+    // Completes once CheckSupport has been entered, so a test can wait for that instead of sleeping.
+    public Task SupportEntered => _supportEntered.Task;
+
+    // E_UNEXPECTED from Dispose, as the release step a real platform would record for it.
+    public static StepOutcome ReleaseFailure { get; } =
+        new("streaming-release", Ok: false, unchecked((int)0x8000FFFF), NativeCodes.Name(unchecked((int)0x8000FFFF)), "COMException");
+
+    // Every release of this device fails, as if Windows would not let go, until ReleaseSucceedsAgain is called for it.
+    // Like the real platform, a device whose release failed is still held, so a later release tries it again.
+    public void ReleaseFails(string deviceId)
     {
         lock (_gate)
         {
+            _releaseFails.Add(deviceId);
+        }
+    }
+
+    public void ReleaseSucceedsAgain(string deviceId)
+    {
+        lock (_gate)
+        {
+            _releaseFails.Remove(deviceId);
+        }
+    }
+
+    public StreamingReleaseOutcome Release(string deviceId)
+    {
+        bool fails;
+        lock (_gate)
+        {
             _calls.Add("Release(" + deviceId + ")");
+            fails = _releaseFails.Contains(deviceId);
         }
 
         ReleaseHeldUntil?.Wait();
-        return ReleaseFailsWith is { } failure
-            ? new StreamingReleaseOutcome(false, deviceId, failure)
+        return fails
+            ? new StreamingReleaseOutcome(false, deviceId, ReleaseFailure)
             : new StreamingReleaseOutcome(true, deviceId, StepOutcomes.FromHResult("streaming-release", 0));
     }
 

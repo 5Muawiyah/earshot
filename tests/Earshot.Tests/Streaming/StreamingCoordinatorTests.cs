@@ -26,8 +26,9 @@ public sealed class StreamingCoordinatorTests
         IBusyGate? gate = null,
         StreamingSettings? settings = null,
         Func<StreamingDevice, bool>? isExcluded = null,
-        TimeProvider? time = null) =>
-        new(fake, gate ?? new ManualBusyGate(), settings ?? StreamingSettings.Default, isExcluded ?? (_ => false), time ?? new TestTimeProvider());
+        TimeProvider? time = null,
+        CapturingLog? log = null) =>
+        new(fake, gate ?? new ManualBusyGate(), settings ?? StreamingSettings.Default, isExcluded ?? (_ => false), time ?? new TestTimeProvider(), log ?? new CapturingLog());
 
     private static async Task<StreamingCoordinator> MakeWithListAsync(FakeStreamingPlatform fake, params StreamingDevice[] devices)
     {
@@ -224,6 +225,54 @@ public sealed class StreamingCoordinatorTests
         Assert.IsEmpty(fake.CallsNamed("Open("));
     }
 
+    // The rule is asked when the list is read and again at the click. A device pinned as the one Earshot manages in
+    // between, with the old list still on the menu, is refused at the click and taken off the menu.
+    [TestMethod]
+    public async Task ADeviceThatBecameTheManagedOneAfterTheListWasReadIsRefusedAtTheClick()
+    {
+        var fake = new FakeStreamingPlatform();
+        string? managed = null;
+        fake.NextDiscovery(FakeStreamingPlatform.Found(Device("phone"), Device("other", "Other")));
+        using StreamingCoordinator coordinator = Make(fake, isExcluded: d => d.DeviceId == managed);
+        await coordinator.RefreshAsync(CancellationToken.None);
+        Assert.AreEqual(2, coordinator.Menu.Items.Count(i => i.Command == StreamingMenuCommand.Play));
+
+        managed = "phone";
+        StreamingOpenOutcome outcome = await coordinator.StartPlayingAsync("phone", CancellationToken.None);
+
+        Assert.AreEqual(StreamingOpenStatus.NotStarted, outcome.Status);
+        Assert.AreEqual("excluded", outcome.Step.Detail);
+        Assert.IsEmpty(fake.CallsNamed("Enable("));
+        Assert.IsEmpty(fake.CallsNamed("Open("));
+        CollectionAssert.AreEqual(
+            Sequence.Of("Other"),
+            coordinator.Menu.Items.Where(i => i.Command == StreamingMenuCommand.Play).Select(i => i.Text).ToArray(),
+            "It comes off the menu at once, without waiting for the next read of the list.");
+
+        // And a second click on it, from a menu that had not been repainted, is refused the same way.
+        StreamingOpenOutcome again = await coordinator.StartPlayingAsync("phone", CancellationToken.None);
+        Assert.AreEqual("excluded", again.Step.Detail);
+        Assert.IsEmpty(fake.CallsNamed("Enable("));
+    }
+
+    // If the rule cannot say which device is the managed one, nothing is started.
+    [TestMethod]
+    public async Task ARuleThatThrowsAtTheClickStartsNothing()
+    {
+        var fake = new FakeStreamingPlatform();
+        bool throws = false;
+        fake.NextDiscovery(FakeStreamingPlatform.Found(Device("phone")));
+        using StreamingCoordinator coordinator = Make(fake, isExcluded: _ => throws ? throw new InvalidOperationException("the host rule broke") : false);
+        await coordinator.RefreshAsync(CancellationToken.None);
+
+        throws = true;
+        StreamingOpenOutcome outcome = await coordinator.StartPlayingAsync("phone", CancellationToken.None);
+
+        Assert.AreNotEqual(StreamingOpenStatus.Open, outcome.Status);
+        Assert.AreEqual(nameof(InvalidOperationException), outcome.Step.Detail);
+        Assert.IsEmpty(fake.CallsNamed("Enable("));
+    }
+
     // An id the last read of the list never held is not something the owner could have clicked, so Windows is not
     // asked about it.
     [TestMethod]
@@ -360,15 +409,16 @@ public sealed class StreamingCoordinatorTests
         await coordinator.StartPlayingAsync("C", CancellationToken.None);
         Assert.AreEqual(3, fake.CallsNamed("Enable(").Count, "Three devices were enabled.");
 
-        StreamingReleaseOutcome last = coordinator.ReleaseAll();
+        IReadOnlyList<StreamingReleaseOutcome> all = coordinator.ReleaseAll();
 
         foreach (string id in Sequence.Of("A", "B", "C"))
         {
             Assert.AreEqual(1, fake.Calls.Count(c => c == "Release(" + id + ")"), id + " must be released exactly once.");
         }
 
-        Assert.IsTrue(last.Released);
-        Assert.AreEqual("C", last.DeviceId);
+        Assert.AreEqual(1, all.Count, "A and B were let go when their opens failed, so C is all that is left.");
+        Assert.IsTrue(all[0].Released);
+        Assert.AreEqual("C", all[0].DeviceId);
         Assert.AreEqual("Release(C)", fake.Calls[^1], "The one still enabled is what ReleaseAll itself lets go of.");
 
         // Final: nothing is released twice, and nothing starts afterwards.

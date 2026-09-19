@@ -14,9 +14,14 @@ namespace Earshot.Streaming;
 //
 // The members have setters, not init accessors, and that is load-bearing. The source-generated reader builds a type
 // with init-only members through one initialiser that sets every member, so a member the file leaves out comes back
-// as default(T), not as the default written here: a Streaming block holding only Enabled read LastDeviceKey as null
-// (and the store then threw while copying the settings) and both limits as zero. With setters it builds the object
-// first and sets only what the file holds. StreamingSettingsTests pins it.
+// as default(T), not as the default written here: a Streaming block holding only Enabled read both limits as zero
+// (and, while this record still had a string member, read that as null, at which the store threw while copying the
+// settings). With setters it builds the object first and sets only what the file holds. StreamingSettingsTests pins it.
+//
+// Nothing about a device is saved, not even a hash of its id: see StreamingLog for why a hash is not safe to keep.
+// The workshop design kept the device last played from so the menu could show it first; the coordinator remembers
+// that for the run instead. A file an earlier build saved with a LastDeviceKey member still loads: the member is
+// unknown now, ignored, and gone at the next save.
 //
 // There is no AskBeforeStopping member. The workshop design reserved one for a confirmation style Earshot does
 // not have, and a saved setting that changes nothing is a promise nobody keeps.
@@ -26,11 +31,6 @@ public sealed record StreamingSettings
     public const int DefaultDiscoveryTimeoutSeconds = 5;
 
     public bool Enabled { get; set; }
-
-    // A short hash of the device last played from (StreamingLog.Key), so the menu can show it first. Never the
-    // id itself, which carries hardware identifiers, and never displayed. Cleared once a good read of the
-    // list no longer holds that device.
-    public string LastDeviceKey { get; set; } = "";
 
     // Earshot's own limit on OpenAsync.
     public int OpenTimeoutSeconds { get; set; } = DefaultOpenTimeoutSeconds;

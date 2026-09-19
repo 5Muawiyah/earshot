@@ -39,6 +39,10 @@ internal static class StreamingCopy
     public const string DisconnectedFormat = "{0} has disconnected.";
     public const string NoLongerAcceptingFormat = "This PC is no longer accepting audio from {0}.";
 
+    // Said once when Windows does not confirm it let go of a connection, in place of the sentence above: Earshot
+    // asked, Windows did not say yes, and the code it gave instead is in the log.
+    public const string MayStillBeConnectedFormat = "{0} may still be connected to this PC. See the log.";
+
     // Stands in for a device Windows gave no name for. Part of a sentence, not one, so it is not among the
     // public sentences above.
     private const string UnnamedDevice = "The device";
