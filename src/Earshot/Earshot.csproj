@@ -30,10 +30,22 @@
        the app to a Windows-version-specific TargetFramework (net10.0-windows10.0.19041.0, for the WinRT
        synthesiser). Audio streaming has since moved the app to that TargetFramework (Directory.Build.props);
        the speech engine was not revisited then, and this package is still what speaks.
-       Microsoft-published, MIT licensed, pinned to the 10.0.* band matching the installed SDK
-       (global.json: 10.0.401). Used only from src\Earshot\Voice\SystemSpeechEngine.cs. -->
+       Microsoft-published, MIT licensed, pinned to the 10.0.* band matching the SDK this was built with:
+       the dotnet command, asked for its version, printed 10.0.401 on the build machine. There is no
+       global.json, so nothing in the repository pins the SDK; the workflow installs the latest 10.0.x.
+       Used only from src\Earshot\Voice\SystemSpeechEngine.cs. -->
   <ItemGroup>
     <PackageReference Include="System.Speech" Version="10.0.12" />
+  </ItemGroup>
+  <!-- The release carries binaries that are not Earshot's and not under Earshot's licence: the WinRT projection
+       (Microsoft.Windows.SDK.NET.dll, WinRT.Runtime.dll, under the Windows SDK licence terms), System.Speech and the
+       two .NET runtimes. The notices that name them, their publisher, their licence and where its terms are travel
+       with every publish. Published only, never copied to the build output. Because it is a resolved file to
+       publish, the target below lists it in Earshot.files.json like any other, so install copies it and checks it.
+       https://learn.microsoft.com/en-us/legal/windows-sdk/redist
+       https://learn.microsoft.com/en-us/dotnet/core/project-sdk/msbuild-props#copytopublishdirectory -->
+  <ItemGroup>
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- Writes Earshot.files.json beside the published files: the path (relative, with "/" separators) and the
        SHA-256 of every file this publish wrote, except the manifest itself. The list is @(ResolvedFileToPublish)

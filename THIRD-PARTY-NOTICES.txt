@@ -1,0 +1,64 @@
+THIRD-PARTY NOTICES
+
+Earshot itself is licensed under the MIT licence: see LICENSE in the source
+repository. The Earshot release also carries software that was not written for
+Earshot and is not covered by Earshot's licence. Each piece is listed below with
+its publisher, the name of its licence and where its terms can be read. No
+licence text is reproduced in this file. Every file listed is shipped exactly as
+its publisher built it. The exact version of each package in a given release is
+recorded in Earshot.deps.json, beside Earshot.exe.
+
+
+1. Microsoft.Windows.SDK.NET.dll and WinRT.Runtime.dll
+
+   Package:    Microsoft.Windows.SDK.NET.Ref
+               https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref
+   Publisher:  Microsoft Corporation
+   Copyright:  (c) Microsoft Corporation. All rights reserved.
+   Licence:    Microsoft Software License Terms, Microsoft Windows Software
+               Development Kit (SDK) for Windows 10. This is not the MIT licence.
+   Terms:      https://learn.microsoft.com/en-us/legal/windows-sdk/license
+               (the package itself points to https://aka.ms/WinSDKLicenseURL)
+
+   Both files are on Microsoft's list of Windows SDK files that may be
+   distributed, under the heading "Microsoft.Windows.SDK.NET.Ref":
+   https://learn.microsoft.com/en-us/legal/windows-sdk/redist
+   Earshot ships them unmodified, as part of Earshot, so that it can call the
+   Windows Runtime API behind "Play from a phone". They stay under Microsoft's
+   terms when they reach you: Earshot's MIT licence gives no rights in them.
+
+
+2. System.Speech.dll
+
+   Package:    System.Speech
+   Publisher:  Microsoft Corporation
+   Copyright:  (c) Microsoft Corporation. All rights reserved.
+               Copyright (c) .NET Foundation and Contributors
+   Licence:    MIT
+   Terms:      https://licenses.nuget.org/MIT
+   Source:     https://github.com/dotnet/dotnet
+
+
+3. The .NET runtime
+
+   Package:    Microsoft.NETCore.App.Runtime.win-x64
+   Publisher:  Microsoft Corporation
+   Copyright:  Copyright (c) .NET Foundation and Contributors
+   Licence:    MIT
+   Terms:      https://licenses.nuget.org/MIT
+   Source:     https://github.com/dotnet/dotnet
+
+   The release is self-contained, so it carries the runtime's files beside
+   Earshot.exe. The runtime includes code from other projects; the notices for
+   that code are published with the runtime:
+   https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT
+
+
+4. The .NET Windows Desktop runtime (Windows Forms)
+
+   Package:    Microsoft.WindowsDesktop.App.Runtime.win-x64
+   Publisher:  Microsoft Corporation
+   Copyright:  Copyright (c) .NET Foundation and Contributors
+   Licence:    MIT
+   Terms:      https://licenses.nuget.org/MIT
+   Source:     https://github.com/dotnet/dotnet
