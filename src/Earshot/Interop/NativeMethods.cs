@@ -66,6 +66,10 @@ internal static partial class NativeMethods
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-themechanged
     internal const int WM_THEMECHANGED = 0x031A;
 
+    // Posted to the window that registered a hot key with RegisterHotKey.
+    // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-hotkey
+    internal const int WM_HOTKEY = 0x0312;
+
     // WM_QUERYENDSESSION / WM_ENDSESSION lParam bits. 0 means shutdown or restart.
     internal const uint ENDSESSION_CLOSEAPP = 0x00000001;
     internal const uint ENDSESSION_CRITICAL = 0x40000000;
@@ -128,4 +132,24 @@ internal static partial class NativeMethods
     [LibraryImport(User32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    // fsModifiers is one of HotkeyModifiers combined with MOD_NOREPEAT (0x4000); vk is a virtual-key
+    // code. id must stay in 0x0000 to 0xBFFF: 0xC000 and above is reserved for shared DLLs, which take
+    // theirs from GlobalAddAtom. Nonzero on success; on failure the caller reads
+    // Marshal.GetLastPInvokeError on the very next statement, before anything else can clear it.
+    // "If a hot key already exists with the same hWnd and id parameters, it is maintained along with
+    // the new hot key" on every OS this assembly targets: a second RegisterHotKey call for the same id
+    // does not replace the first, so the caller must UnregisterHotKey it first.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey
+    [LibraryImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool RegisterHotKey(nint hWnd, int id, uint fsModifiers, uint vk);
+
+    // "Frees a hot key previously registered by the calling thread." The docs do not say a hot key is
+    // released when its window is destroyed or the process ends, so the caller unregisters explicitly,
+    // on the thread that registered it, before the handle goes.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-unregisterhotkey
+    [LibraryImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool UnregisterHotKey(nint hWnd, int id);
 }

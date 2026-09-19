@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Earshot.Contracts;
+using Earshot.Hotkeys;
 using Earshot.Interop;
 
 namespace Earshot.Tray;
@@ -28,15 +29,17 @@ internal sealed class SessionEndingEventArgs(bool isQuery, bool ending, uint fla
 // forced shutdown sends no query at all, so this is a best-effort signal only.
 // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession
 // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession
-internal sealed class ShellMessageWindow : NativeWindow, IDisposable
+internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWindow
 {
     private readonly ILog _log;
     private readonly uint _taskbarCreated;
+    private readonly int _ownerThreadId;
 
     public ShellMessageWindow(ILog log)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
+        _ownerThreadId = Environment.CurrentManagedThreadId;
 
         _taskbarCreated = Shell.RegisterWindowMessage(Shell.TaskbarCreatedMessageName);
         if (_taskbarCreated == 0)
@@ -56,6 +59,15 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable
     public event EventHandler? DisplayChanged;
 
     public event EventHandler<SessionEndingEventArgs>? SessionEnding;
+
+    // IMessageWindow, for Earshot.Hotkeys.HotkeyManager: raised for every message this window receives,
+    // before WndProc falls through to its own handling below or to the base implementation.
+    public event EventHandler<Hotkeys.WindowMessageEventArgs>? MessageReceived;
+
+    // IMessageWindow.IsOwnedByCurrentThread: RegisterHotKey "fails if you try to associate a hot key
+    // with a window created by another thread", and UnregisterHotKey "Frees a hot key previously
+    // registered by the calling thread", so HotkeyManager checks this before either call.
+    public bool IsOwnedByCurrentThread => Environment.CurrentManagedThreadId == _ownerThreadId;
 
     public void Dispose() => DestroyHandle();
 
@@ -97,6 +109,8 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable
 
     protected override void WndProc(ref Message m)
     {
+        MessageReceived?.Invoke(this, new Hotkeys.WindowMessageEventArgs(m.Msg, m.WParam, m.LParam));
+
         if (_taskbarCreated != 0 && unchecked((uint)m.Msg) == _taskbarCreated)
         {
             _log.Info("TaskbarCreated received.");

@@ -3,6 +3,7 @@ using System.Globalization;
 using Earshot.Audio.Connect;
 using Earshot.Composition;
 using Earshot.Contracts;
+using Earshot.Hotkeys;
 using Earshot.Icons;
 using Earshot.Infra;
 using Earshot.Tray;
@@ -123,6 +124,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon;
     private readonly TrayMenu _menu;
     private readonly ShellMessageWindow _window;
+    private readonly HotkeyManager _hotkeys;
     private readonly TrayIconFactory _icons;
     private readonly StartupRegistration _startup;
     private readonly BluetoothDeviceList _devices;
@@ -187,6 +189,12 @@ internal sealed class TrayContext : ApplicationContext
         _window.DisplayChanged += (_, _) => RefreshIcon(remeasure: true, force: false);
         _window.SessionEnding += OnSessionEnding;
 
+        // Global shortcuts, over the same hidden window: no second window, no second message pump.
+        // Every action a shortcut can raise goes through the exact method the matching menu item or the
+        // left click already uses, so a hotkey is never a second route to the device.
+        _hotkeys = new HotkeyManager(_window, new User32Hotkeys(), _log);
+        _hotkeys.Activated += OnHotkeyActivated;
+
         _menu = new TrayMenu(CurrentMenuState);
         _menu.ToggleClicked += (_, _) => StartToggle();
         _menu.BlockAtBootClicked += (_, _) => Start("block at boot", BlockAtBootAsync);
@@ -227,6 +235,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         ReportSettingsLoad(options.SettingsStatus);
+        ApplyHotkeys();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -300,6 +309,7 @@ internal sealed class TrayContext : ApplicationContext
             _coordinator.Changed -= OnCoordinatorChanged;
             _window.SessionEnding -= OnSessionEnding;
             _notifyIcon.MouseClick -= OnIconMouseClick;
+            _hotkeys.Activated -= OnHotkeyActivated;
 
             // NotifyIcon.Dispose removes the icon from the notification area. The Icon it used is
             // disposed only after that.
@@ -332,6 +342,10 @@ internal sealed class TrayContext : ApplicationContext
         _lifetime.Cancel();
         _registry.Cards.Hide();
         _notifyIcon.Visible = false;
+
+        // Every exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
+        // registered after Earshot closes. This runs on the UI thread, which owns the window.
+        _hotkeys.Dispose();
     }
 
     // The cursor as it is now, for a card that follows this click however long the action takes.
@@ -571,14 +585,77 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     // Settings.Update raises Changed before it returns, so the presentation is refreshed afterwards.
+    // Hotkeys are re-applied here too, on the window thread, so a shortcut typed and saved takes effect
+    // at once and one no longer wanted is released.
     private void OnSettingsChanged(object? sender, EarshotSettings e) =>
         _registry.UiPost(() =>
         {
             if (!_closed)
             {
                 UpdatePresentation(forceIcon: false);
+                ApplyHotkeys();
             }
         });
+
+    // Registers what the current settings ask for and logs what did not take. A failure for one
+    // shortcut is reported but never stops the others, and nothing here decides who else holds a
+    // combination beyond the one code (1409) the platform documents as meaning that.
+    private void ApplyHotkeys()
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        IReadOnlyList<HotkeyRegistrationOutcome> outcomes = _hotkeys.Apply(_registry.Settings.Current.Hotkeys);
+        foreach (HotkeyRegistrationOutcome outcome in outcomes)
+        {
+            if (outcome.State is HotkeyRegistrationState.NotSet or HotkeyRegistrationState.Registered)
+            {
+                _log.Write(LogLevel.Debug, "Hotkey " + outcome.Action + ": " + outcome.Message);
+            }
+            else
+            {
+                _log.Warn("Hotkey " + outcome.Action + ": " + outcome.Message);
+            }
+        }
+    }
+
+    // The global shortcut fired: hand it to the exact method the matching menu item or the left click
+    // already uses, so a hotkey never opens a second route to the device. SpeakStatus has nothing to
+    // call yet: speech is a separate feature this build does not have.
+    private void OnHotkeyActivated(object? sender, HotkeyActivatedEventArgs e)
+    {
+        if (_closing || _closed)
+        {
+            return;
+        }
+
+        switch (e.Action)
+        {
+            case HotkeyAction.ToggleConnection:
+                _log.Info("Hotkey: toggle connection.");
+                StartToggle();
+                break;
+
+            case HotkeyAction.ToggleAudioProtection:
+                _log.Info("Hotkey: toggle audio protection.");
+                OnProtectAudioClicked();
+                break;
+
+            case HotkeyAction.ToggleBlockAtBoot:
+                _log.Info("Hotkey: toggle block at boot.");
+                Start("block at boot", BlockAtBootAsync);
+                break;
+
+            case HotkeyAction.SpeakStatus:
+                _log.Info("Hotkey: speak status is not available in this version.");
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(e), e.Action, "Unknown hotkey action.");
+        }
+    }
 
     private void OnCoordinatorChanged(object? sender, EventArgs e)
     {

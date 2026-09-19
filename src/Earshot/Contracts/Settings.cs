@@ -12,6 +12,11 @@ public sealed class EarshotSettings
     public string PinnedAddress         { get; set; } = "";         // 12 hex uppercase, e.g. "0A1B2C3D4E8C"
     // NOTE: BlockAtBoot is NOT here. Its authority is the SYSTEM-owned GateConfig, because the
     // BootBlock task (SYSTEM, no user session) must read it and cannot read HKCU/%APPDATA%.
+
+    // v1.1: global keyboard shortcuts. Defaults off with every text empty (Earshot.Hotkeys.HotkeySettings),
+    // so an older settings file with no Hotkeys member reads as "off, nothing typed" and nothing is
+    // registered until the owner asks.
+    public Earshot.Hotkeys.HotkeySettings Hotkeys { get; set; } = new();
 }
 
 // SYSTEM-owned, %ProgramData%\Earshot\config.json. Users-read, SYSTEM-write via setboot verbs only.
