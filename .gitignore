@@ -12,6 +12,8 @@ TestResults/
 # Local notes and working files, kept out of the repository
 CLAUDE.md
 CLAUDE.local.md
+AGENTS.md
+FINISH_PROMPT.md
 PROMPTING_RESPONSES.md
 PROMPTING_LESSONS.md
 BUILD_PROMPT.md
