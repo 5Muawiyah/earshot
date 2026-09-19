@@ -38,6 +38,10 @@ public sealed class LiveTestSelfTestTests
     private const int ExpectedHalves = 22;
     private const int ExpectedCases = 3;
 
+    // Cases one script runs on top of the shared three: 13-GraceWindow's doubled delay and its
+    // unreadable figure.
+    private const int ExpectedExtraCases = 2;
+
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()
     {
@@ -86,7 +90,7 @@ public sealed class LiveTestSelfTestTests
         // other direction.
         Assert.AreEqual(ExpectedScripts, result.GetProperty("scripts").GetInt32(), "The self-test ran a different number of scripts than expected.");
         Assert.AreEqual(ExpectedHalves, result.GetProperty("halves").GetInt32(), "The self-test ran a different number of halves than expected.");
-        Assert.AreEqual(ExpectedHalves * ExpectedCases, result.GetProperty("runs").GetInt32(), "The self-test ran a different number of cases than expected.");
+        Assert.AreEqual((ExpectedHalves * ExpectedCases) + ExpectedExtraCases, result.GetProperty("runs").GetInt32(), "The self-test ran a different number of cases than expected.");
         Assert.AreEqual(0, exit, "The self-test exited " + exit.ToString(CultureInfo.InvariantCulture) + " with nothing to report.");
     }
 
