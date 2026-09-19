@@ -546,6 +546,11 @@ function Invoke-Earshot
     {
         $process = Start-Process -FilePath $Run.ExePath -ArgumentList (Get-QuotedArguments -Command $Command) `
             -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+
+        # Windows PowerShell 5.1 only fills ExitCode in for a -PassThru process whose handle was
+        # read while it was still running. Without this line ExitCode reads null after the wait,
+        # and every live step is recorded as failed whatever Earshot returned.
+        $null = $process.Handle
     }
     catch
     {
@@ -572,6 +577,15 @@ function Invoke-Earshot
     }
 
     $clock.Stop()
+    if ($null -eq $process.ExitCode)
+    {
+        $step.ran = $true
+        $step.error = 'Earshot.exe ran, but PowerShell did not give its exit code, so this step says nothing either way.'
+        [void]$Run.Steps.Add($step)
+        Write-Failure -Run $Run -Message ([string]$Label + ': ' + $step.error)
+        return $null
+    }
+
     $step.ran = $true
     $step.exitCode = $process.ExitCode
     $step.exitName = Get-GateExitName -ExitCode $process.ExitCode
