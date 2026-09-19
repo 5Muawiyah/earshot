@@ -158,12 +158,18 @@ internal sealed class SpeechAnnouncer : IAnnouncer
             _pending = null;
             worker = _worker;
             _worker = null;
-        }
 
-        // Wakes the worker so it notices the stop flag once it is not blocked inside Speak. A phrase
-        // already in flight still finishes: this never calls SpeakAsyncCancelAll or anything that would
-        // reach the engine from this thread.
-        _signal.Set();
+            // Wakes the worker so it notices the stop flag once it is not blocked inside Speak. A phrase
+            // already in flight still finishes: this never calls SpeakAsyncCancelAll or anything that
+            // would reach the engine from this thread. Called under the same lock Dispose uses to decide
+            // and carry out _signal's own disposal (see Dispose's comment): keeping Set and that decision
+            // under one lock removes the data race between them outright, rather than relying on
+            // ManualResetEventSlim happening to tolerate a Set after Dispose (a probe on this machine
+            // found it does, 200000/200000 attempts; Microsoft's own remarks on Dispose still warn a
+            // disposed synchronization primitive's other methods may throw, so nothing here is built to
+            // depend on that observed, undocumented tolerance).
+            _signal.Set();
+        }
 
         if (worker is null)
         {
@@ -204,12 +210,20 @@ internal sealed class SpeechAnnouncer : IAnnouncer
 
     public void Dispose()
     {
-        if (_disposed)
+        // Checked and claimed under the lock, in one step: a plain "if (_disposed) return; _disposed =
+        // true;" lets two concurrent Dispose calls both read false before either writes true, so both
+        // fall through and both go on to dispose _signal below. Only the caller that actually claims
+        // _disposed here runs the rest of this method.
+        lock (_lock)
         {
-            return;
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
         }
 
-        _disposed = true;
         StopSpeaking();
 
         // Only disposed once the worker thread is provably done: either it never started at all, or a
@@ -220,11 +234,18 @@ internal sealed class SpeechAnnouncer : IAnnouncer
         // ObjectDisposedException on a thread this class no longer controls, so _signal is deliberately
         // left undisposed in that case, the same accepted trade-off already made for the engine itself
         // (see StopSpeaking's timeout branch and the IsBackground comment on the worker thread).
-        bool safeToDisposeSignal;
-        lock (_lock) { safeToDisposeSignal = !_workerStarted || _workerJoinConfirmed; }
-        if (safeToDisposeSignal)
+        //
+        // The read of the flags and the dispose itself happen in the same lock, not read-then-release-
+        // then-dispose: that keeps this and a concurrent StopSpeaking's own locked Set (see its comment)
+        // from interleaving around _signal at all, rather than relying on ManualResetEventSlim happening
+        // to tolerate that interleaving on this runtime.
+        lock (_lock)
         {
-            _signal.Dispose();
+            bool safeToDisposeSignal = !_workerStarted || _workerJoinConfirmed;
+            if (safeToDisposeSignal)
+            {
+                _signal.Dispose();
+            }
         }
     }
 

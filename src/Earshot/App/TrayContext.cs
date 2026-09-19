@@ -876,6 +876,10 @@ internal sealed class TrayContext : ApplicationContext
         {
             _log.Write(LogLevel.Debug, "VoiceOver speak status: nothing spoken, state is " + connection + ".");
             ShowCard(TrayStatus.AppName, TrayStatus.Tooltip(_snapshot, BlockStatus, _registry.Settings.Current), CardPlace.NearTray);
+            // Drains and logs exactly like the spoken branch below: an outcome the worker recorded since
+            // the last drain (a repeat refused inside the gap, a speak failure) must not sit unlogged
+            // just because this particular call had nothing new to speak.
+            LogVoiceOutcomes(voice.Drain());
             return;
         }
 

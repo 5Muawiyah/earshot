@@ -12,7 +12,9 @@ internal static class VoiceSelection
     // Returns the exact installed name to pass to SelectVoice, or null when nothing enabled matches
     // (including when requested is null or empty, in which case the default voice is what Open already
     // uses and no lookup is needed). The first enabled installed voice whose Name contains requested,
-    // ordinal and case-sensitive, wins, the same order SelectVoice itself would search in.
+    // ordinal and case-sensitive, wins, in the order installed lists them: the Microsoft page linked
+    // above documents the match rule (case-sensitive substring, Enabled required) but not a search
+    // order for more than one match, so this comment no longer claims one it cannot cite.
     public static string? Choose(string? requested, IReadOnlyList<(string Name, bool Enabled)> installed)
     {
         ArgumentNullException.ThrowIfNull(installed);

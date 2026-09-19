@@ -51,6 +51,35 @@ public sealed class SystemSpeechEngineBindingTests
             "not a hardcoded or cached list.");
     }
 
+    // SelectedVoiceName is guarded against SpeechSynthesizer.Voice's own undocumented exception
+    // (SystemSpeechEngine.cs). This reads it right after a real Open with the default voice (no
+    // SelectVoice call at all, so the exception the "each reported name" test below sometimes meets is
+    // not even in play here), the simplest real path to it, to prove the guard itself never throws
+    // rather than only reasoning about it.
+    [TestMethod]
+    public void SelectedVoiceNameNeverThrowsAfterOpen()
+    {
+        (string Name, bool Enabled)[] independent = ProbeInstalledVoices();
+        if (!independent.Any(v => v.Enabled))
+        {
+            Assert.Inconclusive("No enabled voice is installed on this machine.");
+            return;
+        }
+
+        using var engine = new SystemSpeechEngine();
+        StepOutcome outcome = engine.Open(VoiceOverSettings.Default);
+        if (!outcome.Ok)
+        {
+            InconclusiveForEnvironment(outcome);
+            return;
+        }
+
+        // The guard itself is the thing under test: no try/catch here. If SelectedVoiceName can still
+        // throw, this test fails with that exception rather than hiding it.
+        string? selected = engine.SelectedVoiceName;
+        Assert.IsTrue(selected is null || selected.Length > 0, "SelectedVoiceName must be null or a real name, never empty.");
+    }
+
     // Proves Open actually drives SelectVoice for a real installed name, not just that it accepts the
     // setting: for every enabled voice this machine has, opening with that exact name must succeed and
     // the synthesiser must report that voice selected afterwards.
@@ -84,27 +113,32 @@ public sealed class SystemSpeechEngineBindingTests
                 // blocker this task fixed exists to survive, caught here rather than failing Open. The
                 // selection did not really happen, so this machine cannot prove the rest of this test;
                 // that is an environment limit, not something SystemSpeechEngine got wrong.
+                //
+                // The swallowed exception's raw HResult must still show up in the structured Code field,
+                // not only decoded into Detail's English sentence: Ok stays true (Open still succeeded,
+                // on the default voice), but Code and CodeName must carry exactly what SelectVoice threw.
+                Assert.AreNotEqual(0, outcome.Code, "The raw HResult of the swallowed SelectVoice exception must be in Code, not just folded into Detail.");
+                Assert.AreEqual(NativeCodes.Name(outcome.Code), outcome.CodeName, "CodeName must decode the same Code that was recorded.");
+                StringAssert.Contains(outcome.Detail, NativeCodes.Name(outcome.Code));
+
                 Assert.Inconclusive("SystemSpeechEngine could not actually select voice \"" + name +
                     "\" on this machine even though it matched exactly; recorded: " + outcome.Detail);
                 return;
             }
 
-            string? selected;
-            try
+            // SelectedVoiceName is guarded (SystemSpeechEngine.cs) rather than left to throw: reading
+            // SpeechSynthesizer.Voice has shown NullReferenceException on this machine, from
+            // System.Speech.Internal.Synthesis.VoiceSynthesis.GetEngineWithVoice, undocumented and the
+            // same class of platform defect as the SelectVoice blocker this task fixed, just reached
+            // through the property getter instead of the method (Microsoft's Voice page documents no
+            // exception either). A null here is that guard doing its job, not SystemSpeechEngine crashing,
+            // but it still means this machine's System.Speech cannot answer "which voice is selected" at
+            // all, which is an environment limit this test records rather than a defect.
+            string? selected = engine.SelectedVoiceName;
+            if (selected is null)
             {
-                selected = engine.SelectedVoiceName;
-            }
-            catch (Exception ex)
-            {
-                // Observed on this machine: reading SpeechSynthesizer.Voice can itself throw
-                // NullReferenceException from System.Speech.Internal.Synthesis.VoiceSynthesis.
-                // GetEngineWithVoice, undocumented, the same class of platform defect as the SelectVoice
-                // blocker this task fixed, just reached through the property getter instead of the
-                // method (Microsoft's Voice page documents no exception either). Recorded, not hidden:
-                // this machine's System.Speech cannot answer "which voice is selected" at all, which is
-                // an environment limit this test observes rather than a defect in SystemSpeechEngine.
-                Assert.Inconclusive("Reading the selected voice threw " + ex.GetType().Name + " (" +
-                    NativeCodes.Name(ex.HResult) + ") on this machine: " + ex.Message);
+                Assert.Inconclusive("Reading the selected voice came back null after opening with \"" + name +
+                    "\" on this machine, the guarded answer for the undocumented exception this property exists to survive.");
                 return;
             }
 
@@ -139,6 +173,83 @@ public sealed class SystemSpeechEngineBindingTests
         Assert.IsFalse(string.IsNullOrEmpty(outcome.Detail), "The fallback must be recorded, not silent.");
         StringAssert.Contains(outcome.Detail, "not found");
         StringAssert.Contains(outcome.Detail, "default voice");
+    }
+
+    // A VoiceName is data from a user-writable settings file, not something Earshot chose, so
+    // SystemSpeechEngine.Echo bounds and sanitises it before it can reach the recorded outcome (and from
+    // there, the log): pins the three shapes that matter (an oversized name, one carrying CRLF and a fake
+    // timestamped line that could otherwise be misread as a second log entry, and one carrying other
+    // control characters), each guaranteed not to match an installed voice so Open takes the "not found"
+    // branch and records the echoed name in Detail. Constructs and disposes a real SpeechSynthesizer;
+    // never calls Speak.
+    [TestMethod]
+    public void VoiceNameIsBoundedAndSanitisedInTheFallbackDetail()
+    {
+        (string Name, bool Enabled)[] independent = ProbeInstalledVoices();
+        if (!independent.Any(v => v.Enabled))
+        {
+            Assert.Inconclusive("No enabled voice is installed on this machine.");
+            return;
+        }
+
+        var cases = new[]
+        {
+            new string('Z', 100_000),
+            "Fake\r\n2026-09-19T10:00:00.000Z ERROR injected as a second log line\r\nName",
+            "ControlCharsHere.",
+        };
+
+        foreach (string requested in cases)
+        {
+            using var engine = new SystemSpeechEngine();
+            StepOutcome outcome = engine.Open(VoiceOverSettings.Default with { VoiceName = requested });
+
+            if (!outcome.Ok)
+            {
+                InconclusiveForEnvironment(outcome);
+                return;
+            }
+
+            Assert.IsFalse(string.IsNullOrEmpty(outcome.Detail), "A VoiceName that matches nothing installed must still record a fallback.");
+            Assert.IsTrue(outcome.Detail!.Length < 200,
+                "The echoed VoiceName must be bounded, not the full " + requested.Length + " characters: length was " + outcome.Detail.Length + ".");
+            Assert.IsFalse(outcome.Detail.Contains('\r'), "No CR may reach the recorded detail: " + outcome.Detail);
+            Assert.IsFalse(outcome.Detail.Contains('\n'), "No LF may reach the recorded detail: " + outcome.Detail);
+            foreach (char c in outcome.Detail)
+            {
+                Assert.IsFalse(char.IsControl(c),
+                    "No control character may reach the recorded detail (found U+" + ((int)c).ToString("X4") + "): " + outcome.Detail);
+            }
+        }
+    }
+
+    // Deleting CR/LF outright (string.Empty rather than a space) would run the words on either side of it
+    // together, changing what the log actually shows; VoiceNameIsBoundedAndSanitisedInTheFallbackDetail
+    // above only proves no CR or LF reaches the detail, not that a space took their place, so that is
+    // pinned here on its own.
+    [TestMethod]
+    public void CarriageReturnAndLineFeedBecomeASpaceRatherThanDisappearing()
+    {
+        (string Name, bool Enabled)[] independent = ProbeInstalledVoices();
+        if (!independent.Any(v => v.Enabled))
+        {
+            Assert.Inconclusive("No enabled voice is installed on this machine.");
+            return;
+        }
+
+        using var engine = new SystemSpeechEngine();
+        StepOutcome outcome = engine.Open(VoiceOverSettings.Default with { VoiceName = "Hello\r\nWorld" });
+
+        if (!outcome.Ok)
+        {
+            InconclusiveForEnvironment(outcome);
+            return;
+        }
+
+        Assert.IsFalse(string.IsNullOrEmpty(outcome.Detail), "A VoiceName that matches nothing installed must still record a fallback.");
+        Assert.IsFalse(outcome.Detail!.Contains("HelloWorld"), "Deleting CR/LF outright must not run the two words together: " + outcome.Detail);
+        Assert.IsTrue(outcome.Detail.Contains("Hello") && outcome.Detail.Contains("World"),
+            "Both words either side of the CRLF must still be present: " + outcome.Detail);
     }
 
     private static (string Name, bool Enabled)[] ProbeInstalledVoices()
