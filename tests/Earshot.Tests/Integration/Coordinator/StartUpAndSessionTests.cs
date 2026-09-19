@@ -355,6 +355,42 @@ public sealed class StartUpAndSessionTests
         Assert.AreNotEqual(BlockCoordinator.SessionEndingMessage, report.UserMessage);
     }
 
+    // The Block-sequence protect skip (the check just before ProtectionPolicy's ReadServices/ProtectOn move,
+    // while a Block goal is running during a session end) must stop the sequence going anywhere near a services
+    // read. A trace of calls cannot tell that skip apart from a reversion of it: SendProtectionAsync separately
+    // refuses a protect verb once the session is ending, so a reverted skip still ends up blocking without a
+    // service change, just by first reading services, then attempting and having ProtectOn refused. The read
+    // itself is never refused, so a services read that never returns catches a reverted skip that a call trace
+    // cannot: with the skip in place the read is never started, so a stall in it never matters.
+    [TestMethod]
+    public void ADisconnectWhileTheSessionEndsBlocksAtOnceWithoutReadingServicesEvenWhenThatReadWouldNeverReturn()
+    {
+        using var h = new CoordinatorHarness(protectAudio: true);
+        h.Settings.Update(s => s.ProtectAudioNoticeShown = true);
+        h.Block.StatusFailure = new IOException("no status");
+        h.Block.ActiveLink = ActiveLinkOnBlock.Drops;
+        h.Monitor.Set(Devices.Active(1));
+        h.Start();
+        h.Coordinator.OnSessionEnding(Query());
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "the boot block status was never read"), "This test needs the session end that sends no block.");
+
+        // Readable by the time of the click: the nodes are enabled. The services read stalls, as a Bluetooth API
+        // call that never returns would: if the Block sequence goes anywhere near ReadServices, the disconnect
+        // never finishes.
+        h.Block.StatusFailure = null;
+        h.Block.Status = Statuses.Allowed();
+        h.Protection.StatusStalls = true;
+        h.Trace.Clear();
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: false));
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted,
+            "The disconnect's block during a session end went near a services read that never returns, instead of skipping straight to the block.");
+        CollectionAssert.AreEqual(DisconnectThenBlock, h.Trace, "Something other than the block followed the disconnect while the session was ending.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
     // The Hands-Free assisted connect turned protection off and then did not connect, after Windows had started to
     // end a session for which no block was sent (Block at boot is off). Its clean-up starts no protect verb then:
     // the setting is kept for the next connect.
@@ -639,8 +675,26 @@ public sealed class StartUpAndSessionTests
         h.Pump();
 
         Assert.IsTrue(change.IsCompletedSuccessfully, "A change stopped for a session end ended in an exception, not a result.");
-        Assert.AreEqual(BlockCoordinator.SessionEndStoppedMessage, change.GetAwaiter().GetResult().UserMessage);
+        ControllerResult result = change.GetAwaiter().GetResult();
+        Assert.AreEqual(BlockCoordinator.SessionEndStoppedMessage, result.UserMessage);
         StringAssert.Contains(BlockCoordinator.SessionEndStoppedMessage, "may not have finished", "The card claims more than is known: the verb may well have completed.");
+
+        // Pinned as a literal, not only through the constant: by the time this card is shown, Windows may already
+        // have said the session end was cancelled (WM_ENDSESSION wParam FALSE), so the present tense "is closing"
+        // would be false. "Began closing" holds regardless of how the session end went on to resolve.
+        Assert.AreEqual(
+            "Windows began closing Earshot, so the change may not have finished. If Earshot stays open, restart it.",
+            result.UserMessage,
+            "The card must say Windows began closing Earshot, not is closing: the session end may already be over by the time this shows.");
+
+        // The protect verb this change had sent went on to succeed after the session-end cancellation fired (set
+        // above), so the step it left behind must not claim it was never attempted, and must not claim its wait
+        // was seen through: the wait was abandoned when the cancellation fired, not completed.
+        Assert.HasCount(1, result.Steps, "One step, for the verb the change had already sent.");
+        StepOutcome step = result.Steps[0];
+        Assert.AreNotEqual("NOT_ATTEMPTED", step.CodeName, "The step says the verb was never attempted, though it went on to succeed.");
+        Assert.IsFalse(step.Detail is { } detail && detail.Contains("waited for", StringComparison.Ordinal),
+            "The step claims what was sent was waited for, but the wait was abandoned when the session-end cancellation fired.");
     }
 
     [TestMethod]

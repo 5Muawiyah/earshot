@@ -108,7 +108,7 @@ internal sealed class BlockCoordinator : IDisposable
     // Earshot. The second is for a change that was already running when it was stopped: a verb already sent is
     // waited for and may well have worked, so it claims neither that something changed nor that nothing did.
     public const string SessionEndingMessage = "Windows is closing Earshot, so nothing was changed. If Earshot stays open, restart it.";
-    public const string SessionEndStoppedMessage = "Windows is closing Earshot, so the change may not have finished. If Earshot stays open, restart it.";
+    public const string SessionEndStoppedMessage = "Windows began closing Earshot, so the change may not have finished. If Earshot stays open, restart it.";
     public const string ChangesNotWatchedMessage = "Earshot cannot see audio device changes, so blocking may be late.";
 
     // How long render must stay not ACTIVE, with nothing in flight, before the nodes are blocked again. A
@@ -692,10 +692,19 @@ internal sealed class BlockCoordinator : IDisposable
             () => StoppedAtSessionEnd(name));
     }
 
+    // Earshot's own code for a step whose outcome a session-end cancellation left unknown: unlike
+    // NativeCodes.NotAttempted (a step refused on purpose, which never ran), this step may have gone out and may
+    // even have succeeded; the cancellation only means the wait for it was abandoned, not that it was seen through.
+    private const int SessionEndInterruptedCode = unchecked((int)0xA0000003);
+    private const string SessionEndInterruptedCodeName = "SESSION_END_INTERRUPTED";
+
     // The result of a change that was running when a session end began and was stopped for it. Partial, since a
-    // verb it had already sent was waited for and may have worked.
+    // verb it had already sent may or may not have finished: the cancellation abandoned the wait for it rather
+    // than confirming either outcome, so the step is recorded as neither attempted-and-failed nor not attempted.
     private static ControllerResult StoppedAtSessionEnd(string action) =>
-        new(OpStatus.Partial, SessionEndStoppedMessage, [StepOutcomes.NotAttempted(action, "Stopped because the session is ending; what was already sent was waited for.")]);
+        new(OpStatus.Partial, SessionEndStoppedMessage,
+            [new StepOutcome(action, Ok: false, SessionEndInterruptedCode, SessionEndInterruptedCodeName,
+                "Stopped because the session began ending; whether it finished is not known.")]);
 
     // The result of a change that was not started because a session end is in progress. The tray shows it as a
     // card, as it does any result that is not a success.
