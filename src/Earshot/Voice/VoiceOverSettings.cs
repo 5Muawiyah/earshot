@@ -11,26 +11,33 @@ namespace Earshot.Voice;
 // and every other member is a design choice, not a measurement: no comment on this type may claim
 // otherwise. A record, so two settings can be compared for equality with ==, which TrayContext uses to
 // decide whether a settings change actually asks for anything different before it reopens the engine.
+//
+// The members have setters, not init accessors, and that is load-bearing. The source-generated reader builds a
+// type with init-only members through one initialiser that sets every member, so a member the file leaves out
+// comes back as default(T), not as the default written here: a hand-written VoiceOver block holding only Enabled
+// read SpeakFailures as false, Volume as 0 and the three limits as 0, which is speech switched on at no volume.
+// With setters it builds the object first and sets only what the file holds. The same reason
+// Earshot.Streaming.StreamingSettings gives; VoiceOverSettingsLoadTests pins it.
 public sealed record VoiceOverSettings
 {
-    public bool Enabled { get; init; }
+    public bool Enabled { get; set; }
 
-    public bool SpeakFailures { get; init; } = true;
+    public bool SpeakFailures { get; set; } = true;
 
     // Null means the system default voice. A non-null value goes to ISpeechEngine.Open, which passes it
     // to SpeechSynthesizer.SelectVoice (case-sensitive substring match); if nothing matches, the engine
     // records that and falls back to the default voice rather than failing Open.
-    public string? VoiceName { get; init; }
+    public string? VoiceName { get; set; }
 
-    public int Rate { get; init; }
+    public int Rate { get; set; }
 
-    public int Volume { get; init; } = 100;
+    public int Volume { get; set; } = 100;
 
-    public int RepeatGapMilliseconds { get; init; } = 2000;
+    public int RepeatGapMilliseconds { get; set; } = 2000;
 
-    public int ShutdownWaitMilliseconds { get; init; } = 1500;
+    public int ShutdownWaitMilliseconds { get; set; } = 1500;
 
-    public int FailuresBeforeGivingUp { get; init; } = 3;
+    public int FailuresBeforeGivingUp { get; set; } = 3;
 
     public static VoiceOverSettings Default => new();
 

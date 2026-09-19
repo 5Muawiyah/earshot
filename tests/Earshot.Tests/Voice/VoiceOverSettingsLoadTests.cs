@@ -51,6 +51,46 @@ public sealed class VoiceOverSettingsLoadTests : IDisposable
         Assert.AreEqual(VoiceOverSettings.Default, store.Current.VoiceOver);
     }
 
+    // A block the owner wrote by hand, holding only Enabled. Every member the file leaves out must read as the
+    // default written on the type, not as default(T): with init-only members the source-generated reader set
+    // every member through one initialiser, so this block read SpeakFailures as false, Volume as 0 and the
+    // three limits as 0, which is speech switched on at no volume with failures not spoken.
+    [TestMethod]
+    public void APartialBlockReadsEveryOmittedMemberAsItsDefault()
+    {
+        File.WriteAllText(SettingsPath, "{ \"SchemaVersion\": 1, \"VoiceOver\": { \"Enabled\": true } }");
+
+        var store = new JsonSettingsStore(SettingsPath, _log);
+
+        Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
+        VoiceOverSettings read = store.Current.VoiceOver;
+        Assert.IsTrue(read.Enabled, "The one member the file holds is read as written.");
+        Assert.IsTrue(read.SpeakFailures);
+        Assert.IsNull(read.VoiceName);
+        Assert.AreEqual(0, read.Rate);
+        Assert.AreEqual(100, read.Volume);
+        Assert.AreEqual(2000, read.RepeatGapMilliseconds);
+        Assert.AreEqual(1500, read.ShutdownWaitMilliseconds);
+        Assert.AreEqual(3, read.FailuresBeforeGivingUp);
+        Assert.AreEqual(VoiceOverSettings.Default with { Enabled = true }, read);
+
+        VoiceOverSettings clamped = read.Clamped(out IReadOnlyList<StepOutcome> notes);
+        Assert.AreEqual(read, clamped);
+        Assert.AreEqual(0, notes.Count, "Defaults are inside their ranges, so nothing is clamped.");
+    }
+
+    // The same, for a block that holds a different single member: no member's presence stands in for another's.
+    [TestMethod]
+    public void ABlockHoldingOnlyTheVolumeLeavesTheRestAtTheirDefaults()
+    {
+        File.WriteAllText(SettingsPath, "{ \"SchemaVersion\": 1, \"VoiceOver\": { \"Volume\": 40 } }");
+
+        var store = new JsonSettingsStore(SettingsPath, _log);
+
+        Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
+        Assert.AreEqual(VoiceOverSettings.Default with { Volume = 40 }, store.Current.VoiceOver);
+    }
+
     // Pins the exact member names the shipped build writes, through the real store (JsonSettingsStore,
     // backed by the source-generated SettingsJsonContext), not a hand-typed sample: the workshop SPEC's
     // own JSON sample (section 6) is camelCase, and a camelCase block is silently ignored on read as
