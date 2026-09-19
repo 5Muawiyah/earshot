@@ -20,12 +20,13 @@ the PC, so Windows has nothing to page at boot; connects and disconnects them
 with one click; and blocks the Hands-Free profile so a browser tab or a game
 cannot drop them to call quality.
 
-`docs/` currently holds only the placeholder images used below. The one
-written guide beyond this file lives with the live tests.
+`docs/` currently holds only the placeholder images used below. Two further
+documents live outside this file.
 
 | Document | What it covers |
 |---|---|
 | [Live test guide](tools/live-tests/README.md) | how to run the live tests by hand, and how to put the machine back if one stops in the middle |
+| [Third-party notices](THIRD-PARTY-NOTICES.txt) | every third-party component a release carries, its publisher, its licence and where to read the terms |
 
 ## The problem
 
@@ -66,6 +67,22 @@ tray icon does it.
    Supporting work: the elevated worker's argument-validation unit tests
    confirm it refuses anything it does not expect. Proof: Test 15, Uninstall
    reversal, which exercises the live setup and its reversal, pending.
+
+## What v1.1 adds
+
+1. **Keyboard shortcuts** for connect, audio protection, block at boot and
+   speak status, off until the owner types one into the settings file. Covered
+   by `tests/Earshot.Tests/Hotkeys` and the tray wiring in
+   `tests/Earshot.Tests/Phase1`.
+2. **Spoken status**, off until the owner turns it on from the menu. Covered by
+   `tests/Earshot.Tests/Voice` and the tray wiring in
+   `tests/Earshot.Tests/Phase1`.
+3. **Play from a phone**, off until the owner turns it on in the settings
+   file. Covered by `tests/Earshot.Tests/Streaming` and the tray wiring in
+   `tests/Earshot.Tests/Phase1`.
+4. None of the three has had a live run. Every test above runs against a
+   stand-in: no real keyboard shortcut has been pressed, nobody has heard
+   Earshot speak, and no real phone has played through it.
 
 ## How it works
 
@@ -205,13 +222,18 @@ Right click opens the menu. Top to bottom, with the exact wording:
 |---|---|
 | `Safe mode: no device actions` | A caption, not a command. It appears only when the `EARSHOT_SAFE_MODE` variable is set, which turns every device action off. |
 | `Connect`, or `Disconnect` when connected | The same as a left click. Unavailable while a change is in flight. |
+| `Play from a phone` | Shown only once the setting turns the feature on. Opens a submenu listing the phones paired in Windows that can send audio to this PC, with `Refresh the list` and, once one is open, `Stop playing from <name>`. Disabled before Windows 10 version 2004 (build 19041). |
 | `Block at boot` | Tick. Keeps the AirPods' device nodes disabled while they are not in use. Turning it on before setup runs setup. The tick shows what is in force; when the setting cannot be read it shows neither state. |
 | `Protect audio quality` | Tick, on by default. Turns off the Hands-Free profile, as described above. |
 | `Turns off the AirPods microphone` | A caption under that setting, always visible and never clickable. It is there because that is what the setting costs you. |
 | `Open on startup` | Tick, on by default. Writes one value named `Earshot` under the current user's `Run` key, with the `--startup` argument. Earshot has to be running to put the block back when you stop using the AirPods. |
+| `Speak status`, or `Speak status (no voice)` when no speech voice is installed | Tick, off by default. Turns spoken status on or off; clicking it does not itself speak anything. |
 | `Choose device...` | Lists the paired Bluetooth devices, with the name to match. Choosing one pins it, and points the elevated worker at the same device. Use this if your AirPods are renamed, so that the default match "AirPods" no longer fits. A device that cannot play audio from this PC, a phone for instance, is refused: "That device cannot play audio from this PC. Choose headphones or speakers." |
 | `Set up Earshot...` | Runs the one-time setup. Shown only while setup is needed. |
 | `Exit` | Closes Earshot. With Block at boot on, it blocks the device nodes before it closes. |
+
+Once a keyboard shortcut is set and switched on, it is shown beside the item's
+own label, for instance `Connect (Ctrl+Alt+P)`.
 
 <br clear="all">
 
@@ -248,6 +270,44 @@ turns off the AirPods microphone on this PC.
 <p align="center"><i>Placeholder art, not a screenshot. Pending a real capture of this state.</i></p>
 
 <br clear="all">
+
+**Keyboard shortcuts.** Off until the owner types one into
+`%APPDATA%\Earshot\settings.json`; there is no settings window. A shortcut
+such as `Ctrl+Alt+P` runs exactly what its matching menu item runs, and every
+shortcut action shows a card near the tray with the result. A shortcut can
+turn Block at boot on but not off, because turning it off stays a deliberate
+menu action; a shortcut never starts setup, because setup ends in an
+elevation prompt the owner did not visibly ask for. A key with no modifier,
+Shift on its own and F12 are all refused, Shift because it cannot be told
+apart from ordinary typing. A shortcut another program already holds is
+reported in one card naming it.
+
+**Speak status.** Off until the owner turns it on from the menu. Earshot
+speaks only from a fixed set of phrases: Connected, Disconnected, Blocked at
+boot, Allowed at boot, Connect failed, Block failed. No device name, address
+or number ever reaches the speech engine, and nothing is said for a state the
+app only assumed, such as connecting or unknown; the tooltip line is shown
+instead. It speaks through the speech engine built into Windows, using
+whichever voices are installed there.
+
+**Play from a phone.** Off until the owner turns it on in the settings file.
+It turns this PC into a Bluetooth speaker a paired phone can send audio to,
+through a Windows API built for it. The phone must already be paired in
+Windows Settings: Earshot cannot pair it, because Windows does not support
+in-app pairing for a desktop program. The owner's AirPods are never offered
+as a source, one device plays at a time, and it never touches the boot
+block, the scheduled tasks or elevation. It is released when Earshot exits
+and when Windows is closing it. It needs Windows 10 version 2004 (build
+19041) or later, which every Windows 11 has; on anything older the menu item
+is shown disabled. It has never been run against a real phone, so whether
+this PC's Bluetooth radio offers the source role at all, and what turning it
+on does to an AirPods link already open, are both open questions.
+
+**Shutdown safety.** Once Windows says the session is ending, Earshot refuses
+to start a connect, an allow or a setting change from any trigger, and says
+so on a card; a block already due still runs, and one known to have failed
+is tried once more. A close request from Windows, such as the one the
+Restart Manager can send, is treated the same as choosing Exit.
 
 ## What it does not do
 
@@ -301,6 +361,16 @@ turns off the AirPods microphone on this PC.
 - **Keep the block current without running.** The tray must be running for
   the block to go back on when you stop using the AirPods, which is why Open
   on startup is on by default.
+- **Confirm a named voice was actually selected.** On the machine this was
+  built and tested on, selecting any installed voice by name throws inside
+  the speech engine, so Earshot falls back to the default voice and logs the
+  fallback. `VoiceName` has no proven effect there, and choosing a named
+  voice is unproven anywhere.
+- **Guarantee a shutdown refusal clears itself.** If Windows abandons a
+  shutdown after telling programs the session is ending, Earshot keeps
+  refusing a connect, an allow and every setting change until it is
+  restarted, because Windows sends nothing to say a shutdown was abandoned;
+  the card says to restart it.
 
 ## Getting started
 
@@ -317,10 +387,15 @@ turns off the AirPods microphone on this PC.
 Connect, disconnect and the audio protection do not need setup. Only the boot
 block does, because disabling a device node needs administrator rights.
 
-Requirements: Windows 11 on x64; the AirPods paired to this PC and connected
-to it at least once, so Windows has created their device nodes; one
-administrator approval, for setup; nothing else to install, because the
-release carries its own .NET runtime.
+Requirements: Windows 11 on x64, which is what Earshot is built for and
+tested on. The v1.1 build declares no higher minimum than before (the
+published `Earshot.dll` still carries `SupportedOSPlatform("Windows7.0")`).
+Only Play from a phone needs Windows 10 version 2004 (build 19041) or later,
+which every Windows 11 has; on anything older that one menu item is shown
+disabled. Otherwise: the AirPods paired to this PC and connected to it at
+least once, so Windows has created their device nodes; one administrator
+approval, for setup; nothing else to install, because the release is
+self-contained.
 
 ## Uninstall
 
@@ -395,6 +470,10 @@ stays pending until a run on the device has written the evidence for it.
 | Starting the SYSTEM task from the tray without a prompt | Seen in the application's log: the tray, not elevated, started the Gate and Protect tasks and both reported success. Test 07, which checks the arguments arrive, is pending |
 | The battery check with the AirPods disconnected | Pending |
 | Fast Startup | Pending |
+| Keyboard shortcuts: registering a real one and pressing it | Pending |
+| Spoken status heard on a real run | Pending |
+| Play from a phone, with a real phone | Pending |
+| Shutdown refusals on a real shutdown | Pending. Covered by the same sitting as the power cycle test (08), since that is a real shutdown |
 
 ### Live tests
 
@@ -454,7 +533,15 @@ One program, `Earshot.exe`, chosen by its first argument.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+Earshot's own code is MIT licensed: see [LICENSE](LICENSE). A release also
+carries Microsoft files that are not. `Microsoft.Windows.SDK.NET.dll` and
+`WinRT.Runtime.dll` ship unmodified under the Microsoft Windows SDK licence
+terms (https://learn.microsoft.com/en-us/legal/windows-sdk/license), which
+the MIT licence does not replace, so pass a release on whole and under terms
+that protect those two files at least as much as Microsoft's do.
+[`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt), in the repository and
+in every release, names each third-party component, its publisher, its
+licence and where its terms can be read.
 
 ---
 
