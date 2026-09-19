@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Is the thirty second idle grace long enough, and never too short?
+    Is the idle grace Earshot uses long enough, and never too short?
 
 .DESCRIPTION
-    Earshot blocks the nodes again once the AirPods stop being used: when the render
-    endpoint has been away from ACTIVE for thirty seconds with nothing in flight.
-    Thirty seconds is a waiting budget somebody chose, not a measured figure. Too
-    short and a pause between tracks, or the endpoint churn a protection change
-    causes, would block the nodes while you are still listening. Too long and the
-    machine sits with the nodes enabled for no reason.
+    Earshot blocks the nodes again once the AirPods stop being used: once the render
+    endpoint has been away from ACTIVE for its idle grace with nothing in flight. That
+    grace is a waiting budget somebody chose, not a measured figure. Too short and a
+    pause between tracks, or the endpoint churn a protection change causes, would
+    block the nodes while you are still listening. Too long and the machine sits with
+    the nodes enabled for no reason.
 
     This test watches a real session with the tray running and reads the log for
     the two lines that matter: the block the idle rule issued, and every time it
@@ -47,16 +47,24 @@ Import-Module (Join-Path $PSScriptRoot 'LiveTest.psm1') -Force
 # There is no read-only surface that reports the idle grace before it has been used: no diag
 # target carries BlockCoordinator.IdleGrace, and the application does not expose it as
 # configuration. The one place it is observable is the log line the idle rule itself writes when
-# it blocks ("...were not in use for <N> s..."), which is Earshot reporting the figure it used,
-# not this script assuming one. Get-MeasuredGraceSeconds below reads that line; nothing here
-# restates 30 as a fallback, because a fallback would be an invented figure wearing a measured
-# one's clothes.
-# src\Earshot\App\BlockCoordinator.cs:108 (IdleGrace), :2385 (the log line this reads)
+# it blocks ("...were not in use for <N> s..."), which is Earshot reporting a figure it used, not
+# this script assuming one. Get-DelaySecondsAtBlock below reads that line.
+#
+# That figure is IdleDelay, not IdleGrace: IdleDelay => Doubled(IdleGrace, _idleFailures)
+# (BlockCoordinator.cs:320), and NoteAutomaticBlock doubles it every time an automatic block fails
+# to take (BlockCoordinator.cs:2436). It equals the grace only when nothing has doubled it, which
+# this script can only rule out, never prove, by finding no record in the log of an automatic
+# block failing (the line NoteAutomaticBlock writes, BlockCoordinator.cs:2439). Absent that
+# record, or unable to tell, the grace-named finding stays null: a delay that might be doubled is
+# not the grace, whatever this script calls it.
+# src\Earshot\App\BlockCoordinator.cs:108 (IdleGrace), :320 (IdleDelay), :2385 (the block line),
+# :2436-2439 (NoteAutomaticBlock, the failure line and what it increments)
 
 # Pulls the seconds figure out of a "Blocking the nodes: ... were not in use for <N> s ..." log
-# line. $null when no such line is given, which the caller records as not measured rather than
-# guessed.
-function Get-MeasuredGraceSeconds
+# line: the delay Earshot used for that block, not necessarily the grace. $null when no such line
+# is given, or its figure cannot be parsed, either of which the caller records as not measured
+# rather than guessed.
+function Get-DelaySecondsAtBlock
 {
     param([string[]]$Lines)
 
@@ -72,7 +80,7 @@ function Get-MeasuredGraceSeconds
 }
 
 $run = New-LiveTestRun -TestId '13-grace-window' -Title 'Tuning the idle grace window' `
-    -Settles 'Whether thirty seconds of idle is the right wait before the nodes are blocked again, measured against real driver churn.' `
+    -Settles 'Whether the idle grace Earshot uses is the right wait before the nodes are blocked again, measured against real driver churn.' `
     -ExePath $ExePath -RunRoot $RunRoot
 
 try
@@ -134,9 +142,22 @@ try
         $stateAfter = Get-Field -Object $nodesAfter -Name 'nodeState'
         Write-Line -Run $run -Text ('Nodes after the watch: ' + $stateAfter)
 
-        # The measured grace, read from the block line itself when there was one. Nothing is
-        # measured when nothing blocked, so this stays $null rather than the watch limit.
-        $measuredGraceSeconds = $(if ($blocked) { Get-MeasuredGraceSeconds -Lines $lines } else { $null })
+        # The delay reported in the block line itself, when there was one. Nothing is measured
+        # when nothing blocked, so this stays $null rather than the watch limit, and it stays
+        # $null rather than a guess when the line was there but its figure could not be parsed.
+        $delaySecondsAtBlock = $(if ($blocked) { Get-DelaySecondsAtBlock -Lines $lines } else { $null })
+
+        # A failed automatic block anywhere in the log since Earshot started (see the header
+        # comment for the line and what it means) is the log's own evidence that the delay at
+        # this block might have been doubled away from the grace. Read over the whole log, not
+        # just since the watch started: a failure earlier in the same run still leaves the
+        # doubling in force until something re-arms the rule, and this script has no reliable way
+        # to tell whether that happened in between. Present, or this script cannot tell, and the
+        # grace-named finding stays null.
+        $automaticBlockFailures = Get-EarshotLogLines -Run $run -Pattern 'the nodes are still enabled ('
+        $anyAutomaticBlockFailure = (@($automaticBlockFailures).Count -gt 0)
+        $doublingRuledOut = ($blocked -and ($null -ne $delaySecondsAtBlock) -and -not $anyAutomaticBlockFailure)
+        $suggestedGraceSeconds = $(if ($doublingRuledOut) { $delaySecondsAtBlock } else { $null })
 
         # A nodes reading of Blocked with no log line proving the idle rule did it is not proof
         # the idle rule blocked them: they may have started Blocked, or been blocked for another
@@ -150,24 +171,47 @@ try
                 else { 'Nothing blocked within ' + $WatchMinutes + ' minutes; the nodes read ' + $stateAfter + '.' }
             )
 
-        Add-Criterion -Run $run -Id 'not-too-long' -Criterion 'The wait is close to the idle grace Earshot itself reports, not minutes longer.' `
-            -Outcome $(if ($blocked -and $seconds -le 120) { 'pass' } elseif ($blocked) { 'fail' } else { 'inconclusive' }) `
+        # "Close to the grace" cannot be checked honestly: the block line reports the delay in
+        # force, which is only the grace when nothing doubled it (see suggestedIdleGraceSeconds
+        # below), and this criterion should not silently go quiet just because it was. It compares
+        # the measured wait against the delay instead, with one 15 s sampling step of slack, which
+        # is the only tolerance this script has grounds for: the loop that produced $seconds polls
+        # in 15 s steps, so a wait it reports can be up to 14 s later than the real one without
+        # anything having gone wrong.
+        Add-Criterion -Run $run -Id 'not-too-long' -Criterion 'The measured wait is within one 15 s sampling step of the delay Earshot reported for that block, not longer.' `
+            -Outcome $(
+                if (-not $blocked) { 'inconclusive' }
+                elseif ($null -eq $delaySecondsAtBlock) { 'inconclusive' }
+                elseif ($seconds -le ($delaySecondsAtBlock + 15)) { 'pass' }
+                else { 'fail' }
+            ) `
             -Detail $(
-                if ($blocked) {
-                    'About ' + $seconds + ' s, watched in 15 s steps, against a reported grace of ' +
-                    $(if ($null -ne $measuredGraceSeconds) { $measuredGraceSeconds.ToString() + ' s' } else { 'an unreadable figure' }) +
-                    '. A much longer wait usually means something kept restarting it; the "not issued" lines say what.'
+                if (-not $blocked) { 'Nothing blocked within the watch window, so there is no wait to compare.' }
+                elseif ($null -eq $delaySecondsAtBlock) { 'The block line did not carry a figure this could parse, so there is nothing to compare the wait against.' }
+                else {
+                    'About ' + $seconds + ' s, watched in 15 s steps, against a delay of ' + $delaySecondsAtBlock +
+                    ' s reported in the block line. Pass is within one 15 s sampling step over that; a much longer wait ' +
+                    'usually means something kept restarting it, and the "not issued" lines say what.'
                 }
-                else { 'Nothing blocked within the watch window, so there is no wait to compare.' }
             )
 
         Add-Finding -Run $run -Name 'secondsFromIdleToBlock' -Value $(if ($blocked) { $seconds } else { $null }) `
             -Detail $(if ($blocked) { 'measured in 15 s steps, so treat it as a bound' } else { 'not measured: nothing blocked within the watch window' })
         Add-Finding -Run $run -Name 'idleBlockDeferrals' -Value @($notIssued).Count -Detail 'how many times the rule decided not to block; the reasons are in the log lines'
-        Add-Finding -Run $run -Name 'suggestedIdleGraceSeconds' -Value $measuredGraceSeconds `
+
+        Add-Finding -Run $run -Name 'idleDelaySecondsAtBlock' -Value $delaySecondsAtBlock `
             -Detail $(
-                if ($null -ne $measuredGraceSeconds) { 'read from the log line Earshot wrote when it blocked, not assumed' }
-                else { 'could not be read: no log line showed the idle rule blocking, so this is not recorded rather than guessed' }
+                if (-not $blocked) { 'not measured: nothing blocked within the watch window' }
+                elseif ($null -eq $delaySecondsAtBlock) { 'the block line did not carry a figure this could parse, so this is not recorded rather than guessed' }
+                else { 'read from the log line Earshot wrote when it blocked: the delay in force at that block, which is the grace only when nothing doubled it (see suggestedIdleGraceSeconds)' }
+            )
+
+        Add-Finding -Run $run -Name 'suggestedIdleGraceSeconds' -Value $suggestedGraceSeconds `
+            -Detail $(
+                if ($doublingRuledOut) { 'equals idleDelaySecondsAtBlock: the log shows no automatic block failing in this run, so nothing doubled the delay away from the grace' }
+                elseif (-not $blocked) { 'not measured: nothing blocked within the watch window' }
+                elseif ($null -eq $delaySecondsAtBlock) { 'the block line did not carry a figure this could parse, so this is not recorded rather than guessed' }
+                else { 'an automatic block failed somewhere in this run (' + @($automaticBlockFailures).Count + ' line(s)), so the delay this block reported may be doubled rather than the grace; not recorded as the grace' }
             )
 
         Write-Section -Run $run -Title 'Protection churn'

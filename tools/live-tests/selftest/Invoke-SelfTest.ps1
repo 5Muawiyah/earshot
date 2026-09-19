@@ -63,7 +63,7 @@
 param(
     [string]$Root = '',
     [string]$WorkRoot = '',
-    [ValidateSet('', 'none', 'one', 'two')][string]$Case = '',
+    [ValidateSet('', 'none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -94,13 +94,20 @@ $tests = @(
     [ordered]@{ Number = '10'; Id = '10-shutdown-messages-v1'; Script = '10-ShutdownMessages.ps1'; Halves = @('first', 'resume'); Extra = @('Variant=1') }
     [ordered]@{ Number = '11'; Id = '11-battery-disconnected'; Script = '11-BatteryDisconnected.ps1'; Halves = @('first'); Extra = @() }
     [ordered]@{ Number = '12'; Id = '12-callback-thread'; Script = '12-CallbackThread.ps1'; Halves = @('first'); Extra = @() }
-    [ordered]@{ Number = '13'; Id = '13-grace-window'; Script = '13-GraceWindow.ps1'; Halves = @('first'); Extra = @('WatchMinutes=1') }
+    # Cases adds two fake-input sets beyond the shared none/one/two: 'grace-doubled' is a failed
+    # automatic block followed by a block line reporting a doubled delay, and 'grace-unparsable'
+    # is a block line whose figure this script cannot parse. Only test 13 reads either, so only
+    # its row asks for them; every other row keeps the shared three.
+    [ordered]@{ Number = '13'; Id = '13-grace-window'; Script = '13-GraceWindow.ps1'; Halves = @('first'); Extra = @('WatchMinutes=1')
+        Cases = @('none', 'one', 'two', 'grace-doubled', 'grace-unparsable') }
     [ordered]@{ Number = '14'; Id = '14-set-device-refusal'; Script = '14-SetDeviceRefusal.ps1'; Halves = @('first'); Extra = @('SpeakerAddress=C7D8E9F0A1B2') }
     [ordered]@{ Number = '15'; Id = '15-uninstall-reversal'; Script = '15-UninstallReversal.ps1'; Halves = @('first', 'resume'); Extra = @() }
 )
 
-$cases = @('none', 'one', 'two')
-if (-not [string]::IsNullOrEmpty($Case)) { $cases = @($Case) }
+$defaultCases = @('none', 'one', 'two')
+$cases = $defaultCases
+$caseExplicit = (-not [string]::IsNullOrEmpty($Case))
+if ($caseExplicit) { $cases = @($Case) }
 
 if ([string]::IsNullOrEmpty($WorkRoot))
 {
@@ -299,9 +306,11 @@ function Test-Expectations
         }
     }
 
-    # Findings is optional and, unlike Criteria, not exhaustive: only the named ones are checked,
-    # and a run may record others expectations.psd1 says nothing about. $null in the expectation
-    # is a real, checked value (not measured), not "skip this one"; only the string 'any' skips.
+    # Findings is optional; a block that omits it entirely is not checked at all, the same as
+    # before. A block that declares it is exhaustive, the same as Criteria: every finding the run
+    # records must be named, and every named one must be recorded with the value given. $null in
+    # the expectation is a real, checked value (not measured), not "skip this one"; only the
+    # string 'any' skips the value check for a finding that must still be recorded.
     if ($wanted.Contains('Findings'))
     {
         $wantedFindings = $wanted.Findings
@@ -317,15 +326,23 @@ function Test-Expectations
             if ($expected -is [string] -and $expected -eq 'any') { continue }
 
             $actual = $Recorded.Findings[$name]
-            $matches = $false
-            if ($null -eq $expected -and $null -eq $actual) { $matches = $true }
-            elseif ($null -ne $expected -and $null -ne $actual -and [string]$expected -eq [string]$actual) { $matches = $true }
+            $isMatch = $false
+            if ($null -eq $expected -and $null -eq $actual) { $isMatch = $true }
+            elseif ($null -ne $expected -and $null -ne $actual -and [string]$expected -eq [string]$actual) { $isMatch = $true }
 
-            if (-not $matches)
+            if (-not $isMatch)
             {
                 $shownExpected = $(if ($null -eq $expected) { 'null' } else { [string]$expected })
                 $shownActual = $(if ($null -eq $actual) { 'null' } else { [string]$actual })
                 $problems = $problems + @([string]$Where + ': the finding "' + $name + '" was ' + $shownActual + ', and the fake inputs imply ' + $shownExpected + '.')
+            }
+        }
+
+        foreach ($name in $Recorded.Findings.Keys)
+        {
+            if (-not $wantedFindings.Contains($name))
+            {
+                $problems = $problems + @([string]$Where + ': the finding "' + $name + '" was recorded and expectations.psd1 does not name it.')
             }
         }
     }
@@ -372,7 +389,14 @@ foreach ($row in $tests)
     $result.scripts = $result.scripts + 1
     $result.halves = $result.halves + @($row.Halves).Count
     $seen[$row.Script] = $true
-    foreach ($caseName in $cases)
+
+    # A row's own Cases replaces the shared none/one/two only for the default sweep. An explicit
+    # -Case on the command line always wins, the same as before, so "-Test 13 -Case one" still
+    # runs exactly that one case.
+    $rowCases = $cases
+    if (-not $caseExplicit -and $row.Contains('Cases')) { $rowCases = @($row.Cases) }
+
+    foreach ($caseName in $rowCases)
     {
         $result.cases = $result.cases + 1
         $sandbox = Join-Path $WorkRoot ([string]$row.Number + '-' + $caseName)

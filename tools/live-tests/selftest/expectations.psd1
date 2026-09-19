@@ -234,25 +234,53 @@
     }
 
     # ------------------------------------------------------------- 13 grace window
-    # This test threw on its very first criterion, so integrator decision D1, the thirty
-    # second idle grace, could not be settled by any sitting. All three criteria are named in
-    # all three columns. not-too-long is the counted one: with no block line in the log the
-    # rule never fired inside the watch, and inconclusive is the honest answer.
+    # All three criteria are named in every column: Findings is declared for this block, which
+    # makes it exhaustive the same as Criteria, so every one of the five findings the script
+    # always records (secondsFromIdleToBlock, idleBlockDeferrals, idleDelaySecondsAtBlock,
+    # suggestedIdleGraceSeconds, idleRuleReArmed) is pinned in every case.
+    #
     # blocks-when-idle is inconclusive, not pass, for "none": nothing blocked in the log, and the
     # nodes read Blocked only because that is where 13-grace-window|first starts (Fakes.psm1,
-    # StartStates), never because the idle rule was seen to do it. secondsFromIdleToBlock and
-    # suggestedIdleGraceSeconds are $null there for the same reason: nothing was measured.
+    # StartStates), never because the idle rule was seen to do it. Every block-derived finding is
+    # $null there for the same reason: nothing was measured.
+    #
     # For "one" and "two" the block line is in the log from the start (Fakes.psm1 stamps it an
     # hour ahead of now), so it is found on the first 15 s poll: secondsFromIdleToBlock is 15,
-    # and suggestedIdleGraceSeconds is 45, the figure LogFixtures writes into that line, read
-    # back rather than assumed.
+    # idleDelaySecondsAtBlock is 45 (the figure LogFixtures writes into that line, read back
+    # rather than assumed), and suggestedIdleGraceSeconds equals it, because neither case's log
+    # holds a failed-automatic-block line, so nothing rules the grace out.
+    #
+    # grace-doubled and grace-unparsable are 13's own cases (Fakes.psm1, New-FakeSandbox): the
+    # first carries a failed-block line before a 90 s block line, so idleDelaySecondsAtBlock is
+    # 90 but suggestedIdleGraceSeconds is $null (a doubling cannot be ruled out); the second
+    # carries a block line with no parseable figure, so both are $null and not-too-long, which
+    # has nothing to compare, is inconclusive rather than silently passing or failing.
     '13-grace-window|first' = @{
         none = @{ Overall = 'inconclusive'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'inconclusive'; 'not-too-long' = 'inconclusive' }
-            Findings = @{ 'secondsFromIdleToBlock' = $null; 'suggestedIdleGraceSeconds' = $null } }
+            Findings = @{
+                'secondsFromIdleToBlock' = $null; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = $null
+                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0
+            } }
         one  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
-            Findings = @{ 'secondsFromIdleToBlock' = 15; 'suggestedIdleGraceSeconds' = 45 } }
+            Findings = @{
+                'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 1; 'idleDelaySecondsAtBlock' = 45
+                'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 1
+            } }
         two  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
-            Findings = @{ 'secondsFromIdleToBlock' = 15; 'suggestedIdleGraceSeconds' = 45 } }
+            Findings = @{
+                'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 2; 'idleDelaySecondsAtBlock' = 45
+                'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 2
+            } }
+        'grace-doubled' = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
+            Findings = @{
+                'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = 90
+                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0
+            } }
+        'grace-unparsable' = @{ Overall = 'inconclusive'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'inconclusive' }
+            Findings = @{
+                'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = $null
+                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0
+            } }
     }
 
     # ------------------------------------------------------ 14 set-device refusal

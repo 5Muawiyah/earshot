@@ -148,16 +148,22 @@ $script:Notes = [ordered]@{
 $script:World = $null
 $script:Context = $null
 
+# How many matching lines and list items each case holds. grace-doubled and grace-unparsable are
+# test 13's own cases (see the "13 grace window" section of New-FakeSandbox below): they carry no
+# generic matching lines of their own, only the bespoke ones that section adds, so they count as
+# 0 here the same as none.
+$script:CaseItemCounts = @{ none = 0; one = 1; two = 2; 'grace-doubled' = 0; 'grace-unparsable' = 0 }
+
 function Initialize-FakeMachine
 {
     param(
         [Parameter(Mandatory = $true)][string]$SandboxRoot,
         [Parameter(Mandatory = $true)][string]$TestId,
         [Parameter(Mandatory = $true)][ValidateSet('first', 'resume')][string]$Half,
-        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two')][string]$Case
+        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case
     )
 
-    $counts = @{ none = 0; one = 1; two = 2 }
+    $counts = $script:CaseItemCounts
     $key = [string]$TestId + '|' + $Half
     if (-not $script:StartStates.ContainsKey($key))
     {
@@ -202,10 +208,10 @@ function New-FakeSandbox
 {
     param(
         [Parameter(Mandatory = $true)][string]$SandboxRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two')][string]$Case
+        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case
     )
 
-    $counts = @{ none = 0; one = 1; two = 2 }
+    $counts = $script:CaseItemCounts
     $items = $counts[$Case]
     $local = Join-Path $SandboxRoot 'local'
     $data = Join-Path (Join-Path $SandboxRoot 'programdata') 'Earshot'
@@ -243,6 +249,36 @@ function New-FakeSandbox
         {
             $lines = $lines + @('2001-02-03T04:05:06.007Z INFO  ' + $fixture.Text + ' (before the window)')
         }
+    }
+
+    # 13 grace window: two cases that exist only for that script, neither reachable by choosing an
+    # item count. Both carry a "Blocking the nodes" line, which is the one thing that pattern
+    # counts, so 13-GraceWindow.ps1 still sees itself as blocked in each.
+    #
+    # grace-doubled: an automatic block failed first (the line NoteAutomaticBlock writes,
+    # BlockCoordinator.cs:2439, "...the nodes are still enabled (...). The idle rule tries again
+    # after N s..."), which is what doubles IdleDelay away from IdleGrace
+    # (BlockCoordinator.cs:320), then the block itself reports that doubled figure, 90, not the
+    # grace, 45.
+    #
+    # grace-unparsable: the block line is there, so the idle rule plainly fired, but its figure is
+    # not a number Get-DelaySecondsAtBlock's regex can read. "not measured" would be dishonest for
+    # this one; the script has to say the figure could not be parsed, not that nothing blocked.
+    if ($Case -eq 'grace-doubled')
+    {
+        $index = $index + 1
+        $failStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$failStamp + ' WARN  idle block: the nodes are still enabled (a fake reason). The idle rule tries again after 90 s if they are still enabled and not in use.')
+
+        $index = $index + 1
+        $blockStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$blockStamp + ' INFO  Blocking the nodes: the AirPods were not in use for 90 s with nothing in flight (2001-02-03T04:05:06.009Z).')
+    }
+    elseif ($Case -eq 'grace-unparsable')
+    {
+        $index = $index + 1
+        $blockStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$blockStamp + ' INFO  Blocking the nodes: the AirPods were not in use for a while with nothing in flight (2001-02-03T04:05:06.009Z).')
     }
 
     # A line with no stamp at all and a line no pattern looks for, so reading a log that holds

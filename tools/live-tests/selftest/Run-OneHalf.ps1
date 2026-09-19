@@ -36,7 +36,8 @@
     first or resume.
 
 .PARAMETER Case
-    none, one or two: how many matching lines and list items the fake inputs hold.
+    none, one or two: how many matching lines and list items the fake inputs hold. Two more,
+    grace-doubled and grace-unparsable, exist only for test 13; see Fakes.psm1.
 
 .PARAMETER RunRoot
     The evidence folder, shared by the two halves of a resumable test.
@@ -53,7 +54,7 @@ param(
     [Parameter(Mandatory = $true)][string]$SandboxRoot,
     [Parameter(Mandatory = $true)][string]$TestId,
     [Parameter(Mandatory = $true)][ValidateSet('first', 'resume')][string]$Half,
-    [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two')][string]$Case,
+    [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case,
     [Parameter(Mandatory = $true)][string]$RunRoot,
     [string]$ExtraArguments = ''
 )
