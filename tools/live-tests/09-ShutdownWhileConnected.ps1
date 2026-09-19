@@ -71,7 +71,7 @@ try
             $audio = Get-AudioState -Run $run -Label 'audio-connected'
             $states = Get-TargetEndpointStates -AudioJson $audio
             $nodes = Get-NodeState -Run $run -Label 'nodes-connected'
-            Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $states.Capture + ', nodes ' + (Get-Field -Object $nodes -Name 'nodeState'))
+            Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }) + ', nodes ' + (Get-Field -Object $nodes -Name 'nodeState'))
 
             Add-Criterion -Run $run -Id 'connected-first' -Criterion 'The AirPods are connected to this PC and the nodes are enabled before the shutdown.' `
                 -Outcome $(if ($states.Render -eq 'Active' -and (Get-Field -Object $nodes -Name 'nodeState') -eq 'Allowed') { 'pass' } else { 'inconclusive' }) `
@@ -98,7 +98,7 @@ try
         $nodeState = Get-Field -Object $nodes -Name 'nodeState'
         $audio = Get-AudioState -Run $run -Label 'audio-after-boot'
         $states = Get-TargetEndpointStates -AudioJson $audio
-        Write-Line -Run $run -Text ('Nodes ' + $nodeState + ', render ' + $states.Render + ', capture ' + $states.Capture)
+        Write-Line -Run $run -Text ('Nodes ' + $nodeState + ', render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }))
 
         $paged = Read-Answer -Run $run -Question 'After this boot, did the AirPods connect to this PC by themselves (taking them off your phone)?'
         Add-Criterion -Run $run -Id 'not-paged-at-boot' -Criterion 'Windows did not page the AirPods at the boot after a shutdown while connected.' `

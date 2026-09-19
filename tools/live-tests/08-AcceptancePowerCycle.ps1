@@ -176,7 +176,7 @@ try
 
         $audio = Get-AudioState -Run $run -Label 'audio-after-power-cycle'
         $states = Get-TargetEndpointStates -AudioJson $audio
-        Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $states.Capture + ', derived ' + $states.Connection)
+        Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }) + ', derived ' + $states.Connection)
         Add-Criterion -Run $run -Id 'not-taken-by-pc' -Criterion 'The AirPods are not connected to this PC after the boot.' `
             -Outcome $(if ($states.Render -ne 'Active') { 'pass' } else { 'fail' }) -Detail ('The render endpoint reads ' + $states.Render + '.')
 

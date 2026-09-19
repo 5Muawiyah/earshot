@@ -95,7 +95,7 @@ try
             $before = Measure-TargetNodes -Run $run -Label 'nodes-before'
             $audioBefore = Get-AudioState -Run $run -Label 'audio-before'
             $statesBefore = Get-TargetEndpointStates -AudioJson $audioBefore
-            Write-Line -Run $run -Text ('Render ' + $statesBefore.Render + ', capture ' + $statesBefore.Capture)
+            Write-Line -Run $run -Text ('Render ' + $statesBefore.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($statesBefore.Capture)) { 'none' } else { $statesBefore.Capture }))
 
             if ($before.State -ne 'Blocked' -and $before.State -ne 'Mixed')
             {
@@ -135,7 +135,7 @@ try
                         $elapsed = $elapsed + 5
                         $audio = Get-AudioState -Run $run -Label ('audio-after-allow-' + $elapsed)
                         $states = Get-TargetEndpointStates -AudioJson $audio
-                        Write-Line -Run $run -Text ('  after ' + $elapsed + ' s: render ' + $states.Render + ', capture ' + $states.Capture)
+                        Write-Line -Run $run -Text ('  after ' + $elapsed + ' s: render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }))
                         if ($null -ne $states.Render -and $states.Render -ne 'NotPresent') { $seenAfter = $elapsed }
                     }
 

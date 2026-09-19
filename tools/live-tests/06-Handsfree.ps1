@@ -108,7 +108,7 @@ try
         $audioBefore = Get-AudioState -Run $run -Label 'audio-before'
         $statesBefore = Get-TargetEndpointStates -AudioJson $audioBefore
         Write-Line -Run $run -Text ('Nodes ' + (Get-Field -Object $nodesBefore -Name 'nodeState') +
-            ', render ' + $statesBefore.Render + ', capture ' + $statesBefore.Capture)
+            ', render ' + $statesBefore.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($statesBefore.Capture)) { 'none' } else { $statesBefore.Capture }))
         Add-Finding -Run $run -Name 'servicesAtBaseline' -Value ($baseline.Services -join '; ')
 
         Write-Section -Run $run -Title 'Leg 1: unelevated'
@@ -190,7 +190,7 @@ try
 
             $audioProtected = Get-AudioState -Run $run -Label 'audio-protected'
             $statesProtected = Get-TargetEndpointStates -AudioJson $audioProtected
-            Write-Line -Run $run -Text ('Render ' + $statesProtected.Render + ', capture ' + $statesProtected.Capture)
+            Write-Line -Run $run -Text ('Render ' + $statesProtected.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($statesProtected.Capture)) { 'none' } else { $statesProtected.Capture }))
             Add-Finding -Run $run -Name 'captureEndpointWhileProtected' -Value $(if ($null -eq $statesProtected.Capture) { 'gone' } else { $statesProtected.Capture })
 
             Write-Section -Run $run -Title 'Does protection last?'

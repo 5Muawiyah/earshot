@@ -157,7 +157,7 @@ try
         {
             $audio = Get-AudioState -Run $run -Label 'audio-after-protection-change'
             $states = Get-TargetEndpointStates -AudioJson $audio
-            Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $states.Capture + ', derived ' + $states.Connection)
+            Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }) + ', derived ' + $states.Connection)
             Add-Criterion -Run $run -Id 'protection-churn' -Criterion 'A protection change does not leave the connection state wrong.' `
                 -Outcome $(if ($null -ne $states.Connection) { 'pass' } else { 'inconclusive' }) `
                 -Detail ('The derived state reads ' + $states.Connection + '. The render endpoint, not the capture one, is what drives it.')

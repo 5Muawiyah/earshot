@@ -29,7 +29,10 @@ namespace Earshot.Tests.LiveTests;
 [TestClass]
 public sealed class LiveTestSelfTestTests
 {
-    // 66 short-lived PowerShell processes. Generous, because a machine under load is not a defect.
+    // 66 short-lived PowerShell processes when this was measured, on 2026-09-18 (commit 8d2db48).
+    // Test 13's two extra self-test cases, added the next day, bring today's count to 68, and
+    // RealLauncherSelfTestTests.cs runs one PowerShell process more again, separately. Generous,
+    // because a machine under load is not a defect.
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(20);
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added

@@ -159,8 +159,8 @@ try
 
         $audio = Get-AudioState -Run $run -Label 'audio-after-restart'
         $states = Get-TargetEndpointStates -AudioJson $audio
-        Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $states.Capture + ', derived ' + $states.Connection)
-        Add-Finding -Run $run -Name 'endpointStateWhileBlocked' -Value ('render ' + $states.Render + ', capture ' + $states.Capture) `
+        Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }) + ', derived ' + $states.Connection)
+        Add-Finding -Run $run -Name 'endpointStateWhileBlocked' -Value ('render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture })) `
             -Detail 'what the audio endpoints look like while the nodes are disabled'
         Add-Finding -Run $run -Name 'resolutionWhileBlocked' -Value ('' + (Get-Field -Object $audio -Name 'resolution')) `
             -Detail 'whether the pinned device still resolves while its nodes are disabled'

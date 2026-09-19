@@ -64,7 +64,7 @@ try
         $nodeState = Get-Field -Object $nodes -Name 'nodeState'
         $audio = Get-AudioState -Run $run -Label 'audio-before'
         $states = Get-TargetEndpointStates -AudioJson $audio
-        Write-Line -Run $run -Text ('Nodes: ' + $nodeState + '. Render: ' + $states.Render + '. Capture: ' + $states.Capture + '.')
+        Write-Line -Run $run -Text ('Nodes: ' + $nodeState + '. Render: ' + $states.Render + '. Capture: ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }) + '.')
 
         if ($nodeState -ne 'Blocked')
         {
@@ -101,7 +101,7 @@ try
                     $elapsed = $elapsed + $interval
                     $audio = Get-AudioState -Run $run -Label ('audio-watch-' + $elapsed)
                     $states = Get-TargetEndpointStates -AudioJson $audio
-                    Write-Line -Run $run -Text ('  after ' + $elapsed + ' s: render ' + $states.Render + ', capture ' + $states.Capture)
+                    Write-Line -Run $run -Text ('  after ' + $elapsed + ' s: render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }))
                     if ($states.Render -eq 'Active')
                     {
                         $wentActive = $true

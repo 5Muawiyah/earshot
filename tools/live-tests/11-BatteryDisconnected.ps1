@@ -86,7 +86,7 @@ try
         Write-Section -Run $run -Title 'Leg 1: disconnected'
         $audio = Get-AudioState -Run $run -Label 'audio-disconnected'
         $states = Get-TargetEndpointStates -AudioJson $audio
-        Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $states.Capture + ', derived ' + $states.Connection)
+        Write-Line -Run $run -Text ('Render ' + $states.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($states.Capture)) { 'none' } else { $states.Capture }) + ', derived ' + $states.Connection)
         if ($states.Render -eq 'Active')
         {
             Add-Criterion -Run $run -Id 'leg1-preconditions' -Criterion 'Leg 1 runs with the AirPods disconnected from this PC.' `
@@ -128,7 +128,7 @@ try
         Wait-Owner -Run $run -Text 'Connect the AirPods to this PC now, from the tray icon or Windows Bluetooth settings, and wait until sound plays from this PC.'
         $audioConnected = Get-AudioState -Run $run -Label 'audio-connected'
         $statesConnected = Get-TargetEndpointStates -AudioJson $audioConnected
-        Write-Line -Run $run -Text ('Render ' + $statesConnected.Render + ', capture ' + $statesConnected.Capture)
+        Write-Line -Run $run -Text ('Render ' + $statesConnected.Render + ', capture ' + $(if ([string]::IsNullOrEmpty($statesConnected.Capture)) { 'none' } else { $statesConnected.Capture }))
 
         if ($statesConnected.Render -ne 'Active')
         {

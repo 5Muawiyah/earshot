@@ -525,6 +525,7 @@ function Invoke-Earshot
         if (-not (Confirm-Step -Run $Run -Prompt $line -Consequence $Consequence))
         {
             $step.error = 'skipped at the owner request'
+            Write-Line -Run $Run -Text '  exit: skipped, no exit code or elapsed time.'
             [void]$Run.Steps.Add($step)
             return $null
         }
@@ -679,6 +680,7 @@ function Invoke-EarshotElevated
     if (-not (Confirm-Step -Run $Run -Prompt $line -Consequence $Consequence))
     {
         $step.error = 'skipped at the owner request'
+        Write-Line -Run $Run -Text '  exit: skipped, no exit code or elapsed time.'
         [void]$Run.Steps.Add($step)
         return $null
     }
