@@ -41,12 +41,25 @@ public sealed class LiveTestSelfTestTests
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()
     {
+        // The shipped scripts are run with Windows PowerShell 5.1 on the machine, so the self-test
+        // runs them in the same host. Where that host is not installed the scripts are not covered,
+        // and the honest record of that is inconclusive rather than a pass. The path is named, so a
+        // machine that was never able to run this is never read as having settled it.
+        string host = WindowsPowerShell51Path();
+        if (!File.Exists(host))
+        {
+            Assert.Inconclusive(
+                "Windows PowerShell 5.1 is not installed at " + host + ", so the shipped live test " +
+                "scripts were not run and this settles nothing about them.");
+        }
+
         string workRoot = Path.Combine(Path.GetTempPath(), "earshot-live-selftest-" + Guid.NewGuid().ToString("N"));
-        (int exit, string output, string errors) = RunSelfTest(workRoot);
+        (int exit, string output, string errors) = RunSelfTest(workRoot, host);
 
         Assert.IsFalse(
             string.IsNullOrWhiteSpace(output),
-            "The self-test printed nothing. Exit " + exit.ToString(CultureInfo.InvariantCulture) + Environment.NewLine + errors);
+            "The self-test printed nothing. Host " + host + ", exit " +
+            exit.ToString(CultureInfo.InvariantCulture) + Environment.NewLine + errors);
 
         JsonElement result = ReadLastJsonObject(output);
         var problems = new List<string>();
@@ -95,12 +108,12 @@ public sealed class LiveTestSelfTestTests
         }
     }
 
-    private static (int Exit, string Output, string Errors) RunSelfTest(string workRoot)
+    private static (int Exit, string Output, string Errors) RunSelfTest(string workRoot, string host)
     {
         string runner = Path.Combine(RepositoryRoot(), "tools", "live-tests", "selftest", "Invoke-SelfTest.ps1");
         Assert.IsTrue(File.Exists(runner), "The self-test runner was not found at " + runner + ".");
 
-        var info = new ProcessStartInfo(PowerShellHost())
+        var info = new ProcessStartInfo(host)
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -153,11 +166,13 @@ public sealed class LiveTestSelfTestTests
         }
     }
 
-    private static string PowerShellHost()
+    // Where Windows PowerShell 5.1 lives on every Windows install. Returned whether or not it is
+    // there: the caller decides what an absent host means, which used to be a bare "powershell.exe"
+    // handed to a child process and an obscure failure some way further in.
+    private static string WindowsPowerShell51Path()
     {
         string system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        string host = Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe");
-        return File.Exists(host) ? host : "powershell.exe";
+        return Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe");
     }
 
     private static string RepositoryRoot()
