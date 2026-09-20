@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- TargetFramework and SupportedOSPlatformVersion come from Directory.Build.props, the one
+         place they are written (see NoSuppressionsTests.TheFloorIsSetInDirectoryBuildPropsAndNowhereElse). -->
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>Earshot.TestWindow</AssemblyName>
+    <RootNamespace>Earshot.TestWindow</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- A development tool, never part of the release. tools\build-release.ps1 publishes
+         src\Earshot\Earshot.csproj by path, so this alone keeps it out of the zip; the flag also
+         means a plain "dotnet publish" on the solution cannot put it there by accident. -->
+    <IsPublishable>false</IsPublishable>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Earshot.Tests" />
+  </ItemGroup>
+</Project>

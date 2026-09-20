@@ -13,5 +13,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Earshot\Earshot.csproj" />
+    <ProjectReference Include="..\..\src\Earshot.TestWindow\Earshot.TestWindow.csproj" />
   </ItemGroup>
 </Project>
