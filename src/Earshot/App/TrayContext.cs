@@ -140,9 +140,13 @@ internal sealed class TrayContext : ApplicationContext
     // dismiss time. A UI timing choice, not a measurement.
     public static readonly TimeSpan DefaultExitNoticeTime = TimeSpan.FromSeconds(4);
 
-    // How long closing waits for Windows to let go of a streaming connection. No page gives Dispose a time limit,
-    // so this is the limit: a waiting budget, not a measured figure. The work runs on a pool thread, which cannot
-    // keep the process alive once this runs out.
+    // How long closing waits for Windows to let go of the streaming connection(s) Close itself starts releasing:
+    // the one in use now, and any earlier one a switch-off could not get Windows to confirm releasing, tried
+    // again here. It does not bound a release already under way in _pending from an earlier switch-off
+    // (StopStreaming(wait: false, ...)): Exit awaits everything in _pending up to its own, much longer limit
+    // (DefaultExitWaitLimit) before Close ever runs. No page gives Dispose a time limit, so this is the limit for
+    // what Close itself starts: a waiting budget, not a measured figure. The work runs on a pool thread, which
+    // cannot keep the process alive once this runs out.
     public static readonly TimeSpan DefaultStreamingShutdownWait = TimeSpan.FromSeconds(2);
 
     private readonly ServiceRegistry _registry;
@@ -207,6 +211,12 @@ internal sealed class TrayContext : ApplicationContext
     private int _streamingGeneration;
     private bool _streamingStartInFlight;
     private bool _streamingRefreshInFlight;
+
+    // Connections an earlier switch-off could not get Windows to confirm releasing, kept instead of let go with
+    // the coordinator that saw the failure, because only the platform instance that coordinator holds still has
+    // the connection to try again. Close makes that one further attempt, through the same instance, once each;
+    // nothing here retries one on a later switch back on. Read and written on the UI thread only.
+    private readonly List<StreamingCoordinator> _unconfirmedStreaming = new();
 
     // Sticky for the life of the process: once Open has told us there is no usable voice on this
     // machine (StepOutcomes.NotAvailable), that is a machine fact that will not change while Earshot
@@ -434,12 +444,16 @@ internal sealed class TrayContext : ApplicationContext
         // alternative (not joining at all) risks disposing a synthesiser that is still mid-call.
         StopVoice();
 
-        // Play from a phone: every connection the coordinator enabled is released and disposed on every exit path
-        // this handles, because "the underlying transport is deactivated when all references are released" and a PC
-        // still accepting audio after Earshot has gone is the worst thing this feature could do. The release runs on
-        // a pool thread and this waits for it at most StreamingShutdownWait: no page gives Dispose a time limit, and
-        // a pool thread cannot keep the process alive. A start still in flight was cancelled by _lifetime above and
-        // releases whatever it had enabled when it comes back. There is no watcher to stop: the list is read once per
+        // Play from a phone: every connection this run enabled is asked to be released here, on every exit path
+        // this handles: the one in use now, if there is one, and any earlier one a switch-off could not get
+        // Windows to confirm releasing, tried again through the same platform instance that still holds it,
+        // because "the underlying transport is deactivated when all references are released" and a PC still
+        // accepting audio after Earshot has gone is the worst thing this feature could do. The release runs on a
+        // pool thread and this waits for it at most StreamingShutdownWait, for all of it together, not once per
+        // connection: no page gives Dispose a time limit, and a pool thread cannot keep the process alive.
+        // Whatever Windows still has not confirmed by the time that runs out has its reference end with the
+        // process, same as it always has. A start still in flight was cancelled by _lifetime above and releases
+        // whatever it had enabled when it comes back. There is no watcher to stop: the list is read once per
         // request and nothing is left running between reads.
         StopStreaming(wait: true, "Earshot is closing");
     }
@@ -1128,17 +1142,28 @@ internal sealed class TrayContext : ApplicationContext
     {
         // A start still building its coordinator sees this and disposes what it built.
         _streamingGeneration++;
-        if (_streaming is not { } streaming)
-        {
-            return;
-        }
 
-        _streaming = null;
-        streaming.Changed -= OnStreamingChanged;
-        _log.Info("Play from a phone: letting go of any connection, because " + why + ".");
+        StreamingCoordinator? streaming = _streaming;
+        if (streaming is not null)
+        {
+            _streaming = null;
+            streaming.Changed -= OnStreamingChanged;
+
+            // Letting go itself is asynchronous, so without this the tooltip and icon could keep reading the
+            // connection just switched away from (e.g. "Waiting for <phone>...") until something unrelated
+            // refreshed them next. A no-op once Earshot is closed: UpdatePresentation guards that itself.
+            UpdatePresentation(forceIcon: false);
+        }
 
         if (!wait)
         {
+            if (streaming is null)
+            {
+                return;
+            }
+
+            _log.Info("Play from a phone: letting go of any connection, because " + why + ".");
+
             // Started now whatever else is going on, Exit included, and kept with the other actions in flight so Exit
             // waits for it. Not through Launch, which starts nothing once Earshot is closing: this must always run.
             Task letGo = LetGoOfStreamingAsync(streaming);
@@ -1151,7 +1176,24 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        Task release = Task.Run(() => LetGoOfEverything(streaming));
+        // Final Close only: the current connection, if there is one, and every connection an earlier switch-off
+        // could not get Windows to confirm releasing, tried again once through the same platform instance that
+        // still holds it: a fresh one would have nothing to release. All of it inside the one closing budget
+        // below, not a fresh one for each: StreamingShutdownWait is not extended by how many are waiting for it.
+        var toRelease = new List<StreamingCoordinator>(_unconfirmedStreaming);
+        _unconfirmedStreaming.Clear();
+        if (streaming is not null)
+        {
+            toRelease.Add(streaming);
+        }
+
+        if (toRelease.Count == 0)
+        {
+            return;
+        }
+
+        _log.Info("Play from a phone: letting go of any connection, because " + why + ".");
+        Task<List<StreamingCoordinator>> release = Task.Run(() => LetGoOfEachStreaming(toRelease));
         try
         {
             if (!release.Wait(_streamingShutdownWait))
@@ -1168,21 +1210,57 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    private static void LetGoOfEverything(StreamingCoordinator streaming)
+    // Releases everything the coordinator holds. If Windows confirmed releasing all of it, the coordinator is
+    // disposed and this returns null. If something is still unconfirmed, the coordinator is returned instead of
+    // disposed: it is the platform instance that still holds the live connection, and a fresh coordinator built
+    // later would hold nothing to release. The caller decides what to do with what comes back.
+    private static StreamingCoordinator? LetGoOfEverything(StreamingCoordinator streaming)
     {
-        streaming.ReleaseAll();
+        IReadOnlyList<StreamingReleaseOutcome> outcomes = streaming.ReleaseAll();
+        if (outcomes.Any(o => o.Failed))
+        {
+            return streaming;
+        }
+
         streaming.Dispose();
+        return null;
+    }
+
+    // The Close-time retry: every coordinator handed to it gets one more attempt, through its own platform
+    // instance, and whatever is still unconfirmed after that comes back so the caller can decide whether to wait
+    // any longer for it. Static: touches nothing on the tray, so it can run on a pool thread.
+    private static List<StreamingCoordinator> LetGoOfEachStreaming(IReadOnlyList<StreamingCoordinator> coordinators)
+    {
+        var stillUnconfirmed = new List<StreamingCoordinator>();
+        foreach (StreamingCoordinator streaming in coordinators)
+        {
+            if (LetGoOfEverything(streaming) is { } unconfirmed)
+            {
+                stillUnconfirmed.Add(unconfirmed);
+            }
+        }
+
+        return stillUnconfirmed;
     }
 
     private async Task LetGoOfStreamingAsync(StreamingCoordinator streaming)
     {
+        StreamingCoordinator? unconfirmed = streaming;
         try
         {
-            await Task.Run(() => LetGoOfEverything(streaming));
+            unconfirmed = await Task.Run(() => LetGoOfEverything(streaming));
         }
         catch (Exception ex)
         {
             _log.Error("Play from a phone: letting go of the connection failed (" + NativeCodes.Name(ex.HResult) + ", " + ex.GetType().Name + ").", ex);
+        }
+
+        if (unconfirmed is not null)
+        {
+            // Not lost with this coordinator: Windows has not confirmed releasing it, and Close makes the one
+            // further attempt this deserves, through the same instance, once, not one on every switch back on
+            // before then.
+            _unconfirmedStreaming.Add(unconfirmed);
         }
 
         ShowStreamingReleaseFailure(streaming, CardPlace.NearTray);

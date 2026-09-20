@@ -141,6 +141,39 @@ public sealed class StreamingReleaseFailureTests
         Assert.AreEqual("B", coordinator.Menu.Items.Single(i => i.Command == StreamingMenuCommand.Stop).DeviceId);
     }
 
+    // The other half of "one device at a time only holds if the last one was really let go": A here is not the
+    // device being replaced (nothing is in use at all, StopPlaying already cleared that), only a name still sitting
+    // in _unreleased from an earlier, unrelated stop. Starting B must retry A's release from that list first
+    // (StartPlayingCoreAsync's unconfirmed loop), not just from swapping out the device in use, which
+    // ASecondDeviceIsNotStartedWhileTheFirstWouldNotLetGo above already covers.
+    [TestMethod]
+    public async Task AThirdDeviceIsRefusedWhileAnEarlierStoppedOneIsStillUnreleased()
+    {
+        var fake = new FakeStreamingPlatform();
+        var log = new CapturingLog();
+        using StreamingCoordinator coordinator = await MakeWithListAsync(fake, log, Device("A"), Device("B", "Phone B"));
+        await coordinator.StartPlayingAsync("A", CancellationToken.None);
+        fake.ReleaseFails("A");
+        StreamingReleaseOutcome stopped = coordinator.StopPlaying("A");
+        Assert.IsTrue(stopped.Failed, "Set-up: A must be unconfirmed and no longer the device in use.");
+        Assert.IsFalse(coordinator.Menu.Items.Any(i => i.Command == StreamingMenuCommand.Play && i.DeviceId == "A" && i.Checked));
+
+        StreamingOpenOutcome refused = await coordinator.StartPlayingAsync("B", CancellationToken.None);
+
+        Assert.AreEqual(StreamingOpenStatus.NotStarted, refused.Status);
+        Assert.AreEqual("release failed", refused.Step.Detail);
+        Assert.IsEmpty(fake.CallsNamed("Enable(B"), "B must not be enabled while A may still be.");
+        AssertTheMenuStillOffersToLetGo(coordinator, "A");
+
+        // Once Windows lets go of A, the next start for B lets it go first and then carries on.
+        fake.ReleaseSucceedsAgain("A");
+        int before = fake.Calls.Count;
+        StreamingOpenOutcome started = await coordinator.StartPlayingAsync("B", CancellationToken.None);
+
+        Assert.AreEqual(StreamingOpenStatus.Open, started.Status);
+        CollectionAssert.AreEqual(Sequence.Of("Release(A)", "Enable(B)", "Open(B)"), fake.Calls.Skip(before).ToArray());
+    }
+
     [TestMethod]
     public async Task ADeviceTheListNoLongerHoldsWhoseReleaseFailsIsStillShown()
     {

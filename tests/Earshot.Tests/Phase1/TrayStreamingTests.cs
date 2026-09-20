@@ -189,6 +189,30 @@ public sealed class TrayStreamingTests
         });
     }
 
+    // Item 2 of the review. Switching the whole feature off (not stopping one device from the menu) used to leave
+    // the tooltip reading whatever it said the moment before: OnSettingsChanged refreshed the presentation, then
+    // ApplyStreaming let the connection go without refreshing it again, and by the time the coordinator's own
+    // Changed handler could have said so it had already been unhooked.
+    [TestMethod]
+    public void TheTooltipIsCorrectAtOnceAfterSwitchingTheFeatureOff()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform fake = PlatformWith(Phone());
+            using TrayHarness tray = On(fake, snapshot: Target(ConnectionState.Disconnected));
+            tray.PumpUntilIdle();
+            string atRest = TrayStatus.Tooltip(tray.Monitor.Current, tray.Coordinator.BlockStatus, tray.Settings.Current);
+            ClickChild(tray, PhoneName);
+            Assert.AreEqual(atRest + "\nWaiting for Test Phone. Start playing something on it.", tray.Context.TooltipText);
+
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = false });
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(atRest, tray.Context.TooltipText,
+                "The tooltip must not still read a connection that switching the feature off just let go of.");
+        });
+    }
+
     [TestMethod]
     public void AFailureGetsOneShortCardTheCodeGoesToTheLogAndNothingStaysEnabled()
     {
@@ -659,6 +683,49 @@ public sealed class TrayStreamingTests
 
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "0x8000FFFF"), "A release that failed as Earshot closed is still in the log.");
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "may still be connected"));
+        });
+    }
+
+    // Item 1 of the review. A release that fails while the feature is switched off used to be reported once and
+    // then forgotten for good: StopStreaming nulled _streaming before letting go asynchronously, so once the next
+    // switch-on built a fresh StreamingCoordinator (a fresh platform with it), nothing referenced the coordinator
+    // whose release had failed and its bookkeeping went with it. Here the feature is switched off with a release
+    // Windows will not confirm, switched on again with a different platform (as a real switch-on always builds a
+    // new one) and off again normally, and only then does Earshot close: the very first platform must still get
+    // one more attempt, because it is the only thing left holding that connection.
+    [TestMethod]
+    public void AReleaseUnconfirmedWhileTheFeatureWasOffIsRetriedOnceAtClose()
+    {
+        StaThread.Run(() =>
+        {
+            FakeStreamingPlatform first = PlatformWith(Phone());
+            FakeStreamingPlatform second = PlatformWith(Phone());
+            var platforms = new Queue<FakeStreamingPlatform>([first, second]);
+            using var tray = new TrayHarness(streamingPlatforms: platforms, settings: s => s.Streaming = s.Streaming with { Enabled = true });
+            tray.PumpUntilIdle();
+            ClickChild(tray, PhoneName);
+            first.ReleaseFails(PhoneId);
+
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = false });
+            TrayHarness.PumpUntil(() => tray.Cards.Shown.Any(c => c.Content.Status == MayStill), "Not told the phone may still be connected.");
+            Assert.AreEqual(1, first.CallsNamed("Release(").Count);
+
+            // A second switch-on builds a second, unrelated platform, exactly as a real switch-on would; switching
+            // off again afterwards must not disturb the first platform's own unconfirmed release. Each change is
+            // pumped to a condition of its own, not just PumpUntilIdle: a settings change is applied by a posted
+            // callback, and a pump that finds nothing already in flight can return before that callback has even
+            // started the next one (see ACoordinatorThatIsReadyLateDoesNotReplaceTheNewerOne).
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = true });
+            TrayHarness.PumpUntil(() => second.CallsNamed("List").Count == 1, "The second switch-on never read its list.");
+            tray.PumpUntilIdle();
+            tray.Settings.Update(s => s.Streaming = s.Streaming with { Enabled = false });
+            TrayHarness.PumpUntil(() => !tray.Context.IsWorking, "The second switch-off never settled.");
+            Assert.AreEqual(1, first.CallsNamed("Release(").Count, "Still untouched by the second cycle.");
+
+            tray.Context.Dispose();
+
+            Assert.AreEqual(2, first.CallsNamed("Release(").Count, "Close retries the original failed release once, through the same platform.");
+            Assert.IsEmpty(second.CallsNamed("Release("), "The second platform had nothing unconfirmed, so Close asks it for nothing.");
         });
     }
 

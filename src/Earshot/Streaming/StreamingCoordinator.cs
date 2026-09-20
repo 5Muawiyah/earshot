@@ -12,10 +12,14 @@ namespace Earshot.Streaming;
 // One device at a time. Whether Windows can have two open at once is not documented, so a second choice
 // releases the first before it enables anything, and is refused if Windows does not confirm that release.
 //
-// Nothing stays enabled that the menu does not show. An enable whose open then fails is released at once, so
-// the only connection left enabled is the one in use, which the menu shows with its Stop item. That one stays
-// enabled when the phone lets go, so the phone can come back by itself; "the underlying transport is
-// deactivated when all references are released", which is what StopPlaying and ReleaseAll do.
+// Nothing stays enabled that this coordinator's own menu does not show, for as long as this coordinator is the
+// one behind it. An enable whose open then fails is released at once, so the only connection left enabled is the
+// one in use, which the menu shows with its Stop item. That one stays enabled when the phone lets go, so the
+// phone can come back by itself; "the underlying transport is deactivated when all references are released",
+// which is what StopPlaying and ReleaseAll do. A release Windows will not confirm keeps its device in this
+// coordinator's own menu for as long as this coordinator lasts; once the feature is switched off, that menu is
+// gone, and it is the host that keeps this instance alive rather than letting Dispose be its end, so the one
+// platform instance still holding the connection can be tried again when Earshot closes.
 //
 // Every release goes through one method, Release, and that is the whole point of it: the outcome of every one
 // is written to the log with its raw code, none is dropped, and when Windows does not confirm a release the
@@ -370,8 +374,10 @@ internal sealed class StreamingCoordinator : IDisposable
             alreadyLetGo = _closed;
         }
 
-        // Not a second attempt at what ReleaseAll has already tried: its outcomes are recorded, and the references
-        // end with the coordinator.
+        // Not a second attempt at what ReleaseAll has already tried: its outcomes are recorded. Disposing here does
+        // not clear them: the fields above still name whatever Windows would not confirm, so a caller that means
+        // to try that connection again keeps this coordinator instead of letting this method be its end, and
+        // calls ReleaseAll on it once more itself. TrayContext does exactly that, once, when Earshot closes.
         if (!alreadyLetGo)
         {
             ReleaseAll();
