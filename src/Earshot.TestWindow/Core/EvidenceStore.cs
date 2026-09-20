@@ -177,6 +177,7 @@ internal static partial class EvidenceStore
                 Overall = overall,
                 Criteria = criteria!,
                 Findings = ReadFindings(root),
+                Errors = ReadErrors(root),
                 StepCount = CountArrayOrObjectMember(root, "steps"),
                 Exe = TryGetString(root, "exe"),
                 StartedUtc = TryGetDate(root, "startedUtc"),
@@ -267,6 +268,36 @@ internal static partial class EvidenceStore
             }
 
             list.Add(new FindingRecord(name, value, TryGetString(item, "detail") ?? string.Empty));
+        }
+
+        return list;
+    }
+
+    // Write-Failure's own shape: { utc, message }. Read leniently, the same as findings: a
+    // malformed entry is skipped rather than failing the whole read, because errors are shown
+    // alongside a result, never used to decide pass or fail.
+    private static List<string> ReadErrors(JsonElement root)
+    {
+        var list = new List<string>();
+        if (!root.TryGetProperty("errors", out JsonElement element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return list;
+        }
+
+        IEnumerable<JsonElement> items = element.ValueKind switch
+        {
+            JsonValueKind.Array => element.EnumerateArray(),
+            JsonValueKind.Object => new[] { element },
+            _ => Array.Empty<JsonElement>(),
+        };
+
+        foreach (JsonElement item in items)
+        {
+            string? message = item.ValueKind == JsonValueKind.Object ? TryGetString(item, "message") : null;
+            if (message is not null)
+            {
+                list.Add(message);
+            }
         }
 
         return list;

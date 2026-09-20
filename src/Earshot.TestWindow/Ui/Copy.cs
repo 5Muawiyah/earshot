@@ -38,4 +38,41 @@ internal static class Copy
         string baseText = BaseText(state.Kind);
         return state.Qualifier is null ? baseText : baseText + ", " + state.Qualifier;
     }
+
+    // test-gui.md section 12's leftAtRest copy, shown after every run. AtRestUnknown is written
+    // to say plainly, in its own words, that the machine must be treated as left in the state
+    // Earshot exists to prevent: an unread node state is never shown as though it were a yes.
+    internal const string AtRestYes =
+        "Left at rest: yes. The AirPods nodes are blocked, so this PC will not page them at the next start.";
+
+    internal const string AtRestNo =
+        "NOT AT REST. This PC was left able to page the AirPods at the next start. That is the state Earshot " +
+        "exists to prevent. Run Restore, or start Earshot, before you shut down.";
+
+    internal const string AtRestUnknown =
+        "NOT KNOWN. The node state could not be read, so this PC must be treated as left in the state Earshot " +
+        "exists to prevent, until Restore has run.";
+
+    internal const string AtRestNotApplicable =
+        "At rest does not apply here: Earshot is not set up, or Block at boot is off.";
+
+    internal const string AtRestNoSuchFinding =
+        "Not recorded. This run is older than the at-rest check. Treat it as not known.";
+
+    // no-on-purpose carries its own reason, so it is built rather than fixed.
+    internal static string AtRestOnPurpose(string reason) =>
+        "Left enabled on purpose. " + reason + " Shut down as the test asks, or run Restore to put it back.";
+
+    // Never conflates an unread state with a good one (T11): "unknown" and a missing finding
+    // both route through AtRestUnknown/AtRestNoSuchFinding, never AtRestYes.
+    internal static string LeftAtRestText(string? leftAtRest, string? reason) => leftAtRest switch
+    {
+        "yes" => AtRestYes,
+        "no" => AtRestNo,
+        "no-on-purpose" => AtRestOnPurpose(string.IsNullOrEmpty(reason) ? "No reason was recorded." : reason),
+        "not-applicable" => AtRestNotApplicable,
+        "unknown" => AtRestUnknown,
+        null => AtRestNoSuchFinding,
+        _ => AtRestUnknown,
+    };
 }

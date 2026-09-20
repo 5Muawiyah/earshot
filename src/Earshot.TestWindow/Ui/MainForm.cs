@@ -3,10 +3,9 @@ using Earshot.TestWindow.Core;
 namespace Earshot.TestWindow.Ui;
 
 // The window's shell. List mode only, for the single-half rows (slice S4): a row is picked from
-// the list, Start begins a real (or, with --sandbox, fake-device) child, and StepPanel shows
-// every prompt. Two-half rows show their derived state but have no Start button yet (their
-// resume handling is slice S6). What happens once a half exits (ResultPanel, the banner) is
-// slice S5.
+// the list, Start begins a real (or, with --sandbox, fake-device) child, StepPanel shows every
+// prompt, ResultPanel shows what result.json says once it exits. Two-half rows show their
+// derived state but have no Start button yet (their resume handling is slice S6).
 internal sealed class MainForm : Form
 {
     private readonly string _repoRoot;
@@ -19,10 +18,13 @@ internal sealed class MainForm : Form
     private readonly Button _startButton;
     private readonly ComboBox _caseBox;
     private readonly Label _statusLabel;
+    private readonly Label _bannerLabel;
     private readonly StepPanel _stepPanel;
+    private readonly ResultPanel _resultPanel;
 
     private ChildRunner? _activeRunner;
     private string? _activeResultFolder;
+    private BannerState _banner = new() { Level = BannerLevel.None };
 
     internal MainForm(string repoRoot, IReadOnlyList<ManifestRow> rows, IReadOnlyList<WordingEntry> wording, SandboxOptions? sandbox, string exePath)
     {
@@ -48,22 +50,48 @@ internal sealed class MainForm : Form
         _caseBox.SelectedIndex = 1;
 
         _statusLabel = new Label { Dock = DockStyle.Top, Height = 28, TextAlign = ContentAlignment.MiddleLeft };
+        _bannerLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 0, TextAlign = ContentAlignment.MiddleLeft, Visible = false,
+            Font = new Font(Font, FontStyle.Bold), AutoEllipsis = false,
+        };
 
         var contentHost = new Panel { Dock = DockStyle.Fill };
         _stepPanel = new StepPanel { Visible = false };
+        _resultPanel = new ResultPanel { Visible = false };
+        contentHost.Controls.Add(_resultPanel);
         contentHost.Controls.Add(_stepPanel);
 
         var rightPanel = new Panel { Dock = DockStyle.Fill };
         rightPanel.Controls.Add(contentHost);
         rightPanel.Controls.Add(_statusLabel);
+        rightPanel.Controls.Add(_bannerLabel);
         rightPanel.Controls.Add(_caseBox);
         rightPanel.Controls.Add(_startButton);
 
         Controls.Add(rightPanel);
         Controls.Add(_rowList);
 
+        FormClosing += OnFormClosing;
+
         PopulateRows();
         UpdateStartButton();
+    }
+
+    // design.md section 4.7: closing while the banner is red asks first.
+    private void OnFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (_banner.Level != BannerLevel.Red)
+        {
+            return;
+        }
+
+        DialogResult choice = MessageBox.Show(
+            "This PC is not at rest. Close anyway?", "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (choice != DialogResult.Yes)
+        {
+            e.Cancel = true;
+        }
     }
 
     private string LiveTestRoot() => _sandbox is not null
@@ -72,6 +100,10 @@ internal sealed class MainForm : Form
 
     private void PopulateRows()
     {
+        // Recomputed at every open and after every half (design.md section 4.6).
+        _banner = Banner.Compute(LiveTestRoot());
+        UpdateBannerLabel();
+
         int selected = _rowList.SelectedIndex;
         _rowList.Items.Clear();
         foreach (ManifestRow row in _rows)
@@ -86,6 +118,22 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void UpdateBannerLabel()
+    {
+        if (_banner.Level == BannerLevel.None)
+        {
+            _bannerLabel.Visible = false;
+            _bannerLabel.Height = 0;
+            return;
+        }
+
+        _bannerLabel.Text = _banner.Message;
+        _bannerLabel.ForeColor = _banner.Level == BannerLevel.Red ? Color.White : Color.Black;
+        _bannerLabel.BackColor = _banner.Level == BannerLevel.Red ? Color.Firebrick : Color.Goldenrod;
+        _bannerLabel.Height = 32;
+        _bannerLabel.Visible = true;
+    }
+
     private DerivedRowState ComputeState(ManifestRow row)
     {
         TestRowSpec spec = row.ToSpec();
@@ -97,7 +145,16 @@ internal sealed class MainForm : Form
     private void UpdateStartButton()
     {
         int index = _rowList.SelectedIndex;
-        _startButton.Enabled = index >= 0 && index < _rows.Count && _rows[index].Halves == 1 && _activeRunner is null;
+        if (index < 0 || index >= _rows.Count)
+        {
+            _startButton.Enabled = false;
+            return;
+        }
+
+        ManifestRow row = _rows[index];
+        // The red banner locks every row except 00 Restore (design.md section 4.6).
+        bool lockedByBanner = _banner.RowsLockedExceptRestore && row.Number != "00";
+        _startButton.Enabled = row.Halves == 1 && _activeRunner is null && !lockedByBanner;
     }
 
     private void StartSelectedRow()
@@ -110,6 +167,11 @@ internal sealed class MainForm : Form
 
         ManifestRow row = _rows[index];
         if (row.Halves != 1)
+        {
+            return;
+        }
+
+        if (_banner.RowsLockedExceptRestore && row.Number != "00")
         {
             return;
         }
@@ -157,6 +219,7 @@ internal sealed class MainForm : Form
             }
         };
 
+        _resultPanel.Visible = false;
         _stepPanel.Visible = true;
         _statusLabel.Text = "Running " + row.TestId + "...";
         UpdateStartButton();
@@ -194,9 +257,15 @@ internal sealed class MainForm : Form
 
         string resultPath = Path.Combine(_activeResultFolder!, "result.json");
         (ParsedResult? result, string? failure) = EvidenceStore.TryReadResult(resultPath, row.TestId);
-        _statusLabel.Text = result is not null
-            ? row.TestId + " finished: " + result.Overall
-            : "No readable result.json: " + failure;
+        if (result is not null)
+        {
+            _resultPanel.Show(ResultPresenter.Present(result, _activeResultFolder!));
+            _resultPanel.Visible = true;
+        }
+        else
+        {
+            _statusLabel.Text = "No readable result.json: " + failure;
+        }
 
         _activeRunner = null;
         PopulateRows();

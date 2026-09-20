@@ -19,6 +19,7 @@ internal sealed class ParsedResult
     public required string Overall { get; init; }
     public required IReadOnlyList<CriterionRecord> Criteria { get; init; }
     public required IReadOnlyList<FindingRecord> Findings { get; init; }
+    public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
     public required int StepCount { get; init; }
     public string? Exe { get; init; }
     public DateTimeOffset? StartedUtc { get; init; }
