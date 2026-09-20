@@ -6,10 +6,10 @@
     <RootNamespace>Earshot</RootNamespace>
     <!-- The one place the release version is written. tools\build-release.ps1 reads Version from here,
          names the zip after it, and checks the published Earshot.exe reports the same. -->
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
-    <InformationalVersion>1.0.0</InformationalVersion>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
     <!-- Written into the file's LegalCopyright, so the one thing a user can right-click says who owns it
          and under what licence. It matches LICENSE. -->
     <Copyright>Copyright (c) 2026 5Muawiyah. MIT licence.</Copyright>

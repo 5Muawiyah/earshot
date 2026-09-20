@@ -374,7 +374,7 @@ Restart Manager can send, is treated the same as choosing Exit.
 
 ## Getting started
 
-1. Get `Earshot-1.0.0-win-x64.zip`. There is no download page: the zip is
+1. Get `Earshot-1.1.0-win-x64.zip`. There is no download page: the zip is
    built from this repository by `tools\build-release.ps1`, which writes it
    to `artifacts\` and prints its size and SHA-256. Check that hash against
    the copy you were given before you unzip it, because setup copies these

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="1.0.0.0" name="Earshot.app" />
+  <assemblyIdentity version="1.1.0.0" name="Earshot.app" />
 
   <!-- The tray never elevates. install and uninstall check elevation themselves.
        https://learn.microsoft.com/en-us/windows/win32/sbscs/application-manifests -->
