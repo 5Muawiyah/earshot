@@ -63,6 +63,44 @@ internal static class Copy
     internal static string AtRestOnPurpose(string reason) =>
         "Left enabled on purpose. " + reason + " Shut down as the test asks, or run Restore to put it back.";
 
+    // test-gui.md section 9.1's hand-off screen. HandOffShutDown is the spec's own literal text.
+    // Section 9.1 does not print the restart or any-start wording in full ("Tests 04, 15 and 05
+    // say restart; each variant of 10 shows the script's own instruction"), so HandOffRestart and
+    // HandOffAnyStart draw the same shape from the same section rather than quoting text that was
+    // never given.
+    internal const string HandOffShutDown =
+        "Now shut this PC down. Use Start, Power, Shut down. Do not choose Restart: a restart " +
+        "does not count for this test and this window will not accept one. Keep listening on your " +
+        "phone. Leave the PC off for ten seconds, start it, sign in, and open this window again. " +
+        "It will pick up here.";
+
+    internal const string HandOffRestart =
+        "Now restart this PC. Use Start, Power, Restart. Keep listening on your phone. When it has " +
+        "signed you back in, open this window again. It will pick up here.";
+
+    internal const string HandOffAnyStart =
+        "Now shut this PC down or restart it, either is fine for this test. Keep listening on your " +
+        "phone. When it has signed you back in, open this window again. It will pick up here.";
+
+    internal static string HandOffText(PowerCycleRequirement requirement) => requirement switch
+    {
+        PowerCycleRequirement.FullShutDown => HandOffShutDown,
+        PowerCycleRequirement.Restart => HandOffRestart,
+        _ => HandOffAnyStart,
+    };
+
+    internal const string FirstHalfFailedHandOff =
+        "The first half did not pass, so shutting down now would not be a valid run. Read the " +
+        "result below, then fix what it names before running this test again.";
+
+    // 08's own words for its fastStartupAtPowerDown finding (section 9.1): "On this PC
+    // HiberbootEnabled read 0 on 2026-09-20, so today it would say: 'Fast Startup is off on this
+    // PC, so this run tests a cold start.'"
+    internal static string FastStartupSentence(string value) =>
+        "Fast Startup is " + value + " on this PC, so this run tests a " +
+        (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase) ? "cold start" : "Fast Startup shut down") +
+        ". The window never changes that setting.";
+
     // Never conflates an unread state with a good one (T11): "unknown" and a missing finding
     // both route through AtRestUnknown/AtRestNoSuchFinding, never AtRestYes.
     internal static string LeftAtRestText(string? leftAtRest, string? reason) => leftAtRest switch

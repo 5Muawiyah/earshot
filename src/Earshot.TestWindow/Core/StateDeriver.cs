@@ -105,7 +105,7 @@ internal static class StateDeriver
         return (null, HalfKind.NotApplicable, historyNote, newestUnreadable);
     }
 
-    private static HalfKind ClassifyHalf(TestRowSpec spec, ParsedResult result)
+    internal static HalfKind ClassifyHalf(TestRowSpec spec, ParsedResult result)
     {
         if (spec.Halves == 1)
         {

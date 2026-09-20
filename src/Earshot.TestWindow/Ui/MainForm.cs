@@ -22,9 +22,12 @@ internal sealed class MainForm : Form
     private readonly Label _bannerLabel;
     private readonly StepPanel _stepPanel;
     private readonly ResultPanel _resultPanel;
+    private readonly TextBox _handOffBox;
 
     private ChildRunner? _activeRunner;
     private string? _activeResultFolder;
+    private bool _activeIsResume;
+    private TestRowSpec? _activeSpec;
     private BannerState _banner = new() { Level = BannerLevel.None };
     private readonly List<string> _transcript = new();
 
@@ -76,6 +79,13 @@ internal sealed class MainForm : Form
         var contentHost = new Panel { Dock = DockStyle.Fill };
         _stepPanel = new StepPanel { Visible = false };
         _resultPanel = new ResultPanel { Visible = false };
+        _handOffBox = new TextBox
+        {
+            Multiline = true, ReadOnly = true, WordWrap = true, Dock = DockStyle.Fill,
+            ScrollBars = ScrollBars.Vertical, Visible = false, BackColor = Color.White,
+            Font = new Font(Font.FontFamily, 11f),
+        };
+        contentHost.Controls.Add(_handOffBox);
         contentHost.Controls.Add(_resultPanel);
         contentHost.Controls.Add(_stepPanel);
 
@@ -184,19 +194,38 @@ internal sealed class MainForm : Form
         return StateDeriver.Derive(spec, evidence, _exePath, exeWrite);
     }
 
+    // A row of Halves 2 (04, 05, 08, 09, 15) is pending when its newest run folder holds
+    // resume.txt, its result.json is a first-half result, and it has not been set aside
+    // (section 9.2). Test 10's parent row (Variants is not null) has no Start of its own here:
+    // its five variants each need their own resume handling, which this slice does not build
+    // (see the S6 report's deviations).
+    private PendingRun? FindPendingRun(ManifestRow row) =>
+        row.Halves == 2 && row.Variants is null ? PendingRunFinder.Find(row.ToSpec(), LiveTestRoot()) : null;
+
     private void UpdateStartButton()
     {
         int index = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         if (index < 0 || index >= _rows.Count)
         {
             _startButton.Enabled = false;
+            _startButton.Text = "Start";
             return;
         }
 
         ManifestRow row = _rows[index];
         // The red banner locks every row except 00 Restore (design.md section 4.6).
         bool lockedByBanner = _banner.RowsLockedExceptRestore && row.Number != "00";
-        _startButton.Enabled = row.Halves == 1 && _activeRunner is null && !lockedByBanner;
+
+        if (row.Variants is not null)
+        {
+            _startButton.Enabled = false;
+            _startButton.Text = "Start";
+            return;
+        }
+
+        PendingRun? pending = FindPendingRun(row);
+        _startButton.Text = pending is not null ? "Carry on with the second half" : "Start";
+        _startButton.Enabled = _activeRunner is null && !lockedByBanner;
     }
 
     private void StartSelectedRow()
@@ -208,7 +237,7 @@ internal sealed class MainForm : Form
         }
 
         ManifestRow row = _rows[index];
-        if (row.Halves != 1)
+        if (row.Variants is not null)
         {
             return;
         }
@@ -225,6 +254,19 @@ internal sealed class MainForm : Form
             return;
         }
 
+        PendingRun? pending = FindPendingRun(row);
+        if (pending is not null)
+        {
+            StartResumedSecondHalf(host, row, pending);
+        }
+        else
+        {
+            StartFreshRun(host, row);
+        }
+    }
+
+    private void StartFreshRun(string host, ManifestRow row)
+    {
         string liveTestRoot = LiveTestRoot();
         string stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", System.Globalization.CultureInfo.InvariantCulture);
         string runRoot = Path.Combine(liveTestRoot, stamp);
@@ -251,8 +293,80 @@ internal sealed class MainForm : Form
             runner = new ChildRunner(host, driver, scriptPath, _exePath, runRoot, resume: false, variant: 0, offerUninstall: false, allowPlanB: false);
         }
 
+        BeginRun(row, runner, Path.Combine(runRoot, row.TestId), isResume: false);
+    }
+
+    // section 9.2: "A resumed run always uses the pending run's -RunRoot; the window never makes
+    // a new root for a second half." resume.txt is parsed by ResumeFile, never executed; only its
+    // four validated values (script, exe, root, variant) are ever used to start anything.
+    private void StartResumedSecondHalf(string host, ManifestRow row, PendingRun pending)
+    {
+        string liveTestRoot = LiveTestRoot();
+        string resumeTxtPath = Path.Combine(pending.Folder, "resume.txt");
+        string[] knownScripts = _rows.Select(r => r.Script).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+        if (!ResumeFile.TryParse(resumeTxtPath, _repoRoot, liveTestRoot, knownScripts, out ResumeInstruction? instruction, out string? reason))
+        {
+            _statusLabel.Text = "resume.txt could not be used, so nothing was started: " + reason;
+            return;
+        }
+
+        // section 9.3: "since" is the first-half snapshot's finishedUtc, else resume.txt's last
+        // write time.
+        DateTimeOffset since = FirstHalfSnapshotFinishedUtc(pending.Folder, row.TestId) ?? File.GetLastWriteTimeUtc(resumeTxtPath);
+        string probeScript = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Get-PowerCycleEvidence.ps1");
+        string evidenceJson = ChildRunner.RunPowerCycleProbe(host, probeScript, since, TimeSpan.FromSeconds(30));
+        PowerCycleVerdict verdict = PowerCycle.Decide(evidenceJson);
+        PowerCycleEvidenceFile.Write(pending.Folder, evidenceJson, verdict);
+
+        PowerCycleGateResult gate = PowerCycleGate.Evaluate(row.PowerCycleRequirement, verdict);
+        if (gate == PowerCycleGateResult.Refuse)
+        {
+            _statusLabel.Text = PowerCycleGate.RefusalMessage(row.PowerCycleRequirement, verdict);
+            PopulateRows();
+            UpdateStartButton();
+            return;
+        }
+
+        ChildRunner runner;
+        if (_sandbox is not null)
+        {
+            string driver = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "selftest", "Run-GuiHalfAgainstFakes.ps1");
+            var extra = new List<(string Name, string Value)>
+            {
+                ("SandboxRoot", _sandbox.Folder),
+                ("TestId", row.TestId),
+                ("Case", (string)_caseBox.SelectedItem!),
+            };
+            runner = new ChildRunner(
+                host, driver, instruction!.ScriptPath, instruction.ExePath, instruction.RunRoot, resume: true,
+                variant: instruction.Variant ?? 0, offerUninstall: false, allowPlanB: false,
+                environmentOverrides: _sandbox.ChildEnvironment, extraArguments: extra);
+        }
+        else
+        {
+            string driver = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Invoke-GuiHalf.ps1");
+            runner = new ChildRunner(
+                host, driver, instruction!.ScriptPath, instruction.ExePath, instruction.RunRoot, resume: true,
+                variant: instruction.Variant ?? 0, offerUninstall: false, allowPlanB: false);
+        }
+
+        BeginRun(row, runner, Path.Combine(instruction.RunRoot, row.TestId), isResume: true);
+    }
+
+    private static DateTimeOffset? FirstHalfSnapshotFinishedUtc(string folder, string testId)
+    {
+        string path = Path.Combine(folder, FirstHalfSnapshot.ResultFileName);
+        (ParsedResult? result, _) = EvidenceStore.TryReadResult(path, testId);
+        return result?.FinishedUtc;
+    }
+
+    private void BeginRun(ManifestRow row, ChildRunner runner, string resultFolder, bool isResume)
+    {
         _activeRunner = runner;
-        _activeResultFolder = Path.Combine(runRoot, row.TestId);
+        _activeResultFolder = resultFolder;
+        _activeIsResume = isResume;
+        _activeSpec = row.ToSpec();
         _transcript.Clear();
         runner.MessageReceived += message =>
         {
@@ -270,8 +384,9 @@ internal sealed class MainForm : Form
         };
 
         _resultPanel.Visible = false;
+        _handOffBox.Visible = false;
         _stepPanel.Visible = true;
-        _statusLabel.Text = "Running " + row.TestId + "...";
+        _statusLabel.Text = "Running " + row.TestId + (isResume ? " (second half)..." : "...");
         UpdateStartButton();
         runner.Start();
     }
@@ -307,7 +422,13 @@ internal sealed class MainForm : Form
 
         string resultPath = Path.Combine(_activeResultFolder!, "result.json");
         (ParsedResult? result, string? failure) = EvidenceStore.TryReadResult(resultPath, row.TestId);
-        if (result is not null)
+
+        bool wasFirstHalfOfTwoHalfTest = row.Halves == 2 && !_activeIsResume;
+        if (result is not null && wasFirstHalfOfTwoHalfTest)
+        {
+            ShowHandOff(row, result);
+        }
+        else if (result is not null)
         {
             _resultPanel.Show(ResultPresenter.Present(result, _activeResultFolder!));
             _resultPanel.Visible = true;
@@ -318,7 +439,44 @@ internal sealed class MainForm : Form
         }
 
         _activeRunner = null;
+        _activeIsResume = false;
+        _activeSpec = null;
         PopulateRows();
         UpdateStartButton();
+    }
+
+    // section 9.1: "read result.json; show leftAtRest; parse resume.txt; copy result.json and
+    // summary.txt to their gui-first-half.* names. ... Then, and only then, the hand-off screen."
+    // The snapshot is taken here, additively, before anything else touches this folder again.
+    private void ShowHandOff(ManifestRow row, ParsedResult firstHalfResult)
+    {
+        FirstHalfSnapshot.Take(_activeResultFolder!);
+
+        var lines = new List<string>
+        {
+            Copy.LeftAtRestText(firstHalfResult.LeftAtRest, null),
+            string.Empty,
+        };
+
+        if (firstHalfResult.Overall != "pass")
+        {
+            lines.Add(Copy.FirstHalfFailedHandOff);
+        }
+        else
+        {
+            lines.Add(Copy.HandOffText(row.PowerCycleRequirement));
+
+            FindingRecord? fastStartup = firstHalfResult.Findings.FirstOrDefault(f => f.Name == "fastStartupAtPowerDown");
+            if (fastStartup?.Value is not null)
+            {
+                lines.Add(string.Empty);
+                lines.Add(Copy.FastStartupSentence(fastStartup.Value));
+            }
+        }
+
+        _resultPanel.Visible = false;
+        _handOffBox.Text = string.Join(Environment.NewLine, lines);
+        _handOffBox.Visible = true;
+        _statusLabel.Text = row.TestId + ": first half complete. Waiting for the power cycle.";
     }
 }

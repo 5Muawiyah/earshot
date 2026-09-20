@@ -182,4 +182,29 @@ internal sealed class ChildRunner : IDisposable
     {
         _process.Dispose();
     }
+
+    // The one other process this window ever starts (T10): a short, read-only, no-window run of
+    // Get-PowerCycleEvidence.ps1, which touches no device and needs no elevation (design.md
+    // section 9.3/D7). Kept as a static helper on this same class rather than a new file, so
+    // "process starts only in ChildRunner.cs and FolderOpener.cs" stays true by construction.
+    internal static string RunPowerCycleProbe(string host, string scriptPath, DateTimeOffset sinceUtc, TimeSpan timeout)
+    {
+        var arguments = new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-SinceUtc", sinceUtc.UtcDateTime.ToString("o", CultureInfo.InvariantCulture) };
+        ProcessStartInfo info = PowerShell51.CreateStartInfo(host, arguments);
+        info.StandardOutputEncoding = Encoding.UTF8;
+
+        using var process = new Process { StartInfo = info };
+        var output = new StringBuilder();
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) { output.AppendLine(e.Data); } };
+        process.Start();
+        process.BeginOutputReadLine();
+        if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+        {
+            process.Kill(entireProcessTree: true);
+            return "{\"error\":\"Get-PowerCycleEvidence.ps1 did not finish within " + timeout + ".\"}";
+        }
+
+        process.WaitForExit();
+        return output.ToString().Trim();
+    }
 }

@@ -63,6 +63,18 @@ $half = $(if ($Resume) { 'resume' } else { 'first' })
 Initialize-FakeMachine -SandboxRoot $SandboxRoot -TestId $TestId -Half $half -Case $Case
 New-FakeSandbox -SandboxRoot $SandboxRoot -Case $Case
 
+# Fakes.psm1 (unchanged) never leaves a file at its own fake ExePath: no shipped script ever
+# invokes it for real, so nothing in the fake world needed one to exist before this slice.
+# resume.txt's -ExePath now needs a real file there too (ResumeFile.cs: "the exe must exist"),
+# the same faithfully-fake-but-real-on-disk shape a real release folder would leave. A placeholder
+# only, never run.
+$fakeExePath = (Get-FakeContext).ExePath
+if (-not (Test-Path -LiteralPath $fakeExePath))
+{
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $fakeExePath) | Out-Null
+    Set-Content -LiteralPath $fakeExePath -Value '' -Encoding Ascii
+}
+
 # A function shadows the cmdlet, so the target script's own
 # "Import-Module (Join-Path $PSScriptRoot 'LiveTest.psm1') -Force" reaches this, installs the
 # three device stubs into both the global scope and the module's own session state, and only
