@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Earshot.TestWindow.Core;
 
 internal enum BannerLevel
@@ -26,41 +28,51 @@ internal static class Banner
     internal const string RedMessage =
         "This PC may be left able to page the AirPods at the next start. Run Restore before you shut down.";
 
+    // B3 (review round 1): "newest" is decided by finishedUtc, the moment the result was
+    // actually written, never by the run folder's own stamp. A resumed second half writes into
+    // its first half's (older) stamp folder, so ordering by stamp let a stale no/unknown there
+    // hide behind an unrelated test's newer-stamped but chronologically earlier pass. A run
+    // whose result.json cannot be read at all (missing, truncated, empty, wrong test, or
+    // self-disagreeing) is ordered by its folder's own stamp instead, since that is the only time
+    // anything is known about it, and it can never become the chosen result, only a reason to
+    // distrust one that is newer than it thought.
     internal static BannerState Compute(string liveTestRoot)
     {
-        List<(string Stamp, bool HasResult, ParsedResult? Result)> runs = ScanAllRuns(liveTestRoot);
+        List<ScannedRun> runs = ScanAllRuns(liveTestRoot);
         if (runs.Count == 0)
         {
             // Nothing has ever run through this window: not evidence of anything either way.
             return new BannerState { Level = BannerLevel.None };
         }
 
-        runs.Sort((a, b) => string.CompareOrdinal(b.Stamp, a.Stamp));
-
-        (string Stamp, bool HasResult, ParsedResult? Result)? newestWithResult = null;
-        foreach (var run in runs)
+        ScannedRun? chosen = null;
+        foreach (ScannedRun run in runs)
         {
-            if (run.HasResult)
+            if (!run.ReadSucceeded)
             {
-                newestWithResult = run;
-                break;
+                continue;
+            }
+
+            if (chosen is null || run.OrderingUtc > chosen.OrderingUtc)
+            {
+                chosen = run;
             }
         }
 
-        if (newestWithResult is null)
+        if (chosen is null)
         {
-            // Every run folder that exists has no result.json at all: something started and
-            // never finished, which is not a confirmed at-rest state either.
+            // Nothing anywhere has a readable result: fail closed, the same as the old "every run
+            // folder has no result.json" rule.
             return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
 
-        bool orphanNewer = runs.Any(run => !run.HasResult && string.CompareOrdinal(run.Stamp, newestWithResult.Value.Stamp) > 0);
-        if (orphanNewer)
+        bool newerUnreadableExists = runs.Any(run => !run.ReadSucceeded && run.OrderingUtc > chosen.OrderingUtc);
+        if (newerUnreadableExists)
         {
             return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
 
-        string? leftAtRest = newestWithResult.Value.Result!.LeftAtRest;
+        string? leftAtRest = chosen.Result!.LeftAtRest;
         return leftAtRest switch
         {
             "yes" or "not-applicable" => new BannerState { Level = BannerLevel.None },
@@ -69,13 +81,15 @@ internal static class Banner
         };
     }
 
-    // Every run folder under the live test root, across every test, newest stamp first is not
-    // guaranteed here (caller sorts): stamp, whether it has a readable result.json, and the
-    // parsed result when it does. A folder whose result.json fails to parse counts as "no
-    // result.json" (fail closed).
-    private static List<(string Stamp, bool HasResult, ParsedResult? Result)> ScanAllRuns(string liveTestRoot)
+    private sealed record ScannedRun(string Stamp, ParsedResult? Result, DateTimeOffset OrderingUtc, bool ReadSucceeded);
+
+    // Every run folder under the live test root, across every test: its own result (when its
+    // result.json is readable at all), and the timestamp it is ordered by, its own finishedUtc
+    // when the result carries one, else the folder's own stamp (the real harness always writes
+    // finishedUtc; only a fixture or a hand-edited file would not).
+    private static List<ScannedRun> ScanAllRuns(string liveTestRoot)
     {
-        var runs = new List<(string, bool, ParsedResult?)>();
+        var runs = new List<ScannedRun>();
         if (!Directory.Exists(liveTestRoot))
         {
             return runs;
@@ -89,14 +103,22 @@ internal static class Banner
                 continue;
             }
 
+            DateTimeOffset stampUtc = ParseStampUtc(stamp);
+
             foreach (string testFolder in Directory.EnumerateDirectories(stampFolder))
             {
                 string testId = Path.GetFileName(testFolder);
                 (ParsedResult? result, _) = EvidenceStore.TryReadResult(Path.Combine(testFolder, "result.json"), testId);
-                runs.Add((stamp, result is not null, result));
+                DateTimeOffset ordering = result?.FinishedUtc ?? stampUtc;
+                runs.Add(new ScannedRun(stamp, result, ordering, result is not null));
             }
         }
 
         return runs;
     }
+
+    // The stamp format EvidenceStore.IsRunStamp already validated (^\d{8}T\d{6}Z$), so this
+    // always parses for anything that reached here.
+    private static DateTimeOffset ParseStampUtc(string stamp) =>
+        DateTimeOffset.ParseExact(stamp, "yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
 }
