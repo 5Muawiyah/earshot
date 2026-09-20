@@ -38,6 +38,7 @@ internal static class Manifest
                 variants.Add(new ManifestVariant(
                     variantElement.GetProperty("variant").GetInt32(),
                     variantElement.GetProperty("testId").GetString()!,
+                    variantElement.GetProperty("name").GetString()!,
                     variantElement.GetProperty("title").GetString()!,
                     ReadPowerCycleRequirement(variantElement)));
             }
@@ -51,7 +52,9 @@ internal static class Manifest
             Kind = element.GetProperty("kind").GetString()!,
             ElevatedVariant = element.TryGetProperty("elevatedVariant", out JsonElement elevated) && elevated.GetBoolean(),
             Halves = element.GetProperty("halves").GetInt32(),
+            Name = element.GetProperty("name").GetString()!,
             Title = element.GetProperty("title").GetString()!,
+            Proves = element.GetProperty("proves").GetString()!,
             Settles = element.GetProperty("settles").GetString()!,
             PowerCycleRequirement = ReadPowerCycleRequirement(element),
             MaxSilenceSeconds = element.TryGetProperty("maxSilenceSeconds", out JsonElement silence) ? silence.GetInt32() : 900,

@@ -58,18 +58,21 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
 
         // A row shows a plain name and one line saying what the test proves, plus its state, not
-        // the TestId alone.
+        // the TestId alone. State is the second column and every column is sized to fit inside
+        // leftPanel's own fixed width, so the state is always on screen at the default window
+        // size, never behind a horizontal scroll; the full text of a long name or line is always
+        // available in full underneath, in _rowDetailLabel.
         _rowList = new ListView
         {
             Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false,
         };
-        _rowList.Columns.Add("#", 34);
-        _rowList.Columns.Add("Test", 220);
-        _rowList.Columns.Add("What it proves", 300);
-        _rowList.Columns.Add("State", 160);
+        _rowList.Columns.Add("#", 30);
+        _rowList.Columns.Add("State", 110);
+        _rowList.Columns.Add("Test", 130);
+        _rowList.Columns.Add("What it proves", 160);
         _rowList.SelectedIndexChanged += (_, _) => { UpdateStartButton(); UpdateRowDetail(); };
 
-        _rowDetailLabel = new Label { Dock = DockStyle.Bottom, Height = 44, AutoEllipsis = false, TextAlign = ContentAlignment.MiddleLeft };
+        _rowDetailLabel = new Label { Dock = DockStyle.Bottom, Height = 110, AutoEllipsis = false, TextAlign = ContentAlignment.TopLeft };
 
         var leftPanel = new Panel { Dock = DockStyle.Left, Width = 460 };
         leftPanel.Controls.Add(_rowList);
@@ -153,7 +156,11 @@ internal sealed class MainForm : Form
         }
 
         DisplayRow row = _displayRows[index];
-        string text = row.Title + Environment.NewLine + "Settles: " + row.Settles;
+
+        // The plain line first, the script's own words as a secondary line beneath it, for both
+        // pairs Name/Title and Proves/Settles, in full: never cut with an ellipsis.
+        string text = row.Name + Environment.NewLine + row.Title + Environment.NewLine + Environment.NewLine +
+            row.Proves + Environment.NewLine + "Settles: " + row.Settles;
         if (row.WaitsOnWindowsUpdate)
         {
             text += Environment.NewLine + "This variant waits on Windows Update offering a restart; it may take a while for one to appear.";
@@ -194,9 +201,9 @@ internal sealed class MainForm : Form
         {
             DerivedRowState state = ComputeState(row);
             var item = new ListViewItem(row.Number);
-            item.SubItems.Add(row.Title);
-            item.SubItems.Add(row.Settles);
             item.SubItems.Add(RowPresenter.Text(state));
+            item.SubItems.Add(row.Name);
+            item.SubItems.Add(row.Proves);
             item.ForeColor = state.IsGreen ? Color.DarkGreen : Color.Black;
             _rowList.Items.Add(item);
         }

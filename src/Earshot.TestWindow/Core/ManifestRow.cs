@@ -1,8 +1,9 @@
 namespace Earshot.TestWindow.Core;
 
 // One variant of test 10 (test-gui.md section 6.1): its own TestId, its own plain name and its
-// own two halves.
-internal sealed record ManifestVariant(int Variant, string TestId, string Title, PowerCycleRequirement PowerCycleRequirement);
+// own two halves. Name is hand-written (what the owner would call this restart), Title is the
+// script's own literal (a secondary line), exactly the Name/Title split ManifestRow carries.
+internal sealed record ManifestVariant(int Variant, string TestId, string Name, string Title, PowerCycleRequirement PowerCycleRequirement);
 
 // One row of Data\tests.json: everything section 6.1's manifest table carries for one test,
 // enough to build the TestRowSpec StateDeriver needs.
@@ -15,10 +16,15 @@ internal sealed class ManifestRow
     public bool ElevatedVariant { get; init; }
     public required int Halves { get; init; }
 
-    // The plain name and the one line saying what the test proves, both the script's own words:
-    // Title and Settles exactly as the script passes them to New-LiveTestRun. Never paraphrased
-    // here (a row must show a name and a line, not the TestId alone).
+    // Two pairs, each a plain line the coordinator asked for and the script's own words as a
+    // secondary line beneath it: Name/Title (what the owner would call this test, hand-written;
+    // never checked against the script) and Proves/Settles (the plain sentence shown in the row
+    // list, hand-written; the script's own -Settles literal, checked against the script by
+    // ManifestTitleSettlesTests, shown in the detail pane only). A row must never show the TestId
+    // alone.
+    public required string Name { get; init; }
     public required string Title { get; init; }
+    public required string Proves { get; init; }
     public required string Settles { get; init; }
     public PowerCycleRequirement PowerCycleRequirement { get; init; } = PowerCycleRequirement.None;
     public int MaxSilenceSeconds { get; init; } = 900;
