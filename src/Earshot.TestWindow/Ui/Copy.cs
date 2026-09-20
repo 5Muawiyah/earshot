@@ -101,6 +101,27 @@ internal static class Copy
         (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase) ? "cold start" : "Fast Startup shut down") +
         ". The window never changes that setting.";
 
+    // test-gui.md section 11. T13 pins that none of these ever reads as running by itself: no
+    // "unattended", "automatic" or "batch", and no "GUI" (this is a window, never named that to
+    // the owner).
+    internal const string RunAllButtonLabel = "Run all, step by step";
+
+    internal const string RunAllExplanation =
+        "You will be asked at every step. It stops for every shut down and carries on when you come back.";
+
+    internal const string RunAllCarryOnButtonLabel = "I have read this. Carry on with Run all.";
+
+    internal static string RunAllStoppedForPowerCycle(string testNumber) =>
+        "Run all stopped for the shut down or restart in test " + testNumber + ". Carry on with the second half?";
+
+    internal static string RunAllStoppedForFailure(string testNumber) =>
+        "Run all stopped at test " + testNumber + ". Read the result, then choose to carry on.";
+
+    internal const string RunAllLockedItemSkipped =
+        "This item is locked, so Run all stopped here rather than skip past it.";
+
+    internal const string RunAllFinished = "Run all has reached the end of the list.";
+
     // Never conflates an unread state with a good one (T11): "unknown" and a missing finding
     // both route through AtRestUnknown/AtRestNoSuchFinding, never AtRestYes.
     internal static string LeftAtRestText(string? leftAtRest, string? reason) => leftAtRest switch

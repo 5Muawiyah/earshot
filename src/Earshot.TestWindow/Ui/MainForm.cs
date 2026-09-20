@@ -23,6 +23,10 @@ internal sealed class MainForm : Form
     private readonly StepPanel _stepPanel;
     private readonly ResultPanel _resultPanel;
     private readonly TextBox _handOffBox;
+    private readonly Button _runAllButton;
+    private readonly Label _runAllExplanationLabel;
+    private readonly Label _runAllStatusLabel;
+    private readonly Button _runAllCarryOnButton;
 
     private ChildRunner? _activeRunner;
     private string? _activeResultFolder;
@@ -30,6 +34,13 @@ internal sealed class MainForm : Form
     private TestRowSpec? _activeSpec;
     private BannerState _banner = new() { Level = BannerLevel.None };
     private readonly List<string> _transcript = new();
+
+    // section 11: Run all's own state, held only in memory plus run-all.json; never consulted by
+    // StateDeriver, so a row's own state is always exactly what section 6.2 says regardless of
+    // whether Run all is active.
+    private bool _runAllActive;
+    private int _runAllIndex = -1;
+    private readonly Dictionary<string, string> _runAllPointers = new(StringComparer.Ordinal);
 
     internal MainForm(string repoRoot, IReadOnlyList<ManifestRow> rows, IReadOnlyList<WordingEntry> wording, SandboxOptions? sandbox, string exePath)
     {
@@ -89,12 +100,30 @@ internal sealed class MainForm : Form
         contentHost.Controls.Add(_resultPanel);
         contentHost.Controls.Add(_stepPanel);
 
+        _runAllCarryOnButton = new Button { Text = Copy.RunAllCarryOnButtonLabel, Dock = DockStyle.Top, Height = 28, Visible = false, AutoSize = true };
+        _runAllCarryOnButton.Click += (_, _) => OnRunAllCarryOnClicked();
+
+        _runAllStatusLabel = new Label { Dock = DockStyle.Top, Height = 24, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkSlateBlue };
+
+        _runAllExplanationLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 32, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            Text = Copy.RunAllExplanation,
+        };
+
+        _runAllButton = new Button { Text = Copy.RunAllButtonLabel, Dock = DockStyle.Top, Height = 28 };
+        _runAllButton.Click += (_, _) => StartOrContinueRunAll();
+
         var rightPanel = new Panel { Dock = DockStyle.Fill };
         rightPanel.Controls.Add(contentHost);
         rightPanel.Controls.Add(_statusLabel);
+        rightPanel.Controls.Add(_runAllStatusLabel);
+        rightPanel.Controls.Add(_runAllCarryOnButton);
         rightPanel.Controls.Add(_bannerLabel);
         rightPanel.Controls.Add(_caseBox);
         rightPanel.Controls.Add(_startButton);
+        rightPanel.Controls.Add(_runAllExplanationLabel);
+        rightPanel.Controls.Add(_runAllButton);
 
         Controls.Add(rightPanel);
         Controls.Add(leftPanel);
@@ -368,6 +397,17 @@ internal sealed class MainForm : Form
         _activeIsResume = isResume;
         _activeSpec = row.ToSpec();
         _transcript.Clear();
+
+        if (_runAllActive)
+        {
+            // The stamp folder is resultFolder's own parent (<runRoot>\<TestId>): the pointer
+            // section 11 asks run-all.json to keep for this item.
+            string? stamp = Path.GetFileName(Path.GetDirectoryName(resultFolder));
+            if (stamp is not null)
+            {
+                _runAllPointers[row.Number] = stamp;
+            }
+        }
         runner.MessageReceived += message =>
         {
             if (IsHandleCreated)
@@ -443,6 +483,157 @@ internal sealed class MainForm : Form
         _activeSpec = null;
         PopulateRows();
         UpdateStartButton();
+
+        // section 12: "The halt is decided from result.json, never from the click." Whatever
+        // just finished, Run all (if active) re-derives this same item from disk and decides
+        // afresh whether to stop here or move itself on; it never trusts what this method above
+        // just did with the panels.
+        if (_runAllActive)
+        {
+            AdvanceRunAll();
+        }
+    }
+
+    // section 11: the guided sequence. Walks RunAllOrder from _runAllIndex, skipping test 10's
+    // five variants (not wired into this window in this build: no variant-level Start exists yet,
+    // a broader skip than section 11's own "variant 4 may be skipped for now"). It starts at most
+    // one child per call, then returns and waits for OnRunFinished to call back in; it never loops
+    // past a row that is not yet a clean pass on disk.
+    private void AdvanceRunAll()
+    {
+        while (_runAllIndex >= 0 && _runAllIndex < RunAllOrder.Items.Count)
+        {
+            RunAllItem item = RunAllOrder.Items[_runAllIndex];
+            if (item.RowNumber == "10")
+            {
+                _runAllIndex++;
+                continue;
+            }
+
+            ManifestRow? row = _rows.FirstOrDefault(r => r.Number == item.RowNumber);
+            if (row is null)
+            {
+                _runAllIndex++;
+                continue;
+            }
+
+            DerivedRowState state = ComputeState(row);
+            bool freshEnough = state.Kind is RowStateKind.NotRun or RowStateKind.StoppedBeforeAnyStep;
+            if (!freshEnough && RunAllHalt.ShouldHalt(state))
+            {
+                HaltRunAll(row, state);
+                return;
+            }
+
+            if (state.Kind == RowStateKind.Passed)
+            {
+                _runAllIndex++;
+                continue;
+            }
+
+            SelectRow(row);
+            string host = PowerShell51.ExecutablePath();
+            if (!File.Exists(host))
+            {
+                HaltRunAll(row, state);
+                return;
+            }
+
+            // Written before the child even starts, not only on a halt: closing the window mid
+            // item must still leave run-all.json pointing at this same index, so reopening and
+            // clicking "Run all, step by step" again resumes here rather than from the start
+            // (T14: "resumes from pointers").
+            SaveRunAllProgress();
+
+            PendingRun? pending = FindPendingRun(row);
+            if (pending is not null)
+            {
+                StartResumedSecondHalf(host, row, pending);
+            }
+            else
+            {
+                StartFreshRun(host, row);
+            }
+
+            return;
+        }
+
+        _runAllActive = false;
+        RunAllFile.Delete(LiveTestRoot());
+        _runAllCarryOnButton.Visible = false;
+        _runAllStatusLabel.Text = Copy.RunAllFinished;
+    }
+
+    private void HaltRunAll(ManifestRow row, DerivedRowState state)
+    {
+        SaveRunAllProgress();
+        SelectRow(row);
+
+        bool atPowerCycleBoundary = state.Kind is RowStateKind.WaitingForShutDown or RowStateKind.WaitingForRestart;
+        _runAllStatusLabel.Text = atPowerCycleBoundary
+            ? Copy.RunAllStoppedForPowerCycle(row.Number)
+            : Copy.RunAllStoppedForFailure(row.Number);
+
+        // At the power-cycle boundary the row's own "Carry on with the second half" button
+        // (section 9.2) is the deliberate click that resumes Run all too, through
+        // OnRunFinished -> AdvanceRunAll above; an ordinary failure needs its own
+        // acknowledgement first (section 12: "Until it is pressed, Run all stays halted").
+        _runAllCarryOnButton.Visible = !atPowerCycleBoundary;
+    }
+
+    private void OnRunAllCarryOnClicked()
+    {
+        _runAllCarryOnButton.Visible = false;
+        _runAllIndex++;
+        SaveRunAllProgress();
+        AdvanceRunAll();
+    }
+
+    private void SaveRunAllProgress()
+    {
+        RunAllFile.Write(LiveTestRoot(), new RunAllRecord
+        {
+            Order = RunAllOrder.Items.Select(RunAllFile.Key).ToArray(),
+            StoppedAtIndex = _runAllIndex,
+            Pointers = new Dictionary<string, string>(_runAllPointers, StringComparer.Ordinal),
+        });
+    }
+
+    private void StartOrContinueRunAll()
+    {
+        if (_banner.RowsLockedExceptRestore)
+        {
+            _runAllStatusLabel.Text = _banner.Message;
+            return;
+        }
+
+        RunAllRecord? existing = RunAllFile.TryRead(LiveTestRoot());
+        _runAllPointers.Clear();
+        if (existing is not null)
+        {
+            foreach ((string key, string stamp) in existing.Pointers)
+            {
+                _runAllPointers[key] = stamp;
+            }
+        }
+
+        _runAllActive = true;
+        _runAllIndex = existing is not null && existing.StoppedAtIndex >= 0 ? existing.StoppedAtIndex : 0;
+        _runAllCarryOnButton.Visible = false;
+        AdvanceRunAll();
+    }
+
+    private void SelectRow(ManifestRow row)
+    {
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            if (_rows[i].Number == row.Number)
+            {
+                _rowList.Items[i].Selected = true;
+                _rowList.Items[i].EnsureVisible();
+                return;
+            }
+        }
     }
 
     // section 9.1: "read result.json; show leftAtRest; parse resume.txt; copy result.json and
