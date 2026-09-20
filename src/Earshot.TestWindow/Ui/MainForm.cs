@@ -14,7 +14,8 @@ internal sealed class MainForm : Form
     private readonly SandboxOptions? _sandbox;
     private readonly string _exePath;
 
-    private readonly ListBox _rowList;
+    private readonly ListView _rowList;
+    private readonly Label _rowDetailLabel;
     private readonly Button _startButton;
     private readonly ComboBox _caseBox;
     private readonly Label _statusLabel;
@@ -25,6 +26,7 @@ internal sealed class MainForm : Form
     private ChildRunner? _activeRunner;
     private string? _activeResultFolder;
     private BannerState _banner = new() { Level = BannerLevel.None };
+    private readonly List<string> _transcript = new();
 
     internal MainForm(string repoRoot, IReadOnlyList<ManifestRow> rows, IReadOnlyList<WordingEntry> wording, SandboxOptions? sandbox, string exePath)
     {
@@ -39,8 +41,23 @@ internal sealed class MainForm : Form
         Height = 720;
         StartPosition = FormStartPosition.CenterScreen;
 
-        _rowList = new ListBox { Dock = DockStyle.Left, Width = 300, IntegralHeight = false };
-        _rowList.SelectedIndexChanged += (_, _) => UpdateStartButton();
+        // A row shows a plain name and one line saying what the test proves, plus its state, not
+        // the TestId alone.
+        _rowList = new ListView
+        {
+            Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false,
+        };
+        _rowList.Columns.Add("#", 34);
+        _rowList.Columns.Add("Test", 220);
+        _rowList.Columns.Add("What it proves", 300);
+        _rowList.Columns.Add("State", 160);
+        _rowList.SelectedIndexChanged += (_, _) => { UpdateStartButton(); UpdateRowDetail(); };
+
+        _rowDetailLabel = new Label { Dock = DockStyle.Bottom, Height = 44, AutoEllipsis = false, TextAlign = ContentAlignment.MiddleLeft };
+
+        var leftPanel = new Panel { Dock = DockStyle.Left, Width = 460 };
+        leftPanel.Controls.Add(_rowList);
+        leftPanel.Controls.Add(_rowDetailLabel);
 
         _startButton = new Button { Text = "Start", Dock = DockStyle.Top, Height = 32 };
         _startButton.Click += (_, _) => StartSelectedRow();
@@ -70,12 +87,32 @@ internal sealed class MainForm : Form
         rightPanel.Controls.Add(_startButton);
 
         Controls.Add(rightPanel);
-        Controls.Add(_rowList);
+        Controls.Add(leftPanel);
 
         FormClosing += OnFormClosing;
 
         PopulateRows();
         UpdateStartButton();
+        UpdateRowDetail();
+    }
+
+    private void UpdateRowDetail()
+    {
+        if (_rowList.SelectedIndices.Count == 0)
+        {
+            _rowDetailLabel.Text = string.Empty;
+            return;
+        }
+
+        int index = _rowList.SelectedIndices[0];
+        if (index < 0 || index >= _rows.Count)
+        {
+            _rowDetailLabel.Text = string.Empty;
+            return;
+        }
+
+        ManifestRow row = _rows[index];
+        _rowDetailLabel.Text = row.Title + Environment.NewLine + "Settles: " + row.Settles;
     }
 
     // design.md section 4.7: closing while the banner is red asks first.
@@ -104,17 +141,22 @@ internal sealed class MainForm : Form
         _banner = Banner.Compute(LiveTestRoot());
         UpdateBannerLabel();
 
-        int selected = _rowList.SelectedIndex;
+        int selected = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         _rowList.Items.Clear();
         foreach (ManifestRow row in _rows)
         {
             DerivedRowState state = ComputeState(row);
-            _rowList.Items.Add(row.Number + "  " + row.TestId + "   [" + RowPresenter.Text(state) + "]");
+            var item = new ListViewItem(row.Number);
+            item.SubItems.Add(row.Title);
+            item.SubItems.Add(row.Settles);
+            item.SubItems.Add(RowPresenter.Text(state));
+            item.ForeColor = state.IsGreen ? Color.DarkGreen : Color.Black;
+            _rowList.Items.Add(item);
         }
 
         if (selected >= 0 && selected < _rowList.Items.Count)
         {
-            _rowList.SelectedIndex = selected;
+            _rowList.Items[selected].Selected = true;
         }
     }
 
@@ -144,7 +186,7 @@ internal sealed class MainForm : Form
 
     private void UpdateStartButton()
     {
-        int index = _rowList.SelectedIndex;
+        int index = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         if (index < 0 || index >= _rows.Count)
         {
             _startButton.Enabled = false;
@@ -159,7 +201,7 @@ internal sealed class MainForm : Form
 
     private void StartSelectedRow()
     {
-        int index = _rowList.SelectedIndex;
+        int index = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         if (index < 0 || index >= _rows.Count)
         {
             return;
@@ -211,11 +253,19 @@ internal sealed class MainForm : Form
 
         _activeRunner = runner;
         _activeResultFolder = Path.Combine(runRoot, row.TestId);
+        _transcript.Clear();
         runner.MessageReceived += message =>
         {
             if (IsHandleCreated)
             {
                 BeginInvoke(new Action(() => HandleMessage(row, message)));
+            }
+        };
+        runner.TranscriptLine += line =>
+        {
+            if (IsHandleCreated)
+            {
+                BeginInvoke(new Action(() => _transcript.Add(line)));
             }
         };
 
@@ -233,7 +283,7 @@ internal sealed class MainForm : Form
             case ChildMessageKind.Hello:
                 break;
             case ChildMessageKind.Prompt:
-                PresentedPrompt presented = PromptPresenter.Present(message, row.Number, _wording);
+                PresentedPrompt presented = PromptPresenter.Present(message, row.Number, _wording, _transcript);
                 _stepPanel.Show(_activeRunner!, presented, message.Seq);
                 break;
             case ChildMessageKind.Exit:

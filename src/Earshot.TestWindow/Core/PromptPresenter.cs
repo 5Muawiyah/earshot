@@ -31,7 +31,8 @@ internal static class PromptPresenter
     private static readonly PromptButton[] YesNoButtons = { new("Yes", "y"), new("No", "n") };
     private static readonly string[] DefaultYesNoUnsure = { "yes", "no", "unsure" };
 
-    internal static PresentedPrompt Present(ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording)
+    internal static PresentedPrompt Present(
+        ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording, IReadOnlyList<string>? transcriptSoFar = null)
     {
         ArgumentNullException.ThrowIfNull(message);
         if (message.Kind != ChildMessageKind.Prompt)
@@ -63,7 +64,7 @@ internal static class PromptPresenter
             "Show-Preconditions" => PresentPreconditions(message),
             "Confirm-Step" => PresentConfirmStep(message, testNumber, wording),
             "Read-Answer" => PresentReadAnswer(message, testNumber, wording, boundOptions ?? textOptions ?? DefaultYesNoUnsure),
-            "Read-Note" => PresentReadNote(message, testNumber, wording),
+            "Read-Note" => PresentReadNote(message, testNumber, wording, transcriptSoFar ?? Array.Empty<string>()),
             "Wait-Owner" => PresentWaitOwner(message, testNumber, wording),
             _ => throw new InvalidOperationException("KnownHelpers and this switch have drifted apart: " + message.Caller),
         };
@@ -155,19 +156,39 @@ internal static class PromptPresenter
         _ => option,
     };
 
-    private static PresentedPrompt PresentReadNote(ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording)
+    // The line after "Addresses seen in the Bluetooth node list, other than the pinned one:" in
+    // 14-SetDeviceRefusal.ps1: each address is printed on its own line, "  " plus twelve upper
+    // case hexadecimal characters, nothing else.
+    private static readonly Regex AddressLine = new(@"^\s*([0-9A-F]{12})\s*$", RegexOptions.Compiled);
+    private const string AddressesSeenMarker = "Addresses seen";
+
+    private static PresentedPrompt PresentReadNote(
+        ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording, IReadOnlyList<string> transcriptSoFar)
     {
         string question = message.Bound.GetValueOrDefault("Question", string.Empty);
         WordingEntry? entry = Wording.Find(wording, testNumber, WordingKind.Note, question);
         string plain = entry?.Plain ?? question;
 
         var buttons = new List<PromptButton>();
-        if (entry is not null)
+        if (entry is not null && entry.Choices.Count > 0)
         {
             foreach (WordingChoice choice in entry.Choices)
             {
                 buttons.Add(new PromptButton(choice.Label, choice.Recorded));
             }
+        }
+        else
+        {
+            // section 7.3, test 14: no static choices are written for this one because the
+            // addresses are printed at run time. One button per address the script has just
+            // printed, sending that address, and "None of these is my phone" (empty, which the
+            // script records as inconclusive). No address lines parsed: only the last button.
+            foreach (string address in AddressesFromTranscript(transcriptSoFar))
+            {
+                buttons.Add(new PromptButton(address, address));
+            }
+
+            buttons.Add(new PromptButton("None of these is my phone", string.Empty));
         }
 
         return new PresentedPrompt
@@ -177,6 +198,38 @@ internal static class PromptPresenter
             ScriptOwnWords = question,
             Buttons = buttons,
         };
+    }
+
+    private static List<string> AddressesFromTranscript(IReadOnlyList<string> transcriptSoFar)
+    {
+        var addresses = new List<string>();
+        bool afterMarker = false;
+        foreach (string line in transcriptSoFar)
+        {
+            if (!afterMarker)
+            {
+                if (line.Contains(AddressesSeenMarker, StringComparison.Ordinal))
+                {
+                    afterMarker = true;
+                }
+
+                continue;
+            }
+
+            Match match = AddressLine.Match(line);
+            if (match.Success)
+            {
+                addresses.Add(match.Groups[1].Value);
+            }
+            else if (!string.IsNullOrWhiteSpace(line))
+            {
+                // The first non-address, non-blank line after the marker (the "Windows
+                // Bluetooth settings shows..." line) ends the list.
+                break;
+            }
+        }
+
+        return addresses;
     }
 
     private static PresentedPrompt PresentWaitOwner(ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording)

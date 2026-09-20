@@ -16,6 +16,16 @@ public sealed class PromptPresenterTests
     private static readonly string[] OnOffLeaveLabels = { "On, as Earshot ships", "Off", "Leave it as it is" };
     private static readonly string[] OnOffLeaveReplies = { "on", "off", "leave" };
     private static readonly string[] CardNoteLabels = { "Connected", "Disconnected", "Something else", "I saw no card" };
+    private static readonly string[] Test14TranscriptWithTwoAddresses =
+    {
+        "Pinned address 0A1B2C3D4E5F, container x, state Blocked",
+        "Addresses seen in the Bluetooth node list, other than the pinned one:",
+        "  1A2B3C4D5E6F",
+        "  6F5E4D3C2B1A",
+        "Windows Bluetooth settings shows which device each one is, under the device properties.",
+    };
+    private static readonly string[] Test14TranscriptWithNoAddresses = { "Addresses seen in the Bluetooth node list, other than the pinned one:" };
+    private static readonly string[] Test14ExpectedButtonLabels = { "1A2B3C4D5E6F", "6F5E4D3C2B1A", "None of these is my phone" };
 
     private static IReadOnlyList<WordingEntry> LoadWording() =>
         Wording.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "wording.json"));
@@ -118,6 +128,35 @@ public sealed class PromptPresenterTests
             CardNoteLabels,
             presented.Buttons.Select(b => b.Label).ToArray());
         Assert.AreEqual("No card seen", presented.Buttons[3].Reply);
+    }
+
+    // section 7.3, test 14: no static choices are written for the phone-address note because the
+    // script prints the addresses at run time; one button per address seen in the transcript,
+    // plus "None of these is my phone".
+    [TestMethod]
+    public void ReadNoteForTest14BuildsButtonsFromTheAddressesPrintedInTheTranscript()
+    {
+        var bound = new Dictionary<string, string> { ["Question"] = "Type the twelve character address of your phone, upper case." };
+
+        PresentedPrompt presented = PromptPresenter.Present(
+            Prompt("Read-Note", "  Your answer (Enter to leave it blank)", bound), "14", LoadWording(), Test14TranscriptWithTwoAddresses);
+
+        Assert.AreEqual("Which of these addresses is your phone?", presented.PlainLine);
+        CollectionAssert.AreEqual(Test14ExpectedButtonLabels, presented.Buttons.Select(b => b.Label).ToArray());
+        Assert.AreEqual("1A2B3C4D5E6F", presented.Buttons[0].Reply);
+        Assert.AreEqual(string.Empty, presented.Buttons[2].Reply);
+    }
+
+    [TestMethod]
+    public void ReadNoteForTest14WithNoAddressLinesOffersOnlyTheLastButton()
+    {
+        var bound = new Dictionary<string, string> { ["Question"] = "Type the twelve character address of your phone, upper case." };
+
+        PresentedPrompt presented = PromptPresenter.Present(
+            Prompt("Read-Note", "  Your answer (Enter to leave it blank)", bound), "14", LoadWording(), Test14TranscriptWithNoAddresses);
+
+        Assert.AreEqual(1, presented.Buttons.Count);
+        Assert.AreEqual("None of these is my phone", presented.Buttons[0].Label);
     }
 
     [TestMethod]

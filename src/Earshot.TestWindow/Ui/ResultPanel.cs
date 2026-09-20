@@ -7,9 +7,12 @@ namespace Earshot.TestWindow.Ui;
 internal sealed class ResultPanel : Panel
 {
     private readonly ListView _failureList;
+    private readonly Label _selectedCaption;
+    private readonly TextBox _selectedDetailBox;
     private readonly TextBox _errorsBox;
     private readonly Label _evidenceLabel;
     private readonly Label _atRestLabel;
+    private IReadOnlyList<FailureRow> _failures = Array.Empty<FailureRow>();
 
     internal ResultPanel()
     {
@@ -35,11 +38,21 @@ internal sealed class ResultPanel : Panel
 
         _failureList = new ListView
         {
-            Width = 704, Height = 160, View = View.Details, FullRowSelect = true, GridLines = true, Margin = new Padding(0, 0, 0, 8),
+            Width = 704, Height = 160, View = View.Details, FullRowSelect = true, GridLines = true, Margin = new Padding(0, 0, 0, 4),
         };
         _failureList.Columns.Add("Criterion", 140);
         _failureList.Columns.Add("Expected", 220);
         _failureList.Columns.Add("Observed", 320);
+        _failureList.SelectedIndexChanged += (_, _) => ShowSelectedFailureInFull();
+
+        // The table truncates long text with an ellipsis; the row picked (the first one, by
+        // default, so nothing is hidden until a click) is always shown here in full, never cut.
+        _selectedCaption = new Label { Text = "Selected criterion, in full", AutoSize = true, Margin = new Padding(0, 0, 0, 2) };
+        _selectedDetailBox = new TextBox
+        {
+            Width = 704, Height = 70, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
+            WordWrap = true, Margin = new Padding(0, 0, 0, 8),
+        };
 
         var errorsCaption = new Label { Text = "Errors the test recorded", AutoSize = true };
         _errorsBox = new TextBox
@@ -52,6 +65,8 @@ internal sealed class ResultPanel : Panel
 
         stack.Controls.Add(heading);
         stack.Controls.Add(_failureList);
+        stack.Controls.Add(_selectedCaption);
+        stack.Controls.Add(_selectedDetailBox);
         stack.Controls.Add(errorsCaption);
         stack.Controls.Add(_errorsBox);
         stack.Controls.Add(_evidenceLabel);
@@ -64,6 +79,7 @@ internal sealed class ResultPanel : Panel
     {
         ArgumentNullException.ThrowIfNull(result);
 
+        _failures = result.Failures;
         _failureList.Items.Clear();
         foreach (FailureRow failure in result.Failures)
         {
@@ -73,6 +89,17 @@ internal sealed class ResultPanel : Panel
             _failureList.Items.Add(item);
         }
 
+        if (_failureList.Items.Count > 0)
+        {
+            // First failed first (section 12): the first row is shown in full without waiting
+            // for a click, so nothing is hidden by the ellipsis by default.
+            _failureList.Items[0].Selected = true;
+        }
+        else
+        {
+            _selectedDetailBox.Text = string.Empty;
+        }
+
         _errorsBox.Text = string.Join(Environment.NewLine, result.Errors);
         _evidenceLabel.Text = "Evidence: " + result.EvidenceFolder + Environment.NewLine +
             result.ResultJsonPath + Environment.NewLine + result.SummaryTxtPath;
@@ -80,5 +107,27 @@ internal sealed class ResultPanel : Panel
         string atRestText = Copy.LeftAtRestText(result.LeftAtRest, result.LeftAtRestDetail);
         _atRestLabel.Text = atRestText;
         _atRestLabel.ForeColor = result.LeftAtRest is "yes" or "not-applicable" ? Color.DarkGreen : Color.DarkRed;
+    }
+
+    private void ShowSelectedFailureInFull()
+    {
+        if (_failureList.SelectedIndices.Count == 0)
+        {
+            _selectedDetailBox.Text = string.Empty;
+            return;
+        }
+
+        int index = _failureList.SelectedIndices[0];
+        if (index < 0 || index >= _failures.Count)
+        {
+            _selectedDetailBox.Text = string.Empty;
+            return;
+        }
+
+        FailureRow failure = _failures[index];
+        _selectedDetailBox.Text =
+            "Criterion: " + failure.Id + Environment.NewLine +
+            "Expected: " + failure.Expected + Environment.NewLine +
+            "Observed: " + failure.Observed;
     }
 }
