@@ -16,4 +16,9 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Earshot.Tests" />
   </ItemGroup>
+  <!-- The manifest travels beside the exe: Manifest.cs reads it from AppContext.BaseDirectory,
+       the same folder Program.cs walks up from to find Earshot.slnx. -->
+  <ItemGroup>
+    <None Include="Data\tests.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

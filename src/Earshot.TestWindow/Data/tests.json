@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "rows": [
+    {
+      "number": "00",
+      "script": "00-Restore.ps1",
+      "testId": "00-restore",
+      "kind": "utility",
+      "elevatedVariant": true,
+      "halves": 1,
+      "whatItProves": "Puts this PC back to a known state. Run it whenever a test stops early.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "01",
+      "script": "01-A2dpOneShot.ps1",
+      "testId": "01-a2dp-oneshot",
+      "kind": "owner-present",
+      "halves": 1,
+      "whatItProves": "Earshot can connect the AirPods to this PC.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "02",
+      "script": "02-Disconnect.ps1",
+      "testId": "02-disconnect",
+      "kind": "owner-present",
+      "halves": 1,
+      "whatItProves": "Earshot can hand the AirPods back to the phone.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "03",
+      "script": "03-AllowPages.ps1",
+      "testId": "03-allow-pages",
+      "kind": "owner-present",
+      "halves": 1,
+      "whatItProves": "Unblocking alone does not pull the AirPods off the phone.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "04",
+      "script": "04-BlockAndReboot.ps1",
+      "testId": "04-block-and-reboot",
+      "kind": "power-cycle",
+      "halves": 2,
+      "whatItProves": "The block is still there after a restart.",
+      "powerCycleRequirement": "any-start",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [ "block", "disabled-now", "locatable" ],
+      "secondHalfOnlyCriteriaIds": [ "persisted", "stayed-on-phone" ]
+    },
+    {
+      "number": "05",
+      "script": "05-Allow.ps1",
+      "testId": "05-allow",
+      "kind": "power-cycle-optional",
+      "halves": 2,
+      "whatItProves": "Unblocking works and the sound devices come back.",
+      "powerCycleRequirement": "any-start",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [ "allow", "problem-cleared", "bit-cleared", "endpoints-back" ],
+      "secondHalfOnlyCriteriaIds": [ "still-allowed" ],
+      "firstHalfAloneIsCompleteWhenDeclined": true
+    },
+    {
+      "number": "06",
+      "script": "06-Handsfree.ps1",
+      "testId": "06-handsfree",
+      "kind": "self-contained",
+      "halves": 1,
+      "whatItProves": "Call protection can be switched on and off.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "07",
+      "script": "07-TaskRunEx.ps1",
+      "testId": "07-task-runex",
+      "kind": "self-contained",
+      "elevatedVariant": true,
+      "halves": 1,
+      "whatItProves": "The tray can start its background task with no administrator prompt.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "08",
+      "script": "08-AcceptancePowerCycle.ps1",
+      "testId": "08-acceptance-power-cycle",
+      "kind": "power-cycle-full-shutdown",
+      "halves": 2,
+      "whatItProves": "ACCEPTANCE. After a full shut down and start, the AirPods stay on the phone.",
+      "powerCycleRequirement": "full-shut-down",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [ "default-config", "blocked-before-power-cycle" ],
+      "secondHalfOnlyCriteriaIds": [ "ACCEPTANCE" ]
+    },
+    {
+      "number": "09",
+      "script": "09-ShutdownWhileConnected.ps1",
+      "testId": "09-shutdown-while-connected",
+      "kind": "power-cycle-full-shutdown",
+      "halves": 2,
+      "whatItProves": "Shutting down while connected does not make this PC grab the AirPods at the next start.",
+      "powerCycleRequirement": "full-shut-down",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [ "connected-first" ],
+      "secondHalfOnlyCriteriaIds": [ "not-paged-at-boot", "nodes-after-boot", "end-session-logged" ]
+    },
+    {
+      "number": "10",
+      "script": "10-ShutdownMessages.ps1",
+      "testId": "10-shutdown-messages",
+      "kind": "power-cycle-variants",
+      "halves": 2,
+      "whatItProves": "What Windows tells Earshot during each kind of restart.",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyFindingNames": [ "stateBeforeRestart" ],
+      "secondHalfOnlyCriteriaIds": [ "query-arrived", "end-arrived", "block-queued" ],
+      "variants": [
+        { "variant": 1, "testId": "10-shutdown-messages-v1", "powerCycleRequirement": "restart" },
+        { "variant": 2, "testId": "10-shutdown-messages-v2", "powerCycleRequirement": "restart" },
+        { "variant": 3, "testId": "10-shutdown-messages-v3", "powerCycleRequirement": "restart" },
+        { "variant": 4, "testId": "10-shutdown-messages-v4", "powerCycleRequirement": "restart" },
+        { "variant": 5, "testId": "10-shutdown-messages-v5", "powerCycleRequirement": "none" }
+      ]
+    },
+    {
+      "number": "11",
+      "script": "11-BatteryDisconnected.ps1",
+      "testId": "11-battery-disconnected",
+      "kind": "owner-present",
+      "halves": 1,
+      "whatItProves": "There is still no battery reading, connected or not.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "12",
+      "script": "12-CallbackThread.ps1",
+      "testId": "12-callback-thread",
+      "kind": "self-contained-long-wait",
+      "halves": 1,
+      "whatItProves": "How Windows reports sound device changes to Earshot.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "13",
+      "script": "13-GraceWindow.ps1",
+      "testId": "13-grace-window",
+      "kind": "owner-present",
+      "halves": 1,
+      "whatItProves": "The wait before Earshot blocks again is about right.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "14",
+      "script": "14-SetDeviceRefusal.ps1",
+      "testId": "14-set-device-refusal",
+      "kind": "self-contained",
+      "halves": 1,
+      "whatItProves": "Earshot refuses to treat a phone as the AirPods.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "15",
+      "script": "15-UninstallReversal.ps1",
+      "testId": "15-uninstall-reversal",
+      "kind": "power-cycle",
+      "elevatedVariant": true,
+      "halves": 2,
+      "whatItProves": "Uninstall puts everything back, and install sets it up again.",
+      "powerCycleRequirement": "any-start",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [ "uninstall", "install-again" ],
+      "secondHalfOnlyCriteriaIds": [ "delayed-deletion" ]
+    }
+  ]
+}
