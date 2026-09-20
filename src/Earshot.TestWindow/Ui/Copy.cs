@@ -93,6 +93,13 @@ internal static class Copy
         "The first half did not pass, so shutting down now would not be a valid run. Read the " +
         "result below, then fix what it names before running this test again.";
 
+    // section 6.2: "a first-half result.json, whatever it says, is never the test's pass." Test
+    // 10's own first half never records a criterion (only a finding), so it always recomputes to
+    // "inconclusive" by design; that is not a failure. Only overall "fail" (which a stopped-early
+    // "run" criterion also forces, since a failing criterion always recomputes the whole result to
+    // fail) means the hand-off screen should say shutting down now would not be a valid run.
+    internal static bool FirstHalfGenuinelyFailed(string overall) => overall == "fail";
+
     // 08's own words for its fastStartupAtPowerDown finding (section 9.1): "On this PC
     // HiberbootEnabled read 0 on 2026-09-20, so today it would say: 'Fast Startup is off on this
     // PC, so this run tests a cold start.'"

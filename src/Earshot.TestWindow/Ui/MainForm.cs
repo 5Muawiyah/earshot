@@ -2,14 +2,15 @@ using Earshot.TestWindow.Core;
 
 namespace Earshot.TestWindow.Ui;
 
-// The window's shell. List mode only, for the single-half rows (slice S4): a row is picked from
-// the list, Start begins a real (or, with --sandbox, fake-device) child, StepPanel shows every
-// prompt, ResultPanel shows what result.json says once it exits. Two-half rows show their
-// derived state but have no Start button yet (their resume handling is slice S6).
+// The window's shell. A row is picked from the list, Start begins a real (or, with --sandbox,
+// fake-device) child, StepPanel shows every prompt, ResultPanel shows what result.json says
+// once it exits. Test 10 is flattened into its five variant rows (DisplayRow.Flatten), so every
+// one of the 16 tests and all 22 halves is its own clickable entry; none is a text box.
 internal sealed class MainForm : Form
 {
     private readonly string _repoRoot;
     private readonly IReadOnlyList<ManifestRow> _rows;
+    private readonly IReadOnlyList<DisplayRow> _displayRows;
     private readonly IReadOnlyList<WordingEntry> _wording;
     private readonly SandboxOptions? _sandbox;
     private readonly string _exePath;
@@ -46,6 +47,7 @@ internal sealed class MainForm : Form
     {
         _repoRoot = repoRoot;
         _rows = rows;
+        _displayRows = DisplayRow.Flatten(rows);
         _wording = wording;
         _sandbox = sandbox;
         _exePath = exePath;
@@ -144,14 +146,20 @@ internal sealed class MainForm : Form
         }
 
         int index = _rowList.SelectedIndices[0];
-        if (index < 0 || index >= _rows.Count)
+        if (index < 0 || index >= _displayRows.Count)
         {
             _rowDetailLabel.Text = string.Empty;
             return;
         }
 
-        ManifestRow row = _rows[index];
-        _rowDetailLabel.Text = row.Title + Environment.NewLine + "Settles: " + row.Settles;
+        DisplayRow row = _displayRows[index];
+        string text = row.Title + Environment.NewLine + "Settles: " + row.Settles;
+        if (row.WaitsOnWindowsUpdate)
+        {
+            text += Environment.NewLine + "This variant waits on Windows Update offering a restart; it may take a while for one to appear.";
+        }
+
+        _rowDetailLabel.Text = text;
     }
 
     // design.md section 4.7: closing while the banner is red asks first.
@@ -182,7 +190,7 @@ internal sealed class MainForm : Form
 
         int selected = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         _rowList.Items.Clear();
-        foreach (ManifestRow row in _rows)
+        foreach (DisplayRow row in _displayRows)
         {
             DerivedRowState state = ComputeState(row);
             var item = new ListViewItem(row.Number);
@@ -215,7 +223,7 @@ internal sealed class MainForm : Form
         _bannerLabel.Visible = true;
     }
 
-    private DerivedRowState ComputeState(ManifestRow row)
+    private DerivedRowState ComputeState(DisplayRow row)
     {
         TestRowSpec spec = row.ToSpec();
         IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(LiveTestRoot(), row.TestId);
@@ -223,34 +231,27 @@ internal sealed class MainForm : Form
         return StateDeriver.Derive(spec, evidence, _exePath, exeWrite);
     }
 
-    // A row of Halves 2 (04, 05, 08, 09, 15) is pending when its newest run folder holds
-    // resume.txt, its result.json is a first-half result, and it has not been set aside
-    // (section 9.2). Test 10's parent row (Variants is not null) has no Start of its own here:
-    // its five variants each need their own resume handling, which this slice does not build
-    // (see the S6 report's deviations).
-    private PendingRun? FindPendingRun(ManifestRow row) =>
-        row.Halves == 2 && row.Variants is null ? PendingRunFinder.Find(row.ToSpec(), LiveTestRoot()) : null;
+    // A row of Halves 2 (04, 05, 08, 09, 15, and each of 10's five variants) is pending when its
+    // newest run folder holds resume.txt, its result.json is a first-half result, and it has not
+    // been set aside (section 9.2). Because each variant carries its own TestId, this can never
+    // find another variant's pending run: "resume lands on the same row and the same variant" by
+    // construction, not by an extra check here.
+    private PendingRun? FindPendingRun(DisplayRow row) =>
+        row.Halves == 2 ? PendingRunFinder.Find(row.ToSpec(), LiveTestRoot()) : null;
 
     private void UpdateStartButton()
     {
         int index = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
-        if (index < 0 || index >= _rows.Count)
+        if (index < 0 || index >= _displayRows.Count)
         {
             _startButton.Enabled = false;
             _startButton.Text = "Start";
             return;
         }
 
-        ManifestRow row = _rows[index];
+        DisplayRow row = _displayRows[index];
         // The red banner locks every row except 00 Restore (design.md section 4.6).
-        bool lockedByBanner = _banner.RowsLockedExceptRestore && row.Number != "00";
-
-        if (row.Variants is not null)
-        {
-            _startButton.Enabled = false;
-            _startButton.Text = "Start";
-            return;
-        }
+        bool lockedByBanner = _banner.RowsLockedExceptRestore && row.Row.Number != "00";
 
         PendingRun? pending = FindPendingRun(row);
         _startButton.Text = pending is not null ? "Carry on with the second half" : "Start";
@@ -260,18 +261,13 @@ internal sealed class MainForm : Form
     private void StartSelectedRow()
     {
         int index = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
-        if (index < 0 || index >= _rows.Count)
+        if (index < 0 || index >= _displayRows.Count)
         {
             return;
         }
 
-        ManifestRow row = _rows[index];
-        if (row.Variants is not null)
-        {
-            return;
-        }
-
-        if (_banner.RowsLockedExceptRestore && row.Number != "00")
+        DisplayRow row = _displayRows[index];
+        if (_banner.RowsLockedExceptRestore && row.Row.Number != "00")
         {
             return;
         }
@@ -294,7 +290,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void StartFreshRun(string host, ManifestRow row)
+    private void StartFreshRun(string host, DisplayRow row)
     {
         string liveTestRoot = LiveTestRoot();
         string stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", System.Globalization.CultureInfo.InvariantCulture);
@@ -313,13 +309,13 @@ internal sealed class MainForm : Form
                 ("Case", (string)_caseBox.SelectedItem!),
             };
             runner = new ChildRunner(
-                host, driver, scriptPath, _exePath, runRoot, resume: false, variant: 0, offerUninstall: false, allowPlanB: false,
+                host, driver, scriptPath, _exePath, runRoot, resume: false, variant: row.VariantNumber, offerUninstall: false, allowPlanB: false,
                 environmentOverrides: _sandbox.ChildEnvironment, extraArguments: extra);
         }
         else
         {
             string driver = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Invoke-GuiHalf.ps1");
-            runner = new ChildRunner(host, driver, scriptPath, _exePath, runRoot, resume: false, variant: 0, offerUninstall: false, allowPlanB: false);
+            runner = new ChildRunner(host, driver, scriptPath, _exePath, runRoot, resume: false, variant: row.VariantNumber, offerUninstall: false, allowPlanB: false);
         }
 
         BeginRun(row, runner, Path.Combine(runRoot, row.TestId), isResume: false);
@@ -328,7 +324,7 @@ internal sealed class MainForm : Form
     // section 9.2: "A resumed run always uses the pending run's -RunRoot; the window never makes
     // a new root for a second half." resume.txt is parsed by ResumeFile, never executed; only its
     // four validated values (script, exe, root, variant) are ever used to start anything.
-    private void StartResumedSecondHalf(string host, ManifestRow row, PendingRun pending)
+    private void StartResumedSecondHalf(string host, DisplayRow row, PendingRun pending)
     {
         string liveTestRoot = LiveTestRoot();
         string resumeTxtPath = Path.Combine(pending.Folder, "resume.txt");
@@ -390,7 +386,7 @@ internal sealed class MainForm : Form
         return result?.FinishedUtc;
     }
 
-    private void BeginRun(ManifestRow row, ChildRunner runner, string resultFolder, bool isResume)
+    private void BeginRun(DisplayRow row, ChildRunner runner, string resultFolder, bool isResume)
     {
         _activeRunner = runner;
         _activeResultFolder = resultFolder;
@@ -401,13 +397,15 @@ internal sealed class MainForm : Form
         if (_runAllActive)
         {
             // The stamp folder is resultFolder's own parent (<runRoot>\<TestId>): the pointer
-            // section 11 asks run-all.json to keep for this item.
+            // section 11 asks run-all.json to keep for this item, keyed the same as
+            // RunAllOrder's own item (RunAllKey, e.g. "10v3").
             string? stamp = Path.GetFileName(Path.GetDirectoryName(resultFolder));
             if (stamp is not null)
             {
-                _runAllPointers[row.Number] = stamp;
+                _runAllPointers[row.RunAllKey] = stamp;
             }
         }
+
         runner.MessageReceived += message =>
         {
             if (IsHandleCreated)
@@ -431,14 +429,14 @@ internal sealed class MainForm : Form
         runner.Start();
     }
 
-    private void HandleMessage(ManifestRow row, ChildMessage message)
+    private void HandleMessage(DisplayRow row, ChildMessage message)
     {
         switch (message.Kind)
         {
             case ChildMessageKind.Hello:
                 break;
             case ChildMessageKind.Prompt:
-                PresentedPrompt presented = PromptPresenter.Present(message, row.Number, _wording, _transcript);
+                PresentedPrompt presented = PromptPresenter.Present(message, row.Row.Number, _wording, _transcript);
                 _stepPanel.Show(_activeRunner!, presented, message.Seq);
                 break;
             case ChildMessageKind.Exit:
@@ -455,7 +453,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void OnRunFinished(ManifestRow row)
+    private void OnRunFinished(DisplayRow row)
     {
         _stepPanel.Visible = false;
         _activeRunner?.WaitForExit(TimeSpan.FromSeconds(20));
@@ -494,23 +492,16 @@ internal sealed class MainForm : Form
         }
     }
 
-    // section 11: the guided sequence. Walks RunAllOrder from _runAllIndex, skipping test 10's
-    // five variants (not wired into this window in this build: no variant-level Start exists yet,
-    // a broader skip than section 11's own "variant 4 may be skipped for now"). It starts at most
-    // one child per call, then returns and waits for OnRunFinished to call back in; it never loops
-    // past a row that is not yet a clean pass on disk.
+    // section 11: the guided sequence. Walks RunAllOrder from _runAllIndex; test 10's five
+    // variants are ordinary items here (each is its own DisplayRow with its own RunAllKey), never
+    // skipped. It starts at most one child per call, then returns and waits for OnRunFinished to
+    // call back in; it never loops past a row that is not yet a clean pass on disk.
     private void AdvanceRunAll()
     {
         while (_runAllIndex >= 0 && _runAllIndex < RunAllOrder.Items.Count)
         {
             RunAllItem item = RunAllOrder.Items[_runAllIndex];
-            if (item.RowNumber == "10")
-            {
-                _runAllIndex++;
-                continue;
-            }
-
-            ManifestRow? row = _rows.FirstOrDefault(r => r.Number == item.RowNumber);
+            DisplayRow? row = _displayRows.FirstOrDefault(r => r.RunAllKey == item.Key);
             if (row is null)
             {
                 _runAllIndex++;
@@ -564,7 +555,7 @@ internal sealed class MainForm : Form
         _runAllStatusLabel.Text = Copy.RunAllFinished;
     }
 
-    private void HaltRunAll(ManifestRow row, DerivedRowState state)
+    private void HaltRunAll(DisplayRow row, DerivedRowState state)
     {
         SaveRunAllProgress();
         SelectRow(row);
@@ -623,11 +614,11 @@ internal sealed class MainForm : Form
         AdvanceRunAll();
     }
 
-    private void SelectRow(ManifestRow row)
+    private void SelectRow(DisplayRow row)
     {
-        for (int i = 0; i < _rows.Count; i++)
+        for (int i = 0; i < _displayRows.Count; i++)
         {
-            if (_rows[i].Number == row.Number)
+            if (_displayRows[i].Number == row.Number)
             {
                 _rowList.Items[i].Selected = true;
                 _rowList.Items[i].EnsureVisible();
@@ -639,7 +630,7 @@ internal sealed class MainForm : Form
     // section 9.1: "read result.json; show leftAtRest; parse resume.txt; copy result.json and
     // summary.txt to their gui-first-half.* names. ... Then, and only then, the hand-off screen."
     // The snapshot is taken here, additively, before anything else touches this folder again.
-    private void ShowHandOff(ManifestRow row, ParsedResult firstHalfResult)
+    private void ShowHandOff(DisplayRow row, ParsedResult firstHalfResult)
     {
         FirstHalfSnapshot.Take(_activeResultFolder!);
 
@@ -649,7 +640,7 @@ internal sealed class MainForm : Form
             string.Empty,
         };
 
-        if (firstHalfResult.Overall != "pass")
+        if (Copy.FirstHalfGenuinelyFailed(firstHalfResult.Overall))
         {
             lines.Add(Copy.FirstHalfFailedHandOff);
         }
