@@ -66,12 +66,19 @@ $run = New-LiveTestRun -TestId ('10-shutdown-messages-v' + $Variant) -Title ('En
     -Settles 'Which end-session messages Earshot actually receives for each kind of restart, and whether the block it queues at that moment ever finishes.' `
     -ExePath $ExePath -RunRoot $RunRoot
 
+# Set below, in the first half only: the precondition for this variant is the AirPods connected
+# (the nodes enabled), so the session-end backstop has something to catch when the restart
+# happens. The closing at-rest check must not offer to block them before that restart.
+$atRestReason = ''
+
 try
 {
     Add-Finding -Run $run -Name 'variant' -Value ($Variant.ToString() + ': ' + $variants[$Variant])
 
     if (-not $Resume)
     {
+        $atRestReason = 'This variant needs the AirPods connected (the nodes enabled) when the restart happens, so the ' +
+            'session-end backstop and the boot task have something to catch; blocking first would test nothing.'
         $ready = Show-Preconditions -Run $run -Preconditions @(
             'Earshot is installed, set up and running in the tray.',
             'Block at boot is on.',
@@ -173,7 +180,7 @@ catch
 }
 finally
 {
-    $overall = Complete-LiveTestRun -Run $run
+    $overall = Complete-LiveTestRun -Run $run -AtRestReason $atRestReason
     Write-Host ('Test 10 finished: ' + $overall)
 }
 

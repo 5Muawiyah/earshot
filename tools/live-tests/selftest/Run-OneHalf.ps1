@@ -36,8 +36,10 @@
     first or resume.
 
 .PARAMETER Case
-    none, one or two: how many matching lines and list items the fake inputs hold. Two more,
-    grace-doubled and grace-unparsable, exist only for test 13; see Fakes.psm1.
+    none, one or two: how many matching lines and list items the fake inputs hold. grace-doubled
+    and grace-unparsable exist only for test 13; atrest-decline and atrest-read-fails exercise the
+    at-rest closing step's decline and read-failure paths (see Fakes.psm1 and Close-AtRest's
+    'at-rest-block' and 'at-rest-nodes' labels, which only these two cases intercept).
 
 .PARAMETER RunRoot
     The evidence folder, shared by the two halves of a resumable test.
@@ -54,7 +56,7 @@ param(
     [Parameter(Mandatory = $true)][string]$SandboxRoot,
     [Parameter(Mandatory = $true)][string]$TestId,
     [Parameter(Mandatory = $true)][ValidateSet('first', 'resume')][string]$Half,
-    [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case,
+    [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case,
     [Parameter(Mandatory = $true)][string]$RunRoot,
     [string]$ExtraArguments = ''
 )
@@ -86,6 +88,15 @@ function Resolve-EarshotExe
 # The whole of the device side. It records the step the way the real one does, moves the fake
 # machine, writes the report to the --out path the command named and the evidence file beside
 # the run folders, then lets the real Copy-AppEvidence pick that file up.
+#
+# Two labels are intercepted ahead of the normal fake, both belonging to Close-AtRest in
+# LiveTest.psm1 alone (no shipped script uses either), so neither changes what any other
+# criterion sees:
+#   'at-rest-nodes'  case atrest-read-fails: throws, simulating the closing step's own read
+#                    failing, which Close-AtRest must catch without losing result.json.
+#   'at-rest-block'  case atrest-decline: answered as a declined live step, the same shape
+#                    Invoke-Earshot itself writes when Confirm-Step returns false, without moving
+#                    the fake machine.
 function Invoke-Earshot
 {
     param(
@@ -96,6 +107,17 @@ function Invoke-Earshot
         [string]$Consequence = '',
         [int]$TimeoutSeconds = 240
     )
+
+    $case = (Get-FakeContext).Case
+    if ($Label -eq 'at-rest-nodes' -and $case -eq 'atrest-read-fails')
+    {
+        throw 'self-test (atrest-read-fails): the node read for the at-rest check failed on purpose.'
+    }
+
+    if ($Label -eq 'at-rest-block' -and $case -eq 'atrest-decline')
+    {
+        return (Invoke-FakeDeclinedStep -Run $Run -Label $Label -Command $Command -Consequence $Consequence)
+    }
 
     return (Invoke-FakeEarshot -Run $Run -Label $Label -Command $Command -Live:$Live -Consequence $Consequence -Elevated:$false)
 }
@@ -282,6 +304,46 @@ function global:Invoke-FakeEarshot
     $returned = [pscustomobject]$step
     Add-Member -InputObject $returned -MemberType NoteProperty -Name 'json' -Value $parsed
     return $returned
+}
+
+# The fake answer for case atrest-decline's one intercepted step: exactly what the real
+# Invoke-Earshot records when Confirm-Step returns false, without moving the fake machine, so
+# Close-AtRest's re-read afterwards still finds the nodes wherever they already were.
+function global:Invoke-FakeDeclinedStep
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string[]]$Command,
+        [Parameter(Mandatory = $true)][string]$Consequence
+    )
+
+    $Run.StepIndex = $Run.StepIndex + 1
+    $step = [ordered]@{
+        index        = $Run.StepIndex
+        label        = $Label
+        command      = ($Command -join ' ')
+        commandText  = (Get-CommandText -ExePath $Run.ExePath -Command $Command)
+        live         = $true
+        elevated     = $false
+        startedUtc   = (Get-UtcNowText)
+        finishedUtc  = $null
+        ran          = $false
+        exitCode     = $null
+        exitName     = $null
+        milliseconds = $null
+        timedOut     = $false
+        error        = 'skipped at the owner request'
+        stdoutFile   = $null
+        stderrFile   = $null
+        jsonFile     = $null
+    }
+
+    Write-Line -Run $Run -Text ('LIVE STEP (self-test, declined): ' + $step.commandText)
+    Write-Line -Run $Run -Text ('  What it does: ' + $Consequence)
+    Write-Line -Run $Run -Text '  Skipped at your request (self-test, case atrest-decline).'
+    [void]$Run.Steps.Add($step)
+    return $null
 }
 
 # Puts the stubs in the global scope, where a test script's own calls find them, and inside

@@ -30,9 +30,10 @@ namespace Earshot.Tests.LiveTests;
 public sealed class LiveTestSelfTestTests
 {
     // 66 short-lived PowerShell processes when this was measured, on 2026-09-18 (commit 8d2db48).
-    // Test 13's two extra self-test cases, added the next day, bring today's count to 68, and
-    // RealLauncherSelfTestTests.cs runs one PowerShell process more again, separately. Generous,
-    // because a machine under load is not a defect.
+    // Test 13's two extra self-test cases, added the next day, brought the count to 68. The
+    // at-rest closing step's own two cases (00's atrest-read-fails, 01's atrest-decline) bring
+    // today's count to 70, and RealLauncherSelfTestTests.cs runs one PowerShell process more
+    // again, separately. Generous, because a machine under load is not a defect.
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(20);
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
@@ -41,9 +42,10 @@ public sealed class LiveTestSelfTestTests
     private const int ExpectedHalves = 22;
     private const int ExpectedCases = 3;
 
-    // Cases one script runs on top of the shared three: 13-GraceWindow's doubled delay and its
-    // unreadable figure.
-    private const int ExpectedExtraCases = 2;
+    // Cases run on top of the shared three, one extra case per extra Cases entry: 13-GraceWindow's
+    // doubled delay and its unreadable figure, 00-Restore's atrest-read-fails, and
+    // 01-A2dpOneShot's atrest-decline (see the Cases overrides in Invoke-SelfTest.ps1's $tests).
+    private const int ExpectedExtraCases = 4;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

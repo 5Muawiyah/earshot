@@ -151,8 +151,13 @@ $script:Context = $null
 # How many matching lines and list items each case holds. grace-doubled and grace-unparsable are
 # test 13's own cases (see the "13 grace window" section of New-FakeSandbox below): they carry no
 # generic matching lines of their own, only the bespoke ones that section adds, so they count as
-# 0 here the same as none.
-$script:CaseItemCounts = @{ none = 0; one = 1; two = 2; 'grace-doubled' = 0; 'grace-unparsable' = 0 }
+# 0 here the same as none. atrest-decline and atrest-read-fails belong to the at-rest closing step
+# (Run-OneHalf.ps1's Invoke-Earshot intercepts those two by name, not by anything counted here),
+# and carry no bespoke log content of their own either, so they count as 0 too.
+$script:CaseItemCounts = @{
+    none = 0; one = 1; two = 2; 'grace-doubled' = 0; 'grace-unparsable' = 0
+    'atrest-decline' = 0; 'atrest-read-fails' = 0
+}
 
 function Initialize-FakeMachine
 {
@@ -160,7 +165,7 @@ function Initialize-FakeMachine
         [Parameter(Mandatory = $true)][string]$SandboxRoot,
         [Parameter(Mandatory = $true)][string]$TestId,
         [Parameter(Mandatory = $true)][ValidateSet('first', 'resume')][string]$Half,
-        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case
+        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -208,7 +213,7 @@ function New-FakeSandbox
 {
     param(
         [Parameter(Mandatory = $true)][string]$SandboxRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case
+        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case
     )
 
     $counts = $script:CaseItemCounts

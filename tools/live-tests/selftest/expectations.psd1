@@ -38,31 +38,60 @@
 
     # ---------------------------------------------------------------- 00 restore
     # Nothing here is counted out of the log or an evidence list, so all three columns agree.
+    #
+    # atrest-read-fails forces the at-rest closing step's own node read to throw (see
+    # Run-OneHalf.ps1's Invoke-Earshot, label 'at-rest-nodes'), which is case (e): the run still
+    # writes result.json, records the one error Close-AtRest's own catch adds, and leftAtRest is
+    # recorded as unknown rather than guessed. 00-Restore's own criteria are untouched, because
+    # the label this case intercepts belongs only to Close-AtRest.
     '00-restore|first' = @{
         none = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' } }
         one  = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' } }
         two  = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' } }
+        'atrest-read-fails' = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' }
+            Findings = @{ 'leftAtRest' = 'unknown' }
+            ExpectedErrors = 1 }
     }
 
     # ------------------------------------------------------------ 01 A2DP one-shot
     # The filters a ks run finds depend on protection, not on the case, and the notification
     # count this test reads is only a finding, so all three columns agree.
+    #
+    # 01 never sends "diag gate block" itself, and every case ends with the nodes Allowed, so
+    # this is where the at-rest closing step's own offer is the only "diag gate block" step in
+    # the run: none/one/two prove case (a) (the owner accepts, exactly one block is sent,
+    # leftAtRest = yes), and the row's own atrest-decline case proves case (b) (the owner
+    # declines, no block is sent, the warning reaches summary.txt, leftAtRest = no).
     '01-a2dp-oneshot|first' = @{
         none = @{ Overall = 'pass'; Criteria = @{
                 'topology-reachable' = 'pass'; 'preconditions' = 'pass'; 'protection-on' = 'pass'
                 'K1-src-protected' = 'pass'; 'K1-src-active' = 'pass'; 'K1-budget' = 'pass'
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
-                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' } }
+                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            Steps = @{ 'diag gate block' = 1 } }
         one  = @{ Overall = 'pass'; Criteria = @{
                 'topology-reachable' = 'pass'; 'preconditions' = 'pass'; 'protection-on' = 'pass'
                 'K1-src-protected' = 'pass'; 'K1-src-active' = 'pass'; 'K1-budget' = 'pass'
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
-                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' } }
+                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            Steps = @{ 'diag gate block' = 1 } }
         two  = @{ Overall = 'pass'; Criteria = @{
                 'topology-reachable' = 'pass'; 'preconditions' = 'pass'; 'protection-on' = 'pass'
                 'K1-src-protected' = 'pass'; 'K1-src-active' = 'pass'; 'K1-budget' = 'pass'
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
-                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' } }
+                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            Steps = @{ 'diag gate block' = 1 } }
+        'atrest-decline' = @{ Overall = 'pass'; Criteria = @{
+                'topology-reachable' = 'pass'; 'preconditions' = 'pass'; 'protection-on' = 'pass'
+                'K1-src-protected' = 'pass'; 'K1-src-active' = 'pass'; 'K1-budget' = 'pass'
+                'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
+                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'no' }
+            Steps = @{ 'diag gate block' = 0 }
+            SummaryContains = @('THE MACHINE IS NOT AT REST.') }
     }
 
     # -------------------------------------------------------------- 02 disconnect
@@ -187,10 +216,19 @@
     }
 
     # --------------------------------------------- 09 shutdown while connected
+    # This half always passes a reason to Complete-LiveTestRun: shutting down with the nodes
+    # still enabled is the point of it, so the at-rest closing step never offers a block here.
+    # This is case (d): no step offered, the reason printed, leftAtRest = no-on-purpose.
     '09-shutdown-while-connected|first' = @{
-        none = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
-        one  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
-        two  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
+        none = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'no-on-purpose' }
+            Steps = @{ 'diag gate block' = 0 } }
+        one  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'no-on-purpose' }
+            Steps = @{ 'diag gate block' = 0 } }
+        two  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'no-on-purpose' }
+            Steps = @{ 'diag gate block' = 0 } }
     }
     # end-session-logged counts the query and end lines, so it is a fail when the log holds
     # neither. That is the answer, and the run still reaches the two criteria after it.
@@ -255,32 +293,41 @@
     # 90 but suggestedIdleGraceSeconds is $null (a doubling cannot be ruled out); the second
     # carries a block line with no parseable figure, so both are $null and not-too-long, which
     # has nothing to compare, is inconclusive rather than silently passing or failing.
+    # 13 never sends "diag gate allow" or "diag gate block" itself, and its own start state is
+    # already Blocked (Fakes.psm1, StartStates), so every case here also proves case (c) of the
+    # at-rest closing step: the nodes already read Blocked, so nothing is offered, and
+    # leftAtRest = yes without a single "diag gate block" step.
     '13-grace-window|first' = @{
         none = @{ Overall = 'inconclusive'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'inconclusive'; 'not-too-long' = 'inconclusive' }
             Findings = @{
                 'secondsFromIdleToBlock' = $null; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = $null
-                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0
-            } }
+                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0 } }
         one  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 1; 'idleDelaySecondsAtBlock' = 45
-                'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 1
-            } }
+                'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 1; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0 } }
         two  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 2; 'idleDelaySecondsAtBlock' = 45
-                'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 2
-            } }
+                'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 2; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0 } }
         'grace-doubled' = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = 90
-                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0
-            } }
+                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0 } }
         'grace-unparsable' = @{ Overall = 'inconclusive'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'inconclusive' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = $null
-                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0
-            } }
+                'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0 } }
     }
 
     # ------------------------------------------------------ 14 set-device refusal

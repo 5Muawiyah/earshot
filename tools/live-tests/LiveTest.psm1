@@ -1262,9 +1262,158 @@ function Write-ResumeInstruction
     Write-Line -Run $Run -Text ('It is also saved in ' + $file + '.')
 }
 
+# ------------------------------------------------------------------- being at rest
+
+# The vocabulary Add-Finding -Name 'leftAtRest' takes, so every run says one of the same five
+# things rather than a free string per script.
+$script:AtRestYes           = 'yes'
+$script:AtRestNo             = 'no'
+$script:AtRestOnPurpose      = 'no-on-purpose'
+$script:AtRestNotApplicable  = 'not-applicable'
+$script:AtRestUnknown        = 'unknown'
+
+# What Complete-LiveTestRun calls before it writes result.json, on every script, so no test can
+# forget it. "At rest" means the AirPods Bluetooth nodes read Blocked, so Windows has nothing to
+# page at the next boot: the state the 19 September incident was missing, because test 01 and
+# test 05 both need the nodes Allowed and both ended that way with nobody asked to put them back.
+#
+#   not set up, or Block at boot off   at rest does not apply here; say so
+#   nodes read Blocked                 at rest already; say so
+#   $Reason is given                   deliberately not at rest; the reason is printed, no offer
+#   anything else                      offer ONE live block; warn loudly if it is declined, the
+#                                       step fails, or the nodes still do not read Blocked after
+#
+# Never throws. A failure in here is recorded as an error and as leftAtRest = 'unknown', and
+# Complete-LiveTestRun still writes result.json: the record of what happened matters more than a
+# tidy exit from this one check.
+function Close-AtRest
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [string]$Reason = ''
+    )
+
+    $detail = [ordered]@{
+        before      = $null
+        setUp       = $null
+        blockAtBoot = $null
+        reason      = $(if ([string]::IsNullOrEmpty($Reason)) { $null } else { $Reason })
+        offered     = $false
+        accepted    = $null
+        blockStep   = $null
+        after       = $null
+    }
+
+    Write-Section -Run $Run -Title 'Is the machine at rest?'
+
+    try
+    {
+        $task = Get-TaskState -Run $Run -Label 'at-rest-task'
+        $setUp = Get-Field -Object $task -Name 'setUp'
+        $blockAtBoot = Get-BlockAtBootSetting -Run $Run
+        $detail.setUp = $setUp
+        $detail.blockAtBoot = $blockAtBoot
+
+        if ($setUp -ne $true -or $blockAtBoot -ne $true)
+        {
+            Write-Line -Run $Run -Text ('Earshot is not set up, or Block at boot is off (set up ' + $setUp +
+                ', Block at boot ' + $blockAtBoot + '), so being at rest does not apply here.')
+            Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestNotApplicable `
+                -Detail ('set up ' + $setUp + ', Block at boot ' + $blockAtBoot + '.')
+            return $detail
+        }
+
+        $nodes = Get-NodeState -Run $Run -Label 'at-rest-nodes'
+        $nodeState = Get-Field -Object $nodes -Name 'nodeState'
+        $detail.before = $nodeState
+        Write-Line -Run $Run -Text ('The AirPods Bluetooth nodes read ' + $nodeState + ' as this run ends.')
+
+        if ($nodeState -eq 'Blocked')
+        {
+            Write-Line -Run $Run -Text 'The machine is at rest: Windows has nothing to page at the next boot.'
+            Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestYes -Detail ('nodes read ' + $nodeState + '.')
+            $detail.after = $nodeState
+            return $detail
+        }
+
+        if (-not [string]::IsNullOrEmpty($Reason))
+        {
+            Write-Line -Run $Run -Text ('The machine is deliberately NOT at rest: ' + $Reason)
+            Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestOnPurpose -Detail $Reason
+            $detail.after = $nodeState
+            return $detail
+        }
+
+        $detail.offered = $true
+        $consequence = 'Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. ' +
+            'If the AirPods are playing through this PC right now, that stops.'
+        $beforeStepCount = $Run.Steps.Count
+        $block = Invoke-Earshot -Run $Run -Label 'at-rest-block' -Command @('diag', 'gate', 'block') -Live -Consequence $consequence
+
+        $lastStep = $null
+        if ($Run.Steps.Count -gt $beforeStepCount) { $lastStep = $Run.Steps[$Run.Steps.Count - 1] }
+        $declined = ($null -ne $lastStep -and $lastStep.error -eq 'skipped at the owner request')
+        $detail.accepted = (-not $declined)
+        if ($null -ne $block) { $detail.blockStep = [ordered]@{ exitCode = $block.exitCode; exitName = $block.exitName } }
+        elseif ($null -ne $lastStep) { $detail.blockStep = [ordered]@{ error = $lastStep.error } }
+
+        $nodesAfter = Get-NodeState -Run $Run -Label 'at-rest-nodes-after'
+        $stateAfter = Get-Field -Object $nodesAfter -Name 'nodeState'
+        $detail.after = $stateAfter
+
+        if ($stateAfter -eq 'Blocked')
+        {
+            Write-Line -Run $Run -Text 'The machine is at rest now: the nodes read Blocked.'
+            Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestYes -Detail ('nodes read ' + $stateAfter + ' after the block.')
+            return $detail
+        }
+
+        Write-Line -Run $Run -Text ''
+        Write-Line -Run $Run -Text '=========================================================================='
+        Write-Line -Run $Run -Text 'THE MACHINE IS NOT AT REST.'
+        Write-Line -Run $Run -Text ('The AirPods Bluetooth nodes read ' + $stateAfter + ', not Blocked.')
+        Write-Line -Run $Run -Text 'If this PC is shut down or restarted like this, Windows will page the AirPods at the next boot,'
+        Write-Line -Run $Run -Text 'and they will bounce between the phone and this PC.'
+        Write-Line -Run $Run -Text 'To fix it: start the Earshot tray, whose own start-up check blocks the nodes when they are not'
+        Write-Line -Run $Run -Text ('in use, or run: "' + $Run.ExePath + '" diag gate block')
+        Write-Line -Run $Run -Text '=========================================================================='
+        Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestNo `
+            -Detail ('nodes read ' + $stateAfter + '; offered ' + $detail.offered + ', accepted ' + $detail.accepted + '.')
+        return $detail
+    }
+    catch
+    {
+        Write-Failure -Run $Run -Message ('The at-rest check itself failed: ' + ($_ | Out-String).Trim())
+        Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestUnknown -Detail 'The read this check makes failed; see the error above.'
+        return $detail
+    }
+}
+
 function Complete-LiveTestRun
 {
-    param([Parameter(Mandatory = $true)]$Run)
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [string]$AtRestReason = ''
+    )
+
+    $atRestDetail = $null
+    try
+    {
+        $atRestDetail = Close-AtRest -Run $Run -Reason $AtRestReason
+    }
+    catch
+    {
+        # Close-AtRest guards its own body. Reaching here means something failed outside that
+        # guard, and the record still matters more than a tidy exit, so it is caught here too
+        # rather than letting result.json go unwritten.
+        Write-Failure -Run $Run -Message ('The at-rest check failed outright: ' + ($_ | Out-String).Trim())
+        Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestUnknown -Detail 'The check crashed outside its own guard; see the error above.'
+        $atRestDetail = [ordered]@{
+            before = $null; setUp = $null; blockAtBoot = $null
+            reason = $(if ([string]::IsNullOrEmpty($AtRestReason)) { $null } else { $AtRestReason })
+            offered = $false; accepted = $null; blockStep = $null; after = $null
+        }
+    }
 
     $outcomes = @($Run.Criteria | ForEach-Object { $_.outcome })
     $overall = $script:UnclearOutcome
@@ -1287,6 +1436,7 @@ function Complete-LiveTestRun
         steps       = @($Run.Steps)
         errors      = @($Run.Errors)
         appEvidence = @($Run.CopiedEvidence)
+        atRest      = $atRestDetail
         folder      = $Run.Folder
     }
 
@@ -1345,5 +1495,5 @@ Export-ModuleMember -Function `
     Get-NodeState, Get-AudioState, Get-TopologyState, Get-ServiceState, Get-TaskState,
     Get-TargetEndpointStates, Read-EarshotJsonFile, Get-BlockAtBootSetting, Get-ProtectAudioSetting,
     Get-EarshotLogLines, Save-EarshotLog, Get-FastStartupSetting,
-    Add-Criterion, Add-Finding, Write-Failure, Write-ResumeInstruction, Complete-LiveTestRun,
+    Add-Criterion, Add-Finding, Write-Failure, Write-ResumeInstruction, Close-AtRest, Complete-LiveTestRun,
     Get-LiveTestExitCode

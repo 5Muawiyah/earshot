@@ -50,10 +50,16 @@ $run = New-LiveTestRun -TestId '09-shutdown-while-connected' -Title 'Shutdown wh
     -Settles 'Whether the v1.1 pre-shutdown service is needed, by showing what happens when the machine is shut down with the nodes still enabled.' `
     -ExePath $ExePath -RunRoot $RunRoot
 
+# Set below, in the first half only: this whole test is about shutting down with the nodes still
+# enabled, so the closing at-rest check must not offer to block them before that shutdown happens.
+$atRestReason = ''
+
 try
 {
     if (-not $Resume)
     {
+        $atRestReason = 'This half deliberately shuts down with the AirPods still connected (the nodes enabled): that is ' +
+            'the case it exists to catch, showing whether the session-end backstop or the boot task blocks them again.'
         $ready = Show-Preconditions -Run $run -Preconditions @(
             'Earshot is installed, set up, and running in the tray.',
             'Block at boot is on.',
@@ -138,7 +144,7 @@ catch
 }
 finally
 {
-    $overall = Complete-LiveTestRun -Run $run
+    $overall = Complete-LiveTestRun -Run $run -AtRestReason $atRestReason
     Write-Host ('Test 09 finished: ' + $overall)
 }
 

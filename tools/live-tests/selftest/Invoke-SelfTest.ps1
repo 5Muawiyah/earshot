@@ -41,7 +41,9 @@
     Where the sandboxes go. Defaults to a new folder under %TEMP%.
 
 .PARAMETER Case
-    Run one set of fake inputs rather than all three.
+    Run one set of fake inputs rather than all three. Also accepts a case that belongs to a
+    single row's own Cases override (see $tests below), such as one of 13's grace cases or the
+    at-rest closing step's atrest-decline and atrest-read-fails.
 
 .PARAMETER Test
     Run one test, by its number, rather than all of them.
@@ -63,7 +65,7 @@
 param(
     [string]$Root = '',
     [string]$WorkRoot = '',
-    [ValidateSet('', 'none', 'one', 'two', 'grace-doubled', 'grace-unparsable')][string]$Case = '',
+    [ValidateSet('', 'none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -81,8 +83,17 @@ Import-Module (Join-Path $PSScriptRoot 'Fakes.psm1') -Force
 # Every shipped test, with the halves it has and anything beyond -ExePath and -RunRoot it takes.
 # A test added to tools\live-tests without a row here is reported as not covered.
 $tests = @(
-    [ordered]@{ Number = '00'; Id = '00-restore'; Script = '00-Restore.ps1'; Halves = @('first'); Extra = @() }
-    [ordered]@{ Number = '01'; Id = '01-a2dp-oneshot'; Script = '01-A2dpOneShot.ps1'; Halves = @('first'); Extra = @() }
+    # atrest-read-fails is added on top of the shared three: it forces the at-rest closing step's
+    # own node read to throw (Run-OneHalf.ps1's Invoke-Earshot, label 'at-rest-nodes'), proving
+    # Close-AtRest's own guard rather than 00-Restore's own criteria, which this case leaves alone.
+    [ordered]@{ Number = '00'; Id = '00-restore'; Script = '00-Restore.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'atrest-read-fails') }
+    # atrest-decline is added on top of the shared three: 01 never calls "diag gate block" itself
+    # and ends with the nodes Allowed in every case, so this is where the at-rest closing step's
+    # own offer is the only "diag gate block" step in the run, and declining it is exercised
+    # cleanly (Run-OneHalf.ps1's Invoke-Earshot, label 'at-rest-block').
+    [ordered]@{ Number = '01'; Id = '01-a2dp-oneshot'; Script = '01-A2dpOneShot.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'atrest-decline') }
     [ordered]@{ Number = '02'; Id = '02-disconnect'; Script = '02-Disconnect.ps1'; Halves = @('first'); Extra = @() }
     [ordered]@{ Number = '03'; Id = '03-allow-pages'; Script = '03-AllowPages.ps1'; Halves = @('first'); Extra = @('WatchSeconds=30') }
     [ordered]@{ Number = '04'; Id = '04-block-and-reboot'; Script = '04-BlockAndReboot.ps1'; Halves = @('first', 'resume'); Extra = @() }
@@ -134,9 +145,11 @@ function Get-PowerShellHost
     return $host51
 }
 
-# Reads a result.json into the two things the expectations talk about: the overall outcome and
-# each criterion by id. @(...) everywhere, because a run with one criterion writes it as an
-# object rather than as a list of one.
+# Reads a result.json into the things the expectations talk about: the overall outcome, each
+# criterion by id, each finding by name, the errors, and how many steps actually ran (exitCode
+# read, not merely offered or declined) against each distinct command line. @(...) everywhere,
+# because a run with one criterion, finding, error or step writes it as an object rather than as
+# a list of one.
 function Read-RunResult
 {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -166,7 +179,30 @@ function Read-RunResult
         $errors = $errors + @([string]$entry.message)
     }
 
-    return [ordered]@{ Overall = [string]$json.overall; Criteria = $criteria; Findings = $findings; Errors = $errors }
+    # Only a step that actually ran counts as "sent": a declined or failed-to-start step still
+    # has a row in result.json (that is what proves it was offered), but ran is $false, and a
+    # command that was only offered is not the same claim as one that was sent.
+    $stepCommandCounts = [ordered]@{}
+    foreach ($step in @($json.steps))
+    {
+        if ($null -eq $step -or $step.ran -ne $true) { continue }
+        $command = [string]$step.command
+        if ($stepCommandCounts.Contains($command)) { $stepCommandCounts[$command] = $stepCommandCounts[$command] + 1 }
+        else { $stepCommandCounts[$command] = 1 }
+    }
+
+    $summary = ''
+    $folder = [string]$json.folder
+    if (-not [string]::IsNullOrEmpty($folder))
+    {
+        $summaryPath = Join-Path $folder 'summary.txt'
+        if (Test-Path -LiteralPath $summaryPath) { $summary = ('' + (Get-Content -LiteralPath $summaryPath -Raw)) }
+    }
+
+    return [ordered]@{
+        Overall = [string]$json.overall; Criteria = $criteria; Findings = $findings; Errors = $errors
+        StepCommandCounts = $stepCommandCounts; Summary = $summary
+    }
 }
 
 # One shipped script, one half, one sandbox. Returns the exit code, the captured output and
@@ -347,6 +383,72 @@ function Test-Expectations
         }
     }
 
+    # FindingsInclude is optional and, unlike Findings, never exhaustive: it names one or two
+    # findings worth pinning down on a script that already records others this file does not
+    # want to enumerate. A finding named here that the run does not record is still a failure;
+    # a finding the run records that is not named here is not checked at all.
+    if ($wanted.Contains('FindingsInclude'))
+    {
+        $wantedFindings = $wanted.FindingsInclude
+        foreach ($name in $wantedFindings.Keys)
+        {
+            if (-not $Recorded.Findings.Contains($name))
+            {
+                $problems = $problems + @([string]$Where + ': the finding "' + $name + '" was never recorded.')
+                continue
+            }
+
+            $expected = $wantedFindings[$name]
+            if ($expected -is [string] -and $expected -eq 'any') { continue }
+
+            $actual = $Recorded.Findings[$name]
+            $isMatch = $false
+            if ($null -eq $expected -and $null -eq $actual) { $isMatch = $true }
+            elseif ($null -ne $expected -and $null -ne $actual -and [string]$expected -eq [string]$actual) { $isMatch = $true }
+
+            if (-not $isMatch)
+            {
+                $shownExpected = $(if ($null -eq $expected) { 'null' } else { [string]$expected })
+                $shownActual = $(if ($null -eq $actual) { 'null' } else { [string]$actual })
+                $problems = $problems + @([string]$Where + ': the finding "' + $name + '" was ' + $shownActual + ', and the fake inputs imply ' + $shownExpected + '.')
+            }
+        }
+    }
+
+    # Steps is optional and, unlike Criteria and Findings, not exhaustive: only the command lines
+    # worth pinning a count against are named. It exists for the at-rest closing step, to prove
+    # "exactly one diag gate block was sent" and "no diag gate block was sent" by counting steps
+    # that actually ran (see Read-RunResult), not merely offered ones.
+    if ($wanted.Contains('Steps'))
+    {
+        $wantedSteps = $wanted.Steps
+        foreach ($command in $wantedSteps.Keys)
+        {
+            $expectedCount = [int]$wantedSteps[$command]
+            $actualCount = 0
+            if ($Recorded.StepCommandCounts.Contains($command)) { $actualCount = [int]$Recorded.StepCommandCounts[$command] }
+            if ($actualCount -ne $expectedCount)
+            {
+                $problems = $problems + @([string]$Where + ': "' + $command + '" ran ' + $actualCount +
+                    ' time(s), and the fake inputs imply ' + $expectedCount + '.')
+            }
+        }
+    }
+
+    # SummaryContains is optional too: a short list of phrases summary.txt must hold, for example
+    # the words of the at-rest warning block, so that block is proven to reach the file a person
+    # would actually read, not only result.json.
+    if ($wanted.Contains('SummaryContains'))
+    {
+        foreach ($phrase in @($wanted.SummaryContains))
+        {
+            if (-not $Recorded.Summary.Contains($phrase))
+            {
+                $problems = $problems + @([string]$Where + ': summary.txt does not hold the expected text "' + $phrase + '".')
+            }
+        }
+    }
+
     return ,$problems
 }
 
@@ -451,9 +553,22 @@ foreach ($row in $tests)
                 $problems = $problems + @([string]$where + ': the script recorded its own catch-all "run" criterion, so it stopped early.')
             }
 
-            if ($recorded.Errors.Count -gt 0)
+            # Ordinarily a run that recorded any error is a problem: the fakes never fail a probe,
+            # so nothing should throw. atrest-read-fails is the one case built to force exactly
+            # that, so it declares how many errors it expects (ExpectedErrors) and is checked
+            # against that instead of the blanket zero.
+            $expectedErrorCount = 0
+            $expectationKey = [string]$row.Id + '|' + $half
+            if (-not $Observed -and $null -ne $expectations -and $expectations.Contains($expectationKey) -and
+                $expectations[$expectationKey].Contains($caseName) -and $expectations[$expectationKey][$caseName].Contains('ExpectedErrors'))
             {
-                $problems = $problems + @([string]$where + ': the run recorded ' + $recorded.Errors.Count + ' error(s): ' + ($recorded.Errors -join ' | '))
+                $expectedErrorCount = [int]$expectations[$expectationKey][$caseName]['ExpectedErrors']
+            }
+
+            if ($recorded.Errors.Count -ne $expectedErrorCount)
+            {
+                $problems = $problems + @([string]$where + ': the run recorded ' + $recorded.Errors.Count +
+                    ' error(s) (expected ' + $expectedErrorCount + '): ' + ($recorded.Errors -join ' | '))
             }
 
             if ($Observed)

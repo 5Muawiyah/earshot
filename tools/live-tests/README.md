@@ -44,6 +44,38 @@ those through its own installed task. Do it by hand instead:
 
 Windows keeps the pairing either way, so nothing needs pairing again.
 
+## Every test checks the machine is at rest
+
+Every script ends by reading whether the AirPods Bluetooth nodes are left Blocked, not only
+whether its own criteria passed. "At rest" means the nodes read Blocked, so Windows has
+nothing to page at the next boot. On 19 September a run left the nodes Allowed and the tray
+closed, with nobody asked whether that was still all right; the next boot paged the AirPods,
+the boot task blocked them about 14 seconds later, and they bounced between the phone and
+the PC in between. This closing step is what now catches that.
+
+- If Earshot is not set up, or Block at boot is off, being at rest does not apply, and the
+  run says so.
+- If the nodes already read Blocked, the run says the machine is at rest and stops there.
+- If a half's whole point is leaving the nodes enabled, it says so instead of offering
+  anything: test 09's first half and every variant of test 10's first half shut down or
+  restart with the AirPods connected on purpose, and test 05's first half does too when you
+  choose its optional restart. Blocking the nodes first would answer nothing about what
+  those halves are testing.
+- Anything else, it offers ONE live step, `diag gate block`, with the usual typed
+  confirmation, described plainly: it blocks the nodes so this PC does not page the AirPods
+  at the next boot, and if they are playing through this PC right now, that stops.
+- If you decline, the step fails, or the nodes still do not read Blocked afterwards, the
+  summary carries a warning block that is hard to miss, saying the machine is not at rest,
+  what happens if it is shut down or restarted like that, and how to fix it: start the
+  Earshot tray, whose own start-up check blocks the nodes when they are not in use, or run
+  `diag gate block` yourself. (`00-Restore.ps1` does the opposite: it allows the nodes, so it
+  is never the right remedy here.)
+
+`result.json` carries this as a top-level `atRest` object, holding what was read before,
+whether a block was offered and accepted, what it returned, and what was read after, plus a
+finding named `leftAtRest`: `yes`, `no`, `no-on-purpose`, `not-applicable` or `unknown`. It
+never changes a test's own criteria, its overall outcome, or its exit code.
+
 ## Running a test
 
 ```

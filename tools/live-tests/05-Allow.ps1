@@ -52,6 +52,11 @@ $run = New-LiveTestRun -TestId '05-allow' -Title 'Allow the nodes and watch the 
     -Settles 'Whether the allow clears the persistent disable, and whether ten seconds is long enough for the render endpoint to come back.' `
     -ExePath $ExePath -RunRoot $RunRoot
 
+# Empty unless the owner chooses the optional restart below: reaching that restart with the
+# nodes still enabled is the whole point of it, so the closing at-rest check must not offer to
+# block them first.
+$atRestReason = ''
+
 function Measure-TargetNodes
 {
     param(
@@ -159,6 +164,8 @@ try
             $wants = Read-Answer -Run $run -Question 'Do you want to restart now and check the nodes are still enabled afterwards?'
             if ($wants -eq 'yes')
             {
+                $atRestReason = 'You chose to restart to check the enable persists: this half is deliberately leaving the ' +
+                    'nodes enabled up to that restart, which is what it is testing, so blocking them first would answer nothing.'
                 Write-Line -Run $run -Text 'Restart the machine yourself: Start menu, Power, Restart. This script does not restart anything.'
                 Write-ResumeInstruction -Run $run -ScriptPath $PSCommandPath
             }
@@ -182,7 +189,7 @@ catch
 }
 finally
 {
-    $overall = Complete-LiveTestRun -Run $run
+    $overall = Complete-LiveTestRun -Run $run -AtRestReason $atRestReason
     Write-Host ('Test 05 finished: ' + $overall)
 }
 
