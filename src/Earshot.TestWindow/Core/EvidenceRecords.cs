@@ -62,6 +62,11 @@ internal sealed class RunEvidence
     public bool HasFirstHalfSnapshotFile { get; init; }
     public bool HasResumeFile { get; init; }
     public bool HasSetAsideFile { get; init; }
+
+    // section 8.3: the window's own marker, written only when it has forcibly killed the child
+    // that owned this run folder. gui- prefixed, additive (section 8.4); never written by any
+    // shipped script.
+    public bool HasKilledMarker { get; init; }
     public string? PowerCycleVerdict { get; init; }
 
     public bool ReadSucceeded => Result is not null;

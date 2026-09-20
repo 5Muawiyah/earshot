@@ -18,6 +18,7 @@ internal sealed class MainForm : Form
     private readonly ListView _rowList;
     private readonly Label _rowDetailLabel;
     private readonly Button _startButton;
+    private readonly Button _stopButton;
     private readonly ComboBox _caseBox;
     private readonly Label _statusLabel;
     private readonly Label _bannerLabel;
@@ -28,13 +29,25 @@ internal sealed class MainForm : Form
     private readonly Label _runAllExplanationLabel;
     private readonly Label _runAllStatusLabel;
     private readonly Button _runAllCarryOnButton;
+    private readonly System.Windows.Forms.Timer _watchdogTimer;
 
     private ChildRunner? _activeRunner;
     private string? _activeResultFolder;
     private bool _activeIsResume;
     private TestRowSpec? _activeSpec;
+    private DisplayRow? _activeDisplayRow;
     private BannerState _banner = new() { Level = BannerLevel.None };
     private readonly List<string> _transcript = new();
+
+    // section 8.3: the silence watchdog and the abort/kill sequence. A prompt on screen is never
+    // a hang (test 12 waits hours at one), so the watchdog only ever looks at silence while
+    // _currentPromptSeq is null. _killDeadlineUtc is set once, either by an abort waiting for a
+    // natural exit or (implicitly, by going straight to the confirmation) when Stop is clicked
+    // with nothing pending.
+    private int? _currentPromptSeq;
+    private DateTimeOffset _lastActivityUtc;
+    private DateTimeOffset? _killDeadlineUtc;
+    private bool _silenceWarningShown;
 
     // section 11: Run all's own state, held only in memory plus run-all.json; never consulted by
     // StateDeriver, so a row's own state is always exactly what section 6.2 says regardless of
@@ -81,6 +94,16 @@ internal sealed class MainForm : Form
         _startButton = new Button { Text = "Start", Dock = DockStyle.Top, Height = 32 };
         _startButton.Click += (_, _) => StartSelectedRow();
 
+        // section 8.2: "the form only renders the current prompt, the transcript box and a Stop
+        // button", standing throughout a run, not only for the rare unrecognised-prompt case
+        // StepPanel's own built-in stop button covers.
+        _stopButton = new Button { Text = "Stop the test", Dock = DockStyle.Top, Height = 28, Enabled = false };
+        _stopButton.Click += (_, _) => OnStopClicked();
+
+        _watchdogTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        _watchdogTimer.Tick += (_, _) => OnWatchdogTick();
+        _watchdogTimer.Start();
+
         _caseBox = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Visible = sandbox is not null };
         _caseBox.Items.AddRange(new object[] { "none", "one", "two" });
         _caseBox.SelectedIndex = 1;
@@ -126,6 +149,7 @@ internal sealed class MainForm : Form
         rightPanel.Controls.Add(_runAllCarryOnButton);
         rightPanel.Controls.Add(_bannerLabel);
         rightPanel.Controls.Add(_caseBox);
+        rightPanel.Controls.Add(_stopButton);
         rightPanel.Controls.Add(_startButton);
         rightPanel.Controls.Add(_runAllExplanationLabel);
         rightPanel.Controls.Add(_runAllButton);
@@ -169,9 +193,26 @@ internal sealed class MainForm : Form
         _rowDetailLabel.Text = text;
     }
 
-    // design.md section 4.7: closing while the banner is red asks first.
+    // design.md section 4.7: closing while the banner is red asks first. section 8.3/S8: closing
+    // during a run asks first too, and closing anyway is the same as a forced kill (the process
+    // is going away either way; the row must read Unknown afterwards, not whatever it said
+    // before this run started).
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
+        if (_activeRunner is not null)
+        {
+            DialogResult runChoice = MessageBox.Show(
+                "A test is still running. Closing now stops it, the same as Stop the test: no result is written and this PC may not be at rest. Close anyway?",
+                "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (runChoice != DialogResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            KillActiveRun();
+        }
+
         if (_banner.Level != BannerLevel.Red)
         {
             return;
@@ -399,7 +440,13 @@ internal sealed class MainForm : Form
         _activeResultFolder = resultFolder;
         _activeIsResume = isResume;
         _activeSpec = row.ToSpec();
+        _activeDisplayRow = row;
         _transcript.Clear();
+        _currentPromptSeq = null;
+        _killDeadlineUtc = null;
+        _silenceWarningShown = false;
+        _lastActivityUtc = DateTimeOffset.UtcNow;
+        _stopButton.Enabled = true;
 
         if (_runAllActive)
         {
@@ -424,7 +471,11 @@ internal sealed class MainForm : Form
         {
             if (IsHandleCreated)
             {
-                BeginInvoke(new Action(() => _transcript.Add(line)));
+                BeginInvoke(new Action(() =>
+                {
+                    _transcript.Add(line);
+                    _lastActivityUtc = DateTimeOffset.UtcNow;
+                }));
             }
         };
 
@@ -438,11 +489,17 @@ internal sealed class MainForm : Form
 
     private void HandleMessage(DisplayRow row, ChildMessage message)
     {
+        _lastActivityUtc = DateTimeOffset.UtcNow;
         switch (message.Kind)
         {
             case ChildMessageKind.Hello:
                 break;
             case ChildMessageKind.Prompt:
+                // section 8.3: "a prompt on screen is never a hang." While one is pending the
+                // silence watchdog has nothing to say, and Stop's own behaviour changes: it can
+                // abort this exact seq rather than only wait-then-kill.
+                _currentPromptSeq = message.Seq;
+                _silenceWarningShown = false;
                 PresentedPrompt presented = PromptPresenter.Present(message, row.Row.Number, _wording, _transcript);
                 _stepPanel.Show(_activeRunner!, presented, message.Seq);
                 break;
@@ -486,6 +543,10 @@ internal sealed class MainForm : Form
         _activeRunner = null;
         _activeIsResume = false;
         _activeSpec = null;
+        _activeDisplayRow = null;
+        _currentPromptSeq = null;
+        _killDeadlineUtc = null;
+        _stopButton.Enabled = false;
         PopulateRows();
         UpdateStartButton();
 
@@ -496,6 +557,123 @@ internal sealed class MainForm : Form
         if (_runAllActive)
         {
             AdvanceRunAll();
+        }
+    }
+
+    // section 8.3: Stop's own two paths. A prompt pending: send the real abort down the wire and
+    // let the script's own catch/finally run, same as a real owner clicking Stop inside StepPanel
+    // for an unrecognised prompt; nothing pending: there is no seq anything is waiting to read, so
+    // waiting for it to arrive on its own would never end, and the second confirmation is asked
+    // straight away.
+    private void OnStopClicked()
+    {
+        if (_activeRunner is null)
+        {
+            return;
+        }
+
+        if (_currentPromptSeq is int seq)
+        {
+            _activeRunner.Abort(seq);
+            _statusLabel.Text = "Stop sent. Waiting up to 60 s for the test to finish on its own.";
+            _killDeadlineUtc = DateTimeOffset.UtcNow.AddSeconds(60);
+        }
+        else
+        {
+            ConfirmAndKill();
+        }
+    }
+
+    private void OnWatchdogTick()
+    {
+        if (_activeRunner is null)
+        {
+            return;
+        }
+
+        if (_killDeadlineUtc is DateTimeOffset deadline && DateTimeOffset.UtcNow >= deadline)
+        {
+            _killDeadlineUtc = null;
+            ConfirmAndKill();
+            return;
+        }
+
+        // section 8.3: "no prompt pending and no stdout line for MaxSilenceSeconds. The window
+        // then asks, and does nothing by itself." Shown once per silent stretch, on the status
+        // line rather than a modal, so it never blocks the Stop button it is telling the owner
+        // about.
+        if (_currentPromptSeq is null && !_silenceWarningShown)
+        {
+            int maxSilenceSeconds = _activeDisplayRow?.MaxSilenceSeconds ?? 900;
+            if ((DateTimeOffset.UtcNow - _lastActivityUtc).TotalSeconds >= maxSilenceSeconds)
+            {
+                _silenceWarningShown = true;
+                _statusLabel.Text = "This test has been silent for " + Math.Max(1, maxSilenceSeconds / 60) +
+                    " minutes. Keep waiting, or Stop the test.";
+            }
+        }
+    }
+
+    private void ConfirmAndKill()
+    {
+        if (_activeRunner is null)
+        {
+            return;
+        }
+
+        DialogResult choice = MessageBox.Show(
+            "Stopping it now means no result is written and this PC may not be at rest.",
+            "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (choice != DialogResult.Yes)
+        {
+            return;
+        }
+
+        KillActiveRun();
+    }
+
+    // section 8.3: "kill the process tree... The row is Unknown and the red banner requires
+    // Restore before anything else." gui-killed.txt is what makes the row read Unknown rather
+    // than falling back to an older, now-untrustworthy pass (StateDeriver.Derive's own newest-run
+    // check); Banner.Compute already reads a run folder with no result.json as red on its own; no
+    // change was needed there.
+    private void KillActiveRun()
+    {
+        if (_activeRunner is null)
+        {
+            return;
+        }
+
+        DisplayRow? row = _activeDisplayRow;
+        _activeRunner.Kill();
+
+        if (_activeResultFolder is not null)
+        {
+            Directory.CreateDirectory(_activeResultFolder);
+            File.WriteAllText(Path.Combine(_activeResultFolder, "gui-killed.txt"), DateTimeOffset.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        _stepPanel.Visible = false;
+        _resultPanel.Visible = false;
+        _handOffBox.Visible = false;
+        _statusLabel.Text = "Stopped by force. This row now reads Unknown until Restore has run.";
+
+        _activeRunner = null;
+        _activeIsResume = false;
+        _activeSpec = null;
+        _activeDisplayRow = null;
+        _currentPromptSeq = null;
+        _killDeadlineUtc = null;
+        _stopButton.Enabled = false;
+        PopulateRows();
+        UpdateStartButton();
+
+        // A forced kill is the owner overriding the sequence, not a script-decided outcome: Run
+        // all treats it exactly like an ordinary halt on failure (section 12), never advanced
+        // past on its own.
+        if (_runAllActive && row is not null)
+        {
+            HaltRunAll(row, new DerivedRowState { Kind = RowStateKind.Unknown, Reason = "stopped by force" });
         }
     }
 

@@ -21,6 +21,19 @@ internal static class StateDeriver
             return new DerivedRowState { Kind = RowStateKind.NotRun };
         }
 
+        // section 8.3: "kill leaves Unknown and the banner, never a pass." A forced kill can
+        // leave the real device mid-way through a live step, which no older evidence (even a
+        // genuine earlier pass) can speak to, so this outranks everything else, but only for the
+        // newest run: an older kill that a later, clean run has since superseded is just history.
+        if (runsNewestFirst[0].HasKilledMarker)
+        {
+            return new DerivedRowState
+            {
+                Kind = RowStateKind.Unknown,
+                Reason = "the test was stopped by force; nothing after that point is known",
+            };
+        }
+
         (RunEvidence? verdictRun, HalfKind verdictHalf, string? historyNote, RunEvidence? newestUnreadable) =
             FindVerdictRun(spec, runsNewestFirst);
 

@@ -16,6 +16,7 @@ internal sealed class DisplayRow
     public string RunAllKey => Variant is null ? Row.Number : Row.Number + "v" + Variant.Variant.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public string TestId => Variant?.TestId ?? Row.TestId;
+    public int MaxSilenceSeconds => Row.MaxSilenceSeconds;
 
     // Name/Title and Proves/Settles: a plain line first, the script's own words as a secondary
     // line beneath it. Proves is shared across all five of 10's variants (they settle the same

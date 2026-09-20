@@ -79,6 +79,7 @@ internal static partial class EvidenceStore
             HasFirstHalfSnapshotFile = hasSnapshotFile,
             HasResumeFile = File.Exists(Path.Combine(folder, "resume.txt")),
             HasSetAsideFile = File.Exists(Path.Combine(folder, "gui-set-aside.txt")),
+            HasKilledMarker = File.Exists(Path.Combine(folder, "gui-killed.txt")),
             PowerCycleVerdict = TryReadPowerCycleVerdict(Path.Combine(folder, "gui-power-cycle.json")),
         };
     }
