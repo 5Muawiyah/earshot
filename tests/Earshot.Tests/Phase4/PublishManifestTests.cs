@@ -63,7 +63,8 @@ public sealed class PublishManifestTests
 
         // Every package the publish says it carries is named in the notices, so a dependency added later without a
         // notice fails here. The list is the publish's own (Earshot.deps.json), not one typed into this test.
-        string[] carried = CarriedPackages(Path.Combine(output, "Earshot.deps.json"));
+        string depsFile = Path.Combine(output, "Earshot.deps.json");
+        string[] carried = CarriedPackages(depsFile, "Earshot");
         Assert.IsTrue(carried.Length >= 4, "Only " + carried.Length + " packages were read from Earshot.deps.json: " + string.Join(", ", carried));
         foreach (string package in carried)
         {
@@ -74,6 +75,171 @@ public sealed class PublishManifestTests
         {
             Assert.IsTrue(File.Exists(Path.Combine(output, binary)), binary + " is named in the notices and is not in the release.");
         }
+
+        // The MIT licence asks that its copyright notice and its permission notice travel with every copy, so the
+        // release carries the licence text of each component it ships under that licence, not only a link to it.
+        // Each file is read from the publisher's own package at publish time, so it is present and listed here or
+        // the publish stopped before it reached this test.
+        foreach (string licence in LicenceTextsTheReleaseCarries)
+        {
+            string full = Path.Combine(output, licence);
+            Assert.IsTrue(File.Exists(full), licence + " is not in the release, so the licence text does not travel with it.");
+            Assert.Contains(licence, listed, licence + " ships and " + FileManifest.FileName + " does not list it, so install would not copy it.");
+            Assert.IsTrue(new FileInfo(full).Length > 0, licence + " is empty.");
+        }
+
+        // Not just a file of the right name: the .NET runtime's own LICENSE.TXT is the MIT text, and the permission
+        // notice is the sentence MIT asks to be carried. The notices file is the one place that must not hold it.
+        StringAssert.Contains(
+            File.ReadAllText(Path.Combine(output, @"licences\Microsoft.NETCore.App.Runtime.win-x64\LICENSE.TXT")),
+            "Permission is hereby granted",
+            "The published .NET runtime licence carries no permission notice.");
+        Assert.AreEqual(
+            File.ReadAllText(Path.Combine(RepositoryRoot(), "LICENSE")),
+            File.ReadAllText(Path.Combine(output, @"licences\Earshot\LICENSE")),
+            "Earshot's own licence ships as the repository holds it: a release archive is not the source repository.");
+
+        // Nothing ships that no notice answers for. The loop above can only ask about packages Earshot.deps.json
+        // names; this asks about the published files themselves.
+        string[] unaccounted = BinariesTheNoticesDoNotAccountFor(output, depsFile, EarshotsOwnBinaries, notices);
+        Assert.AreEqual(0, unaccounted.Length,
+            "The release ships binaries that no package in Earshot.deps.json accounts for and that " + NoticesFileName +
+            " does not name: " + string.Join(", ", unaccounted));
+    }
+
+    // A third-party binary copied in by a plain <None ... CopyToPublishDirectory="PreserveNewest" /> item ships and
+    // is listed in Earshot.files.json, but a deps file only knows about package and project references, so it names
+    // no such file. The package-by-package check therefore cannot see it and never asks for a notice. This is that
+    // gap, shown on a publish of its own: a throwaway project with one loose binary in it, so nothing has to be
+    // pretended about Earshot's own release.
+    [TestMethod]
+    public void ALooseBinaryNoPackageAccountsForIsCaughtThoughTheDepsFileNeverNamesIt()
+    {
+        using var temp = new TempFolder();
+        string source = Path.Combine(temp.Path, "fixture");
+        string output = Path.Combine(temp.Path, "out");
+        string artifacts = Path.Combine(temp.Path, "artifacts");
+        Directory.CreateDirectory(source);
+
+        // Empty files of both names stop MSBuild walking above the temporary folder for settings that are not this
+        // fixture's. The binary is a dummy: the check reads file names and a deps file, never the bytes.
+        File.WriteAllText(Path.Combine(source, "Directory.Build.props"), "<Project />");
+        File.WriteAllText(Path.Combine(source, "Directory.Build.targets"), "<Project />");
+        File.WriteAllText(Path.Combine(source, "Program.cs"), "internal static class Program { private static void Main() { } }");
+        File.WriteAllBytes(Path.Combine(source, OrphanBinary), [0x4D, 0x5A, 0x00, 0x00]);
+        string project = Path.Combine(source, "Fixture.csproj");
+        File.WriteAllText(project, """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0</TargetFramework>
+                <AssemblyName>Fixture</AssemblyName>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+              <ItemGroup>
+                <None Include="Contoso.Native.dll" CopyToPublishDirectory="PreserveNewest" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        (int exit, string log) = Publish(project, output, artifacts, selfContained: false);
+        if (exit != 0 && log.Contains("error NU1", StringComparison.Ordinal))
+        {
+            Assert.Inconclusive("The fixture could not be restored here:" + Environment.NewLine + Tail(log));
+        }
+
+        Assert.AreEqual(0, exit, "The fixture publish failed:" + Environment.NewLine + Tail(log));
+        Assert.IsTrue(File.Exists(Path.Combine(output, OrphanBinary)), OrphanBinary + " did not reach the publish folder, so there is no gap to show.");
+
+        // The gap itself. The deps file of a publish carrying that binary names no third-party package at all, so
+        // the package-by-package check has nothing to ask about and passes on a release that ships a stranger.
+        string depsFile = Path.Combine(output, "Fixture.deps.json");
+        string[] carried = CarriedPackages(depsFile, "Fixture");
+        Assert.AreEqual(0, carried.Length,
+            "The fixture's deps file names packages, so it does not show a binary that no deps entry accounts for: " + string.Join(", ", carried));
+        Assert.IsFalse(File.ReadAllText(depsFile).Contains("Contoso", StringComparison.OrdinalIgnoreCase),
+            "The deps file names the loose binary after all, so the package-by-package check would have seen it.");
+
+        // The check that does see it. With notices that say nothing, the binary is reported.
+        string[] unnamed = BinariesTheNoticesDoNotAccountFor(output, depsFile, FixtureOwnBinaries, string.Empty);
+        Assert.Contains(OrphanBinary, unnamed,
+            "A loose third-party binary ships, no deps entry accounts for it and no notice names it, and the check let it through. It reported: " +
+            (unnamed.Length == 0 ? "nothing" : string.Join(", ", unnamed)));
+
+        // And with notices that name it, it is not reported, so the check asks for a notice rather than forbidding
+        // the file.
+        string[] named = BinariesTheNoticesDoNotAccountFor(output, depsFile, FixtureOwnBinaries, "Contoso.Native.dll, published by Contoso, under its own terms.");
+        Assert.IsFalse(named.Contains(OrphanBinary, StringComparer.OrdinalIgnoreCase),
+            "A binary the notices name is still reported: " + string.Join(", ", named));
+    }
+
+    private const string OrphanBinary = "Contoso.Native.dll";
+    private static readonly string[] FixtureOwnBinaries = ["Fixture.exe", "Fixture.dll"];
+
+    // The apphost. Earshot.dll is named by Earshot's own entry in the deps file; the exe the SDK builds around it
+    // is in no deps file, and it is not third party.
+    private static readonly string[] EarshotsOwnBinaries = ["Earshot.exe"];
+
+    // Where each carried licence text lands in the release, and what THIRD-PARTY-NOTICES.txt says about it. The
+    // paths are the ones the publish writes, so a folder renamed on one side and not the other fails.
+    private static readonly string[] LicenceTextsTheReleaseCarries =
+    [
+        @"licences\Microsoft.NETCore.App.Runtime.win-x64\LICENSE.TXT",
+        @"licences\Microsoft.NETCore.App.Runtime.win-x64\THIRD-PARTY-NOTICES.TXT",
+        @"licences\Microsoft.WindowsDesktop.App.Runtime.win-x64\LICENSE",
+        @"licences\System.Speech\THIRD-PARTY-NOTICES.TXT",
+        @"licences\Earshot\LICENSE",
+    ];
+
+    // Every published .dll and .exe that is neither the application's own nor accounted for by an entry in the deps
+    // file has to be named in the notices by its file name. A deps file lists the assemblies each package and each
+    // runtime pack contributed, so a file whose name is in that list is already covered by the package-by-package
+    // check; anything else arrived some other way and would otherwise be asked about by nothing.
+    private static string[] BinariesTheNoticesDoNotAccountFor(string publishDir, string depsFile, string[] ownBinaries, string notices)
+    {
+        var accounted = new HashSet<string>(ownBinaries, StringComparer.OrdinalIgnoreCase);
+        using (var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(depsFile)))
+        {
+            foreach (System.Text.Json.JsonProperty target in document.RootElement.GetProperty("targets").EnumerateObject())
+            {
+                foreach (System.Text.Json.JsonProperty library in target.Value.EnumerateObject())
+                {
+                    foreach (string section in DepsAssetSections)
+                    {
+                        if (!library.Value.TryGetProperty(section, out System.Text.Json.JsonElement assets))
+                        {
+                            continue;
+                        }
+
+                        foreach (System.Text.Json.JsonProperty asset in assets.EnumerateObject())
+                        {
+                            accounted.Add(Path.GetFileName(asset.Name.Replace('/', Path.DirectorySeparatorChar)));
+                        }
+                    }
+                }
+            }
+        }
+
+        return Directory.EnumerateFiles(publishDir, "*", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(publishDir, f))
+            .Where(f => BinaryExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+            .Where(f => !accounted.Contains(Path.GetFileName(f)))
+            .Where(f => !IsSatelliteOf(Path.GetFileName(f), accounted))
+            .Where(f => !notices.Contains(Path.GetFileName(f), StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static readonly string[] DepsAssetSections = ["runtime", "native", "resources"];
+    private static readonly string[] BinaryExtensions = [".dll", ".exe"];
+
+    // A self-contained publish puts satellite assemblies in culture folders and names none of them in the deps
+    // file. One belongs to the package its parent assembly came from, so it is accounted for when the parent is.
+    private static bool IsSatelliteOf(string fileName, HashSet<string> accounted)
+    {
+        const string suffix = ".resources.dll";
+        return fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            && accounted.Contains(string.Concat(fileName.AsSpan(0, fileName.Length - suffix.Length), ".dll"));
     }
 
     // The notices as they stand in the repository: each third-party binary by name, who publishes it, the name of its
@@ -96,6 +262,13 @@ public sealed class PublishManifestTests
         foreach (string package in PackagesTheReleaseCarries)
         {
             Assert.IsTrue(NamesPackage(notices, package), NoticesFileName + " has no \"Package:\" line for " + package + ".");
+        }
+
+        // The licence texts travel with the release, and the notices say where each one lands. A folder renamed on
+        // one side only fails here as well as in the publish test.
+        foreach (string licence in LicenceTextsTheReleaseCarries)
+        {
+            StringAssert.Contains(notices, licence);
         }
 
         // Named and linked, never copied out.
@@ -145,14 +318,14 @@ public sealed class PublishManifestTests
     private static readonly string[] ThirdPartyBinariesNamedOneByOne = ["Microsoft.Windows.SDK.NET.dll", "WinRT.Runtime.dll", "System.Speech.dll"];
 
     // The "libraries" of a deps file name every package the publish carries, as "name/version", runtime packs with a
-    // "runtimepack." prefix. Earshot itself is the one entry that is not third party.
-    private static string[] CarriedPackages(string depsFile)
+    // "runtimepack." prefix. The project's own entry is the one that is not third party.
+    private static string[] CarriedPackages(string depsFile, string ownLibrary)
     {
         using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(depsFile));
         return document.RootElement.GetProperty("libraries").EnumerateObject()
             .Select(library => library.Name.Split('/')[0])
             .Select(name => name.StartsWith("runtimepack.", StringComparison.Ordinal) ? name["runtimepack.".Length..] : name)
-            .Where(name => !string.Equals(name, "Earshot", StringComparison.Ordinal))
+            .Where(name => !string.Equals(name, ownLibrary, StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
     }

@@ -34,8 +34,13 @@
        the dotnet command, asked for its version, printed 10.0.401 on the build machine. There is no
        global.json, so nothing in the repository pins the SDK; the workflow installs the latest 10.0.x.
        Used only from src\Earshot\Voice\SystemSpeechEngine.cs. -->
+  <!-- GeneratePathProperty gives $(PkgSystem_Speech), the restored package folder, which the licence target
+       below reads to find the package's own THIRD-PARTY-NOTICES.TXT. Without it that property is empty: a
+       publish with the attribute left off printed PkgSystem_Speech=[] on this machine. The version is never
+       written into the path; NuGet fills the property in from whatever it restored.
+       https://learn.microsoft.com/en-us/nuget/consume-packages/package-references-in-project-files#generatepathproperty -->
   <ItemGroup>
-    <PackageReference Include="System.Speech" Version="10.0.12" />
+    <PackageReference Include="System.Speech" Version="10.0.12" GeneratePathProperty="true" />
   </ItemGroup>
   <!-- The release carries binaries that are not Earshot's and not under Earshot's licence: the WinRT projection
        (Microsoft.Windows.SDK.NET.dll, WinRT.Runtime.dll, under the Windows SDK licence terms), System.Speech and the
@@ -47,6 +52,73 @@
   <ItemGroup>
     <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- The MIT licence asks that its copyright notice and its permission notice travel with every copy, so the
+       release carries the licence text of each MIT component, not just a link to it. The texts are the ones the
+       publisher put in its own package: nothing is transcribed into this repository, and no version number or
+       user path is written down here. They are read from the restored packages at publish time and land under
+       licences\<package id>\, one folder per package. Earshot's own LICENSE goes to licences\Earshot\LICENSE,
+       because THIRD-PARTY-NOTICES.txt tells the reader to see LICENSE in the source repository and a release
+       archive is not the source repository.
+
+       Where each path comes from, read off a publish on the build machine rather than recalled:
+         @(ResolvedRuntimePack) carries %(PackageDirectory), the restored folder of each runtime pack. A publish
+         printed dir=[C:\Users\muawi\.nuget\packages\microsoft.netcore.app.runtime.win-x64\10.0.12] for
+         Microsoft.NETCore.App.Runtime.win-x64 and the matching folder for the Windows Desktop pack. The same
+         item also holds Microsoft.Windows.SDK.NET.Ref and Microsoft.AspNetCore.App.Runtime.win-x64; the
+         ASP.NET Core pack is resolved but never published, and Earshot.deps.json names only the four packages
+         the notices name, so only those four are asked for a licence.
+         $(PkgSystem_Speech) comes from the PackageReference above.
+
+       The two runtime packs are asked for only when the publish is self-contained, which is what the release is
+       and what carries the runtime's files. A framework-dependent publish ships none of them and resolves
+       neither pack: asked for $(SelfContained), the same project printed "false" with no runtime identifier for
+       a plain publish and "true" for a self-contained one, and a framework-dependent publish listed only
+       Microsoft.Windows.SDK.NET.Ref in @(ResolvedRuntimePack). System.Speech.dll and the WinRT projection ship
+       either way, so those two are asked for either way, as is Earshot's own licence.
+
+       This runs after ComputeResolvedFilesToPublishList, which is where @(ResolvedFileToPublish) is complete and
+       still before CopyFilesToPublishDirectory splits and copies it, so the files are copied by the publish
+       itself, listed in Earshot.files.json by the target below like any other published file, and checked by
+       install against that manifest.
+       https://learn.microsoft.com/en-us/dotnet/core/project-sdk/msbuild-props#resolvedfiletopublish -->
+  <Target Name="AddEarshotLicenceTexts" AfterTargets="ComputeResolvedFilesToPublishList">
+    <PropertyGroup>
+      <EarshotRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..'))</EarshotRepositoryRoot>
+      <EarshotNetCoreRuntimePack>@(ResolvedRuntimePack->WithMetadataValue('NuGetPackageId', 'Microsoft.NETCore.App.Runtime.win-x64')->'%(PackageDirectory)')</EarshotNetCoreRuntimePack>
+      <EarshotDesktopRuntimePack>@(ResolvedRuntimePack->WithMetadataValue('NuGetPackageId', 'Microsoft.WindowsDesktop.App.Runtime.win-x64')->'%(PackageDirectory)')</EarshotDesktopRuntimePack>
+      <EarshotSdkRefPack>@(ResolvedRuntimePack->WithMetadataValue('NuGetPackageId', 'Microsoft.Windows.SDK.NET.Ref')->'%(PackageDirectory)')</EarshotSdkRefPack>
+      <EarshotResolvedRuntimePacks>@(ResolvedRuntimePack->'%(NuGetPackageId)', ', ')</EarshotResolvedRuntimePacks>
+    </PropertyGroup>
+    <Error Condition="'$(SelfContained)' == 'true' and '$(EarshotNetCoreRuntimePack)' == ''" Text="No licence text can be published: none of the runtime packs this publish resolved ($(EarshotResolvedRuntimePacks)) is Microsoft.NETCore.App.Runtime.win-x64 with a PackageDirectory, so the .NET runtime's LICENSE.TXT and THIRD-PARTY-NOTICES.TXT cannot be found. The release publishes self-contained for win-x64." />
+    <Error Condition="'$(SelfContained)' == 'true' and '$(EarshotDesktopRuntimePack)' == ''" Text="No licence text can be published: none of the runtime packs this publish resolved ($(EarshotResolvedRuntimePacks)) is Microsoft.WindowsDesktop.App.Runtime.win-x64 with a PackageDirectory, so the Windows Desktop runtime's LICENSE cannot be found. The release publishes self-contained for win-x64." />
+    <Error Condition="'$(EarshotSdkRefPack)' == ''" Text="No licence text can be published: none of the runtime packs this publish resolved ($(EarshotResolvedRuntimePacks)) is Microsoft.Windows.SDK.NET.Ref with a PackageDirectory, so that package cannot be checked for a licence file." />
+    <Error Condition="'$(PkgSystem_Speech)' == ''" Text="No licence text can be published: PkgSystem_Speech is empty, so the System.Speech package folder cannot be found. The PackageReference to System.Speech needs GeneratePathProperty=&quot;true&quot;." />
+    <ItemGroup>
+      <EarshotLicenceText Condition="'$(SelfContained)' == 'true'" Include="$(EarshotNetCoreRuntimePack)\LICENSE.TXT" RelativePath="licences\Microsoft.NETCore.App.Runtime.win-x64\LICENSE.TXT" />
+      <EarshotLicenceText Condition="'$(SelfContained)' == 'true'" Include="$(EarshotNetCoreRuntimePack)\THIRD-PARTY-NOTICES.TXT" RelativePath="licences\Microsoft.NETCore.App.Runtime.win-x64\THIRD-PARTY-NOTICES.TXT" />
+      <EarshotLicenceText Condition="'$(SelfContained)' == 'true'" Include="$(EarshotDesktopRuntimePack)\LICENSE" RelativePath="licences\Microsoft.WindowsDesktop.App.Runtime.win-x64\LICENSE" />
+      <EarshotLicenceText Include="$(PkgSystem_Speech)\THIRD-PARTY-NOTICES.TXT" RelativePath="licences\System.Speech\THIRD-PARTY-NOTICES.TXT" />
+      <EarshotLicenceText Include="$(EarshotRepositoryRoot)\LICENSE" RelativePath="licences\Earshot\LICENSE" />
+      <EarshotMissingLicenceText Include="@(EarshotLicenceText)" Condition="!Exists('%(Identity)')" />
+    </ItemGroup>
+    <Error Condition="'@(EarshotMissingLicenceText)' != ''" Text="The release may not ship without the licence text of what it carries, and these files were not where this publish looked for them: @(EarshotMissingLicenceText->'%(Identity)', '; '). Each is read from a restored package folder or from the repository root, so check that the package restored and that the publisher still ships the file under that name." />
+    <!-- Microsoft.Windows.SDK.NET.Ref is the one carried package with no licence text of its own to ship. The
+         probe on the build machine: a recursive search of the restored 10.0.19041.57 folder for any file named
+         like a licence, a notice, a legal file or an EULA found none, and its nuspec carries only
+         licenceUrl=https://aka.ms/WinSDKLicenseURL, no <license type="file">. THIRD-PARTY-NOTICES.txt says so
+         in those words. The same search runs here on every publish, so if a later version of the package does
+         start carrying one, this stops the release rather than letting that sentence quietly become untrue. -->
+    <ItemGroup>
+      <EarshotSdkRefLicenceFile Include="$(EarshotSdkRefPack)\**\*licen*;$(EarshotSdkRefPack)\**\*notice*;$(EarshotSdkRefPack)\**\*legal*;$(EarshotSdkRefPack)\**\*eula*" />
+    </ItemGroup>
+    <Error Condition="'@(EarshotSdkRefLicenceFile)' != ''" Text="Microsoft.Windows.SDK.NET.Ref now carries licence text of its own: @(EarshotSdkRefLicenceFile->'%(Identity)', '; '). Ship it under licences\Microsoft.Windows.SDK.NET.Ref\ in AddEarshotLicenceTexts, and correct the sentence in THIRD-PARTY-NOTICES.txt that says the package carries no licence file." />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(EarshotLicenceText)">
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <Message Importance="high" Text="Earshot: publishing @(EarshotLicenceText->Count()) licence texts under licences\." />
+  </Target>
   <!-- Writes Earshot.files.json beside the published files: the path (relative, with "/" separators) and the
        SHA-256 of every file this publish wrote, except the manifest itself. The list is @(ResolvedFileToPublish)
        at its RelativePath, the items the SDK's publish copies, not whatever the folder holds. The folder must hold
