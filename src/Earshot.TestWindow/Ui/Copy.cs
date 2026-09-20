@@ -26,8 +26,29 @@ internal static class Copy
         RowStateKind.Failed => Failed,
         RowStateKind.Inconclusive => Inconclusive,
         RowStateKind.StoppedBeforeAnyStep => StoppedBeforeAnyStep,
+        RowStateKind.Locked => Locked,
         _ => Unknown,
     };
+
+    // section 10.2's own words, shown for a Locked row's detail.
+    internal const string LockedDetail =
+        "Locked. Run the administrator prompt check first. It proves this window can raise the " +
+        "Windows permission box and read the answer before anything real depends on it.";
+
+    // section 10.3: "Derived from result.json only: a step with elevated true, ran false and an
+    // error." Two independent messages, never guessed at from anything the window itself
+    // observed while the step ran.
+    internal const string DeclinedElevatedPrompt =
+        "You chose No on the Windows permission box, so that step did not run and nothing was " +
+        "changed by it. The test is recorded as not settled.";
+
+    internal const string EarshotNotInstalledAfterDeclinedReinstall =
+        "Earshot is not installed now. Open Earshot from the release folder and set it up again before any other test.";
+
+    // Whether test 15's own extra warning applies: its uninstall criterion passed but its
+    // install-again criterion did not, so the machine may have been left with Earshot removed.
+    internal static bool NeedsNotInstalledWarning(bool uninstallPassed, bool installAgainPassed) =>
+        uninstallPassed && !installAgainPassed;
 
     // The text a row shows: the base word, plus its qualifier when it has one. A qualified pass
     // ("Passed, on an earlier build") is never shortened back to the bare word, so the amber

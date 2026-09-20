@@ -273,10 +273,32 @@ internal sealed class MainForm : Form
 
     private DerivedRowState ComputeState(DisplayRow row)
     {
+        if (IsElevationLocked(row))
+        {
+            return new DerivedRowState { Kind = RowStateKind.Locked, Reason = Copy.LockedDetail };
+        }
+
         TestRowSpec spec = row.ToSpec();
         IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(LiveTestRoot(), row.TestId);
         DateTimeOffset? exeWrite = File.Exists(_exePath) ? File.GetLastWriteTimeUtc(_exePath) : null;
         return StateDeriver.Derive(spec, evidence, _exePath, exeWrite);
+    }
+
+    // section 10.2's lock rule, wired to row 15: its whole test is the elevated uninstall/install
+    // cycle, so it is unambiguous. 00's uninstall variant and 07's plan B are the other two rows
+    // the spec names, but neither has its own control surface in this build yet (StartFreshRun
+    // never passes -OfferUninstall or -AllowPlanB as true anywhere): their primary, unelevated
+    // rows must stay usable, so they are deliberately not gated here. Recorded as a known gap.
+    private bool IsElevationLocked(DisplayRow row)
+    {
+        if (row.Row.Number != "15")
+        {
+            return false;
+        }
+
+        ParsedResult? rehearsal = ElevationGate.FindNewestRehearsal(LiveTestRoot());
+        DateTimeOffset harnessNewestWriteUtc = ElevationGate.HarnessNewestWriteUtc(_repoRoot);
+        return !ElevationGate.IsUnlocked(rehearsal, harnessNewestWriteUtc);
     }
 
     // A row of Halves 2 (04, 05, 08, 09, 15, and each of 10's five variants) is pending when its
@@ -303,7 +325,7 @@ internal sealed class MainForm : Form
 
         PendingRun? pending = FindPendingRun(row);
         _startButton.Text = pending is not null ? "Carry on with the second half" : "Start";
-        _startButton.Enabled = _activeRunner is null && !lockedByBanner;
+        _startButton.Enabled = _activeRunner is null && !lockedByBanner && !IsElevationLocked(row);
     }
 
     private void StartSelectedRow()
@@ -317,6 +339,12 @@ internal sealed class MainForm : Form
         DisplayRow row = _displayRows[index];
         if (_banner.RowsLockedExceptRestore && row.Row.Number != "00")
         {
+            return;
+        }
+
+        if (IsElevationLocked(row))
+        {
+            _statusLabel.Text = Copy.LockedDetail;
             return;
         }
 
@@ -746,9 +774,11 @@ internal sealed class MainForm : Form
         SelectRow(row);
 
         bool atPowerCycleBoundary = state.Kind is RowStateKind.WaitingForShutDown or RowStateKind.WaitingForRestart;
-        _runAllStatusLabel.Text = atPowerCycleBoundary
-            ? Copy.RunAllStoppedForPowerCycle(row.Number)
-            : Copy.RunAllStoppedForFailure(row.Number);
+        _runAllStatusLabel.Text = state.Kind == RowStateKind.Locked
+            ? Copy.RunAllLockedItemSkipped + " " + Copy.LockedDetail
+            : atPowerCycleBoundary
+                ? Copy.RunAllStoppedForPowerCycle(row.Number)
+                : Copy.RunAllStoppedForFailure(row.Number);
 
         // At the power-cycle boundary the row's own "Carry on with the second half" button
         // (section 9.2) is the deliberate click that resumes Run all too, through

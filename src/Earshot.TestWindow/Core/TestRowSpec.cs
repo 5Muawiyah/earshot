@@ -40,6 +40,12 @@ internal enum RowStateKind
     Inconclusive,
     Unknown,
     StoppedBeforeAnyStep,
+
+    // section 10.2: never produced by StateDeriver.Derive (which reads a single row's own
+    // evidence only); MainForm.cs overlays this on top of the ordinary derived state for the
+    // elevated launch site's rows, from ElevationGate, which reads the rehearsal's own result.json
+    // and the harness files' own write times.
+    Locked,
 }
 
 // What StateDeriver decided for one row, from disk alone. IsGreen is the one bit T4 pins: only a
