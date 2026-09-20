@@ -94,6 +94,23 @@ public sealed class StateDeriverTests
         Assert.AreEqual(RowStateKind.WaitingForShutDown, state.Kind);
     }
 
+    // M3: test 10's first half is inconclusive by design (section 6.1: "First half only: finding
+    // stateBeforeRestart, no criteria at all"). With resume.txt present that must still read as
+    // waiting for the restart, the same as every other two-half test's first-half pass; it must
+    // never read as Failed just because its own result.json's overall is "inconclusive" rather
+    // than "pass".
+    [TestMethod]
+    public void Test10FirstHalfInconclusiveByDesignWaitsRatherThanFails()
+    {
+        using var root = new TempFolder();
+        string folder = WriteResult(root, "20260920T000000Z", "10-shutdown-messages-v1",
+            new ResultJsonFixture("10-shutdown-messages-v1", "inconclusive").WithFinding("stateBeforeRestart", "connected"));
+        File.WriteAllText(Path.Combine(folder, "resume.txt"), "powershell -File x -Resume -Variant 1");
+
+        DerivedRowState state = StateDeriver.Derive(TestRowSpecFixtures.Test10Variant1(), Load(root.Path, "10-shutdown-messages-v1"), null, null);
+        Assert.AreEqual(RowStateKind.WaitingForRestart, state.Kind);
+    }
+
     // 05's exception: no resume.txt means the owner declined the optional restart.
     [TestMethod]
     public void Test05WithNoResumeIsCompleteWithAQualifier()
@@ -106,6 +123,44 @@ public sealed class StateDeriverTests
         Assert.AreEqual(RowStateKind.Passed, state.Kind);
         Assert.IsFalse(state.IsGreen, "A first-half-only pass must never render as a clean green pass.");
         StringAssert.Contains(state.Qualifier, "restart half not run");
+    }
+
+    // M3: test 10's first half is inconclusive by design (no criteria, only the stateBeforeRestart
+    // finding), so its snapshot's own overall is "inconclusive", never "pass". DeriveFromSecondHalf
+    // used to require the snapshot's overall to equal "pass" before letting the second half's pass
+    // through, so no test 10 row could ever show Passed at all, on any build, ever, even with a
+    // clean second half.
+    [TestMethod]
+    public void Test10SecondHalfPassWithAnInconclusiveByDesignFirstHalfSnapshotIsGreen()
+    {
+        using var root = new TempFolder();
+        string folder = WriteResult(root, "20260920T000000Z", "10-shutdown-messages-v1",
+            new ResultJsonFixture("10-shutdown-messages-v1", "pass")
+                .WithCriterion("query-arrived", "pass").WithCriterion("end-arrived", "pass").WithCriterion("block-queued", "pass"));
+        File.WriteAllText(Path.Combine(folder, "gui-first-half.result.json"),
+            new ResultJsonFixture("10-shutdown-messages-v1", "inconclusive").WithFinding("stateBeforeRestart", "connected").Build());
+
+        DerivedRowState state = StateDeriver.Derive(TestRowSpecFixtures.Test10Variant1(), Load(root.Path, "10-shutdown-messages-v1"), null, null);
+        Assert.AreEqual(RowStateKind.Passed, state.Kind, "Reason: " + state.Reason);
+        Assert.IsTrue(state.IsGreen, "Qualifier was: " + state.Qualifier);
+    }
+
+    // A genuinely failed first half (the harness's own "fail" overall, e.g. a stopped-early 'run'
+    // criterion) must still fail the second half's row: "inconclusive by design" is not a licence
+    // to wave through an actual failure.
+    [TestMethod]
+    public void Test10SecondHalfPassWithAGenuinelyFailedFirstHalfSnapshotFails()
+    {
+        using var root = new TempFolder();
+        string folder = WriteResult(root, "20260920T000000Z", "10-shutdown-messages-v1",
+            new ResultJsonFixture("10-shutdown-messages-v1", "pass")
+                .WithCriterion("query-arrived", "pass").WithCriterion("end-arrived", "pass").WithCriterion("block-queued", "pass"));
+        File.WriteAllText(Path.Combine(folder, "gui-first-half.result.json"),
+            new ResultJsonFixture("10-shutdown-messages-v1", "fail").WithCriterion("run", "fail").Build());
+
+        DerivedRowState state = StateDeriver.Derive(TestRowSpecFixtures.Test10Variant1(), Load(root.Path, "10-shutdown-messages-v1"), null, null);
+        Assert.AreEqual(RowStateKind.Failed, state.Kind);
+        StringAssert.Contains(state.Reason, "snapshot did not pass");
     }
 
     [TestMethod]
@@ -195,6 +250,61 @@ public sealed class StateDeriverTests
 
         Assert.IsFalse(state.IsGreen);
         StringAssert.Contains(state.Qualifier, "on an earlier build");
+    }
+
+    // M2: an absent exe, an absent startedUtc, or a chosen exe that cannot currently be found must
+    // each read as a build-not-confirmed qualifier, never as a clean green pass. Before the fix
+    // EarlierBuildQualifier required both result.Exe and result.StartedUtc to be present before it
+    // would compare anything, so a result.json missing either field, or a chosen exe path whose
+    // file has gone missing (chosenExeLastWriteUtc null), fell straight through to "no qualifier".
+    [TestMethod]
+    public void AbsentExeInResultNeverReadsGreen()
+    {
+        using var root = new TempFolder();
+        WriteResult(root, "20260920T000000Z", "01-a2dp-oneshot",
+            new ResultJsonFixture("01-a2dp-oneshot", "pass").WithCriterion("c1", "pass")
+                .WithStartedUtc("2026-09-20T00:00:00.000Z"));
+
+        DerivedRowState state = StateDeriver.Derive(
+            TestRowSpecFixtures.OneHalf(), Load(root.Path, "01-a2dp-oneshot"),
+            @"C:\Program Files\Earshot\Earshot.exe", DateTimeOffset.Parse("2026-09-19T00:00:00.000Z"));
+
+        Assert.IsFalse(state.IsGreen, "An absent exe in result.json must not read as a confirmed build.");
+        StringAssert.Contains(state.Qualifier, "build not confirmed");
+    }
+
+    [TestMethod]
+    public void AbsentStartedUtcInResultNeverReadsGreen()
+    {
+        using var root = new TempFolder();
+        WriteResult(root, "20260920T000000Z", "01-a2dp-oneshot",
+            new ResultJsonFixture("01-a2dp-oneshot", "pass").WithCriterion("c1", "pass")
+                .WithExe(@"C:\Program Files\Earshot\Earshot.exe"));
+
+        DerivedRowState state = StateDeriver.Derive(
+            TestRowSpecFixtures.OneHalf(), Load(root.Path, "01-a2dp-oneshot"),
+            @"C:\Program Files\Earshot\Earshot.exe", DateTimeOffset.Parse("2026-09-19T00:00:00.000Z"));
+
+        Assert.IsFalse(state.IsGreen, "An absent startedUtc in result.json must not read as a confirmed build.");
+        StringAssert.Contains(state.Qualifier, "build not confirmed");
+    }
+
+    [TestMethod]
+    public void MissingChosenExeNeverReadsGreen()
+    {
+        using var root = new TempFolder();
+        WriteResult(root, "20260920T000000Z", "01-a2dp-oneshot",
+            new ResultJsonFixture("01-a2dp-oneshot", "pass").WithCriterion("c1", "pass")
+                .WithExe(@"C:\Program Files\Earshot\Earshot.exe").WithStartedUtc("2026-09-20T00:00:00.000Z"));
+
+        // chosenExeLastWriteUtc null with a non-null chosenExePath is what MainForm passes when
+        // File.Exists(_exePath) is false: the chosen exe is configured but currently missing.
+        DerivedRowState state = StateDeriver.Derive(
+            TestRowSpecFixtures.OneHalf(), Load(root.Path, "01-a2dp-oneshot"),
+            @"C:\Program Files\Earshot\Earshot.exe", null);
+
+        Assert.IsFalse(state.IsGreen, "A missing chosen exe must not read as a confirmed build.");
+        StringAssert.Contains(state.Qualifier, "build not confirmed");
     }
 
     [TestMethod]

@@ -96,4 +96,42 @@ public sealed class ElevationGateTests
 
         Assert.IsNull(ElevationGate.FindNewestRehearsal(root.Path));
     }
+
+    // M8: "newest decides; unreadable is locked." The old FindNewestRehearsal walked every stamp
+    // looking for the newest one that happened to read as a pass, so a newer attempt that crashed,
+    // was killed, or wrote a malformed result.json was silently skipped past, and an older genuine
+    // pass underneath it unlocked row 15 as though the newest attempt had never happened.
+    [TestMethod]
+    public void ANewerUnreadableRehearsalLocksEvenWithAnOlderPassUnderneath()
+    {
+        using var root = new TempFolder();
+        string olderFolder = Path.Combine(root.Path, "20260918T090000Z", ElevationGate.RehearsalTestId);
+        ResultJsonFixture.WriteTo(Path.Combine(olderFolder, "result.json"),
+            new ResultJsonFixture(ElevationGate.RehearsalTestId, "pass")
+                .WithCriterion("approved-exit-code", "pass").WithFinishedUtc("2026-09-18T09:05:00.000Z").Build());
+
+        string newerFolder = Path.Combine(root.Path, "20260920T090000Z", ElevationGate.RehearsalTestId);
+        Directory.CreateDirectory(newerFolder);
+        File.WriteAllText(Path.Combine(newerFolder, "result.json"), "not json at all");
+
+        Assert.IsNull(ElevationGate.FindNewestRehearsal(root.Path),
+            "A newer unreadable rehearsal attempt must lock the row, not fall back to the older pass underneath it.");
+    }
+
+    [TestMethod]
+    public void ANewerKilledRehearsalLocksEvenWithAnOlderPassUnderneath()
+    {
+        using var root = new TempFolder();
+        string olderFolder = Path.Combine(root.Path, "20260918T090000Z", ElevationGate.RehearsalTestId);
+        ResultJsonFixture.WriteTo(Path.Combine(olderFolder, "result.json"),
+            new ResultJsonFixture(ElevationGate.RehearsalTestId, "pass")
+                .WithCriterion("approved-exit-code", "pass").WithFinishedUtc("2026-09-18T09:05:00.000Z").Build());
+
+        string newerFolder = Path.Combine(root.Path, "20260920T090000Z", ElevationGate.RehearsalTestId);
+        Directory.CreateDirectory(newerFolder);
+        File.WriteAllText(Path.Combine(newerFolder, "gui-killed.txt"), "2026-09-20T09:00:00.000Z");
+
+        Assert.IsNull(ElevationGate.FindNewestRehearsal(root.Path),
+            "A newer killed rehearsal attempt must lock the row, not fall back to the older pass underneath it.");
+    }
 }

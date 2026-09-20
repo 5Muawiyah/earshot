@@ -205,7 +205,7 @@ internal static class StateDeriver
         {
             leaf = leaf with { Qualifier = CombineQualifier(leaf.Qualifier, "second half only on record") };
         }
-        else if (run.FirstHalfSnapshot is null || run.FirstHalfSnapshot.Overall != "pass")
+        else if (run.FirstHalfSnapshot is null || !IsAcceptableFirstHalfSnapshot(spec, run.FirstHalfSnapshot))
         {
             return new DerivedRowState
             {
@@ -223,6 +223,24 @@ internal static class StateDeriver
         }
 
         return leaf;
+    }
+
+    // M3: whether a first-half snapshot counts as good enough for the second half's pass to stand.
+    // Derived from the manifest shape, not a hard-coded test number: a test whose first half never
+    // records a criterion at all (only a finding, section 6.1's half-marker table; today only test
+    // 10) always recomputes to "inconclusive" by design (rule 4), never "pass", so "inconclusive"
+    // is accepted there too. Any other test's first half is still held to an actual "pass"; a
+    // first half that genuinely failed (recomputes to "fail", e.g. a stopped-early 'run'
+    // criterion) is never accepted, for any test.
+    private static bool IsAcceptableFirstHalfSnapshot(TestRowSpec spec, ParsedResult snapshot)
+    {
+        if (snapshot.Overall == "pass")
+        {
+            return true;
+        }
+
+        bool firstHalfIsInconclusiveByDesign = spec.FirstHalfOnlyCriteriaIds.Count == 0 && spec.FirstHalfOnlyFindingNames.Count > 0;
+        return firstHalfIsInconclusiveByDesign && snapshot.Overall == "inconclusive";
     }
 
     // Base pass/fail/inconclusive plus the earlier-build check, which section 6.2 applies to
@@ -271,6 +289,12 @@ internal static class StateDeriver
         };
     }
 
+    // M2: the earlier-build check must fail closed. An absent or unparsable exe or startedUtc in
+    // result.json, or a chosen exe that cannot currently be found (chosenExeLastWriteUtc null
+    // while chosenExePath is set, which is what MainForm passes when File.Exists(_exePath) is
+    // false), each used to compare as "not different" and "not changed since", so the row read a
+    // clean green pass with no build actually confirmed. Unknown build is a qualifier now, never
+    // silently green.
     private static string? EarlierBuildQualifier(ParsedResult result, string? chosenExePath, DateTimeOffset? chosenExeLastWriteUtc)
     {
         if (chosenExePath is null)
@@ -278,12 +302,27 @@ internal static class StateDeriver
             return null;
         }
 
-        bool differentExe = result.Exe is not null &&
-            !string.Equals(result.Exe.Trim(), chosenExePath.Trim(), StringComparison.OrdinalIgnoreCase);
-        bool exeChangedSince = chosenExeLastWriteUtc is not null && result.StartedUtc is not null &&
-            chosenExeLastWriteUtc.Value > result.StartedUtc.Value;
+        if (string.IsNullOrWhiteSpace(result.Exe))
+        {
+            return "build not confirmed: result.json does not record which exe ran it";
+        }
 
-        return differentExe || exeChangedSince ? "on an earlier build" : null;
+        if (!string.Equals(result.Exe.Trim(), chosenExePath.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return "on an earlier build";
+        }
+
+        if (result.StartedUtc is null)
+        {
+            return "build not confirmed: result.json does not record when the run started";
+        }
+
+        if (chosenExeLastWriteUtc is null)
+        {
+            return "build not confirmed: the chosen exe could not be found to check it";
+        }
+
+        return chosenExeLastWriteUtc.Value > result.StartedUtc.Value ? "on an earlier build" : null;
     }
 
     private static string? CombineQualifier(string? existing, string addition) =>

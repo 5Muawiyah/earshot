@@ -46,24 +46,26 @@ internal static class ElevationGate
         return newest;
     }
 
-    // The newest elevated-launch-rehearsal\result.json across every stamp under the live test
-    // root, read the same fail-closed way as any other test's evidence (EvidenceStore.TryReadResult):
-    // a malformed or self-disagreeing rehearsal file never counts as a pass.
+    // M8: "newest decides; unreadable is locked." The newest rehearsal attempt by stamp is the
+    // only one that speaks, exactly like StateDeriver.Derive's own newest-run check (B4): a
+    // rehearsal folder newer than the last pass that was killed, crashed or wrote a malformed
+    // result.json must lock the row, never be skipped past on the way to an older, now-stale pass
+    // underneath it. Read the same fail-closed way as any other test's evidence
+    // (EvidenceStore.LoadEvidence), newest stamp first.
     internal static ParsedResult? FindNewestRehearsal(string liveTestRoot)
     {
-        ParsedResult? newest = null;
-        DateTimeOffset newestFinished = DateTimeOffset.MinValue;
-
-        foreach ((string _, string folder) in EvidenceStore.FindRunFolders(liveTestRoot, RehearsalTestId))
+        IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(liveTestRoot, RehearsalTestId);
+        if (evidence.Count == 0)
         {
-            (ParsedResult? result, _) = EvidenceStore.TryReadResult(Path.Combine(folder, "result.json"), RehearsalTestId);
-            if (result?.FinishedUtc is DateTimeOffset finished && finished > newestFinished)
-            {
-                newest = result;
-                newestFinished = finished;
-            }
+            return null;
         }
 
-        return newest;
+        RunEvidence newest = evidence[0];
+        if (newest.HasKilledMarker || !newest.ReadSucceeded)
+        {
+            return null;
+        }
+
+        return newest.Result;
     }
 }
