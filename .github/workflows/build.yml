@@ -23,3 +23,15 @@ jobs:
       # It sets EARSHOT_SAFE_MODE itself, so no device action can run here, and it
       # prints its summary as JSON whether it passes or fails.
       - run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools\check.ps1 -LogDir "${{ runner.temp }}\earshot-check"
+      # The summary keeps forty lines of a failure. The full build and test logs say which
+      # test was skipped and why, and what a failing one printed, so they are kept whether
+      # the gate passed or not.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: earshot-check-logs
+          path: |
+            ${{ runner.temp }}\earshot-check\build.log
+            ${{ runner.temp }}\earshot-check\test.log
+          if-no-files-found: warn
+          retention-days: 14
