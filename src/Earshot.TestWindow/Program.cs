@@ -17,7 +17,7 @@ internal static class Program
         bool sandboxRequested = StartupGate.HasSandboxArgument(args);
         bool safeModeSet = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("EARSHOT_SAFE_MODE"));
         bool dataRootSet = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("EARSHOT_DATA_ROOT"));
-        bool solutionFound = StartupGate.FindSolutionAbove(AppContext.BaseDirectory, out _);
+        bool solutionFound = StartupGate.FindSolutionAbove(AppContext.BaseDirectory, out string? repoRoot);
         bool powerShell51Found = File.Exists(PowerShell51.ExecutablePath());
 
         using Mutex instanceMutex = StartupGate.TryAcquireSingleInstance(out bool acquiredInstance);
@@ -40,7 +40,13 @@ internal static class Program
         // The mutex stays owned by this process for as long as the window runs, so a second
         // instance's own attempt to create it sees createdNew false the whole time. It is
         // released implicitly when the handle closes at process exit.
-        Application.Run(new MainForm());
+        _ = SandboxOptions.TryParse(args, out SandboxOptions? sandbox);
+        IReadOnlyList<ManifestRow> rows = Manifest.Load(Manifest.DefaultPath());
+        IReadOnlyList<WordingEntry> wording = Wording.Load(Wording.DefaultPath());
+        string exePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Earshot", "Earshot.exe");
+
+        Application.Run(new MainForm(repoRoot!, rows, wording, sandbox, exePath));
         return 0;
     }
 

@@ -27,7 +27,9 @@ internal sealed class ChildRunner : IDisposable
         bool resume,
         int variant,
         bool offerUninstall,
-        bool allowPlanB)
+        bool allowPlanB,
+        IReadOnlyDictionary<string, string>? environmentOverrides = null,
+        IReadOnlyList<(string Name, string Value)>? extraArguments = null)
     {
         var arguments = new List<string>
         {
@@ -56,6 +58,17 @@ internal sealed class ChildRunner : IDisposable
             arguments.Add("-AllowPlanB");
         }
 
+        // The sandbox driver's own extra parameters (-SandboxRoot, -TestId, -Case): never sent to
+        // the production driver, which declares none of them.
+        if (extraArguments is not null)
+        {
+            foreach ((string name, string value) in extraArguments)
+            {
+                arguments.Add("-" + name);
+                arguments.Add(value);
+            }
+        }
+
         ProcessStartInfo info = PowerShell51.CreateStartInfo(host, arguments);
 
         // The preamble defect (test-gui.md section 2, T7.1): a StandardInputEncoding that emits a
@@ -69,6 +82,19 @@ internal sealed class ChildRunner : IDisposable
         // EARSHOT_SAFE_MODE and EARSHOT_DATA_ROOT are never stripped here (design.md section
         // 8.1): the scripts' own Assert-LiveEnvironment stays the authority on whether a live run
         // may proceed. Only PSModulePath is removed, by PowerShell51.CreateStartInfo.
+        //
+        // --sandbox (development and tests only) redirects LOCALAPPDATA, APPDATA, ProgramData and
+        // ProgramFiles for the child into a folder of its own, so Run-GuiHalfAgainstFakes.ps1 and
+        // the real, unstubbed New-LiveTestRun/Get-EarshotDataPaths never touch this machine's real
+        // %LOCALAPPDATA%\Earshot.
+        if (environmentOverrides is not null)
+        {
+            foreach ((string name, string value) in environmentOverrides)
+            {
+                info.Environment[name] = value;
+            }
+        }
+
         _process = new Process { StartInfo = info };
     }
 
