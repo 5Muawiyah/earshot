@@ -28,10 +28,11 @@ jobs:
       # is the case that once inherited a module path it could not use. Running the gate
       # under pwsh keeps that case executed on every push.
       - run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools\check.ps1 -LogDir "${{ runner.temp }}\earshot-check"
-      # The summary keeps forty lines of a failure. The full build and test logs say which
-      # test was skipped and why, and what a failing one printed, so they are kept whether
-      # the gate passed or not.
-      - uses: actions/upload-artifact@v7
+      # The summary keeps forty lines of a failure. The full build and test logs name every
+      # skipped test and hold everything a failing one printed, so they are kept whether the
+      # gate passed or not. They do not give a skip's reason: the gate runs at minimal
+      # verbosity. Pinned to the commit behind v7.0.1.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: earshot-check-logs

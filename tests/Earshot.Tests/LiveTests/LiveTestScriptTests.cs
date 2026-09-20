@@ -546,17 +546,9 @@ public sealed class LiveTestScriptTests
 
     private static (int Exit, string Output, string Errors) RunPowerShell(string scriptPath, string root)
     {
-        var info = new ProcessStartInfo(PowerShellHost())
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (string argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Root", root })
-        {
-            info.ArgumentList.Add(argument);
-        }
+        ProcessStartInfo info = WindowsPowerShellHost.CreateStartInfo(
+            PowerShellHost(),
+            new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Root", root });
 
         var output = new StringBuilder();
         var errors = new StringBuilder();

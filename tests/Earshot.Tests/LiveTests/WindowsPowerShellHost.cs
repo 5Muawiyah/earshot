@@ -2,17 +2,21 @@ using System.Diagnostics;
 
 namespace Earshot.Tests.LiveTests;
 
-// How the tests start Windows PowerShell 5.1, in one place, because the environment the child
-// inherits decides whether it works.
+// How the tests start Windows PowerShell 5.1, because the environment the child inherits decides
+// whether it works.
 //
 // The hosted build runs the gate under PowerShell 7, and PowerShell 7 puts its own module folders
 // at the front of PSModulePath. It takes them out again when it starts powershell.exe itself, but
 // not when something in between does: here the chain is pwsh, dotnet test, then powershell.exe.
-// A 5.1 child that inherits the 7 path finds the 7 copy of Microsoft.PowerShell.Utility first and
-// cannot load it. The compiled cmdlets still resolve; Import-PowerShellDataFile, which 5.1 ships
-// as a script function inside that module, does not, and Invoke-SelfTest.ps1 stopped on it with
-// CommandNotFoundException before printing anything. Every run of the build workflow failed on
-// that one test while the same gate passed on a machine that runs it under 5.1.
+// A 5.1 child that inherited the 7 path stopped in Invoke-SelfTest.ps1 on
+// "'Import-PowerShellDataFile' is not recognized", CommandNotFoundException, before printing
+// anything, while the compiled cmdlets around it still resolved. 5.1 ships that command as a
+// script function inside Microsoft.PowerShell.Utility and 7 lists it as a cmdlet, so the likely
+// mechanism is that 5.1 resolved 7's copy of the module, which does not give it the function.
+// That part is inferred: PowerShell 7 is not installed where this was written. What is proved,
+// by the hosted build going from failing to passing on this change alone, is that the inherited
+// path was the cause. Every run of the build workflow had failed on that one test while the
+// same gate passed on a machine that runs it under 5.1.
 // https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_psmodulepath
 //
 // With the variable absent, powershell.exe builds its own default path, which is what the owner's

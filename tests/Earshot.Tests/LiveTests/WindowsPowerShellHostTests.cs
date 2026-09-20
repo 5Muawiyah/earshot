@@ -6,11 +6,12 @@ namespace Earshot.Tests.LiveTests;
 // The build workflow failed on every run because a Windows PowerShell 5.1 child inherited a module
 // path it could not use (see WindowsPowerShellHost). These two tests hold that shut.
 //
-// The second is the control. It puts a module that cannot load in front of the real
-// Microsoft.PowerShell.Utility and shows that 5.1 then loses Import-PowerShellDataFile, so the
-// first test is known to be looking at something that can go wrong. The shadowing module is a
-// stand-in written by the test, not PowerShell 7's own: 5.1 words the two failures differently,
-// and the hosted build, which runs the gate under pwsh, is where the real one is exercised.
+// The second is the control. It puts a module in front of the real Microsoft.PowerShell.Utility
+// that names Import-PowerShellDataFile as a cmdlet and does not provide it, which is how
+// PowerShell 7's manifest looks to 5.1, and shows that 5.1 then answers "is not recognized", the
+// text the hosted build printed. So the first test is known to be looking at something that can
+// go wrong. The shadowing module is a stand-in written by the test, not PowerShell 7's own: the
+// hosted build, which runs the gate under pwsh, is where the real one is exercised.
 [TestClass]
 public sealed class WindowsPowerShellHostTests
 {
@@ -40,7 +41,7 @@ public sealed class WindowsPowerShellHostTests
     }
 
     [TestMethod]
-    public void AModuleThatCannotLoadAheadOfTheRealOneTakesImportPowerShellDataFileAway()
+    public void AModuleAheadOfTheRealOneThatNamesTheCommandWithoutProvidingItTakesItAway()
     {
         string host = RequireHost();
         string folder = NewScratchFolder();
@@ -54,7 +55,6 @@ public sealed class WindowsPowerShellHostTests
                 "@{" + Environment.NewLine +
                 "    ModuleVersion = '7.0.0.0'" + Environment.NewLine +
                 "    GUID = '1da87e53-152b-403e-98dc-74d7b4d63d59'" + Environment.NewLine +
-                "    NestedModules = @('Absent.dll')" + Environment.NewLine +
                 "    CmdletsToExport = @('Import-PowerShellDataFile')" + Environment.NewLine +
                 "    FunctionsToExport = @()" + Environment.NewLine +
                 "}" + Environment.NewLine);
@@ -67,7 +67,7 @@ public sealed class WindowsPowerShellHostTests
             (int exit, string output, string errors) = Run(info);
             Assert.AreNotEqual("42", output.Trim(), "The shadowing module changed nothing, so the other test proves nothing.");
             Assert.AreNotEqual(0, exit, "The probe exited 0 with the shadowing module in front.");
-            StringAssert.Contains(errors, "Import-PowerShellDataFile");
+            StringAssert.Contains(errors, "'Import-PowerShellDataFile' is not recognized");
         }
         finally
         {
