@@ -22,6 +22,11 @@ jobs:
       # suppressed diagnostic anywhere in the solution, and on an em-dash in the source.
       # It sets EARSHOT_SAFE_MODE itself, so no device action can run here, and it
       # prints its summary as JSON whether it passes or fails.
+      #
+      # It runs under pwsh here and under Windows PowerShell 5.1 on the owner's machine, on
+      # purpose: the live-test self-test starts 5.1 children, and a child started below pwsh
+      # is the case that once inherited a module path it could not use. Running the gate
+      # under pwsh keeps that case executed on every push.
       - run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools\check.ps1 -LogDir "${{ runner.temp }}\earshot-check"
       # The summary keeps forty lines of a failure. The full build and test logs say which
       # test was skipped and why, and what a failing one printed, so they are kept whether

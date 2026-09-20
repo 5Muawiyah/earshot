@@ -97,21 +97,11 @@ public sealed class RealLauncherSelfTestTests
 
     private static (int Exit, string Output, string Errors) RunScript(string host, string script)
     {
-        var info = new ProcessStartInfo(host)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (string argument in new[]
+        ProcessStartInfo info = WindowsPowerShellHost.CreateStartInfo(host, new[]
         {
             "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
             "-Root", RepositoryRoot(),
-        })
-        {
-            info.ArgumentList.Add(argument);
-        }
+        });
 
         var output = new StringBuilder();
         var errors = new StringBuilder();
@@ -152,11 +142,7 @@ public sealed class RealLauncherSelfTestTests
 
     // Where Windows PowerShell 5.1 lives on every Windows install. Returned whether or not it is
     // there: the caller decides what an absent host means.
-    private static string WindowsPowerShell51Path()
-    {
-        string system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        return Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe");
-    }
+    private static string WindowsPowerShell51Path() => WindowsPowerShellHost.Path51();
 
     private static string RepositoryRoot()
     {

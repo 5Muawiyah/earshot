@@ -125,21 +125,13 @@ public sealed class LiveTestSelfTestTests
         string runner = Path.Combine(RepositoryRoot(), "tools", "live-tests", "selftest", "Invoke-SelfTest.ps1");
         Assert.IsTrue(File.Exists(runner), "The self-test runner was not found at " + runner + ".");
 
-        var info = new ProcessStartInfo(host)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (string argument in new[]
+        // Started through WindowsPowerShellHost so the child does not inherit PowerShell 7's module
+        // path from a gate run under pwsh. Every case the runner starts inherits from this one.
+        ProcessStartInfo info = WindowsPowerShellHost.CreateStartInfo(host, new[]
         {
             "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runner,
             "-Root", RepositoryRoot(), "-WorkRoot", workRoot,
-        })
-        {
-            info.ArgumentList.Add(argument);
-        }
+        });
 
         var output = new StringBuilder();
         var errors = new StringBuilder();
@@ -181,11 +173,7 @@ public sealed class LiveTestSelfTestTests
     // Where Windows PowerShell 5.1 lives on every Windows install. Returned whether or not it is
     // there: the caller decides what an absent host means, which used to be a bare "powershell.exe"
     // handed to a child process and an obscure failure some way further in.
-    private static string WindowsPowerShell51Path()
-    {
-        string system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        return Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe");
-    }
+    private static string WindowsPowerShell51Path() => WindowsPowerShellHost.Path51();
 
     private static string RepositoryRoot()
     {
