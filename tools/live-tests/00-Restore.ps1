@@ -51,7 +51,8 @@ $run = New-LiveTestRun -TestId '00-restore' -Title 'Restore the machine to a kno
 try
 {
     $ready = Show-Preconditions -Run $run -Preconditions @(
-        'You know which state you want to end in: nodes allowed, and Handsfree on or off.',
+        'You know which state you want these restore steps to reach: nodes allowed, and Handsfree on or off. ' +
+            'The run then closes by offering to block the nodes again, which you can accept or decline separately.',
         'The Earshot tray is closed, so its idle rule does not block the nodes while this runs.'
     ) -PhysicalActions @(
         'Nothing physical, unless you choose to uninstall.'
@@ -96,8 +97,9 @@ try
                 Write-Line -Run $run -Text ('The nodes read ' + $nodeState + ', so nothing is allowed.')
             }
 
-            Add-Criterion -Run $run -Id 'nodes' -Criterion 'The nodes end up Allowed.' `
-                -Outcome $(if ($nodeState -eq 'Allowed') { 'pass' } else { 'fail' }) -Detail ('They read ' + $nodeState + '.')
+            Add-Criterion -Run $run -Id 'nodes' -Criterion 'The nodes read Allowed after these restore steps.' `
+                -Outcome $(if ($nodeState -eq 'Allowed') { 'pass' } else { 'fail' }) -Detail ('They read ' + $nodeState +
+                    '. The closing check below offers to block them again before this run ends, which is a separate question from this one.')
 
             Write-Section -Run $run -Title 'Handsfree protection'
             Write-Line -Run $run -Text ('Protection reads ' + $protection + '. Earshot ships with it on.')
@@ -182,7 +184,7 @@ try
                 -Detail $(if ($setUp -eq $true) { 'Every task reads ' + $systemSid + '.' } else { 'The tasks are not installed, so there is nothing to read.' })
         }
 
-        Write-Section -Run $run -Title 'The state it finished in'
+        Write-Section -Run $run -Title 'The state after these steps (the closing check runs next, and may block the nodes again)'
         [void](Get-AudioState -Run $run -Label 'audio-after')
         [void](Get-NodeState -Run $run -Label 'nodes-final')
         Save-EarshotLog -Run $run
@@ -212,7 +214,13 @@ catch
 }
 finally
 {
-    $overall = Complete-LiveTestRun -Run $run
+    # This run's own steps just allowed the nodes on purpose (see the 'nodes' criterion above),
+    # so the closing check's offer would reverse that: this consequence text says so plainly,
+    # rather than reusing the generic wording every other script gets.
+    $atRestConsequence = 'Blocks the AirPods Bluetooth nodes again, reversing the allow this run just made. Until they ' +
+        'are allowed again (a left click in the tray, or 05-Allow.ps1), they will not connect to this PC. Declining ' +
+        'leaves the nodes allowed, which is what this run''s own steps set out to do.'
+    $overall = Complete-LiveTestRun -Run $run -AtRestConsequence $atRestConsequence
     Write-Host ('Restore finished: ' + $overall)
 }
 

@@ -31,9 +31,9 @@ public sealed class LiveTestSelfTestTests
 {
     // 66 short-lived PowerShell processes when this was measured, on 2026-09-18 (commit 8d2db48).
     // Test 13's two extra self-test cases, added the next day, brought the count to 68. The
-    // at-rest closing step's own two cases (00's atrest-read-fails, 01's atrest-decline) bring
-    // today's count to 70, and RealLauncherSelfTestTests.cs runs one PowerShell process more
-    // again, separately. Generous, because a machine under load is not a defect.
+    // at-rest closing step's own cases across 00, 01 and 09 bring today's count to 77, and
+    // RealLauncherSelfTestTests.cs runs one PowerShell process more again, separately. Generous,
+    // because a machine under load is not a defect.
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(20);
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
@@ -42,10 +42,13 @@ public sealed class LiveTestSelfTestTests
     private const int ExpectedHalves = 22;
     private const int ExpectedCases = 3;
 
-    // Cases run on top of the shared three, one extra case per extra Cases entry: 13-GraceWindow's
-    // doubled delay and its unreadable figure, 00-Restore's atrest-read-fails, and
-    // 01-A2dpOneShot's atrest-decline (see the Cases overrides in Invoke-SelfTest.ps1's $tests).
-    private const int ExpectedExtraCases = 4;
+    // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
+    // overrides in Invoke-SelfTest.ps1's $tests): 13-GraceWindow's doubled delay and its
+    // unreadable figure (2); 00-Restore's atrest-guard-throws (1); 01-A2dpOneShot's
+    // atrest-decline, atrest-block-ineffective, atrest-setup-unknown, atrest-config-missing,
+    // atrest-nodes-probe-fails and atrest-nodes-stay-unreadable (6); 09-ShutdownWhileConnected's
+    // declined-start, which runs both of that row's halves (2).
+    private const int ExpectedExtraCases = 11;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

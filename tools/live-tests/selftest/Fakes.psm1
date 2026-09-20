@@ -151,12 +151,15 @@ $script:Context = $null
 # How many matching lines and list items each case holds. grace-doubled and grace-unparsable are
 # test 13's own cases (see the "13 grace window" section of New-FakeSandbox below): they carry no
 # generic matching lines of their own, only the bespoke ones that section adds, so they count as
-# 0 here the same as none. atrest-decline and atrest-read-fails belong to the at-rest closing step
-# (Run-OneHalf.ps1's Invoke-Earshot intercepts those two by name, not by anything counted here),
-# and carry no bespoke log content of their own either, so they count as 0 too.
+# 0 here the same as none. Every atrest-* case and declined-start belong to the at-rest closing
+# step and the preconditions prompt (Run-OneHalf.ps1's Invoke-Earshot and Read-Host intercept
+# those by name, not by anything counted here), and carry no bespoke log content of their own
+# either, so they all count as 0 too.
 $script:CaseItemCounts = @{
     none = 0; one = 1; two = 2; 'grace-doubled' = 0; 'grace-unparsable' = 0
-    'atrest-decline' = 0; 'atrest-read-fails' = 0
+    'atrest-decline' = 0; 'atrest-guard-throws' = 0; 'atrest-block-ineffective' = 0
+    'atrest-setup-unknown' = 0; 'atrest-config-missing' = 0; 'atrest-nodes-probe-fails' = 0; 'atrest-nodes-stay-unreadable' = 0
+    'declined-start' = 0
 }
 
 function Initialize-FakeMachine
@@ -165,7 +168,11 @@ function Initialize-FakeMachine
         [Parameter(Mandatory = $true)][string]$SandboxRoot,
         [Parameter(Mandatory = $true)][string]$TestId,
         [Parameter(Mandatory = $true)][ValidateSet('first', 'resume')][string]$Half,
-        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case
+        [Parameter(Mandatory = $true)][ValidateSet(
+            'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
+            'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
+            'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+            'declined-start')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -213,7 +220,11 @@ function New-FakeSandbox
 {
     param(
         [Parameter(Mandatory = $true)][string]$SandboxRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case
+        [Parameter(Mandatory = $true)][ValidateSet(
+            'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
+            'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
+            'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+            'declined-start')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -295,6 +306,17 @@ function New-FakeSandbox
         -Value $lines -Encoding UTF8
 
     Write-FakeMachineFiles -DataFolder $data -BlockAtBoot $true -Items $items
+
+    # atrest-config-missing is the real failure shape Get-BlockAtBootSetting sees when
+    # config.json is not there: Read-EarshotJsonFile returns $null without throwing, the same as
+    # a probe that could not answer. Removing the file Write-FakeMachineFiles just wrote is
+    # simpler and more honest than teaching that function a case it otherwise has no reason to
+    # know about.
+    if ($Case -eq 'atrest-config-missing')
+    {
+        Remove-Item -LiteralPath (Join-Path $data 'config.json') -Force -ErrorAction SilentlyContinue
+    }
+
     Set-Content -LiteralPath (Join-Path (Join-Path $SandboxRoot 'roaming') 'Earshot\settings.json') `
         -Value (@{ ProtectAudioQuality = $true; OpenOnStartup = $true } | ConvertTo-Json) -Encoding UTF8
     Set-Content -LiteralPath (Join-Path (Join-Path $SandboxRoot 'release') 'Earshot.files.json') `
@@ -621,6 +643,13 @@ function Update-FakeWorld
     )
 
     $text = ($Command -join ' ')
+
+    # atrest-block-ineffective proves the closing check's re-read, not the step's own reported
+    # success, is what decides leftAtRest: the step below still answers as a plain success (see
+    # Get-FakeGateEvidence), but the world does not actually move, the same as a block the real
+    # gate accepted the task for yet vetoed or only partly carried out.
+    if ($text -eq 'diag gate block' -and (Get-FakeContext).Case -eq 'atrest-block-ineffective') { return }
+
     switch -Regex ($text)
     {
         '^diag gate allow' { $script:World.NodeState = 'Allowed' }

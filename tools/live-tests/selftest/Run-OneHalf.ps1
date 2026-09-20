@@ -37,9 +37,17 @@
 
 .PARAMETER Case
     none, one or two: how many matching lines and list items the fake inputs hold. grace-doubled
-    and grace-unparsable exist only for test 13; atrest-decline and atrest-read-fails exercise the
-    at-rest closing step's decline and read-failure paths (see Fakes.psm1 and Close-AtRest's
-    'at-rest-block' and 'at-rest-nodes' labels, which only these two cases intercept).
+    and grace-unparsable exist only for test 13. The rest exercise the at-rest closing step by
+    intercepting its own labels ('at-rest-task', 'at-rest-nodes', 'at-rest-nodes-after',
+    'at-rest-block'), never a label a shipped script uses itself, so none of them can change what
+    any other criterion sees: atrest-decline (the offer declined), atrest-block-ineffective (the
+    step answers success but the world does not move, so the re-read is what must catch it),
+    atrest-setup-unknown and atrest-config-missing (the setup or Block at boot read fails or the
+    file is missing), atrest-nodes-probe-fails and atrest-nodes-stay-unreadable (the node read
+    fails once, or fails both times), atrest-guard-throws (something throws outside all of that,
+    proving Close-AtRest's and Complete-LiveTestRun's own guards rather than any of the above).
+    declined-start answers 'n' to the "ready to start" prompt, for the one test that needs to
+    prove the at-rest reason is not set before the owner has actually agreed to go ahead.
 
 .PARAMETER RunRoot
     The evidence folder, shared by the two halves of a resumable test.
@@ -56,7 +64,11 @@ param(
     [Parameter(Mandatory = $true)][string]$SandboxRoot,
     [Parameter(Mandatory = $true)][string]$TestId,
     [Parameter(Mandatory = $true)][ValidateSet('first', 'resume')][string]$Half,
-    [Parameter(Mandatory = $true)][ValidateSet('none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case,
+    [Parameter(Mandatory = $true)][ValidateSet(
+        'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
+        'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
+        'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+        'declined-start')][string]$Case,
     [Parameter(Mandatory = $true)][string]$RunRoot,
     [string]$ExtraArguments = ''
 )
@@ -89,14 +101,24 @@ function Resolve-EarshotExe
 # machine, writes the report to the --out path the command named and the evidence file beside
 # the run folders, then lets the real Copy-AppEvidence pick that file up.
 #
-# Two labels are intercepted ahead of the normal fake, both belonging to Close-AtRest in
-# LiveTest.psm1 alone (no shipped script uses either), so neither changes what any other
-# criterion sees:
-#   'at-rest-nodes'  case atrest-read-fails: throws, simulating the closing step's own read
-#                    failing, which Close-AtRest must catch without losing result.json.
-#   'at-rest-block'  case atrest-decline: answered as a declined live step, the same shape
-#                    Invoke-Earshot itself writes when Confirm-Step returns false, without moving
-#                    the fake machine.
+# A handful of labels are intercepted ahead of the normal fake, every one of them belonging to
+# Close-AtRest in LiveTest.psm1 alone (no shipped script uses any of them), so none of these
+# cases can change what any other criterion sees:
+#   'at-rest-task', 'at-rest-nodes'   case atrest-setup-unknown / atrest-nodes-probe-fails /
+#                                      atrest-nodes-stay-unreadable: answered as a failed probe,
+#                                      the real shape a probe fails in (an error recorded, $null
+#                                      returned), never a thrown exception.
+#   'at-rest-nodes-after'             case atrest-nodes-stay-unreadable only: the same failed
+#                                      shape, so neither read this run makes ever answers.
+#   'at-rest-nodes'                   case atrest-guard-throws: actually throws, for the one case
+#                                      that exists to prove Close-AtRest's own catch and
+#                                      Complete-LiveTestRun's wrapping one, not the null handling.
+#   'at-rest-block'                   case atrest-decline: answered as a declined live step, the
+#                                      same shape Invoke-Earshot itself writes when Confirm-Step
+#                                      returns false, without moving the fake machine.
+#                                      case atrest-block-ineffective: answered as a plain success,
+#                                      but Update-FakeWorld (Fakes.psm1) leaves the world where it
+#                                      was, so only the closing check's own re-read can catch it.
 function Invoke-Earshot
 {
     param(
@@ -109,9 +131,25 @@ function Invoke-Earshot
     )
 
     $case = (Get-FakeContext).Case
-    if ($Label -eq 'at-rest-nodes' -and $case -eq 'atrest-read-fails')
+
+    if ($Label -eq 'at-rest-nodes' -and $case -eq 'atrest-guard-throws')
     {
-        throw 'self-test (atrest-read-fails): the node read for the at-rest check failed on purpose.'
+        throw 'self-test (atrest-guard-throws): something failed outside Close-AtRest''s own null handling, on purpose.'
+    }
+
+    if ($Label -eq 'at-rest-task' -and $case -eq 'atrest-setup-unknown')
+    {
+        return (Invoke-FakeFailedProbe -Run $Run -Label $Label -Command $Command)
+    }
+
+    if ($Label -eq 'at-rest-nodes' -and ($case -eq 'atrest-nodes-probe-fails' -or $case -eq 'atrest-nodes-stay-unreadable'))
+    {
+        return (Invoke-FakeFailedProbe -Run $Run -Label $Label -Command $Command)
+    }
+
+    if ($Label -eq 'at-rest-nodes-after' -and $case -eq 'atrest-nodes-stay-unreadable')
+    {
+        return (Invoke-FakeFailedProbe -Run $Run -Label $Label -Command $Command)
     }
 
     if ($Label -eq 'at-rest-block' -and $case -eq 'atrest-decline')
@@ -201,12 +239,21 @@ function Wait-Seconds
 }
 
 # A backstop. Nothing in a self-test run may block on input, so anything that still asks is
-# recorded as a gap and answered with y, which is what Show-Preconditions wants.
+# recorded as a gap and answered with y, which is what Show-Preconditions wants, except for
+# declined-start: that case exists to prove the owner saying no to "ready to start" leaves the
+# at-rest reason unset (09-ShutdownWhileConnected.ps1 and 10-ShutdownMessages.ps1 only set it
+# after this answer), so it answers n instead.
 function Read-Host
 {
     param([Parameter(Position = 0)][string]$Prompt = '')
 
-    if ($Prompt -notmatch 'ready to start') { Write-FakeGap -Text ('Read-Host was reached directly: ' + $Prompt) }
+    if ($Prompt -notmatch 'ready to start')
+    {
+        Write-FakeGap -Text ('Read-Host was reached directly: ' + $Prompt)
+        return 'y'
+    }
+
+    if ((Get-FakeContext).Case -eq 'declined-start') { return 'n' }
     return 'y'
 }
 
@@ -343,6 +390,50 @@ function global:Invoke-FakeDeclinedStep
     Write-Line -Run $Run -Text ('  What it does: ' + $Consequence)
     Write-Line -Run $Run -Text '  Skipped at your request (self-test, case atrest-decline).'
     [void]$Run.Steps.Add($step)
+    return $null
+}
+
+# The fake answer for every atrest-*-fails/unknown case's intercepted labels: the real shape a
+# probe fails in. The real Invoke-Earshot never throws on a failed probe; Start-Process failing
+# to start, a timeout and an unreadable exit code all end the same way, with an error recorded on
+# the step and $null returned to the caller. This is that shape, not an exception, so it exercises
+# the null handling Close-AtRest actually has to do rather than only its outer catch.
+function global:Invoke-FakeFailedProbe
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string[]]$Command
+    )
+
+    $Run.StepIndex = $Run.StepIndex + 1
+    $message = 'self-test: Earshot.exe could not be started (case ' + (Get-FakeContext).Case + ', forced on purpose).'
+    $step = [ordered]@{
+        index        = $Run.StepIndex
+        label        = $Label
+        command      = ($Command -join ' ')
+        commandText  = (Get-CommandText -ExePath $Run.ExePath -Command $Command)
+        live         = $false
+        elevated     = $false
+        startedUtc   = (Get-UtcNowText)
+        finishedUtc  = $null
+        ran          = $false
+        exitCode     = $null
+        exitName     = $null
+        milliseconds = $null
+        timedOut     = $false
+        error        = $message
+        stdoutFile   = $null
+        stderrFile   = $null
+        jsonFile     = $null
+    }
+
+    Write-Line -Run $Run -Text ('Reading (changes nothing, self-test): ' + $step.commandText)
+    [void]$Run.Steps.Add($step)
+    # Write-Failure, not a plain Write-Line: the real Invoke-Earshot records every one of its own
+    # failure paths this way, which is what puts it in result.json's errors, not only in the
+    # printed summary.
+    Write-Failure -Run $Run -Message $message
     return $null
 }
 

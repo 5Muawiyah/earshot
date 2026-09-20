@@ -202,9 +202,10 @@ try
                 if ($null -ne $allow)
                 {
                     $nodes = Get-NodeState -Run $run -Label 'nodes-final'
-                    Add-Criterion -Run $run -Id 'left-allowed' -Criterion 'The nodes are left allowed.' `
+                    Add-Criterion -Run $run -Id 'left-allowed' -Criterion 'The nodes read allowed again after the disconnect steps above.' `
                         -Outcome $(if ((Get-Field -Object $nodes -Name 'nodeState') -eq 'Allowed') { 'pass' } else { 'fail' }) `
-                        -Detail ('They read ' + (Get-Field -Object $nodes -Name 'nodeState') + '. If they are blocked, run 00-Restore.ps1.')
+                        -Detail ('They read ' + (Get-Field -Object $nodes -Name 'nodeState') + '. If they are blocked, run 00-Restore.ps1. ' +
+                            'The closing check below offers to block them again before this run ends, which is a separate question from this one.')
                 }
             }
         }
@@ -219,7 +220,12 @@ catch
 }
 finally
 {
-    $overall = Complete-LiveTestRun -Run $run
+    # The block-alone-drops-a-link leg above allows the nodes again on purpose, so the closing
+    # check's offer would reverse that: say so plainly, the same as 00-Restore.ps1.
+    $atRestConsequence = 'Blocks the AirPods Bluetooth nodes again, reversing the allow this run just made. Until they ' +
+        'are allowed again (a left click in the tray, or 05-Allow.ps1), they will not connect to this PC. Declining ' +
+        'leaves the nodes allowed, which is what this run''s own steps set out to do.'
+    $overall = Complete-LiveTestRun -Run $run -AtRestConsequence $atRestConsequence
     Write-Host ('Test 02 finished: ' + $overall)
 }
 

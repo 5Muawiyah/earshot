@@ -77,8 +77,6 @@ try
 
     if (-not $Resume)
     {
-        $atRestReason = 'This variant needs the AirPods connected (the nodes enabled) when the restart happens, so the ' +
-            'session-end backstop and the boot task have something to catch; blocking first would test nothing.'
         $ready = Show-Preconditions -Run $run -Preconditions @(
             'Earshot is installed, set up and running in the tray.',
             'Block at boot is on.',
@@ -91,6 +89,11 @@ try
 
         if ($ready)
         {
+            # Only now, with the owner committed to going ahead: nothing restarts if they said no
+            # above, so the closing check must still offer a block in that case.
+            $atRestReason = 'This variant needs the AirPods connected (the nodes enabled) when the restart happens, so the ' +
+                'session-end backstop and the boot task have something to catch; blocking first would test nothing.'
+
             Write-Section -Run $run -Title 'Before the restart'
             $audio = Get-AudioState -Run $run -Label 'audio-before'
             $states = Get-TargetEndpointStates -AudioJson $audio

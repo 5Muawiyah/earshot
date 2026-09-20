@@ -65,7 +65,10 @@
 param(
     [string]$Root = '',
     [string]$WorkRoot = '',
-    [ValidateSet('', 'none', 'one', 'two', 'grace-doubled', 'grace-unparsable', 'atrest-decline', 'atrest-read-fails')][string]$Case = '',
+    [ValidateSet('', 'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
+        'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
+        'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+        'declined-start')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -83,17 +86,26 @@ Import-Module (Join-Path $PSScriptRoot 'Fakes.psm1') -Force
 # Every shipped test, with the halves it has and anything beyond -ExePath and -RunRoot it takes.
 # A test added to tools\live-tests without a row here is reported as not covered.
 $tests = @(
-    # atrest-read-fails is added on top of the shared three: it forces the at-rest closing step's
-    # own node read to throw (Run-OneHalf.ps1's Invoke-Earshot, label 'at-rest-nodes'), proving
-    # Close-AtRest's own guard rather than 00-Restore's own criteria, which this case leaves alone.
+    # atrest-guard-throws is added on top of the shared three: it forces something to throw
+    # unexpectedly deep in the at-rest closing step (Run-OneHalf.ps1's Invoke-Earshot, label
+    # 'at-rest-nodes'), proving Close-AtRest's own catch and Complete-LiveTestRun's wrapping one,
+    # not the null handling (see 01's cases for that). 00-Restore's own criteria are untouched.
     [ordered]@{ Number = '00'; Id = '00-restore'; Script = '00-Restore.ps1'; Halves = @('first'); Extra = @()
-        Cases = @('none', 'one', 'two', 'atrest-read-fails') }
-    # atrest-decline is added on top of the shared three: 01 never calls "diag gate block" itself
-    # and ends with the nodes Allowed in every case, so this is where the at-rest closing step's
-    # own offer is the only "diag gate block" step in the run, and declining it is exercised
-    # cleanly (Run-OneHalf.ps1's Invoke-Earshot, label 'at-rest-block').
+        Cases = @('none', 'one', 'two', 'atrest-guard-throws') }
+    # Added on top of the shared three: 01 never calls "diag gate block" itself and ends with the
+    # nodes Allowed in every case, so this is where the at-rest closing step's own offer is the
+    # only "diag gate block" step in the run, exercised cleanly (Run-OneHalf.ps1's Invoke-Earshot,
+    # labels 'at-rest-task', 'at-rest-nodes', 'at-rest-nodes-after' and 'at-rest-block'):
+    # atrest-decline (declined, no block sent), atrest-block-ineffective (the step answers success
+    # but the world does not move, proving the re-read decides, not the step's own exit code),
+    # atrest-setup-unknown and atrest-config-missing (the setup or Block at boot read fails or is
+    # missing, and this must still check the nodes rather than call it not-applicable),
+    # atrest-nodes-probe-fails (the first node read fails but the later one, after the offer,
+    # still answers) and atrest-nodes-stay-unreadable (neither read ever answers, so the honest
+    # record is unknown, never a guessed no).
     [ordered]@{ Number = '01'; Id = '01-a2dp-oneshot'; Script = '01-A2dpOneShot.ps1'; Halves = @('first'); Extra = @()
-        Cases = @('none', 'one', 'two', 'atrest-decline') }
+        Cases = @('none', 'one', 'two', 'atrest-decline', 'atrest-block-ineffective',
+            'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable') }
     [ordered]@{ Number = '02'; Id = '02-disconnect'; Script = '02-Disconnect.ps1'; Halves = @('first'); Extra = @() }
     [ordered]@{ Number = '03'; Id = '03-allow-pages'; Script = '03-AllowPages.ps1'; Halves = @('first'); Extra = @('WatchSeconds=30') }
     [ordered]@{ Number = '04'; Id = '04-block-and-reboot'; Script = '04-BlockAndReboot.ps1'; Halves = @('first', 'resume'); Extra = @() }
@@ -101,7 +113,11 @@ $tests = @(
     [ordered]@{ Number = '06'; Id = '06-handsfree'; Script = '06-Handsfree.ps1'; Halves = @('first'); Extra = @() }
     [ordered]@{ Number = '07'; Id = '07-task-runex'; Script = '07-TaskRunEx.ps1'; Halves = @('first'); Extra = @() }
     [ordered]@{ Number = '08'; Id = '08-acceptance-power-cycle'; Script = '08-AcceptancePowerCycle.ps1'; Halves = @('first', 'resume'); Extra = @() }
-    [ordered]@{ Number = '09'; Id = '09-shutdown-while-connected'; Script = '09-ShutdownWhileConnected.ps1'; Halves = @('first', 'resume'); Extra = @() }
+    # declined-start is added on top of the shared three: the owner says no to "ready to start",
+    # so nothing runs and nothing is shut down, which is exactly when the at-rest reason must NOT
+    # be set (09-ShutdownWhileConnected.ps1 now sets it only once $ready is true).
+    [ordered]@{ Number = '09'; Id = '09-shutdown-while-connected'; Script = '09-ShutdownWhileConnected.ps1'; Halves = @('first', 'resume'); Extra = @()
+        Cases = @('none', 'one', 'two', 'declined-start') }
     [ordered]@{ Number = '10'; Id = '10-shutdown-messages-v1'; Script = '10-ShutdownMessages.ps1'; Halves = @('first', 'resume'); Extra = @('Variant=1') }
     [ordered]@{ Number = '11'; Id = '11-battery-disconnected'; Script = '11-BatteryDisconnected.ps1'; Halves = @('first'); Extra = @() }
     [ordered]@{ Number = '12'; Id = '12-callback-thread'; Script = '12-CallbackThread.ps1'; Halves = @('first'); Extra = @() }
@@ -279,6 +295,59 @@ function Invoke-Half
     return [ordered]@{ Exit = $exit; Output = $output; Errors = $errors; OutFile = $outFile; ErrFile = $errFile }
 }
 
+# The at-rest closing step's default outcome for every script and half, worked out from each
+# one's own StartState (Fakes.psm1) and its own gate calls, reasoned by hand once and pinned
+# here rather than repeated per case in expectations.psd1. Applied only to the shared none/one/two
+# cases below: a row's own bespoke case (atrest-decline and the rest, grace-doubled, ...) has a
+# different, deliberately provoked outcome and carries its own explicit expectation instead.
+#
+#   00-restore|first                    yes, 1   allows on its own, then the offer blocks again
+#   01-a2dp-oneshot|first                yes, 1   never blocks itself; the offer is the only one
+#   02-disconnect|first                  yes, 2   one block mid-test, allows again, then the offer
+#   03-allow-pages|first                 yes, 1   blocks itself at the end; nothing left to offer
+#   04-block-and-reboot|first            yes, 1   blocks itself; nothing left to offer
+#   04-block-and-reboot|resume            yes, 0   starts and stays Blocked; nothing to offer
+#   05-allow|first                 no-on-purpose, 0   the fake owner always chooses the restart
+#   05-allow|resume                      yes, 1   starts Allowed (the enable held); the offer blocks
+#   06-handsfree|first                   yes, 2   one block mid-test, allows again, then the offer
+#   07-task-runex|first                  yes, 1   never blocks itself; the offer is the only one
+#   08-acceptance-power-cycle|first      yes, 0   starts Blocked; nothing to offer
+#   08-acceptance-power-cycle|resume     yes, 0   stays Blocked; nothing to offer
+#   09-shutdown-while-connected|first   no-on-purpose, 0   the reason is always given once ready
+#   09-shutdown-while-connected|resume    yes, 0   stays Blocked; nothing to offer
+#   10-shutdown-messages-v1|first  no-on-purpose, 0   the reason is always given once ready
+#   10-shutdown-messages-v1|resume        yes, 0   stays Blocked; nothing to offer
+#   11-battery-disconnected|first        yes, 1   never blocks itself; the offer is the only one
+#   12-callback-thread|first             yes, 1   never blocks itself; the offer is the only one
+#   13-grace-window|first                yes, 0   starts and stays Blocked; nothing to offer
+#   14-set-device-refusal|first          yes, 1   set-device never touches the nodes
+#   15-uninstall-reversal|first          yes, 1   uninstall allows, install does not re-block
+#   15-uninstall-reversal|resume          yes, 1   stays Allowed from the first half; the offer blocks
+$script:AtRestDefaults = @{
+    '00-restore|first'                   = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '01-a2dp-oneshot|first'              = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '02-disconnect|first'                = @{ LeftAtRest = 'yes'; BlockCount = 2 }
+    '03-allow-pages|first'               = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '04-block-and-reboot|first'          = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '04-block-and-reboot|resume'         = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '05-allow|first'                     = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
+    '05-allow|resume'                    = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '06-handsfree|first'                 = @{ LeftAtRest = 'yes'; BlockCount = 2 }
+    '07-task-runex|first'                = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '08-acceptance-power-cycle|first'    = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '08-acceptance-power-cycle|resume'   = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '09-shutdown-while-connected|first'  = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
+    '09-shutdown-while-connected|resume' = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '10-shutdown-messages-v1|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
+    '10-shutdown-messages-v1|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '11-battery-disconnected|first'      = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '12-callback-thread|first'           = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '13-grace-window|first'              = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '14-set-device-refusal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '15-uninstall-reversal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '15-uninstall-reversal|resume'       = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+}
+
 # What the expectations for one case say should have been recorded, against what was. The
 # expectations file is keyed "<test id>|<half>", and holds one map of criterion to outcome per
 # set of fake inputs. An outcome of "any" means the criterion must be recorded but its outcome
@@ -297,6 +366,28 @@ function Test-Expectations
 
     $problems = @()
     $key = [string]$TestId + '|' + $Half
+
+    # The at-rest default table, checked on every shared-input case regardless of what the
+    # per-case entry below does or does not say about leftAtRest and "diag gate block": this is
+    # what pins the closing step on halves whose own expectations entry never mentions it, so a
+    # mutation that stops offering the block, or that trusts a step's exit code over the re-read,
+    # cannot pass by simply not being named anywhere.
+    if (@('none', 'one', 'two') -contains $CaseName -and $script:AtRestDefaults.Contains($key))
+    {
+        $wantedAtRest = $script:AtRestDefaults[$key]
+        $actualAtRest = $(if ($Recorded.Findings.Contains('leftAtRest')) { $Recorded.Findings['leftAtRest'] } else { $null })
+        if ([string]$actualAtRest -ne [string]$wantedAtRest.LeftAtRest)
+        {
+            $problems = $problems + @([string]$Where + ': leftAtRest was ' + $actualAtRest + ', and the default table for "' + $key + '" implies ' + $wantedAtRest.LeftAtRest + '.')
+        }
+
+        $actualCount = 0
+        if ($Recorded.StepCommandCounts.Contains('diag gate block')) { $actualCount = [int]$Recorded.StepCommandCounts['diag gate block'] }
+        if ($actualCount -ne $wantedAtRest.BlockCount)
+        {
+            $problems = $problems + @([string]$Where + ': "diag gate block" ran ' + $actualCount + ' time(s), and the default table for "' + $key + '" implies ' + $wantedAtRest.BlockCount + '.')
+        }
+    }
     if (-not $Expectations.Contains($key))
     {
         return ,@([string]$Where + ': there is no entry for "' + $key + '" in expectations.psd1.')

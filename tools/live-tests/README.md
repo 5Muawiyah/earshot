@@ -50,8 +50,9 @@ Every script ends by reading whether the AirPods Bluetooth nodes are left Blocke
 whether its own criteria passed. "At rest" means the nodes read Blocked, so Windows has
 nothing to page at the next boot. On 19 September a run left the nodes Allowed and the tray
 closed, with nobody asked whether that was still all right; the next boot paged the AirPods,
-the boot task blocked them about 14 seconds later, and they bounced between the phone and
-the PC in between. This closing step is what now catches that.
+the boot task then blocked them, and they bounced between the phone and the PC in between.
+This closing step is what now catches that. See the main README's verification table for the
+sourced account of what was actually measured that day and what was not.
 
 - If Earshot is not set up, or Block at boot is off, being at rest does not apply, and the
   run says so.

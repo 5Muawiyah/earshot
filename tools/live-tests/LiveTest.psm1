@@ -1272,16 +1272,33 @@ $script:AtRestOnPurpose      = 'no-on-purpose'
 $script:AtRestNotApplicable  = 'not-applicable'
 $script:AtRestUnknown        = 'unknown'
 
+# The default offer text, and what 00-Restore.ps1 and 02-Disconnect.ps1 pass instead: those two
+# runs' own steps just allowed the nodes on purpose, so accepting the offer reverses that, and
+# saying so plainly matters more there than anywhere else.
+$script:AtRestDefaultConsequence = 'Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. ' +
+    'If the AirPods are playing through this PC right now, that stops.'
+
 # What Complete-LiveTestRun calls before it writes result.json, on every script, so no test can
 # forget it. "At rest" means the AirPods Bluetooth nodes read Blocked, so Windows has nothing to
 # page at the next boot: the state the 19 September incident was missing, because test 01 and
 # test 05 both need the nodes Allowed and both ended that way with nobody asked to put them back.
 #
-#   not set up, or Block at boot off   at rest does not apply here; say so
-#   nodes read Blocked                 at rest already; say so
-#   $Reason is given                   deliberately not at rest; the reason is printed, no offer
-#   anything else                      offer ONE live block; warn loudly if it is declined, the
-#                                       step fails, or the nodes still do not read Blocked after
+#   setUp = $false, or blockAtBoot = $false (a POSITIVE reading of either)   not applicable
+#   nodes read Blocked                                                      at rest already
+#   $Reason is given                                                        deliberately not at
+#                                                                            rest; no offer
+#   anything else, including setUp or blockAtBoot unread ($null)            offer ONE live block
+#
+# setUp and blockAtBoot only ever gate the FIRST of those: a failed probe or a missing
+# config.json comes back $null from Get-TaskState and Get-BlockAtBootSetting, and $null is not
+# the same claim as "off". Treating it as one used to fail open exactly where the least is known.
+# $null in either reads as unknown, which takes the same path as a positive true: read the
+# nodes anyway, offer the block if they are not Blocked, and warn exactly as for a known machine.
+#
+# leftAtRest ends unknown, never not-applicable and never no with an empty value, only when the
+# node state itself was never pinned down by either read this check makes: the one before the
+# offer and the one after it. Once either of those has answered anything, Blocked or not, that
+# is a real reading, and the record is yes or no, not a hedge.
 #
 # Never throws. A failure in here is recorded as an error and as leftAtRest = 'unknown', and
 # Complete-LiveTestRun still writes result.json: the record of what happened matters more than a
@@ -1290,8 +1307,11 @@ function Close-AtRest
 {
     param(
         [Parameter(Mandatory = $true)]$Run,
-        [string]$Reason = ''
+        [string]$Reason = '',
+        [string]$Consequence = ''
     )
+
+    $offerText = $(if ([string]::IsNullOrEmpty($Consequence)) { $script:AtRestDefaultConsequence } else { $Consequence })
 
     $detail = [ordered]@{
         before      = $null
@@ -1314,7 +1334,7 @@ function Close-AtRest
         $detail.setUp = $setUp
         $detail.blockAtBoot = $blockAtBoot
 
-        if ($setUp -ne $true -or $blockAtBoot -ne $true)
+        if ($setUp -eq $false -or $blockAtBoot -eq $false)
         {
             Write-Line -Run $Run -Text ('Earshot is not set up, or Block at boot is off (set up ' + $setUp +
                 ', Block at boot ' + $blockAtBoot + '), so being at rest does not apply here.')
@@ -1323,10 +1343,24 @@ function Close-AtRest
             return $detail
         }
 
+        if ($null -eq $setUp -or $null -eq $blockAtBoot)
+        {
+            Write-Line -Run $Run -Text ('Set up or Block at boot could not be confirmed (set up ' + $setUp +
+                ', Block at boot ' + $blockAtBoot + '), so this reads the nodes directly rather than assuming either way.')
+        }
+
         $nodes = Get-NodeState -Run $Run -Label 'at-rest-nodes'
         $nodeState = Get-Field -Object $nodes -Name 'nodeState'
         $detail.before = $nodeState
-        Write-Line -Run $Run -Text ('The AirPods Bluetooth nodes read ' + $nodeState + ' as this run ends.')
+
+        if ($null -eq $nodeState)
+        {
+            Write-Line -Run $Run -Text 'The AirPods Bluetooth node state could not be read, so whether the machine is at rest is not known yet.'
+        }
+        else
+        {
+            Write-Line -Run $Run -Text ('The AirPods Bluetooth nodes read ' + $nodeState + ' as this run ends.')
+        }
 
         if ($nodeState -eq 'Blocked')
         {
@@ -1345,17 +1379,38 @@ function Close-AtRest
         }
 
         $detail.offered = $true
-        $consequence = 'Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. ' +
-            'If the AirPods are playing through this PC right now, that stops.'
         $beforeStepCount = $Run.Steps.Count
-        $block = Invoke-Earshot -Run $Run -Label 'at-rest-block' -Command @('diag', 'gate', 'block') -Live -Consequence $consequence
+        $block = Invoke-Earshot -Run $Run -Label 'at-rest-block' -Command @('diag', 'gate', 'block') -Live -Consequence $offerText
 
         $lastStep = $null
         if ($Run.Steps.Count -gt $beforeStepCount) { $lastStep = $Run.Steps[$Run.Steps.Count - 1] }
         $declined = ($null -ne $lastStep -and $lastStep.error -eq 'skipped at the owner request')
         $detail.accepted = (-not $declined)
-        if ($null -ne $block) { $detail.blockStep = [ordered]@{ exitCode = $block.exitCode; exitName = $block.exitName } }
-        elseif ($null -ne $lastStep) { $detail.blockStep = [ordered]@{ error = $lastStep.error } }
+
+        # The process exit code Invoke-Earshot captured is 0 whenever the scheduled task ran to
+        # completion, whatever the block verb itself returned: src\Earshot\Boot\DiagGate.cs sets
+        # it from GateRunOutcome.Completed alone, not from the verb's own result. That result is
+        # in the evidence file the gate wrote for this run, under statusFile, which is the same
+        # field every other script reads a refusal from (14-SetDeviceRefusal.ps1). It is recorded
+        # and printed here so a partial or vetoed block is never shown as a plain success, but it
+        # never decides leftAtRest: only the re-read below does that.
+        $gateResult = $null
+        $gateExitCode = $null
+        if ($null -ne $block)
+        {
+            $gateEvidence = Get-DiagEvidence -Run $Run
+            $gateResult = Get-FieldPath -Object $gateEvidence -Path @('statusFile', 'result')
+            $gateExitCode = Get-FieldPath -Object $gateEvidence -Path @('statusFile', 'exitCode')
+            $detail.blockStep = [ordered]@{ processExitCode = $block.exitCode; gateResult = $gateResult; gateExitCode = $gateExitCode }
+            if ($null -ne $gateResult)
+            {
+                Write-Line -Run $Run -Text ('  The block reported ' + $gateResult + ' (exit ' + $gateExitCode + ').')
+            }
+        }
+        elseif ($null -ne $lastStep)
+        {
+            $detail.blockStep = [ordered]@{ error = $lastStep.error }
+        }
 
         $nodesAfter = Get-NodeState -Run $Run -Label 'at-rest-nodes-after'
         $stateAfter = Get-Field -Object $nodesAfter -Name 'nodeState'
@@ -1371,14 +1426,34 @@ function Close-AtRest
         Write-Line -Run $Run -Text ''
         Write-Line -Run $Run -Text '=========================================================================='
         Write-Line -Run $Run -Text 'THE MACHINE IS NOT AT REST.'
-        Write-Line -Run $Run -Text ('The AirPods Bluetooth nodes read ' + $stateAfter + ', not Blocked.')
+        if ($null -eq $stateAfter)
+        {
+            Write-Line -Run $Run -Text 'The AirPods Bluetooth node state could not be read, so this cannot confirm they are blocked.'
+        }
+        else
+        {
+            Write-Line -Run $Run -Text ('The AirPods Bluetooth nodes read ' + $stateAfter + ', not Blocked.')
+        }
+        if ($null -ne $gateResult -and $gateResult -ne 'Success')
+        {
+            Write-Line -Run $Run -Text ('The block itself reported ' + $gateResult + ' (exit ' + $gateExitCode + '), not a plain success.')
+        }
         Write-Line -Run $Run -Text 'If this PC is shut down or restarted like this, Windows will page the AirPods at the next boot,'
         Write-Line -Run $Run -Text 'and they will bounce between the phone and this PC.'
         Write-Line -Run $Run -Text 'To fix it: start the Earshot tray, whose own start-up check blocks the nodes when they are not'
         Write-Line -Run $Run -Text ('in use, or run: "' + $Run.ExePath + '" diag gate block')
         Write-Line -Run $Run -Text '=========================================================================='
-        Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestNo `
-            -Detail ('nodes read ' + $stateAfter + '; offered ' + $detail.offered + ', accepted ' + $detail.accepted + '.')
+
+        if ($null -eq $nodeState -and $null -eq $stateAfter)
+        {
+            Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestUnknown `
+                -Detail ('the node state could not be read, before or after the offer; offered ' + $detail.offered + ', accepted ' + $detail.accepted + '.')
+        }
+        else
+        {
+            Add-Finding -Run $Run -Name 'leftAtRest' -Value $script:AtRestNo `
+                -Detail ('nodes read ' + $stateAfter + '; offered ' + $detail.offered + ', accepted ' + $detail.accepted + '.')
+        }
         return $detail
     }
     catch
@@ -1393,13 +1468,14 @@ function Complete-LiveTestRun
 {
     param(
         [Parameter(Mandatory = $true)]$Run,
-        [string]$AtRestReason = ''
+        [string]$AtRestReason = '',
+        [string]$AtRestConsequence = ''
     )
 
     $atRestDetail = $null
     try
     {
-        $atRestDetail = Close-AtRest -Run $Run -Reason $AtRestReason
+        $atRestDetail = Close-AtRest -Run $Run -Reason $AtRestReason -Consequence $AtRestConsequence
     }
     catch
     {

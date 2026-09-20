@@ -58,8 +58,6 @@ try
 {
     if (-not $Resume)
     {
-        $atRestReason = 'This half deliberately shuts down with the AirPods still connected (the nodes enabled): that is ' +
-            'the case it exists to catch, showing whether the session-end backstop or the boot task blocks them again.'
         $ready = Show-Preconditions -Run $run -Preconditions @(
             'Earshot is installed, set up, and running in the tray.',
             'Block at boot is on.',
@@ -72,6 +70,12 @@ try
 
         if ($ready)
         {
+            # Only now, with the owner committed to going ahead: nothing has shut down yet if they
+            # said no above, so the closing check must still offer a block in that case, not read
+            # a shutdown as deliberately pending that is never actually going to happen.
+            $atRestReason = 'This half deliberately shuts down with the AirPods still connected (the nodes enabled): that is ' +
+                'the case it exists to catch, showing whether the session-end backstop or the boot task blocks them again.'
+
             Write-Section -Run $run -Title 'Connect and confirm'
             Wait-Owner -Run $run -Text 'Left-click the tray icon to connect the AirPods to this PC, and play something so they stay in use.'
             $audio = Get-AudioState -Run $run -Label 'audio-connected'
