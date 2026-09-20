@@ -336,14 +336,6 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // B1: exactly one child may exist. Checked here, not only via the Start button's own
-        // Enabled state, because Run all and its carry-on button call this same start path
-        // programmatically, never through a click a disabled button could have blocked.
-        if (!RunGate.CanStart(_activeRunner))
-        {
-            return;
-        }
-
         DisplayRow row = _displayRows[index];
         if (_banner.RowsLockedExceptRestore && row.Row.Number != "00")
         {
@@ -483,7 +475,6 @@ internal sealed class MainForm : Form
         _silenceWarningShown = false;
         _lastActivityUtc = DateTimeOffset.UtcNow;
         _stopButton.Enabled = true;
-        _runAllButton.Enabled = false;
 
         if (_runAllActive)
         {
@@ -497,20 +488,11 @@ internal sealed class MainForm : Form
             }
         }
 
-        // B1: routed by identity, on the UI thread, at the moment each is actually handled, not
-        // when it was queued. A message from a runner that is no longer _activeRunner (it ended,
-        // or was superseded) is dropped rather than handled against whatever runner is active now.
         runner.MessageReceived += message =>
         {
             if (IsHandleCreated)
             {
-                BeginInvoke(new Action(() =>
-                {
-                    if (RunGate.ShouldProcessMessage(_activeRunner, runner))
-                    {
-                        HandleMessage(row, message);
-                    }
-                }));
+                BeginInvoke(new Action(() => HandleMessage(row, message)));
             }
         };
         runner.TranscriptLine += line =>
@@ -519,11 +501,8 @@ internal sealed class MainForm : Form
             {
                 BeginInvoke(new Action(() =>
                 {
-                    if (RunGate.ShouldProcessMessage(_activeRunner, runner))
-                    {
-                        _transcript.Add(line);
-                        _lastActivityUtc = DateTimeOffset.UtcNow;
-                    }
+                    _transcript.Add(line);
+                    _lastActivityUtc = DateTimeOffset.UtcNow;
                 }));
             }
         };
@@ -596,7 +575,6 @@ internal sealed class MainForm : Form
         _currentPromptSeq = null;
         _killDeadlineUtc = null;
         _stopButton.Enabled = false;
-        _runAllButton.Enabled = true;
         PopulateRows();
         UpdateStartButton();
 
@@ -715,7 +693,6 @@ internal sealed class MainForm : Form
         _currentPromptSeq = null;
         _killDeadlineUtc = null;
         _stopButton.Enabled = false;
-        _runAllButton.Enabled = true;
         PopulateRows();
         UpdateStartButton();
 
@@ -734,14 +711,6 @@ internal sealed class MainForm : Form
     // call back in; it never loops past a row that is not yet a clean pass on disk.
     private void AdvanceRunAll()
     {
-        // B1: never start a second child. AdvanceRunAll's only job is to start the next item, so
-        // if one is already active this call has nothing to do (it will be called again from
-        // OnRunFinished once that one ends).
-        if (!RunGate.CanStart(_activeRunner))
-        {
-            return;
-        }
-
         while (_runAllIndex >= 0 && _runAllIndex < RunAllOrder.Items.Count)
         {
             RunAllItem item = RunAllOrder.Items[_runAllIndex];
@@ -753,19 +722,14 @@ internal sealed class MainForm : Form
             }
 
             DerivedRowState state = ComputeState(row);
-
-            // B2: the caller's own decision, not just RunAllHalt.ShouldHalt in isolation. A
-            // declined start (StoppedBeforeAnyStep) used to be treated as "fresh enough" to
-            // start again, bypassing ShouldHalt (which already says halt for it) and restarting
-            // the same test forever.
-            RunAllAdvanceDecision decision = RunAllAdvance.Decide(state);
-            if (decision == RunAllAdvanceDecision.Halt)
+            bool freshEnough = state.Kind is RowStateKind.NotRun or RowStateKind.StoppedBeforeAnyStep;
+            if (!freshEnough && RunAllHalt.ShouldHalt(state))
             {
                 HaltRunAll(row, state);
                 return;
             }
 
-            if (decision == RunAllAdvanceDecision.Advance)
+            if (state.Kind == RowStateKind.Passed)
             {
                 _runAllIndex++;
                 continue;
@@ -825,13 +789,6 @@ internal sealed class MainForm : Form
 
     private void OnRunAllCarryOnClicked()
     {
-        // B1: a stray or double click while a half is somehow already active must never start a
-        // second one.
-        if (!RunGate.CanStart(_activeRunner))
-        {
-            return;
-        }
-
         _runAllCarryOnButton.Visible = false;
         _runAllIndex++;
         SaveRunAllProgress();
@@ -850,13 +807,6 @@ internal sealed class MainForm : Form
 
     private void StartOrContinueRunAll()
     {
-        // B1: Run all's own button stayed enabled during a run; nothing stopped a second click
-        // (or a click while a single-row Start was mid-flight) from starting a second child.
-        if (!RunGate.CanStart(_activeRunner))
-        {
-            return;
-        }
-
         if (_banner.RowsLockedExceptRestore)
         {
             _runAllStatusLabel.Text = _banner.Message;
@@ -925,60 +875,5 @@ internal sealed class MainForm : Form
         _handOffBox.Text = string.Join(Environment.NewLine, lines);
         _handOffBox.Visible = true;
         _statusLabel.Text = row.TestId + ": first half complete. Waiting for the power cycle.";
-    }
-
-    // Test seams only (Earshot.Tests, via InternalsVisibleTo): review round 1's own rule is that
-    // a fix whose only proof is an extracted predicate in isolation proves nothing about the
-    // caller that used to bypass it. These let a test drive this form's real click handlers
-    // headlessly (constructed, handle forced, never Shown) and observe what a real click actually
-    // does, the same way MainForm.cs 1090-1150ish's own private methods are wired to controls.
-    internal ChildRunner? ActiveRunnerForTests => _activeRunner;
-
-    internal bool SelectRowForTests(string number)
-    {
-        for (int i = 0; i < _displayRows.Count; i++)
-        {
-            if (_displayRows[i].Number == number)
-            {
-                _rowList.Items[i].Selected = true;
-                UpdateStartButton();
-                UpdateRowDetail();
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    internal void ClickStartForTests() => _startButton.PerformClick();
-
-    internal void ClickStopForTests() => _stopButton.PerformClick();
-
-    internal void ClickRunAllForTests() => _runAllButton.PerformClick();
-
-    internal void ClickCarryOnForTests() => _runAllCarryOnButton.PerformClick();
-
-    internal void KillActiveRunForTests() => KillActiveRun();
-
-    internal string StatusTextForTests => _statusLabel.Text;
-
-    internal string RunAllStatusTextForTests => _runAllStatusLabel.Text;
-
-    internal bool CarryOnVisibleForTests => _runAllCarryOnButton.Visible;
-
-    internal bool StartButtonEnabledForTests => _startButton.Enabled;
-
-    internal int SelectedIndexForTests => _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
-
-    // Control.CreateControl() (protected on every Control) silently does nothing while Visible
-    // is false, which a Form always is until shown; parked off-screen, with no taskbar entry, so
-    // nothing is ever seen, but every child control gets a real handle and the real message loop
-    // Control.BeginInvoke (every ChildRunner event) depends on, the same as actually running it.
-    internal void ForceControlCreationForTests()
-    {
-        StartPosition = FormStartPosition.Manual;
-        Location = new Point(-32000, -32000);
-        ShowInTaskbar = false;
-        Show();
     }
 }
