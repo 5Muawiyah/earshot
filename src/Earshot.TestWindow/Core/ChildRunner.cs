@@ -303,6 +303,22 @@ internal sealed class ChildRunner : IDisposable
         _process.Dispose();
     }
 
+    // The one other process this window ever starts beyond the test child itself: opening
+    // Explorer at a saved evidence folder for the owner (Result view's own "Open the folder"
+    // button, plain-window-layout.md's Result section). UseShellExecute true is what makes Windows
+    // treat a folder path as something to open with its own registered handler (Explorer), the
+    // same as double-clicking it there, rather than trying to execute the path directly as a
+    // program, which a folder is not.
+    // https://learn.microsoft.com/dotnet/api/system.diagnostics.processstartinfo.useshellexecute
+    // Kept as a static helper on this same class, not a new file, so "process starts only in
+    // ChildRunner.cs" (NoDevicePathTests.ProcessIsStartedOnlyFromChildRunner) stays true by
+    // construction; MainForm/ResultPanel call this rather than System.Diagnostics.Process
+    // themselves.
+    internal static void OpenFolderInExplorer(string path)
+    {
+        using Process? process = Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+    }
+
     // The one other process this window ever starts: a short, read-only, no-window run of
     // Get-PowerCycleEvidence.ps1, which touches no device and needs no elevation. Kept as a
     // static helper on this same class rather than a new file, so "process starts only in

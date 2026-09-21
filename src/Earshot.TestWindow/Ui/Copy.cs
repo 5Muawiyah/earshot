@@ -537,4 +537,39 @@ internal static class Copy
         RowStateKind.Unknown => "?",
         _ => "•",
     };
+
+    // The Result view's own single verdict line (plain-window-layout.md's Result section): the
+    // four sentences quoted there, verbatim, chosen from the same RowStateKind MainForm already
+    // derived for this row (ComputeState/StateDeriver), never re-derived here. Any kind other than
+    // the three named good-faith outcomes (Passed, Failed, Inconclusive) reads as the fourth,
+    // deliberately harshest sentence: a result the reader must never mistake for a pass, matching
+    // PlainBaseText's own fail-closed default (=> PlainUnknown) for the same reason.
+    internal const string ResultVerdictPassed = "This test worked.";
+    internal const string ResultVerdictFailed = "This test did not work.";
+    internal const string ResultVerdictInconclusive = "We could not tell.";
+    internal const string ResultVerdictUnknown = "We do not know what happened, and that is not a pass.";
+
+    internal static string ResultVerdictSentence(RowStateKind kind) => kind switch
+    {
+        RowStateKind.Passed => ResultVerdictPassed,
+        RowStateKind.Failed => ResultVerdictFailed,
+        RowStateKind.Inconclusive => ResultVerdictInconclusive,
+        _ => ResultVerdictUnknown,
+    };
+
+    // The verdict sentence with its own symbol (Copy.RowStateSymbol, the same one the row list
+    // already shows beside its state text), so the Result view's headline never relies on the
+    // sentence's own words alone either.
+    internal static string ResultVerdictLine(RowStateKind kind) => RowStateSymbol(kind) + " " + ResultVerdictSentence(kind);
+
+    // Result view, plain mode (plain-window-layout.md): a raw folder and file path is jargon, kept
+    // behind technical details (ResultPanel's own EvidenceLabel, unchanged); this is what replaces
+    // it, plus the button beside it that actually opens the folder.
+    internal const string ResultRecordSavedLine = "A record of this run has been saved.";
+
+    internal const string OpenFolderButtonLabel = "Open the folder";
+
+    // Result view's own navigation, outside Run all: Run all's halt already offers
+    // RunAllCarryOnButtonLabel/RunAllStopHereButtonLabel instead of this.
+    internal const string BackToStartButtonLabel = "Back to the start";
 }

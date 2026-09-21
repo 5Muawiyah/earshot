@@ -64,6 +64,13 @@ internal sealed class MainForm : Form
     private readonly Button _runAllCarryOnButton;
     private readonly Button _runAllStopHereButton;
 
+    // Result view navigation outside Run all (plain-window-layout.md's Result section: "Buttons:
+    // in Run all, 'Carry on with the rest' and 'Stop here'; otherwise 'Back to the start'"). Shown
+    // exactly when the Result view is on screen and Run all's own two buttons are not
+    // (UpdateBackToStartVisibility); "the start" is Home, not the List view ("Choose one test"),
+    // since this follows a single test's own result, distinct from List's own "Back".
+    private readonly Button _backToStartButton;
+
     // Run all under a red or unknown banner: shown instead of starting anything, until the owner
     // has clicked through it (the same "have you done it" shape as a Wait-Owner step); only then is
     // row 00 Restore actually started, through the same single start gate every other route uses.
@@ -105,6 +112,10 @@ internal sealed class MainForm : Form
     private int _lastPresentedPromptSeq;
     private string? _lastPresentedPromptProgressText;
     private ResultPresentation? _lastResultPresentation;
+    // Cached alongside _lastResultPresentation, only ever read while that is not null: the row's
+    // own verdict kind at the moment the Result view was last shown, so flipping the
+    // technical-details toggle can redraw the same panel without re-deriving anything.
+    private RowStateKind _lastResultRowStateKind;
 
     // The silence watchdog and the abort/kill sequence. A prompt on screen is never
     // a hang (test 12 waits hours at one), so the watchdog only ever looks at silence while
@@ -323,6 +334,12 @@ internal sealed class MainForm : Form
         _runAllStopHereButton = new Button { Text = Copy.RunAllStopHereButtonLabel, Visible = false, AutoSize = true, Margin = new Padding(4) };
         _runAllStopHereButton.Click += (_, _) => OnRunAllStopHereClicked();
 
+        // "Back to the start" (Home, not List: see the field's own remark): visible exactly when
+        // the Result view is on screen and Run all's own two buttons above are not
+        // (UpdateBackToStartVisibility, called at every place any of the three changes).
+        _backToStartButton = new Button { Text = Copy.BackToStartButtonLabel, Visible = false, AutoSize = true, Margin = new Padding(4) };
+        _backToStartButton.Click += (_, _) => SwitchToView(MainView.Home);
+
         _runAllStatusLabel = new Label
         {
             AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkSlateBlue,
@@ -443,6 +460,7 @@ internal sealed class MainForm : Form
         runningTopFlow.Controls.Add(_runAllRestoreContinueButton);
         runningTopFlow.Controls.Add(_runAllCarryOnButton);
         runningTopFlow.Controls.Add(_runAllStopHereButton);
+        runningTopFlow.Controls.Add(_backToStartButton);
 
         // "Stop this test", small, at the bottom edge of the whole Running view, away from
         // StepPanel's own answer buttons above it (plain-window-layout.md's Step view, point 7).
@@ -609,7 +627,7 @@ internal sealed class MainForm : Form
 
         if (_lastResultPresentation is not null)
         {
-            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails);
+            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails, _lastResultRowStateKind);
         }
 
         // The row list's own State column reads plain or technical the same way: PopulateRows
@@ -1361,6 +1379,7 @@ internal sealed class MainForm : Form
         _resultPanel.Visible = false;
         _handOffBox.Visible = false;
         _stepPanel.Visible = true;
+        UpdateBackToStartVisibility();
         SwitchToView(MainView.Running);
         _statusLabel.Text = _showTechnicalDetails
             ? "Running " + row.TestId + (isResume ? " (second half)..." : "...")
@@ -1507,8 +1526,13 @@ internal sealed class MainForm : Form
         }
         else if (result is not null)
         {
+            // The one source of truth for pass/fail/inconclusive/unknown: computed once here, fed
+            // to the Result view's own verdict line and (below) reused for the plain status line,
+            // rather than re-derived a second time and risking the two ever disagreeing.
+            DerivedRowState state = ComputeState(row);
             _lastResultPresentation = ResultPresenter.Present(result, _activeResultFolder!, row.Row.Number, _wording);
-            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails);
+            _lastResultRowStateKind = state.Kind;
+            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails, state.Kind);
             _resultPanel.Visible = true;
 
             // The status line's own "Finished: ..." (plain mode only; technical mode already read
@@ -1517,7 +1541,7 @@ internal sealed class MainForm : Form
             // list right now, so this can never claim a better verdict than the list itself does.
             if (!_showTechnicalDetails)
             {
-                _statusLabel.Text = Copy.PlainFinishedStatus(row.Name, RowPresenter.PlainText(ComputeState(row)));
+                _statusLabel.Text = Copy.PlainFinishedStatus(row.Name, RowPresenter.PlainText(state));
             }
         }
         else
@@ -1537,6 +1561,11 @@ internal sealed class MainForm : Form
         _runAllButton.Enabled = true;
         PopulateRows();
         UpdateStartButton();
+        // Ordinary single-test path: Run all is not active, so neither branch below runs, and this
+        // is the one place that decides "Back to the start" for it. The run-all branches below each
+        // recompute this again themselves once they know their own outcome, harmlessly redundant
+        // here.
+        UpdateBackToStartVisibility();
 
         // The halt is decided from result.json, never from the click. Whatever
         // just finished, Run all (if active) re-derives this same item from disk and decides
@@ -1575,6 +1604,7 @@ internal sealed class MainForm : Form
         _runAllStopHereButton.Visible = false;
         _runAllProgressLabel.Visible = false;
         _runAllStatusLabel.Text = Copy.RunAllRestoreDidNotReachAtRest;
+        UpdateBackToStartVisibility();
     }
 
     // Stop's own two paths. A prompt pending: send the real abort down the wire and
@@ -1845,6 +1875,7 @@ internal sealed class MainForm : Form
         _runAllStopHereButton.Visible = false;
         _runAllProgressLabel.Visible = false;
         _runAllStatusLabel.Text = Copy.RunAllFinished + " " + BuildRunAllEndSummarySentence();
+        UpdateBackToStartVisibility();
     }
 
     // Fresh from disk, every time: how many of Run all's own items ended up in each bucket right
@@ -1908,6 +1939,7 @@ internal sealed class MainForm : Form
         // buttons is pressed, Run all stays halted.
         _runAllCarryOnButton.Visible = !atPowerCycleBoundary;
         _runAllStopHereButton.Visible = !atPowerCycleBoundary;
+        UpdateBackToStartVisibility();
     }
 
     private void OnRunAllCarryOnClicked()
@@ -1938,6 +1970,18 @@ internal sealed class MainForm : Form
         RunAllFile.Delete(WindowStateRoot());
         _runAllStatusLabel.Text = Copy.RunAllFinished + " " + BuildRunAllEndSummarySentence();
         UpdateRunAllButtonLabel();
+        UpdateBackToStartVisibility();
+    }
+
+    // "Back to the start" is visible exactly when the Result view is on screen and Run all's own
+    // two buttons are not: an ordinary single-test result (Run all not active), or Run all's own
+    // end-of-sequence state (both natural completion and Stop here, where Run all is no longer
+    // active but the last test's own result stays on screen). Never computed once and cached: this
+    // is called again at every place any of the three inputs changes, so it can never drift from
+    // what is actually on screen right now.
+    private void UpdateBackToStartVisibility()
+    {
+        _backToStartButton.Visible = _resultPanel.Visible && !_runAllCarryOnButton.Visible && !_runAllStopHereButton.Visible;
     }
 
     private void SaveRunAllProgress()
@@ -2095,6 +2139,7 @@ internal sealed class MainForm : Form
         _resultPanel.Visible = false;
         _handOffBox.Text = string.Join(Environment.NewLine, lines);
         _handOffBox.Visible = true;
+        UpdateBackToStartVisibility();
         SwitchToView(MainView.Running);
         _statusLabel.Text = _showTechnicalDetails
             ? row.TestId + ": first half complete. Waiting for the power cycle."
@@ -2448,6 +2493,14 @@ internal sealed class MainForm : Form
     }
 
     internal bool RunAllStopHereVisibleForTests => _runAllStopHereButton.Visible;
+
+    internal bool BackToStartVisibleForTests => _backToStartButton.Visible;
+
+    internal void ClickBackToStartForTests()
+    {
+        SwitchToView(MainView.Running);
+        _backToStartButton.PerformClick();
+    }
 
     internal bool RunAllRestoreAdviceVisibleForTests => _runAllRestoreAdviceLabel.Visible && _runAllRestoreContinueButton.Visible;
 
