@@ -212,13 +212,43 @@ internal sealed class MainForm : Form
     // during a run asks first too, and closing anyway is the same as a forced kill (the process
     // is going away either way; the row must read Unknown afterwards, not whatever it said
     // before this run started).
+    // Test seam: real callers never replace this; it defaults to the real modal box every
+    // OnFormClosing decision used to call directly. Substituting it in a test proves what
+    // OnFormClosing decided to do without ever putting a real dialog on screen, which nothing
+    // here can safely dismiss on its own.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Func<string, DialogResult> ConfirmDialogForTests { get; set; } =
+        message => MessageBox.Show(message, "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+    // M10, design.md section 4.4: "Windows ends the session while a half is running: the form
+    // cancels the close once, so Windows shows its own 'this app is preventing shut down' screen
+    // with the window title 'Earshot live tests: a test is still running'. If the owner forces
+    // it, the child dies with the session and the next open shows the red banner." Windows sends
+    // WM_QUERYENDSESSION and waits for FormClosing to answer synchronously; a modal MessageBox
+    // does not answer it, it blocks the answer, so this path never shows one. The cancel happens
+    // at most once per session-end attempt: a second attempt (the owner having forced it, or
+    // Windows trying again) is let through, so the window can never make itself the one thing an
+    // otherwise-successful shutdown cannot get past.
+    private bool _windowsShutdownCancelledOnce;
+
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
+        if (e.CloseReason == CloseReason.WindowsShutDown)
+        {
+            if (_activeRunner is not null && !_windowsShutdownCancelledOnce)
+            {
+                _windowsShutdownCancelledOnce = true;
+                Text = "Earshot live tests: a test is still running";
+                e.Cancel = true;
+            }
+
+            return;
+        }
+
         if (_activeRunner is not null)
         {
-            DialogResult runChoice = MessageBox.Show(
-                "A test is still running. Closing now stops it, the same as Stop the test: no result is written and this PC may not be at rest. Close anyway?",
-                "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            DialogResult runChoice = ConfirmDialogForTests(
+                "A test is still running. Closing now stops it, the same as Stop the test: no result is written and this PC may not be at rest. Close anyway?");
             if (runChoice != DialogResult.Yes)
             {
                 e.Cancel = true;
@@ -233,8 +263,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        DialogResult choice = MessageBox.Show(
-            "This PC is not at rest. Close anyway?", "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        DialogResult choice = ConfirmDialogForTests("This PC is not at rest. Close anyway?");
         if (choice != DialogResult.Yes)
         {
             e.Cancel = true;
@@ -496,6 +525,7 @@ internal sealed class MainForm : Form
         _currentPromptSeq = null;
         _killDeadlineUtc = null;
         _silenceWarningShown = false;
+        _windowsShutdownCancelledOnce = false;
         _lastActivityUtc = DateTimeOffset.UtcNow;
         _stopButton.Enabled = true;
         _runAllButton.Enabled = false;
@@ -1020,6 +1050,13 @@ internal sealed class MainForm : Form
     internal void ClickCurrentPromptButtonForTests() => _stepPanel.ClickFirstButtonForTests();
 
     internal void ClickPromptButtonForTests(int index) => _stepPanel.ClickButtonForTests(index);
+
+    internal FormClosingEventArgs RaiseFormClosingForTests(CloseReason reason)
+    {
+        var args = new FormClosingEventArgs(reason, cancel: false);
+        OnFormClosing(this, args);
+        return args;
+    }
 
     internal bool HandOffVisibleForTests => _handOffBox.Visible;
 
