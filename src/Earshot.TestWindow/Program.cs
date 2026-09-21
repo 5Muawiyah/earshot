@@ -38,7 +38,8 @@ internal static class Program
             sandboxArgumentWithoutValidFolder: sandboxArgumentWithoutValidFolder,
             anotherInstanceRunning: !acquiredInstance,
             solutionFound: solutionFound,
-            powerShell51Found: powerShell51Found);
+            powerShell51Found: powerShell51Found,
+            sandboxFolderInsideProtectedRoot: sandboxArgumentWithoutValidFolder && StartupGate.IsSandboxFolderInsideProtectedRoot(args));
 
         if (refusal != StartupRefusal.None)
         {

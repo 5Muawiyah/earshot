@@ -125,7 +125,8 @@ public sealed class StartupGateTests
         var messages = new HashSet<string>(StringComparer.Ordinal);
         foreach (StartupRefusal refusal in new[]
         {
-            StartupRefusal.RunningElevated, StartupRefusal.SandboxRequestedWithoutFolder, StartupRefusal.SandboxEnvironmentVariableSet,
+            StartupRefusal.RunningElevated, StartupRefusal.SandboxRequestedWithoutFolder,
+            StartupRefusal.SandboxFolderInsideProtectedRoot, StartupRefusal.SandboxEnvironmentVariableSet,
             StartupRefusal.AnotherInstanceRunning, StartupRefusal.SolutionNotFound,
             StartupRefusal.WindowsPowerShell51Missing,
         })
@@ -135,6 +136,69 @@ public sealed class StartupGateTests
             Assert.IsTrue(messages.Add(message), refusal + " shares its message with another refusal.");
         }
     }
+
+    // The rejection copy used to say only that --sandbox "needs a folder after it", which is what
+    // an owner sees whether they typed nothing at all or typed a real, existing folder that just
+    // happened to sit under a protected root. The refusal now names the rule that was actually
+    // broken, and still says a temp folder is fine even though %TEMP% is itself under
+    // %LOCALAPPDATA%.
+    [TestMethod]
+    public void SandboxFolderInsideProtectedRootRefusalNamesTheRuleItBroke()
+    {
+        string message = StartupGate.Message(StartupRefusal.SandboxFolderInsideProtectedRoot);
+        StringAssert.Contains(message, "LOCALAPPDATA");
+        StringAssert.Contains(message, "APPDATA");
+        StringAssert.Contains(message, "ProgramData");
+        StringAssert.Contains(message, "ProgramFiles");
+        StringAssert.Contains(message, "TEMP");
+    }
+
+    // Evaluate must surface the more specific refusal only when the folder was actually rejected
+    // for sitting inside a protected root, never for the plain "no folder at all" case.
+    [TestMethod]
+    public void EvaluateReportsTheProtectedRootRefusalOnlyWhenAskedTo()
+    {
+        StartupRefusal refusal = StartupGate.Evaluate(
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false,
+            sandboxArgumentWithoutValidFolder: true, anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true,
+            sandboxFolderInsideProtectedRoot: true);
+
+        Assert.AreEqual(StartupRefusal.SandboxFolderInsideProtectedRoot, refusal);
+    }
+
+    [TestMethod]
+    public void EvaluateReportsThePlainRefusalWhenTheFolderWasNotInsideAProtectedRoot()
+    {
+        StartupRefusal refusal = StartupGate.Evaluate(
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false,
+            sandboxArgumentWithoutValidFolder: true, anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true,
+            sandboxFolderInsideProtectedRoot: false);
+
+        Assert.AreEqual(StartupRefusal.SandboxRequestedWithoutFolder, refusal);
+    }
+
+    // The helper Program.cs will use to decide sandboxFolderInsideProtectedRoot: true only when a
+    // well-formed, absolute candidate was rejected specifically for sitting inside a protected
+    // root and was not exempted by sitting under temp.
+    [TestMethod]
+    public void IsSandboxFolderInsideProtectedRootIsTrueOnlyForThatSpecificReason()
+    {
+        using var protectedRoot = new TempFolder();
+        string tempRoot = Path.Combine(protectedRoot.Path, "Temp");
+        string insideProtectedRoot = Path.Combine(protectedRoot.Path, "Earshot");
+        string underTemp = Path.Combine(tempRoot, "sandbox");
+
+        Assert.IsTrue(StartupGate.IsSandboxFolderInsideProtectedRoot(
+            new[] { "--sandbox", insideProtectedRoot }, new[] { protectedRoot.Path }, tempRoot));
+        Assert.IsFalse(StartupGate.IsSandboxFolderInsideProtectedRoot(
+            new[] { "--sandbox", underTemp }, new[] { protectedRoot.Path }, tempRoot));
+        Assert.IsFalse(StartupGate.IsSandboxFolderInsideProtectedRoot(
+            SandboxWithNoFolder, new[] { protectedRoot.Path }, tempRoot));
+        Assert.IsFalse(StartupGate.IsSandboxFolderInsideProtectedRoot(
+            SandboxWithRelativeFolder, new[] { protectedRoot.Path }, tempRoot));
+    }
+
+    private static readonly string[] SandboxWithRelativeFolder = { "--sandbox", @"relative\sandbox" };
 
     private static readonly string[] NoArguments = Array.Empty<string>();
     private static readonly string[] OtherArgumentOnly = { "--other" };
@@ -193,6 +257,59 @@ public sealed class StartupGateTests
         string[] args = { "--sandbox", protectedRoot.Path };
 
         Assert.IsNull(StartupGate.SandboxFolder(args, new[] { protectedRoot.Path }));
+    }
+
+    // My own regression: on a real machine %TEMP% is C:\Users\<user>\AppData\Local\Temp, which
+    // sits inside %LOCALAPPDATA%. Before this fix, IsUsableSandboxFolder's protected-root check
+    // refused any --sandbox folder nested there, so the one folder an owner would actually reach
+    // for (a scratch folder under their own temp folder) was always rejected. This reproduces
+    // that shape without touching the real machine's %TEMP%: a fake "LOCALAPPDATA" with a "Temp"
+    // sub-folder standing in for it, and a candidate below that.
+    [TestMethod]
+    public void SandboxFolderAllowsAFolderUnderTempEvenThoughTempSitsUnderLocalAppData()
+    {
+        using var protectedRoot = new TempFolder();
+        string tempRoot = Path.Combine(protectedRoot.Path, "Temp");
+        string candidate = Path.Combine(tempRoot, "sandbox");
+        Directory.CreateDirectory(candidate);
+
+        Assert.AreEqual(
+            candidate,
+            StartupGate.SandboxFolder(new[] { "--sandbox", candidate }, new[] { protectedRoot.Path }, tempRoot));
+    }
+
+    // The exemption is for %TEMP% specifically, not for the whole of %LOCALAPPDATA%: a folder that
+    // sits directly under the protected root, but outside the temp sub-folder (the shape
+    // %LOCALAPPDATA%\Earshot is), must stay refused.
+    [TestMethod]
+    public void SandboxFolderStillRejectsALocalAppDataFolderThatIsNotUnderTemp()
+    {
+        using var protectedRoot = new TempFolder();
+        string tempRoot = Path.Combine(protectedRoot.Path, "Temp");
+        string earshotFolder = Path.Combine(protectedRoot.Path, "Earshot");
+        Directory.CreateDirectory(earshotFolder);
+
+        Assert.IsNull(StartupGate.SandboxFolder(new[] { "--sandbox", earshotFolder }, new[] { protectedRoot.Path }, tempRoot));
+    }
+
+    // The default (real) overload must consult the real %TEMP%, not an empty exemption: a folder
+    // actually created under this machine's own temp folder is accepted through the two-argument
+    // overload that production code (Program.cs, via SandboxOptions.TryParse -> StartupGate)
+    // actually calls.
+    [TestMethod]
+    public void TheRealSandboxFolderOverloadAllowsAFolderUnderThisMachinesRealTemp()
+    {
+        string tempRoot = Path.GetTempPath();
+        string candidate = Path.Combine(tempRoot, "earshot-startupgate-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(candidate);
+        try
+        {
+            Assert.AreEqual(candidate, StartupGate.SandboxFolder(new[] { "--sandbox", candidate }));
+        }
+        finally
+        {
+            Directory.Delete(candidate, recursive: true);
+        }
     }
 
     // The one-argument overload must actually consult RealProtectedRoots(), not an empty list: a
