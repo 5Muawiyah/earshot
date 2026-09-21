@@ -110,6 +110,7 @@ internal sealed class MainForm : Form
         _rowList = new ListView
         {
             Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false,
+            MultiSelect = false,
         };
         _rowList.Columns.Add("#", 30);
         _rowList.Columns.Add("State", 110);
@@ -343,7 +344,7 @@ internal sealed class MainForm : Form
             text += Environment.NewLine + Environment.NewLine + Copy.PlanBNotAvailable;
         }
 
-        if (_sandbox is not null && row.Row.Number == "10" && row.VariantNumber is >= 2 and <= 5)
+        if (Test10VariantSandboxNote.ShouldShow(_sandbox is not null, row.Row.Number, row.VariantNumber))
         {
             text += Environment.NewLine + Environment.NewLine + Copy.Test10VariantNotSandboxTestable;
         }
@@ -1648,6 +1649,24 @@ internal sealed class MainForm : Form
     internal void ForceRunAllButtonEnabledForTests() => _runAllButton.Enabled = true;
 
     internal int SelectedIndexForTests => _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
+
+    internal int SelectedIndexCountForTests => _rowList.SelectedIndices.Count;
+
+    // Test seam: marks a second item Selected without first clearing the row list's own
+    // selection, the way a real ctrl or shift click would leave it if MultiSelect ever let one
+    // through; a single-select ListView (real handle, real control) clears the earlier item on its
+    // own the moment this runs, never this seam's job to enforce.
+    internal void SelectAdditionalRowForTests(string number)
+    {
+        for (int i = 0; i < _displayRows.Count; i++)
+        {
+            if (_displayRows[i].Number == number)
+            {
+                _rowList.Items[i].Selected = true;
+                return;
+            }
+        }
+    }
 
     // Control.CreateControl() (protected on every Control) silently does nothing while Visible
     // is false, which a Form always is until shown; parked off-screen, with no taskbar entry, so

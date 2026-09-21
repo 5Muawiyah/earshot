@@ -1,3 +1,4 @@
+using Earshot.TestWindow.Core;
 using Earshot.TestWindow.Ui;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -43,39 +44,25 @@ public sealed class Test10VariantSandboxNoteTests
         }
     }
 
+    // A pure check (Test10VariantSandboxNote.ShouldShow), not a real window: this window's own
+    // tests build sandbox forms only, and proving "never shown outside a sandbox window" never
+    // needed a real, non-sandboxed MainForm in the first place, since the decision itself never
+    // reads anything else about the form.
     [TestMethod]
     public void TheWarningIsNeverShownOutsideASandboxWindow()
     {
-        string repoRoot = RepositoryLocator.RepositoryRoot();
-        var rows = Earshot.TestWindow.Core.Manifest.Load(Path.Combine(repoRoot, "src", "Earshot.TestWindow", "Data", "tests.json"));
-        var wording = Earshot.TestWindow.Core.Wording.Load(Path.Combine(repoRoot, "src", "Earshot.TestWindow", "Data", "wording.json"));
+        Assert.IsFalse(Test10VariantSandboxNote.ShouldShow(sandboxed: false, rowNumber: "10", variantNumber: 3));
+    }
 
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            MainForm? form = null;
-            try
-            {
-                form = new MainForm(repoRoot, rows, wording, sandbox: null, @"C:\nowhere\Earshot.exe");
-                form.ForceControlCreationForTests();
-                Assert.IsTrue(form.SelectRowForTests("10.3"));
-                Assert.IsFalse(form.RowDetailTextForTests.Contains(Copy.Test10VariantNotSandboxTestable, StringComparison.Ordinal));
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
-                form?.Dispose();
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(30)));
-        if (failure is not null)
-        {
-            throw new InvalidOperationException("Test body failed: " + failure, failure);
-        }
+    [TestMethod]
+    public void TheWarningNeverShowsForAnyOtherRowEvenSandboxed()
+    {
+        Assert.IsFalse(Test10VariantSandboxNote.ShouldShow(sandboxed: true, rowNumber: "01", variantNumber: 0));
+    }
+
+    [TestMethod]
+    public void TheWarningNeverShowsForVariant1Sandboxed()
+    {
+        Assert.IsFalse(Test10VariantSandboxNote.ShouldShow(sandboxed: true, rowNumber: "10", variantNumber: 1));
     }
 }
