@@ -64,6 +64,14 @@ internal static class Copy
         "not wired to a control in this build. To run it, open a console and run: powershell " +
         "-File tools\\live-tests\\Run-LiveTests.ps1 -Test 07 -ExePath <path to Earshot.exe> -AllowPlanB";
 
+    // The sandbox's fake machine (tools\live-tests\selftest\Fakes.psm1) has a starting state for
+    // "10-shutdown-messages-v1" only: variants 2 to 5 have none, so a sandboxed run of one of them
+    // fails immediately rather than settling anything about the row. Said here rather than left
+    // for the owner to find out by starting one.
+    internal const string Test10VariantNotSandboxTestable =
+        "Not testable in a sandbox window: the sandbox's fake machine has a starting state for " +
+        "variant 1 only. Choose variant 1 to try the sandbox, or run this one for real.";
+
     // Derived from result.json only: a step with elevated true, ran false and an error. Two
     // independent messages, never guessed at from anything the window itself observed while the
     // step ran.

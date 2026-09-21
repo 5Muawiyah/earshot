@@ -250,6 +250,11 @@ internal sealed class MainForm : Form
             text += Environment.NewLine + Environment.NewLine + Copy.PlanBNotAvailable;
         }
 
+        if (_sandbox is not null && row.Row.Number == "10" && row.VariantNumber is >= 2 and <= 5)
+        {
+            text += Environment.NewLine + Environment.NewLine + Copy.Test10VariantNotSandboxTestable;
+        }
+
         _rowDetailLabel.Text = text;
     }
 
