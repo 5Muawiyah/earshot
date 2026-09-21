@@ -44,7 +44,7 @@ internal sealed class ChildMessage
     public string? Text { get; init; }
 }
 
-// The message and reply grammar, section 5.2. Every stdout line either carries the prefix and
+// The message and reply grammar. Every stdout line either carries the prefix and
 // decodes to one of hello/prompt/exit/crash, or is transcript. A line with the prefix that this
 // cannot decode is Unreadable, never dropped and never guessed at.
 internal static class Protocol

@@ -127,7 +127,7 @@ public sealed class PendingRunFinderTests
         Assert.AreEqual("20260920T120000Z", pending!.Stamp);
     }
 
-    // M1: a killed second half leaves resume.txt from the first half still on disk and
+    // A killed second half leaves resume.txt from the first half still on disk and
     // result.json still holding the first half's own (stale) data, since the script never reached
     // Complete-LiveTestRun to overwrite it. Before this fix, PendingRunFinder had no idea the
     // second half had ever been attempted and killed, so it read exactly like an untouched

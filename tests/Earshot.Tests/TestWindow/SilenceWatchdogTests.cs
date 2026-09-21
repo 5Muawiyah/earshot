@@ -32,15 +32,16 @@ public sealed class SilenceWatchdogTests
             Assert.IsNotNull(form.CurrentPromptSeqForTests, "the first prompt (Show-Preconditions) never arrived.");
 
             // While a prompt is genuinely pending, silence must never be reported, however long it
-            // has been: section 8.3, "a prompt on screen is never a hang."
+            // has been: a prompt on screen is never a hang.
             form.SetLastActivityUtcForTests(DateTimeOffset.UtcNow.AddHours(-3));
             form.ForceWatchdogTickForTests();
             StringAssert.DoesNotMatch(form.StatusTextForTests, new System.Text.RegularExpressions.Regex("silent"),
                 "the watchdog must not fire while a prompt is on screen, however long ago it appeared.");
 
-            // StepPanel disables its buttons for 800 ms after a prompt appears (click safety,
-            // section 7.4); PerformClick is a no-op on a disabled button (Button.CanSelect is
-            // false while Enabled is false), so the wait must actually elapse, pumped, first.
+            // StepPanel disables its buttons for 800 ms after a prompt appears, to absorb a click
+            // meant for the previous prompt; PerformClick is a no-op on a disabled button
+            // (Button.CanSelect is false while Enabled is false), so the wait must actually
+            // elapse, pumped, first.
             MainFormTestHarness.PumpUntil(() => false, TimeSpan.FromMilliseconds(900));
 
             // The reply is a real button click through the real StepPanel, not a call that

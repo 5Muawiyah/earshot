@@ -67,7 +67,7 @@ public sealed class AbortRecordsTheStopTests
         (ParsedResult? result, string? failure) = EvidenceStore.TryReadResult(resultPath, testId);
         Assert.IsNotNull(result, "result.json did not parse: " + failure);
         Assert.AreEqual("fail", result!.Overall);
-        Assert.IsTrue(result.StoppedEarly, "the stop was not recorded as the 'run' criterion section 6.2 names.");
+        Assert.IsTrue(result.StoppedEarly, "the stop was not recorded as the 'run' criterion that means the script stopped early.");
 
         // StateDeriver's own already-pinned rule 5 ("a criterion with id 'run' means the script
         // stopped early: Failed, 'stopped early'"), reached this time through a real abort rather
@@ -133,7 +133,7 @@ public sealed class AbortRecordsTheStopTests
                 // The abort escaping straight past the script's own catch (it has none broad
                 // enough) still counts: Invoke-GuiHalf.ps1/the fakes driver reports it as a
                 // crash, and result.json is whatever the script's own finally managed to write
-                // before that, which section 6.2's fail-closed reading judges on its own terms.
+                // before that, which the fail-closed reading of result.json judges on its own terms.
                 exitCode = message.ExitCode ?? 3;
                 return true;
             }

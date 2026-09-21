@@ -130,7 +130,7 @@ public sealed class PromptPresenterTests
         Assert.AreEqual("No card seen", presented.Buttons[3].Reply);
     }
 
-    // section 7.3, test 14: no static choices are written for the phone-address note because the
+    // Test 14: no static choices are written for the phone-address note because the
     // script prints the addresses at run time; one button per address seen in the transcript,
     // plus "None of these is my phone".
     [TestMethod]

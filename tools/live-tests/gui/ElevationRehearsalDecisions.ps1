@@ -126,8 +126,8 @@ function Get-DeclinedRecordedOutcome
 
 # The same shape and recompute rule Complete-LiveTestRun uses (none gives inconclusive; any fail
 # gives fail; else any inconclusive gives inconclusive; else pass), written by hand here because
-# this check does not call Complete-LiveTestRun (section 10.2: its own closing check would run
-# device probes against cmd.exe).
+# this check does not call Complete-LiveTestRun: its own closing check would run device probes
+# against cmd.exe, which this rehearsal must not do.
 function Write-ElevationRehearsalResult
 {
     param([Parameter(Mandatory = $true)]$Run)

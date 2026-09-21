@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// M4: the window had no control to run the administrator prompt check, though Copy.LockedDetail
+// Before this fix the window had no control to run the administrator prompt check, though Copy.LockedDetail
 // told the owner to run one. Safety comes first here: this test file must NEVER call
 // StartRehearsal in a way that could reach ChildRunner.Start against the real
 // Test-ElevatedLaunch.ps1, because that raises a real Windows administrator prompt. Every test

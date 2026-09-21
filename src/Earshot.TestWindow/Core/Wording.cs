@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Earshot.TestWindow.Core;
 
-// Reads Data\wording.json and looks an entry up the way section 7.2 describes: by exact
+// Reads Data\wording.json and looks an entry up by exact match: by exact
 // scriptText against the caller's own bound.Question, bound.Text or bound.Consequence, scoped to
 // the row number so two tests sharing an exact sentence never cross-match.
 internal static class Wording
@@ -44,7 +44,7 @@ internal static class Wording
         _ => throw new FormatException("Unknown wording kind '" + value + "'."),
     };
 
-    // No match: the script's own words are shown as the instruction (section 7.2). Never throws
+    // No match: the script's own words are shown as the instruction. Never throws
     // and never guesses a plain line that was not written for this exact sentence.
     internal static WordingEntry? Find(IReadOnlyList<WordingEntry> entries, string test, WordingKind kind, string scriptText)
     {

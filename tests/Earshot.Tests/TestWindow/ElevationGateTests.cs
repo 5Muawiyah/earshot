@@ -96,7 +96,7 @@ public sealed class ElevationGateTests
         Assert.IsNull(ElevationGate.FindNewestRehearsal(root.Path));
     }
 
-    // M8: "newest decides; unreadable is locked." The old FindNewestRehearsal walked every stamp
+    // Newest decides, and unreadable is locked. The old FindNewestRehearsal walked every stamp
     // looking for the newest one that happened to read as a pass, so a newer attempt that crashed,
     // was killed, or wrote a malformed result.json was silently skipped past, and an older genuine
     // pass underneath it unlocked row 15 as though the newest attempt had never happened.

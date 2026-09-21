@@ -69,7 +69,7 @@ try
         -Outcome $declineOutcome.outcome -Detail $declineOutcome.detail
 
     $promptCameToFront = Read-Answer -Run $run -Question 'Did the Windows permission box appear in front of everything, without you looking for it?'
-    Add-Finding -Run $run -Name 'promptCameToFront' -Value $promptCameToFront -Detail 'Not scored: section 10.1 names this unknown until observed.'
+    Add-Finding -Run $run -Name 'promptCameToFront' -Value $promptCameToFront -Detail 'Not scored: whether the prompt came to the front is unknown until this rehearsal has actually observed it.'
 }
 catch
 {
@@ -78,9 +78,10 @@ catch
 }
 finally
 {
-    # section 10.2: "leftAtRest = not-applicable (this check starts cmd.exe only)". Added the
-    # same way Complete-LiveTestRun records every other leftAtRest value: as a finding, never a
-    # separate member, so ParsedResult.LeftAtRest reads it identically either way.
+    # leftAtRest is not-applicable here because this check starts cmd.exe only, not the AirPods
+    # device path. Added the same way Complete-LiveTestRun records every other leftAtRest value:
+    # as a finding, never a separate member, so ParsedResult.LeftAtRest reads it identically
+    # either way.
     Add-Finding -Run $run -Name 'leftAtRest' -Value 'not-applicable' -Detail 'This check starts cmd.exe only.'
     $overall = Write-ElevationRehearsalResult -Run $run
     Write-Host ('Administrator prompt check finished: ' + $overall)

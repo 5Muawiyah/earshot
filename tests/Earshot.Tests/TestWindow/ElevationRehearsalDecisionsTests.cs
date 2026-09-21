@@ -60,7 +60,7 @@ public sealed class ElevationRehearsalDecisionsTests
         Assert.AreEqual("fail", result.GetProperty("outcome").GetString());
     }
 
-    // M5: only an error naming Windows' own cancellation code (1223, ERROR_CANCELLED) is a
+    // Only an error naming Windows' own cancellation code (1223, ERROR_CANCELLED) is a
     // recorded decline. LiveTest.psm1's own catch comment names it: "a declined prompt reports
     // 1223".
     [TestMethod]

@@ -41,9 +41,9 @@ public sealed class Test10VariantSmokeTests
 
         var options = new SandboxOptions { Folder = sandbox.Path };
 
-        // First half: no criteria at all, only the stateBeforeRestart finding (section 6.1's
-        // half-marker table), so Get-LiveTestExitCode's own rule reads this as inconclusive (2),
-        // never a pass. 2 is the correct, expected exit here.
+        // First half: no criteria at all, only the stateBeforeRestart finding (test 10's own
+        // half-marker for telling its first half apart), so Get-LiveTestExitCode's own rule reads
+        // this as inconclusive (2), never a pass. 2 is the correct, expected exit here.
         RunHalfToExit(host, driver, script, runRoot, options, testId, variant: 1, resume: false, out int exitCode);
         Assert.AreEqual(2, exitCode, "10-ShutdownMessages.ps1 variant 1's first half did not read inconclusive.");
 

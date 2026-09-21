@@ -90,7 +90,7 @@ public sealed class BannerTests
         Assert.AreEqual(BannerLevel.Red, banner.Level, "A newer run with no result.json must not be shadowed by an older good one.");
     }
 
-    // M1: a killed second half leaves the first half's own stale result.json behind, unrewritten,
+    // A killed second half leaves the first half's own stale result.json behind, unrewritten,
     // since the script never reached Complete-LiveTestRun. That stale record can carry any
     // leftAtRest value the first half itself recorded (here, "yes", as a two-half test whose first
     // half already left the nodes blocked correctly would); before this fix, Banner.Compute had no

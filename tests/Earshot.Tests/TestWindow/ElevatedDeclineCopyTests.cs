@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// section 10.3: "declined-prompt copy derived from a fixture." Each case below is the exact
-// criteria-outcome shape a real result.json would carry for that situation.
+// The declined-prompt copy is derived from a fixture, not asserted from memory. Each case below
+// is the exact criteria-outcome shape a real result.json would carry for that situation.
 [TestClass]
 public sealed class ElevatedDeclineCopyTests
 {

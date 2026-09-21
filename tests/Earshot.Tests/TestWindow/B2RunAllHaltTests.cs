@@ -18,7 +18,7 @@ public sealed class B2RunAllHaltTests
         string liveTestRoot = Path.Combine(sandbox.Path, "local", "Earshot", "livetest");
 
         // Row 01, stopped before any step: the shape a declined Show-Preconditions leaves
-        // (section 6.2's own "stopped before any step": no criteria, no steps).
+        // (no criteria, no steps, the fail-closed rules' own definition of "stopped before any step").
         string folder = Path.Combine(liveTestRoot, "20260920T000000Z", "01-a2dp-oneshot");
         ResultJsonFixture.WriteTo(Path.Combine(folder, "result.json"), new ResultJsonFixture("01-a2dp-oneshot", "inconclusive").Build());
 
@@ -53,7 +53,7 @@ public sealed class B2RunAllHaltTests
         }
 
         // Row 04's first half, waiting for its restart: resume.txt present, first-half markers
-        // recorded (section 6.1's own half-marker table for 04).
+        // recorded, matching the half-marker criteria ids row 04 uses to tell its own halves apart.
         string folder = Path.Combine(liveTestRoot, "20260920T000000Z", "04-block-and-reboot");
         ResultJsonFixture.WriteTo(Path.Combine(folder, "result.json"),
             new ResultJsonFixture("04-block-and-reboot", "pass")

@@ -14,7 +14,7 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
 
-        // M6: --sandbox's presence and its actual, valid folder are decided together, once, here.
+        // --sandbox's presence and its actual, valid folder are decided together, once, here.
         // sandboxRequested (used both by the refusal below and to build the real SandboxOptions
         // MainForm gets) is true only when a valid folder was actually parsed; the switch present
         // with nothing usable after it is its own refusal, never a silent fall-through to a REAL,

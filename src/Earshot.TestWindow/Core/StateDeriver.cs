@@ -89,8 +89,8 @@ internal static class StateDeriver
         return DeriveFromSecondHalf(spec, verdictRun, verdict, chosenExePath, chosenExeLastWriteUtc, historyNote);
     }
 
-    // Section 6.2: "the newest stamp holding that TestId whose result.json records at least one
-    // criterion, or for test 10's first halves the first-half finding". Runs that are well formed
+    // The verdict run is the newest stamp holding that TestId whose result.json records at least one
+    // criterion, or for test 10's first halves the first-half finding. Runs that are well formed
     // but stopped before any step are skipped and remembered as history, newest one only. A read
     // failure is remembered separately: it never masquerades as "stopped before any step".
     private static (RunEvidence? Verdict, HalfKind Half, string? HistoryNote, RunEvidence? NewestUnreadable) FindVerdictRun(
@@ -113,7 +113,7 @@ internal static class StateDeriver
                 spec.FirstHalfOnlyFindingNames.Count > 0 &&
                 spec.FirstHalfOnlyFindingNames.Any(name => result.Findings.Any(f => f.Name == name));
 
-            // section 9.2: starting a fresh run over a pending one sets the old one aside, only on
+            // Starting a fresh run over a pending one sets the old one aside, only on
             // a Yes. A set-aside first half is no longer this row's pending evidence; it is
             // skipped here exactly as a stopped-before-any-step run is, so an older real verdict
             // underneath it is still found.
@@ -159,7 +159,7 @@ internal static class StateDeriver
         return HalfKind.NotApplicable;
     }
 
-    // Section 6.2, "First half only": never the test's pass. resume.txt present is the ordinary
+    // A first half is never the test's pass on its own. resume.txt present is the ordinary
     // case (Waiting); its exception is 05, where no resume.txt means the owner declined the
     // optional restart and the first half is the whole test.
     private static DerivedRowState DeriveFromFirstHalf(
@@ -178,8 +178,8 @@ internal static class StateDeriver
             return new DerivedRowState { Kind = waitingKind, HistoryNote = historyNote, LeftAtRest = verdict.LeftAtRest };
         }
 
-        // A first half with no resume.txt to continue it, and not 05's declined-restart shape:
-        // section 6.2 does not say what this means, so it is read as evidence that does not
+        // A first half with no resume.txt to continue it, and not 05's declined-restart shape,
+        // is a shape the fail-closed rules do not cover, so it is read as evidence that does not
         // settle anything, fail closed, rather than guessed either way.
         return new DerivedRowState
         {
@@ -190,7 +190,7 @@ internal static class StateDeriver
         };
     }
 
-    // Section 6.2, "Two halves": Passed needs the second half's pass, the first half's snapshot
+    // For a two-half test, Passed needs the second half's pass, the first half's snapshot
     // must itself have passed, and 08/09 need a confirmed power-down.
     private static DerivedRowState DeriveFromSecondHalf(
         TestRowSpec spec, RunEvidence run, ParsedResult verdict, string? chosenExePath, DateTimeOffset? chosenExeLastWriteUtc, string? historyNote)
@@ -242,7 +242,7 @@ internal static class StateDeriver
         return firstHalfIsInconclusiveByDesign && snapshot.Overall == "inconclusive";
     }
 
-    // Base pass/fail/inconclusive plus the earlier-build check, which section 6.2 applies to
+    // Base pass/fail/inconclusive plus the earlier-build check, which the fail-closed rules apply to
     // every row, one half or two.
     private static DerivedRowState BuildLeafState(
         RunEvidence run, ParsedResult result, string? chosenExePath, DateTimeOffset? chosenExeLastWriteUtc,

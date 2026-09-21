@@ -76,9 +76,9 @@ public sealed class PowerCycleTests
     public void The109UsedIsTheNewestOneStrictlyBeforeTheNewestStartNotAnOlderOne()
     {
         // Two 109 rows before the start: a restart, then (older) a power-down. The newest of the
-        // two (the restart) decides, matching section 9.3's "a mistaken restart is put right by a
-        // proper shut down": here it is the other way round on purpose, to prove "newest" wins
-        // rather than "any".
+        // two (the restart) decides, matching the power-cycle rule that a mistaken restart is put
+        // right by a proper shut down: here it is the other way round on purpose, to prove "newest"
+        // wins rather than "any".
         string json = """
             {
                 "kernelGeneral12":[{"utc":"2026-09-20T08:00:00Z"}],

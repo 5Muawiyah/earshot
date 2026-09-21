@@ -329,7 +329,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         return (result, problems);
     }
 
-    // design.md section 7.1's own reply grammar (SandboxFakesSmokeTests/Test10VariantSmokeTests):
+    // The reply grammar each helper expects (SandboxFakesSmokeTests/Test10VariantSmokeTests):
     // Wait-Owner's Yes is an empty line (the fake machine is moved automatically by
     // Run-GuiHalfAgainstFakes.ps1's own Read-Host wrapper, from the Text it was given, not from
     // what is typed back). Read-Answer and Read-Note are answered from Fakes.psm1's own tables

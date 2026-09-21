@@ -2,7 +2,7 @@ using Earshot.TestWindow.Core;
 
 namespace Earshot.TestWindow.Ui;
 
-// Renders one ResultPresentation (section 12): the failure list, the script's own errors, and
+// Renders one ResultPresentation: the failure list, the script's own errors, and
 // the leftAtRest line. Holds no decisions: ResultPresenter and Copy already made them.
 internal sealed class ResultPanel : Panel
 {
@@ -104,7 +104,7 @@ internal sealed class ResultPanel : Panel
 
         if (_failureList.Items.Count > 0)
         {
-            // First failed first (section 12): the first row is shown in full without waiting
+            // First failed first: the first row is shown in full without waiting
             // for a click, so nothing is hidden by the ellipsis by default.
             _failureList.Items[0].Selected = true;
         }

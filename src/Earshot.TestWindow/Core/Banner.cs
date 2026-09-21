@@ -110,7 +110,7 @@ internal static class Banner
                 string testId = Path.GetFileName(testFolder);
                 (ParsedResult? result, _) = EvidenceStore.TryReadResult(Path.Combine(testFolder, "result.json"), testId);
 
-                // M1: a killed run (section 8.3's hard stop) leaves whatever result.json it found
+                // A killed run (the window's own forced hard stop) leaves whatever result.json it found
                 // on disk untouched, most often a second half's own first-half snapshot never
                 // reached Complete-LiveTestRun to overwrite. That stale record can carry any
                 // leftAtRest a first half legitimately records; treated as an ordinary readable

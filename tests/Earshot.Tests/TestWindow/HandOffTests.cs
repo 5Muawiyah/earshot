@@ -72,7 +72,7 @@ public sealed class HandOffTests
         });
     }
 
-    // M7: a declined start (No at Show-Preconditions) never reaches the point of writing
+    // A declined start (No at Show-Preconditions) never reaches the point of writing
     // resume.txt, so there is nothing for the hand-off screen's "come back and this window will
     // pick up here" to be about. Real sandboxed run against the unchanged fakes, real button
     // clicks, not a fixture standing in for OnRunFinished's own decision.

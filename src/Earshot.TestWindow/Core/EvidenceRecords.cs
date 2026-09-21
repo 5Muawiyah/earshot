@@ -34,10 +34,11 @@ internal sealed class ParsedResult
     public DateTimeOffset? StartedUtc { get; init; }
     public DateTimeOffset? FinishedUtc { get; init; }
 
-    // Section 6.2 rule 5: a criterion with id "run" means the script stopped early.
+    // One of the fail-closed rules for reading result.json: a criterion with id "run" means
+    // the script stopped early.
     public bool StoppedEarly => Criteria.Any(c => string.Equals(c.Id, "run", StringComparison.Ordinal));
 
-    // Section 6.2's own definition of "stopped before any step": no criteria, no steps.
+    // "Stopped before any step" means no criteria and no steps recorded.
     // A well-formed, honestly empty result, not a parse failure.
     public bool IsStoppedBeforeAnyStep => Criteria.Count == 0 && StepCount == 0;
 
@@ -56,11 +57,11 @@ internal enum HalfKind
 }
 
 // One run folder's evidence for one test: what result.json (if any) held, the first-half
-// snapshot the window takes at the power-cycle boundary (section 9.1), whether resume.txt and
-// gui-set-aside.txt are present, and the power-cycle verdict recorded before a second half ran
-// (section 9.3). ReadFailureReason is set, and Result is null, exactly when the fail-closed
-// checks in section 6.2 could not validate result.json; in every such case the row this
-// evidence feeds is Unknown.
+// snapshot the window takes before shutting down or restarting at the power-cycle boundary,
+// whether resume.txt and gui-set-aside.txt are present, and the power-cycle verdict recorded
+// before a second half ran. ReadFailureReason is set, and Result is null, exactly when the
+// fail-closed checks that read result.json could not validate it; in every such case the row
+// this evidence feeds is Unknown.
 internal sealed class RunEvidence
 {
     public required string Stamp { get; init; }
@@ -72,9 +73,9 @@ internal sealed class RunEvidence
     public bool HasResumeFile { get; init; }
     public bool HasSetAsideFile { get; init; }
 
-    // section 8.3: the window's own marker, written only when it has forcibly killed the child
-    // that owned this run folder. gui- prefixed, additive (section 8.4); never written by any
-    // shipped script.
+    // The window's own marker, written only when it has forcibly killed the child
+    // that owned this run folder. gui- prefixed and additive to result.json's own fields; never
+    // written by any shipped script.
     public bool HasKilledMarker { get; init; }
     public string? PowerCycleVerdict { get; init; }
 

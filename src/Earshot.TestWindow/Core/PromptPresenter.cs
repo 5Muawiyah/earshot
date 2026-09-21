@@ -39,8 +39,8 @@ internal static class PromptPresenter
             throw new ArgumentException("Not a prompt message.", nameof(message));
         }
 
-        // Options come from bound.Options when present, else from the prompt text [a/b/c]
-        // (section 7.2). Read-Answer is the only caller that ever carries either.
+        // Options come from bound.Options when present, else from the prompt text [a/b/c].
+        // Read-Answer is the only caller that ever carries either.
         IReadOnlyList<string>? boundOptions = ReadOptionsFromBound(message);
         IReadOnlyList<string>? textOptions = ReadOptionsFromPromptText(message.Prompt);
         bool optionsDisagree = boundOptions is not null && textOptions is not null &&
@@ -139,7 +139,7 @@ internal static class PromptPresenter
         };
     }
 
-    // Section 7.3's fixed relabelling for the two tests whose Read-Answer offers on/off/leave
+    // The fixed relabelling for the two tests whose Read-Answer offers on/off/leave
     // rather than yes/no/unsure. Every other option keeps its own word as its label (Yes, No,
     // Not sure are handled by the caller through the ordinary yes/no/unsure path below).
     private static string OptionButtonLabel(string option, string question) => option switch
@@ -178,7 +178,7 @@ internal static class PromptPresenter
         }
         else
         {
-            // section 7.3, test 14: no static choices are written for this one because the
+            // Test 14: no static choices are written for this one because the
             // addresses are printed at run time. One button per address the script has just
             // printed, sending that address, and "None of these is my phone" (empty, which the
             // script records as inconclusive). No address lines parsed: only the last button.

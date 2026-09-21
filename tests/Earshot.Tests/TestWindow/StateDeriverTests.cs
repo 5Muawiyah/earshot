@@ -94,8 +94,8 @@ public sealed class StateDeriverTests
         Assert.AreEqual(RowStateKind.WaitingForShutDown, state.Kind);
     }
 
-    // M3: test 10's first half is inconclusive by design (section 6.1: "First half only: finding
-    // stateBeforeRestart, no criteria at all"). With resume.txt present that must still read as
+    // Test 10's first half is inconclusive by design: its half-marker is the stateBeforeRestart
+    // finding, with no criteria at all. With resume.txt present that must still read as
     // waiting for the restart, the same as every other two-half test's first-half pass; it must
     // never read as Failed just because its own result.json's overall is "inconclusive" rather
     // than "pass".
@@ -125,7 +125,7 @@ public sealed class StateDeriverTests
         StringAssert.Contains(state.Qualifier, "restart half not run");
     }
 
-    // M3: test 10's first half is inconclusive by design (no criteria, only the stateBeforeRestart
+    // Test 10's first half is inconclusive by design (no criteria, only the stateBeforeRestart
     // finding), so its snapshot's own overall is "inconclusive", never "pass". DeriveFromSecondHalf
     // used to require the snapshot's overall to equal "pass" before letting the second half's pass
     // through, so no test 10 row could ever show Passed at all, on any build, ever, even with a
@@ -252,7 +252,7 @@ public sealed class StateDeriverTests
         StringAssert.Contains(state.Qualifier, "on an earlier build");
     }
 
-    // M2: an absent exe, an absent startedUtc, or a chosen exe that cannot currently be found must
+    // An absent exe, an absent startedUtc, or a chosen exe that cannot currently be found must
     // each read as a build-not-confirmed qualifier, never as a clean green pass. Before the fix
     // EarlierBuildQualifier required both result.Exe and result.StartedUtc to be present before it
     // would compare anything, so a result.json missing either field, or a chosen exe path whose

@@ -41,7 +41,7 @@ public sealed class WindowsShutdownCloseTests
             Assert.AreEqual(0, dialogCalls, "no modal dialog may be shown on the Windows shutdown path: it blocks WM_QUERYENDSESSION rather than answering it.");
             StringAssert.Contains(form.Text, "a test is still running");
 
-            // section 4.4: "if the owner forces it" - a second attempt must not cancel again,
+            // If the owner forces it, a second attempt must not cancel again,
             // or the window could make itself the one thing blocking a shutdown forever.
             FormClosingEventArgs second = form.RaiseFormClosingForTests(CloseReason.WindowsShutDown);
             Assert.IsFalse(second.Cancel, "a second Windows shutdown attempt must be let through.");

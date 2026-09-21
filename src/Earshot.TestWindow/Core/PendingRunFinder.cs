@@ -23,12 +23,12 @@ internal static class PendingRunFinder
                 continue;
             }
 
-            // M1: a killed second half leaves resume.txt from the first half still here, and
+            // A killed second half leaves resume.txt from the first half still here, and
             // result.json still holding the first half's own stale data, since the killed script
             // never reached Complete-LiveTestRun to overwrite it. Without this, that stale record
             // read exactly like an untouched, never-attempted first-half pass, and the row offered
             // "Carry on with the second half" again, over evidence StateDeriver's own killed-marker
-            // check (section 8.3) already reads as Unknown.
+            // check already reads as Unknown.
             if (File.Exists(Path.Combine(folder, "gui-killed.txt")))
             {
                 continue;

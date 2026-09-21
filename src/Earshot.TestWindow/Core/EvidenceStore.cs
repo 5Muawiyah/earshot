@@ -17,7 +17,7 @@ internal static partial class EvidenceStore
     // Every run folder for one TestId under the live test root, newest stamp first. A stamp
     // format sorts lexically the same as chronologically (yyyyMMdd'T'HHmmss'Z', UTC), so an
     // ordinal sort needs no date parsing. Anything under the root whose top folder is not a
-    // stamp, or that holds no folder named exactly TestId, is ignored, as section 6.2 says.
+    // stamp, or that holds no folder named exactly TestId, is ignored: it is not this test's evidence.
     internal static IReadOnlyList<(string Stamp, string Folder)> FindRunFolders(string liveTestRoot, string testId)
     {
         var found = new List<(string Stamp, string Folder)>();
@@ -59,8 +59,9 @@ internal static partial class EvidenceStore
     }
 
     // Everything this run folder can tell the deriver about one test: its own result.json, the
-    // first-half snapshot the window takes at the power-cycle boundary (section 9.1), whether
-    // resume.txt or gui-set-aside.txt are present, and the power-cycle verdict (section 9.3).
+    // first-half snapshot the window takes before shutting down or restarting at the power-cycle
+    // boundary, whether resume.txt or gui-set-aside.txt are present, and the power-cycle verdict
+    // (power-down, restart, not-yet or unknown) recorded before a second half ran.
     internal static RunEvidence ReadRunEvidence(string stamp, string folder, string testId)
     {
         (ParsedResult? result, string? failure) = TryReadResult(Path.Combine(folder, "result.json"), testId);
@@ -84,8 +85,8 @@ internal static partial class EvidenceStore
         };
     }
 
-    // The fail-closed read, section 6.2 rules 1 to 5. Every early return is a rule from that
-    // section; the comment beside each one names it.
+    // The fail-closed read of result.json. Every early return below enforces one rule for
+    // trusting that file, and the comment beside each one names which rule it is.
     internal static (ParsedResult? Result, string? FailureReason) TryReadResult(string path, string expectedTestId)
     {
         if (!File.Exists(path))
@@ -389,7 +390,7 @@ internal static partial class EvidenceStore
         return null;
     }
 
-    // gui-power-cycle.json (section 9.3): { ..., "verdict": "power-down" | "restart" | "not-yet" | "unknown" }.
+    // gui-power-cycle.json holds the power-cycle verdict: { ..., "verdict": "power-down" | "restart" | "not-yet" | "unknown" }.
     // Written by PowerCycle.cs in a later slice; read here as plain data, decided by nothing else.
     private static string? TryReadPowerCycleVerdict(string path)
     {

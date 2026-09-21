@@ -48,7 +48,7 @@ internal sealed class MainForm : Form
     private BannerState _banner = new() { Level = BannerLevel.None };
     private readonly List<string> _transcript = new();
 
-    // section 8.3: the silence watchdog and the abort/kill sequence. A prompt on screen is never
+    // The silence watchdog and the abort/kill sequence. A prompt on screen is never
     // a hang (test 12 waits hours at one), so the watchdog only ever looks at silence while
     // _currentPromptSeq is null. _killDeadlineUtc is set once, either by an abort waiting for a
     // natural exit or (implicitly, by going straight to the confirmation) when Stop is clicked
@@ -58,9 +58,9 @@ internal sealed class MainForm : Form
     private DateTimeOffset? _killDeadlineUtc;
     private bool _silenceWarningShown;
 
-    // section 11: Run all's own state, held only in memory plus run-all.json; never consulted by
-    // StateDeriver, so a row's own state is always exactly what section 6.2 says regardless of
-    // whether Run all is active.
+    // Run all's own state, held only in memory plus run-all.json; never consulted by
+    // StateDeriver, so a row's own state is always exactly what the fail-closed evidence rules say
+    // regardless of whether Run all is active.
     private bool _runAllActive;
     private int _runAllIndex = -1;
     private readonly Dictionary<string, string> _runAllPointers = new(StringComparer.Ordinal);
@@ -103,8 +103,8 @@ internal sealed class MainForm : Form
         _startButton = new Button { Text = "Start", Dock = DockStyle.Top, Height = 32 };
         _startButton.Click += (_, _) => StartSelectedRow();
 
-        // section 8.2: "the form only renders the current prompt, the transcript box and a Stop
-        // button", standing throughout a run, not only for the rare unrecognised-prompt case
+        // The form only renders the current prompt, the transcript box and a Stop
+        // button, standing throughout a run, not only for the rare unrecognised-prompt case
         // StepPanel's own built-in stop button covers.
         _stopButton = new Button { Text = "Stop the test", Dock = DockStyle.Top, Height = 28, Enabled = false };
         _stopButton.Click += (_, _) => OnStopClicked();
@@ -487,7 +487,7 @@ internal sealed class MainForm : Form
 
     // A row of Halves 2 (04, 05, 08, 09, 15, and each of 10's five variants) is pending when its
     // newest run folder holds resume.txt, its result.json is a first-half result, and it has not
-    // been set aside (section 9.2). Because each variant carries its own TestId, this can never
+    // been set aside by a deliberate fresh start. Because each variant carries its own TestId, this can never
     // find another variant's pending run: "resume lands on the same row and the same variant" by
     // construction, not by an extra check here.
     private PendingRun? FindPendingRun(DisplayRow row) =>
@@ -589,8 +589,8 @@ internal sealed class MainForm : Form
         BeginRun(row, runner, Path.Combine(runRoot, row.TestId), isResume: false);
     }
 
-    // section 9.2: "A resumed run always uses the pending run's -RunRoot; the window never makes
-    // a new root for a second half." resume.txt is parsed by ResumeFile, never executed; only its
+    // A resumed run always uses the pending run's -RunRoot; the window never makes
+    // a new root for a second half. resume.txt is parsed by ResumeFile, never executed; only its
     // four validated values (script, exe, root, variant) are ever used to start anything.
     private void StartResumedSecondHalf(string host, DisplayRow row, PendingRun pending)
     {
@@ -604,7 +604,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // section 9.3: "since" is the first-half snapshot's finishedUtc, else resume.txt's last
+        // "since" is the first-half snapshot's finishedUtc, else resume.txt's last
         // write time.
         DateTimeOffset since = FirstHalfSnapshotFinishedUtc(pending.Folder, row.TestId) ?? File.GetLastWriteTimeUtc(resumeTxtPath);
         string probeScript = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Get-PowerCycleEvidence.ps1");
@@ -673,7 +673,7 @@ internal sealed class MainForm : Form
         if (_runAllActive)
         {
             // The stamp folder is resultFolder's own parent (<runRoot>\<TestId>): the pointer
-            // section 11 asks run-all.json to keep for this item, keyed the same as
+            // run-all.json keeps for this item, keyed the same as
             // RunAllOrder's own item (RunAllKey, e.g. "10v3").
             string? stamp = Path.GetFileName(Path.GetDirectoryName(resultFolder));
             if (stamp is not null)
@@ -717,7 +717,7 @@ internal sealed class MainForm : Form
             case ChildMessageKind.Hello:
                 break;
             case ChildMessageKind.Prompt:
-                // section 8.3: "a prompt on screen is never a hang." While one is pending the
+                // A prompt on screen is never a hang. While one is pending the
                 // silence watchdog has nothing to say, and Stop's own behaviour changes: it can
                 // abort this exact seq rather than only wait-then-kill.
                 _currentPromptSeq = message.Seq;
@@ -787,7 +787,7 @@ internal sealed class MainForm : Form
         PopulateRows();
         UpdateStartButton();
 
-        // section 12: "The halt is decided from result.json, never from the click." Whatever
+        // The halt is decided from result.json, never from the click. Whatever
         // just finished, Run all (if active) re-derives this same item from disk and decides
         // afresh whether to stop here or move itself on; it never trusts what this method above
         // just did with the panels.
@@ -797,7 +797,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    // section 8.3: Stop's own two paths. A prompt pending: send the real abort down the wire and
+    // Stop's own two paths. A prompt pending: send the real abort down the wire and
     // let the script's own catch/finally run, same as a real owner clicking Stop inside StepPanel
     // for an unrecognised prompt; nothing pending: there is no seq anything is waiting to read, so
     // waiting for it to arrive on its own would never end, and the second confirmation is asked
@@ -835,8 +835,8 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // section 8.3: "no prompt pending and no stdout line for MaxSilenceSeconds. The window
-        // then asks, and does nothing by itself." Shown once per silent stretch, on the status
+        // A hang is no prompt pending and no stdout line for MaxSilenceSeconds. The window
+        // then asks, and does nothing by itself. Shown once per silent stretch, on the status
         // line rather than a modal, so it never blocks the Stop button it is telling the owner
         // about.
         if (_currentPromptSeq is null && !_silenceWarningShown)
@@ -928,7 +928,7 @@ internal sealed class MainForm : Form
         UpdateStartButton();
 
         // A forced kill is the owner overriding the sequence, not a script-decided outcome: Run
-        // all treats it exactly like an ordinary halt on failure (section 12), never advanced
+        // all treats it exactly like an ordinary halt on failure, never advanced
         // past on its own.
         if (_runAllActive && row is not null)
         {
@@ -936,7 +936,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    // section 11: the guided sequence. Walks RunAllOrder from _runAllIndex; test 10's five
+    // Run all's guided sequence. Walks RunAllOrder from _runAllIndex; test 10's five
     // variants are ordinary items here (each is its own DisplayRow with its own RunAllKey), never
     // skipped. It starts at most one child per call, then returns and waits for OnRunFinished to
     // call back in; it never loops past a row that is not yet a clean pass on disk.
@@ -1024,9 +1024,9 @@ internal sealed class MainForm : Form
                 : Copy.RunAllStoppedForFailure(row.Number);
 
         // At the power-cycle boundary the row's own "Carry on with the second half" button
-        // (section 9.2) is the deliberate click that resumes Run all too, through
+        // is the deliberate click that resumes Run all too, through
         // OnRunFinished -> AdvanceRunAll above; an ordinary failure needs its own
-        // acknowledgement first (section 12: "Until it is pressed, Run all stays halted").
+        // acknowledgement first: until it is pressed, Run all stays halted.
         _runAllCarryOnButton.Visible = !atPowerCycleBoundary;
     }
 
@@ -1099,9 +1099,10 @@ internal sealed class MainForm : Form
         }
     }
 
-    // section 9.1: "read result.json; show leftAtRest; parse resume.txt; copy result.json and
-    // summary.txt to their gui-first-half.* names. ... Then, and only then, the hand-off screen."
-    // The snapshot is taken here, additively, before anything else touches this folder again.
+    // The hand-off to the second half proceeds in order: read result.json; show leftAtRest; parse
+    // resume.txt; copy result.json and summary.txt to their gui-first-half.* names; then, and only
+    // then, the hand-off screen. The snapshot is taken here, additively, before anything else
+    // touches this folder again.
     private void ShowHandOff(DisplayRow row, ParsedResult firstHalfResult)
     {
         FirstHalfSnapshot.Take(_activeResultFolder!);

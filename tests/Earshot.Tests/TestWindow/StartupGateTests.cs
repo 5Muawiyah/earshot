@@ -42,10 +42,11 @@ public sealed class StartupGateTests
         Assert.AreEqual(StartupRefusal.None, refusal);
     }
 
-    // M6: "--sandbox with no folder starts REAL mode with the environment refusal bypassed."
-    // sandboxArgumentWithoutValidFolder must refuse outright, before the environment-variable
-    // check ever gets a chance to see sandboxRequested as a reason to let it through: a caller
-    // that could not parse a folder must never also pass sandboxRequested true.
+    // The defect this guards against: --sandbox with no folder starting REAL mode with the
+    // environment refusal bypassed. sandboxArgumentWithoutValidFolder must refuse outright,
+    // before the environment-variable check ever gets a chance to see sandboxRequested as a
+    // reason to let it through: a caller that could not parse a folder must never also pass
+    // sandboxRequested true.
     [TestMethod]
     public void SandboxArgumentWithoutAFolderRefusesEvenWithTheSafetyVariablesSet()
     {

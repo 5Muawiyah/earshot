@@ -31,7 +31,7 @@ internal sealed class DisplayRow
 
     public TestRowSpec ToSpec() => Variant is null ? Row.ToSpec() : Row.ToVariantSpec(Variant);
 
-    // Section 6.1: "Variant 4 waits on Windows Update offering a restart; the row says so." The
+    // Variant 4 waits on Windows Update offering a restart, so the row says so; it is the
     // only variant whose physical action is not fully in the owner's own hands.
     public bool WaitsOnWindowsUpdate => Variant is { Variant: 4 };
 
