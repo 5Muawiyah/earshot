@@ -211,7 +211,7 @@ internal sealed class MainForm : Form
         listBottomPanel.Controls.Add(_speakerChoiceRow);
         listBottomPanel.Controls.Add(_speakerChoiceLabel);
 
-        _startButton = new Button { Text = "Start", Width = 160, Height = 36, Margin = new Padding(4) };
+        _startButton = new Button { Text = Copy.StartThisTestButtonLabel, Width = 160, Height = 36, Margin = new Padding(4) };
         _startButton.Click += (_, _) => StartSelectedRow();
 
         _backButton = new Button { Text = Copy.ListBackButtonLabel, Width = 100, Height = 36, Margin = new Padding(4) };
@@ -245,7 +245,7 @@ internal sealed class MainForm : Form
         // much larger answer buttons above it, rather than docked above everything the way it used
         // to sit: "Stop this test" must never read as one of the answers to whatever question is
         // currently on screen.
-        _stopButton = new Button { Text = "Stop the test", AutoSize = true, Height = 24, Enabled = false };
+        _stopButton = new Button { Text = "Stop the test", AutoSize = true, Height = 24, Enabled = false, Visible = false };
         _stopButton.Click += (_, _) => OnStopClicked();
 
         _watchdogTimer = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -912,7 +912,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        _bannerLabel.Text = _banner.Message;
+        _bannerLabel.Text = _showTechnicalDetails ? _banner.Message ?? string.Empty : Copy.BannerPlainText(_banner.Level);
         _bannerLabel.ForeColor = _banner.Level == BannerLevel.Red ? Color.White : Color.Black;
         _bannerLabel.BackColor = _banner.Level == BannerLevel.Red ? Color.Firebrick : Color.Goldenrod;
         _bannerLabel.Visible = true;
@@ -1062,7 +1062,7 @@ internal sealed class MainForm : Form
         if (index < 0 || index >= _displayRows.Count)
         {
             _startButton.Enabled = false;
-            _startButton.Text = "Start";
+            _startButton.Text = Copy.StartThisTestButtonLabel;
             return;
         }
 
@@ -1071,7 +1071,7 @@ internal sealed class MainForm : Form
         bool lockedByBanner = RefreshBanner().RowsLockedExceptRestore && row.Row.Number != "00";
 
         PendingRun? pending = FindPendingRun(row);
-        _startButton.Text = pending is not null ? "Carry on with the second half" : "Start";
+        _startButton.Text = pending is not null ? Copy.CarryOnSecondHalfButtonLabel : Copy.StartThisTestButtonLabel;
         _startButton.Enabled = _activeRunner is null && !lockedByBanner && !IsElevationLocked(row);
     }
 
@@ -1330,6 +1330,7 @@ internal sealed class MainForm : Form
         _windowsShutdownCancelledOnce = false;
         _lastActivityUtc = DateTimeOffset.UtcNow;
         _stopButton.Enabled = true;
+        _stopButton.Visible = true;
         _runAllButton.Enabled = false;
 
         if (_runAllActive)
@@ -1558,6 +1559,7 @@ internal sealed class MainForm : Form
         _currentPromptSeq = null;
         _killDeadlineUtc = null;
         _stopButton.Enabled = false;
+        _stopButton.Visible = false;
         _runAllButton.Enabled = true;
         PopulateRows();
         UpdateStartButton();
@@ -1752,6 +1754,7 @@ internal sealed class MainForm : Form
         _currentPromptSeq = null;
         _killDeadlineUtc = null;
         _stopButton.Enabled = false;
+        _stopButton.Visible = false;
         _runAllButton.Enabled = true;
         PopulateRows();
         UpdateStartButton();
@@ -2235,6 +2238,8 @@ internal sealed class MainForm : Form
     internal void RaiseActivatedForTests() => OnWindowActivated(this, EventArgs.Empty);
 
     internal bool BannerVisibleForTests => _bannerLabel.Visible;
+
+    internal string BannerTextForTests => _bannerLabel.Text;
 
     // View-switching test seams (see the class remark and SwitchToView above). A later commit's
     // Step/Result tests build on these the same way.

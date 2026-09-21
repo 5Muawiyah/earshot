@@ -223,6 +223,26 @@ internal static class Copy
     internal static string AtRestOnPurpose(string reason) =>
         "Left able to grab them on purpose. " + reason + " Shut down as the test asks, or run Restore to put it back.";
 
+    // The at-rest banner shown at the top of Home. Banner.Compute only ever returns Red or Amber
+    // here (None never reaches this: MainForm hides the banner outright for it), and it never says
+    // which exact leftAtRest value caused Red (no, unknown, unreadable, or a newer run whose result
+    // cannot be trusted): that collapsing is deliberate, fail-closed design in Banner.cs itself, so
+    // this reuses the SAME corrected advice (AtRestNo, click the Earshot icon first, Restore only as
+    // the fallback) for every Red cause rather than inventing a finer distinction Banner.cs does not
+    // expose. Amber (left enabled on purpose, for a test still in progress) gets its own short plain
+    // line, since "Left enabled on purpose." (Banner.cs's own internal caption) says nothing plain
+    // about what "enabled" means or what to do about it.
+    internal const string BannerAmberPlain =
+        "This computer's AirPods connection was left able to grab them, on purpose, so a test still in " +
+        "progress could finish. No action is needed yet; the test itself will say when to shut down.";
+
+    internal static string BannerPlainText(BannerLevel level) => level switch
+    {
+        BannerLevel.Red => AtRestNo,
+        BannerLevel.Amber => BannerAmberPlain,
+        _ => string.Empty,
+    };
+
     // The hand-off screen. Tests 04, 15 and 05 say restart; each variant of 10 shows the script's
     // own instruction, so HandOffRestart and HandOffAnyStart draw the same shape as
     // HandOffShutDown rather than quoting text that was never given.
@@ -523,6 +543,12 @@ internal static class Copy
 
     // List view ("Choose one test").
     internal const string ListBackButtonLabel = "Back";
+
+    // The list's own start control, in the two shapes it can read: a fresh row, or one with a
+    // pending second half waiting to be carried on.
+    internal const string StartThisTestButtonLabel = "Start this test";
+
+    internal const string CarryOnSecondHalfButtonLabel = "Carry on with the second half";
 
     // The row states shown as text are already plain (Copy.PlainBaseText); this is the small
     // symbol shown beside each one, so colour is never the only signal.

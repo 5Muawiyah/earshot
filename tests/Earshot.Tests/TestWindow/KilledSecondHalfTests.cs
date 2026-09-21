@@ -1,13 +1,14 @@
 using Earshot.TestWindow.Core;
+using Earshot.TestWindow.Ui;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
 // A killed second half must never look like only the first half ever happened: the row reads
 // Unknown, the at-rest banner locks every other row, and "Carry on with the second half" is
-// withdrawn back to a plain "Start" (PendingRunFinder no longer offers the stale first-half
-// result once gui-killed.txt sits beside it). Real MainForm, a real second-half child, a real
-// forced kill; test 10 variant 1 is the only two-half row tools\live-tests\selftest\Fakes.psm1
+// withdrawn back to the ordinary "Start this test" (PendingRunFinder no longer offers the stale
+// first-half result once gui-killed.txt sits beside it). Real MainForm, a real second-half child,
+// a real forced kill; test 10 variant 1 is the only two-half row tools\live-tests\selftest\Fakes.psm1
 // has fixture data for, so its resumed second half is the one two-half flow this class can drive
 // for real in a sandbox window.
 [TestClass]
@@ -50,7 +51,7 @@ public sealed class KilledSecondHalfNeverMasksAsFirstHalfOnlyTests
         {
             form.PowerCycleVerdictOverrideForTests = () => PowerCycleVerdict.Restart;
             Assert.IsTrue(form.SelectRowForTests("10.1"));
-            Assert.AreEqual("Carry on with the second half", form.StartButtonTextForTests,
+            Assert.AreEqual(Copy.CarryOnSecondHalfButtonLabel, form.StartButtonTextForTests,
                 "the pending first half was not recognised before the second half ever started.");
 
             form.ClickStartForTests();
@@ -62,7 +63,7 @@ public sealed class KilledSecondHalfNeverMasksAsFirstHalfOnlyTests
             form.KillActiveRunForTests();
 
             Assert.IsNull(form.ActiveRunnerForTests, "the kill did not clear the active runner.");
-            Assert.AreEqual("Start", form.StartButtonTextForTests,
+            Assert.AreEqual(Copy.StartThisTestButtonLabel, form.StartButtonTextForTests,
                 "\"Carry on with the second half\" was not withdrawn: the kill must stop the stale first-half result from still being offered as pending.");
             Assert.IsFalse(form.StartButtonEnabledForTests, "the red banner did not lock the Start button for this row.");
             // "We do not know" is the plain label for RowStateKind.Unknown (technical details are
