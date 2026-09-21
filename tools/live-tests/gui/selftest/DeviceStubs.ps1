@@ -4,12 +4,12 @@
     command answers, the same module tools\live-tests\selftest\Run-OneHalf.ps1 uses for the
     fully-scripted self-test.
 
-    What is different from Run-OneHalf.ps1: only Resolve-EarshotExe, Invoke-Earshot and
-    Invoke-EarshotElevated are replaced here. Confirm-Step, Read-Answer, Read-Note, Wait-Owner
-    and Read-Host are never touched by this file, because Run-GuiHalfAgainstFakes.ps1 sends every
-    one of them through the real ReadHostShim.ps1, to a real owner (human or scripted through
-    ChildRunner), exactly as Invoke-GuiHalf.ps1 does for a real run: this file with the unchanged
-    Fakes.psm1.
+    What is different from Run-OneHalf.ps1: only Resolve-EarshotExe, Invoke-Earshot,
+    Invoke-EarshotElevated and Start-Process (a backstop, never expected to fire) are replaced
+    here. Confirm-Step, Read-Answer, Read-Note, Wait-Owner and Read-Host are never touched by this
+    file, because Run-GuiHalfAgainstFakes.ps1 sends every one of them through the real
+    ReadHostShim.ps1, to a real owner (human or scripted through ChildRunner), exactly as
+    Invoke-GuiHalf.ps1 does for a real run: this file with the unchanged Fakes.psm1.
 #>
 
 Microsoft.PowerShell.Core\Import-Module (Join-Path $PSScriptRoot '..\..\selftest\Fakes.psm1') -Force
@@ -181,9 +181,20 @@ function Invoke-EarshotElevated
 
     return (Invoke-EarshotTwFakeCommand -Run $Run -Label $Label -Command $Command -Live -Elevated)
 }
+
+# A backstop, the same one tools\live-tests\selftest\Fakes.psm1 carries: nothing in a sandboxed
+# run may start a real process, since Resolve-EarshotExe, Invoke-Earshot and Invoke-EarshotElevated
+# above already cover every way the shipped scripts start Earshot.exe. A helper that grew a new way
+# of starting one reaches this instead of the real cmdlet, and stops with a named error rather than
+# quietly starting something real off whatever -ExePath the window happened to be given (which is
+# never one Resolve-EarshotExe's own stub reads, so it is routinely a path that cannot even exist).
+function Start-Process
+{
+    throw ('This sandboxed run never starts a process directly. Something reached Start-Process: ' + ($args -join ' '))
+}
 '@
 
-# Puts the three stubs in the global scope, where a shipped script's own calls find them, and
+# Puts the four stubs in the global scope, where a shipped script's own calls find them, and
 # inside LiveTest.psm1's session state, where the module's own helpers (Get-TaskState and the
 # rest calling Invoke-Earshot internally) find them. The same two-session-state technique as
 # selftest\Run-OneHalf.ps1's Install-EarshotStubs, applied to a smaller set of names.
