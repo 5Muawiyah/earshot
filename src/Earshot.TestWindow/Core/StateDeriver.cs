@@ -21,46 +21,18 @@ internal static class StateDeriver
             return new DerivedRowState { Kind = RowStateKind.NotRun };
         }
 
-        // A kill leaves Unknown and the banner, never a pass. A forced kill can
-        // leave the real device mid-way through a live step, which no older evidence (even a
-        // genuine earlier pass) can speak to, so this outranks everything else, but only for the
-        // newest run: an older kill that a later, clean run has since superseded is just history.
-        if (runsNewestFirst[0].HasKilledMarker)
-        {
-            return new DerivedRowState
-            {
-                Kind = RowStateKind.Unknown,
-                Reason = "the test was stopped by force; nothing after that point is known",
-            };
-        }
-
-        // The single newest run folder for this test, whatever it says, outranks every older one.
-        // If it is missing, truncated, empty, for the wrong test, or otherwise fails
-        // EvidenceStore's own fail-closed checks (including "overall pass with no criteria",
-        // which those checks already reject as self-disagreeing), the row is Unknown right here
-        // and no older evidence, not even a genuine earlier pass, is ever consulted. This is
-        // different from an honestly empty "stopped before any step" run (ReadSucceeded true,
-        // zero criteria), which is still let through to older evidence.
-        if (!runsNewestFirst[0].ReadSucceeded)
-        {
-            return new DerivedRowState
-            {
-                Kind = RowStateKind.Unknown,
-                Reason = runsNewestFirst[0].ReadFailureReason,
-                HistoryNote = "the newest run, in " + runsNewestFirst[0].Folder + ", could not be read; no older result is trusted while that stands",
-            };
-        }
-
-        (RunEvidence? verdictRun, HalfKind verdictHalf, string? historyNote, RunEvidence? newestUnreadable) =
+        (RunEvidence? verdictRun, HalfKind verdictHalf, string? historyNote, StopReason? stopReason) =
             FindVerdictRun(spec, runsNewestFirst);
 
         if (verdictRun is null)
         {
-            // Fail closed: evidence exists but none of it proves anything either way. A read
-            // failure outranks "stopped before any step", because unreadable evidence is not the
-            // same claim as an honestly empty run.
-            return newestUnreadable is not null
-                ? new DerivedRowState { Kind = RowStateKind.Unknown, Reason = newestUnreadable.ReadFailureReason, HistoryNote = historyNote }
+            // Fail closed: evidence exists but none of it proves anything either way. Walking from
+            // the newest run, a run that settled nothing (a declined start, stopped before any
+            // step) is skipped, but the first run that is killed or unreadable stops the walk right
+            // there: neither is the same claim as an honestly empty run, and no older evidence,
+            // not even a genuine earlier pass underneath it, is ever consulted while either stands.
+            return stopReason is not null
+                ? new DerivedRowState { Kind = RowStateKind.Unknown, Reason = stopReason.Reason, HistoryNote = stopReason.HistoryNote ?? historyNote }
                 : new DerivedRowState { Kind = RowStateKind.StoppedBeforeAnyStep, HistoryNote = historyNote };
         }
 
@@ -89,22 +61,36 @@ internal static class StateDeriver
         return DeriveFromSecondHalf(spec, verdictRun, verdict, chosenExePath, chosenExeLastWriteUtc, historyNote);
     }
 
+    // Why the walk below stopped without ever reaching a verdict: a kill (this window's own
+    // forced hard stop, which can leave the real device mid-way through a live step) or a read
+    // failure (missing, truncated, empty, for the wrong test, or otherwise failing EvidenceStore's
+    // own fail-closed checks). Either one outranks every older run, including a genuine earlier
+    // pass, because neither is the same claim as an honestly empty "stopped before any step" run.
+    private sealed record StopReason(string? Reason, string? HistoryNote);
+
     // The verdict run is the newest stamp holding that TestId whose result.json records at least one
-    // criterion, or for test 10's first halves the first-half finding. Runs that are well formed
-    // but stopped before any step are skipped and remembered as history, newest one only. A read
-    // failure is remembered separately: it never masquerades as "stopped before any step".
-    private static (RunEvidence? Verdict, HalfKind Half, string? HistoryNote, RunEvidence? NewestUnreadable) FindVerdictRun(
+    // criterion, or for test 10's first halves the first-half finding. Walking from the newest run,
+    // a run that settled nothing (stopped before any step, or a set-aside first half) is skipped
+    // and remembered as history, newest one only; the first run that is killed or unreadable stops
+    // the walk immediately, at whatever position it is found, rather than being skipped past on the
+    // way to older evidence.
+    private static (RunEvidence? Verdict, HalfKind Half, string? HistoryNote, StopReason? StopReason) FindVerdictRun(
         TestRowSpec spec, IReadOnlyList<RunEvidence> runsNewestFirst)
     {
         string? historyNote = null;
-        RunEvidence? newestUnreadable = null;
 
         foreach (RunEvidence run in runsNewestFirst)
         {
+            if (run.HasKilledMarker)
+            {
+                return (null, HalfKind.NotApplicable, historyNote,
+                    new StopReason("the test was stopped by force; nothing after that point is known", historyNote));
+            }
+
             if (!run.ReadSucceeded)
             {
-                newestUnreadable ??= run;
-                continue;
+                return (null, HalfKind.NotApplicable, historyNote,
+                    new StopReason(run.ReadFailureReason, "a run in " + run.Folder + " could not be read; no older result is trusted while that stands"));
             }
 
             ParsedResult result = run.Result!;
@@ -126,13 +112,13 @@ internal static class StateDeriver
             bool countsAsVerdict = result.Criteria.Count > 0 || isFirstHalfFindingMarker;
             if (countsAsVerdict)
             {
-                return (run, half, historyNote, newestUnreadable);
+                return (run, half, historyNote, null);
             }
 
             historyNote ??= "a later start on " + FormatStampForHistory(run.Stamp) + " was stopped before any step";
         }
 
-        return (null, HalfKind.NotApplicable, historyNote, newestUnreadable);
+        return (null, HalfKind.NotApplicable, historyNote, null);
     }
 
     internal static HalfKind ClassifyHalf(TestRowSpec spec, ParsedResult result)
