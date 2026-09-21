@@ -106,10 +106,35 @@ internal static class ResumeFile
             return false;
         }
 
-        string fullLiveTestRoot = Path.GetFullPath(liveTestRoot);
-        if (!Path.GetFullPath(runRoot).StartsWith(fullLiveTestRoot, StringComparison.OrdinalIgnoreCase))
+        // String.StartsWith on the raw full path text used to accept a folder that only shares
+        // "livetest" as a text prefix, never actually inside it (a sibling such as
+        // "...\livetest-gui\...", which starts with the string "...\livetest" but is a different
+        // folder entirely). The boundary is only real once a directory separator (or an exact
+        // match) sits right after the shared text.
+        string fullLiveTestRoot = Path.GetFullPath(liveTestRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string fullRunRoot = Path.GetFullPath(runRoot);
+        bool liesUnderLiveTestRoot = string.Equals(fullRunRoot, fullLiveTestRoot, StringComparison.OrdinalIgnoreCase) ||
+            fullRunRoot.StartsWith(fullLiveTestRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        if (!liesUnderLiveTestRoot)
         {
             reason = "resume.txt's -RunRoot does not lie under " + liveTestRoot + ": " + runRoot;
+            return false;
+        }
+
+        // Never a network path, and never anything but a local drive letter: this window only
+        // ever writes a plain "<letter>:\..." exe path itself, and resume.txt is read off disk,
+        // never something this process chose, so a UNC or relative path is refused outright
+        // rather than asked whether it happens to exist (a relative path can resolve to a real
+        // file nobody meant, such as one sitting beside this very process).
+        if (exePath.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            reason = "resume.txt's -ExePath is a network path, never accepted: " + exePath;
+            return false;
+        }
+
+        if (exePath.Length < 3 || !char.IsAsciiLetter(exePath[0]) || exePath[1] != ':' || exePath[2] != '\\')
+        {
+            reason = "resume.txt's -ExePath does not start with a local drive letter: " + exePath;
             return false;
         }
 

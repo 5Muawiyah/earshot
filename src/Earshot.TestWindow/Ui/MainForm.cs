@@ -677,9 +677,14 @@ internal sealed class MainForm : Form
     {
         string liveTestRoot = LiveTestRoot();
         string resumeTxtPath = Path.Combine(pending.Folder, "resume.txt");
-        string[] knownScripts = _rows.Select(r => r.Script).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
-        if (!ResumeFile.TryParse(resumeTxtPath, _repoRoot, liveTestRoot, knownScripts, out ResumeInstruction? instruction, out string? reason))
+        // This row's own script only, never any of the other 15: resume.txt is read off disk, and
+        // a line naming a different (even if otherwise genuine) shipped script must never be
+        // accepted just because it is one of the sixteen. Passing the whole list here used to let
+        // that through, and would start a real child against the wrong script.
+        string[] expectedScript = { row.Script };
+
+        if (!ResumeFile.TryParse(resumeTxtPath, _repoRoot, liveTestRoot, expectedScript, out ResumeInstruction? instruction, out string? reason))
         {
             _statusLabel.Text = "resume.txt could not be used, so nothing was started: " + reason;
             return;
