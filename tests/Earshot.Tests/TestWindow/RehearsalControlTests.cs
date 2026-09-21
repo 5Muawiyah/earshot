@@ -63,7 +63,7 @@ public sealed class RehearsalControlTests
             form.ClickRehearsalButtonForTests();
 
             Assert.IsNull(form.ActiveRunnerForTests, "a sandboxed window must never start the rehearsal, whatever called the click handler.");
-            StringAssert.Contains(form.RehearsalStatusTextForTests, "sandbox");
+            StringAssert.Contains(form.RehearsalStatusTextForTests, "practice window");
         });
     }
 
@@ -74,19 +74,19 @@ public sealed class RehearsalControlTests
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
             string warning = form.RehearsalWarningTextForTests;
-            StringAssert.Contains(warning, "administrator");
-            StringAssert.Contains(warning, "Windows will raise");
-            StringAssert.Contains(warning, "first time this launch has ever been run");
+            StringAssert.Contains(warning, "permission");
+            StringAssert.Contains(warning, "Windows will show a real box");
+            StringAssert.Contains(warning, "first time this has ever been run");
         });
     }
 
     [TestMethod]
     public void TheLockedDetailAndTheRehearsalRowNameAgree()
     {
-        // Copy.LockedDetail tells the owner to "run the administrator prompt check first";
+        // Copy.LockedDetail tells the owner to "run the permission box check first";
         // Copy.RehearsalRowName is the control's own label. They must name the same thing.
-        StringAssert.Contains(Copy.LockedDetail, "administrator prompt check");
-        StringAssert.Contains(Copy.RehearsalRowName.ToLowerInvariant(), "administrator prompt check");
+        StringAssert.Contains(Copy.LockedDetail, "permission box check");
+        StringAssert.Contains(Copy.RehearsalRowName.ToLowerInvariant(), "permission box check");
     }
 
     // Rows 00 and 07 must say plainly what is not offered, rather than silently never
@@ -99,9 +99,8 @@ public sealed class RehearsalControlTests
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
             Assert.IsTrue(form.SelectRowForTests("00"));
-            StringAssert.Contains(form.RowDetailTextForTests, "never offers to uninstall");
-            StringAssert.Contains(form.RowDetailTextForTests, "Run-LiveTests.ps1 -Test 00");
-            StringAssert.Contains(form.RowDetailTextForTests, "-OfferUninstall");
+            StringAssert.Contains(form.RowDetailTextForTests, "never offers to remove Earshot");
+            StringAssert.Contains(form.RowDetailTextForTests, "ask whoever set Earshot up");
         });
     }
 
@@ -112,9 +111,8 @@ public sealed class RehearsalControlTests
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
             Assert.IsTrue(form.SelectRowForTests("07"));
-            StringAssert.Contains(form.RowDetailTextForTests, "not wired to a control");
-            StringAssert.Contains(form.RowDetailTextForTests, "Run-LiveTests.ps1 -Test 07");
-            StringAssert.Contains(form.RowDetailTextForTests, "-AllowPlanB");
+            StringAssert.Contains(form.RowDetailTextForTests, "the other way");
+            StringAssert.Contains(form.RowDetailTextForTests, "ask whoever set Earshot up");
         });
     }
 

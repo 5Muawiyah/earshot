@@ -26,6 +26,11 @@ public sealed class PromptPresenterTests
     };
     private static readonly string[] Test14TranscriptWithNoAddresses = { "Addresses seen in the Bluetooth node list, other than the pinned one:" };
     private static readonly string[] Test14ExpectedButtonLabels = { "1A2B3C4D5E6F", "6F5E4D3C2B1A", "None of these is my phone" };
+    private static readonly string[] ExpectedRawPrecondition = { "Earshot is installed and set up (the \\Earshot tasks exist)." };
+    private static readonly string[] ExpectedPlainPrecondition = { "Earshot is installed and set up." };
+    private static readonly string[] ExpectedPlainAction = { "After each step, say whether the sound moved to this computer." };
+    private static readonly string[] ExpectedUntranslatedPrecondition = { "A brand new precondition never seen before." };
+    private static readonly string[] ExpectedCompoundPlainAction = { "Restart this computer this way: type: shutdown /r /t 0" };
 
     private static IReadOnlyList<WordingEntry> LoadWording() =>
         Wording.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "wording.json"));
@@ -72,6 +77,10 @@ public sealed class PromptPresenterTests
 
         Assert.AreEqual("Asks the AirPods to connect to this PC. If it works, the sound moves from your phone to this PC.", presented.PlainLine);
         StringAssert.Contains(presented.DetailText, "KSPROPERTY_ONESHOT_RECONNECT");
+
+        // The raw consequence under "What it does:" is the script's own words, so it is marked
+        // technical: StepPanel hides it unless "Show technical details" is on.
+        Assert.IsTrue(presented.DetailIsTechnical);
     }
 
     [TestMethod]
@@ -169,6 +178,62 @@ public sealed class PromptPresenterTests
         Assert.IsTrue(presented.Buttons[0].SendsReply);
         Assert.AreEqual(string.Empty, presented.Buttons[0].Reply);
         Assert.IsFalse(presented.Buttons[1].SendsReply);
+
+        // "Have you done it?" is this window's own plain wording, never the script's, so it is
+        // never hidden behind the technical-details toggle.
+        Assert.IsFalse(presented.DetailIsTechnical);
+    }
+
+    [TestMethod]
+    public void ShowPreconditionsAlsoProvidesAPlainTranslationOfEachRealScriptLine()
+    {
+        var bound = new Dictionary<string, string>
+        {
+            ["Preconditions"] = "[\"Earshot is installed and set up (the \\\\Earshot tasks exist).\"]",
+            ["PhysicalActions"] = "[\"After each step, say whether the audio moved to this PC.\"]",
+        };
+
+        PresentedPrompt presented = PromptPresenter.Present(
+            Prompt("Show-Preconditions", "Are all of those true, and are you ready to start? [y/N]", bound), "01", LoadWording());
+
+        // The raw lists are unchanged (still verbatim, for the technical-details view).
+        CollectionAssert.AreEqual(ExpectedRawPrecondition, presented.ListItems.ToArray());
+
+        // The plain lists carry wording.json's own translation instead.
+        CollectionAssert.AreEqual(ExpectedPlainPrecondition, presented.PlainListItems.ToArray());
+        CollectionAssert.AreEqual(ExpectedPlainAction, presented.PlainPhysicalActions.ToArray());
+    }
+
+    [TestMethod]
+    public void ShowPreconditionsWithNoWordingEntryFallsBackToTheScriptsOwnWordsForThatOneLine()
+    {
+        var bound = new Dictionary<string, string>
+        {
+            ["Preconditions"] = "[\"A brand new precondition never seen before.\"]",
+        };
+
+        PresentedPrompt presented = PromptPresenter.Present(
+            Prompt("Show-Preconditions", "Are all of those true, and are you ready to start? [y/N]", bound), "01", LoadWording());
+
+        CollectionAssert.AreEqual(ExpectedUntranslatedPrecondition, presented.PlainListItems.ToArray());
+    }
+
+    // 10-ShutdownMessages.ps1's own restart action is built at run time from a fixed literal
+    // prefix plus one of five per-variant strings ('Restart the machine this way: ' +
+    // $variants[$Variant]): wording.json can only ever pin an entry to the fixed prefix, so the
+    // plain line has to keep whatever real, already-plain text follows it rather than losing it.
+    [TestMethod]
+    public void ShowPreconditionsTranslatesACompoundActionByItsLiteralPrefixAndKeepsTheRestVerbatim()
+    {
+        var bound = new Dictionary<string, string>
+        {
+            ["PhysicalActions"] = "[\"Restart the machine this way: type: shutdown /r /t 0\"]",
+        };
+
+        PresentedPrompt presented = PromptPresenter.Present(
+            Prompt("Show-Preconditions", "Are all of those true, and are you ready to start? [y/N]", bound), "10", LoadWording());
+
+        CollectionAssert.AreEqual(ExpectedCompoundPlainAction, presented.PlainPhysicalActions.ToArray());
     }
 
     [TestMethod]

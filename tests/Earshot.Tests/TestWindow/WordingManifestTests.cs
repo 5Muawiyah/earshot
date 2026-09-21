@@ -9,7 +9,8 @@ namespace Earshot.Tests.TestWindow;
 
 // Every wording entry's scriptText appears in the
 // script it is filed under, and every literal Read-Answer/Read-Note/Wait-Owner
-// question-or-instruction and every literal -Consequence a live step passes has an entry. Read
+// question-or-instruction, every literal -Consequence a live step passes, and every literal
+// element of Show-Preconditions' own -Preconditions and -PhysicalActions arrays has an entry. Read
 // with the real PowerShell parser, not a regex, the same way LiveTestScriptTests reads the
 // scripts, so a call split over several lines or reordered parameters is still found.
 [TestClass]
@@ -90,6 +91,8 @@ public sealed class WordingManifestTests
                     "question" => WordingKind.Question,
                     "note" => WordingKind.Note,
                     "instruction" => WordingKind.Instruction,
+                    "precondition" => WordingKind.Precondition,
+                    "action" => WordingKind.Action,
                     _ => WordingKind.Consequence,
                 };
 
@@ -161,6 +164,82 @@ public sealed class WordingManifestTests
             foreach ($c in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true))
             {
                 $name = $c.GetCommandName()
+
+                # Show-Preconditions takes two string arrays (-Preconditions, -PhysicalActions)
+                # rather than one Question/Text/Consequence literal, so it is walked separately from
+                # the single-literal callers below. Each array element becomes its own reported call
+                # (kind precondition or action). An element that is a plain string literal is
+                # reported whole; an element that is a literal prefix concatenated with a dynamic,
+                # already-plain suffix (10-ShutdownMessages.ps1's own per-variant restart
+                # instruction: 'Restart the machine this way: ' + $variants[$Variant]) reports only
+                # its literal prefix, since that is the only part wording.json can ever pin an exact
+                # sentence to; anything else (a bare variable, a call, a concatenation with no
+                # leading literal) is reported non-literal, the same as every other caller here, so
+                # it fails loudly rather than silently passing nothing through.
+                if ($name -eq 'Show-Preconditions')
+                {
+                    $elements = $c.CommandElements
+                    for ($i = 1; $i -lt $elements.Count; $i++)
+                    {
+                        $e = $elements[$i]
+                        if (-not ($e -is [System.Management.Automation.Language.CommandParameterAst])) { continue }
+                        if ($e.ParameterName -ne 'Preconditions' -and $e.ParameterName -ne 'PhysicalActions') { continue }
+
+                        $argExpr = $e.Argument
+                        if ($null -eq $argExpr -and ($i + 1) -lt $elements.Count -and
+                            -not ($elements[$i + 1] -is [System.Management.Automation.Language.CommandParameterAst]))
+                        {
+                            $argExpr = $elements[$i + 1]
+                        }
+
+                        $arrayKind = if ($e.ParameterName -eq 'Preconditions') { 'precondition' } else { 'action' }
+
+                        $arrayElements = @()
+                        if ($argExpr -is [System.Management.Automation.Language.ArrayExpressionAst])
+                        {
+                            $inner = $argExpr.FindAll({ $args[0] -is [System.Management.Automation.Language.ArrayLiteralAst] }, $false) | Select-Object -First 1
+                            if ($null -ne $inner) { $arrayElements = $inner.Elements }
+                            else { $arrayElements = $argExpr.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $args[0] -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true) }
+                        }
+                        elseif ($argExpr -is [System.Management.Automation.Language.ArrayLiteralAst])
+                        {
+                            $arrayElements = $argExpr.Elements
+                        }
+                        elseif ($null -ne $argExpr)
+                        {
+                            $arrayElements = @($argExpr)
+                        }
+
+                        foreach ($rawEl in $arrayElements)
+                        {
+                            # An element written in parentheses, ('literal ' + $x), parses as a
+                            # ParenExpressionAst wrapping the real BinaryExpressionAst rather than
+                            # the binary expression itself; unwrap it before classifying.
+                            $el = $rawEl
+                            while ($el -is [System.Management.Automation.Language.ParenExpressionAst])
+                            {
+                                $el = $el.Pipeline.PipelineElements[0].Expression
+                            }
+
+                            if ($el -is [System.Management.Automation.Language.StringConstantExpressionAst])
+                            {
+                                $calls += [ordered]@{ line = $c.Extent.StartLineNumber; kind = $arrayKind; isLiteral = $true; value = $el.Value }
+                            }
+                            elseif ($el -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                                    $el.Left -is [System.Management.Automation.Language.StringConstantExpressionAst])
+                            {
+                                $calls += [ordered]@{ line = $c.Extent.StartLineNumber; kind = $arrayKind; isLiteral = $true; value = $el.Left.Value }
+                            }
+                            else
+                            {
+                                $calls += [ordered]@{ line = $c.Extent.StartLineNumber; kind = $arrayKind; isLiteral = $false; value = $null }
+                            }
+                        }
+                    }
+
+                    continue
+                }
+
                 if ($name -ne 'Read-Answer' -and $name -ne 'Read-Note' -and $name -ne 'Wait-Owner' -and
                     $name -ne 'Invoke-Earshot' -and $name -ne 'Invoke-EarshotElevated' -and $name -ne 'Invoke-KsStep') { continue }
 

@@ -16,11 +16,31 @@ internal sealed record PresentedPrompt
     public required string PlainLine { get; init; }
     public string? DetailLabel { get; init; }
     public string? DetailText { get; init; }
+
+    // True only for Confirm-Step's own "What it does:" detail: the script's raw consequence text,
+    // which belongs behind the technical-details toggle. Wait-Owner's "Have you done it?" detail
+    // is this window's own plain wording, never the script's, so it stays false and is never hidden.
+    public bool DetailIsTechnical { get; init; }
+
+    // The script's own raw preconditions and physical actions, verbatim: shown only behind the
+    // technical-details toggle.
     public IReadOnlyList<string> ListItems { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> PhysicalActions { get; init; } = Array.Empty<string>();
+
+    // The same two lists, translated through wording.json's precondition and action entries (or the
+    // script's own words, unhidden, when no entry exists yet): always shown, on or off.
+    public IReadOnlyList<string> PlainListItems { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> PlainPhysicalActions { get; init; } = Array.Empty<string>();
+
     public required string ScriptOwnWords { get; init; }
     public required IReadOnlyList<PromptButton> Buttons { get; init; }
     public bool StopOnly { get; init; }
+
+    // Zero or more named how-to blocks (wording.json's own "howToBlocks"), resolved and in order:
+    // shown as a numbered list with a picture beside it, always visible (never behind the
+    // technical-details toggle), since these are this window's own plain steps, never the script's
+    // own words.
+    public IReadOnlyList<HowToBlock> HowToBlocks { get; init; } = Array.Empty<HowToBlock>();
 }
 
 internal static class PromptPresenter
@@ -60,7 +80,7 @@ internal static class PromptPresenter
 
         return message.Caller switch
         {
-            "Show-Preconditions" => PresentPreconditions(message),
+            "Show-Preconditions" => PresentPreconditions(message, testNumber, wording),
             "Confirm-Step" => PresentConfirmStep(message, testNumber, wording),
             "Read-Answer" => PresentReadAnswer(message, testNumber, wording, boundOptions ?? textOptions ?? DefaultYesNoUnsure),
             "Read-Note" => PresentReadNote(message, testNumber, wording, transcriptSoFar ?? Array.Empty<string>()),
@@ -69,7 +89,7 @@ internal static class PromptPresenter
         };
     }
 
-    private static PresentedPrompt PresentPreconditions(ChildMessage message)
+    private static PresentedPrompt PresentPreconditions(ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording)
     {
         var preconditions = new List<string>();
         if (message.Bound.TryGetValue("Preconditions", out string? raw))
@@ -83,15 +103,59 @@ internal static class PromptPresenter
             physicalActions.AddRange(ReadStringArray(rawActions));
         }
 
+        var howTo = new List<HowToBlock>();
+        foreach (string p in preconditions)
+        {
+            howTo.AddRange(HowToFor(wording, testNumber, WordingKind.Precondition, p));
+        }
+
+        foreach (string a in physicalActions)
+        {
+            howTo.AddRange(HowToFor(wording, testNumber, WordingKind.Action, a));
+        }
+
         return new PresentedPrompt
         {
             Heading = "Before this test starts",
             PlainLine = "Are all of those true, and are you ready to start?",
             ListItems = preconditions,
             PhysicalActions = physicalActions,
+            PlainListItems = preconditions.Select(p => PlainPreconditionOrAction(wording, testNumber, WordingKind.Precondition, p)).ToList(),
+            PlainPhysicalActions = physicalActions.Select(a => PlainPreconditionOrAction(wording, testNumber, WordingKind.Action, a)).ToList(),
             ScriptOwnWords = message.Prompt ?? string.Empty,
             Buttons = YesNoButtons,
+            HowToBlocks = howTo,
         };
+    }
+
+    private static string PlainPreconditionOrAction(IReadOnlyList<WordingEntry> wording, string testNumber, WordingKind kind, string scriptText)
+    {
+        (string plain, string technicalSuffix) = Wording.FindPreconditionOrAction(wording, testNumber, kind, scriptText);
+        return plain + technicalSuffix;
+    }
+
+    // The exact-match entry's own how-to blocks; the prefix-fallback entry used for a compound
+    // line (10-ShutdownMessages.ps1's own restart action) carries its blocks the same way, since
+    // Find (called first inside FindPreconditionOrAction) already covers the exact-match case and
+    // a direct lookup here is simpler than threading the tuple through.
+    private static IReadOnlyList<HowToBlock> HowToFor(IReadOnlyList<WordingEntry> wording, string testNumber, WordingKind kind, string scriptText)
+    {
+        WordingEntry? exact = Wording.Find(wording, testNumber, kind, scriptText);
+        if (exact is not null)
+        {
+            return exact.HowTo;
+        }
+
+        foreach (WordingEntry entry in wording)
+        {
+            if (entry.Test == testNumber && entry.Kind == kind && entry.ScriptText.Length > 0 &&
+                scriptText.StartsWith(entry.ScriptText, StringComparison.Ordinal))
+            {
+                return entry.HowTo;
+            }
+        }
+
+        return Array.Empty<HowToBlock>();
     }
 
     private static PresentedPrompt PresentConfirmStep(ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording)
@@ -111,6 +175,7 @@ internal static class PromptPresenter
             PlainLine = plain,
             DetailLabel = "What it does:",
             DetailText = consequence,
+            DetailIsTechnical = true,
             ScriptOwnWords = consequence,
             Buttons = YesNoButtons,
         };
@@ -136,6 +201,7 @@ internal static class PromptPresenter
             PlainLine = plain,
             ScriptOwnWords = question,
             Buttons = buttons,
+            HowToBlocks = entry?.HowTo ?? Array.Empty<HowToBlock>(),
         };
     }
 
@@ -244,6 +310,7 @@ internal static class PromptPresenter
             DetailLabel = "Have you done it?",
             ScriptOwnWords = text,
             Buttons = new[] { new PromptButton("Yes", string.Empty), new PromptButton("No", string.Empty, SendsReply: false) },
+            HowToBlocks = entry?.HowTo ?? Array.Empty<HowToBlock>(),
         };
     }
 

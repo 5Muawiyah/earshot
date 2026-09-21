@@ -120,16 +120,18 @@ public sealed class BannerTests
         Assert.AreEqual(BannerLevel.None, banner.Level);
     }
 
-    // Also pins the leftAtRest copy itself: "no" and "unknown" must each say plainly that the
-    // machine is left in the state Earshot exists to prevent, and "unknown" must never read as
-    // "yes".
+    // Also pins the leftAtRest copy itself: "no" and "unknown" must each say plainly, in the
+    // reader's own words, that this computer might grab the AirPods off the phone, and "unknown"
+    // must never read as "yes".
     [TestMethod]
     public void NoAndUnknownEachSayTheMachineIsLeftInTheStateEarshotExistsToPrevent()
     {
-        StringAssert.Contains(Copy.LeftAtRestText("no", null), "state Earshot");
-        StringAssert.Contains(Copy.LeftAtRestText("no", null), "exists to prevent");
-        StringAssert.Contains(Copy.LeftAtRestText("unknown", null), "state Earshot");
-        StringAssert.Contains(Copy.LeftAtRestText("unknown", null), "exists to prevent");
+        // "no"'s own words were corrected from live evidence (telling the owner to run Restore
+        // first was wrong for the commonest cause): it now says, in plain words, exactly what that
+        // bad state is (this computer grabbing the AirPods off the phone), rather than naming it
+        // abstractly.
+        StringAssert.Contains(Copy.LeftAtRestText("no", null), "grab your AirPods off your phone");
+        StringAssert.Contains(Copy.LeftAtRestText("unknown", null), "grab them off your phone");
     }
 
     [TestMethod]

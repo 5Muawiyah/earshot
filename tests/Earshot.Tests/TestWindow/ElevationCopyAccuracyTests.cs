@@ -6,9 +6,9 @@ namespace Earshot.Tests.TestWindow;
 
 // The rehearsal status copy used to say a passing check "offers 00's uninstall and 07's plan B".
 // It does not: rows 00 and 07 never offer either in this build
-// (Copy.RestoreUninstallOfferNotAvailable, Copy.PlanBNotAvailable both say plainly that the
-// control is not wired and name the console command instead). The copy must never claim an
-// offer that does not exist.
+// (Copy.RestoreUninstallOfferNotAvailable, Copy.PlanBNotAvailable both say plainly that it has to
+// be done another way, by whoever set Earshot up, rather than naming a command). The copy must
+// never claim an offer that does not exist.
 [TestClass]
 public sealed class ElevationCopyAccuracyTests
 {
@@ -20,9 +20,9 @@ public sealed class ElevationCopyAccuracyTests
     }
 
     [TestMethod]
-    public void RehearsalUnlocksRowsNamesTheConsoleRouteInstead()
+    public void RehearsalUnlocksRowsNamesTheOtherRouteInstead()
     {
-        StringAssert.Contains(Copy.RehearsalUnlocksRows, "console");
+        StringAssert.Contains(Copy.RehearsalUnlocksRows, "ask whoever set Earshot up");
         StringAssert.Contains(Copy.RehearsalUnlocksRows, "00");
         StringAssert.Contains(Copy.RehearsalUnlocksRows, "07");
     }

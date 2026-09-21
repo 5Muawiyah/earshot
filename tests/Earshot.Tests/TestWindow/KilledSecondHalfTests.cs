@@ -65,8 +65,10 @@ public sealed class KilledSecondHalfNeverMasksAsFirstHalfOnlyTests
             Assert.AreEqual("Start", form.StartButtonTextForTests,
                 "\"Carry on with the second half\" was not withdrawn: the kill must stop the stale first-half result from still being offered as pending.");
             Assert.IsFalse(form.StartButtonEnabledForTests, "the red banner did not lock the Start button for this row.");
-            Assert.AreEqual("Unknown", form.RowStateTextForTests("10.1"),
-                "the row did not read Unknown after its second half was killed.");
+            // "We do not know" is the plain label for RowStateKind.Unknown (technical details are
+            // off by default here); RowPresenterTests pins the technical "Unknown" text directly.
+            Assert.AreEqual("We do not know", form.RowStateTextForTests("10.1"),
+                "the row did not read Unknown (shown in plain words) after its second half was killed.");
 
             Assert.IsTrue(form.SelectRowForTests("01"));
             Assert.IsFalse(form.StartButtonEnabledForTests, "the at-rest banner did not lock an unrelated row too.");

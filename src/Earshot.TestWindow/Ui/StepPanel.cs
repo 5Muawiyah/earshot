@@ -19,6 +19,13 @@ internal sealed class StepPanel : Panel
     private readonly TextBox _scriptWordsBox;
     private readonly FlowLayoutPanel _buttonRow;
     private readonly Label _acknowledgementLabel;
+
+    // The how-to block area: text left, picture right, below the buttons (which stay exactly where
+    // they were), wrapping rather than growing sideways, so the panel never needs a horizontal
+    // scroll bar at the window's default size.
+    private readonly Label _howToStepsLabel;
+    private readonly PictureBox _howToPictureBox;
+
     private readonly System.Windows.Forms.Timer _clickSafetyTimer;
 
     private ChildRunner? _runner;
@@ -48,6 +55,13 @@ internal sealed class StepPanel : Panel
         _buttonRow = new FlowLayoutPanel { Top = 250, Left = 8, Width = 560, Height = 40, FlowDirection = FlowDirection.LeftToRight };
         _acknowledgementLabel = new Label { AutoSize = true, MaximumSize = new Size(560, 0), Top = 296, Left = 8, ForeColor = SystemColors.GrayText };
 
+        _howToStepsLabel = new Label { AutoSize = true, MaximumSize = new Size(360, 0), Top = 330, Left = 8, Visible = false };
+        _howToPictureBox = new PictureBox
+        {
+            Top = 330, Left = 380, Width = 160, Height = 160, SizeMode = PictureBoxSizeMode.Zoom,
+            BorderStyle = BorderStyle.FixedSingle, Visible = false,
+        };
+
         _clickSafetyTimer = new System.Windows.Forms.Timer { Interval = (int)ClickSafetyDelay.TotalMilliseconds };
         _clickSafetyTimer.Tick += (_, _) =>
         {
@@ -66,12 +80,22 @@ internal sealed class StepPanel : Panel
         Controls.Add(_scriptWordsBox);
         Controls.Add(_buttonRow);
         Controls.Add(_acknowledgementLabel);
+        Controls.Add(_howToStepsLabel);
+        Controls.Add(_howToPictureBox);
     }
 
     // Every button built here calls this, and nothing else in the form does (ChildRunner itself
     // is the single call site for the underlying reply; StepPanel is the single place a click
     // becomes that call).
-    internal void Show(ChildRunner runner, PresentedPrompt prompt, int seq)
+    //
+    // showTechnicalDetails gates every script-authored string this panel can show: the raw prompt
+    // text (ScriptOwnWords), the raw preconditions and physical actions (ListItems,
+    // PhysicalActions), and a Confirm-Step's raw consequence (DetailText, only when
+    // prompt.DetailIsTechnical). Off, only PromptPresenter's own plain lines are visible: PlainLine
+    // and, for Show-Preconditions, PlainListItems/PlainPhysicalActions. On, everything this panel
+    // showed before this toggle existed is still shown, gathered under one "Technical details"
+    // heading instead of scattered across the caption and the list box.
+    internal void Show(ChildRunner runner, PresentedPrompt prompt, int seq, bool showTechnicalDetails)
     {
         ArgumentNullException.ThrowIfNull(runner);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -82,18 +106,17 @@ internal sealed class StepPanel : Panel
 
         _headingLabel.Text = prompt.Heading;
         _plainLineLabel.Text = prompt.PlainLine;
-        _scriptWordsBox.Text = prompt.ScriptOwnWords;
 
-        if (prompt.ListItems.Count > 0)
+        if (prompt.PlainListItems.Count > 0 || prompt.PlainPhysicalActions.Count > 0)
         {
             _listItemsBox.Visible = true;
             _listItemsBox.Items.Clear();
-            foreach (string item in prompt.ListItems)
+            foreach (string item in prompt.PlainListItems)
             {
                 _listItemsBox.Items.Add("- " + item);
             }
 
-            foreach (string action in prompt.PhysicalActions)
+            foreach (string action in prompt.PlainPhysicalActions)
             {
                 _listItemsBox.Items.Add("* " + action);
             }
@@ -103,8 +126,44 @@ internal sealed class StepPanel : Panel
         else
         {
             _listItemsBox.Visible = false;
-            _detailLabel.Text = prompt.DetailLabel is null ? string.Empty : prompt.DetailLabel + " " + prompt.DetailText;
+
+            // Wait-Owner's "Have you done it?" is this window's own plain wording
+            // (DetailIsTechnical is false for it), always shown; Confirm-Step's raw "What it does:"
+            // consequence is the script's own words, so it is folded into the technical block below
+            // instead.
+            _detailLabel.Text = prompt.DetailLabel is null || prompt.DetailIsTechnical
+                ? string.Empty
+                : prompt.DetailLabel + " " + prompt.DetailText;
         }
+
+        var technicalLines = new List<string>();
+        if (!string.IsNullOrEmpty(prompt.ScriptOwnWords))
+        {
+            technicalLines.Add(prompt.ScriptOwnWords);
+        }
+
+        foreach (string item in prompt.ListItems)
+        {
+            technicalLines.Add("- " + item);
+        }
+
+        foreach (string action in prompt.PhysicalActions)
+        {
+            technicalLines.Add("* " + action);
+        }
+
+        if (prompt.DetailIsTechnical && prompt.DetailLabel is not null)
+        {
+            technicalLines.Add(prompt.DetailLabel + " " + prompt.DetailText);
+        }
+
+        _scriptWordsCaption.Text = "Technical details";
+        _scriptWordsBox.Text = string.Join(Environment.NewLine, technicalLines);
+        bool hasTechnicalContent = technicalLines.Count > 0;
+        _scriptWordsCaption.Visible = showTechnicalDetails && hasTechnicalContent;
+        _scriptWordsBox.Visible = showTechnicalDetails && hasTechnicalContent;
+
+        RenderHowTo(prompt.HowToBlocks);
 
         _buttonRow.Controls.Clear();
         if (prompt.StopOnly)
@@ -126,6 +185,45 @@ internal sealed class StepPanel : Panel
 
         _clickSafetyTimer.Stop();
         _clickSafetyTimer.Start();
+    }
+
+    // Every named block's own steps, numbered in one continuous sequence across all of them (an
+    // entry rarely names more than one), with the first block that actually has a picture shown
+    // beside them; never hidden by the technical-details toggle, since these are this window's own
+    // plain words, never the script's. A missing picture file shows nothing, never an error on
+    // screen (HowToPictureCoverageTests is what catches that, for the writer to see).
+    private void RenderHowTo(IReadOnlyList<HowToBlock> blocks)
+    {
+        _howToPictureBox.Image?.Dispose();
+        _howToPictureBox.Image = null;
+
+        if (blocks.Count == 0)
+        {
+            _howToStepsLabel.Visible = false;
+            _howToPictureBox.Visible = false;
+            return;
+        }
+
+        var lines = new List<string>();
+        string? pictureName = null;
+        int stepNumber = 1;
+        foreach (HowToBlock block in blocks)
+        {
+            foreach (string step in block.Steps)
+            {
+                lines.Add(stepNumber + ". " + step);
+                stepNumber++;
+            }
+
+            pictureName ??= block.Picture;
+        }
+
+        _howToStepsLabel.Text = string.Join(Environment.NewLine, lines);
+        _howToStepsLabel.Visible = true;
+
+        Image? picture = pictureName is null ? null : HowToPictures.TryLoad(pictureName);
+        _howToPictureBox.Image = picture;
+        _howToPictureBox.Visible = picture is not null;
     }
 
     private Button BuildButton(PromptButton button)
@@ -173,4 +271,20 @@ internal sealed class StepPanel : Panel
     internal void ClickButtonForTests(int index) => (_buttonRow.Controls.Count > index ? _buttonRow.Controls[index] as Button : null)?.PerformClick();
 
     internal string AcknowledgementTextForTests => _acknowledgementLabel.Text;
+
+    internal string PlainLineTextForTests => _plainLineLabel.Text;
+
+    internal IReadOnlyList<string> ListItemsForTests => _listItemsBox.Items.Cast<string>().ToList();
+
+    internal bool TechnicalDetailsVisibleForTests => _scriptWordsBox.Visible;
+
+    internal string TechnicalDetailsTextForTests => _scriptWordsBox.Text;
+
+    internal bool HowToStepsVisibleForTests => _howToStepsLabel.Visible;
+
+    internal string HowToStepsTextForTests => _howToStepsLabel.Text;
+
+    internal bool HowToPictureVisibleForTests => _howToPictureBox.Visible;
+
+    internal bool HowToPictureLoadedForTests => _howToPictureBox.Image is not null;
 }

@@ -47,7 +47,16 @@ internal sealed class MainForm : Form
     private readonly Button _runAllButton;
     private readonly Label _runAllExplanationLabel;
     private readonly Label _runAllStatusLabel;
+    private readonly Label _runAllProgressLabel;
     private readonly Button _runAllCarryOnButton;
+    private readonly Button _runAllStopHereButton;
+
+    // Run all under a red or unknown banner: shown instead of starting anything, until the owner
+    // has clicked through it (the same "have you done it" shape as a Wait-Owner step); only then is
+    // row 00 Restore actually started, through the same single start gate every other route uses.
+    private readonly Label _runAllRestoreAdviceLabel;
+    private readonly Button _runAllRestoreContinueButton;
+    private bool _runAllRecoveringViaRestore;
     private readonly System.Windows.Forms.Timer _watchdogTimer;
 
     // The administrator prompt check's own control, separate from the row list (it is a
@@ -70,6 +79,18 @@ internal sealed class MainForm : Form
     private DisplayRow? _activeDisplayRow;
     private BannerState _banner = new() { Level = BannerLevel.None };
     private readonly List<string> _transcript = new();
+
+    // "Show technical details", off by default and remembered beside the window's other settings
+    // (TechnicalDetailsSettings, in WindowStateRoot). Off, no script-authored string is shown
+    // anywhere: the step panel, the row detail, the result panel. On, everything this window used
+    // to show unconditionally is still shown, labelled "Technical details". The last prompt and
+    // result presented are cached so flipping the checkbox mid-step or mid-result redraws the
+    // panel that is actually on screen immediately, rather than waiting for the next one.
+    private readonly CheckBox _technicalDetailsCheckBox;
+    private bool _showTechnicalDetails;
+    private PresentedPrompt? _lastPresentedPrompt;
+    private int _lastPresentedPromptSeq;
+    private ResultPresentation? _lastResultPresentation;
 
     // The silence watchdog and the abort/kill sequence. A prompt on screen is never
     // a hang (test 12 waits hours at one), so the watchdog only ever looks at silence while
@@ -102,6 +123,7 @@ internal sealed class MainForm : Form
         // A remembered, still-valid choice always wins over the fixed %ProgramFiles% fallback the
         // caller was constructed with; read before anything else here uses _exePath.
         _exePath = ExePathSettings.TryReadOrDefault(WindowStateRoot(), _exePath);
+        _showTechnicalDetails = TechnicalDetailsSettings.TryReadOrDefault(WindowStateRoot());
         Width = 1040;
         Height = 720;
         StartPosition = FormStartPosition.CenterScreen;
@@ -169,6 +191,12 @@ internal sealed class MainForm : Form
         _chooseExeButton = new Button { Text = "Choose Earshot.exe...", Dock = DockStyle.Top, Height = 24 };
         _chooseExeButton.Click += (_, _) => ChooseExePath();
 
+        _technicalDetailsCheckBox = new CheckBox
+        {
+            Text = Copy.ShowTechnicalDetailsLabel, Dock = DockStyle.Top, Height = 24, AutoSize = false, Checked = _showTechnicalDetails,
+        };
+        _technicalDetailsCheckBox.CheckedChanged += (_, _) => OnTechnicalDetailsToggled();
+
         _statusLabel = new Label { Dock = DockStyle.Top, Height = 28, TextAlign = ContentAlignment.MiddleLeft };
         _bannerLabel = new Label
         {
@@ -205,7 +233,24 @@ internal sealed class MainForm : Form
         _runAllCarryOnButton = new Button { Text = Copy.RunAllCarryOnButtonLabel, Dock = DockStyle.Top, Height = 28, Visible = false, AutoSize = true };
         _runAllCarryOnButton.Click += (_, _) => OnRunAllCarryOnClicked();
 
+        _runAllStopHereButton = new Button { Text = Copy.RunAllStopHereButtonLabel, Dock = DockStyle.Top, Height = 28, Visible = false, AutoSize = true };
+        _runAllStopHereButton.Click += (_, _) => OnRunAllStopHereClicked();
+
         _runAllStatusLabel = new Label { Dock = DockStyle.Top, Height = 24, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkSlateBlue };
+        _runAllProgressLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 20, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText, Visible = false,
+        };
+
+        _runAllRestoreAdviceLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 64, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed, Visible = false,
+        };
+        _runAllRestoreContinueButton = new Button
+        {
+            Text = Copy.RunAllRestoreContinueButtonLabel, Dock = DockStyle.Top, Height = 28, Visible = false, AutoSize = true,
+        };
+        _runAllRestoreContinueButton.Click += (_, _) => OnRunAllRestoreContinueClicked();
 
         _runAllExplanationLabel = new Label
         {
@@ -213,7 +258,10 @@ internal sealed class MainForm : Form
             Text = Copy.RunAllExplanation,
         };
 
-        _runAllButton = new Button { Text = Copy.RunAllButtonLabel, Dock = DockStyle.Top, Height = 28 };
+        // The window's main control: one large primary button at the top of the right-hand panel,
+        // taller than every other button here, for running every test back to back; the row list
+        // and its own Start button stay secondary, for running one test.
+        _runAllButton = new Button { Text = Copy.RunAllButtonLabel, Dock = DockStyle.Top, Height = 48, Font = new Font(Font, FontStyle.Bold) };
         _runAllButton.Click += (_, _) => StartOrContinueRunAll();
 
         // Beside row 15 rather than inside the row list, since this is a utility check, not
@@ -224,12 +272,17 @@ internal sealed class MainForm : Form
         _rehearsalRow = BuildRehearsalDisplayRow();
         _rehearsalWarningLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 48, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed,
+            // Tall enough for RehearsalWarning's own wording to wrap without overlapping the
+            // status label below it.
+            Dock = DockStyle.Top, Height = 64, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed,
             Text = Copy.RehearsalWarning,
         };
         _rehearsalStatusLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 20, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            // Tall enough for RehearsalNeverInSandbox's own longer, plain wording to wrap without
+            // overlapping the control below it (seen clipped in a captured screenshot: a fixed 20 px
+            // was already tight before this text grew a little plainer, and longer).
+            Dock = DockStyle.Top, Height = 36, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
             Text = sandbox is null ? string.Empty : Copy.RehearsalNeverInSandbox,
         };
         _rehearsalButton = new Button
@@ -241,8 +294,12 @@ internal sealed class MainForm : Form
         var rightPanel = new Panel { Dock = DockStyle.Fill };
         rightPanel.Controls.Add(contentHost);
         rightPanel.Controls.Add(_statusLabel);
+        rightPanel.Controls.Add(_runAllProgressLabel);
         rightPanel.Controls.Add(_runAllStatusLabel);
+        rightPanel.Controls.Add(_runAllStopHereButton);
         rightPanel.Controls.Add(_runAllCarryOnButton);
+        rightPanel.Controls.Add(_runAllRestoreContinueButton);
+        rightPanel.Controls.Add(_runAllRestoreAdviceLabel);
         rightPanel.Controls.Add(_bannerLabel);
         rightPanel.Controls.Add(_caseBox);
         rightPanel.Controls.Add(_stopButton);
@@ -256,6 +313,7 @@ internal sealed class MainForm : Form
         rightPanel.Controls.Add(_runAllButton);
         rightPanel.Controls.Add(_exePathLabel);
         rightPanel.Controls.Add(_chooseExeButton);
+        rightPanel.Controls.Add(_technicalDetailsCheckBox);
 
         Controls.Add(rightPanel);
         Controls.Add(leftPanel);
@@ -316,6 +374,30 @@ internal sealed class MainForm : Form
         UpdateStartButton();
     }
 
+    // Persisted immediately, then whichever panel is actually on screen is redrawn from its own
+    // cached, real presentation (never re-derived), so flipping the checkbox mid-step or
+    // mid-result takes effect at once rather than waiting for the next prompt or run.
+    private void OnTechnicalDetailsToggled()
+    {
+        _showTechnicalDetails = _technicalDetailsCheckBox.Checked;
+        TechnicalDetailsSettings.Write(WindowStateRoot(), _showTechnicalDetails);
+
+        if (_lastPresentedPrompt is not null && _activeRunner is not null)
+        {
+            _stepPanel.Show(_activeRunner, _lastPresentedPrompt, _lastPresentedPromptSeq, _showTechnicalDetails);
+        }
+
+        if (_lastResultPresentation is not null)
+        {
+            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails);
+        }
+
+        // The row list's own State column reads plain or technical the same way: PopulateRows
+        // rebuilds every row's text from the same _showTechnicalDetails this handler just set.
+        PopulateRows();
+        UpdateRowDetail();
+    }
+
     private void UpdateRowDetail()
     {
         if (_rowList.SelectedIndices.Count == 0)
@@ -338,10 +420,17 @@ internal sealed class MainForm : Form
         DisplayRow row = _displayRows[index];
         ClearNotedStartWarningIfRowChanged(row);
 
-        // The plain line first, the script's own words as a secondary line beneath it, for both
-        // pairs Name/Title and Proves/Settles, in full: never cut with an ellipsis.
-        string text = row.Name + Environment.NewLine + row.Title + Environment.NewLine + Environment.NewLine +
-            row.Proves + Environment.NewLine + "Settles: " + row.Settles;
+        // Name and Proves are this window's own plain words, always shown, in full: never cut
+        // with an ellipsis. Title and Settles are the script's own words, so they move behind the
+        // technical-details toggle; UpdateStartButton and every state derivation are unaffected,
+        // since this method only ever builds display text.
+        string text = row.Name + Environment.NewLine + Environment.NewLine + row.Proves;
+        if (_showTechnicalDetails)
+        {
+            text += Environment.NewLine + Environment.NewLine + "Technical details" + Environment.NewLine +
+                row.Title + Environment.NewLine + "Settles: " + row.Settles;
+        }
+
         if (row.WaitsOnWindowsUpdate)
         {
             text += Environment.NewLine + "This variant waits on Windows Update offering a restart; it may take a while for one to appear.";
@@ -515,6 +604,7 @@ internal sealed class MainForm : Form
         // Recomputed at every open and after every half.
         RefreshBanner();
         UpdateRehearsalStatus();
+        UpdateRunAllButtonLabel();
 
         int selected = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         _rowList.Items.Clear();
@@ -522,7 +612,7 @@ internal sealed class MainForm : Form
         {
             DerivedRowState state = ComputeState(row);
             var item = new ListViewItem(row.Number);
-            item.SubItems.Add(RowPresenter.Text(state));
+            item.SubItems.Add(_showTechnicalDetails ? RowPresenter.Text(state) : RowPresenter.PlainText(state));
             item.SubItems.Add(row.Name);
             item.SubItems.Add(row.Proves);
             item.ForeColor = state.IsGreen ? Color.DarkGreen : Color.Black;
@@ -533,6 +623,18 @@ internal sealed class MainForm : Form
         {
             _rowList.Items[selected].Selected = true;
         }
+    }
+
+    // After a shut down or an ordinary halt, run-all.json still records a stopped point to come
+    // back to (RunAllFile), even though _runAllActive itself is only ever true while this window
+    // is actually driving the sequence. The one primary button reads that record fresh at every
+    // open, so reopening after the owner's own shut down shows "Carry on with the tests" rather
+    // than the fresh-start label, with no second control to find.
+    private void UpdateRunAllButtonLabel()
+    {
+        RunAllRecord? existing = RunAllFile.TryRead(WindowStateRoot());
+        bool hasStoppedPoint = existing is not null && existing.StoppedAtIndex >= 0;
+        _runAllButton.Text = hasStoppedPoint ? Copy.RunAllCarryOnLabel : Copy.RunAllButtonLabel;
     }
 
     // Recomputes the banner from disk right now and updates both the cached copy and the visible
@@ -1091,7 +1193,9 @@ internal sealed class MainForm : Form
                 _silenceWarningShown = false;
                 _killDeadlineUtc = null;
                 PresentedPrompt presented = PromptPresenter.Present(message, row.Row.Number, _wording, _transcript);
-                _stepPanel.Show(_activeRunner!, presented, message.Seq);
+                _lastPresentedPrompt = presented;
+                _lastPresentedPromptSeq = message.Seq;
+                _stepPanel.Show(_activeRunner!, presented, message.Seq, _showTechnicalDetails);
                 break;
             case ChildMessageKind.Exit:
                 _statusLabel.Text = row.TestId + " finished (exit " + message.ExitCode + ").";
@@ -1140,7 +1244,8 @@ internal sealed class MainForm : Form
         }
         else if (result is not null)
         {
-            _resultPanel.Show(ResultPresenter.Present(result, _activeResultFolder!));
+            _lastResultPresentation = ResultPresenter.Present(result, _activeResultFolder!, row.Row.Number, _wording);
+            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails);
             _resultPanel.Visible = true;
         }
         else
@@ -1163,10 +1268,39 @@ internal sealed class MainForm : Form
         // just finished, Run all (if active) re-derives this same item from disk and decides
         // afresh whether to stop here or move itself on; it never trusts what this method above
         // just did with the panels.
-        if (_runAllActive)
+        if (_runAllActive && _runAllRecoveringViaRestore)
+        {
+            _runAllRecoveringViaRestore = false;
+            OnRunAllRestoreRecoveryFinished(result);
+        }
+        else if (_runAllActive)
         {
             AdvanceRunAll();
         }
+    }
+
+    // Restore ran as Run all's own red-banner recovery step (started only after the owner clicked
+    // through the same advice AtRestNo gives). Only leftAtRest of yes means this computer is
+    // actually safe to carry on with the rest of the sequence; anything else (no, unknown, a
+    // declined start, a killed run) halts here exactly as an ordinary failed row would, rather than
+    // silently retrying Restore or moving on over a machine that is still not known to be at rest.
+    private void OnRunAllRestoreRecoveryFinished(ParsedResult? result)
+    {
+        if (result?.LeftAtRest == "yes")
+        {
+            _runAllStatusLabel.Text = Copy.RunAllRestoreSucceeded;
+            _runAllIndex = Math.Max(_runAllIndex, 0);
+            SaveRunAllProgress();
+            AdvanceRunAll();
+            return;
+        }
+
+        _runAllActive = false;
+        RunAllFile.Delete(WindowStateRoot());
+        _runAllCarryOnButton.Visible = false;
+        _runAllStopHereButton.Visible = false;
+        _runAllProgressLabel.Visible = false;
+        _runAllStatusLabel.Text = Copy.RunAllRestoreDidNotReachAtRest;
     }
 
     // Stop's own two paths. A prompt pending: send the real abort down the wire and
@@ -1321,8 +1455,15 @@ internal sealed class MainForm : Form
 
         // A forced kill, or a process ending on its own with nothing reported, is never a
         // script-decided outcome: Run all treats either one exactly like an ordinary halt on
-        // failure, never advanced past on its own.
-        if (_runAllActive && row is not null)
+        // failure, never advanced past on its own. A kill during the red-banner Restore recovery
+        // step is never treated as a green light to carry on into the ordinary sequence: nothing
+        // there has been confirmed at rest, so it is read the same as Restore itself failing to.
+        if (_runAllActive && _runAllRecoveringViaRestore)
+        {
+            _runAllRecoveringViaRestore = false;
+            OnRunAllRestoreRecoveryFinished(null);
+        }
+        else if (_runAllActive && row is not null)
         {
             HaltRunAll(row, new DerivedRowState { Kind = RowStateKind.Unknown, Reason = "stopped by force" });
         }
@@ -1330,8 +1471,12 @@ internal sealed class MainForm : Form
 
     // Run all's guided sequence. Walks RunAllOrder from _runAllIndex; test 10's five
     // variants are ordinary items here (each is its own DisplayRow with its own RunAllKey), never
-    // skipped. It starts at most one child per call, then returns and waits for OnRunFinished to
-    // call back in; it never loops past a row that is not yet a clean pass on disk.
+    // skipped. A row this window cannot start at all (Locked: only row 15, before the
+    // administrator prompt check has passed) is skipped over with a plain reason rather than
+    // halting the whole sequence for it; the end-of-sequence summary lists it under "not run yet"
+    // all the same, since ComputeState still reads it as Locked on every later pass over the list.
+    // It starts at most one child per call, then returns and waits for OnRunFinished to call back
+    // in; it never loops past a row that is not yet a clean pass on disk.
     private void AdvanceRunAll()
     {
         // Never start a second child. AdvanceRunAll's only job is to start the next item, so
@@ -1353,6 +1498,12 @@ internal sealed class MainForm : Form
             }
 
             DerivedRowState state = ComputeState(row);
+
+            if (state.Kind == RowStateKind.Locked)
+            {
+                _runAllIndex++;
+                continue;
+            }
 
             // The caller's own decision, not just RunAllHalt.ShouldHalt in isolation. A
             // declined start (StoppedBeforeAnyStep) used to be treated as "fresh enough" to
@@ -1381,7 +1532,7 @@ internal sealed class MainForm : Form
 
             // Written before the child even starts, not only on a halt: closing the window mid
             // item must still leave run-all.json pointing at this same index, so reopening and
-            // clicking "Run all, step by step" again resumes here rather than from the start.
+            // clicking "Carry on with the tests" again resumes here rather than from the start.
             SaveRunAllProgress();
 
             // The combined gate again, right before the item this loop actually chose is started:
@@ -1399,6 +1550,9 @@ internal sealed class MainForm : Form
                 return;
             }
 
+            _runAllProgressLabel.Text = Copy.RunAllProgressLine(_runAllIndex + 1, RunAllOrder.Items.Count, row.Name);
+            _runAllProgressLabel.Visible = true;
+
             PendingRun? pending = FindPendingRun(row);
             if (pending is not null)
             {
@@ -1415,13 +1569,57 @@ internal sealed class MainForm : Form
         _runAllActive = false;
         RunAllFile.Delete(WindowStateRoot());
         _runAllCarryOnButton.Visible = false;
-        _runAllStatusLabel.Text = Copy.RunAllFinished;
+        _runAllStopHereButton.Visible = false;
+        _runAllProgressLabel.Visible = false;
+        _runAllStatusLabel.Text = Copy.RunAllFinished + " " + BuildRunAllEndSummarySentence();
     }
+
+    // Fresh from disk, every time: how many of Run all's own items ended up in each bucket right
+    // now, whatever path each one took to get there (run for real, skipped as Locked, or never
+    // reached at all), followed by which rows were never run and why.
+    private string BuildRunAllEndSummarySentence()
+    {
+        int worked = 0, didNotWork = 0, couldNotTell = 0, notRunYet = 0;
+        var notRunEntries = new List<string>();
+        foreach (RunAllItem item in RunAllOrder.Items)
+        {
+            DisplayRow? row = _displayRows.FirstOrDefault(r => r.RunAllKey == item.Key);
+            if (row is null)
+            {
+                continue;
+            }
+
+            DerivedRowState state = ComputeState(row);
+            switch (RunAllSummary.Classify(state.Kind))
+            {
+                case RunAllSummaryBucket.Worked: worked++; break;
+                case RunAllSummaryBucket.DidNotWork: didNotWork++; break;
+                case RunAllSummaryBucket.CouldNotTell: couldNotTell++; break;
+                default:
+                    notRunYet++;
+                    notRunEntries.Add(row.Number + " (" + row.Name + "): " + NotRunReasonText(state));
+                    break;
+            }
+        }
+
+        string sentence = Copy.RunAllSummarySentence(worked, didNotWork, couldNotTell, notRunYet);
+        return notRunEntries.Count == 0 ? sentence : sentence + " " + string.Join(" ", notRunEntries);
+    }
+
+    private static string NotRunReasonText(DerivedRowState state) => state.Kind switch
+    {
+        RowStateKind.Locked => Copy.LockedDetail,
+        RowStateKind.StoppedBeforeAnyStep => "It was stopped before any step ran.",
+        RowStateKind.WaitingForShutDown => "It is waiting for the shut down.",
+        RowStateKind.WaitingForRestart => "It is waiting for the restart.",
+        _ => "It has not been run yet.",
+    };
 
     private void HaltRunAll(DisplayRow row, DerivedRowState state)
     {
         SaveRunAllProgress();
         SelectRow(row);
+        _runAllProgressLabel.Visible = false;
 
         bool atPowerCycleBoundary = state.Kind is RowStateKind.WaitingForShutDown or RowStateKind.WaitingForRestart;
         _runAllStatusLabel.Text = state.Kind == RowStateKind.Locked
@@ -1433,8 +1631,10 @@ internal sealed class MainForm : Form
         // At the power-cycle boundary the row's own "Carry on with the second half" button
         // is the deliberate click that resumes Run all too, through
         // OnRunFinished -> AdvanceRunAll above; an ordinary failure needs its own
-        // acknowledgement first: until it is pressed, Run all stays halted.
+        // acknowledgement first, with the choice to give up on it too: until one of the two
+        // buttons is pressed, Run all stays halted.
         _runAllCarryOnButton.Visible = !atPowerCycleBoundary;
+        _runAllStopHereButton.Visible = !atPowerCycleBoundary;
     }
 
     private void OnRunAllCarryOnClicked()
@@ -1447,9 +1647,24 @@ internal sealed class MainForm : Form
         }
 
         _runAllCarryOnButton.Visible = false;
+        _runAllStopHereButton.Visible = false;
         _runAllIndex++;
         SaveRunAllProgress();
         AdvanceRunAll();
+    }
+
+    // Gives up on the rest of the sequence at a halt, rather than the only other choice being to
+    // carry on past whatever it stopped on: run-all.json is cleared, so a later "Run all the
+    // tests" starts fresh rather than resuming at the row this abandoned.
+    private void OnRunAllStopHereClicked()
+    {
+        _runAllActive = false;
+        _runAllCarryOnButton.Visible = false;
+        _runAllStopHereButton.Visible = false;
+        _runAllProgressLabel.Visible = false;
+        RunAllFile.Delete(WindowStateRoot());
+        _runAllStatusLabel.Text = Copy.RunAllFinished + " " + BuildRunAllEndSummarySentence();
+        UpdateRunAllButtonLabel();
     }
 
     private void SaveRunAllProgress()
@@ -1462,19 +1677,20 @@ internal sealed class MainForm : Form
         });
     }
 
+    // The one entry point for the window's main control. The single-runner rule always applies;
+    // the banner lock never simply refuses here the way every other start route's does, because
+    // Run all's whole job under a red or unknown banner is to get this computer back to a known
+    // state on its own, through row 00 Restore, the one start the banner lock already exempts.
     private void StartOrContinueRunAll()
     {
-        // Run all's own button stayed enabled during a run; nothing stopped a second click
-        // (or a click while a single-row Start was mid-flight) from starting a second child. Run
-        // all's own entry point is never exempt from the banner lock, whatever item it would land
-        // on: the owner starts it again from Restore's own row instead.
-        if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, rowIsExemptFromBannerLock: false))
+        if (!RunGate.CanStart(_activeRunner))
         {
-            if (_activeRunner is null)
-            {
-                _runAllStatusLabel.Text = _banner.Message;
-            }
+            return;
+        }
 
+        if (RefreshBanner().RowsLockedExceptRestore)
+        {
+            ShowRunAllRestoreAdvice();
             return;
         }
 
@@ -1491,7 +1707,66 @@ internal sealed class MainForm : Form
         _runAllActive = true;
         _runAllIndex = existing is not null && existing.StoppedAtIndex >= 0 ? existing.StoppedAtIndex : 0;
         _runAllCarryOnButton.Visible = false;
+        _runAllStopHereButton.Visible = false;
         AdvanceRunAll();
+    }
+
+    // The deliberate step shown before Restore ever starts under a red or unknown banner: the same
+    // plain advice the not-at-rest result line gives (Copy.AtRestNo), shown as a step to act on
+    // first, since it is usually all that is needed; Restore itself is what runs once the owner
+    // says they have done it, never silently skipped past.
+    private void ShowRunAllRestoreAdvice()
+    {
+        _runAllRestoreAdviceLabel.Text = Copy.RunAllRestoreAdviceHeading + Environment.NewLine + Environment.NewLine + Copy.AtRestNo;
+        _runAllRestoreAdviceLabel.Visible = true;
+        _runAllRestoreContinueButton.Visible = true;
+        _runAllStatusLabel.Text = string.Empty;
+    }
+
+    private void OnRunAllRestoreContinueClicked()
+    {
+        if (!RunGate.CanStart(_activeRunner))
+        {
+            return;
+        }
+
+        _runAllRestoreAdviceLabel.Visible = false;
+        _runAllRestoreContinueButton.Visible = false;
+        StartRunAllViaRestoreRecovery();
+    }
+
+    // Row 00 Restore, started as Run all's own red-banner recovery step: the one row the banner
+    // lock already exempts, through the same single start gate every other route uses. Never adds
+    // Restore to _runAllPointers (RunAllOrder's own sequence has no entry for "00" at all, by
+    // design: Restore is the manual escape hatch, never one of the guided items).
+    private void StartRunAllViaRestoreRecovery()
+    {
+        DisplayRow? restoreRow = _displayRows.FirstOrDefault(r => r.Row.Number == "00");
+        if (restoreRow is null)
+        {
+            return;
+        }
+
+        if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, rowIsExemptFromBannerLock: true))
+        {
+            return;
+        }
+
+        string host = PowerShell51.ExecutablePath();
+        if (!File.Exists(host))
+        {
+            _runAllStatusLabel.Text = "Windows PowerShell 5.1 is not installed at " + host + ".";
+            return;
+        }
+
+        _runAllActive = true;
+        _runAllRecoveringViaRestore = true;
+        _runAllIndex = -1;
+        _runAllCarryOnButton.Visible = false;
+        _runAllStopHereButton.Visible = false;
+        _runAllStatusLabel.Text = Copy.RunAllRestoreRunning;
+        SelectRow(restoreRow);
+        StartFreshRun(host, restoreRow);
     }
 
     private void SelectRow(DisplayRow row)
@@ -1650,6 +1925,18 @@ internal sealed class MainForm : Form
 
     internal string RowDetailTextForTests => _rowDetailLabel.Text;
 
+    // Test seam: CheckBox exposes no PerformClick (that is a Button-only member); flipping Checked
+    // is exactly what a real click does first, and raises the same CheckedChanged event that drives
+    // the real OnTechnicalDetailsToggled handler, so this proves that handler rather than setting
+    // _showTechnicalDetails directly.
+    internal void ClickTechnicalDetailsCheckBoxForTests() => _technicalDetailsCheckBox.Checked = !_technicalDetailsCheckBox.Checked;
+
+    internal bool ShowTechnicalDetailsForTests => _showTechnicalDetails;
+
+    internal StepPanel StepPanelForTests => _stepPanel;
+
+    internal ResultPanel ResultPanelForTests => _resultPanel;
+
     // Test 14's speaker-address choice: one entry per visible button (candidates, then "No second
     // device", in that order), the address PerformClick chose (null once cleared or before any
     // click), and the click itself, the same PerformClick pattern every other *ForTests click uses.
@@ -1748,6 +2035,22 @@ internal sealed class MainForm : Form
     internal void BeginRunForTests(DisplayRow row, ChildRunner runner, string resultFolder) =>
         BeginRun(row, runner, resultFolder, isResume: false);
 
+    // Test seam: drives the real BeginRun/OnRunFinished/OnRunAllRestoreRecoveryFinished pipeline
+    // for a runner and script built entirely by the test, so the red-banner recovery outcome (a
+    // Restore that does or does not record leftAtRest yes) can be proved against a controlled
+    // result.json without needing the real 00-Restore.ps1 against a real or sandboxed device.
+    internal void BeginRunAllRestoreRecoveryForTests(ChildRunner runner, string resultFolder)
+    {
+        _runAllActive = true;
+        _runAllRecoveringViaRestore = true;
+        DisplayRow restoreRow = _displayRows.First(r => r.Row.Number == "00");
+        BeginRun(restoreRow, runner, resultFolder, isResume: false);
+    }
+
+    internal string? ActiveRowNumberForTests => _activeDisplayRow?.Number;
+
+    internal bool RunAllActiveForTests => _runAllActive;
+
     internal void ClickCarryOnForTests() => _runAllCarryOnButton.PerformClick();
 
     internal void KillActiveRunForTests() => KillActiveRun();
@@ -1763,6 +2066,22 @@ internal sealed class MainForm : Form
     internal string RunAllStatusTextForTests => _runAllStatusLabel.Text;
 
     internal bool CarryOnVisibleForTests => _runAllCarryOnButton.Visible;
+
+    internal void ClickRunAllStopHereForTests() => _runAllStopHereButton.PerformClick();
+
+    internal bool RunAllStopHereVisibleForTests => _runAllStopHereButton.Visible;
+
+    internal bool RunAllRestoreAdviceVisibleForTests => _runAllRestoreAdviceLabel.Visible && _runAllRestoreContinueButton.Visible;
+
+    internal string RunAllRestoreAdviceTextForTests => _runAllRestoreAdviceLabel.Text;
+
+    internal void ClickRunAllRestoreContinueForTests() => _runAllRestoreContinueButton.PerformClick();
+
+    internal string RunAllProgressTextForTests => _runAllProgressLabel.Text;
+
+    internal bool RunAllProgressVisibleForTests => _runAllProgressLabel.Visible;
+
+    internal string RunAllButtonTextForTests => _runAllButton.Text;
 
     internal bool StartButtonEnabledForTests => _startButton.Enabled;
 

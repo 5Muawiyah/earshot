@@ -6,9 +6,13 @@ namespace Earshot.TestWindow.Ui;
 // the leftAtRest line. Holds no decisions: ResultPresenter and Copy already made them.
 internal sealed class ResultPanel : Panel
 {
+    private readonly Label _plainSummaryLabel;
+    private readonly Label _plainLinesLabel;
+    private readonly Label _technicalHeading;
     private readonly ListView _failureList;
     private readonly Label _selectedCaption;
     private readonly TextBox _selectedDetailBox;
+    private readonly Label _errorsCaption;
     private readonly TextBox _errorsBox;
     private readonly Label _evidenceLabel;
     private readonly Label _atRestLabel;
@@ -36,6 +40,19 @@ internal sealed class ResultPanel : Panel
 
         var heading = new Label { Text = "Result", AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(0, 0, 0, 8) };
 
+        // The plain-mode summary: shown with technical details off, in place of the technical
+        // table below (which stays exactly as it was, behind the toggle).
+        _plainSummaryLabel = new Label
+        {
+            AutoSize = true, MaximumSize = new Size(704, 0), Font = new Font(Font.FontFamily, 11f), Margin = new Padding(0, 0, 0, 4),
+        };
+        _plainLinesLabel = new Label { AutoSize = true, MaximumSize = new Size(704, 0), Margin = new Padding(0, 0, 0, 8) };
+
+        _technicalHeading = new Label
+        {
+            Text = "Technical details", AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(0, 4, 0, 2),
+        };
+
         _failureList = new ListView
         {
             Width = 704, Height = 160, View = View.Details, FullRowSelect = true, GridLines = true, Margin = new Padding(0, 0, 0, 4),
@@ -54,7 +71,7 @@ internal sealed class ResultPanel : Panel
             WordWrap = true, Margin = new Padding(0, 0, 0, 8),
         };
 
-        var errorsCaption = new Label { Text = "Errors the test recorded", AutoSize = true };
+        _errorsCaption = new Label { Text = "Errors the test recorded", AutoSize = true };
         _errorsBox = new TextBox
         {
             Width = 704, Height = 60, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Margin = new Padding(0, 0, 0, 8),
@@ -74,10 +91,13 @@ internal sealed class ResultPanel : Panel
 
         stack.Controls.Add(heading);
         stack.Controls.Add(_declinedElevatedPromptLabel);
+        stack.Controls.Add(_plainSummaryLabel);
+        stack.Controls.Add(_plainLinesLabel);
+        stack.Controls.Add(_technicalHeading);
         stack.Controls.Add(_failureList);
         stack.Controls.Add(_selectedCaption);
         stack.Controls.Add(_selectedDetailBox);
-        stack.Controls.Add(errorsCaption);
+        stack.Controls.Add(_errorsCaption);
         stack.Controls.Add(_errorsBox);
         stack.Controls.Add(_evidenceLabel);
         stack.Controls.Add(_atRestLabel);
@@ -85,7 +105,12 @@ internal sealed class ResultPanel : Panel
         Controls.Add(stack);
     }
 
-    internal void Show(ResultPresentation result)
+    // showTechnicalDetails gates the failure table (Criterion, Expected, Observed: the script's own
+    // check ids and its own words for what it expected and observed), the selected-criterion detail
+    // box and the raw errors box, the same script-authored content Copy.RestoreUninstallOfferNotAvailable-
+    // style strings never are. The evidence path and the leftAtRest line are this window's own
+    // words (Copy), never the script's, so neither is ever hidden.
+    internal void Show(ResultPresentation result, bool showTechnicalDetails)
     {
         ArgumentNullException.ThrowIfNull(result);
 
@@ -114,8 +139,23 @@ internal sealed class ResultPanel : Panel
         }
 
         _errorsBox.Text = string.Join(Environment.NewLine, result.Errors);
-        _evidenceLabel.Text = "Evidence: " + result.EvidenceFolder + Environment.NewLine +
-            result.ResultJsonPath + Environment.NewLine + result.SummaryTxtPath;
+
+        _plainSummaryLabel.Text = Copy.PlainCheckSummarySentence(result.TotalCriteria, result.FailedCount, result.InconclusiveCount);
+        _plainLinesLabel.Text = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            result.PlainFailureLines.Select(line => line.PlainMeaning is null ? line.PlainLine : line.PlainLine + Environment.NewLine + line.PlainMeaning));
+        _plainSummaryLabel.Visible = !showTechnicalDetails;
+        _plainLinesLabel.Visible = !showTechnicalDetails && result.PlainFailureLines.Count > 0;
+
+        _technicalHeading.Visible = showTechnicalDetails;
+        _failureList.Visible = showTechnicalDetails;
+        _selectedCaption.Visible = showTechnicalDetails;
+        _selectedDetailBox.Visible = showTechnicalDetails;
+        _errorsCaption.Visible = showTechnicalDetails;
+        _errorsBox.Visible = showTechnicalDetails;
+
+        _evidenceLabel.Text = "The saved record of this run is here:" + Environment.NewLine +
+            result.EvidenceFolder + Environment.NewLine + result.ResultJsonPath + Environment.NewLine + result.SummaryTxtPath;
 
         string atRestText = Copy.LeftAtRestText(result.LeftAtRest, result.LeftAtRestDetail);
         _atRestLabel.Text = atRestText;
@@ -143,4 +183,16 @@ internal sealed class ResultPanel : Panel
             "Expected: " + failure.Expected + Environment.NewLine +
             "Observed: " + failure.Observed;
     }
+
+    internal bool TechnicalDetailsVisibleForTests => _failureList.Visible;
+
+    internal string EvidenceTextForTests => _evidenceLabel.Text;
+
+    internal string AtRestTextForTests => _atRestLabel.Text;
+
+    internal bool PlainSummaryVisibleForTests => _plainSummaryLabel.Visible;
+
+    internal string PlainSummaryTextForTests => _plainSummaryLabel.Text;
+
+    internal string PlainLinesTextForTests => _plainLinesLabel.Text;
 }
