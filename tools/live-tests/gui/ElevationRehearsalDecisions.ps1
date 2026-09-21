@@ -76,25 +76,51 @@ function Get-ApprovedExitCodeOutcome
 }
 
 # section 10.3: a declined prompt's own shape is "a step with elevated true, ran false and an
-# error", and the call itself returns nothing.
+# error", and the call itself returns nothing. M5: ran=false with some error is not, on its own,
+# proof that Windows raised the permission box and the owner chose No there. Invoke-EarshotElevated
+# (LiveTest.psm1) leaves that exact shape for at least two other reasons that never touch Windows'
+# own prompt at all: a No pressed in the window's own Confirm-Step before Start-Process is ever
+# called (error 'skipped at the owner request'), and Start-Process's own WaitForExit timing out
+# (error 'It did not finish within <n> s.'). Only a real decline throws from Start-Process itself,
+# and LiveTest.psm1's own comment beside that catch names the one reliable signal for it: "a
+# declined prompt reports 1223" (ERROR_CANCELLED, the Win32 code Windows returns for -Verb RunAs
+# when the owner chooses No). Anything else that also happens to be ran=false is inconclusive, not
+# a pass: it does not settle whether the Windows box ever appeared.
 function Get-DeclinedRecordedOutcome
 {
     param($ReturnValue, $LastStep)
 
-    $shapeOk = ($null -eq $ReturnValue) -and ($null -ne $LastStep) -and ($LastStep.ran -eq $false) -and
-        (-not [string]::IsNullOrEmpty($LastStep.error))
+    if ($null -ne $LastStep -and $LastStep.ran -eq $true)
+    {
+        return [ordered]@{
+            outcome = 'fail'
+            detail  = 'Round 2 needed No on the Windows box, but the elevated step ran, so it was approved instead.'
+        }
+    }
 
-    if ($shapeOk)
+    $hasError = ($null -ne $LastStep) -and (-not [string]::IsNullOrEmpty($LastStep.error))
+    $observedWindowsCancellation = $hasError -and ($LastStep.error -match '1223')
+
+    if (($null -eq $ReturnValue) -and $observedWindowsCancellation)
     {
         return [ordered]@{
             outcome = 'pass'
-            detail  = 'The declined step recorded ran=false with an error, and the call returned nothing, as section 10.3 describes.'
+            detail  = 'The declined step recorded ran=false with an error naming Windows'' own cancellation code (1223), and the call returned nothing, as section 10.3 describes.'
+        }
+    }
+
+    if ($hasError)
+    {
+        return [ordered]@{
+            outcome = 'inconclusive'
+            detail  = ('This is not a recorded Windows decline: ' + $LastStep.error +
+                ' Only an observed launch attempt that Windows itself reported as cancelled (error 1223) counts; a No in the window''s own step, or a timeout, does not.')
         }
     }
 
     return [ordered]@{
         outcome = 'fail'
-        detail  = 'Round 2 needed No on the Windows box; the declined shape was not what section 10.3 describes.'
+        detail  = 'Round 2 needed No on the Windows box; no step was recorded at all.'
     }
 }
 

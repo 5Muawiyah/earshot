@@ -58,14 +58,53 @@ public sealed class ElevationRehearsalDecisionsTests
         Assert.AreEqual("fail", result.GetProperty("outcome").GetString());
     }
 
+    // M5: only an error naming Windows' own cancellation code (1223, ERROR_CANCELLED) is a
+    // recorded decline. LiveTest.psm1's own catch comment names it: "a declined prompt reports
+    // 1223".
     [TestMethod]
-    public void DeclinedWithTheRealShapeIsAPass()
+    public void DeclinedWithTheReal1223ShapeIsAPass()
+    {
+        JsonElement result = RunDriver("""
+            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'The elevated run could not be started (a declined prompt reports 1223): System.ComponentModel.Win32Exception: The operation was canceled by the user' })
+            $r | ConvertTo-Json -Compress
+            """);
+        Assert.AreEqual("pass", result.GetProperty("outcome").GetString());
+    }
+
+    // M5's own two named cases: neither ever reaches Start-Process, so neither can be a Windows
+    // decline, whatever ElevationRehearsalDecisions.ps1 used to think of their shape.
+    [TestMethod]
+    public void ANoInTheWindowsOwnStepIsInconclusiveNeverAPass()
     {
         JsonElement result = RunDriver("""
             $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'skipped at the owner request' })
             $r | ConvertTo-Json -Compress
             """);
-        Assert.AreEqual("pass", result.GetProperty("outcome").GetString());
+        Assert.AreEqual("inconclusive", result.GetProperty("outcome").GetString());
+        StringAssert.Contains(result.GetProperty("detail").GetString(), "1223");
+    }
+
+    [TestMethod]
+    public void ATimeoutIsInconclusiveNeverAPass()
+    {
+        JsonElement result = RunDriver("""
+            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'It did not finish within 600 s.' })
+            $r | ConvertTo-Json -Compress
+            """);
+        Assert.AreEqual("inconclusive", result.GetProperty("outcome").GetString());
+    }
+
+    // A ran=false error that names neither 1223 nor either named exemption (some other launch
+    // failure entirely) is also inconclusive: it does not settle whether Windows' own box ever
+    // appeared either.
+    [TestMethod]
+    public void SomeOtherLaunchFailureIsInconclusiveNeverAPass()
+    {
+        JsonElement result = RunDriver("""
+            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'The system cannot find the file specified' })
+            $r | ConvertTo-Json -Compress
+            """);
+        Assert.AreEqual("inconclusive", result.GetProperty("outcome").GetString());
     }
 
     [TestMethod]
@@ -83,6 +122,16 @@ public sealed class ElevationRehearsalDecisionsTests
     {
         JsonElement result = RunDriver("""
             $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = $null })
+            $r | ConvertTo-Json -Compress
+            """);
+        Assert.AreEqual("fail", result.GetProperty("outcome").GetString());
+    }
+
+    [TestMethod]
+    public void DeclinedWithNoStepAtAllIsAFail()
+    {
+        JsonElement result = RunDriver("""
+            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep $null
             $r | ConvertTo-Json -Compress
             """);
         Assert.AreEqual("fail", result.GetProperty("outcome").GetString());
