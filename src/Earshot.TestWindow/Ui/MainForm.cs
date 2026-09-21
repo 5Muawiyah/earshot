@@ -13,7 +13,12 @@ internal sealed class MainForm : Form
     private readonly IReadOnlyList<DisplayRow> _displayRows;
     private readonly IReadOnlyList<WordingEntry> _wording;
     private readonly SandboxOptions? _sandbox;
-    private readonly string _exePath;
+    // The exe path the constructor was given is only the fallback now: ChooseExePath overwrites
+    // this the moment a valid choice is made, and the constructor itself already prefers whatever
+    // ExePathSettings has remembered from an earlier open.
+    private string _exePath;
+    private readonly Label _exePathLabel;
+    private readonly Button _chooseExeButton;
 
     private readonly ListView _rowList;
     private readonly Label _rowDetailLabel;
@@ -89,6 +94,10 @@ internal sealed class MainForm : Form
         _exePath = exePath;
 
         Text = "Earshot live tests" + (sandbox is not null ? " (SANDBOX, no device)" : string.Empty);
+
+        // A remembered, still-valid choice always wins over the fixed %ProgramFiles% fallback the
+        // caller was constructed with; read before anything else here uses _exePath.
+        _exePath = ExePathSettings.TryReadOrDefault(WindowStateRoot(), _exePath);
         Width = 1040;
         Height = 720;
         StartPosition = FormStartPosition.CenterScreen;
@@ -146,6 +155,14 @@ internal sealed class MainForm : Form
         _caseBox = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Visible = sandbox is not null };
         _caseBox.Items.AddRange(new object[] { "none", "one", "two" });
         _caseBox.SelectedIndex = 1;
+
+        _exePathLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 20, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            AutoEllipsis = true, Text = "Earshot.exe: " + _exePath,
+        };
+        _chooseExeButton = new Button { Text = "Choose Earshot.exe...", Dock = DockStyle.Top, Height = 24 };
+        _chooseExeButton.Click += (_, _) => ChooseExePath();
 
         _statusLabel = new Label { Dock = DockStyle.Top, Height = 28, TextAlign = ContentAlignment.MiddleLeft };
         _bannerLabel = new Label
@@ -232,6 +249,8 @@ internal sealed class MainForm : Form
         rightPanel.Controls.Add(_rehearsalButton);
         rightPanel.Controls.Add(_runAllExplanationLabel);
         rightPanel.Controls.Add(_runAllButton);
+        rightPanel.Controls.Add(_exePathLabel);
+        rightPanel.Controls.Add(_chooseExeButton);
 
         Controls.Add(rightPanel);
         Controls.Add(leftPanel);
@@ -241,6 +260,43 @@ internal sealed class MainForm : Form
         PopulateRows();
         UpdateStartButton();
         UpdateRowDetail();
+    }
+
+    // Test seam: real callers never replace this; it defaults to a real OpenFileDialog filtered
+    // to Earshot.exe, returning the chosen path or null when the owner cancelled. Substituting it
+    // in a test proves ChooseExePath's own validation and persistence without ever putting a real
+    // Windows file picker on screen, which nothing here can safely dismiss on its own.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Func<string?> ChooseExePathDialogForTests { get; set; } = () =>
+    {
+        using var dialog = new OpenFileDialog { Filter = "Earshot.exe|Earshot.exe", CheckFileExists = true, Title = "Choose Earshot.exe" };
+        return dialog.ShowDialog() == DialogResult.OK ? dialog.FileName : null;
+    };
+
+    // Never trusts the dialog's own choice just because Windows let the owner pick it
+    // (ExePathChoice: a local drive-letter path, a file that exists, named exactly Earshot.exe).
+    // A valid choice replaces _exePath immediately and is remembered (ExePathSettings) so the
+    // next open starts from it rather than the fixed %ProgramFiles% fallback again.
+    private void ChooseExePath()
+    {
+        string? chosen = ChooseExePathDialogForTests();
+        if (chosen is null)
+        {
+            return;
+        }
+
+        if (!ExePathChoice.IsValid(chosen, out string? reason))
+        {
+            _statusLabel.Text = "That choice was not used: " + reason;
+            return;
+        }
+
+        _exePath = chosen;
+        _exePathLabel.Text = "Earshot.exe: " + _exePath;
+        ExePathSettings.Write(WindowStateRoot(), _exePath);
+        _statusLabel.Text = "Earshot.exe is now: " + _exePath;
+        PopulateRows();
+        UpdateStartButton();
     }
 
     private void UpdateRowDetail()
@@ -1512,6 +1568,12 @@ internal sealed class MainForm : Form
     internal void KillActiveRunForTests() => KillActiveRun();
 
     internal string StatusTextForTests => _statusLabel.Text;
+
+    internal string ExePathForTests => _exePath;
+
+    internal string ExePathLabelTextForTests => _exePathLabel.Text;
+
+    internal void ClickChooseExeButtonForTests() => _chooseExeButton.PerformClick();
 
     internal string RunAllStatusTextForTests => _runAllStatusLabel.Text;
 
