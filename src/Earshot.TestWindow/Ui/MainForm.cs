@@ -103,6 +103,7 @@ internal sealed class MainForm : Form
     private bool _showTechnicalDetails;
     private PresentedPrompt? _lastPresentedPrompt;
     private int _lastPresentedPromptSeq;
+    private string? _lastPresentedPromptProgressText;
     private ResultPresentation? _lastResultPresentation;
 
     // The silence watchdog and the abort/kill sequence. A prompt on screen is never
@@ -228,8 +229,12 @@ internal sealed class MainForm : Form
 
         // The form only renders the current prompt, the transcript box and a Stop
         // button, standing throughout a run, not only for the rare unrecognised-prompt case
-        // StepPanel's own built-in stop button covers.
-        _stopButton = new Button { Text = "Stop the test", Dock = DockStyle.Top, Height = 28, Enabled = false };
+        // StepPanel's own built-in stop button covers. Small and pinned to the bottom edge of the
+        // Running view (plain-window-layout.md's Step view, point 7), away from StepPanel's own,
+        // much larger answer buttons above it, rather than docked above everything the way it used
+        // to sit: "Stop this test" must never read as one of the answers to whatever question is
+        // currently on screen.
+        _stopButton = new Button { Text = "Stop the test", AutoSize = true, Height = 24, Enabled = false };
         _stopButton.Click += (_, _) => OnStopClicked();
 
         _watchdogTimer = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -438,11 +443,20 @@ internal sealed class MainForm : Form
         runningTopFlow.Controls.Add(_runAllRestoreContinueButton);
         runningTopFlow.Controls.Add(_runAllCarryOnButton);
         runningTopFlow.Controls.Add(_runAllStopHereButton);
-        runningTopFlow.Controls.Add(_stopButton);
+
+        // "Stop this test", small, at the bottom edge of the whole Running view, away from
+        // StepPanel's own answer buttons above it (plain-window-layout.md's Step view, point 7).
+        var stopRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 6, 8, 6),
+        };
+        stopRow.Controls.Add(_stopButton);
 
         _runningPanel = new Panel { Dock = DockStyle.Fill, Visible = false };
         _runningPanel.Controls.Add(contentHost);
         _runningPanel.Controls.Add(runningTopFlow);
+        _runningPanel.Controls.Add(stopRow);
 
         var viewHost = new Panel { Dock = DockStyle.Fill };
         viewHost.Controls.Add(_runningPanel);
@@ -507,6 +521,29 @@ internal sealed class MainForm : Form
         _homePickupLineLabel.Visible = pickupRow is not null;
     }
 
+    // StepPanel's own progress line (plain-window-layout.md's Step view, point 1): "which test, of
+    // how many", read from RunAllOrder.Items's own fixed sequence, the same list Run all's own
+    // progress label and HomeRunAllCountLine already read. Works the same way whether this run is
+    // part of Run all or an ordinary single Start click: RunAllOrder.Items names every numbered
+    // row's fixed position regardless of how this run started, so a single test 03 start shows
+    // "Test 3 of 20" exactly as Run all would when it reaches row 03. Row 00 Restore and the
+    // administrator prompt check (row "AR") are not in RunAllOrder.Items at all (see RunAllOrder's
+    // own remark: 00 is the manual escape hatch, never part of the guided sequence), so neither has
+    // a position to report; this returns null for those, and StepPanel hides the line rather than
+    // showing a fabricated one.
+    private static string? ComputeStepProgressText(DisplayRow row)
+    {
+        for (int i = 0; i < RunAllOrder.Items.Count; i++)
+        {
+            if (RunAllOrder.Items[i].Key == row.RunAllKey)
+            {
+                return Copy.StepProgressLine(i + 1, RunAllOrder.Items.Count, row.Name);
+            }
+        }
+
+        return null;
+    }
+
     // A console run of one of the two commands rows 00 and 07 point the owner at
     // (Copy.RestoreUninstallOfferNotAvailable, Copy.PlanBNotAvailable) happens entirely outside
     // this window; the owner returning to it (alt-tab, clicking back onto it) is the moment this
@@ -567,7 +604,7 @@ internal sealed class MainForm : Form
 
         if (_lastPresentedPrompt is not null && _activeRunner is not null)
         {
-            _stepPanel.Show(_activeRunner, _lastPresentedPrompt, _lastPresentedPromptSeq, _showTechnicalDetails);
+            _stepPanel.Show(_activeRunner, _lastPresentedPrompt, _lastPresentedPromptSeq, _showTechnicalDetails, _lastPresentedPromptProgressText);
         }
 
         if (_lastResultPresentation is not null)
@@ -1411,7 +1448,8 @@ internal sealed class MainForm : Form
                 PresentedPrompt presented = PromptPresenter.Present(message, row.Row.Number, _wording, _transcript);
                 _lastPresentedPrompt = presented;
                 _lastPresentedPromptSeq = message.Seq;
-                _stepPanel.Show(_activeRunner!, presented, message.Seq, _showTechnicalDetails);
+                _lastPresentedPromptProgressText = ComputeStepProgressText(row);
+                _stepPanel.Show(_activeRunner!, presented, message.Seq, _showTechnicalDetails, _lastPresentedPromptProgressText);
                 break;
             case ChildMessageKind.Exit:
                 // Provisional: OnRunFinished (called next, on this same thread) overwrites this

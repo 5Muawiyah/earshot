@@ -356,6 +356,18 @@ internal static class Copy
         "Test " + oneBasedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + " of " +
         total.ToString(System.Globalization.CultureInfo.InvariantCulture) + ": " + name;
 
+    // The Step view's own progress line (plain-window-layout.md, point 1), shown above every
+    // prompt for both an ordinary single-test start and Run all: "Test N of M", a middle dot, then
+    // the row's own name, matching the spec's own literal example ("Test 3 of 20 · Connect with
+    // one click"). Kept apart from RunAllProgressLine's own colon-separated shape above, rather
+    // than reshaping that one to match: RunAllPresentationTests already pins its text verbatim, and
+    // this is a different control (StepPanel's own progress label, not _runAllProgressLabel, which
+    // still only shows while Run all itself is under way) so the two lines were never one sentence
+    // duplicated in two places to begin with.
+    internal static string StepProgressLine(int oneBasedIndex, int total, string name) =>
+        "Test " + oneBasedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + " of " +
+        total.ToString(System.Globalization.CultureInfo.InvariantCulture) + " · " + name;
+
     // The end-of-run summary: how many worked, did not work, could not tell, and were not run
     // (each only mentioned when its own count is above zero), followed by the plain reason for
     // each row that was never run.
