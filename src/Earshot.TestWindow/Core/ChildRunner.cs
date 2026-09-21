@@ -5,8 +5,7 @@ using System.Text;
 namespace Earshot.TestWindow.Core;
 
 // Starts one child powershell.exe 5.1 running Invoke-GuiHalf.ps1, and speaks the line protocol
-// (test-gui.md sections 5.1 and 5.2) with it. This is the only file, along with FolderOpener.cs,
-// that starts a process (T10).
+// with it. This is the only file that starts a process.
 internal sealed class ChildRunner : IDisposable
 {
     private readonly Process _process;
@@ -71,17 +70,17 @@ internal sealed class ChildRunner : IDisposable
 
         ProcessStartInfo info = PowerShell51.CreateStartInfo(host, arguments);
 
-        // The preamble defect (test-gui.md section 2, T7.1): a StandardInputEncoding that emits a
-        // UTF-8 preamble corrupts the first reply, because the shim reads raw bytes off
-        // System.Console.In and the preamble's three bytes land in front of them. ASCII never
+        // A StandardInputEncoding that emits a UTF-8 preamble corrupts the first reply, because
+        // the shim reads raw bytes off System.Console.In and the preamble's three bytes land in
+        // front of them. ASCII never
         // writes one; the wire is pure ASCII (base64) either way, so nothing this window sends
         // needs more than that.
         info.StandardInputEncoding = Encoding.ASCII;
         info.StandardOutputEncoding = Encoding.UTF8;
 
-        // EARSHOT_SAFE_MODE and EARSHOT_DATA_ROOT are never stripped here (design.md section
-        // 8.1): the scripts' own Assert-LiveEnvironment stays the authority on whether a live run
-        // may proceed. Only PSModulePath is removed, by PowerShell51.CreateStartInfo.
+        // EARSHOT_SAFE_MODE and EARSHOT_DATA_ROOT are never stripped here: the scripts' own
+        // Assert-LiveEnvironment stays the authority on whether a live run may proceed. Only
+        // PSModulePath is removed, by PowerShell51.CreateStartInfo.
         //
         // --sandbox (development and tests only) redirects LOCALAPPDATA, APPDATA, ProgramData and
         // ProgramFiles for the child into a folder of its own, so Run-GuiHalfAgainstFakes.ps1 and
@@ -114,7 +113,7 @@ internal sealed class ChildRunner : IDisposable
     // sign anything is wrong: it is what a killed process's pipe does. Treated exactly like a
     // clean EOF (the loop simply ends); MessageReceived/TranscriptLine's own subscribers
     // (MainForm's SafeBeginInvoke) are what is responsible for a child that ends without an exit
-    // message being noticed at all (design.md section 5.2), not this loop.
+    // message being noticed at all, not this loop.
     private void ReadLoop()
     {
         while (true)
@@ -149,9 +148,8 @@ internal sealed class ChildRunner : IDisposable
         }
     }
 
-    // The one call site for a reply (design.md section 7.4; T7 asserts this from source across
-    // the whole project). One reply per seq: a second click for the same seq is ignored, silently,
-    // rather than sent twice.
+    // The one call site for a reply, asserted from source across the whole project. One reply
+    // per seq: a second click for the same seq is ignored, silently, rather than sent twice.
     internal void ReplyFromOwnerClick(int seq, string reply)
     {
         lock (_gate)
@@ -165,7 +163,31 @@ internal sealed class ChildRunner : IDisposable
         WriteLine(Protocol.FormatReply(seq, reply));
     }
 
-    internal void Abort(int seq) => WriteLine(Protocol.FormatAbort(seq));
+    // Reserves the seq the same way a reply does, before the abort line is even written: a click
+    // racing this abort for the same seq (the owner presses a button the instant before Stop is
+    // processed, or the reverse) must never still send a reply for a prompt this abort has
+    // already told the script to give up on.
+    // Reserves the seq the same way a reply does, before the abort line is even written: a click
+    // racing this abort for the same seq (the owner presses a button the instant before Stop is
+    // processed, or the reverse) must never still send a reply for a prompt this abort has
+    // already told the script to give up on.
+    internal void Abort(int seq)
+    {
+        lock (_gate)
+        {
+            _repliedSeq.Add(seq);
+        }
+
+        WriteLine(Protocol.FormatAbort(seq));
+    }
+
+    internal bool HasReplyOrAbortBeenSentForTests(int seq)
+    {
+        lock (_gate)
+        {
+            return _repliedSeq.Contains(seq);
+        }
+    }
 
     private void WriteLine(string line)
     {
@@ -210,10 +232,10 @@ internal sealed class ChildRunner : IDisposable
         _process.Dispose();
     }
 
-    // The one other process this window ever starts (T10): a short, read-only, no-window run of
-    // Get-PowerCycleEvidence.ps1, which touches no device and needs no elevation (design.md
-    // section 9.3/D7). Kept as a static helper on this same class rather than a new file, so
-    // "process starts only in ChildRunner.cs and FolderOpener.cs" stays true by construction.
+    // The one other process this window ever starts: a short, read-only, no-window run of
+    // Get-PowerCycleEvidence.ps1, which touches no device and needs no elevation. Kept as a
+    // static helper on this same class rather than a new file, so "process starts only in
+    // ChildRunner.cs" stays true by construction.
     internal static string RunPowerCycleProbe(string host, string scriptPath, DateTimeOffset sinceUtc, TimeSpan timeout)
     {
         var arguments = new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-SinceUtc", sinceUtc.UtcDateTime.ToString("o", CultureInfo.InvariantCulture) };

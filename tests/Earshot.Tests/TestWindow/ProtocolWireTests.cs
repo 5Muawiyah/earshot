@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T7 (test-gui.md section 13): the shim's own contract, proved against a real child rather than
+// The shim's own contract, proved against a real child rather than
 // only read. These tests write raw bytes to a child's stdin directly, which is the shim's own
 // grammar being tested, not the "one reply per click" rule ChildRunner enforces (that is
 // ChildRunnerClickSafetyTests). The skill's rail 1 ("never pipe input into a script") is
@@ -81,8 +81,8 @@ public sealed class ProtocolWireTests
     }
 
     // A child that dies before it can send its own exit message (here, the target script fails
-    // to parse, which throws outside Invoke-GuiHalf.ps1's own try/catch): design.md section 5.2,
-    // "A child that exits without an exit message ... is reported as such." No exit or crash
+    // to parse, which throws outside Invoke-GuiHalf.ps1's own try/catch): a child that exits
+    // without an exit message is reported as such. No exit or crash
     // message ever arrives; the row this feeds is derived from disk alone, never from the
     // process's own exit code.
     [TestMethod]

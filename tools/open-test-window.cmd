@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-rem S10: starts the live test window from a fresh console. Builds Release first if it has not
+rem Starts the live test window from a fresh console. Builds Release first if it has not
 rem been built yet; never touches Earshot.exe itself, never elevates, never sets EARSHOT_SAFE_MODE
 rem or EARSHOT_DATA_ROOT (a real run needs neither: the window's own StartupGate refuses if either
 rem is set without --sandbox).

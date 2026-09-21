@@ -4,10 +4,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T10 (test-gui.md section 13): "cannot touch the device" is a property this reads off the built
-// output, not a claim about what the source is meant to do. The window references no product
-// assembly, declares no P/Invoke, and the only file allowed to start a process is ChildRunner.cs
-// (FolderOpener.cs, for the "open the evidence folder" shell action, is not built yet).
+// "Cannot touch the device" is a property this reads off the built output, not a claim about
+// what the source is meant to do. The window references no product assembly, declares no
+// P/Invoke, and the only file allowed to start a process is ChildRunner.cs.
 [TestClass]
 public sealed class NoDevicePathTests
 {
@@ -51,14 +50,14 @@ public sealed class NoDevicePathTests
         new(@"new\s+Process\s*\(|\bProcess\.Start\s*\(", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     [TestMethod]
-    public void ProcessIsStartedOnlyFromChildRunnerOrFolderOpener()
+    public void ProcessIsStartedOnlyFromChildRunner()
     {
         string sourceRoot = Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow");
         var offenders = new List<string>();
         foreach (string file in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
         {
             string name = Path.GetFileName(file);
-            if (name is "ChildRunner.cs" or "FolderOpener.cs")
+            if (name is "ChildRunner.cs")
             {
                 continue;
             }
@@ -70,7 +69,7 @@ public sealed class NoDevicePathTests
             }
         }
 
-        Assert.AreEqual(0, offenders.Count, "A process is started outside ChildRunner.cs/FolderOpener.cs: " + string.Join(", ", offenders));
+        Assert.AreEqual(0, offenders.Count, "A process is started outside ChildRunner.cs: " + string.Join(", ", offenders));
     }
 
     [TestMethod]

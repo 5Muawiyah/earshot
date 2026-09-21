@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 9.2: "A run is pending when its folder holds resume.txt, its result.json is
-// a first-half result by the markers, and there is no gui-set-aside.txt." Every case writes real
+// A run is pending when its folder holds resume.txt, its result.json is
+// a first-half result by the markers, and there is no gui-set-aside.txt. Every case writes real
 // files to a scratch live-test root and reads them back through EvidenceStore/PendingRunFinder,
 // the same disk-only path the window uses.
 [TestClass]

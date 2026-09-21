@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// B1 (review round 1): exactly one child may exist. Run all's own button, and its carry-on
+// Exactly one child may exist. Run all's own button, and its carry-on
 // button, used to stay enabled during a run with nothing checking _activeRunner, so a click on
 // either while a row's own Start was already active began a second child; every reply then went
 // to whichever runner was newest, not the one that actually asked. Drives the real MainForm, real

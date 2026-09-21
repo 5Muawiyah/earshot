@@ -2,7 +2,7 @@ using Earshot.TestWindow.Core;
 
 namespace Earshot.TestWindow.Ui;
 
-// The one place a derived row state becomes text and a colour. T4: green is shown for nothing
+// The one place a derived row state becomes text and a colour. Green is shown for nothing
 // but a fully confirmed pass (DerivedRowState.IsGreen), and the text for everything else always
 // carries its qualifier rather than the bare word "Passed".
 internal static class RowPresenter

@@ -22,8 +22,7 @@ internal sealed class ResultPanel : Panel
 
         // A top-down flow, so each control's real rendered height (a wrapped evidence path can
         // be several lines) always pushes the next one down instead of a fixed offset guessing
-        // wrong and hiding the leftAtRest line underneath (design.md section 4/12: it must be
-        // shown after every run).
+        // wrong and hiding the leftAtRest line underneath: it must be shown after every run.
         var stack = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.TopDown,
@@ -64,9 +63,9 @@ internal sealed class ResultPanel : Panel
         _evidenceLabel = new Label { AutoSize = true, MaximumSize = new Size(704, 0), Margin = new Padding(0, 0, 0, 12) };
         _atRestLabel = new Label { AutoSize = true, MaximumSize = new Size(704, 0), Font = new Font(Font, FontStyle.Bold) };
 
-        // M13: section 10.3's own words, shown here rather than only in a criterion's own detail
-        // text, since "you chose No on the Windows permission box" is the one fact about the run
-        // that most needs to be seen without having to open the failure list first.
+        // Shown here rather than only in a criterion's own detail text, since "you chose No on
+        // the Windows permission box" is the one fact about the run that most needs to be seen
+        // without having to open the failure list first.
         _declinedElevatedPromptLabel = new Label
         {
             AutoSize = true, MaximumSize = new Size(704, 0), ForeColor = Color.DarkRed, Visible = false,

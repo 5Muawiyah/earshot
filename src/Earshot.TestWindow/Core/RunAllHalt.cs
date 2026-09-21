@@ -1,8 +1,7 @@
 namespace Earshot.TestWindow.Core;
 
-// test-gui.md section 11's halt rule, decided purely from the row's own derived state (never
-// from which button was clicked, matching section 12: "The halt is decided from result.json,
-// never from the click"). T14.
+// The halt rule, decided purely from the row's own derived state, never from which button was
+// clicked: the halt is decided from result.json, never from the click.
 internal static class RunAllHalt
 {
     internal static bool ShouldHalt(DerivedRowState state)

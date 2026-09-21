@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// design.md section 8.1: the window shows a blocking screen and offers nothing else for five
+// The window shows a blocking screen and offers nothing else for five
 // reasons. Each one is proved here, either as a pure decision (StartupGate.Evaluate never touches
 // the real environment, token or mutex) or, where the fact-gathering itself is worth trusting,
 // against something real: a real named mutex, a real temporary folder tree.

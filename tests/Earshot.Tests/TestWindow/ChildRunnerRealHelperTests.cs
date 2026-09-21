@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T6 (test-gui.md section 13): one execution of every real prompt helper the tests would
-// otherwise fake, reproducing the local probe from section 2 as a committed regression: real
+// One execution of every real prompt helper the tests would
+// otherwise fake, reproducing the local probe as a committed regression: real
 // Windows PowerShell 5.1, the real LiveTest.psm1, a hand-built run context in a scratch folder,
 // no device. All five helpers (Show-Preconditions, Confirm-Step, Read-Answer, Read-Note,
 // Wait-Owner) plus one real Wait-Seconds wait run through the real ReadHostShim.ps1 and

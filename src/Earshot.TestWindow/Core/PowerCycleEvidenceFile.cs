@@ -2,10 +2,9 @@ using System.Text.Json;
 
 namespace Earshot.TestWindow.Core;
 
-// test-gui.md section 9.3: "All rows and the verdict go to gui-power-cycle.json before the second
-// half starts." Written additively (gui- prefix, section 8.4), never overwriting a harness file.
-// EvidenceStore.TryReadPowerCycleVerdict reads the top-level "verdict" member back with exactly
-// these spellings.
+// All rows and the verdict go to gui-power-cycle.json before the second half starts. Written
+// additively (gui- prefix), never overwriting a harness file. EvidenceStore.TryReadPowerCycleVerdict
+// reads the top-level "verdict" member back with exactly these spellings.
 internal static class PowerCycleEvidenceFile
 {
     internal static void Write(string folder, string rawEvidenceJson, PowerCycleVerdict verdict)

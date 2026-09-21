@@ -1,7 +1,6 @@
 namespace Earshot.TestWindow.Core;
 
-// One row of the failure list section 12 describes: which criterion, what was expected, what was
-// observed.
+// One row of the failure list: which criterion, what was expected, what was observed.
 internal sealed record FailureRow(string Id, string Expected, string Observed);
 
 internal sealed record ResultPresentation
@@ -15,16 +14,16 @@ internal sealed record ResultPresentation
     public string? LeftAtRest { get; init; }
     public string? LeftAtRestDetail { get; init; }
 
-    // M13, section 10.3: "a step with elevated true, ran false and an error" is derived here,
-    // from result.json alone; Ui.Copy.DeclinedElevatedPrompt is the one place its words live.
+    // A step with elevated true, ran false and an error is derived here, from result.json alone;
+    // Ui.Copy.DeclinedElevatedPrompt is the one place its words live.
     public bool HasDeclinedElevatedStep { get; init; }
     public required string EvidenceFolder { get; init; }
     public required string ResultJsonPath { get; init; }
     public required string SummaryTxtPath { get; init; }
 }
 
-// Builds what ResultPanel shows, from result.json alone (design.md D4). Section 12: "for every
-// criterion that is not a pass, first failed first: which, expected, observed, evidence."
+// Builds what ResultPanel shows, from result.json alone. For every criterion that is not a pass,
+// first failed first: which, expected, observed, evidence.
 internal static class ResultPresenter
 {
     internal static ResultPresentation Present(ParsedResult result, string folder)

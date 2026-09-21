@@ -3,12 +3,12 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// M9 (review round 1): _currentPromptSeq (MainForm's own silence-watchdog state) was set by the
+// _currentPromptSeq (MainForm's own silence-watchdog state) was set by the
 // first prompt and never cleared by anything but the run ending, so OnWatchdogTick's "no prompt
 // pending" gate read false for the rest of any run: the watchdog could fire at most once, for the
 // very first prompt, and never again. Drives the real MainForm, a real sandboxed child and a real
-// button click (StepPanel.ClickFirstButtonForTests), the same "the caller, not just the
-// predicate" rule review round 1 asked for. Time is moved by backdating _lastActivityUtc rather
+// button click (StepPanel.ClickFirstButtonForTests), testing the caller and not just the
+// predicate. Time is moved by backdating _lastActivityUtc rather
 // than by waiting for real minutes to pass, in both directions.
 [TestClass]
 public sealed class SilenceWatchdogTests
@@ -44,7 +44,7 @@ public sealed class SilenceWatchdogTests
             MainFormTestHarness.PumpUntil(() => false, TimeSpan.FromMilliseconds(900));
 
             // The reply is a real button click through the real StepPanel, not a call that
-            // bypasses it: this is the caller B1's own rule (review round 1) asks to be proved,
+            // bypasses it: this proves the caller,
             // not just the predicate in isolation.
             form.ClickCurrentPromptButtonForTests();
 

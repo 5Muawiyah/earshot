@@ -47,12 +47,12 @@ function Get-LastStep
     return $Run.Steps[$Run.Steps.Count - 1]
 }
 
-# design.md note H2: Invoke-EarshotElevated never reads a process Handle for this launch site
+# Invoke-EarshotElevated never reads a process Handle for this launch site
 # (unlike the unelevated one Invoke-Earshot uses), so PowerShell 5.1 may never fill in ExitCode
 # for a -Verb RunAs process. $ReturnValue is $null for both a decline and an unreadable exit
 # code, so $LastStep (the step Invoke-EarshotElevated itself appended to $Run.Steps) is what
-# tells them apart: ran false is a decline; ran true with no exitCode is H2's own case, reported
-# inconclusive, never guessed as a pass or scored as a fail.
+# tells them apart: ran false is a decline; ran true with no exitCode is that unreadable-exit-code
+# case, reported inconclusive, never guessed as a pass or scored as a fail.
 function Get-ApprovedExitCodeOutcome
 {
     param($ReturnValue, $LastStep)
@@ -66,7 +66,7 @@ function Get-ApprovedExitCodeOutcome
     {
         return [ordered]@{
             outcome = 'inconclusive'
-            detail  = 'The elevated process started, but its exit code could not be read (design.md note H2). Neither a pass nor a fail.'
+            detail  = 'The elevated process started, but its exit code could not be read. Neither a pass nor a fail.'
         }
     }
 
@@ -75,8 +75,8 @@ function Get-ApprovedExitCodeOutcome
     return [ordered]@{ outcome = 'fail'; detail = ('Round 1 needed Yes on the Windows box: ' + $detail) }
 }
 
-# section 10.3: a declined prompt's own shape is "a step with elevated true, ran false and an
-# error", and the call itself returns nothing. M5: ran=false with some error is not, on its own,
+# A declined prompt's own shape is a step with elevated true, ran false and an
+# error, and the call itself returns nothing. ran=false with some error is not, on its own,
 # proof that Windows raised the permission box and the owner chose No there. Invoke-EarshotElevated
 # (LiveTest.psm1) leaves that exact shape for at least two other reasons that never touch Windows'
 # own prompt at all: a No pressed in the window's own Confirm-Step before Start-Process is ever
@@ -105,7 +105,7 @@ function Get-DeclinedRecordedOutcome
     {
         return [ordered]@{
             outcome = 'pass'
-            detail  = 'The declined step recorded ran=false with an error naming Windows'' own cancellation code (1223), and the call returned nothing, as section 10.3 describes.'
+            detail  = 'The declined step recorded ran=false with an error naming Windows'' own cancellation code (1223), and the call returned nothing.'
         }
     }
 

@@ -6,9 +6,9 @@ namespace Earshot.Tests.TestWindow;
 // Drives a real MainForm headlessly: constructed, its Win32 handle forced into existence, never
 // Shown. Runs the whole test body on a dedicated STA thread pumping its own message loop with
 // Application.DoEvents, since Control.BeginInvoke (every ChildRunner event MainForm subscribes
-// to) only ever runs when something pumps that thread's queue. Review round 1's own rule: a
+// to) only ever runs when something pumps that thread's queue. A
 // predicate proved only in isolation proves nothing about the caller that used to bypass it, so
-// B1 and B2's own tests drive the real button click handlers, not a copy of their logic.
+// tests that need this drive the real button click handlers, not a copy of their logic.
 internal static class MainFormTestHarness
 {
     internal static void Run(string sandboxFolder, Action<MainForm> body, TimeSpan? timeout = null)

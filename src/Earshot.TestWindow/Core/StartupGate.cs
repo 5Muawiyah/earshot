@@ -1,9 +1,9 @@
 namespace Earshot.TestWindow.Core;
 
-// The five things that make the window show a blocking screen and offer nothing else
-// (design.md section 8.1). Kept as a pure decision over facts a caller has already collected, so
-// every branch can be driven from a test without an elevated process, a real second instance or a
-// machine missing Windows PowerShell 5.1.
+// The five things that make the window show a blocking screen and offer nothing else. Kept as a
+// pure decision over facts a caller has already collected, so every branch can be driven from a
+// test without an elevated process, a real second instance or a machine missing Windows
+// PowerShell 5.1.
 internal enum StartupRefusal
 {
     None = 0,
@@ -20,10 +20,9 @@ internal static class StartupGate
     internal const string MutexName = "Local\\EarshotLiveTestWindow";
     internal const string SandboxArgument = "--sandbox";
 
-    // Order matches the bullet list in design.md 8.1. An elevated window is refused before
-    // anything else is even worth reading, and a missing PowerShell 5.1 is checked last because
-    // every other refusal is cheaper to explain.
-    // M6: sandboxRequested must mean a sandbox that was actually usable, not merely the bare
+    // An elevated window is refused before anything else is even worth reading, and a missing
+    // PowerShell 5.1 is checked last because every other refusal is cheaper to explain.
+    // sandboxRequested must mean a sandbox that was actually usable, not merely the bare
     // presence of the --sandbox switch. Before sandboxArgumentWithoutValidFolder existed, the
     // switch's mere presence (StartupGate.HasSandboxArgument) was used to decide sandboxRequested
     // and, separately and independently, SandboxOptions.TryParse decided whether MainForm actually
@@ -87,7 +86,7 @@ internal static class StartupGate
     }
 
     // The folder after --sandbox, or null when the switch is absent, has nothing after it, or
-    // what follows it is empty or all whitespace (M6: none of those is a valid folder either).
+    // what follows it is empty or all whitespace: none of those is a valid folder either.
     internal static string? SandboxFolder(IReadOnlyList<string> args)
     {
         for (int i = 0; i + 1 < args.Count; i++)
@@ -102,8 +101,8 @@ internal static class StartupGate
         return null;
     }
 
-    // The scripts are found from the repository (design.md 8.1): walk up from the exe looking for
-    // Earshot.slnx, the same way RepositoryRoot() does in the test project.
+    // The scripts are found from the repository: walk up from the exe looking for Earshot.slnx,
+    // the same way RepositoryRoot() does in the test project.
     internal static bool FindSolutionAbove(string startDirectory, out string? solutionRoot)
     {
         for (DirectoryInfo? folder = new(startDirectory); folder is not null; folder = folder.Parent)

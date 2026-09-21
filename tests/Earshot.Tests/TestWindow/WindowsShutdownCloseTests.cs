@@ -5,9 +5,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// M10 (review round 1), design.md section 4.4: "Windows ends the session while a half is
-// running: the form cancels the close once... If the owner forces it, the child dies with the
-// session." Windows sends WM_QUERYENDSESSION and needs a synchronous answer from FormClosing; a
+// When Windows ends the session while a half is
+// running, the form cancels the close once; if the owner forces it, the child dies with the
+// session. Windows sends WM_QUERYENDSESSION and needs a synchronous answer from FormClosing; a
 // modal MessageBox does not answer it, it blocks the answer. OnFormClosing.ConfirmDialogForTests
 // is a seam substituted here so this proves what the real caller decided (call the dialog, or
 // not) without ever putting a real, undismissable dialog on screen: nothing in an automated run

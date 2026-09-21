@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T7.1 (test-gui.md section 13, and section 2's local probe): the first reply of a session
+// The first reply of a session
 // arrives intact. Proved once against a build of ChildRunner whose StandardInputEncoding wrote a
 // UTF-8 preamble instead of ASCII, and recorded red there (handover); this is the same test,
 // green against the real ChildRunner, which sets StandardInputEncoding to ASCII for exactly this
@@ -33,7 +33,7 @@ public sealed class PreambleDefectTests
         Assert.AreEqual(0, harness.Runner.ExitCode);
 
         // With a UTF-8 preamble ahead of it, the first "y" arrives as three extra bytes plus "y"
-        // (the exact corruption test-gui.md section 2 records: 180, 9559, 9488, 121), which this
+        // (a local probe recorded the exact corruption: 180, 9559, 9488, 121), which this
         // exact-match assertion catches. ASCII, which ChildRunner actually uses, has no preamble,
         // so the line the script reads back is exactly what was sent.
         StringAssert.Contains(harness.Transcript, "FIRST-REPLY=[y]");

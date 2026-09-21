@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 9.3's required-transition table, one test method per cell. "an unreadable
-// log is unknown, never accepted as a shut down" (the coordinator's own S6 instruction) is pinned
+// The required-transition table, one test method per cell. "An unreadable
+// log is unknown, never accepted as a shut down" is pinned
 // by FullShutDownNeverStartsOnUnknownAlone below: Unknown gets StartNoted, never plain Start, so a
 // row can never read a clean green pass from it (StateDeriver.DeriveFromSecondHalf's own
 // "shut down not confirmed" qualifier only fires when the verdict is not literally "power-down").

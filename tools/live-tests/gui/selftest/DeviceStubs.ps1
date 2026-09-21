@@ -1,6 +1,5 @@
 <#
-    Device-side stubs only (test-gui.md section 5's architecture table: "DeviceStubs.ps1 device-
-    side stubs only"). This is not a second fake machine: it imports
+    Device-side stubs only. This is not a second fake machine: it imports
     tools\live-tests\selftest\Fakes.psm1 unchanged for the fake machine's own state and its
     command answers, the same module tools\live-tests\selftest\Run-OneHalf.ps1 uses for the
     fully-scripted self-test.
@@ -9,8 +8,8 @@
     Invoke-EarshotElevated are replaced here. Confirm-Step, Read-Answer, Read-Note, Wait-Owner
     and Read-Host are never touched by this file, because Run-GuiHalfAgainstFakes.ps1 sends every
     one of them through the real ReadHostShim.ps1, to a real owner (human or scripted through
-    ChildRunner), exactly as Invoke-GuiHalf.ps1 does for a real run. T6/T5 (test-gui.md section
-    13): "DeviceStubs.ps1 with the unchanged Fakes.psm1".
+    ChildRunner), exactly as Invoke-GuiHalf.ps1 does for a real run: this file with the unchanged
+    Fakes.psm1.
 #>
 
 Microsoft.PowerShell.Core\Import-Module (Join-Path $PSScriptRoot '..\..\selftest\Fakes.psm1') -Force

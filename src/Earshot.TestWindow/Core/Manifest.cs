@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Earshot.TestWindow.Core;
 
-// The 16 tests, read from Data\tests.json (test-gui.md section 6.1). Read with JsonDocument, not
+// The 16 tests, read from Data\tests.json. Read with JsonDocument, not
 // JsonSerializer: this solution turns reflection-based (de)serialisation off
 // (JsonSerializerIsReflectionEnabledByDefault is false), and a hand-written source-generated
 // context is not worth it for a file this shape reads once at start-up.
@@ -57,14 +57,16 @@ internal static class Manifest
             Proves = element.GetProperty("proves").GetString()!,
             Settles = element.GetProperty("settles").GetString()!,
             PowerCycleRequirement = ReadPowerCycleRequirement(element),
-            // M9: the default, 900 s, is design.md section 8.3's own literal wording ("This test
-            // has been silent for 15 minutes"), not an invented figure. Where a script names its
-            // own watch parameter, tests.json's own value is derived from it, not the default: 03
-            // (03-AllowPages.ps1's $WatchSeconds, default 120) uses 150 (the default plus a 30 s
-            // margin over its 10 s-interval watch loop); 13 (13-GraceWindow.ps1's $WatchMinutes,
-            // default 10, i.e. 600 s) uses 650 (a 50 s margin over its own 15 s-interval loop).
-            // Every other row keeps the section 8.3 default: none of the shipped scripts' other
-            // Wait-Seconds calls exceed a few seconds between the Write-Line each one starts with.
+            // The default, 900 s ("This test has been silent for 15 minutes"), is not an invented
+            // figure: it is the silence watchdog's own literal wording, unchanged, and is
+            // comfortably longer than any legitimate gap the shipped scripts actually produce.
+            // Where a script names its own watch parameter, tests.json's own value is derived
+            // from it instead: 03 (03-AllowPages.ps1's $WatchSeconds, default 120) uses 150 (the
+            // default plus a 30 s margin over its 10 s-interval watch loop); 13
+            // (13-GraceWindow.ps1's $WatchMinutes, default 10, i.e. 600 s) uses 650 (a 50 s margin
+            // over its own 15 s-interval loop). Every other row keeps the 900 s default: none of
+            // the shipped scripts' other Wait-Seconds calls exceed a few seconds between the
+            // Write-Line each one starts with.
             MaxSilenceSeconds = element.TryGetProperty("maxSilenceSeconds", out JsonElement silence) ? silence.GetInt32() : 900,
             FirstHalfOnlyCriteriaIds = ReadStringArray(element, "firstHalfOnlyCriteriaIds"),
             SecondHalfOnlyCriteriaIds = ReadStringArray(element, "secondHalfOnlyCriteriaIds"),

@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T2 (test-gui.md section 13): one test per rule in section 6.2, each named for the rule it
+// One test per rule StateDeriver implements, each named for the rule it
 // pins. Every one of these has been run once against a build with its own rule deleted, and gone
 // red; the run and the exact output are recorded in the handover, not repeated here as a comment,
 // because a comment cannot be executed. Restoring the rule turns the same test green again.

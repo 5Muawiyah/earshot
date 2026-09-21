@@ -2,9 +2,9 @@ using System.Globalization;
 
 namespace Earshot.TestWindow.Core;
 
-// The only place a row's state is decided (test-gui.md section 6.2). Every branch below is named
-// for the rule it implements; T2 (tests\Earshot.Tests\TestWindow\StateDeriverPinTests.cs) pins
-// each one by deleting it and recording the red run.
+// The only place a row's state is decided. Every branch below is named for the rule it
+// implements; tests\Earshot.Tests\TestWindow\StateDeriverPinTests.cs pins each one by deleting it
+// and recording the red run.
 internal static class StateDeriver
 {
     internal static DerivedRowState Derive(
@@ -21,7 +21,7 @@ internal static class StateDeriver
             return new DerivedRowState { Kind = RowStateKind.NotRun };
         }
 
-        // section 8.3: "kill leaves Unknown and the banner, never a pass." A forced kill can
+        // A kill leaves Unknown and the banner, never a pass. A forced kill can
         // leave the real device mid-way through a live step, which no older evidence (even a
         // genuine earlier pass) can speak to, so this outranks everything else, but only for the
         // newest run: an older kill that a later, clean run has since superseded is just history.
@@ -34,13 +34,13 @@ internal static class StateDeriver
             };
         }
 
-        // B4 (review round 1): the single newest run folder for this test, whatever it says,
-        // outranks every older one. If it is missing, truncated, empty, for the wrong test, or
-        // otherwise fails EvidenceStore's own fail-closed checks (including "overall pass with no
-        // criteria", which those checks already reject as self-disagreeing), the row is Unknown
-        // right here and no older evidence, not even a genuine earlier pass, is ever consulted.
-        // This is different from an honestly empty "stopped before any step" run (ReadSucceeded
-        // true, zero criteria), which section 6.2 still lets fall through to older evidence.
+        // The single newest run folder for this test, whatever it says, outranks every older one.
+        // If it is missing, truncated, empty, for the wrong test, or otherwise fails
+        // EvidenceStore's own fail-closed checks (including "overall pass with no criteria",
+        // which those checks already reject as self-disagreeing), the row is Unknown right here
+        // and no older evidence, not even a genuine earlier pass, is ever consulted. This is
+        // different from an honestly empty "stopped before any step" run (ReadSucceeded true,
+        // zero criteria), which is still let through to older evidence.
         if (!runsNewestFirst[0].ReadSucceeded)
         {
             return new DerivedRowState
@@ -225,13 +225,12 @@ internal static class StateDeriver
         return leaf;
     }
 
-    // M3: whether a first-half snapshot counts as good enough for the second half's pass to stand.
+    // Whether a first-half snapshot counts as good enough for the second half's pass to stand.
     // Derived from the manifest shape, not a hard-coded test number: a test whose first half never
-    // records a criterion at all (only a finding, section 6.1's half-marker table; today only test
-    // 10) always recomputes to "inconclusive" by design (rule 4), never "pass", so "inconclusive"
-    // is accepted there too. Any other test's first half is still held to an actual "pass"; a
-    // first half that genuinely failed (recomputes to "fail", e.g. a stopped-early 'run'
-    // criterion) is never accepted, for any test.
+    // records a criterion at all (only a finding; today only test 10) always recomputes to
+    // "inconclusive" by design, never "pass", so "inconclusive" is accepted there too. Any other
+    // test's first half is still held to an actual "pass"; a first half that genuinely failed
+    // (recomputes to "fail", e.g. a stopped-early 'run' criterion) is never accepted, for any test.
     private static bool IsAcceptableFirstHalfSnapshot(TestRowSpec spec, ParsedResult snapshot)
     {
         if (snapshot.Overall == "pass")
@@ -289,7 +288,7 @@ internal static class StateDeriver
         };
     }
 
-    // M2: the earlier-build check must fail closed. An absent or unparsable exe or startedUtc in
+    // The earlier-build check must fail closed. An absent or unparsable exe or startedUtc in
     // result.json, or a chosen exe that cannot currently be found (chosenExeLastWriteUtc null
     // while chosenExePath is set, which is what MainForm passes when File.Exists(_exePath) is
     // false), each used to compare as "not different" and "not changed since", so the row read a

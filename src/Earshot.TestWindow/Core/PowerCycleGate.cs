@@ -4,16 +4,15 @@ internal enum PowerCycleGateResult
 {
     Start,
 
-    // Started, but the row can never read a clean green pass for it (design.md 6.2's amber
-    // rules already cover the row text; this is only about whether the half may run at all).
+    // Started, but the row can never read a clean green pass for it (the row's own amber
+    // qualifiers already cover the row text; this is only about whether the half may run at all).
     StartNoted,
     Refuse,
 }
 
-// test-gui.md section 9.3's required-transition table. Only PowerCycleVerdict.PowerDown ever
-// counts as a confirmed shut down; restart, not-yet and unknown never do, whatever the
-// requirement (design.md D7, and the coordinator's own instruction: "an unreadable log is
-// unknown, never accepted as a shut down").
+// The required-transition table. Only PowerCycleVerdict.PowerDown ever counts as a confirmed
+// shut down; restart, not-yet and unknown never do, whatever the requirement: an unreadable log
+// is unknown, never accepted as a shut down.
 internal static class PowerCycleGate
 {
     internal static PowerCycleGateResult Evaluate(PowerCycleRequirement requirement, PowerCycleVerdict verdict) => requirement switch

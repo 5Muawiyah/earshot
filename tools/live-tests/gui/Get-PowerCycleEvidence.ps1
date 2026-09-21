@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Reads raw System event log rows for the power-cycle question, read-only, no elevation
-    (test-gui.md section 9.3). Decides nothing: PowerCycle.cs is where the verdict comes from.
+    Reads raw System event log rows for the power-cycle question, read-only, no elevation.
+    Decides nothing: PowerCycle.cs is where the verdict comes from.
 
 .DESCRIPTION
-    Local probe, 2026-09-20 (test-gui.md section 9.3): the System log is readable by the owner's
+    Local probe, 2026-09-20: the System log is readable by the owner's
     normal account. Every shut down from the Start menu or Explorer wrote User32 1074 with type
     text "power off" and Kernel-Power 109 with ShutdownActionType 6; every restart wrote 5;
     shutdown.exe wrote 4; each start wrote Kernel-General 12 and Kernel-Boot 27, with BootType.

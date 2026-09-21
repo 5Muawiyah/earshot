@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Runs one half of one shipped live test script under the test window's protocol, against the
-    fake device (test-gui.md section 5's architecture table and slice S4).
+    fake device.
 
 .DESCRIPTION
     The sandboxed twin of Invoke-GuiHalf.ps1. Everything about the prompt protocol is identical
@@ -13,8 +13,8 @@
     One addition Invoke-GuiHalf.ps1 does not need: when the real Wait-Owner is the caller, this
     file's own Read-Host wrapper moves the fake machine (Update-FakeWorldForOwnerAction) once the
     owner's reply arrives, because the real Wait-Owner itself only prints text and waits; it does
-    not know about a fake machine. test-gui.md section 5.1: "The test driver defines its own
-    wrapper round the same core, which also moves the fake world when the caller is Wait-Owner."
+    not know about a fake machine. This test driver defines its own wrapper round the same core,
+    which also moves the fake world when the caller is Wait-Owner.
 
 .PARAMETER SandboxRoot
     The sandbox folder Fakes.psm1's Initialize-FakeMachine and New-FakeSandbox build fake files

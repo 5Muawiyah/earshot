@@ -1,8 +1,8 @@
 <#
-    The shared core of the line protocol between a live test script and the test window
-    (test-gui.md section 5.1). This text is load-bearing: keep its behaviour exactly. The
+    The shared core of the line protocol between a live test script and the test window. This
+    text is load-bearing: keep its behaviour exactly. The
     production driver, Invoke-GuiHalf.ps1, dot-sources this file and then defines the two-line
-    global:Read-Host wrapper itself; the self-test's own driver (slice S4) dot-sources this same
+    global:Read-Host wrapper itself; the self-test's own driver dot-sources this same
     file and defines a different wrapper round the same core.
 
     Wire format, child to window, one message per stdout line: the prefix, then base64 of UTF-8

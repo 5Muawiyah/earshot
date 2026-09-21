@@ -1,9 +1,8 @@
 namespace Earshot.TestWindow.Core;
 
-// test-gui.md section 9.1: "the second half's New-LiveTestRun truncates summary.txt and
-// Complete-LiveTestRun overwrites result.json, so without it the first half's record ... is
-// lost." Copied additively, under the gui- prefix (section 8.4), never overwriting a harness
-// file.
+// The second half's own New-LiveTestRun truncates summary.txt and Complete-LiveTestRun overwrites
+// result.json, so without this copy the first half's record would be lost. Copied additively,
+// under the gui- prefix, never overwriting a harness file.
 internal static class FirstHalfSnapshot
 {
     internal const string ResultFileName = "gui-first-half.result.json";

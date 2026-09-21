@@ -4,13 +4,13 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// M12 and M7 (review round 1). Drives the real MainForm.ShowHandOff / OnRunFinished, not a copy
+// Drives the real MainForm.ShowHandOff / OnRunFinished, not a copy
 // of their logic: ShowHandOffForTests takes only a DisplayRow and a ParsedResult, both
 // constructible directly, so the real production method runs inside a real (headless) form.
 [TestClass]
 public sealed class HandOffTests
 {
-    // M12: LiveTest.psm1's Complete-LiveTestRun writes the no-on-purpose reason into the
+    // LiveTest.psm1's Complete-LiveTestRun writes the no-on-purpose reason into the
     // leftAtRest finding's own Detail. ShowHandOff used to pass null unconditionally, so this
     // recorded reason never reached the owner: the hand-off screen said "No reason was recorded."
     // even when one had been.

@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// B1 (review round 1): exactly one child may exist; a reply routes by identity and is dropped if
+// Exactly one child may exist; a reply routes by identity and is dropped if
 // its runner is no longer the active one.
 [TestClass]
 public sealed class RunGateTests

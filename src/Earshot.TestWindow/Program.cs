@@ -4,9 +4,9 @@ using Earshot.TestWindow.Ui;
 
 namespace Earshot.TestWindow;
 
-// Entry point. Every refusal in design.md section 8.1 is decided by StartupGate.Evaluate, a pure
-// function over facts gathered here, so the decision itself can be tested without an elevated
-// process, a second real instance or a machine missing Windows PowerShell 5.1.
+// Entry point. Every refusal is decided by StartupGate.Evaluate, a pure function over facts
+// gathered here, so the decision itself can be tested without an elevated process, a second real
+// instance or a machine missing Windows PowerShell 5.1.
 internal static class Program
 {
     [STAThread]

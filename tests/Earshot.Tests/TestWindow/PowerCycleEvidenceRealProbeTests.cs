@@ -24,8 +24,8 @@ public sealed class PowerCycleEvidenceRealProbeTests
         string scriptPath = Path.Combine(RepositoryLocator.RepositoryRoot(), "tools", "live-tests", "gui", "Get-PowerCycleEvidence.ps1");
         Assert.IsTrue(File.Exists(scriptPath), "fixture script missing: " + scriptPath);
 
-        // Ten years back is well before this machine's log window (test-gui.md section 9.3
-        // records ten transitions over six days on 2026-09-20), which proves the real script and
+        // Ten years back is well before this machine's log window (a local probe recorded ten
+        // transitions over six days on 2026-09-20), which proves the real script and
         // its "no events were found" handling both run clean over a real, populated log rather
         // than an artificially narrow or empty one.
         DateTimeOffset since = DateTimeOffset.UtcNow.AddYears(-10);

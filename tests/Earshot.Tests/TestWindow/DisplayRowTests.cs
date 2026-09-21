@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 6.1: "row 10 opens into five variant rows... row 10 reads 'n of 5
-// recorded'." DisplayRow.Flatten is what turns the 16-row manifest into the 20 real, clickable
+// Row 10 opens into five variant rows, and reads "n of 5 recorded".
+// DisplayRow.Flatten is what turns the 16-row manifest into the 20 real, clickable
 // entries this window shows (15 ordinary rows plus 5 variants), never a text box for picking one.
 [TestClass]
 public sealed class DisplayRowTests

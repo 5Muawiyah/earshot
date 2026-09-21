@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T7 / design.md section 7.4: a reply is written only from ChildRunner.ReplyFromOwnerClick, one
+// A reply is written only from ChildRunner.ReplyFromOwnerClick, one
 // reply per seq, and a second click for the same seq writes nothing.
 [TestClass]
 public sealed class ChildRunnerClickSafetyTests
@@ -38,10 +38,39 @@ public sealed class ChildRunnerClickSafetyTests
         StringAssert.Contains(harness.Transcript, "ANSWERS=one|two");
     }
 
-    // design.md 7.4: "No timer, default, queue or startup path calls it." Scanned across the
+    // A click racing an abort for the same seq must never still send a reply: once Stop has told
+    // the script to give up on this prompt, a stray "one" arriving after must not be read as an
+    // answer to it. Abort reserves the seq itself, before its own line is even written, so a
+    // reply for the same seq called any time after (racing or not) is always the no-op a second
+    // click already is.
+    [TestMethod]
+    public void AReplyForTheSameSeqAsAnAbortIsNeverSent()
+    {
+        string host = PowerShell51.ExecutablePath();
+        if (!File.Exists(host))
+        {
+            Assert.Inconclusive("Windows PowerShell 5.1 is not installed at " + host + ".");
+        }
+
+        using var harness = new GuiHalfHarness(TwoPromptsScript);
+        harness.Start();
+
+        ChildMessage first = harness.NextMessageOfKind(ChildMessageKind.Prompt, Timeout);
+        harness.Runner.Abort(first.Seq);
+        Assert.IsTrue(harness.Runner.HasReplyOrAbortBeenSentForTests(first.Seq),
+            "Abort must reserve the seq immediately, not only after its own line is written.");
+
+        // Races the abort: if this were still allowed through, the script would read "one" as the
+        // first prompt's answer and carry on to ask a second one instead of stopping.
+        harness.Runner.ReplyFromOwnerClick(first.Seq, "one");
+
+        ChildMessage crash = harness.NextMessageOfKind(ChildMessageKind.Crash, Timeout);
+        StringAssert.Contains(crash.Text, "Stopped from the test window at your request.");
+    }
+
+    // No timer, default, queue or startup path may call it. Scanned across the
     // whole project rather than just ChildRunner.cs, so a future caller anywhere (a form, a
-    // timer tick) is caught too; today, before slice S4 wires a button to it, that count is
-    // zero, which still satisfies "at most one".
+    // timer tick) is caught too.
     [TestMethod]
     public void ReplyFromOwnerClickHasAtMostOneCallSiteOutsideItsOwnDeclaration()
     {

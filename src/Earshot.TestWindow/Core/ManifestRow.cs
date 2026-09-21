@@ -1,12 +1,12 @@
 namespace Earshot.TestWindow.Core;
 
-// One variant of test 10 (test-gui.md section 6.1): its own TestId, its own plain name and its
-// own two halves. Name is hand-written (what the owner would call this restart), Title is the
-// script's own literal (a secondary line), exactly the Name/Title split ManifestRow carries.
+// One variant of test 10: its own TestId, its own plain name and its own two halves. Name is
+// hand-written (what the owner would call this restart), Title is the script's own literal (a
+// secondary line), exactly the Name/Title split ManifestRow carries.
 internal sealed record ManifestVariant(int Variant, string TestId, string Name, string Title, PowerCycleRequirement PowerCycleRequirement);
 
-// One row of Data\tests.json: everything section 6.1's manifest table carries for one test,
-// enough to build the TestRowSpec StateDeriver needs.
+// One row of Data\tests.json: everything the manifest carries for one test, enough to build the
+// TestRowSpec StateDeriver needs.
 internal sealed class ManifestRow
 {
     public required string Number { get; init; }
@@ -33,8 +33,8 @@ internal sealed class ManifestRow
     public IReadOnlyList<string> FirstHalfOnlyFindingNames { get; init; } = Array.Empty<string>();
     public bool FirstHalfAloneIsCompleteWhenDeclined { get; init; }
 
-    // Only test 10 has these: one sub-row per variant, section 6.1: "row 10 opens into five
-    // variant rows, one per -Variant, each with its own TestId and its own two halves".
+    // Only test 10 has these: one sub-row per variant, one per -Variant, each with its own
+    // TestId and its own two halves.
     public IReadOnlyList<ManifestVariant>? Variants { get; init; }
 
     // The spec StateDeriver needs for this row's own TestId. For test 10, use ToVariantSpec

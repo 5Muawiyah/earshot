@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T4 (test-gui.md section 13): the literal "Passed" appears in one source file, and a row
+// The literal "Passed" appears in one source file, and a row
 // presenter given Unknown, Not run or any amber state renders neither that word alone nor the
 // green colour.
 [TestClass]
@@ -30,6 +30,32 @@ public sealed class CopyBindingTests
 
         CollectionAssert.AreEqual(new[] { Path.Combine("Ui", "Copy.cs") }, withLiteral,
             "The literal \"Passed\" must appear in Copy.cs only. Found in: " + string.Join(", ", withLiteral));
+    }
+
+    // An unreadable HiberbootEnabled makes Get-FastStartupSetting return "unknown"
+    // (LiveTest.psm1's own Get-FastStartupSetting), never "on" or "off". The sentence must never
+    // claim a Fast Startup shut down was tested when the setting could not actually be read: that
+    // would be inventing a fact this window has no source for.
+    [TestMethod]
+    public void UnknownFastStartupNeverClaimsAFastStartupShutDownWasTested()
+    {
+        string sentence = Copy.FastStartupSentence("unknown");
+        Assert.IsFalse(sentence.Contains("Fast Startup shut down", StringComparison.Ordinal),
+            "'unknown' must never be reported as though it confirmed a Fast Startup shut down: " + sentence);
+        Assert.IsFalse(sentence.Contains("cold start", StringComparison.Ordinal),
+            "'unknown' must never be reported as though it confirmed a cold start either: " + sentence);
+    }
+
+    [TestMethod]
+    public void OffFastStartupReadsAsAColdStart()
+    {
+        StringAssert.Contains(Copy.FastStartupSentence("off"), "cold start");
+    }
+
+    [TestMethod]
+    public void OnFastStartupReadsAsAFastStartupShutDown()
+    {
+        StringAssert.Contains(Copy.FastStartupSentence("on"), "Fast Startup shut down");
     }
 
     [TestMethod]

@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// B4 (review round 1): a newer unreadable run must never let an older pass show through. Before
+// A newer unreadable run must never let an older pass show through. Before
 // this fix, StateDeriver.FindVerdictRun's loop treated an unreadable newest run as something to
 // skip past on the way to an older, readable verdict; now the newest run's own read failure is
 // checked first, and nothing older is ever consulted while it stands.
@@ -80,9 +80,9 @@ public sealed class StateDeriverNewestUnreadableTests
     [TestMethod]
     public void AnHonestlyEmptyNewestRunStillFallsThroughToAnOlderPassUnlikeAGenuineReadFailure()
     {
-        // Not B4's own bug: a well-formed, honestly empty "stopped before any step" result
-        // (declined at preconditions, say) is not a read failure, and section 6.2 already lets
-        // it fall through to an older verdict. This pins that the B4 fix did not remove that.
+        // A well-formed, honestly empty "stopped before any step" result
+        // (declined at preconditions, say) is not a read failure, and is already let
+        // through to an older verdict. This pins that the newest-unreadable fix did not remove that.
         using var root = new TempFolder();
         WriteResult(root, "20260919T000000Z", "01-a2dp-oneshot",
             new ResultJsonFixture("01-a2dp-oneshot", "pass").WithCriterion("c1", "pass"));

@@ -7,7 +7,7 @@ namespace Earshot.Tests.TestWindow;
 // script, before any UI exists: real Windows PowerShell 5.1, the real LiveTest.psm1 and
 // 01-A2dpOneShot.ps1, the real five prompt helpers through the real shim, the fake device from
 // the unchanged Fakes.psm1. This is what StepPanel/MainForm drive interactively in the sandbox
-// walk-through; here it is driven the same way T5 drives it, through ChildRunner's own API.
+// walk-through; here it is driven the same way, through ChildRunner's own API.
 [TestClass]
 public sealed class SandboxFakesSmokeTests
 {
@@ -59,7 +59,7 @@ public sealed class SandboxFakesSmokeTests
 
             if (message.Kind == ChildMessageKind.Prompt)
             {
-                // design.md section 7.1: Show-Preconditions and Confirm-Step's Yes sends "y",
+                // Show-Preconditions and Confirm-Step's Yes sends "y",
                 // Read-Answer's Yes sends the option word itself ("yes"), Wait-Owner's Yes sends
                 // an empty line.
                 string reply = message.Caller switch

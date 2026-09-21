@@ -4,8 +4,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T13 (test-gui.md section 13): "no em-dash (already scanned in src), none of 'unattended',
-// 'automatic', 'batch' in Run all copy, no 'GUI' in any string the owner sees." Reads every
+// No em-dash (already scanned in src), none of "unattended",
+// "automatic", "batch" in Run all copy, no "GUI" in any string the owner sees. Reads every
 // owner-facing string Copy.cs defines by reflection, so a new constant or method is covered
 // automatically rather than needing this test edited every time one is added.
 [TestClass]

@@ -13,12 +13,12 @@ internal enum ChildMessageKind
 
     // A line carrying the prefix that this window could not read as one of the four message
     // types above: malformed base64, invalid JSON, or a "type" this protocol does not know.
-    // design.md section 5.2: never guessed at, always shown as what it is.
+    // Never guessed at, always shown as what it is.
     Unreadable,
 }
 
 // One line the child sent, decoded. Nothing here is ever a live step; it is one message from the
-// wire described in test-gui.md section 5.1/5.2.
+// wire this protocol describes.
 internal sealed class ChildMessage
 {
     public required ChildMessageKind Kind { get; init; }

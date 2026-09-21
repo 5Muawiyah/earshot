@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T1 (test-gui.md section 13): the fixture matrix over real temporary folders. Each test method
-// here is named for the row in that list it proves. StateDeriver.Derive is exercised through
+// The fixture matrix over real temporary folders. Each test method
+// here is named for the case it proves. StateDeriver.Derive is exercised through
 // EvidenceStore, exactly the pipeline the window itself uses, never by constructing a
 // DerivedRowState directly.
 [TestClass]

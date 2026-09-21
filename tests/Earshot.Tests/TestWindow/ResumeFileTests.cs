@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 9.2: resume.txt is parsed, never executed. Every case here hands
+// resume.txt is parsed, never executed. Every case here hands
 // ResumeFile.TryParse a real file on disk and checks only that it read and validated the line's
 // four values against the filesystem, exactly as Write-ResumeInstruction would have written it;
 // none of these ever start a process.

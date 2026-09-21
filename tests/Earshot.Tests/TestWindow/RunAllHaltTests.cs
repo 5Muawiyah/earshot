@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T14 (test-gui.md section 11/12/13): Run all halts on each non-pass, on leftAtRest no and
+// Run all halts on each non-pass, on leftAtRest no and
 // unknown, and at each power-cycle boundary.
 [TestClass]
 public sealed class RunAllHaltTests

@@ -1,8 +1,8 @@
 namespace Earshot.TestWindow.Core;
 
-// design.md section 8.1: "--sandbox <folder> (tests and development only: uses
-// Run-GuiHalfAgainstFakes.ps1, redirects LOCALAPPDATA, APPDATA, ProgramData, ProgramFiles for
-// the child into that folder, and titles the window 'SANDBOX, no device')."
+// --sandbox <folder>: tests and development only. Uses Run-GuiHalfAgainstFakes.ps1, redirects
+// LOCALAPPDATA, APPDATA, ProgramData, ProgramFiles for the child into that folder, and titles the
+// window "SANDBOX, no device".
 internal sealed class SandboxOptions
 {
     internal const string DriverScriptName = "Run-GuiHalfAgainstFakes.ps1";
@@ -22,8 +22,8 @@ internal sealed class SandboxOptions
     // process may need them set (a caller who sets them belt-and-braces alongside --sandbox), but
     // the fakes driver's child still calls the real, unstubbed New-LiveTestRun, whose
     // Assert-LiveEnvironment refuses to run at all while either is set, the same reason
-    // selftest\Invoke-SelfTest.ps1 clears them around its own child. design.md section 8.1's "the
-    // variables are never stripped" is about the real (non-sandbox) driver, where
+    // selftest\Invoke-SelfTest.ps1 clears them around its own child. The rule that these
+    // variables are never stripped is about the real (non-sandbox) driver only, where
     // Assert-LiveEnvironment must stay the only authority.
     internal IReadOnlyDictionary<string, string> ChildEnvironment => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {

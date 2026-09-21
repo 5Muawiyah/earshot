@@ -11,7 +11,7 @@ internal sealed record ResumeInstruction
     public int? Variant { get; init; }
 }
 
-// A strict parser for resume.txt (test-gui.md section 9.2). Parsed, never executed: this file is
+// A strict parser for resume.txt. Parsed, never executed: this file is
 // never handed to a shell, only matched against the one literal line
 // Write-ResumeInstruction writes, then checked against the filesystem. Anything else, the row is
 // Unknown and nothing is started.

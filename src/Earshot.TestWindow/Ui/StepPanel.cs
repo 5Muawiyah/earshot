@@ -3,11 +3,11 @@ using Earshot.TestWindow.Core;
 namespace Earshot.TestWindow.Ui;
 
 // Renders one PresentedPrompt and turns a button click into exactly one
-// ChildRunner.ReplyFromOwnerClick call (design.md section 7.4). Holds no decisions of its own:
+// ChildRunner.ReplyFromOwnerClick call. Holds no decisions of its own:
 // PromptPresenter decided what to show, this only draws it.
 internal sealed class StepPanel : Panel
 {
-    // Buttons are disabled for 800 ms after a prompt appears (section 7.4), so a fast double
+    // Buttons are disabled for 800 ms after a prompt appears, so a fast double
     // click on the previous prompt's position cannot answer this one.
     private static readonly TimeSpan ClickSafetyDelay = TimeSpan.FromMilliseconds(800);
 
@@ -23,10 +23,10 @@ internal sealed class StepPanel : Panel
     private ChildRunner? _runner;
     private int _currentSeq;
 
-    // M9: the one notification MainForm needs to clear its own silence-watchdog state
+    // The one notification MainForm needs to clear its own silence-watchdog state
     // (_currentPromptSeq) the moment a reply actually leaves this panel, not only when the run
     // itself ends. Raised only for a reply that was actually sent (Abort does not raise it: the
-    // watchdog's own kill-deadline countdown takes over from there, section 8.3).
+    // watchdog's own kill-deadline countdown takes over from there).
     internal event Action<int>? ReplySent;
 
     internal StepPanel()

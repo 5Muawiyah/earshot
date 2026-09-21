@@ -7,7 +7,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T12's wording half (test-gui.md section 13): every wording entry's scriptText appears in the
+// Every wording entry's scriptText appears in the
 // script it is filed under, and every literal Read-Answer/Read-Note/Wait-Owner
 // question-or-instruction and every literal -Consequence a live step passes has an entry. Read
 // with the real PowerShell parser, not a regex, the same way LiveTestScriptTests reads the

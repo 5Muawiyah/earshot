@@ -4,8 +4,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T11 (test-gui.md section 13): each leftAtRest value, a missing finding, and an orphan folder
-// give the banner and the row gating design.md section 4.6 describes.
+// Each leftAtRest value, a missing finding, and an orphan folder give the banner and the row
+// gating Banner.Compute describes.
 [TestClass]
 public sealed class BannerTests
 {
@@ -120,9 +120,9 @@ public sealed class BannerTests
         Assert.AreEqual(BannerLevel.None, banner.Level);
     }
 
-    // T11 also pins the leftAtRest copy itself (design.md section 12; the coordinator's own
-    // strengthening for "unknown"): "no" and "unknown" must each say plainly that the machine is
-    // left in the state Earshot exists to prevent, and "unknown" must never read as "yes".
+    // Also pins the leftAtRest copy itself: "no" and "unknown" must each say plainly that the
+    // machine is left in the state Earshot exists to prevent, and "unknown" must never read as
+    // "yes".
     [TestMethod]
     public void NoAndUnknownEachSayTheMachineIsLeftInTheStateEarshotExistsToPrevent()
     {

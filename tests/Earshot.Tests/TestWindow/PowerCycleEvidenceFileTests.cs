@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// gui-power-cycle.json's shape (test-gui.md section 9.3): a top-level "verdict" member with
+// gui-power-cycle.json's shape: a top-level "verdict" member with
 // exactly the spellings EvidenceStore.TryReadPowerCycleVerdict reads back, plus the raw rows,
 // additive and never overwriting anything the harness itself writes.
 [TestClass]

@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// PromptPresenter turns one protocol prompt message into what StepPanel shows (test-gui.md
-// section 7.1's table), decided here rather than in the form.
+// PromptPresenter turns one protocol prompt message into what StepPanel shows,
+// decided here rather than in the form.
 [TestClass]
 public sealed class PromptPresenterTests
 {

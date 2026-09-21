@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 9.3's three rules, each pinned by its own JSON shape. PowerCycle.Decide
+// The three verdict rules, each pinned by its own JSON shape. PowerCycle.Decide
 // reads nothing itself: every case here hands it the exact raw shape Get-PowerCycleEvidence.ps1
 // prints, so a change to that script's member names shows up here rather than only live.
 [TestClass]

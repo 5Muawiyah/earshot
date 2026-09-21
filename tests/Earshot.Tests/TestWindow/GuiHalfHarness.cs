@@ -5,7 +5,7 @@ namespace Earshot.Tests.TestWindow;
 
 // Starts a real Invoke-GuiHalf.ps1 child against a script of the test's own choosing, and turns
 // ChildRunner's events into a single sequential feed a test can consume with a timeout. Used by
-// every S3 protocol test (T6, T7, T7.1) so each one only states the script and the sequence of
+// every protocol test so each one only states the script and the sequence of
 // prompts and replies it expects, not the process plumbing.
 internal sealed class GuiHalfHarness : IDisposable
 {

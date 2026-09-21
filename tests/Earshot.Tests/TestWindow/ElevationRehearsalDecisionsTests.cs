@@ -6,11 +6,12 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// S9: "Prove everything short of it against the stub." Nothing here starts a process with -Verb
-// RunAs, raises a Windows prompt, or calls the real Invoke-EarshotElevated: it dot-sources
-// tools\live-tests\gui\ElevationRehearsalDecisions.ps1 (the part of Test-ElevatedLaunch.ps1 that
-// does not itself elevate) with real Windows PowerShell 5.1 and synthetic step data standing in
-// for what a real approve/decline/H2-unreadable-exit-code round would have recorded.
+// Proves everything short of a real elevated launch against the stub. Nothing here starts a
+// process with -Verb RunAs, raises a Windows prompt, or calls the real Invoke-EarshotElevated: it
+// dot-sources tools\live-tests\gui\ElevationRehearsalDecisions.ps1 (the part of
+// Test-ElevatedLaunch.ps1 that does not itself elevate) with real Windows PowerShell 5.1 and
+// synthetic step data standing in for what a real approve/decline/unreadable-exit-code round
+// would have recorded.
 [TestClass]
 public sealed class ElevationRehearsalDecisionsTests
 {
@@ -29,13 +30,14 @@ public sealed class ElevationRehearsalDecisionsTests
     [TestMethod]
     public void ApprovedButTheExitCodeCouldNotBeReadIsInconclusiveNeverAPass()
     {
-        // design.md note H2: ran true, exitCode null.
+        // Ran true, exitCode null: the elevated process started but PowerShell never filled in
+        // its exit code.
         JsonElement result = RunDriver("""
             $r = Get-ApprovedExitCodeOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $true; exitCode = $null; error = 'The elevated run started, but PowerShell did not give its exit code, so this step says nothing either way.' })
             $r | ConvertTo-Json -Compress
             """);
         Assert.AreEqual("inconclusive", result.GetProperty("outcome").GetString());
-        StringAssert.Contains(result.GetProperty("detail").GetString(), "note H2");
+        StringAssert.Contains(result.GetProperty("detail").GetString(), "exit code could not be read");
     }
 
     [TestMethod]

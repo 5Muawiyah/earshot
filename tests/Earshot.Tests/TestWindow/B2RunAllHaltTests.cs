@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// B2 (review round 1): AdvanceRunAll used to treat a declined start (StoppedBeforeAnyStep) as
+// AdvanceRunAll used to treat a declined start (StoppedBeforeAnyStep) as
 // "fresh enough" to retry, bypassing RunAllHalt.ShouldHalt (already correct in isolation, per
 // RunAllHaltTests.cs) and restarting the same test forever. RunAllAdvanceTests.cs proves the
 // extracted decision; this drives the real "Run all, step by step" button against real evidence

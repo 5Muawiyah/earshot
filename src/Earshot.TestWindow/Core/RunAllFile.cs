@@ -2,9 +2,9 @@ using System.Text.Json;
 
 namespace Earshot.TestWindow.Core;
 
-// test-gui.md section 11: "run-all.json holds the order, the item it stopped at, and for each
-// item a pointer to its run folder. No outcome is stored." One file, at the live test root
-// (never inside a stamp folder, since it spans many runs).
+// run-all.json holds the order, the item it stopped at, and for each item a pointer to its run
+// folder. No outcome is stored. One file, at the live test root (never inside a stamp folder,
+// since it spans many runs).
 internal sealed record RunAllRecord
 {
     public required IReadOnlyList<string> Order { get; init; }
@@ -17,9 +17,9 @@ internal sealed record RunAllRecord
 }
 
 // Read and write only: RunAllFile decides nothing about whether to halt or advance (RunAllHalt
-// does), and reads fail closed. "A lost or unreadable run-all.json: Run all is simply not active.
-// The list is unaffected" (section 11) and "a corrupt run-all.json changes no row" (T14): a read
-// failure here must never touch StateDeriver's own evidence, only this file.
+// does), and reads fail closed. A lost or unreadable run-all.json means Run all is simply not
+// active; the list is unaffected, and a corrupt run-all.json changes no row: a read failure here
+// must never touch StateDeriver's own evidence, only this file.
 internal static class RunAllFile
 {
     internal const string FileName = "run-all.json";

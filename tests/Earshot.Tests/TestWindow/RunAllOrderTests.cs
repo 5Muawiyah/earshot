@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 11: "a guided sequence in launcher order, 01 to 15, with 10 as five items;
-// 00 is not in it."
+// A guided sequence in launcher order, 01 to 15, with 10 as five items;
+// 00 is not in it.
 [TestClass]
 public sealed class RunAllOrderTests
 {

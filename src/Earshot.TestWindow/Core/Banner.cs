@@ -9,8 +9,8 @@ internal enum BannerLevel
     Red,
 }
 
-// design.md section 4.6. Rows other than 00 Restore stay locked while Level is Red, until a
-// newer Restore run records leftAtRest of yes or not-applicable.
+// Rows other than 00 Restore stay locked while Level is Red, until a newer Restore run records
+// leftAtRest of yes or not-applicable.
 internal sealed record BannerState
 {
     public required BannerLevel Level { get; init; }
@@ -19,17 +19,17 @@ internal sealed record BannerState
     internal bool RowsLockedExceptRestore => Level == BannerLevel.Red;
 }
 
-// Computed from disk alone, at every open and after every half (design.md section 4.6): "if the
-// newest result.json by finishedUtc has leftAtRest of no, unknown or no such finding, or if a
-// run folder newer than it has no result.json" the banner is red; no-on-purpose is amber and
-// blocks nothing; yes or not-applicable is no banner at all.
+// Computed from disk alone, at every open and after every half: if the newest result.json by
+// finishedUtc has leftAtRest of no, unknown or no such finding, or if a run folder newer than it
+// has no result.json, the banner is red; no-on-purpose is amber and blocks nothing; yes or
+// not-applicable is no banner at all.
 internal static class Banner
 {
     internal const string RedMessage =
         "This PC may be left able to page the AirPods at the next start. Run Restore before you shut down.";
 
-    // B3 (review round 1): "newest" is decided by finishedUtc, the moment the result was
-    // actually written, never by the run folder's own stamp. A resumed second half writes into
+    // "Newest" is decided by finishedUtc, the moment the result was actually written, never by
+    // the run folder's own stamp. A resumed second half writes into
     // its first half's (older) stamp folder, so ordering by stamp let a stale no/unknown there
     // hide behind an unrelated test's newer-stamped but chronologically earlier pass. A run
     // whose result.json cannot be read at all (missing, truncated, empty, wrong test, or

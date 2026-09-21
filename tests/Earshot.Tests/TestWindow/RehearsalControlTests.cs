@@ -46,8 +46,8 @@ public sealed class RehearsalControlTests
         });
     }
 
-    // Belt and braces (design.md section 8.1's own phrase for the sandbox refusal): even a click
-    // that reaches the handler despite Enabled=false must refuse, in the handler itself.
+    // Belt and braces: even a click that reaches the handler despite Enabled=false must refuse,
+    // in the handler itself.
     [TestMethod]
     public void ClickingTheRehearsalButtonInASandboxWindowStartsNothing()
     {
@@ -83,7 +83,7 @@ public sealed class RehearsalControlTests
         StringAssert.Contains(Copy.RehearsalRowName.ToLowerInvariant(), "administrator prompt check");
     }
 
-    // M13: rows 00 and 07 must say plainly what is not offered, rather than silently never
+    // Rows 00 and 07 must say plainly what is not offered, rather than silently never
     // reaching it. Real MainForm, real row selection, the same UpdateRowDetail every other row
     // uses.
     [TestMethod]
@@ -94,6 +94,8 @@ public sealed class RehearsalControlTests
         {
             Assert.IsTrue(form.SelectRowForTests("00"));
             StringAssert.Contains(form.RowDetailTextForTests, "never offers to uninstall");
+            StringAssert.Contains(form.RowDetailTextForTests, "Run-LiveTests.ps1 -Test 00");
+            StringAssert.Contains(form.RowDetailTextForTests, "-OfferUninstall");
         });
     }
 
@@ -105,11 +107,13 @@ public sealed class RehearsalControlTests
         {
             Assert.IsTrue(form.SelectRowForTests("07"));
             StringAssert.Contains(form.RowDetailTextForTests, "not wired to a control");
+            StringAssert.Contains(form.RowDetailTextForTests, "Run-LiveTests.ps1 -Test 07");
+            StringAssert.Contains(form.RowDetailTextForTests, "-AllowPlanB");
         });
     }
 
-    // M13: "Wire Copy.DeclinedElevatedPrompt into the result panel." A result.json whose only
-    // step is elevated, did not run, and carries an error is exactly section 10.3's own shape,
+    // Copy.DeclinedElevatedPrompt is wired into the result panel. A result.json whose only
+    // step is elevated, did not run, and carries an error is exactly that shape,
     // constructed directly (ParsedResult/StepRecord), the same way HandOffTests drives
     // ShowHandOffForTests without a real child.
     [TestMethod]

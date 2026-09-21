@@ -1,17 +1,16 @@
 <#
 .SYNOPSIS
-    Runs one half of one shipped live test script under the test window's protocol
-    (test-gui.md section 5.1).
+    Runs one half of one shipped live test script under the test window's protocol.
 
 .DESCRIPTION
     Dot-sources ReadHostShim.ps1 for the message and reply grammar, defines the two-line
-    global:Read-Host wrapper described in test-gui.md section 5.1, sends a hello message, then
+    global:Read-Host wrapper, sends a hello message, then
     runs the named script directly with only the parameters it declares, the way
     Run-LiveTests.ps1 works out what to forward and the way
     tools\live-tests\selftest\Run-OneHalf.ps1 runs a script and passes its exit code on.
 
     Nothing here is replaced inside the shipped script or LiveTest.psm1: Read-Host is the only
-    seam, exactly as design.md D2 asks. Every other prompt helper, and every device, task and
+    seam. Every other prompt helper, and every device, task and
     folder call the shipped script makes, runs unchanged.
 
 .PARAMETER Script
@@ -60,8 +59,8 @@ if (-not (Test-Path -LiteralPath $Script -PathType Leaf))
 
 . (Join-Path $PSScriptRoot 'ReadHostShim.ps1')
 
-# The one seam design.md D2 asks for: a function shadows the cmdlet, and LiveTest.psm1's own
-# helpers resolve it from the global scope (proved by local probe, test-gui.md section 2). The
+# The one seam this driver adds: a function shadows the cmdlet, and LiveTest.psm1's own
+# helpers resolve it from the global scope (proved by local probe). The
 # real Show-Preconditions, Confirm-Step, Read-Answer, Read-Note and Wait-Owner run unchanged and
 # still write their own lines to summary.txt and their own entries to $Run.Answers.
 function global:Read-Host

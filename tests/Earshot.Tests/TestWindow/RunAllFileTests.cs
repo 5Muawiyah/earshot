@@ -3,10 +3,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 11: "run-all.json holds the order, the item it stopped at, and for each
-// item a pointer to its run folder. No outcome is stored." T14's "a corrupt run-all.json changes
-// no row": every failure path here returns null from this file alone, never touching
-// EvidenceStore/StateDeriver's own reads.
+// run-all.json holds the order, the item it stopped at, and for each item a pointer to its run
+// folder. No outcome is stored. A corrupt run-all.json must change no row: every failure path
+// here returns null from this file alone, never touching EvidenceStore/StateDeriver's own reads.
 [TestClass]
 public sealed class RunAllFileTests
 {
@@ -113,5 +112,37 @@ public sealed class RunAllFileTests
     public void TheKeyForAVariantItemAppendsVTheVariantNumber()
     {
         Assert.AreEqual("10v3", RunAllFile.Key(new RunAllItem("10", 3)));
+    }
+
+    // The harness's own Copy-AppEvidence sweeps every *.json file at the root of livetest\ and
+    // copies new ones into whichever test folder is currently running. run-all.json living there
+    // risked being swept into a live test's own evidence by mistake, so the window keeps it in
+    // its own livetest-gui\ folder beside, never inside, the harness's live test root. Driven
+    // through the real MainForm (a declined row halts Run all immediately, which is what saves
+    // run-all.json), not by calling RunAllFile directly with a folder chosen by the test.
+    [TestMethod]
+    public void RunAllJsonIsNeverWrittenAtTheRootOfTheHarnesssOwnLiveTestFolder()
+    {
+        using var sandbox = new TempFolder();
+        string liveTestRoot = Path.Combine(sandbox.Path, "local", "Earshot", "livetest");
+        ResultJsonFixture.WriteTo(Path.Combine(liveTestRoot, "20260920T000000Z", "01-a2dp-oneshot", "result.json"),
+            new ResultJsonFixture("01-a2dp-oneshot", "inconclusive").Build());
+
+        // An unrelated, already-settled pass with leftAtRest yes, so the at-rest banner is not
+        // what stops Run all here: this test is about the per-row halt decision alone.
+        ResultJsonFixture.WriteTo(Path.Combine(liveTestRoot, "20260920T010000Z", "15-uninstall-reversal", "result.json"),
+            new ResultJsonFixture("15-uninstall-reversal", "pass").WithCriterion("delayed-deletion", "pass")
+                .WithFinding("leftAtRest", "yes").WithFinishedUtc("2026-09-20T01:00:00.000Z").Build());
+
+        MainFormTestHarness.Run(sandbox.Path, form =>
+        {
+            form.ClickRunAllForTests();
+            Assert.IsTrue(form.CarryOnVisibleForTests, "Run all did not halt on the declined row as expected.");
+        });
+
+        Assert.IsFalse(File.Exists(Path.Combine(liveTestRoot, RunAllFile.FileName)),
+            "run-all.json must never be written at the root of the harness's own livetest folder.");
+        Assert.IsTrue(File.Exists(Path.Combine(sandbox.Path, "local", "Earshot", "livetest-gui", RunAllFile.FileName)),
+            "run-all.json was not found in the window's own livetest-gui folder.");
     }
 }

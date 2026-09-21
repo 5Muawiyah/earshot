@@ -1,9 +1,9 @@
 namespace Earshot.TestWindow.Core;
 
-// test-gui.md section 10.2's lock rule: "15, 00's uninstall variant and 07's plan B are Locked
-// until the newest rehearsal result.json is a pass and is newer than the last write time of
-// LiveTest.psm1, Invoke-GuiHalf.ps1 and ReadHostShim.ps1." Reads disk only, decides nothing about
-// starting anything: MainForm still never elevates and never runs the rehearsal itself.
+// The lock rule: 15, 00's uninstall variant and 07's plan B are locked until the newest rehearsal
+// result.json is a pass and is newer than the last write time of LiveTest.psm1, Invoke-GuiHalf.ps1
+// and ReadHostShim.ps1. Reads disk only, decides nothing about starting anything: MainForm still
+// never elevates and never runs the rehearsal itself.
 internal static class ElevationGate
 {
     internal const string RehearsalTestId = "elevated-launch-rehearsal";
@@ -46,8 +46,8 @@ internal static class ElevationGate
         return newest;
     }
 
-    // M8: "newest decides; unreadable is locked." The newest rehearsal attempt by stamp is the
-    // only one that speaks, exactly like StateDeriver.Derive's own newest-run check (B4): a
+    // Newest decides; unreadable is locked. The newest rehearsal attempt by stamp is the
+    // only one that speaks, exactly like StateDeriver.Derive's own newest-run check: a
     // rehearsal folder newer than the last pass that was killed, crashed or wrote a malformed
     // result.json must lock the row, never be skipped past on the way to an older, now-stale pass
     // underneath it. Read the same fail-closed way as any other test's evidence

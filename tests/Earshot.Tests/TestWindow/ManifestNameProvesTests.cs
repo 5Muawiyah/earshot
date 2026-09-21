@@ -3,17 +3,16 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// The coordinator's own instruction: "add a separate manifest field for a plain row name...
-// keep the script header's title as a secondary line... The 'what it proves' line likewise in
-// plain words, facts unchanged." Proves is not invented: test-gui.md section 6.1's own manifest
-// table already carries this exact "What it proves (row copy)" column, marked "binding copy", so
-// every row's Proves value here is that literal text, checked against it. Name has no such table
-// (the coordinator said to write it), so it is checked only for being present, plain, and never
-// the bare TestId.
+// Every row carries a plain row name, with the script header's own title kept as a secondary
+// line, and a "what it proves" line in plain words with the facts unchanged. Proves is not
+// invented: the manifest's own table already carries this exact "What it proves (row copy)"
+// column, marked binding copy, so every row's Proves value here is that literal text, checked
+// against it. Name has no such table (it is hand-written), so it is checked only for being
+// present, plain, and never the bare TestId.
 [TestClass]
 public sealed class ManifestNameProvesTests
 {
-    // test-gui.md section 6.1's own table, column "What it proves (row copy)", copied exactly.
+    // The manifest's own table, column "What it proves (row copy)", copied exactly.
     private static readonly Dictionary<string, string> ExpectedProves = new(StringComparer.Ordinal)
     {
         ["00"] = "Puts this PC back to a known state. Run it whenever a test stops early.",

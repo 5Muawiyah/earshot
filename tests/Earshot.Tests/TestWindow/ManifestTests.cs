@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T12's manifest half (test-gui.md section 13): scripts equal the 16 shipped; TestIds equal the
+// Scripts equal the 16 shipped; TestIds equal the
 // -TestId literals; halves sum to 22; markers agree with selftest\expectations.psd1, read
 // through a real Windows PowerShell 5.1 child exactly as the harness itself reads it
 // (Import-PowerShellDataFile), never re-typed as a C# literal.
@@ -77,8 +77,8 @@ public sealed class ManifestTests
                 continue;
             }
 
-            // Test 10 is keyed by its first variant in expectations.psd1 (T5's own convention:
-            // "10 as variant 1, as the self-test does").
+            // Test 10 is keyed by its first variant in expectations.psd1, the same convention the
+            // self-test itself uses: 10 as variant 1.
             string testId = row.Variants is { Count: > 0 } variants ? variants[0].TestId : row.TestId;
 
             HashSet<string> firstHalfCriteria = CriteriaIds(expectations, testId + "|first");

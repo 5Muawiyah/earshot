@@ -1,29 +1,16 @@
+using System.Threading.Tasks;
 using Earshot.TestWindow.Core;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// Priority-zero fix, reported by the hosted build: dotnet test's own test host crashed with an
-// unhandled InvalidOperationException ("Invoke or BeginInvoke cannot be called on a control until
-// the window handle has been created") thrown from a background thread. ChildRunner.ReadLoop runs
-// on a ThreadPool thread (Task.Run) and its MessageReceived/TranscriptLine closures in
-// MainForm.BeginRun called Control.BeginInvoke guarded only by a plain IsHandleCreated read, with
-// no check for IsDisposed and no try/catch: a message that arrives while (or just after) the form
-// is disposed - exactly what MainFormTestHarness's own cleanup does to a still-running child -
-// throws on that background thread, which is unhandled by construction (nothing on ReadLoop's own
-// call stack catches it) and takes the whole process down with it, in production as much as in a
-// test: OnFormClosing kills the active run and lets the close proceed, so the same race exists
-// for a real owner closing the window on a live half.
-//
-// Reproduced here by driving the exact delivery path BeginRun wires up, after the form has
-// already been disposed. The IsHandleCreated read could not be kept even as a fast path: checking
-// it and then calling BeginInvoke are two separate steps, so a synchronous test can only ever see
-// it correctly read false post-dispose (proving nothing) or race it, which is not reproducible on
-// demand; MainForm.SafeBeginInvoke instead relies solely on catching what BeginInvoke itself
-// throws, which is deterministic and is what actually stops the crash either way. Before this
-// fix, the assertion below (proving delivery is recorded, not silently dropped) itself crashed
-// this repository's real dotnet test host with "Test host process crashed: Unhandled exception",
-// the same failure shape as the hosted report, because nothing caught it either.
+// ChildRunner.ReadLoop runs on a ThreadPool thread and its MessageReceived/TranscriptLine
+// closures used to call Control.BeginInvoke guarded only by a plain IsHandleCreated read, with no
+// try/catch: a message that arrived while, or just after, this form was disposed threw straight
+// out of ReadLoop's own call stack, which nothing there catches, and an exception unhandled on a
+// background thread takes the whole process down with it. The same race exists for a real owner
+// closing the window during a live half (OnFormClosing kills the run and lets the close proceed),
+// not only for a test harness disposing the form right after its own cleanup kill.
 [TestClass]
 public sealed class PostDisposalDeliveryTests
 {
@@ -46,7 +33,7 @@ public sealed class PostDisposalDeliveryTests
             try
             {
                 // The exact call MessageReceived/TranscriptLine's closures make: BeginInvoke on a
-                // form whose handle has been destroyed. Before the fix, this line alone threw.
+                // form whose handle has been destroyed.
                 form.SafeBeginInvokeForTests(() => { });
             }
             catch (Exception ex)
@@ -105,16 +92,14 @@ public sealed class PostDisposalDeliveryTests
         }
     }
 
-    // The stress form of the original report: real child, real start, no wait at all before the
-    // harness's own cleanup kills and disposes, repeated enough times to bias the timing toward
-    // the race actually landing. Measured on this machine (Priority-zero investigation,
-    // 2026-09-21): 400 iterations of this exact shape took about 22 s and never crashed the host
-    // even before this fix existed to catch anything (the pre-fix run's "crash" was reproduced
-    // deterministically instead, in ABeginInvokeAfterDisposeIsCaughtAndRecordedNeverThrown, not by
-    // timing); kept here at a smaller count so the gate does not pay for 400 child-process starts,
-    // as a standing guard against the same class of race recurring.
+    // A real child, a real start, no wait at all before the test harness's own cleanup kills and
+    // disposes, repeated enough times to bias the timing toward the same race landing again if it
+    // ever came back. TaskScheduler.UnobservedTaskException and AppDomain.UnhandledException are
+    // both hooked for the whole run: either one firing means some exception escaped a path this
+    // class does not already know about and is asserting on directly, which is exactly the shape
+    // of failure a fix proved only by a deterministic, single-shot test could still miss.
     [TestMethod]
-    public void StressStartKillDisposeNeverCrashesTheHost()
+    public void StressStartKillDisposeNeverLeavesAnUnobservedOrUnhandledException()
     {
         string host = PowerShell51.ExecutablePath();
         if (!File.Exists(host))
@@ -122,19 +107,51 @@ public sealed class PostDisposalDeliveryTests
             Assert.Inconclusive("Windows PowerShell 5.1 is not installed at " + host + ".");
         }
 
-        const int iterations = 40;
-        for (int i = 0; i < iterations; i++)
+        var unobserved = new List<Exception>();
+        var unhandled = new List<object>();
+        EventHandler<UnobservedTaskExceptionEventArgs> onUnobserved = (_, e) =>
         {
-            using var sandbox = new TempFolder();
-            MainFormTestHarness.Run(sandbox.Path, form =>
+            lock (unobserved) { unobserved.Add(e.Exception); }
+            e.SetObserved();
+        };
+        UnhandledExceptionEventHandler onUnhandled = (_, e) =>
+        {
+            lock (unhandled) { unhandled.Add(e.ExceptionObject); }
+        };
+
+        TaskScheduler.UnobservedTaskException += onUnobserved;
+        AppDomain.CurrentDomain.UnhandledException += onUnhandled;
+        try
+        {
+            const int iterations = 60;
+            for (int i = 0; i < iterations; i++)
             {
-                Assert.IsTrue(form.SelectRowForTests("01"));
-                form.ClickStartForTests();
-                Assert.IsNotNull(form.ActiveRunnerForTests, "iteration " + i + ": no child started.");
-                // No wait: return immediately so MainFormTestHarness's own finally block (kill,
-                // then dispose) races the freshly started ChildRunner's read loop at its most
-                // active point, exactly as the hosted build's crash report described.
-            });
+                using var sandbox = new TempFolder();
+                MainFormTestHarness.Run(sandbox.Path, form =>
+                {
+                    Assert.IsTrue(form.SelectRowForTests("01"));
+                    form.ClickStartForTests();
+                    Assert.IsNotNull(form.ActiveRunnerForTests, "iteration " + i + ": no child started.");
+                    // No wait: return immediately so the harness's own cleanup (kill, then
+                    // dispose) races the freshly started ChildRunner's read loop at its most
+                    // active point.
+                });
+            }
+
+            // TaskScheduler.UnobservedTaskException only fires when a faulted, unobserved Task is
+            // finalized; forcing a full collection here is what gives any such task, from any of
+            // the 60 runs above, the chance to be found and reported before this method asserts.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= onUnobserved;
+            AppDomain.CurrentDomain.UnhandledException -= onUnhandled;
+        }
+
+        Assert.AreEqual(0, unobserved.Count, "an unobserved task exception escaped: " + string.Join("; ", unobserved));
+        Assert.AreEqual(0, unhandled.Count, "an unhandled exception reached AppDomain: " + string.Join("; ", unhandled));
     }
 }

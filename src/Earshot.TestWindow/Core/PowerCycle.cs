@@ -2,8 +2,8 @@ using System.Text.Json;
 
 namespace Earshot.TestWindow.Core;
 
-// test-gui.md section 9.3's four verdicts. "unknown" covers a read error, an unreadable log, and
-// a 109 value this table does not name: it is never accepted as a shut down.
+// The four power-cycle verdicts. "unknown" covers a read error, an unreadable log, and a 109
+// value the required-transition table does not name: it is never accepted as a shut down.
 internal enum PowerCycleVerdict
 {
     Unknown,
@@ -13,7 +13,7 @@ internal enum PowerCycleVerdict
 }
 
 // Decides a verdict from the raw rows Get-PowerCycleEvidence.ps1 returns; it reads nothing
-// itself. test-gui.md section 9.3:
+// itself:
 //   1. read error: unknown;
 //   2. no start after since: not-yet;
 //   3. the newest 109 before the newest start and after since: none gives unknown; 5 gives

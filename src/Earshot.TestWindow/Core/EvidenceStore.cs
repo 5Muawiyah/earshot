@@ -4,9 +4,9 @@ using System.Text.RegularExpressions;
 
 namespace Earshot.TestWindow.Core;
 
-// Reads run evidence from disk, and only from disk (design.md D4: "only result.json can raise a
-// row to Passed"). Every read is fail closed: a file that cannot be parsed, or that disagrees
-// with itself, comes back as a reason string, never as a guess. test-gui.md section 6.2.
+// Reads run evidence from disk, and only from disk: only result.json can raise a row to Passed.
+// Every read is fail closed: a file that cannot be parsed, or that disagrees with itself, comes
+// back as a reason string, never as a guess.
 internal static partial class EvidenceStore
 {
     [GeneratedRegex(@"^\d{8}T\d{6}Z$")]
@@ -305,8 +305,8 @@ internal static partial class EvidenceStore
         return list;
     }
 
-    // M13: leniently read too, the same as findings and errors: steps are shown and reasoned
-    // about (a declined elevated prompt), never used to decide pass or fail.
+    // Leniently read too, the same as findings and errors: steps are shown and reasoned about (a
+    // declined elevated prompt), never used to decide pass or fail.
     private static List<StepRecord> ReadSteps(JsonElement root)
     {
         var list = new List<StepRecord>();

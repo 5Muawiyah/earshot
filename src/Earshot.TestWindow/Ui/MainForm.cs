@@ -31,7 +31,7 @@ internal sealed class MainForm : Form
     private readonly Button _runAllCarryOnButton;
     private readonly System.Windows.Forms.Timer _watchdogTimer;
 
-    // M4: the administrator prompt check's own control, separate from the row list (it is a
+    // The administrator prompt check's own control, separate from the row list (it is a
     // utility check, not one of the 16 numbered tests, and never appears in Run all's own order).
     private readonly Button _rehearsalButton;
     private readonly Label _rehearsalWarningLabel;
@@ -126,7 +126,7 @@ internal sealed class MainForm : Form
 
         var contentHost = new Panel { Dock = DockStyle.Fill };
         _stepPanel = new StepPanel { Visible = false };
-        // M9: the silence watchdog must stop treating a reply as though the prompt it answered
+        // The silence watchdog must stop treating a reply as though the prompt it answered
         // were still pending. Without this, _currentPromptSeq was set once by the first prompt and
         // never cleared again until the whole run ended, so OnWatchdogTick's own "no prompt
         // pending" gate was permanently false from the second prompt onwards: the watchdog could
@@ -164,11 +164,11 @@ internal sealed class MainForm : Form
         _runAllButton = new Button { Text = Copy.RunAllButtonLabel, Dock = DockStyle.Top, Height = 28 };
         _runAllButton.Click += (_, _) => StartOrContinueRunAll();
 
-        // M4: beside row 15 rather than inside the row list, since this is a utility check, not
+        // Beside row 15 rather than inside the row list, since this is a utility check, not
         // one of the 16 numbered tests. Disabled outright in a sandbox window (never Visible at
-        // all is not enough on its own; StartRehearsal itself refuses too, section 8.1's own
-        // belt-and-braces): an unattended or development sandbox must never run this, because it
-        // always raises a real Windows administrator prompt, in any mode.
+        // all is not enough on its own; StartRehearsal itself refuses too, belt and braces): an
+        // unattended or development sandbox must never run this, because it always raises a real
+        // Windows administrator prompt, in any mode.
         _rehearsalRow = BuildRehearsalDisplayRow();
         _rehearsalWarningLabel = new Label
         {
@@ -237,10 +237,10 @@ internal sealed class MainForm : Form
             text += Environment.NewLine + "This variant waits on Windows Update offering a restart; it may take a while for one to appear.";
         }
 
-        // M13: "the brief forbids a silently missing path." Restore's own uninstall offer and
-        // 07's plan B are real branches these scripts declare (-OfferUninstall, -AllowPlanB) that
-        // this window never passes as true anywhere, so this row can never reach them; said here
-        // rather than left for the owner to notice on his own.
+        // A path this window never reaches must never be silently missing. Restore's own
+        // uninstall offer and 07's plan B are real branches these scripts declare
+        // (-OfferUninstall, -AllowPlanB) that this window never passes as true anywhere, so this
+        // row can never reach them; said here rather than left for the owner to notice on his own.
         if (row.Number == "00")
         {
             text += Environment.NewLine + Environment.NewLine + Copy.RestoreUninstallOfferNotAvailable;
@@ -253,10 +253,9 @@ internal sealed class MainForm : Form
         _rowDetailLabel.Text = text;
     }
 
-    // design.md section 4.7: closing while the banner is red asks first. section 8.3/S8: closing
-    // during a run asks first too, and closing anyway is the same as a forced kill (the process
-    // is going away either way; the row must read Unknown afterwards, not whatever it said
-    // before this run started).
+    // Closing while the banner is red asks first. Closing during a run asks first too, and
+    // closing anyway is the same as a forced kill (the process is going away either way; the row
+    // must read Unknown afterwards, not whatever it said before this run started).
     // Test seam: real callers never replace this; it defaults to the real modal box every
     // OnFormClosing decision used to call directly. Substituting it in a test proves what
     // OnFormClosing decided to do without ever putting a real dialog on screen, which nothing
@@ -265,12 +264,12 @@ internal sealed class MainForm : Form
     internal Func<string, DialogResult> ConfirmDialogForTests { get; set; } =
         message => MessageBox.Show(message, "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
-    // M10, design.md section 4.4: "Windows ends the session while a half is running: the form
-    // cancels the close once, so Windows shows its own 'this app is preventing shut down' screen
-    // with the window title 'Earshot live tests: a test is still running'. If the owner forces
-    // it, the child dies with the session and the next open shows the red banner." Windows sends
-    // WM_QUERYENDSESSION and waits for FormClosing to answer synchronously; a modal MessageBox
-    // does not answer it, it blocks the answer, so this path never shows one. The cancel happens
+    // When Windows ends the session while a half is running, the form cancels the close once, so
+    // Windows shows its own "this app is preventing shut down" screen with the window title
+    // "Earshot live tests: a test is still running". If the owner forces it, the child dies with
+    // the session and the next open shows the red banner. Windows sends WM_QUERYENDSESSION and
+    // waits for FormClosing to answer synchronously; a modal MessageBox does not answer it, it
+    // blocks the answer, so this path never shows one. The cancel happens
     // at most once per session-end attempt: a second attempt (the owner having forced it, or
     // Windows trying again) is let through, so the window can never make itself the one thing an
     // otherwise-successful shutdown cannot get past.
@@ -319,9 +318,18 @@ internal sealed class MainForm : Form
         ? Path.Combine(_sandbox.Folder, "local", "Earshot", "livetest")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Earshot", "livetest");
 
+    // The window's own bookkeeping never lives at the root of livetest\: the harness's own
+    // Copy-AppEvidence sweeps every *.json file it finds there and copies new ones into whichever
+    // test folder is currently running, so a window-owned file at that root risked being swept
+    // into a live test's own evidence by mistake. run-all.json lives in this folder instead,
+    // beside but never inside the harness's own live test root.
+    private string WindowStateRoot() => _sandbox is not null
+        ? Path.Combine(_sandbox.Folder, "local", "Earshot", "livetest-gui")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Earshot", "livetest-gui");
+
     private void PopulateRows()
     {
-        // Recomputed at every open and after every half (design.md section 4.6).
+        // Recomputed at every open and after every half.
         _banner = Banner.Compute(LiveTestRoot());
         UpdateBannerLabel();
         UpdateRehearsalStatus();
@@ -374,7 +382,7 @@ internal sealed class MainForm : Form
         return StateDeriver.Derive(spec, evidence, _exePath, exeWrite);
     }
 
-    // M4: a hand-built row for the administrator prompt check, never one of the 16 in
+    // A hand-built row for the administrator prompt check, never one of the 16 in
     // Data\tests.json (Number "AR" so it can never collide with a real one, and so it is never
     // picked up by RunAllOrder, which walks the manifest's own numbered rows). Its TestId matches
     // ElevationGate.RehearsalTestId exactly, so ComputeState-style evidence lookups and the lock
@@ -396,10 +404,10 @@ internal sealed class MainForm : Form
         return new DisplayRow { Row = row };
     }
 
-    // M4: never in a sandbox window (an unattended or development sandbox must never raise a
-    // real Windows administrator prompt), never while another run is active (RunGate's own rule,
-    // section 8.2), and always through the production driver: D8 and section 10.2 are explicit
-    // that nothing about this site's own execution may be faked.
+    // Never in a sandbox window (an unattended or development sandbox must never raise a
+    // real Windows administrator prompt), never while another run is active (RunGate's own rule),
+    // and always through the production driver: nothing about this site's own execution may be
+    // faked.
     private void StartRehearsal()
     {
         if (_sandbox is not null)
@@ -455,11 +463,11 @@ internal sealed class MainForm : Form
         };
     }
 
-    // section 10.2's lock rule, wired to row 15: its whole test is the elevated uninstall/install
-    // cycle, so it is unambiguous. M13: 00's uninstall variant and 07's plan B are the other two
-    // rows the spec names; this round does not give either its own locked row (the safer of the
-    // spec's two sanctioned options was taken instead: UpdateRowDetail's own note on rows 00 and
-    // 07 says plainly what is not offered and why), so neither is gated here either.
+    // The lock rule, wired to row 15: its whole test is the elevated uninstall/install cycle, so
+    // it is unambiguous. 00's uninstall variant and 07's plan B are the other two paths the same
+    // elevated launch site would reach; this row does not give either its own locked row, so
+    // neither is gated here either. UpdateRowDetail's own note on rows 00 and 07 says plainly
+    // what is not offered, why, and exactly what to run instead from a console.
     private bool IsElevationLocked(DisplayRow row)
     {
         if (row.Row.Number != "15")
@@ -491,7 +499,7 @@ internal sealed class MainForm : Form
         }
 
         DisplayRow row = _displayRows[index];
-        // The red banner locks every row except 00 Restore (design.md section 4.6).
+        // The red banner locks every row except 00 Restore.
         bool lockedByBanner = _banner.RowsLockedExceptRestore && row.Row.Number != "00";
 
         PendingRun? pending = FindPendingRun(row);
@@ -507,7 +515,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // B1: exactly one child may exist. Checked here, not only via the Start button's own
+        // Exactly one child may exist. Checked here, not only via the Start button's own
         // Enabled state, because Run all and its carry-on button call this same start path
         // programmatically, never through a click a disabled button could have blocked.
         if (!RunGate.CanStart(_activeRunner))
@@ -669,7 +677,7 @@ internal sealed class MainForm : Form
             }
         }
 
-        // B1: routed by identity, on the UI thread, at the moment each is actually handled, not
+        // Routed by identity, on the UI thread, at the moment each is actually handled, not
         // when it was queued. A message from a runner that is no longer _activeRunner (it ended,
         // or was superseded) is dropped rather than handled against whatever runner is active now.
         runner.MessageReceived += message => SafeBeginInvoke(() =>
@@ -729,14 +737,21 @@ internal sealed class MainForm : Form
     private void OnRunFinished(DisplayRow row)
     {
         _stepPanel.Visible = false;
-        _activeRunner?.WaitForExit(TimeSpan.FromSeconds(20));
+        // The child already sent its own exit message, so result.json is expected to be on disk
+        // regardless of what happens next; a missed exit within this grace window (a lingering
+        // handle, a slow-to-tear-down thread) must never leave the process itself orphaned,
+        // holding stdin open, once this method moves on and drops the only reference to it.
+        if (_activeRunner is not null && !_activeRunner.WaitForExit(ExitGracePeriodForTests))
+        {
+            _activeRunner.Kill();
+        }
 
         string resultPath = Path.Combine(_activeResultFolder!, "result.json");
         (ParsedResult? result, string? failure) = EvidenceStore.TryReadResult(resultPath, row.TestId);
 
-        // M7: a declined start (No at Show-Preconditions, or any other stop before the script
+        // A declined start (No at Show-Preconditions, or any other stop before the script
         // ever reaches the point of writing resume.txt) still produces a readable result.json, but
-        // there is nothing pending to come back to. Section 9.2's own pending detection already
+        // there is nothing pending to come back to. The pending detection elsewhere already
         // requires resume.txt; the hand-off screen ("Now shut this PC down... it will pick up
         // here") must ask for exactly the same thing, not show it whenever this happened to be a
         // two-half test's first half regardless of what the run actually reached.
@@ -849,14 +864,14 @@ internal sealed class MainForm : Form
         KillActiveRun();
     }
 
-    // section 8.3: "kill the process tree... The row is Unknown and the red banner requires
-    // Restore before anything else." gui-killed.txt is what makes the row read Unknown rather than
-    // falling back to an older, now-untrustworthy pass (StateDeriver.Derive's own newest-run
-    // check). M1: it also makes PendingRunFinder stop offering "Carry on" over the stale first-half
-    // result a killed second half leaves behind, and makes Banner.Compute distrust that same stale
-    // result rather than reading whatever leftAtRest it happens to carry as though it settled
-    // anything; a run folder with no result.json at all was already red on its own, but this one
-    // does have a (stale, untrustworthy) result.json, which needed its own check in both places.
+    // Kill the process tree; the row is Unknown and the red banner requires Restore before
+    // anything else. gui-killed.txt is what makes the row read Unknown rather than falling back
+    // to an older, now-untrustworthy pass (StateDeriver.Derive's own newest-run check). It also
+    // makes PendingRunFinder stop offering "Carry on" over the stale first-half result a killed
+    // second half leaves behind, and makes Banner.Compute distrust that same stale result rather
+    // than reading whatever leftAtRest it happens to carry as though it settled anything; a run
+    // folder with no result.json at all was already red on its own, but this one does have a
+    // (stale, untrustworthy) result.json, which needed its own check in both places.
     private void KillActiveRun()
     {
         if (_activeRunner is null)
@@ -868,21 +883,21 @@ internal sealed class MainForm : Form
         ChildRunner runner = _activeRunner;
         runner.Kill();
 
-        // Priority-zero fix: Kill() only asks the OS to terminate the process tree; ReadLoop's
-        // ReadLine keeps running on its own ThreadPool thread until the killed process's stdout
-        // pipe actually closes, a short time later, not synchronously with Kill() returning. This
-        // method is called from OnFormClosing (a real close while a half is running) as well as
-        // from tests that dispose the form right after calling it (MainFormTestHarness's own
-        // cleanup): either way, once this method returns, the form may be disposed at any moment.
-        // Draining the read loop here, before that can happen, is what SafeBeginInvoke's disposal
-        // guard below is the last line of defence for, not the primary fix.
+        // Kill() only asks the OS to terminate the process tree; ReadLoop's ReadLine keeps
+        // running on its own ThreadPool thread until the killed process's stdout pipe actually
+        // closes, a short time later, not synchronously with Kill() returning. This method is
+        // called from OnFormClosing (a real close while a half is running) as well as from tests
+        // that dispose the form right after calling it: either way, once this method returns, the
+        // form may be disposed at any moment. Draining the read loop here, before that can
+        // happen, is what SafeBeginInvoke's own disposal guard is the last line of defence for,
+        // not the primary fix.
         try
         {
             runner.WaitForReadLoopAsync().Wait(TimeSpan.FromSeconds(5));
         }
         catch (AggregateException ex)
         {
-            _postDisposalDeliveryFailures.Add(ex);
+            RecordPostDisposalDeliveryFailure(ex);
         }
 
         if (_activeResultFolder is not null)
@@ -922,7 +937,7 @@ internal sealed class MainForm : Form
     // call back in; it never loops past a row that is not yet a clean pass on disk.
     private void AdvanceRunAll()
     {
-        // B1: never start a second child. AdvanceRunAll's only job is to start the next item, so
+        // Never start a second child. AdvanceRunAll's only job is to start the next item, so
         // if one is already active this call has nothing to do (it will be called again from
         // OnRunFinished once that one ends).
         if (!RunGate.CanStart(_activeRunner))
@@ -942,7 +957,7 @@ internal sealed class MainForm : Form
 
             DerivedRowState state = ComputeState(row);
 
-            // B2: the caller's own decision, not just RunAllHalt.ShouldHalt in isolation. A
+            // The caller's own decision, not just RunAllHalt.ShouldHalt in isolation. A
             // declined start (StoppedBeforeAnyStep) used to be treated as "fresh enough" to
             // start again, bypassing ShouldHalt (which already says halt for it) and restarting
             // the same test forever.
@@ -969,8 +984,7 @@ internal sealed class MainForm : Form
 
             // Written before the child even starts, not only on a halt: closing the window mid
             // item must still leave run-all.json pointing at this same index, so reopening and
-            // clicking "Run all, step by step" again resumes here rather than from the start
-            // (T14: "resumes from pointers").
+            // clicking "Run all, step by step" again resumes here rather than from the start.
             SaveRunAllProgress();
 
             PendingRun? pending = FindPendingRun(row);
@@ -987,7 +1001,7 @@ internal sealed class MainForm : Form
         }
 
         _runAllActive = false;
-        RunAllFile.Delete(LiveTestRoot());
+        RunAllFile.Delete(WindowStateRoot());
         _runAllCarryOnButton.Visible = false;
         _runAllStatusLabel.Text = Copy.RunAllFinished;
     }
@@ -1013,7 +1027,7 @@ internal sealed class MainForm : Form
 
     private void OnRunAllCarryOnClicked()
     {
-        // B1: a stray or double click while a half is somehow already active must never start a
+        // A stray or double click while a half is somehow already active must never start a
         // second one.
         if (!RunGate.CanStart(_activeRunner))
         {
@@ -1028,7 +1042,7 @@ internal sealed class MainForm : Form
 
     private void SaveRunAllProgress()
     {
-        RunAllFile.Write(LiveTestRoot(), new RunAllRecord
+        RunAllFile.Write(WindowStateRoot(), new RunAllRecord
         {
             Order = RunAllOrder.Items.Select(RunAllFile.Key).ToArray(),
             StoppedAtIndex = _runAllIndex,
@@ -1038,7 +1052,7 @@ internal sealed class MainForm : Form
 
     private void StartOrContinueRunAll()
     {
-        // B1: Run all's own button stayed enabled during a run; nothing stopped a second click
+        // Run all's own button stayed enabled during a run; nothing stopped a second click
         // (or a click while a single-row Start was mid-flight) from starting a second child.
         if (!RunGate.CanStart(_activeRunner))
         {
@@ -1051,7 +1065,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        RunAllRecord? existing = RunAllFile.TryRead(LiveTestRoot());
+        RunAllRecord? existing = RunAllFile.TryRead(WindowStateRoot());
         _runAllPointers.Clear();
         if (existing is not null)
         {
@@ -1087,7 +1101,7 @@ internal sealed class MainForm : Form
     {
         FirstHalfSnapshot.Take(_activeResultFolder!);
 
-        // M12: the recorded reason lives in the leftAtRest finding's own Detail, not in a
+        // The recorded reason lives in the leftAtRest finding's own Detail, not in a
         // separate member (LiveTest.psm1's Complete-LiveTestRun writes it there). Passing null
         // unconditionally meant "no-on-purpose" always showed "No reason was recorded." even when
         // the script had recorded one.
@@ -1120,45 +1134,44 @@ internal sealed class MainForm : Form
         _statusLabel.Text = row.TestId + ": first half complete. Waiting for the power cycle.";
     }
 
-    // Priority-zero fix (hosted build crash): the one call site every ChildRunner.MessageReceived
-    // and TranscriptLine closure must go through, never a raw BeginInvoke. ReadLoop runs on its
-    // own ThreadPool thread and can still be delivering a message the instant this form's handle
-    // is destroyed (Dispose, or the STA thread's own teardown in MainFormTestHarness): a plain
-    // IsHandleCreated read is not enough, because it can pass and then go stale before BeginInvoke
-    // actually runs. This is the one place that race is allowed to happen and be caught: it must
-    // never throw out into ReadLoop's own call stack, which nothing there catches, and which is
-    // unhandled on a background thread by construction. The failure is recorded, not swallowed:
-    // PostDisposalDeliveryFailuresForTests names it for a test, and it is exactly the shape "no
-    // silent catches" asks for even though this call is neither COM, CfgMgr32, Bluetooth nor Task
-    // Scheduler.
+    // The one call site every ChildRunner.MessageReceived and TranscriptLine closure must go
+    // through, never a raw BeginInvoke. ReadLoop runs on its own ThreadPool thread and can still
+    // be delivering a message the instant this form's handle is destroyed (Dispose, or a test
+    // harness's own teardown right after it): a plain IsHandleCreated read is not enough, because
+    // it can pass and then go stale before BeginInvoke actually runs, and a check on one thread
+    // followed by a call on another cannot be made atomic against a Dispose happening in between.
+    // The try/catch below is what is actually safe under that race. Anything it catches is
+    // recorded, twice, never swallowed: PostDisposalDeliveryFailuresForTests for a test to read,
+    // and a trace line for anyone reading this process's own diagnostic output, because an
+    // uncaught exception here is unhandled on a background thread by construction and takes the
+    // whole process down with it.
     private void SafeBeginInvoke(Action action)
     {
-        // No IsHandleCreated pre-check: that was the original bug. A check on one thread and a
-        // BeginInvoke a few CPU cycles later on another can straddle a Dispose happening in
-        // between (this form's own OnFormClosing kills the run and lets the close proceed;
-        // MainFormTestHarness's cleanup disposes right after its own kill), so IsHandleCreated can
-        // read true and then go stale before BeginInvoke actually runs. The try/catch is the only
-        // thing here that is actually safe under that race; IsHandleCreated could stay as a
-        // cheap first guess, but would add nothing this catch does not already cover.
         try
         {
             BeginInvoke(action);
         }
         catch (ObjectDisposedException ex)
         {
-            _postDisposalDeliveryFailures.Add(ex);
+            RecordPostDisposalDeliveryFailure(ex);
         }
         catch (InvalidOperationException ex)
         {
-            _postDisposalDeliveryFailures.Add(ex);
+            RecordPostDisposalDeliveryFailure(ex);
         }
     }
 
-    // Test seams only (Earshot.Tests, via InternalsVisibleTo): review round 1's own rule is that
-    // a fix whose only proof is an extracted predicate in isolation proves nothing about the
-    // caller that used to bypass it. These let a test drive this form's real click handlers
-    // headlessly (constructed, handle forced, never Shown) and observe what a real click actually
-    // does, the same way MainForm.cs 1090-1150ish's own private methods are wired to controls.
+    private void RecordPostDisposalDeliveryFailure(Exception ex)
+    {
+        _postDisposalDeliveryFailures.Add(ex);
+        System.Diagnostics.Trace.TraceWarning("A message delivery from ChildRunner arrived after this window's handle was gone: " + ex);
+    }
+
+    // Test seams only (Earshot.Tests, via InternalsVisibleTo): a fix whose only proof is an
+    // extracted predicate in isolation proves nothing about the caller that used to bypass it.
+    // These let a test drive this form's real click handlers headlessly (constructed, handle
+    // forced, never Shown) and observe what a real click actually does, the same way this form's
+    // own private methods are wired to controls.
     internal ChildRunner? ActiveRunnerForTests => _activeRunner;
 
     internal void SafeBeginInvokeForTests(Action action) => SafeBeginInvoke(action);
@@ -1205,7 +1218,7 @@ internal sealed class MainForm : Form
 
     internal bool ResultPanelVisibleForTests => _resultPanel.Visible;
 
-    // M12 test seam: ShowHandOff needs only a DisplayRow and a ParsedResult, both constructible
+    // Test seam: ShowHandOff needs only a DisplayRow and a ParsedResult, both constructible
     // without a real child, so the real production method (not a copy of its logic) is driven
     // directly for the case a live run cannot conveniently reach on its own (a specific
     // leftAtRest reason).
@@ -1236,6 +1249,18 @@ internal sealed class MainForm : Form
     internal void ClickStopForTests() => _stopButton.PerformClick();
 
     internal void ClickRunAllForTests() => _runAllButton.PerformClick();
+
+    // Test seam: the real 20 s grace period OnRunFinished waits for a child to exit on its own
+    // after sending its own exit message, shortened here so a test proving the orphan-cleanup
+    // path does not have to wait 20 real seconds for it.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal TimeSpan ExitGracePeriodForTests { get; set; } = TimeSpan.FromSeconds(20);
+
+    // Test seam: drives the real BeginRun/OnRunFinished pipeline for a runner and script built
+    // entirely by the test (not one of the 16 shipped scripts), so the orphan-on-missed-exit path
+    // can be proved against a child that deliberately outlives its own exit message.
+    internal void BeginRunForTests(DisplayRow row, ChildRunner runner, string resultFolder) =>
+        BeginRun(row, runner, resultFolder, isResume: false);
 
     internal void ClickCarryOnForTests() => _runAllCarryOnButton.PerformClick();
 

@@ -3,14 +3,13 @@ using System.Text.RegularExpressions;
 
 namespace Earshot.TestWindow.Core;
 
-// One button on screen: its label and the exact token sent as the reply. Wait-Owner's "No"
-// (design.md section 7.1) sends nothing at all and just shows a message, so SendsReply is false
-// for it; Reply is unused in that case.
+// One button on screen: its label and the exact token sent as the reply. Wait-Owner's "No" sends
+// nothing at all and just shows a message, so SendsReply is false for it; Reply is unused in
+// that case.
 internal sealed record PromptButton(string Label, string Reply, bool SendsReply = true);
 
-// What StepPanel renders for one prompt message, decided here rather than in the form
-// (design.md section 5: "Forms hold no decisions"). test-gui.md section 7.1's table, one branch
-// per caller.
+// What StepPanel renders for one prompt message, decided here rather than in the form: forms
+// hold no decisions. One branch per caller.
 internal sealed record PresentedPrompt
 {
     public required string Heading { get; init; }

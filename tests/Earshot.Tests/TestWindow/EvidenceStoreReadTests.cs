@@ -4,9 +4,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T1's file-level rows: what EvidenceStore.TryReadResult does with a result.json that is
+// What EvidenceStore.TryReadResult does with a result.json that is
 // missing, empty, truncated, wrong-test, self-contradicting, oddly shaped but valid, or written
-// with a byte order mark. test-gui.md section 6.2, rules 1 to 5.
+// with a byte order mark: rules 1 to 5.
 [TestClass]
 public sealed class EvidenceStoreReadTests
 {

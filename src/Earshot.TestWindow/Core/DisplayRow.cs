@@ -1,9 +1,8 @@
 namespace Earshot.TestWindow.Core;
 
 // One selectable, startable entry in the list: either a whole manifest row, or one of test 10's
-// five variants (test-gui.md section 6.1: "row 10 opens into five variant rows, one per
-// -Variant, each with its own TestId and its own two halves"). Every row but 10 has exactly one
-// DisplayRow of its own; 10 has five, never a text box asking which to run.
+// five variants, each with its own TestId and its own two halves. Every row but 10 has exactly
+// one DisplayRow of its own; 10 has five, never a text box asking which to run.
 internal sealed class DisplayRow
 {
     public required ManifestRow Row { get; init; }

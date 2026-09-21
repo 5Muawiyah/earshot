@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// section 8.3 (S8): "kill leaves Unknown and the banner, never a pass." A T2-style pin: this
+// A kill leaves Unknown and the banner, never a pass. This
 // class fails when the rule at the top of StateDeriver.Derive checking
 // runsNewestFirst[0].HasKilledMarker is deleted, because an older genuine pass would otherwise
 // keep showing through a kill that may have left the real device mid-way through a live step.

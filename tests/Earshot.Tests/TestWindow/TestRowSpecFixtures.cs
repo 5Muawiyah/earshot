@@ -2,7 +2,7 @@ using Earshot.TestWindow.Core;
 
 namespace Earshot.Tests.TestWindow;
 
-// The half markers from test-gui.md section 6.1's table, as TestRowSpec values. Shared by
+// The half markers from the manifest's own table, as TestRowSpec values. Shared by
 // StateDeriverTests, StateDeriverPinTests and StateDeriverPropertyTests so the same shapes are
 // used everywhere rather than approximated per test.
 internal static class TestRowSpecFixtures

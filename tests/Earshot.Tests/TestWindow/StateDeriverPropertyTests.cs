@@ -3,9 +3,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// T3 (test-gui.md section 13): seeded random result.json files and folder layouts; for each,
+// Seeded random result.json files and folder layouts; for each,
 // Derive() == Passed (green) implies an independently written predicate over the same files.
-// The predicate is written from the same section 6.2 text as StateDeriver, but expressed the
+// The predicate is written from the same rules as StateDeriver, but expressed the
 // other way round (starting from "what must be true for a green pass" rather than walking the
 // rules in order), so the two are unlikely to share the same mistake.
 [TestClass]

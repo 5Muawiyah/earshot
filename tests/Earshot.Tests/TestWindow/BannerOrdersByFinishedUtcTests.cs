@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// B3 (review round 1): Banner.Compute used to pick "newest" by the run folder's own stamp, not
+// Banner.Compute used to pick "newest" by the run folder's own stamp, not
 // by when the result was actually written. A resumed second half writes into its first half's
 // (older) stamp folder, so a genuinely more recent no/unknown there could hide behind an
 // unrelated test's newer-stamped but chronologically earlier pass.

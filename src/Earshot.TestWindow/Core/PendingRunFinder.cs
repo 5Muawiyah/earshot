@@ -7,10 +7,9 @@ internal sealed record PendingRun
     public required string Folder { get; init; }
 }
 
-// test-gui.md section 9.2: "A run is pending when its folder holds resume.txt, its result.json
-// is a first-half result by the markers, and there is no gui-set-aside.txt." Read from disk
-// only; the newest stamp holding such a folder wins, the same order EvidenceStore already sorts
-// in.
+// A run is pending when its folder holds resume.txt, its result.json is a first-half result by
+// the markers, and there is no gui-set-aside.txt. Read from disk only; the newest stamp holding
+// such a folder wins, the same order EvidenceStore already sorts in.
 internal static class PendingRunFinder
 {
     internal static PendingRun? Find(TestRowSpec spec, string liveTestRoot)

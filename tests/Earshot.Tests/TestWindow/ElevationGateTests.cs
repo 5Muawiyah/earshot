@@ -3,9 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 10.2's lock rule, T2-style: each case is named for the part of the rule it
-// pins. "rows 15, 00 uninstall and 07 plan B read Locked in a clean sandbox and unlock on a
-// passing rehearsal file" (S9's own acceptance line).
+// The lock rule: each case is named for the part of the rule it pins. Rows 15, 00 uninstall and
+// 07 plan B read Locked in a clean sandbox and unlock on a passing rehearsal file.
 [TestClass]
 public sealed class ElevationGateTests
 {

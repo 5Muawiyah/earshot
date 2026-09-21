@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// B2 (review round 1): this is the caller RunAllHaltTests.cs never actually exercised.
+// This is the caller RunAllHaltTests.cs never actually exercised.
 // AdvanceRunAll's own "freshEnough" check used to treat StoppedBeforeAnyStep the same as NotRun,
 // skipping RunAllHalt.ShouldHalt (which already, correctly, says halt for it) and restarting a
 // declined test forever. Every case here is named for what AdvanceRunAll must now do.

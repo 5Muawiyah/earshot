@@ -3,11 +3,11 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// test-gui.md section 6.1: "row 10 opens into five variant rows, one per -Variant, each with its
-// own TestId and its own two halves." Real Windows PowerShell 5.1, the real 10-ShutdownMessages.ps1
+// Row 10 opens into five variant rows, one per -Variant, each with its
+// own TestId and its own two halves. Real Windows PowerShell 5.1, the real 10-ShutdownMessages.ps1
 // script, the real driver and shim, the fake device, both halves, exactly as MainForm's
 // StartFreshRun/StartResumedSecondHalf drive any other two-half row through ChildRunner's own
-// API. Proves the required S6 sandbox demonstration for at least one of the five variants.
+// API. Proves the sandbox demonstration for at least one of the five variants.
 //
 // Variant 1 is the only one of the five this class can exercise: tools\live-tests\selftest\
 // Fakes.psm1 (unchanged, off limits) defines StartStates only for
@@ -84,7 +84,7 @@ public sealed class Test10VariantSmokeTests
         Assert.IsTrue(secondHalf.Criteria.Any(c => c.Id == "block-queued"));
 
         // The window never accepts the second half's own exit code alone as proof; a recorded
-        // result (any overall) is what T5 asks for. The fake session-end mechanics are not this
+        // result (any overall) is what matters here. The fake session-end mechanics are not this
         // test's concern.
         Assert.IsTrue(secondExitCode is 0 or 1 or 2, "unexpected exit code: " + secondExitCode);
 

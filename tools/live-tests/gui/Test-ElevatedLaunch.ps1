@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    The administrator prompt check (test-gui.md section 10.2). Proves this window's one
+    The administrator prompt check. Proves this window's one
     elevated launch site can raise the Windows permission box and read the answer, before
     anything real (test 15, 00's uninstall variant, 07's plan B) is ever allowed to depend on it.
 
@@ -16,7 +16,7 @@
 
     Round 1: choose Yes on the Windows box. cmd.exe /c exit 7 runs elevated and exits
     immediately. Criterion approved-exit-code passes only if the real exit code (7) is read
-    back; note H2 (design.md): Invoke-EarshotElevated never reads a process Handle for this
+    back; Invoke-EarshotElevated never reads a process Handle for this
     launch (unlike the unelevated one), so PowerShell 5.1 may not fill in ExitCode at all for a
     -Verb RunAs process. That is reported as inconclusive here, never guessed as a pass.
 
