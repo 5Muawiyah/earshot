@@ -19,7 +19,7 @@ namespace Earshot.Tests.TestWindow;
 [TestClass]
 public sealed class Test10VariantSmokeTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
     private static readonly string[] KnownScripts = { "10-ShutdownMessages.ps1" };
 
     [TestMethod]

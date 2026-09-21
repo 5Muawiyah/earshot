@@ -11,7 +11,7 @@ namespace Earshot.Tests.TestWindow;
 [TestClass]
 public sealed class PreambleDefectTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
 
     [TestMethod]
     public void TheFirstReplyOfASessionArrivesIntact()

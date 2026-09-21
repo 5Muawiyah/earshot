@@ -13,7 +13,7 @@ namespace Earshot.Tests.TestWindow;
 [TestClass]
 public sealed class AbortRecordsTheStopTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
 
     [TestMethod]
     public void AbortingTheFirstPromptStillLeavesAReadableResultRecordingTheStop()

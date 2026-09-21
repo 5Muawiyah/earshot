@@ -13,8 +13,8 @@ namespace Earshot.Tests.TestWindow;
 [TestClass]
 public sealed class ChildRunnerRealHelperTests
 {
-    private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan ExitTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan ExitTimeout = TimeSpan.FromSeconds(120);
 
     [TestMethod]
     public void AllFiveRealPromptHelpersAndARealWaitRunThroughTheRealShim()

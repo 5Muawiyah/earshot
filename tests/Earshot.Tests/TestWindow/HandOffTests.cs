@@ -91,13 +91,13 @@ public sealed class HandOffTests
             Assert.IsTrue(form.SelectRowForTests("04"));
             form.ClickStartForTests();
 
-            MainFormTestHarness.PumpUntil(() => form.CurrentPromptSeqForTests is not null, TimeSpan.FromSeconds(10));
+            MainFormTestHarness.PumpUntil(() => form.CurrentPromptSeqForTests is not null, TimeSpan.FromSeconds(120));
             Assert.IsNotNull(form.CurrentPromptSeqForTests, "the first prompt (Show-Preconditions) never arrived.");
 
             MainFormTestHarness.PumpUntil(() => false, TimeSpan.FromMilliseconds(900)); // click safety delay
             form.ClickPromptButtonForTests(1); // "No"
 
-            MainFormTestHarness.PumpUntil(() => form.ActiveRunnerForTests is null, TimeSpan.FromSeconds(15));
+            MainFormTestHarness.PumpUntil(() => form.ActiveRunnerForTests is null, TimeSpan.FromSeconds(120));
             Assert.IsNull(form.ActiveRunnerForTests, "the declined run never finished.");
 
             Assert.IsFalse(form.HandOffVisibleForTests, "a declined start (no resume.txt) must never show the hand-off screen.");

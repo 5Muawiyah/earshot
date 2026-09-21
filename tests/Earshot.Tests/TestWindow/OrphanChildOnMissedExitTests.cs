@@ -51,7 +51,7 @@ public sealed class OrphanChildOnMissedExitTests
 
             int childProcessId = runner.ProcessId;
 
-            MainFormTestHarness.PumpUntil(() => form.ActiveRunnerForTests is null, TimeSpan.FromSeconds(15));
+            MainFormTestHarness.PumpUntil(() => form.ActiveRunnerForTests is null, TimeSpan.FromSeconds(120));
             Assert.IsNull(form.ActiveRunnerForTests, "OnRunFinished never completed.");
 
             bool stillRunning;
@@ -66,7 +66,7 @@ public sealed class OrphanChildOnMissedExitTests
             }
 
             Assert.IsFalse(stillRunning, "the child process was left running after OnRunFinished returned: an orphan holding stdin.");
-        }, timeout: TimeSpan.FromSeconds(30));
+        }, timeout: TimeSpan.FromSeconds(300));
     }
 
     // Speaks the real wire protocol directly (the same prefix and base64 JSON

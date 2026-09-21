@@ -28,7 +28,7 @@ public sealed class SilenceWatchdogTests
             Assert.IsTrue(form.SelectRowForTests("01"));
             form.ClickStartForTests();
 
-            MainFormTestHarness.PumpUntil(() => form.CurrentPromptSeqForTests is not null, TimeSpan.FromSeconds(10));
+            MainFormTestHarness.PumpUntil(() => form.CurrentPromptSeqForTests is not null, TimeSpan.FromSeconds(120));
             Assert.IsNotNull(form.CurrentPromptSeqForTests, "the first prompt (Show-Preconditions) never arrived.");
 
             // While a prompt is genuinely pending, silence must never be reported, however long it

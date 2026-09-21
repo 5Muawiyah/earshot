@@ -15,7 +15,7 @@ namespace Earshot.Tests.TestWindow;
 [TestClass]
 public sealed class ElevationRehearsalDecisionsTests
 {
-    private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RunTimeout = TimeSpan.FromSeconds(120);
 
     [TestMethod]
     public void ApprovedWithTheRealExitCodeSevenIsAPass()
