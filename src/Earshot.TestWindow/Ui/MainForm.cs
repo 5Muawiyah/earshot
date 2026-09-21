@@ -677,9 +677,23 @@ internal sealed class MainForm : Form
 
         TestRowSpec spec = row.ToSpec();
         IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(LiveTestRoot(), row.TestId, _activeResultFolder);
-        DateTimeOffset? exeWrite = File.Exists(_exePath) ? File.GetLastWriteTimeUtc(_exePath) : null;
         bool sequenceTimeDisagreement = EvidenceStore.SequenceDisagreesWithStampOrder(evidence);
-        return StateDeriver.Derive(spec, evidence, _exePath, exeWrite, sequenceTimeDisagreement);
+
+        // The earlier-build check (StateDeriver's own EarlierBuildQualifier) means to compare the
+        // exe a real run actually used against the one this window has chosen. In a practice
+        // window the fake-device driver never runs the chosen exe at all; it always records its
+        // own sandboxed stand-in path instead (Run-GuiHalfAgainstFakes.ps1's -ExePath forwarding),
+        // so that comparison can never honestly match, and every row that had genuinely just
+        // passed read "Worked, with an older copy of Earshot" regardless of anything the reader
+        // did. Passed null here, exactly as AllScriptsAndHalvesThroughWindowTests already does
+        // when it checks the same derivation directly: StateDeriver.Derive already treats a null
+        // chosenExePath as "the earlier-build check does not apply", the same rule a real window
+        // with no exe chosen yet already relies on.
+        string? chosenExePath = _sandbox is null ? _exePath : null;
+        DateTimeOffset? exeWrite = chosenExePath is not null && File.Exists(chosenExePath)
+            ? File.GetLastWriteTimeUtc(chosenExePath)
+            : null;
+        return StateDeriver.Derive(spec, evidence, chosenExePath, exeWrite, sequenceTimeDisagreement);
     }
 
     // A hand-built row for the administrator prompt check, never one of the 16 in
