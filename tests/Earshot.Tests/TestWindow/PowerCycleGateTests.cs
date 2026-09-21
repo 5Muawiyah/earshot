@@ -18,9 +18,9 @@ public sealed class PowerCycleGateTests
     }
 
     [TestMethod]
-    public void FullShutDownRefusesARestartWithNoOverride()
+    public void FullShutDownNotesARestartRatherThanRefusingOrStartingCleanly()
     {
-        Assert.AreEqual(PowerCycleGateResult.Refuse, PowerCycleGate.Evaluate(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Restart));
+        Assert.AreEqual(PowerCycleGateResult.StartNoted, PowerCycleGate.Evaluate(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Restart));
     }
 
     [TestMethod]
@@ -73,17 +73,24 @@ public sealed class PowerCycleGateTests
     }
 
     [TestMethod]
-    public void RefusalMessageForAFullShutDownAfterARestartNamesTheMistake()
-    {
-        string message = PowerCycleGate.RefusalMessage(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Restart);
-        StringAssert.Contains(message, "restart, not a shut down");
-        StringAssert.Contains(message, "kept");
-    }
-
-    [TestMethod]
     public void RefusalMessageForNotYetAsksForTheTransitionThisRowNeeds()
     {
         string message = PowerCycleGate.RefusalMessage(PowerCycleRequirement.AnyStart, PowerCycleVerdict.NotYet);
         StringAssert.Contains(message, "has not recorded a start");
+    }
+
+    [TestMethod]
+    public void NotedWarningForAFullShutDownAfterARestartNamesTheMistake()
+    {
+        string message = PowerCycleGate.NotedWarning(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Restart);
+        StringAssert.Contains(message, "restart, not a shut down");
+        StringAssert.Contains(message, "carry on only if you want to try it anyway");
+    }
+
+    [TestMethod]
+    public void NotedWarningForAnUnreadableLogSaysSo()
+    {
+        string message = PowerCycleGate.NotedWarning(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Unknown);
+        StringAssert.Contains(message, "could not be read");
     }
 }

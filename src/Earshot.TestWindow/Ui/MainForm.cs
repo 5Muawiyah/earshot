@@ -26,6 +26,11 @@ internal sealed class MainForm : Form
     private readonly FlowLayoutPanel _speakerChoiceRow;
     private string? _chosenSpeakerAddress;
 
+    // A noted start (PowerCycleGateResult.StartNoted): shown instead of starting anything, until
+    // this button is clicked. _pendingNotedStart itself is declared beside ShowNotedStartWarning.
+    private readonly Label _notedStartWarningLabel;
+    private readonly Button _notedStartButton;
+
     private readonly Button _startButton;
     private readonly Button _stopButton;
     private readonly ComboBox _caseBox;
@@ -121,6 +126,13 @@ internal sealed class MainForm : Form
         _startButton = new Button { Text = "Start", Dock = DockStyle.Top, Height = 32 };
         _startButton.Click += (_, _) => StartSelectedRow();
 
+        _notedStartWarningLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 48, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed, Visible = false,
+        };
+        _notedStartButton = new Button { Text = "Start anyway, noted", Dock = DockStyle.Top, Height = 28, Visible = false };
+        _notedStartButton.Click += (_, _) => ProceedWithNotedStart();
+
         // The form only renders the current prompt, the transcript box and a Stop
         // button, standing throughout a run, not only for the rare unrecognised-prompt case
         // StepPanel's own built-in stop button covers.
@@ -212,6 +224,8 @@ internal sealed class MainForm : Form
         rightPanel.Controls.Add(_bannerLabel);
         rightPanel.Controls.Add(_caseBox);
         rightPanel.Controls.Add(_stopButton);
+        rightPanel.Controls.Add(_notedStartButton);
+        rightPanel.Controls.Add(_notedStartWarningLabel);
         rightPanel.Controls.Add(_startButton);
         rightPanel.Controls.Add(_rehearsalStatusLabel);
         rightPanel.Controls.Add(_rehearsalWarningLabel);
@@ -235,6 +249,7 @@ internal sealed class MainForm : Form
         {
             _rowDetailLabel.Text = string.Empty;
             UpdateSpeakerChoice(null);
+            ClearNotedStartWarningIfRowChanged(null);
             return;
         }
 
@@ -243,10 +258,12 @@ internal sealed class MainForm : Form
         {
             _rowDetailLabel.Text = string.Empty;
             UpdateSpeakerChoice(null);
+            ClearNotedStartWarningIfRowChanged(null);
             return;
         }
 
         DisplayRow row = _displayRows[index];
+        ClearNotedStartWarningIfRowChanged(row);
 
         // The plain line first, the script's own words as a secondary line beneath it, for both
         // pairs Name/Title and Proves/Settles, in full: never cut with an ellipsis.
@@ -707,6 +724,59 @@ internal sealed class MainForm : Form
             return;
         }
 
+        if (gate == PowerCycleGateResult.StartNoted)
+        {
+            ShowNotedStartWarning(host, row, instruction!, PowerCycleGate.NotedWarning(row.PowerCycleRequirement, verdict));
+            return;
+        }
+
+        StartResumedChildRunner(host, row, instruction!);
+    }
+
+    // StartNoted's own gate: the row may still be tried, but only past a deliberate click on its
+    // own warning, never silently, so a start that only ever needed noting can never look the same
+    // as one that needed nothing at all. Cleared, not acted on, the moment a different row is
+    // selected (UpdateRowDetail), so a stale warning from an earlier row can never be carried into
+    // a click meant for a different one.
+    private (string Host, DisplayRow Row, ResumeInstruction Instruction, string Warning)? _pendingNotedStart;
+
+    private void ShowNotedStartWarning(string host, DisplayRow row, ResumeInstruction instruction, string warning)
+    {
+        _pendingNotedStart = (host, row, instruction, warning);
+        _notedStartWarningLabel.Text = warning;
+        _notedStartWarningLabel.Visible = true;
+        _notedStartButton.Visible = true;
+        _statusLabel.Text = "This start needs a deliberate click before it counts as tried.";
+    }
+
+    private void ProceedWithNotedStart()
+    {
+        if (_pendingNotedStart is not { } pending)
+        {
+            return;
+        }
+
+        _pendingNotedStart = null;
+        _notedStartWarningLabel.Visible = false;
+        _notedStartButton.Visible = false;
+        StartResumedChildRunner(pending.Host, pending.Row, pending.Instruction);
+    }
+
+    // A stale warning from an earlier row must never be carried into a click meant for a
+    // different one: navigating away from the row it belongs to withdraws it rather than leaving
+    // it clickable against whatever is selected now.
+    private void ClearNotedStartWarningIfRowChanged(DisplayRow? row)
+    {
+        if (_pendingNotedStart is { } pending && !ReferenceEquals(pending.Row, row))
+        {
+            _pendingNotedStart = null;
+            _notedStartWarningLabel.Visible = false;
+            _notedStartButton.Visible = false;
+        }
+    }
+
+    private void StartResumedChildRunner(string host, DisplayRow row, ResumeInstruction instruction)
+    {
         ChildRunner runner;
         if (_sandbox is not null)
         {
@@ -718,7 +788,7 @@ internal sealed class MainForm : Form
                 ("Case", (string)_caseBox.SelectedItem!),
             };
             runner = new ChildRunner(
-                host, driver, instruction!.ScriptPath, instruction.ExePath, instruction.RunRoot, resume: true,
+                host, driver, instruction.ScriptPath, instruction.ExePath, instruction.RunRoot, resume: true,
                 variant: instruction.Variant ?? 0, offerUninstall: false, allowPlanB: false,
                 environmentOverrides: _sandbox.ChildEnvironment, extraArguments: extra);
         }
@@ -726,7 +796,7 @@ internal sealed class MainForm : Form
         {
             string driver = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Invoke-GuiHalf.ps1");
             runner = new ChildRunner(
-                host, driver, instruction!.ScriptPath, instruction.ExePath, instruction.RunRoot, resume: true,
+                host, driver, instruction.ScriptPath, instruction.ExePath, instruction.RunRoot, resume: true,
                 variant: instruction.Variant ?? 0, offerUninstall: false, allowPlanB: false);
         }
 
@@ -1359,6 +1429,19 @@ internal sealed class MainForm : Form
         _activeResultFolder ??= Path.Combine(Path.GetTempPath(), "earshot-handoff-test-seam-" + Guid.NewGuid().ToString("N"), row.TestId);
         ShowHandOff(row, firstHalfResult);
     }
+
+    // Test seam: the real event log's own PowerCycleVerdict for a resumed run cannot be chosen
+    // from a test (RunPowerCycleProbe always reads this machine's own history), so this drives
+    // the real ShowNotedStartWarning/ProceedWithNotedStart pair directly with a verdict of its
+    // choosing, the way a real StartNoted gate result would have called it.
+    internal void ShowNotedStartWarningForTests(string host, DisplayRow row, ResumeInstruction instruction, string warning) =>
+        ShowNotedStartWarning(host, row, instruction, warning);
+
+    internal bool NotedStartWarningVisibleForTests => _notedStartWarningLabel.Visible && _notedStartButton.Visible;
+
+    internal string NotedStartWarningTextForTests => _notedStartWarningLabel.Text;
+
+    internal void ClickNotedStartButtonForTests() => _notedStartButton.PerformClick();
 
     internal bool SelectRowForTests(string number)
     {
