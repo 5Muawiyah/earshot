@@ -537,7 +537,7 @@ internal sealed class MainForm : Form
     // never the cached field, so a fresh disk read decides, not a stale in-memory one.
     private BannerState RefreshBanner()
     {
-        _banner = Banner.Compute(LiveTestRoot());
+        _banner = Banner.Compute(LiveTestRoot(), _activeResultFolder);
         UpdateBannerLabel();
         return _banner;
     }
@@ -566,7 +566,7 @@ internal sealed class MainForm : Form
         }
 
         TestRowSpec spec = row.ToSpec();
-        IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(LiveTestRoot(), row.TestId);
+        IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(LiveTestRoot(), row.TestId, _activeResultFolder);
         DateTimeOffset? exeWrite = File.Exists(_exePath) ? File.GetLastWriteTimeUtc(_exePath) : null;
         return StateDeriver.Derive(spec, evidence, _exePath, exeWrite);
     }
@@ -677,7 +677,7 @@ internal sealed class MainForm : Form
     // find another variant's pending run: "resume lands on the same row and the same variant" by
     // construction, not by an extra check here.
     private PendingRun? FindPendingRun(DisplayRow row) =>
-        row.Halves == 2 ? PendingRunFinder.Find(row.ToSpec(), LiveTestRoot()) : null;
+        row.Halves == 2 ? PendingRunFinder.Find(row.ToSpec(), LiveTestRoot(), _activeResultFolder) : null;
 
     private void UpdateStartButton()
     {
@@ -1010,6 +1010,18 @@ internal sealed class MainForm : Form
         try
         {
             runner.Start();
+
+            // Written the moment the half actually starts, gui- prefixed like this window's other
+            // markers and never touching what the scripts write (MarkUnknownAndReset already
+            // pre-creates this same folder for gui-killed.txt the same way, so resultFolder not
+            // existing yet is not new here). Removed again by OnRunFinished or
+            // MarkUnknownAndReset, whichever this window sees the half end through; the one case
+            // that leaves it behind is the window dying together with its own child (a forced
+            // session end, a power cut), which is exactly what it exists to catch.
+            Directory.CreateDirectory(resultFolder);
+            File.WriteAllText(
+                Path.Combine(resultFolder, "gui-run-started.txt"),
+                DateTimeOffset.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
         }
         catch (Exception ex)
         {
@@ -1019,6 +1031,23 @@ internal sealed class MainForm : Form
                 "Could not start " + row.TestId + ": " + ex.GetType().Name + ": " + ex.Message +
                 " This row now reads Unknown until Restore has run.");
             runner.Dispose();
+        }
+    }
+
+    // Removes gui-run-started.txt, if present: called from every path this window itself sees a
+    // half end (OnRunFinished, MarkUnknownAndReset), so the marker is left behind only when the
+    // window never got the chance to call either at all.
+    private static void RemoveRunStartedMarker(string? resultFolder)
+    {
+        if (resultFolder is null)
+        {
+            return;
+        }
+
+        string path = Path.Combine(resultFolder, "gui-run-started.txt");
+        if (File.Exists(path))
+        {
+            File.Delete(path);
         }
     }
 
@@ -1072,6 +1101,10 @@ internal sealed class MainForm : Form
         {
             _activeRunner.Kill();
         }
+
+        // This window saw the half end (an exit or crash message arrived): the run-started
+        // marker BeginRun wrote has done its job.
+        RemoveRunStartedMarker(_activeResultFolder);
 
         string resultPath = Path.Combine(_activeResultFolder!, "result.json");
         (ParsedResult? result, string? failure) = EvidenceStore.TryReadResult(resultPath, row.TestId);
@@ -1247,6 +1280,10 @@ internal sealed class MainForm : Form
         {
             Directory.CreateDirectory(_activeResultFolder);
             File.WriteAllText(Path.Combine(_activeResultFolder, "gui-killed.txt"), DateTimeOffset.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+
+            // gui-killed.txt alone already explains this row; the run-started marker has done its
+            // job the moment this window sees the half end by any path, this one included.
+            RemoveRunStartedMarker(_activeResultFolder);
         }
 
         _stepPanel.Visible = false;

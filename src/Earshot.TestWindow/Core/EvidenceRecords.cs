@@ -77,6 +77,16 @@ internal sealed class RunEvidence
     // that owned this run folder. gui- prefixed and additive to result.json's own fields; never
     // written by any shipped script.
     public bool HasKilledMarker { get; init; }
+
+    // True when gui-run-started.txt (written the moment BeginRun's own child actually starts,
+    // removed on every path this window sees a half end) is still there and this is not the
+    // window's own currently active run: a half that died together with the window itself (a
+    // forced session end, a power cut) never reaches KillActiveRun or MarkUnknownAndReset to
+    // write gui-killed.txt or remove this marker, so it is the only trace left that the half
+    // started and this window never saw it end. Resolved here (EvidenceStore), from the raw
+    // marker file and the caller's own activeFolder, into the one fact StateDeriver,
+    // Banner.Compute and PendingRunFinder each need: never a live, currently running half.
+    public bool HasStaleRunStartedMarker { get; init; }
     public string? PowerCycleVerdict { get; init; }
 
     public bool ReadSucceeded => Result is not null;

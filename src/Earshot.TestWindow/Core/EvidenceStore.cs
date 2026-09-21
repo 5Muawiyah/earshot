@@ -46,13 +46,15 @@ internal static partial class EvidenceStore
     }
 
     // Every run folder for one TestId, read and validated, newest stamp first: exactly what
-    // StateDeriver.Derive takes as its evidence.
-    internal static IReadOnlyList<RunEvidence> LoadEvidence(string liveTestRoot, string testId)
+    // StateDeriver.Derive takes as its evidence. activeFolder (MainForm's own _activeResultFolder,
+    // or null when nothing is running) is the one run folder gui-run-started.txt is never read as
+    // stale for: it is this window's own currently active half, not one that died unnoticed.
+    internal static IReadOnlyList<RunEvidence> LoadEvidence(string liveTestRoot, string testId, string? activeFolder = null)
     {
         var evidence = new List<RunEvidence>();
         foreach ((string stamp, string folder) in FindRunFolders(liveTestRoot, testId))
         {
-            evidence.Add(ReadRunEvidence(stamp, folder, testId));
+            evidence.Add(ReadRunEvidence(stamp, folder, testId, activeFolder));
         }
 
         return evidence;
@@ -62,13 +64,16 @@ internal static partial class EvidenceStore
     // first-half snapshot the window takes before shutting down or restarting at the power-cycle
     // boundary, whether resume.txt or gui-set-aside.txt are present, and the power-cycle verdict
     // (power-down, restart, not-yet or unknown) recorded before a second half ran.
-    internal static RunEvidence ReadRunEvidence(string stamp, string folder, string testId)
+    internal static RunEvidence ReadRunEvidence(string stamp, string folder, string testId, string? activeFolder = null)
     {
         (ParsedResult? result, string? failure) = TryReadResult(Path.Combine(folder, "result.json"), testId);
 
         string snapshotPath = Path.Combine(folder, "gui-first-half.result.json");
         bool hasSnapshotFile = File.Exists(snapshotPath);
         ParsedResult? snapshot = hasSnapshotFile ? TryReadResult(snapshotPath, testId).Result : null;
+
+        bool hasRunStartedMarker = File.Exists(Path.Combine(folder, "gui-run-started.txt"));
+        bool isActiveFolder = activeFolder is not null && string.Equals(folder, activeFolder, StringComparison.OrdinalIgnoreCase);
 
         return new RunEvidence
         {
@@ -81,6 +86,7 @@ internal static partial class EvidenceStore
             HasResumeFile = File.Exists(Path.Combine(folder, "resume.txt")),
             HasSetAsideFile = File.Exists(Path.Combine(folder, "gui-set-aside.txt")),
             HasKilledMarker = File.Exists(Path.Combine(folder, "gui-killed.txt")),
+            HasStaleRunStartedMarker = hasRunStartedMarker && !isActiveFolder,
             PowerCycleVerdict = TryReadPowerCycleVerdict(Path.Combine(folder, "gui-power-cycle.json")),
         };
     }

@@ -36,9 +36,12 @@ internal static class Banner
     // self-disagreeing) is ordered by its folder's own stamp instead, since that is the only time
     // anything is known about it, and it can never become the chosen result, only a reason to
     // distrust one that is newer than it thought.
-    internal static BannerState Compute(string liveTestRoot)
+    // activeFolder (MainForm's own _activeResultFolder, or null when nothing is running) is the
+    // one run folder a stale-looking gui-run-started.txt is never read as abandoned for: it is
+    // this window's own currently active half, not one that died together with the window.
+    internal static BannerState Compute(string liveTestRoot, string? activeFolder = null)
     {
-        List<ScannedRun> runs = ScanAllRuns(liveTestRoot);
+        List<ScannedRun> runs = ScanAllRuns(liveTestRoot, activeFolder);
         if (runs.Count == 0)
         {
             // Nothing has ever run through this window: not evidence of anything either way.
@@ -87,7 +90,7 @@ internal static class Banner
     // result.json is readable at all), and the timestamp it is ordered by, its own finishedUtc
     // when the result carries one, else the folder's own stamp (the real harness always writes
     // finishedUtc; only a fixture or a hand-edited file would not).
-    private static List<ScannedRun> ScanAllRuns(string liveTestRoot)
+    private static List<ScannedRun> ScanAllRuns(string liveTestRoot, string? activeFolder)
     {
         var runs = new List<ScannedRun>();
         if (!Directory.Exists(liveTestRoot))
@@ -134,7 +137,14 @@ internal static class Banner
                 // own finishedUtc: a kill that happens long after an older pass elsewhere used to
                 // still read as "older" than that pass, by the stale first half's own clock, and so
                 // never outranked it or showed the banner at all.
-                bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt"));
+                // A stale gui-run-started.txt (the half started but this window never saw it end,
+                // most often because the window died together with its own child before
+                // MarkUnknownAndReset ever wrote gui-killed.txt) is read exactly like a kill, for
+                // the same reason: whatever result.json is still sitting underneath it must never
+                // speak for it. Exempted only for this window's own currently active run.
+                bool staleRunStarted = File.Exists(Path.Combine(testFolder, "gui-run-started.txt")) &&
+                    !(activeFolder is not null && string.Equals(testFolder, activeFolder, StringComparison.OrdinalIgnoreCase));
+                bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt")) || staleRunStarted;
                 bool readable = result is not null && !killed;
                 DateTimeOffset ordering = readable ? result!.FinishedUtc ?? stampUtc : NewestWriteTimeUtc(testFolder, stampUtc);
                 runs.Add(new ScannedRun(stamp, result, ordering, readable));

@@ -87,6 +87,18 @@ internal static class StateDeriver
                     new StopReason("the test was stopped by force; nothing after that point is known", historyNote));
             }
 
+            // gui-run-started.txt outliving the half it was written for, with no gui-killed.txt:
+            // this window never saw it end, which a forced session end or a power cut (the window
+            // dying together with its own child, before KillActiveRun or MarkUnknownAndReset ever
+            // ran) is the only way to reach. Read exactly like a kill: the stale first-half
+            // evidence still sitting underneath it (resume.txt, an old result.json) must never
+            // read as an ordinary, still-pending wait.
+            if (run.HasStaleRunStartedMarker)
+            {
+                return (null, HalfKind.NotApplicable, historyNote,
+                    new StopReason("the run started but this window never saw it end (it may have died with the window itself); nothing after that point is known", historyNote));
+            }
+
             if (!run.ReadSucceeded)
             {
                 return (null, HalfKind.NotApplicable, historyNote,

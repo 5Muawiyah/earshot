@@ -12,7 +12,10 @@ internal sealed record PendingRun
 // such a folder wins, the same order EvidenceStore already sorts in.
 internal static class PendingRunFinder
 {
-    internal static PendingRun? Find(TestRowSpec spec, string liveTestRoot)
+    // activeFolder (MainForm's own _activeResultFolder, or null when nothing is running) is the
+    // one run folder a stale-looking gui-run-started.txt is never read as abandoned for: it is
+    // this window's own currently active half.
+    internal static PendingRun? Find(TestRowSpec spec, string liveTestRoot, string? activeFolder = null)
     {
         ArgumentNullException.ThrowIfNull(spec);
 
@@ -30,6 +33,16 @@ internal static class PendingRunFinder
             // "Carry on with the second half" again, over evidence StateDeriver's own killed-marker
             // check already reads as Unknown.
             if (File.Exists(Path.Combine(folder, "gui-killed.txt")))
+            {
+                continue;
+            }
+
+            // The same shape a kill leaves, reached a different way: the half started
+            // (gui-run-started.txt) but this window never saw it end (no gui-killed.txt either,
+            // because the window died together with its own child before MarkUnknownAndReset ever
+            // ran). Never offered as "Carry on", except for this window's own run in progress.
+            bool isActiveFolder = activeFolder is not null && string.Equals(folder, activeFolder, StringComparison.OrdinalIgnoreCase);
+            if (File.Exists(Path.Combine(folder, "gui-run-started.txt")) && !isActiveFolder)
             {
                 continue;
             }
