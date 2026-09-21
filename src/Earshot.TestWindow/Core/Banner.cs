@@ -109,8 +109,18 @@ internal static class Banner
             {
                 string testId = Path.GetFileName(testFolder);
                 (ParsedResult? result, _) = EvidenceStore.TryReadResult(Path.Combine(testFolder, "result.json"), testId);
+
+                // M1: a killed run (section 8.3's hard stop) leaves whatever result.json it found
+                // on disk untouched, most often a second half's own first-half snapshot never
+                // reached Complete-LiveTestRun to overwrite. That stale record can carry any
+                // leftAtRest a first half legitimately records; treated as an ordinary readable
+                // result here, it used to let a kill hide behind its own victim's old data and
+                // show no banner at all. A killed folder is never trusted, the same as an
+                // unreadable one: it can outrank a good result that is older than it, but it can
+                // never become the chosen one itself.
+                bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt"));
                 DateTimeOffset ordering = result?.FinishedUtc ?? stampUtc;
-                runs.Add(new ScannedRun(stamp, result, ordering, result is not null));
+                runs.Add(new ScannedRun(stamp, result, ordering, result is not null && !killed));
             }
         }
 

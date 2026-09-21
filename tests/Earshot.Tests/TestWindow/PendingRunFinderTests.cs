@@ -127,6 +127,29 @@ public sealed class PendingRunFinderTests
         Assert.AreEqual("20260920T120000Z", pending!.Stamp);
     }
 
+    // M1: a killed second half leaves resume.txt from the first half still on disk and
+    // result.json still holding the first half's own (stale) data, since the script never reached
+    // Complete-LiveTestRun to overwrite it. Before this fix, PendingRunFinder had no idea the
+    // second half had ever been attempted and killed, so it read exactly like an untouched
+    // first-half pass and offered "Carry on with the second half" again over a row StateDeriver
+    // itself (the killed-marker check in Derive) already reads as Unknown.
+    [TestMethod]
+    public void AKilledSecondHalfIsNotPendingEvenThoughTheStaleFirstHalfResultStillReadsAsOne()
+    {
+        TestRowSpec spec = TestRowSpecFixtures.Test08();
+        string folder = TestFolder("20260920T120000Z", spec.TestId);
+        string json = new ResultJsonFixture(spec.TestId, "pass")
+            .WithCriterion("default-config", "pass")
+            .WithCriterion("blocked-before-power-cycle", "pass")
+            .Build();
+        ResultJsonFixture.WriteTo(Path.Combine(folder, "result.json"), json);
+        File.WriteAllText(Path.Combine(folder, "resume.txt"), "placeholder");
+        File.WriteAllText(Path.Combine(folder, "gui-killed.txt"), "2026-09-20T12:05:00.000Z");
+
+        Assert.IsNull(PendingRunFinder.Find(spec, _liveTestRoot),
+            "a killed second half must never be offered as 'Carry on' again.");
+    }
+
     [TestMethod]
     public void Test10sFirstHalfFindingOnlyMarkerIsPendingToo()
     {

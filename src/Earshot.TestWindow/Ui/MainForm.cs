@@ -577,7 +577,14 @@ internal sealed class MainForm : Form
         string resultPath = Path.Combine(_activeResultFolder!, "result.json");
         (ParsedResult? result, string? failure) = EvidenceStore.TryReadResult(resultPath, row.TestId);
 
-        bool wasFirstHalfOfTwoHalfTest = row.Halves == 2 && !_activeIsResume;
+        // M7: a declined start (No at Show-Preconditions, or any other stop before the script
+        // ever reaches the point of writing resume.txt) still produces a readable result.json, but
+        // there is nothing pending to come back to. Section 9.2's own pending detection already
+        // requires resume.txt; the hand-off screen ("Now shut this PC down... it will pick up
+        // here") must ask for exactly the same thing, not show it whenever this happened to be a
+        // two-half test's first half regardless of what the run actually reached.
+        bool wasFirstHalfOfTwoHalfTest = row.Halves == 2 && !_activeIsResume &&
+            File.Exists(Path.Combine(_activeResultFolder!, "resume.txt"));
         if (result is not null && wasFirstHalfOfTwoHalfTest)
         {
             ShowHandOff(row, result);
@@ -686,10 +693,13 @@ internal sealed class MainForm : Form
     }
 
     // section 8.3: "kill the process tree... The row is Unknown and the red banner requires
-    // Restore before anything else." gui-killed.txt is what makes the row read Unknown rather
-    // than falling back to an older, now-untrustworthy pass (StateDeriver.Derive's own newest-run
-    // check); Banner.Compute already reads a run folder with no result.json as red on its own; no
-    // change was needed there.
+    // Restore before anything else." gui-killed.txt is what makes the row read Unknown rather than
+    // falling back to an older, now-untrustworthy pass (StateDeriver.Derive's own newest-run
+    // check). M1: it also makes PendingRunFinder stop offering "Carry on" over the stale first-half
+    // result a killed second half leaves behind, and makes Banner.Compute distrust that same stale
+    // result rather than reading whatever leftAtRest it happens to carry as though it settled
+    // anything; a run folder with no result.json at all was already red on its own, but this one
+    // does have a (stale, untrustworthy) result.json, which needed its own check in both places.
     private void KillActiveRun()
     {
         if (_activeRunner is null)
@@ -920,9 +930,14 @@ internal sealed class MainForm : Form
     {
         FirstHalfSnapshot.Take(_activeResultFolder!);
 
+        // M12: the recorded reason lives in the leftAtRest finding's own Detail, not in a
+        // separate member (LiveTest.psm1's Complete-LiveTestRun writes it there). Passing null
+        // unconditionally meant "no-on-purpose" always showed "No reason was recorded." even when
+        // the script had recorded one.
+        string? leftAtRestReason = firstHalfResult.Findings.FirstOrDefault(f => f.Name == "leftAtRest")?.Detail;
         var lines = new List<string>
         {
-            Copy.LeftAtRestText(firstHalfResult.LeftAtRest, null),
+            Copy.LeftAtRestText(firstHalfResult.LeftAtRest, leftAtRestReason),
             string.Empty,
         };
 
@@ -1003,6 +1018,24 @@ internal sealed class MainForm : Form
     internal int? CurrentPromptSeqForTests => _currentPromptSeq;
 
     internal void ClickCurrentPromptButtonForTests() => _stepPanel.ClickFirstButtonForTests();
+
+    internal void ClickPromptButtonForTests(int index) => _stepPanel.ClickButtonForTests(index);
+
+    internal bool HandOffVisibleForTests => _handOffBox.Visible;
+
+    internal string HandOffTextForTests => _handOffBox.Text;
+
+    internal bool ResultPanelVisibleForTests => _resultPanel.Visible;
+
+    // M12 test seam: ShowHandOff needs only a DisplayRow and a ParsedResult, both constructible
+    // without a real child, so the real production method (not a copy of its logic) is driven
+    // directly for the case a live run cannot conveniently reach on its own (a specific
+    // leftAtRest reason).
+    internal void ShowHandOffForTests(DisplayRow row, ParsedResult firstHalfResult)
+    {
+        _activeResultFolder ??= Path.Combine(Path.GetTempPath(), "earshot-handoff-test-seam-" + Guid.NewGuid().ToString("N"), row.TestId);
+        ShowHandOff(row, firstHalfResult);
+    }
 
     internal bool SelectRowForTests(string number)
     {

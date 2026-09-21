@@ -90,6 +90,25 @@ public sealed class BannerTests
         Assert.AreEqual(BannerLevel.Red, banner.Level, "A newer run with no result.json must not be shadowed by an older good one.");
     }
 
+    // M1: a killed second half leaves the first half's own stale result.json behind, unrewritten,
+    // since the script never reached Complete-LiveTestRun. That stale record can carry any
+    // leftAtRest value the first half itself recorded (here, "yes", as a two-half test whose first
+    // half already left the nodes blocked correctly would); before this fix, Banner.Compute had no
+    // idea a kill had happened and read that stale "yes" as though it settled the question,
+    // showing no banner at all over a machine no run has actually finished putting at rest.
+    [TestMethod]
+    public void AKilledRunShowsTheRedBannerEvenThoughItsStaleResultSaysYes()
+    {
+        using var root = new TempFolder();
+        WriteResult(root, "20260920T000000Z", "04-block-and-reboot", "yes");
+        File.WriteAllText(Path.Combine(root.Path, "20260920T000000Z", "04-block-and-reboot", "gui-killed.txt"),
+            "2026-09-20T00:05:00.000Z");
+
+        BannerState banner = Banner.Compute(root.Path);
+        Assert.AreEqual(BannerLevel.Red, banner.Level,
+            "A killed run's stale result must never speak for it; the banner must not trust it.");
+    }
+
     [TestMethod]
     public void AnOlderOrphanDoesNotOverrideANewerGoodResult()
     {
