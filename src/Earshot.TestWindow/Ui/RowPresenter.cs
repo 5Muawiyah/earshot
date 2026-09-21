@@ -16,4 +16,8 @@ internal static class RowPresenter
 
     internal static System.Drawing.Color RowColor(DerivedRowState state) =>
         state.IsGreen ? System.Drawing.Color.Green : System.Drawing.Color.Black;
+
+    // A small symbol shown beside the state text in the List view, so colour is never the only
+    // signal that a row worked, did not work, or is still waiting.
+    internal static string Symbol(DerivedRowState state) => Copy.RowStateSymbol(state.Kind);
 }

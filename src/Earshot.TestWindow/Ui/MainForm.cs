@@ -6,8 +6,21 @@ namespace Earshot.TestWindow.Ui;
 // fake-device) child, StepPanel shows every prompt, ResultPanel shows what result.json says
 // once it exits. Test 10 is flattened into its five variant rows (DisplayRow.Flatten), so every
 // one of the 16 tests and all 22 halves is its own clickable entry; none is a text box.
+//
+// Three views share this window's client area, exactly one Visible at a time (plain-window-layout.md's
+// second pass): Home (the front page, and the default), List ("Choose one test") and Running (today's
+// StepPanel/ResultPanel/hand-off box, unredesigned this commit; a later commit rebuilds its own inside
+// without touching this switching mechanism). No logic moved: StateDeriver, Banner, RunGate,
+// RunAllAdvance, the single start gate and every lock behave exactly as before; this is presentation.
+// WinForms' own Control.Visible getter already folds a hidden parent into every child's own Visible
+// read, so a control simply re-parented into a view panel that is not showing becomes unreachable by
+// a real click (Button.PerformClick is a no-op on it) without anything here needing to track that
+// separately for production code; only test seams that click such a control need to ask for the
+// right view first (SwitchToView, and the small Ensure/Show*ForTests helpers below that call it).
 internal sealed class MainForm : Form
 {
+    internal enum MainView { Home, List, Running }
+
     private readonly string _repoRoot;
     private readonly IReadOnlyList<ManifestRow> _rows;
     private readonly IReadOnlyList<DisplayRow> _displayRows;
@@ -109,6 +122,24 @@ internal sealed class MainForm : Form
     private int _runAllIndex = -1;
     private readonly Dictionary<string, string> _runAllPointers = new(StringComparer.Ordinal);
 
+    // The three views (see the class remark above) and Home's own new controls.
+    private MainView _currentView = MainView.Home;
+    private readonly Panel _homePanel;
+    private readonly Panel _listPanel;
+    private readonly Panel _runningPanel;
+
+    private readonly Label _homeCountLineLabel;
+    private readonly Label _homePickupLineLabel;
+    private readonly Button _chooseOneTestLinkButton;
+    private readonly Button _moreToggleButton;
+    private readonly FlowLayoutPanel _morePanel;
+    private bool _moreOpen;
+    private readonly Label _rehearsalTeaserLabel;
+    private readonly Label _caseBoxLabel;
+    private readonly Label _bannerHowToStepsLabel;
+    private readonly PictureBox _bannerHowToPictureBox;
+    private readonly Button _backButton;
+
     internal MainForm(string repoRoot, IReadOnlyList<ManifestRow> rows, IReadOnlyList<WordingEntry> wording, SandboxOptions? sandbox, string exePath)
     {
         _repoRoot = repoRoot;
@@ -124,24 +155,29 @@ internal sealed class MainForm : Form
         // caller was constructed with; read before anything else here uses _exePath.
         _exePath = ExePathSettings.TryReadOrDefault(WindowStateRoot(), _exePath);
         _showTechnicalDetails = TechnicalDetailsSettings.TryReadOrDefault(WindowStateRoot());
-        Width = 1040;
-        Height = 720;
+
+        // The whole window's own minimum, from this commit on (plain-window-layout.md): Home and
+        // List must fit without needing to be resized first, and the window stays resizable and
+        // reflows above that floor.
+        MinimumSize = new Size(1100, 760);
+        Width = 1150;
+        Height = 800;
         StartPosition = FormStartPosition.CenterScreen;
 
         // A row shows a plain name and one line saying what the test proves, plus its state, not
         // the TestId alone. State is the second column and every column is sized to fit inside
-        // leftPanel's own fixed width, so the state is always on screen at the default window
-        // size, never behind a horizontal scroll; the full text of a long name or line is always
+        // leftPanel's own width, so the state is always on screen at the default window size,
+        // never behind a horizontal scroll; the full text of a long name or line is always
         // available in full underneath, in _rowDetailLabel.
         _rowList = new ListView
         {
             Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false,
             MultiSelect = false,
         };
-        _rowList.Columns.Add("#", 30);
-        _rowList.Columns.Add("State", 110);
-        _rowList.Columns.Add("Test", 130);
-        _rowList.Columns.Add("What it proves", 160);
+        _rowList.Columns.Add("#", 50);
+        _rowList.Columns.Add("State", 150);
+        _rowList.Columns.Add("Test", 280);
+        _rowList.Columns.Add("What it proves", 520);
         _rowList.SelectedIndexChanged += (_, _) => { UpdateStartButton(); UpdateRowDetail(); };
 
         _rowDetailLabel = new Label { Dock = DockStyle.Bottom, Height = 110, AutoEllipsis = false, TextAlign = ContentAlignment.TopLeft };
@@ -153,21 +189,42 @@ internal sealed class MainForm : Form
         };
         _speakerChoiceRow = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, FlowDirection = FlowDirection.LeftToRight, Visible = false };
 
-        var leftPanel = new Panel { Dock = DockStyle.Left, Width = 460 };
+        // The full-window-width List view's own row-list panel (RowListLayoutTests reads this
+        // literal, by name and by its own Width, straight out of this source file).
+        var leftPanel = new Panel { Dock = DockStyle.Fill, Width = 1040 };
         leftPanel.Controls.Add(_rowList);
-        leftPanel.Controls.Add(_speakerChoiceRow);
-        leftPanel.Controls.Add(_speakerChoiceLabel);
-        leftPanel.Controls.Add(_rowDetailLabel);
 
-        _startButton = new Button { Text = "Start", Dock = DockStyle.Top, Height = 32 };
+        var listBottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 160 };
+        listBottomPanel.Controls.Add(_rowDetailLabel);
+        listBottomPanel.Controls.Add(_speakerChoiceRow);
+        listBottomPanel.Controls.Add(_speakerChoiceLabel);
+
+        _startButton = new Button { Text = "Start", Width = 160, Height = 36, Margin = new Padding(4) };
         _startButton.Click += (_, _) => StartSelectedRow();
+
+        _backButton = new Button { Text = Copy.ListBackButtonLabel, Width = 100, Height = 36, Margin = new Padding(4) };
+        _backButton.Click += (_, _) => SwitchToView(MainView.Home);
 
         _notedStartWarningLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 48, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed, Visible = false,
+            Dock = DockStyle.Bottom, Height = 48, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed, Visible = false,
         };
-        _notedStartButton = new Button { Text = "Start anyway, noted", Dock = DockStyle.Top, Height = 28, Visible = false };
+        _notedStartButton = new Button { Text = "Start anyway, noted", Dock = DockStyle.Bottom, Height = 28, Visible = false };
         _notedStartButton.Click += (_, _) => ProceedWithNotedStart();
+
+        var listButtonRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.LeftToRight, WrapContents = false,
+        };
+        listButtonRow.Controls.Add(_startButton);
+        listButtonRow.Controls.Add(_backButton);
+
+        _listPanel = new Panel { Dock = DockStyle.Fill, Visible = false };
+        _listPanel.Controls.Add(leftPanel);
+        _listPanel.Controls.Add(listBottomPanel);
+        _listPanel.Controls.Add(listButtonRow);
+        _listPanel.Controls.Add(_notedStartButton);
+        _listPanel.Controls.Add(_notedStartWarningLabel);
 
         // The form only renders the current prompt, the transcript box and a Stop
         // button, standing throughout a run, not only for the rare unrecognised-prompt case
@@ -179,30 +236,55 @@ internal sealed class MainForm : Form
         _watchdogTimer.Tick += (_, _) => OnWatchdogTick();
         _watchdogTimer.Start();
 
-        _caseBox = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Visible = sandbox is not null };
+        _caseBoxLabel = new Label
+        {
+            AutoSize = true, TextAlign = ContentAlignment.MiddleLeft, Text = Copy.PracticeDataLabel, Visible = sandbox is not null,
+        };
+        _caseBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Visible = sandbox is not null, Width = 120 };
         _caseBox.Items.AddRange(new object[] { "none", "one", "two" });
         _caseBox.SelectedIndex = 1;
 
+        // AutoEllipsis used to cut a long path with "..." unconditionally (plain-window-layout.md's
+        // own "What is wrong now": the exe path was always-visible clutter). It is shown only when
+        // technical details is on (ChooseExePath, OnTechnicalDetailsToggled and the initial value
+        // below all set its Visible the same way), and AutoSize with a wide MaximumSize lets it wrap
+        // and grow rather than clip, however long the path is.
         _exePathLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 20, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
-            AutoEllipsis = true, Text = "Earshot.exe: " + _exePath,
+            AutoSize = true, MaximumSize = new Size(900, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            AutoEllipsis = false, Text = "Earshot.exe: " + _exePath, Visible = _showTechnicalDetails,
         };
-        _chooseExeButton = new Button { Text = "Choose Earshot.exe...", Dock = DockStyle.Top, Height = 24 };
+        _chooseExeButton = new Button { Text = Copy.FindEarshotButtonLabel, AutoSize = true };
         _chooseExeButton.Click += (_, _) => ChooseExePath();
 
         _technicalDetailsCheckBox = new CheckBox
         {
-            Text = Copy.ShowTechnicalDetailsLabel, Dock = DockStyle.Top, Height = 24, AutoSize = false, Checked = _showTechnicalDetails,
+            Text = Copy.ShowTechnicalDetailsLabel, AutoSize = true, Checked = _showTechnicalDetails,
         };
         _technicalDetailsCheckBox.CheckedChanged += (_, _) => OnTechnicalDetailsToggled();
 
-        _statusLabel = new Label { Dock = DockStyle.Top, Height = 28, TextAlign = ContentAlignment.MiddleLeft };
+        _statusLabel = new Label { Dock = DockStyle.Bottom, Height = 32, TextAlign = ContentAlignment.MiddleLeft };
         _bannerLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 0, TextAlign = ContentAlignment.MiddleLeft, Visible = false,
+            AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, Visible = false,
             Font = new Font(Font, FontStyle.Bold), AutoEllipsis = false,
         };
+        _bannerHowToStepsLabel = new Label
+        {
+            AutoSize = true, MaximumSize = new Size(700, 0), TextAlign = ContentAlignment.TopLeft, Visible = false,
+            Text = string.Join(Environment.NewLine, Copy.AtRestHowToSteps.Select((step, index) => (index + 1) + ". " + step)),
+        };
+        _bannerHowToPictureBox = new PictureBox
+        {
+            Width = 160, Height = 160, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, Visible = false,
+            Image = HowToPictures.TryLoad("earshot-icon-taskbar"),
+        };
+        var bannerHowToRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+        bannerHowToRow.Controls.Add(_bannerHowToStepsLabel);
+        bannerHowToRow.Controls.Add(_bannerHowToPictureBox);
 
         var contentHost = new Panel { Dock = DockStyle.Fill };
         _stepPanel = new StepPanel { Visible = false };
@@ -230,38 +312,41 @@ internal sealed class MainForm : Form
         contentHost.Controls.Add(_resultPanel);
         contentHost.Controls.Add(_stepPanel);
 
-        _runAllCarryOnButton = new Button { Text = Copy.RunAllCarryOnButtonLabel, Dock = DockStyle.Top, Height = 28, Visible = false, AutoSize = true };
+        _runAllCarryOnButton = new Button { Text = Copy.RunAllCarryOnButtonLabel, Visible = false, AutoSize = true, Margin = new Padding(4) };
         _runAllCarryOnButton.Click += (_, _) => OnRunAllCarryOnClicked();
 
-        _runAllStopHereButton = new Button { Text = Copy.RunAllStopHereButtonLabel, Dock = DockStyle.Top, Height = 28, Visible = false, AutoSize = true };
+        _runAllStopHereButton = new Button { Text = Copy.RunAllStopHereButtonLabel, Visible = false, AutoSize = true, Margin = new Padding(4) };
         _runAllStopHereButton.Click += (_, _) => OnRunAllStopHereClicked();
 
-        _runAllStatusLabel = new Label { Dock = DockStyle.Top, Height = 24, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkSlateBlue };
+        _runAllStatusLabel = new Label
+        {
+            AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkSlateBlue,
+        };
         _runAllProgressLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 20, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText, Visible = false,
+            AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText, Visible = false,
         };
 
         _runAllRestoreAdviceLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 64, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed, Visible = false,
+            AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed, Visible = false,
         };
         _runAllRestoreContinueButton = new Button
         {
-            Text = Copy.RunAllRestoreContinueButtonLabel, Dock = DockStyle.Top, Height = 28, Visible = false, AutoSize = true,
+            Text = Copy.RunAllRestoreContinueButtonLabel, Visible = false, AutoSize = true, Margin = new Padding(4),
         };
         _runAllRestoreContinueButton.Click += (_, _) => OnRunAllRestoreContinueClicked();
 
         _runAllExplanationLabel = new Label
         {
-            Dock = DockStyle.Top, Height = 32, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
             Text = Copy.RunAllExplanation,
         };
 
-        // The window's main control: one large primary button at the top of the right-hand panel,
-        // taller than every other button here, for running every test back to back; the row list
-        // and its own Start button stay secondary, for running one test.
-        _runAllButton = new Button { Text = Copy.RunAllButtonLabel, Dock = DockStyle.Top, Height = 48, Font = new Font(Font, FontStyle.Bold) };
+        // The window's main control: one large primary button on Home, taller and bolder than
+        // every other button here, for running every test back to back; the row list and its own
+        // Start button stay secondary, reached through "Choose one test", for running one test.
+        _runAllButton = new Button { Text = Copy.RunAllButtonLabel, Width = 320, Height = 56, Font = new Font(Font.FontFamily, 12f, FontStyle.Bold) };
         _runAllButton.Click += (_, _) => StartOrContinueRunAll();
 
         // Beside row 15 rather than inside the row list, since this is a utility check, not
@@ -270,53 +355,102 @@ internal sealed class MainForm : Form
         // unattended or development sandbox must never run this, because it always raises a real
         // Windows administrator prompt, in any mode.
         _rehearsalRow = BuildRehearsalDisplayRow();
+        _rehearsalTeaserLabel = new Label { AutoSize = true, MaximumSize = new Size(700, 0), TextAlign = ContentAlignment.MiddleLeft, Text = Copy.RehearsalTeaser };
         _rehearsalWarningLabel = new Label
         {
-            // Tall enough for RehearsalWarning's own wording to wrap without overlapping the
-            // status label below it.
-            Dock = DockStyle.Top, Height = 64, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed,
+            AutoSize = true, MaximumSize = new Size(700, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed,
             Text = Copy.RehearsalWarning,
         };
         _rehearsalStatusLabel = new Label
         {
-            // Tall enough for RehearsalNeverInSandbox's own longer, plain wording to wrap without
-            // overlapping the control below it (seen clipped in a captured screenshot: a fixed 20 px
-            // was already tight before this text grew a little plainer, and longer).
-            Dock = DockStyle.Top, Height = 36, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            AutoSize = true, MaximumSize = new Size(700, 0), TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
             Text = sandbox is null ? string.Empty : Copy.RehearsalNeverInSandbox,
         };
         _rehearsalButton = new Button
         {
-            Text = Copy.RehearsalRowName, Dock = DockStyle.Top, Height = 28, Enabled = sandbox is null,
+            Text = Copy.RehearsalRowName, AutoSize = true, Enabled = sandbox is null,
         };
         _rehearsalButton.Click += (_, _) => StartRehearsal();
 
-        var rightPanel = new Panel { Dock = DockStyle.Fill };
-        rightPanel.Controls.Add(contentHost);
-        rightPanel.Controls.Add(_statusLabel);
-        rightPanel.Controls.Add(_runAllProgressLabel);
-        rightPanel.Controls.Add(_runAllStatusLabel);
-        rightPanel.Controls.Add(_runAllStopHereButton);
-        rightPanel.Controls.Add(_runAllCarryOnButton);
-        rightPanel.Controls.Add(_runAllRestoreContinueButton);
-        rightPanel.Controls.Add(_runAllRestoreAdviceLabel);
-        rightPanel.Controls.Add(_bannerLabel);
-        rightPanel.Controls.Add(_caseBox);
-        rightPanel.Controls.Add(_stopButton);
-        rightPanel.Controls.Add(_notedStartButton);
-        rightPanel.Controls.Add(_notedStartWarningLabel);
-        rightPanel.Controls.Add(_startButton);
-        rightPanel.Controls.Add(_rehearsalStatusLabel);
-        rightPanel.Controls.Add(_rehearsalWarningLabel);
-        rightPanel.Controls.Add(_rehearsalButton);
-        rightPanel.Controls.Add(_runAllExplanationLabel);
-        rightPanel.Controls.Add(_runAllButton);
-        rightPanel.Controls.Add(_exePathLabel);
-        rightPanel.Controls.Add(_chooseExeButton);
-        rightPanel.Controls.Add(_technicalDetailsCheckBox);
+        // The collapsed "More" section: technical details, the exe chooser (path shown only with
+        // technical details on), the permission box check (a short teaser always shown, the fuller
+        // warning only once this section is open) and, in a practice window only, the fake-input
+        // case chooser.
+        _morePanel = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Visible = false,
+        };
+        _morePanel.Controls.Add(_technicalDetailsCheckBox);
+        _morePanel.Controls.Add(_chooseExeButton);
+        _morePanel.Controls.Add(_exePathLabel);
+        _morePanel.Controls.Add(_rehearsalButton);
+        _morePanel.Controls.Add(_rehearsalTeaserLabel);
+        _morePanel.Controls.Add(_rehearsalStatusLabel);
+        _morePanel.Controls.Add(_rehearsalWarningLabel);
+        if (sandbox is not null)
+        {
+            _morePanel.Controls.Add(_caseBoxLabel);
+            _morePanel.Controls.Add(_caseBox);
+        }
 
-        Controls.Add(rightPanel);
-        Controls.Add(leftPanel);
+        _moreToggleButton = new Button { Text = Copy.MoreSectionShowLabel, AutoSize = true };
+        _moreToggleButton.Click += (_, _) => ToggleMoreSection();
+
+        _chooseOneTestLinkButton = new Button { Text = Copy.ChooseOneTestLinkLabel, AutoSize = true, FlatStyle = FlatStyle.Flat };
+        _chooseOneTestLinkButton.FlatAppearance.BorderSize = 0;
+        _chooseOneTestLinkButton.Click += (_, _) => SwitchToView(MainView.List);
+
+        var homeTitleLabel = new Label { AutoSize = true, Font = new Font(Font.FontFamily, 16f, FontStyle.Bold), Text = Copy.HomeTitle };
+        var homeIntroLabel1 = new Label { AutoSize = true, MaximumSize = new Size(900, 0), Text = Copy.HomeIntroWhatEarshotDoes };
+        var homeIntroLabel2 = new Label { AutoSize = true, MaximumSize = new Size(900, 0), Text = Copy.HomeIntroWhatTheseTestsAreFor };
+        var homeIntroLabel3 = new Label { AutoSize = true, MaximumSize = new Size(900, 0), Text = Copy.HomeIntroHowThisWindowHelps };
+        _homeCountLineLabel = new Label { AutoSize = true, MaximumSize = new Size(900, 0), ForeColor = SystemColors.GrayText };
+        _homePickupLineLabel = new Label { AutoSize = true, MaximumSize = new Size(900, 0), Font = new Font(Font, FontStyle.Bold), Visible = false };
+
+        var homeFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(16),
+        };
+        homeFlow.Controls.Add(_bannerLabel);
+        homeFlow.Controls.Add(bannerHowToRow);
+        homeFlow.Controls.Add(homeTitleLabel);
+        homeFlow.Controls.Add(homeIntroLabel1);
+        homeFlow.Controls.Add(homeIntroLabel2);
+        homeFlow.Controls.Add(homeIntroLabel3);
+        homeFlow.Controls.Add(_runAllButton);
+        homeFlow.Controls.Add(_homeCountLineLabel);
+        homeFlow.Controls.Add(_runAllExplanationLabel);
+        homeFlow.Controls.Add(_homePickupLineLabel);
+        homeFlow.Controls.Add(_chooseOneTestLinkButton);
+        homeFlow.Controls.Add(_moreToggleButton);
+        homeFlow.Controls.Add(_morePanel);
+
+        _homePanel = new Panel { Dock = DockStyle.Fill };
+        _homePanel.Controls.Add(homeFlow);
+
+        var runningTopFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+        runningTopFlow.Controls.Add(_runAllProgressLabel);
+        runningTopFlow.Controls.Add(_runAllStatusLabel);
+        runningTopFlow.Controls.Add(_runAllRestoreAdviceLabel);
+        runningTopFlow.Controls.Add(_runAllRestoreContinueButton);
+        runningTopFlow.Controls.Add(_runAllCarryOnButton);
+        runningTopFlow.Controls.Add(_runAllStopHereButton);
+        runningTopFlow.Controls.Add(_stopButton);
+
+        _runningPanel = new Panel { Dock = DockStyle.Fill, Visible = false };
+        _runningPanel.Controls.Add(contentHost);
+        _runningPanel.Controls.Add(runningTopFlow);
+
+        var viewHost = new Panel { Dock = DockStyle.Fill };
+        viewHost.Controls.Add(_runningPanel);
+        viewHost.Controls.Add(_listPanel);
+        viewHost.Controls.Add(_homePanel);
+
+        Controls.Add(viewHost);
+        Controls.Add(_statusLabel);
 
         FormClosing += OnFormClosing;
         Activated += OnWindowActivated;
@@ -324,6 +458,53 @@ internal sealed class MainForm : Form
         PopulateRows();
         UpdateStartButton();
         UpdateRowDetail();
+        SwitchToView(MainView.Home);
+    }
+
+    // Exactly one of the three view panels is ever Visible; nothing about what a control does
+    // changes, only whether it is currently reachable by a real click (WinForms' own Visible
+    // getter folds a hidden parent into every child control's own Visible read). Called by every
+    // production path that starts a run (BeginRun) or opens the guided Run all flow
+    // (StartOrContinueRunAll/ShowRunAllRestoreAdvice), by the Home/List navigation controls
+    // themselves, and by the small Ensure/Show*ForTests seams a handful of existing tests need so a
+    // click they already perform still reaches a control that now lives in a specific view.
+    private void SwitchToView(MainView view)
+    {
+        _currentView = view;
+        _homePanel.Visible = view == MainView.Home;
+        _listPanel.Visible = view == MainView.List;
+        _runningPanel.Visible = view == MainView.Running;
+    }
+
+    private void ToggleMoreSection()
+    {
+        _moreOpen = !_moreOpen;
+        _morePanel.Visible = _moreOpen;
+        _moreToggleButton.Text = _moreOpen ? Copy.MoreSectionHideLabel : Copy.MoreSectionShowLabel;
+    }
+
+    // Home's own "how many tests" line and, while a run is waiting after a shut down, which test
+    // Carry on with the tests will pick up at. Both are read fresh from real data (RunAllOrder.Items,
+    // the same list RunAllProgressLine's own denominator already uses, and run-all.json), never a
+    // typed number or name, so neither can drift from what Run all actually does. Called from
+    // PopulateRows, so it is refreshed at every open, after every half and on every window Activated,
+    // the same as the banner and the rehearsal status.
+    private void UpdateHomeRunAllInfo()
+    {
+        int totalTests = RunAllOrder.Items.Count;
+        int fullShutDownCount = RunAllOrder.Items.Count(item =>
+        {
+            DisplayRow? row = _displayRows.FirstOrDefault(r => r.RunAllKey == item.Key);
+            return row is not null && row.PowerCycleRequirement == PowerCycleRequirement.FullShutDown;
+        });
+        _homeCountLineLabel.Text = Copy.HomeRunAllCountLine(totalTests, fullShutDownCount);
+
+        RunAllRecord? existing = RunAllFile.TryRead(WindowStateRoot());
+        DisplayRow? pickupRow = existing is not null && existing.StoppedAtIndex >= 0 && existing.StoppedAtIndex < RunAllOrder.Items.Count
+            ? _displayRows.FirstOrDefault(r => r.RunAllKey == RunAllOrder.Items[existing.StoppedAtIndex].Key)
+            : null;
+        _homePickupLineLabel.Text = pickupRow is not null ? Copy.HomeCarryOnPickupLine(pickupRow.Name) : string.Empty;
+        _homePickupLineLabel.Visible = pickupRow is not null;
     }
 
     // A console run of one of the two commands rows 00 and 07 point the owner at
@@ -368,6 +549,7 @@ internal sealed class MainForm : Form
 
         _exePath = chosen;
         _exePathLabel.Text = "Earshot.exe: " + _exePath;
+        _exePathLabel.Visible = _showTechnicalDetails;
         ExePathSettings.Write(WindowStateRoot(), _exePath);
         _statusLabel.Text = _showTechnicalDetails ? "Earshot.exe is now: " + _exePath : Copy.PlainExeChosenStatus;
         PopulateRows();
@@ -381,6 +563,7 @@ internal sealed class MainForm : Form
     {
         _showTechnicalDetails = _technicalDetailsCheckBox.Checked;
         TechnicalDetailsSettings.Write(WindowStateRoot(), _showTechnicalDetails);
+        _exePathLabel.Visible = _showTechnicalDetails;
 
         if (_lastPresentedPrompt is not null && _activeRunner is not null)
         {
@@ -605,14 +788,22 @@ internal sealed class MainForm : Form
         RefreshBanner();
         UpdateRehearsalStatus();
         UpdateRunAllButtonLabel();
+        UpdateHomeRunAllInfo();
 
         int selected = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         _rowList.Items.Clear();
         foreach (DisplayRow row in _displayRows)
         {
             DerivedRowState state = ComputeState(row);
+            string stateText = _showTechnicalDetails ? RowPresenter.Text(state) : RowPresenter.PlainText(state);
             var item = new ListViewItem(row.Number);
-            item.SubItems.Add(_showTechnicalDetails ? RowPresenter.Text(state) : RowPresenter.PlainText(state));
+
+            // The cell shows a small symbol beside the state text, so colour is never the only
+            // signal; the sub-item's own Tag keeps the plain state text alone (RowStateTextForTests
+            // reads the Tag, so every test that pins an exact state string keeps working unchanged).
+            ListViewItem.ListViewSubItem stateSubItem = item.SubItems.Add(RowPresenter.Symbol(state) + " " + stateText);
+            stateSubItem.Tag = stateText;
+
             item.SubItems.Add(row.Name);
             item.SubItems.Add(row.Proves);
             item.ForeColor = state.IsGreen ? Color.DarkGreen : Color.Black;
@@ -652,20 +843,26 @@ internal sealed class MainForm : Form
         return _banner;
     }
 
+    // The at-rest banner sits at the top of Home (plain-window-layout.md), with its own
+    // find-and-click-the-Earshot-icon how-to block and picture beside it; _bannerLabel is AutoSize
+    // now, so only Visible needs setting here, never a fixed Height that could clip its own wrapped
+    // text.
     private void UpdateBannerLabel()
     {
         if (_banner.Level == BannerLevel.None)
         {
             _bannerLabel.Visible = false;
-            _bannerLabel.Height = 0;
+            _bannerHowToStepsLabel.Visible = false;
+            _bannerHowToPictureBox.Visible = false;
             return;
         }
 
         _bannerLabel.Text = _banner.Message;
         _bannerLabel.ForeColor = _banner.Level == BannerLevel.Red ? Color.White : Color.Black;
         _bannerLabel.BackColor = _banner.Level == BannerLevel.Red ? Color.Firebrick : Color.Goldenrod;
-        _bannerLabel.Height = 32;
         _bannerLabel.Visible = true;
+        _bannerHowToStepsLabel.Visible = true;
+        _bannerHowToPictureBox.Visible = _bannerHowToPictureBox.Image is not null;
     }
 
     private DerivedRowState ComputeState(DisplayRow row)
@@ -1127,6 +1324,7 @@ internal sealed class MainForm : Form
         _resultPanel.Visible = false;
         _handOffBox.Visible = false;
         _stepPanel.Visible = true;
+        SwitchToView(MainView.Running);
         _statusLabel.Text = _showTechnicalDetails
             ? "Running " + row.TestId + (isResume ? " (second half)..." : "...")
             : Copy.PlainRunningStatus(row.Name, isResume);
@@ -1745,6 +1943,7 @@ internal sealed class MainForm : Form
         _runAllIndex = existing is not null && existing.StoppedAtIndex >= 0 ? existing.StoppedAtIndex : 0;
         _runAllCarryOnButton.Visible = false;
         _runAllStopHereButton.Visible = false;
+        SwitchToView(MainView.Running);
         AdvanceRunAll();
     }
 
@@ -1758,6 +1957,7 @@ internal sealed class MainForm : Form
         _runAllRestoreAdviceLabel.Visible = true;
         _runAllRestoreContinueButton.Visible = true;
         _runAllStatusLabel.Text = string.Empty;
+        SwitchToView(MainView.Running);
     }
 
     private void OnRunAllRestoreContinueClicked()
@@ -1857,6 +2057,7 @@ internal sealed class MainForm : Form
         _resultPanel.Visible = false;
         _handOffBox.Text = string.Join(Environment.NewLine, lines);
         _handOffBox.Visible = true;
+        SwitchToView(MainView.Running);
         _statusLabel.Text = _showTechnicalDetails
             ? row.TestId + ": first half complete. Waiting for the power cycle."
             : Copy.PlainWaitingForPowerCycleStatus(row.PowerCycleRequirement, row.Name);
@@ -1952,6 +2153,58 @@ internal sealed class MainForm : Form
 
     internal bool BannerVisibleForTests => _bannerLabel.Visible;
 
+    // View-switching test seams (see the class remark and SwitchToView above). A later commit's
+    // Step/Result tests build on these the same way.
+    internal MainView CurrentViewForTests => _currentView;
+
+    internal void ShowHomeViewForTests() => SwitchToView(MainView.Home);
+
+    internal void ShowListViewForTests() => SwitchToView(MainView.List);
+
+    internal Panel HomePanelForTests => _homePanel;
+
+    internal Panel ListPanelForTests => _listPanel;
+
+    internal void ClickChooseOneTestLinkForTests()
+    {
+        SwitchToView(MainView.Home);
+        _chooseOneTestLinkButton.PerformClick();
+    }
+
+    internal void ClickBackButtonForTests()
+    {
+        SwitchToView(MainView.List);
+        _backButton.PerformClick();
+    }
+
+    internal bool MoreSectionVisibleForTests => _morePanel.Visible;
+
+    internal void ClickMoreToggleForTests()
+    {
+        SwitchToView(MainView.Home);
+        _moreToggleButton.PerformClick();
+    }
+
+    // Ensures Home is showing and the collapsed More section is open, so a click on a control that
+    // now lives inside it (the exe chooser, the rehearsal button) reaches a genuinely Visible
+    // control, the same as a real owner opening More first would. Never changes what the click
+    // itself proves: only whether it can reach the control at all (Button.PerformClick is a no-op
+    // on an invisible control).
+    private void EnsureHomeMoreExpandedForTests()
+    {
+        SwitchToView(MainView.Home);
+        if (!_moreOpen)
+        {
+            _moreToggleButton.PerformClick();
+        }
+    }
+
+    internal string HomeCountLineTextForTests => _homeCountLineLabel.Text;
+
+    internal string HomePickupLineTextForTests => _homePickupLineLabel.Text;
+
+    internal bool HomePickupLineVisibleForTests => _homePickupLineLabel.Visible;
+
     // Test seams for the rehearsal control. PerformClick (the same pattern every other *ForTests
     // click uses) does nothing on a disabled control (Button.CanSelect is false while Enabled is
     // false), so a click alone can never prove StartRehearsal's own runtime sandbox guard when the
@@ -1960,7 +2213,11 @@ internal sealed class MainForm : Form
     // Enabled true first (ForceRehearsalButtonEnabledForTests), then assert it, then click for real.
     internal bool RehearsalButtonEnabledForTests => _rehearsalButton.Enabled;
 
-    internal void ForceRehearsalButtonEnabledForTests() => _rehearsalButton.Enabled = true;
+    internal void ForceRehearsalButtonEnabledForTests()
+    {
+        EnsureHomeMoreExpandedForTests();
+        _rehearsalButton.Enabled = true;
+    }
 
     internal string RowDetailTextForTests => _rowDetailLabel.Text;
 
@@ -1991,7 +2248,11 @@ internal sealed class MainForm : Form
 
     internal string RehearsalWarningTextForTests => _rehearsalWarningLabel.Text;
 
-    internal void ClickRehearsalButtonForTests() => _rehearsalButton.PerformClick();
+    internal void ClickRehearsalButtonForTests()
+    {
+        EnsureHomeMoreExpandedForTests();
+        _rehearsalButton.PerformClick();
+    }
 
     internal bool HandOffVisibleForTests => _handOffBox.Visible;
 
@@ -2013,35 +2274,55 @@ internal sealed class MainForm : Form
     // from a test (RunPowerCycleProbe always reads this machine's own history), so this drives
     // the real ShowNotedStartWarning/ProceedWithNotedStart pair directly with a verdict of its
     // choosing, the way a real StartNoted gate result would have called it.
-    internal void ShowNotedStartWarningForTests(string host, DisplayRow row, ResumeInstruction instruction, string warning) =>
+    internal void ShowNotedStartWarningForTests(string host, DisplayRow row, ResumeInstruction instruction, string warning)
+    {
+        // The noted-start warning and its button live in the List view (they are shown while
+        // starting a specific selected row, before BeginRun ever switches to Running); this test
+        // seam calls the real ShowNotedStartWarning directly, sometimes while a different row's run
+        // is already active and Running is showing instead, so NotedStartWarningVisibleForTests
+        // (which reads Visible through WinForms' own parent-chain fold) needs List showing to read
+        // what ShowNotedStartWarning itself actually set.
+        SwitchToView(MainView.List);
         ShowNotedStartWarning(host, row, instruction, warning);
+    }
 
     internal bool NotedStartWarningVisibleForTests => _notedStartWarningLabel.Visible && _notedStartButton.Visible;
 
     internal string NotedStartWarningTextForTests => _notedStartWarningLabel.Text;
 
-    internal void ClickNotedStartButtonForTests() => _notedStartButton.PerformClick();
+    internal void ClickNotedStartButtonForTests()
+    {
+        SwitchToView(MainView.List);
+        _notedStartButton.PerformClick();
+    }
 
     internal string StartButtonTextForTests => _startButton.Text;
 
     // Test seam: the row list's own "State" column (SubItems[1]; SubItems[0] is always the same
-    // text as the ListViewItem's own Number), read the same way an owner reads it on screen,
-    // rather than re-deriving it independently from disk.
+    // text as the ListViewItem's own Number), read the same way RowStateSymbol's own text: the
+    // sub-item's Tag, which PopulateRows sets to the plain/technical state text alone, without the
+    // small symbol prefixed onto the cell's own displayed Text.
     internal string? RowStateTextForTests(string number)
     {
         for (int i = 0; i < _displayRows.Count; i++)
         {
             if (_displayRows[i].Number == number)
             {
-                return _rowList.Items[i].SubItems[1].Text;
+                return _rowList.Items[i].SubItems[1].Tag as string ?? _rowList.Items[i].SubItems[1].Text;
             }
         }
 
         return null;
     }
 
+    // Selecting a row is a List-view action in the real window ("Choose one test"), so this test
+    // seam switches there first: a real click could never reach the row list otherwise, since
+    // WinForms' own Visible getter folds a hidden parent (Home showing instead) into every child's
+    // own Visible read, and this keeps every existing test's own SelectRowForTests-then-Click*
+    // pattern working unchanged.
     internal bool SelectRowForTests(string number)
     {
+        SwitchToView(MainView.List);
         for (int i = 0; i < _displayRows.Count; i++)
         {
             if (_displayRows[i].Number == number)
@@ -2056,11 +2337,19 @@ internal sealed class MainForm : Form
         return false;
     }
 
-    internal void ClickStartForTests() => _startButton.PerformClick();
+    internal void ClickStartForTests()
+    {
+        SwitchToView(MainView.List);
+        _startButton.PerformClick();
+    }
 
     internal void ClickStopForTests() => _stopButton.PerformClick();
 
-    internal void ClickRunAllForTests() => _runAllButton.PerformClick();
+    internal void ClickRunAllForTests()
+    {
+        SwitchToView(MainView.Home);
+        _runAllButton.PerformClick();
+    }
 
     // Test seam: the real 20 s grace period OnRunFinished waits for a child to exit on its own
     // after sending its own exit message, shortened here so a test proving the orphan-cleanup
@@ -2090,7 +2379,11 @@ internal sealed class MainForm : Form
 
     internal bool RunAllActiveForTests => _runAllActive;
 
-    internal void ClickCarryOnForTests() => _runAllCarryOnButton.PerformClick();
+    internal void ClickCarryOnForTests()
+    {
+        SwitchToView(MainView.Running);
+        _runAllCarryOnButton.PerformClick();
+    }
 
     internal void KillActiveRunForTests() => KillActiveRun();
 
@@ -2100,13 +2393,21 @@ internal sealed class MainForm : Form
 
     internal string ExePathLabelTextForTests => _exePathLabel.Text;
 
-    internal void ClickChooseExeButtonForTests() => _chooseExeButton.PerformClick();
+    internal void ClickChooseExeButtonForTests()
+    {
+        EnsureHomeMoreExpandedForTests();
+        _chooseExeButton.PerformClick();
+    }
 
     internal string RunAllStatusTextForTests => _runAllStatusLabel.Text;
 
     internal bool CarryOnVisibleForTests => _runAllCarryOnButton.Visible;
 
-    internal void ClickRunAllStopHereForTests() => _runAllStopHereButton.PerformClick();
+    internal void ClickRunAllStopHereForTests()
+    {
+        SwitchToView(MainView.Running);
+        _runAllStopHereButton.PerformClick();
+    }
 
     internal bool RunAllStopHereVisibleForTests => _runAllStopHereButton.Visible;
 
@@ -2114,7 +2415,11 @@ internal sealed class MainForm : Form
 
     internal string RunAllRestoreAdviceTextForTests => _runAllRestoreAdviceLabel.Text;
 
-    internal void ClickRunAllRestoreContinueForTests() => _runAllRestoreContinueButton.PerformClick();
+    internal void ClickRunAllRestoreContinueForTests()
+    {
+        SwitchToView(MainView.Running);
+        _runAllRestoreContinueButton.PerformClick();
+    }
 
     internal string RunAllProgressTextForTests => _runAllProgressLabel.Text;
 

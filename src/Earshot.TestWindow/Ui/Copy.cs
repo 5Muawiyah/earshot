@@ -96,6 +96,18 @@ internal static class Copy
     // will raise a real prompt, and this is the elevated launch site's first execution in any form.
     internal const string RehearsalRowName = "Permission box check";
 
+    // The at-rest banner's own how-to block on Home: find and click the Earshot icon. Reused
+    // verbatim from Data\wording.json's own "find-and-left-click-the-earshot-icon" howToBlocks
+    // entry (same picture, "earshot-icon-taskbar"), added here as a small static use rather than
+    // plumbing a new wording.json entry for a block that is never bound to a script prompt.
+    internal static readonly IReadOnlyList<string> AtRestHowToSteps = new[]
+    {
+        "Look at the bottom-right corner of the screen, next to the clock.",
+        "If you cannot see the Earshot icon, click the small ^ arrow to show hidden icons.",
+        "Click the Earshot icon once with the left mouse button. Do not double-click.",
+        "A small card should appear near the clock.",
+    };
+
     internal const string RehearsalWarning =
         "This starts a real check. Windows will show a real box asking for permission, twice. " +
         "This is the first time this has ever been run, in any form. Only the owner runs this, " +
@@ -442,4 +454,75 @@ internal static class Copy
     // same "may grab your AirPods" words AtRestNo already uses, never "at rest" itself.
     internal const string StopConfirmationWarning =
         "Stopping it now means no result is written, and this computer may still be able to grab your AirPods off your phone.";
+
+    // Home view (plain-window-layout.md's second pass): the window's own front page. Title, three
+    // plain sentences, then the one large primary button (Copy.RunAllButtonLabel/RunAllCarryOnLabel,
+    // unchanged, just re-homed here).
+    internal const string HomeTitle = "Earshot tests";
+
+    internal const string HomeIntroWhatEarshotDoes =
+        "Earshot stops this computer grabbing your AirPods off your phone when it starts up, and lets " +
+        "you connect or disconnect them with one click on its icon near the clock.";
+
+    internal const string HomeIntroWhatTheseTestsAreFor =
+        "These tests check that this computer is doing that properly.";
+
+    internal const string HomeIntroHowThisWindowHelps =
+        "This window will say exactly what to do at each step, and Not sure is always an acceptable answer.";
+
+    // Under the primary button: how many tests Run all covers, and how many of those need a full
+    // shut down and start again partway through. Both counts are read from the real manifest
+    // (RunAllOrder.Items, the same list RunAllProgressLine already counts against), never a typed
+    // number, so this line can never drift from what Run all actually does.
+    internal static string HomeRunAllCountLine(int totalTests, int fullShutDownCount)
+    {
+        string testsWord = totalTests == 1 ? "test" : "tests";
+        string shutDownSentence = fullShutDownCount switch
+        {
+            0 => "None of them need this computer shut down partway through.",
+            1 => "One of them needs this computer shut down and started again partway through; the window will say so when it is time.",
+            _ => fullShutDownCount + " of them need this computer shut down and started again partway through; the window will say so when it is time.",
+        };
+
+        return totalTests.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " + testsWord +
+            " in all. Some need your AirPods and your phone nearby. " + shutDownSentence;
+    }
+
+    // Shown only while run-all.json records a stopped point to come back to: which test Carry on
+    // with the tests will pick up at, read from the same record UpdateRunAllButtonLabel already
+    // reads for the button's own label.
+    internal static string HomeCarryOnPickupLine(string testName) => "It will pick up at: " + testName + ".";
+
+    internal const string ChooseOneTestLinkLabel = "Choose one test";
+
+    internal const string MoreSectionShowLabel = "More";
+
+    internal const string MoreSectionHideLabel = "Less";
+
+    // The exe chooser's own new plain label (was "Choose Earshot.exe...").
+    internal const string FindEarshotButtonLabel = "Find Earshot on this computer";
+
+    internal const string PracticeDataLabel = "Practice data:";
+
+    // The collapsed More section's own two-sentence teaser for the permission box check; the fuller
+    // Copy.RehearsalWarning is shown only once the section is open.
+    internal const string RehearsalTeaser =
+        "This runs a one-time safety check of the Windows permission box. Only the owner should run it, by hand, once.";
+
+    // List view ("Choose one test").
+    internal const string ListBackButtonLabel = "Back";
+
+    // The row states shown as text are already plain (Copy.PlainBaseText); this is the small
+    // symbol shown beside each one, so colour is never the only signal.
+    internal static string RowStateSymbol(RowStateKind kind) => kind switch
+    {
+        RowStateKind.Passed => "✓",
+        RowStateKind.Failed => "✗",
+        RowStateKind.Locked => "■",
+        RowStateKind.WaitingForShutDown => "»",
+        RowStateKind.WaitingForRestart => "»",
+        RowStateKind.Inconclusive => "?",
+        RowStateKind.Unknown => "?",
+        _ => "•",
+    };
 }

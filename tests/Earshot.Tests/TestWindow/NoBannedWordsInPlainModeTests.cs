@@ -190,6 +190,13 @@ public sealed class NoBannedWordsInPlainModeTests
         yield return (nameof(Copy.PlainWaitingForPowerCycleStatus), Copy.PlainWaitingForPowerCycleStatus(PowerCycleRequirement.Restart, "Full shut down and start"));
         yield return (nameof(Copy.PlainWaitingForPowerCycleStatus), Copy.PlainWaitingForPowerCycleStatus(PowerCycleRequirement.AnyStart, "Full shut down and start"));
         yield return (nameof(Copy.SilentForMinutesStatus), Copy.SilentForMinutesStatus(15));
+
+        // Home's own new lines (plain-window-layout.md's second pass): the "how many tests" line
+        // and which test Carry on with the tests will pick up at.
+        yield return (nameof(Copy.HomeRunAllCountLine), Copy.HomeRunAllCountLine(19, 2));
+        yield return (nameof(Copy.HomeRunAllCountLine), Copy.HomeRunAllCountLine(1, 0));
+        yield return (nameof(Copy.HomeRunAllCountLine), Copy.HomeRunAllCountLine(19, 1));
+        yield return (nameof(Copy.HomeCarryOnPickupLine), Copy.HomeCarryOnPickupLine("Full shut down and start"));
     }
 
     private static void CheckText(string text, string source, List<string> problems, string[]? bannedWords = null)
