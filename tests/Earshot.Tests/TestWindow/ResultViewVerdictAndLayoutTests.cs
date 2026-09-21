@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// plain-window-layout.md's Result view redesign: one large verdict line with a symbol, using the
+// the layout's Result view redesign: one large verdict line with a symbol, using the
 // exact four sentences the spec quotes verbatim, sourced from the same DerivedRowState MainForm
 // already computed for the row (never re-derived here); the raw evidence paths staying jargon
 // behind technical details, replaced in plain mode by a saved-record line and a real "Open the

@@ -305,7 +305,7 @@ internal sealed class ChildRunner : IDisposable
 
     // The one other process this window ever starts beyond the test child itself: opening
     // Explorer at a saved evidence folder for the owner (Result view's own "Open the folder"
-    // button, plain-window-layout.md's Result section). UseShellExecute true is what makes Windows
+    // button, the layout's Result section). UseShellExecute true is what makes Windows
     // treat a folder path as something to open with its own registered handler (Explorer), the
     // same as double-clicking it there, rather than trying to execute the path directly as a
     // program, which a folder is not.

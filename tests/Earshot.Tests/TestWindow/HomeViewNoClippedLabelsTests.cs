@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// plain-window-layout.md's own acceptance bar for this commit's Home view: no label's preferred
+// the layout's acceptance bar for this commit's Home view: no label's preferred
 // size (the size it would need to show all of its own text) exceeds its own actual bounds, at the
 // window's default size. A label given a fixed size (or a MaximumSize) too small for its real text
 // is exactly what "clipped" means; AutoEllipsis is the same defect wearing a different coat (it

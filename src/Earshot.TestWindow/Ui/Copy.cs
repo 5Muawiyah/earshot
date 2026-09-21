@@ -131,7 +131,7 @@ internal static class Copy
     // 00's uninstall variant and 07's plan B are real branches those scripts declare
     // (-OfferUninstall, -AllowPlanB) that this row can never reach, because this window never
     // passes either as true anywhere. No silently missing path: said plainly on the row itself,
-    // in the reader's own words (plain-words.md's own "console route" line: say who to ask
+    // in the reader's own words (the word list's "console route" line: say who to ask
     // rather than name the command, which only whoever set Earshot up would run anyway).
     internal const string RestoreUninstallOfferNotAvailable =
         "This row never offers to remove Earshot from here. That has to be done another way: " +
@@ -290,7 +290,7 @@ internal static class Copy
     internal static bool FirstHalfGenuinelyFailed(string overall) => overall == "fail";
 
     // 08's own words for its fastStartupAtPowerDown finding, in the owner's own rewrite
-    // (plain-words.md's "explain the one hard word in the same sentence" rule): the reader learns
+    // (the word list's "explain the one hard word in the same sentence" rule): the reader learns
     // what Fast Startup is in the same breath it is named, and this computer is never called "this
     // PC". HiberbootEnabled read 0 on this computer on 2026-09-20, so today it would read the
     // "off" branch below.
@@ -387,7 +387,7 @@ internal static class Copy
         "Test " + oneBasedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + " of " +
         total.ToString(System.Globalization.CultureInfo.InvariantCulture) + ": " + name;
 
-    // The Step view's own progress line (plain-window-layout.md, point 1), shown above every
+    // The Step view's own progress line, shown above every
     // prompt for both an ordinary single-test start and Run all: "Test N of M", a middle dot, then
     // the row's own name, matching the spec's own literal example ("Test 3 of 20 · Connect with
     // one click"). Kept apart from RunAllProgressLine's own colon-separated shape above, rather
@@ -475,7 +475,7 @@ internal static class Copy
 
     internal const string PlainExeChosenStatus = "Earshot has been found on this computer.";
 
-    // Windows PowerShell 5.1's own fixed install path is technical; plain-words.md's own
+    // Windows PowerShell 5.1's own fixed install path is technical; the word list's
     // "console route" line ("say who to ask") covers exactly this: nothing here can be started
     // without it, and only whoever set Earshot up can fix that.
     internal const string PlainPowerShellMissingStatus =
@@ -498,7 +498,7 @@ internal static class Copy
     internal const string StopConfirmationWarning =
         "Stopping it now means no result is written, and this computer may still be able to grab your AirPods off your phone.";
 
-    // Home view (plain-window-layout.md's second pass): the window's own front page. Title, three
+    // Home view (the second pass): the window's own front page. Title, three
     // plain sentences, then the one large primary button (Copy.RunAllButtonLabel/RunAllCarryOnLabel,
     // unchanged, just re-homed here).
     internal const string HomeTitle = "Earshot tests";
@@ -575,7 +575,7 @@ internal static class Copy
         _ => "•",
     };
 
-    // The Result view's own single verdict line (plain-window-layout.md's Result section): the
+    // The Result view's own single verdict line (the layout's Result section): the
     // four sentences quoted there, verbatim, chosen from the same RowStateKind MainForm already
     // derived for this row (ComputeState/StateDeriver), never re-derived here. Any kind other than
     // the three named good-faith outcomes (Passed, Failed, Inconclusive) reads as the fourth,
@@ -599,7 +599,7 @@ internal static class Copy
     // sentence's own words alone either.
     internal static string ResultVerdictLine(RowStateKind kind) => RowStateSymbol(kind) + " " + ResultVerdictSentence(kind);
 
-    // Result view, plain mode (plain-window-layout.md): a raw folder and file path is jargon, kept
+    // Result view, plain mode: a raw folder and file path is jargon, kept
     // behind technical details (ResultPanel's own EvidenceLabel, unchanged); this is what replaces
     // it, plus the button beside it that actually opens the folder.
     internal const string ResultRecordSavedLine = "A record of this run has been saved.";

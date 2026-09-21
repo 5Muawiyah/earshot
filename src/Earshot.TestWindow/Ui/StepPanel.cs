@@ -6,7 +6,7 @@ namespace Earshot.TestWindow.Ui;
 // ChildRunner.ReplyFromOwnerClick call. Holds no decisions of its own:
 // PromptPresenter decided what to show, this only draws it.
 //
-// Internal layout (plain-window-layout.md, "Step (fills the window while a test runs)"), top to
+// Internal layout (the layout, "Step (fills the window while a test runs)"), top to
 // bottom, in one FlowLayoutPanel whose child order Show() rearranges every time:
 //   1. the progress line ("Test N of M <middle dot> <row name>"), when this run has a position in
 //      Run all's own order;
@@ -24,20 +24,20 @@ namespace Earshot.TestWindow.Ui;
 //
 // Which physical label plays "the checklist" (point 3) versus "the question" (point 5) depends on
 // the prompt: Show-Preconditions' own plain line ("Are all of those true, and are you ready to
-// start?") IS the question about the checklist above it, so it moves to point 5 rather than
+// start?") IS the question about the checklist above it, so it moves to rather than
 // sitting above the checklist it asks about (the named bug this redesign fixes). Wait-Owner has no
 // checklist; its plain line is the instruction (point 3) and "Have you done it?" is the question
 // (point 5). Confirm-Step, Read-Answer and Read-Note have no checklist and no non-technical detail
-// line of their own, so their plain line is the only text and sits at point 3, with nothing
-// duplicated at point 5.
+// line of their own, so their plain line is the only text and sits at, with nothing
+// duplicated at.
 internal sealed class StepPanel : Panel
 {
     // Buttons are disabled for 800 ms after a prompt appears, so a fast double
     // click on the previous prompt's position cannot answer this one.
     private static readonly TimeSpan ClickSafetyDelay = TimeSpan.FromMilliseconds(800);
 
-    // "Plain line font at least 14 pt, body at least 11 pt" (plain-window-layout.md): PlainLine is
-    // the short headline sentence, wherever it ends up (point 3 or point 5 above); the checklist
+    // "Plain line font at least 14 pt, body at least 11 pt": PlainLine is
+    // the short headline sentence, wherever it ends up (point 3 or above); the checklist
     // and the detail-derived question text are both "body" and use the smaller floor.
     private const float PlainLineFontSize = 14f;
     private const float BodyFontSize = 11f;
@@ -120,7 +120,7 @@ internal sealed class StepPanel : Panel
         _howToRow.Controls.Add(_howToStepsLabel);
         _howToRow.Controls.Add(_howToPictureBox);
 
-        // "at least 44 px high, 13 pt, evenly spaced" (plain-window-layout.md): a fixed minimum
+        // "at least 44 px high, 13 pt, evenly spaced": a fixed minimum
         // size holds even while AutoSize lets a longer label (a chosen speaker name, say) grow
         // wider; the same Margin on every button is what makes the spacing even.
         _buttonRow = new FlowLayoutPanel
@@ -247,8 +247,8 @@ internal sealed class StepPanel : Panel
             : prompt.DetailLabel + " " + prompt.DetailText;
 
         // Show-Preconditions' own plain line is the question about the checklist above it
-        // ("Are all of those true, and are you ready to start?"): it belongs at point 5, directly
-        // above the buttons, not at point 3 where a plain instruction would sit.
+        // ("Are all of those true, and are you ready to start?"): it belongs at, directly
+        // above the buttons, not at where a plain instruction would sit.
         bool plainLineIsQuestion = hasList;
         if (plainLineIsQuestion)
         {
@@ -327,7 +327,7 @@ internal sealed class StepPanel : Panel
 
         ApplyWrapWidths();
 
-        // "No default button" (plain-window-layout.md): a probe against this window's own real
+        // "No default button": a probe against this window's own real
         // behaviour (MainFormTestHarness, a real sandboxed run) found that a real WinForms Button
         // never keeps real keyboard focus (Control.Focused) across a prompt refresh here even
         // without this call - Controls.Clear() already drops it. What the same probe found left
@@ -416,7 +416,7 @@ internal sealed class StepPanel : Panel
         }
     }
 
-    // Reflow on resize (plain-window-layout.md: "the window stays resizable and the layout
+    // Reflow on resize (the layout: "the window stays resizable and the layout
     // reflows"): every wrapping label's own MaximumSize.Width is recomputed from this panel's
     // current client width, not fixed once at construction, and the how-to row's own label is
     // narrowed further to leave room for its fixed-size picture so the row never needs to grow
@@ -551,7 +551,7 @@ internal sealed class StepPanel : Panel
 
     // Whichever control currently holds the question text directly above the buttons (point 5),
     // or null for a prompt with nothing separate to ask there (Confirm-Step, Read-Answer,
-    // Read-Note: the body text at point 3 is already the only thing to answer).
+    // Read-Note: the body text at is already the only thing to answer).
     internal Control? QuestionControlForTests => _questionControlForTests;
 
     internal Control ButtonRowForTests => _buttonRow;

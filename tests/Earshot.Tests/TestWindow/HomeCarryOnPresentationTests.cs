@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// plain-window-layout.md's own acceptance check for Home, the first of the two this commit is
+// the layout's acceptance check for Home, the first of the two this commit is
 // owed: "If a run is waiting after a shut down: the primary button becomes 'Carry on with the
 // tests' and a line says which test it will pick up." UpdateRunAllButtonLabel already reads
 // run-all.json fresh at every open (RunAllPresentationTests.cs proves the underlying label logic

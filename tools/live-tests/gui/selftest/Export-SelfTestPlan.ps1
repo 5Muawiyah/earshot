@@ -4,7 +4,7 @@
     running it.
 
 .DESCRIPTION
-    tests\Earshot.Tests\TestWindow's coverage sweep (test-gui.md's "same evidence" proof) has to
+    tests\Earshot.Tests\TestWindow's coverage sweep (the design's "same evidence" proof) has to
     drive exactly the scripts and halves Invoke-SelfTest.ps1 itself covers, so a script or a half
     added there is picked up here too, with no second list to keep in step by hand. Invoke-SelfTest.ps1
     is off limits to edit and is not safe to run in full for this (it runs every case against a

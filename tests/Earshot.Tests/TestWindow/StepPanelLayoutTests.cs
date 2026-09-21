@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// plain-window-layout.md's Step view redesign: the checklist/instruction is a wrapping label that
+// the layout's Step view redesign: the checklist/instruction is a wrapping label that
 // never clips (never a ListBox, which cannot wrap), the how-to picture is visible without
 // scrolling at the default window size, the question sits directly above the answer buttons
 // (fixing the named bug: it used to come first), the answer buttons are large, and no stray Enter
@@ -21,8 +21,8 @@ public sealed class StepPanelLayoutTests
     // Before this change: StepPanel laid every control out at a fixed Top/Left. Test 01's own
     // Show-Preconditions prompt put the question ("Are all of those true, and are you ready to
     // start?", PromptPresenter's own PlainLine for that prompt) at Top=32 and the checklist itself
-    // (a ListBox) at Top=80: the question came before the list it asked about, the bug
-    // plain-window-layout.md names outright. Confirmed red against the unmodified file with a
+    // (a ListBox) at Top=80: the question came before the list it asked about, the wrong way
+    // round for a reader. Confirmed red against the unmodified file with a
     // throwaway probe before this test was written (not committed): body(ListBox).Bounds=
     // {Y=80,H=79}, question(Label).Bounds={Y=32,H=25} - the question's own bottom (57) sat above
     // the checklist's own top (80), the wrong way round.
@@ -78,7 +78,11 @@ public sealed class StepPanelLayoutTests
         using var sandbox = new TempFolder();
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
-            Assert.AreEqual(new Size(1100, 760), form.MinimumSize, "the window's own floor must be at least the spec's minimum.");
+            // The floor has to fit a small display, or Windows shrinks it and the window cannot be
+            // used there: a hosted build machine with a 1024 by 768 screen showed exactly that.
+            Assert.AreEqual(new Size(MainForm.MinimumWindowWidth, MainForm.MinimumWindowHeight), form.MinimumSize, "Windows changed the window's own floor, so it does not fit this display.");
+            Assert.IsLessThanOrEqualTo(1024, MainForm.MinimumWindowWidth);
+            Assert.IsLessThanOrEqualTo(720, MainForm.MinimumWindowHeight);
 
             Assert.IsTrue(form.SelectRowForTests("01"));
             form.ClickStartForTests();
@@ -128,7 +132,7 @@ public sealed class StepPanelLayoutTests
     }
 
     // (d) No label is clipped on Step for 01's preconditions, and the checklist is a real wrapping
-    // label, never a scrolling box that clips (plain-window-layout.md, point 3, verbatim).
+    // label, never a scrolling box that clips.
     //
     // Before this change: the checklist was a fixed 560x80 ListBox (StepPanel.cs's own
     // _listItemsBox), which HomeViewNoClippedLabelsTests' own technique cannot even see (it only
@@ -155,7 +159,7 @@ public sealed class StepPanelLayoutTests
             StepPanel panel = form.StepPanelForTests;
             Assert.IsInstanceOfType<Label>(panel.BodyControlForTests,
                 "the checklist must be a wrapping label; a ListBox cannot wrap and clips a long line at its own fixed width.");
-            Assert.IsFalse(panel.BodyControlForTests is ListBox, "never a scrolling box (plain-window-layout.md, point 3, verbatim).");
+            Assert.IsFalse(panel.BodyControlForTests is ListBox, "never a scrolling box.");
 
             var offenders = new List<string>();
             CollectClippedLabels(form.StepPanelForTests, offenders);
@@ -164,7 +168,7 @@ public sealed class StepPanelLayoutTests
     }
 
     // (e) Font sizes: the plain line at least 14 pt, a representative body control at least 11 pt
-    // (plain-window-layout.md, point 3: "Plain line font at least 14 pt, body at least 11 pt").
+    // (the layout: "Plain line font at least 14 pt, body at least 11 pt").
     [TestMethod]
     public void ThePlainLineIsAtLeast14PointAndTheBodyIsAtLeast11Point()
     {
@@ -177,7 +181,7 @@ public sealed class StepPanelLayoutTests
         });
     }
 
-    // (f) Answer buttons: at least 44 px high, at least 13 pt (plain-window-layout.md, point 6).
+    // (f) Answer buttons: at least 44 px high, at least 13 pt.
     [TestMethod]
     public void AnswerButtonsAreAtLeast44PxHighAndAtLeast13Point()
     {

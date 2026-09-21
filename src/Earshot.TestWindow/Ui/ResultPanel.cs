@@ -44,7 +44,7 @@ internal sealed class ResultPanel : Panel
 
         var heading = new Label { Text = "Result", AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(0, 0, 0, 8) };
 
-        // The Result view's own single verdict line (plain-window-layout.md): one large sentence
+        // The Result view's own single verdict line: one large sentence
         // with a symbol, never gated by the technical-details toggle (this window's own words,
         // never the script's, the same reasoning _atRestLabel below already follows).
         _verdictLabel = new Label
@@ -92,7 +92,7 @@ internal sealed class ResultPanel : Panel
 
         _evidenceLabel = new Label { AutoSize = true, MaximumSize = new Size(704, 0), Margin = new Padding(0, 0, 0, 12) };
 
-        // Plain mode's own replacement for the raw paths above (plain-window-layout.md's Result
+        // Plain mode's own replacement for the raw paths above (the layout's Result
         // section: "File paths are jargon: behind technical details. In plain mode one line ... and
         // a button"): the line and the button that actually opens the saved evidence folder for the
         // owner, both gated the same way the raw paths are, only the other way round.
@@ -114,7 +114,7 @@ internal sealed class ResultPanel : Panel
             Margin = new Padding(0, 0, 0, 8),
         };
 
-        // Spec order (plain-window-layout.md's Result section): verdict; the plain line per check
+        // Order: verdict; the plain line per check
         // that did not work; then the left-at-rest line in plain words; then, jargon behind the
         // toggle either way, the raw paths (technical) or the saved-record line and its button
         // (plain).

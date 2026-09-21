@@ -52,7 +52,7 @@ public sealed class NoBannedWordsInPlainModeTests
     private static readonly string[] BannedIncludingThisPc = Banned.Concat(new[] { "this PC" }).ToArray();
 
     // Real on-screen names that legitimately contain a would-be hit ("Block at boot" contains
-    // " boot"; "Exit" is a real Earshot tray menu item, plain-words.md's own exception for a menu
+    // " boot"; "Exit" is a real Earshot tray menu item, the word list's exception for a menu
     // name kept verbatim, and test 12's instruction names the same click in its ordinary verb
     // form). Checked by removing each allowed phrase from the text before scanning for banned
     // words, so nothing else in the same sentence is given a free pass by sitting near it.
@@ -193,7 +193,7 @@ public sealed class NoBannedWordsInPlainModeTests
         yield return (nameof(Copy.PlainWaitingForPowerCycleStatus), Copy.PlainWaitingForPowerCycleStatus(PowerCycleRequirement.AnyStart, "Full shut down and start"));
         yield return (nameof(Copy.SilentForMinutesStatus), Copy.SilentForMinutesStatus(15));
 
-        // Home's own new lines (plain-window-layout.md's second pass): the "how many tests" line
+        // Home's own new lines (the second pass): the "how many tests" line
         // and which test Carry on with the tests will pick up at.
         yield return (nameof(Copy.HomeRunAllCountLine), Copy.HomeRunAllCountLine(19, 2));
         yield return (nameof(Copy.HomeRunAllCountLine), Copy.HomeRunAllCountLine(1, 0));

@@ -26,7 +26,7 @@ public sealed class NoDocumentCitationsTests
     // ever starts there). Kept in the same shape as the search that found the first 69, so the two
     // can never silently drift apart.
     private static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b:|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review round",
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b:|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review round|\bplain-[a-z-]+\.md\b|\btest-gui[a-z0-9-]*\.md\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] OwnedFolders =

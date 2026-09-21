@@ -7,7 +7,7 @@ namespace Earshot.TestWindow.Ui;
 // once it exits. Test 10 is flattened into its five variant rows (DisplayRow.Flatten), so every
 // one of the 16 tests and all 22 halves is its own clickable entry; none is a text box.
 //
-// Three views share this window's client area, exactly one Visible at a time (plain-window-layout.md's
+// Three views share this window's client area, exactly one Visible at a time (the layout's
 // second pass): Home (the front page, and the default), List ("Choose one test") and Running (today's
 // StepPanel/ResultPanel/hand-off box, unredesigned this commit; a later commit rebuilds its own inside
 // without touching this switching mechanism). No logic moved: StateDeriver, Banner, RunGate,
@@ -20,6 +20,11 @@ namespace Earshot.TestWindow.Ui;
 internal sealed class MainForm : Form
 {
     internal enum MainView { Home, List, Running }
+
+    internal const int MinimumWindowWidth = 1000;
+    internal const int MinimumWindowHeight = 680;
+    private const int PreferredWindowWidth = 1150;
+    private const int PreferredWindowHeight = 800;
 
     private readonly string _repoRoot;
     private readonly IReadOnlyList<ManifestRow> _rows;
@@ -64,7 +69,7 @@ internal sealed class MainForm : Form
     private readonly Button _runAllCarryOnButton;
     private readonly Button _runAllStopHereButton;
 
-    // Result view navigation outside Run all (plain-window-layout.md's Result section: "Buttons:
+    // Result view navigation outside Run all (the layout's Result section: "Buttons:
     // in Run all, 'Carry on with the rest' and 'Stop here'; otherwise 'Back to the start'"). Shown
     // exactly when the Result view is on screen and Run all's own two buttons are not
     // (UpdateBackToStartVisibility); "the start" is Home, not the List view ("Choose one test"),
@@ -168,12 +173,14 @@ internal sealed class MainForm : Form
         _exePath = ExePathSettings.TryReadOrDefault(WindowStateRoot(), _exePath);
         _showTechnicalDetails = TechnicalDetailsSettings.TryReadOrDefault(WindowStateRoot());
 
-        // The whole window's own minimum, from this commit on (plain-window-layout.md): Home and
-        // List must fit without needing to be resized first, and the window stays resizable and
-        // reflows above that floor.
-        MinimumSize = new Size(1100, 760);
-        Width = 1150;
-        Height = 800;
+        // The floor is small enough for a 1366 by 768 laptop with its taskbar showing, and for a
+        // 1024 by 768 display: Windows will not honour a minimum larger than the screen, and a
+        // window that cannot fit cannot be used. Above the floor the window opens as large as the
+        // working area allows, up to its preferred size, stays resizable, and reflows.
+        MinimumSize = new Size(MinimumWindowWidth, MinimumWindowHeight);
+        Rectangle workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, PreferredWindowWidth, PreferredWindowHeight);
+        Width = Math.Max(MinimumWindowWidth, Math.Min(PreferredWindowWidth, workingArea.Width));
+        Height = Math.Max(MinimumWindowHeight, Math.Min(PreferredWindowHeight, workingArea.Height));
         StartPosition = FormStartPosition.CenterScreen;
 
         // A row shows a plain name and one line saying what the test proves, plus its state, not
@@ -241,7 +248,7 @@ internal sealed class MainForm : Form
         // The form only renders the current prompt, the transcript box and a Stop
         // button, standing throughout a run, not only for the rare unrecognised-prompt case
         // StepPanel's own built-in stop button covers. Small and pinned to the bottom edge of the
-        // Running view (plain-window-layout.md's Step view, point 7), away from StepPanel's own,
+        // Running view (the layout's Step view), away from StepPanel's own,
         // much larger answer buttons above it, rather than docked above everything the way it used
         // to sit: "Stop this test" must never read as one of the answers to whatever question is
         // currently on screen.
@@ -260,7 +267,7 @@ internal sealed class MainForm : Form
         _caseBox.Items.AddRange(new object[] { "none", "one", "two" });
         _caseBox.SelectedIndex = 1;
 
-        // AutoEllipsis used to cut a long path with "..." unconditionally (plain-window-layout.md's
+        // AutoEllipsis used to cut a long path with "..." unconditionally (the layout's
         // own "What is wrong now": the exe path was always-visible clutter). It is shown only when
         // technical details is on (ChooseExePath, OnTechnicalDetailsToggled and the initial value
         // below all set its Visible the same way), and AutoSize with a wide MaximumSize lets it wrap
@@ -463,7 +470,7 @@ internal sealed class MainForm : Form
         runningTopFlow.Controls.Add(_backToStartButton);
 
         // "Stop this test", small, at the bottom edge of the whole Running view, away from
-        // StepPanel's own answer buttons above it (plain-window-layout.md's Step view, point 7).
+        // StepPanel's own answer buttons above it (the layout's Step view).
         var stopRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
@@ -539,7 +546,7 @@ internal sealed class MainForm : Form
         _homePickupLineLabel.Visible = pickupRow is not null;
     }
 
-    // StepPanel's own progress line (plain-window-layout.md's Step view, point 1): "which test, of
+    // StepPanel's own progress line (the layout's Step view): "which test, of
     // how many", read from RunAllOrder.Items's own fixed sequence, the same list Run all's own
     // progress label and HomeRunAllCountLine already read. Works the same way whether this run is
     // part of Run all or an ordinary single Start click: RunAllOrder.Items names every numbered
@@ -897,7 +904,7 @@ internal sealed class MainForm : Form
         return _banner;
     }
 
-    // The at-rest banner sits at the top of Home (plain-window-layout.md), with its own
+    // The at-rest banner sits at the top of Home, with its own
     // find-and-click-the-Earshot-icon how-to block and picture beside it; _bannerLabel is AutoSize
     // now, so only Visible needs setting here, never a fixed Height that could clip its own wrapped
     // text.

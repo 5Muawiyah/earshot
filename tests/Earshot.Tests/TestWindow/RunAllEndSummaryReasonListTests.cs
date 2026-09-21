@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// plain-window-layout.md's Result section, its last bullet: "End of Run all: a summary (how many
+// the layout's Result section, its last bullet: "End of Run all: a summary (how many
 // worked, did not work, could not tell) and the list of tests not run yet with the plain reason
 // for each." Investigation (MainForm.cs, BuildRunAllEndSummarySentence): the per-test reason list
 // already existed before this commit touched anything - it is not a gap. BuildRunAllEndSummarySentence
