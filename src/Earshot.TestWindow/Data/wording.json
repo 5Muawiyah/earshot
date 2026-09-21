@@ -48,13 +48,13 @@
     { "test": "06", "kind": "consequence", "scriptText": "Turns the services back on from this non-elevated process, undoing what the previous step did.", "plain": "Tries to turn phone-call sound back on the same way, undoing the step before it." },
     { "test": "06", "kind": "consequence", "scriptText": "Starts the SYSTEM Protect task, which turns Handsfree and Headset off. Windows removes their profile drivers, so the AirPods microphone stops working on this PC. It can take minutes.", "plain": "Turns off phone-call sound on this PC, including the AirPods microphone. It can take a few minutes." },
     { "test": "06", "kind": "instruction", "scriptText": "Disconnect the AirPods from this PC and connect them again from Windows Bluetooth settings.", "plain": "Disconnect the AirPods from this PC and connect them again in Windows Bluetooth settings." },
-    { "test": "06", "kind": "consequence", "scriptText": "Disables the AirPods Bluetooth nodes, so the service read can be compared against the same read with the nodes enabled.", "plain": "Turns off the AirPods Bluetooth connection, so the next reading can be compared with the nodes on." },
+    { "test": "06", "kind": "consequence", "scriptText": "Disables the AirPods Bluetooth nodes, so the service read can be compared against the same read with the nodes enabled.", "plain": "Turns off the AirPods Bluetooth connection, so the next reading can be compared with the connection on." },
     { "test": "06", "kind": "consequence", "scriptText": "Enables the nodes again.", "plain": "Turns the AirPods Bluetooth connection back on." },
     { "test": "06", "kind": "question", "scriptText": "Leave protection on, as Earshot ships, or turn it off?", "plain": "Leave call protection on, as Earshot ships, or turn it off?" },
     { "test": "06", "kind": "consequence", "scriptText": "Turns the Handsfree and Headset services back on through the elevated task, which reinstalls their profile drivers. It can take minutes.", "plain": "Turns phone-call sound back on for this PC. It can take a few minutes." },
 
     { "test": "07", "kind": "consequence", "scriptText": "Starts the SYSTEM Gate task with the status verb. It reads the node state and writes a status file. It changes no device.", "plain": "Starts the background task to read the current state. It changes nothing on the AirPods." },
-    { "test": "07", "kind": "note", "scriptText": "From the gate log, how did the unsupplied third argument arrive (literal placeholder, empty, or not at all)?", "plain": "Look at the last lines from the gate log above. How did the missing third value arrive?", "choices": [
+    { "test": "07", "kind": "note", "scriptText": "From the gate log, how did the unsupplied third argument arrive (literal placeholder, empty, or not at all)?", "plain": "Look at the last lines shown above. How did the missing third value arrive?", "choices": [
       { "label": "As the literal placeholder", "recorded": "As the literal placeholder" },
       { "label": "Empty", "recorded": "Empty" },
       { "label": "Not at all", "recorded": "Not at all" },
@@ -123,7 +123,7 @@
     { "test": "12", "kind": "instruction", "scriptText": "Leave Earshot running for a few hours of normal use today, then exit it from the menu and come back to this.", "plain": "Leave Earshot running for a few hours of normal use today, then exit it from the menu and come back to this." },
 
     { "test": "13", "kind": "instruction", "scriptText": "Connect the AirPods to this PC and use them for a few minutes, with at least one pause between tracks longer than ten seconds.", "plain": "Connect the AirPods to this PC and use them for a few minutes, with at least one pause between tracks longer than ten seconds." },
-    { "test": "13", "kind": "question", "scriptText": "While you were using them, did Earshot ever cut the connection or block the nodes?", "plain": "While you were using them, did Earshot ever cut the connection or block the nodes?" },
+    { "test": "13", "kind": "question", "scriptText": "While you were using them, did Earshot ever cut the connection or block the nodes?", "plain": "While you were using them, did Earshot ever cut the connection or block it?" },
     { "test": "13", "kind": "instruction", "scriptText": "Stop using the AirPods now: pause everything, or take them out. Then leave the machine alone.", "plain": "Stop using the AirPods now: pause everything or take them out. Then leave this PC alone." },
 
     { "test": "14", "kind": "note", "scriptText": "Type the twelve character address of your phone, upper case.", "plain": "Which of these addresses is your phone?" },

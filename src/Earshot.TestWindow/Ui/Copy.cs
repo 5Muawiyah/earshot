@@ -69,9 +69,9 @@ internal static class Copy
         "tools\\live-tests\\Run-LiveTests.ps1 -Test 00 -ExePath <path to Earshot.exe> -OfferUninstall";
 
     internal const string PlanBNotAvailable =
-        "This row never tries the elevated plan B for the missing third value: -AllowPlanB is " +
-        "not wired to a control in this build. To run it, open a console and run: powershell " +
-        "-File tools\\live-tests\\Run-LiveTests.ps1 -Test 07 -ExePath <path to Earshot.exe> -AllowPlanB";
+        "This row never tries the plan B that needs an administrator prompt, for the missing third " +
+        "value: -AllowPlanB is not wired to a control in this build. To run it, open a console and " +
+        "run: powershell -File tools\\live-tests\\Run-LiveTests.ps1 -Test 07 -ExePath <path to Earshot.exe> -AllowPlanB";
 
     // Test 14's own "Moving the pin off a protected device" half needs a second Bluetooth audio
     // device's address, and this window never offers a text box to type one into. It is chosen
@@ -80,12 +80,12 @@ internal static class Copy
     // knows what to do rather than finding a button row with nothing on it.
     internal const string SpeakerAddressNoCandidates =
         "No second Bluetooth audio device has been read yet, so this half cannot be tried: nothing " +
-        "in an earlier run's own record of the Bluetooth nodes showed one. Pair a second device " +
-        "with an A2DP sink (a speaker, for example), run 01 or 02 once with it nearby, then come " +
+        "in an earlier run's own record of the Bluetooth connections showed one. Pair a second device " +
+        "that can play sound (a speaker, for example), run 01 or 02 once with it nearby, then come " +
         "back to this row to choose it.";
 
     internal const string SpeakerAddressChoicePrompt =
-        "Second device for the protected-device half, read from an earlier run's own node list:";
+        "Second device for this test, read from an earlier run's own list:";
 
     internal const string SpeakerAddressChoiceNone = "No second device";
 
@@ -126,15 +126,15 @@ internal static class Copy
     // own words, that the machine must be treated as left in the state Earshot exists to prevent:
     // an unread node state is never shown as though it were a yes.
     internal const string AtRestYes =
-        "Left at rest: yes. The AirPods nodes are blocked, so this PC will not page them at the next start.";
+        "Left at rest: yes. The AirPods' Bluetooth connection is blocked, so this PC will not page them at the next start.";
 
     internal const string AtRestNo =
         "NOT AT REST. This PC was left able to page the AirPods at the next start. That is the state Earshot " +
         "exists to prevent. Run Restore, or start Earshot, before you shut down.";
 
     internal const string AtRestUnknown =
-        "NOT KNOWN. The node state could not be read, so this PC must be treated as left in the state Earshot " +
-        "exists to prevent, until Restore has run.";
+        "NOT KNOWN. It could not be read whether the AirPods' Bluetooth connection is blocked, so this PC must " +
+        "be treated as left in the state Earshot exists to prevent, until Restore has run.";
 
     internal const string AtRestNotApplicable =
         "At rest does not apply here: Earshot is not set up, or Block at boot is off.";

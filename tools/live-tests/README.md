@@ -276,6 +276,43 @@ real. Nothing there touches a device, registers a task, elevates or starts
 the owner's machine fails the gate instead. `tools\live-tests\selftest\README.md`
 explains it, and says what to add when a test is added.
 
+## The test window
+
+`Earshot.TestWindow` is a front end over these same scripts. It runs them, reads
+their `result.json`, and writes its evidence to the same
+`%LOCALAPPDATA%\Earshot\livetest\` folder a console run would use.
+
+Open it with:
+
+```
+tools\open-test-window.cmd
+```
+
+It lists every test in this folder and offers "Run all, step by step", a guided
+sequence that stops and asks at every step. It is never an unattended run: it
+pauses wherever the owner is needed, and stops for every shut down or restart,
+carrying on in the same row when the window is opened again.
+
+A No answer, or a check that fails, stops the run there. The window shows which
+check it was, what was expected, what was actually seen, and where the evidence
+for it was written.
+
+Tests 08, 09 and 10 hand over across a shut down or restart this way. 08 and 09
+need a full shut down; the window refuses a restart for either.
+
+After every run, the window says plainly whether the PC was left at rest. A row
+with no evidence for it reads Unknown, and Unknown is never shown as a pass.
+
+Row 15 stays locked until the administrator prompt check, run once by the owner
+from this window by hand, has passed.
+
+`00-Restore.ps1 -OfferUninstall` and `07-TaskRunEx.ps1 -AllowPlanB` are not
+offered by any button here. Run them from a console instead, with those named
+switches, the same way the table above describes.
+
+No console test should be run while the window is open: both would read and
+write the same evidence folder and talk to the same device at once.
+
 ## A note on numbers
 
 Never write a figure into the README or anywhere else that a test did not measure.
