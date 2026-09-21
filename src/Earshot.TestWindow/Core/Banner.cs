@@ -108,6 +108,16 @@ internal static class Banner
             foreach (string testFolder in Directory.EnumerateDirectories(stampFolder))
             {
                 string testId = Path.GetFileName(testFolder);
+
+                // The administrator prompt rehearsal touches no device node and proves nothing
+                // about rest: its own result always carries a hard-coded leftAtRest of
+                // not-applicable, which must never be able to clear or outrank a real test's
+                // not-at-rest or unknown state, so it is not even a candidate here.
+                if (string.Equals(testId, ElevationGate.RehearsalTestId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 (ParsedResult? result, _) = EvidenceStore.TryReadResult(Path.Combine(testFolder, "result.json"), testId);
 
                 // A killed run (the window's own forced hard stop) leaves whatever result.json it found
@@ -118,9 +128,16 @@ internal static class Banner
                 // show no banner at all. A killed folder is never trusted, the same as an
                 // unreadable one: it can outrank a good result that is older than it, but it can
                 // never become the chosen one itself.
+                //
+                // Ordering for a killed or unreadable folder is the newest time anything in it was
+                // written (for a kill, that is the kill marker itself), never the stale result's
+                // own finishedUtc: a kill that happens long after an older pass elsewhere used to
+                // still read as "older" than that pass, by the stale first half's own clock, and so
+                // never outranked it or showed the banner at all.
                 bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt"));
-                DateTimeOffset ordering = result?.FinishedUtc ?? stampUtc;
-                runs.Add(new ScannedRun(stamp, result, ordering, result is not null && !killed));
+                bool readable = result is not null && !killed;
+                DateTimeOffset ordering = readable ? result!.FinishedUtc ?? stampUtc : NewestWriteTimeUtc(testFolder, stampUtc);
+                runs.Add(new ScannedRun(stamp, result, ordering, readable));
             }
         }
 
@@ -131,4 +148,28 @@ internal static class Banner
     // always parses for anything that reached here.
     private static DateTimeOffset ParseStampUtc(string stamp) =>
         DateTimeOffset.ParseExact(stamp, "yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+
+    // The newest last-write time of any file directly in this folder (result.json, resume.txt,
+    // gui-killed.txt and the rest), falling back to the run's own stamp when the folder holds
+    // nothing at all: a kill or a read failure is ordered by whatever actually happened last, not
+    // by a stale record's own idea of when it finished.
+    private static DateTimeOffset NewestWriteTimeUtc(string testFolder, DateTimeOffset fallback)
+    {
+        DateTimeOffset newest = fallback;
+        if (!Directory.Exists(testFolder))
+        {
+            return newest;
+        }
+
+        foreach (string file in Directory.EnumerateFiles(testFolder))
+        {
+            var written = new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
+            if (written > newest)
+            {
+                newest = written;
+            }
+        }
+
+        return newest;
+    }
 }
