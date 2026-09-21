@@ -18,6 +18,7 @@ internal sealed class StepPanel : Panel
     private readonly Label _scriptWordsCaption;
     private readonly TextBox _scriptWordsBox;
     private readonly FlowLayoutPanel _buttonRow;
+    private readonly Label _acknowledgementLabel;
     private readonly System.Windows.Forms.Timer _clickSafetyTimer;
 
     private ChildRunner? _runner;
@@ -45,6 +46,7 @@ internal sealed class StepPanel : Panel
             ScrollBars = ScrollBars.Vertical, BackColor = SystemColors.Control, ForeColor = SystemColors.GrayText,
         };
         _buttonRow = new FlowLayoutPanel { Top = 250, Left = 8, Width = 560, Height = 40, FlowDirection = FlowDirection.LeftToRight };
+        _acknowledgementLabel = new Label { AutoSize = true, MaximumSize = new Size(560, 0), Top = 296, Left = 8, ForeColor = SystemColors.GrayText };
 
         _clickSafetyTimer = new System.Windows.Forms.Timer { Interval = (int)ClickSafetyDelay.TotalMilliseconds };
         _clickSafetyTimer.Tick += (_, _) =>
@@ -63,6 +65,7 @@ internal sealed class StepPanel : Panel
         Controls.Add(_scriptWordsCaption);
         Controls.Add(_scriptWordsBox);
         Controls.Add(_buttonRow);
+        Controls.Add(_acknowledgementLabel);
     }
 
     // Every button built here calls this, and nothing else in the form does (ChildRunner itself
@@ -75,6 +78,7 @@ internal sealed class StepPanel : Panel
 
         _runner = runner;
         _currentSeq = seq;
+        _acknowledgementLabel.Text = string.Empty;
 
         _headingLabel.Text = prompt.Heading;
         _plainLineLabel.Text = prompt.PlainLine;
@@ -140,6 +144,13 @@ internal sealed class StepPanel : Panel
                 _runner?.ReplyFromOwnerClick(seqAtBuildTime, button.Reply);
                 ReplySent?.Invoke(seqAtBuildTime);
             }
+            else
+            {
+                // Wait-Owner's own "No": nothing is sent (the script is still waiting on the
+                // same Read-Host, unanswered), so the screen has to say that plainly rather than
+                // sit unchanged, which reads like the click did nothing at all.
+                _acknowledgementLabel.Text = "Take your time. Click Yes when you have done it.";
+            }
         };
         return control;
     }
@@ -158,4 +169,6 @@ internal sealed class StepPanel : Panel
     internal void ClickFirstButtonForTests() => ClickButtonForTests(0);
 
     internal void ClickButtonForTests(int index) => (_buttonRow.Controls.Count > index ? _buttonRow.Controls[index] as Button : null)?.PerformClick();
+
+    internal string AcknowledgementTextForTests => _acknowledgementLabel.Text;
 }

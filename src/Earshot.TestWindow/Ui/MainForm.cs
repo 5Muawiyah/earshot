@@ -1410,6 +1410,8 @@ internal sealed class MainForm : Form
 
     internal void ClickPromptButtonForTests(int index) => _stepPanel.ClickButtonForTests(index);
 
+    internal string StepPanelAcknowledgementTextForTests => _stepPanel.AcknowledgementTextForTests;
+
     internal FormClosingEventArgs RaiseFormClosingForTests(CloseReason reason)
     {
         var args = new FormClosingEventArgs(reason, cancel: false);
