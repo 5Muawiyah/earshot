@@ -8,9 +8,9 @@
 
 </div>
 
-<p align="center"><img src="docs/images/hero.png" alt="The Earshot tray icon" width="100%"></p>
+<p align="center"><img src="docs/images/hero.png" alt="Earshot's icon in the tray, with its card above it saying Connected" width="100%"></p>
 
-<p align="center"><i>Placeholder art, not a screenshot. Pending a real capture of the tray in use.</i></p>
+<p align="center"><i>Earshot in the tray: one click, and a small card says what happened.</i></p>
 
 Muawiyah Jahanzaib built Earshot because Windows pages every paired Bluetooth
 device when the PC powers on, including AirPods that were left on a phone in

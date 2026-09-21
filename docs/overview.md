@@ -38,9 +38,9 @@ likewise `disconnected`, `blocked` or `not found`. If Earshot cannot read the
 audio devices at all it says `unknown`, rather than guessing at one of the
 four states.
 
-<img src="images/tray-menu.png" alt="The Earshot tray icon and its right-click menu" width="360" align="right">
+<img src="images/tray-menu.png" alt="Earshot's right-click menu on a set up PC with the AirPods disconnected" width="360" align="right">
 
-<p align="center"><i>Placeholder art, not a screenshot. Pending a real capture of the menu open.</i></p>
+<p align="center"><i>The right-click menu on a PC that is set up, with the AirPods disconnected.</i></p>
 
 ## The right-click menu
 
@@ -75,11 +75,11 @@ were doing. If the AirPods do not arrive the ordinary way, the card says so
 honestly, for instance "Trying another way" while Earshot works around a
 driver refusal.
 
-<p align="center"><i>Placeholder art, not a screenshot. Pending a real capture of the card in view.</i></p>
+<p align="center"><i>The card Earshot shows near the tray when the AirPods connect.</i></p>
 
 <br clear="all">
 
-<img src="images/boot-block.png" alt="Placeholder image, standing in for a diagram of the device node being disabled at boot" width="360" align="right">
+<img src="images/boot-block.png" alt="The card Earshot shows when the AirPods are blocked at boot" width="360" align="right">
 
 ## The boot block
 
@@ -88,11 +88,11 @@ they stop being used, and stay disabled through a restart. Nothing has to run
 at shutdown for that to hold; staying disabled is the steady state, and it is
 what stops Windows paging them at the next boot.
 
-<p align="center"><i>Placeholder art, not a screenshot. Pending a real capture of this state.</i></p>
+<p align="center"><i>The card Earshot shows when the AirPods are blocked at boot.</i></p>
 
 <br clear="all">
 
-<img src="images/audio-protection.png" alt="Placeholder image, standing in for a diagram of the Hands-Free profile being turned off" width="360" align="right">
+<img src="images/audio-protection.png" alt="The card Earshot shows when audio quality protection is switched on" width="360" align="right">
 
 ## Audio quality protection
 
@@ -111,7 +111,7 @@ again on this PC while that runs. If putting the protection back fails, the
 card says "Connected, but audio quality protection did not apply." and the
 microphone stays available until the next connect fixes it.
 
-<p align="center"><i>Placeholder art, not a screenshot. Pending a real capture of this state.</i></p>
+<p align="center"><i>The notice Earshot shows when audio quality protection is switched on.</i></p>
 
 <br clear="all">
 
