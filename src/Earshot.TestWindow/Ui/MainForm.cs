@@ -367,13 +367,21 @@ internal sealed class MainForm : Form
 
         if (row.Row.Number == "14")
         {
-            IReadOnlyList<string> candidates = SpeakerCandidateFinder.Find(LiveTestRoot());
+            IReadOnlyList<SpeakerCandidate> candidates = SpeakerCandidateFinder.Find(LiveTestRoot());
             if (candidates.Count == 0)
             {
                 text += Environment.NewLine + Environment.NewLine + Copy.SpeakerAddressNoCandidates;
             }
 
             UpdateSpeakerChoice(candidates);
+
+            // The chosen candidate is shown on the row itself, before Start is ever clicked: the
+            // owner reads what will actually be forwarded as -SpeakerAddress from the same place
+            // as every other fact about this row, not only from which button happens to look
+            // pressed in the choice row above.
+            SpeakerCandidate? chosen = candidates.FirstOrDefault(c => c.Address == _chosenSpeakerAddress);
+            text += Environment.NewLine + Environment.NewLine +
+                (chosen is not null ? "Second device chosen: " + chosen.DisplayText : "Second device chosen: none.");
         }
         else
         {
@@ -387,7 +395,7 @@ internal sealed class MainForm : Form
     // row, or when nothing is selected). A previously chosen address is kept only while it is
     // still among the candidates read this time; anything else (no row 14, no candidates, a stale
     // choice) resets it to null, which StartFreshRun then reads as "no second device".
-    private void UpdateSpeakerChoice(IReadOnlyList<string>? candidates)
+    private void UpdateSpeakerChoice(IReadOnlyList<SpeakerCandidate>? candidates)
     {
         _speakerChoiceRow.Controls.Clear();
 
@@ -399,7 +407,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (_chosenSpeakerAddress is not null && !candidates.Contains(_chosenSpeakerAddress, StringComparer.Ordinal))
+        if (_chosenSpeakerAddress is not null && !candidates.Any(c => c.Address == _chosenSpeakerAddress))
         {
             _chosenSpeakerAddress = null;
         }
@@ -407,16 +415,16 @@ internal sealed class MainForm : Form
         _speakerChoiceLabel.Visible = true;
         _speakerChoiceRow.Visible = true;
 
-        foreach (string address in candidates)
+        foreach (SpeakerCandidate candidate in candidates)
         {
-            string captured = address;
-            var button = new Button { Text = address, AutoSize = true, Margin = new Padding(4) };
-            button.Click += (_, _) => _chosenSpeakerAddress = captured;
+            string captured = candidate.Address;
+            var button = new Button { Text = candidate.DisplayText, AutoSize = true, Margin = new Padding(4) };
+            button.Click += (_, _) => { _chosenSpeakerAddress = captured; UpdateRowDetail(); };
             _speakerChoiceRow.Controls.Add(button);
         }
 
         var noneButton = new Button { Text = Copy.SpeakerAddressChoiceNone, AutoSize = true, Margin = new Padding(4) };
-        noneButton.Click += (_, _) => _chosenSpeakerAddress = null;
+        noneButton.Click += (_, _) => { _chosenSpeakerAddress = null; UpdateRowDetail(); };
         _speakerChoiceRow.Controls.Add(noneButton);
     }
 

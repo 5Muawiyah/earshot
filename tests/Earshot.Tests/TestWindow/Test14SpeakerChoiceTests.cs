@@ -5,8 +5,10 @@ namespace Earshot.Tests.TestWindow;
 
 // The window can never type -SpeakerAddress in for test 14 (no text box anywhere in this
 // project), so it is chosen from buttons instead, built from whatever an earlier run's own node
-// evidence already shows (SpeakerCandidateFinder). Real MainForm, real row selection, exactly the
-// way every other *ForTests test in this project drives it.
+// evidence already shows (SpeakerCandidateFinder): the newest readable node evidence only, each
+// button showing the device name and the run it came from when the evidence holds them, and the
+// chosen one visible on the row itself before Start is ever clicked. Real MainForm, real row
+// selection, exactly the way every other *ForTests test in this project drives it.
 [TestClass]
 public sealed class Test14SpeakerChoiceTests
 {
@@ -35,9 +37,27 @@ public sealed class Test14SpeakerChoiceTests
 
             IReadOnlyList<string> choices = form.SpeakerAddressChoicesForTests;
             Assert.AreEqual(3, choices.Count, "two candidates plus \"" + Copy.SpeakerAddressChoiceNone + "\": " + string.Join(", ", choices));
-            CollectionAssert.Contains(choices.ToArray(), "B4C5D6E7F809");
-            CollectionAssert.Contains(choices.ToArray(), "C7D8E9F0A1B2");
+            Assert.IsTrue(choices.Any(c => c.StartsWith("B4C5D6E7F809", StringComparison.Ordinal)));
+            Assert.IsTrue(choices.Any(c => c.StartsWith("C7D8E9F0A1B2", StringComparison.Ordinal)));
             CollectionAssert.Contains(choices.ToArray(), Copy.SpeakerAddressChoiceNone);
+        });
+    }
+
+    // Each button names the run its evidence came from, always; the device name only when the
+    // evidence actually held one.
+    [TestMethod]
+    public void EachButtonNamesTheSourceRunAndTheDeviceNameWhenTheEvidenceHoldsOne()
+    {
+        using var sandbox = new Earshot.Tests.TempFolder();
+        WriteNodeEvidence(sandbox.Path, "B4C5D6E7F809");
+
+        MainFormTestHarness.Run(sandbox.Path, form =>
+        {
+            Assert.IsTrue(form.SelectRowForTests("14"));
+            string choice = form.SpeakerAddressChoicesForTests.Single(c => c.StartsWith("B4C5D6E7F809", StringComparison.Ordinal));
+
+            StringAssert.Contains(choice, "01-a2dp-oneshot");
+            StringAssert.Contains(choice, "Kitchen Speaker");
         });
     }
 
@@ -58,6 +78,27 @@ public sealed class Test14SpeakerChoiceTests
             // The last button is always "No second device".
             form.ClickSpeakerAddressChoiceForTests(form.SpeakerAddressChoicesForTests.Count - 1);
             Assert.IsNull(form.ChosenSpeakerAddressForTests);
+        });
+    }
+
+    // The chosen candidate is shown on the row itself, before Start is ever clicked, so the owner
+    // reads what will actually be forwarded as -SpeakerAddress from the row's own text, not only
+    // from which button happens to look pressed.
+    [TestMethod]
+    public void TheChosenCandidateIsVisibleOnTheRowBeforeStartIsClicked()
+    {
+        using var sandbox = new Earshot.Tests.TempFolder();
+        WriteNodeEvidence(sandbox.Path, "B4C5D6E7F809");
+
+        MainFormTestHarness.Run(sandbox.Path, form =>
+        {
+            Assert.IsTrue(form.SelectRowForTests("14"));
+            StringAssert.Contains(form.RowDetailTextForTests, "chosen: none");
+
+            form.ClickSpeakerAddressChoiceForTests(0);
+
+            StringAssert.Contains(form.RowDetailTextForTests, "B4C5D6E7F809");
+            StringAssert.Contains(form.RowDetailTextForTests, "Kitchen Speaker");
         });
     }
 
@@ -87,7 +128,8 @@ public sealed class Test14SpeakerChoiceTests
         };
         foreach (string address in otherAddresses)
         {
-            nodes.Add("{ \"instanceId\": \"BTHENUM\\\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&0002\\\\7&" + address + "&0&" + address + "_C00000000\" }");
+            nodes.Add("{ \"instanceId\": \"BTHENUM\\\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&0002\\\\7&" + address + "&0&" + address +
+                "_C00000000\", \"name\": \"Kitchen Speaker\" }");
         }
 
         string json = "{ \"address\": \"0A1B2C3D4E8C\", \"nodeState\": \"Allowed\", \"nodes\": [" + string.Join(",", nodes) + "] }";

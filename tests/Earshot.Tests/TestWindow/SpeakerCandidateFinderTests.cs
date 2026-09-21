@@ -46,8 +46,32 @@ public sealed class SpeakerCandidateFinderTests
             }
             """);
 
-        IReadOnlyList<string> found = SpeakerCandidateFinder.Find(folder.Path);
-        CollectionAssert.AreEquivalent(TwoAddresses, found.ToArray(), "case-insensitive input must come back upper case, and the pinned address must never appear.");
+        IReadOnlyList<SpeakerCandidate> found = SpeakerCandidateFinder.Find(folder.Path);
+        CollectionAssert.AreEquivalent(TwoAddresses, found.Select(c => c.Address).ToArray(), "case-insensitive input must come back upper case, and the pinned address must never appear.");
+        Assert.IsTrue(found.All(c => c.SourceStamp == "20260921T000000Z" && c.SourceTestId == "01-a2dp-oneshot"),
+            "Each candidate must carry the run it actually came from.");
+    }
+
+    [TestMethod]
+    public void CarriesTheDeviceNameWhenTheEvidenceHoldsOneAndNullWhenItDoesNot()
+    {
+        using var folder = new Earshot.Tests.TempFolder();
+        string testFolder = Path.Combine(folder.Path, "20260921T000000Z", "01-a2dp-oneshot");
+        Directory.CreateDirectory(testFolder);
+
+        File.WriteAllText(Path.Combine(testFolder, "nodes-before.json"), """
+            {
+              "address": "0A1B2C3D4E8C",
+              "nodes": [
+                { "instanceId": "DEV_B4C5D6E7F809", "name": "Kitchen Speaker" },
+                { "instanceId": "DEV_C7D8E9F0A1B2" }
+              ]
+            }
+            """);
+
+        IReadOnlyList<SpeakerCandidate> found = SpeakerCandidateFinder.Find(folder.Path);
+        Assert.AreEqual("Kitchen Speaker", found.Single(c => c.Address == "B4C5D6E7F809").DeviceName);
+        Assert.IsNull(found.Single(c => c.Address == "C7D8E9F0A1B2").DeviceName);
     }
 
     [TestMethod]
@@ -62,8 +86,9 @@ public sealed class SpeakerCandidateFinderTests
         File.WriteAllText(Path.Combine(older, "nodes.json"), """{ "address": "0A1B2C3D4E8C", "nodes": [ { "instanceId": "DEV_AAAAAAAAAAAA" } ] }""");
         File.WriteAllText(Path.Combine(newer, "nodes.json"), """{ "address": "0A1B2C3D4E8C", "nodes": [ { "instanceId": "DEV_BBBBBBBBBBBB" } ] }""");
 
-        IReadOnlyList<string> found = SpeakerCandidateFinder.Find(folder.Path);
-        CollectionAssert.AreEquivalent(NewestAddressOnly, found.ToArray());
+        IReadOnlyList<SpeakerCandidate> found = SpeakerCandidateFinder.Find(folder.Path);
+        CollectionAssert.AreEquivalent(NewestAddressOnly, found.Select(c => c.Address).ToArray());
+        Assert.AreEqual("20260921T000000Z", found[0].SourceStamp, "Only the newest run's own evidence must ever be offered.");
     }
 
     [TestMethod]
