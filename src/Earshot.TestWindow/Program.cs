@@ -14,7 +14,15 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
 
-        bool sandboxRequested = StartupGate.HasSandboxArgument(args);
+        // M6: --sandbox's presence and its actual, valid folder are decided together, once, here.
+        // sandboxRequested (used both by the refusal below and to build the real SandboxOptions
+        // MainForm gets) is true only when a valid folder was actually parsed; the switch present
+        // with nothing usable after it is its own refusal, never a silent fall-through to a REAL,
+        // non-sandboxed run with the safety-variable refusal already bypassed.
+        bool sandboxArgumentPresent = StartupGate.HasSandboxArgument(args);
+        bool sandboxParsed = SandboxOptions.TryParse(args, out SandboxOptions? sandbox);
+        bool sandboxRequested = sandboxArgumentPresent && sandboxParsed;
+        bool sandboxArgumentWithoutValidFolder = sandboxArgumentPresent && !sandboxParsed;
         bool safeModeSet = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("EARSHOT_SAFE_MODE"));
         bool dataRootSet = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("EARSHOT_DATA_ROOT"));
         bool solutionFound = StartupGate.FindSolutionAbove(AppContext.BaseDirectory, out string? repoRoot);
@@ -27,6 +35,7 @@ internal static class Program
             safeModeVariableSet: safeModeSet,
             dataRootVariableSet: dataRootSet,
             sandboxRequested: sandboxRequested,
+            sandboxArgumentWithoutValidFolder: sandboxArgumentWithoutValidFolder,
             anotherInstanceRunning: !acquiredInstance,
             solutionFound: solutionFound,
             powerShell51Found: powerShell51Found);
@@ -40,7 +49,6 @@ internal static class Program
         // The mutex stays owned by this process for as long as the window runs, so a second
         // instance's own attempt to create it sees createdNew false the whole time. It is
         // released implicitly when the handle closes at process exit.
-        _ = SandboxOptions.TryParse(args, out SandboxOptions? sandbox);
         IReadOnlyList<ManifestRow> rows = Manifest.Load(Manifest.DefaultPath());
         IReadOnlyList<WordingEntry> wording = Wording.Load(Wording.DefaultPath());
         string exePath = Path.Combine(

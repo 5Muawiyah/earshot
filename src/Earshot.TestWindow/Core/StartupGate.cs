@@ -8,6 +8,7 @@ internal enum StartupRefusal
 {
     None = 0,
     RunningElevated,
+    SandboxRequestedWithoutFolder,
     SandboxEnvironmentVariableSet,
     AnotherInstanceRunning,
     SolutionNotFound,
@@ -22,11 +23,19 @@ internal static class StartupGate
     // Order matches the bullet list in design.md 8.1. An elevated window is refused before
     // anything else is even worth reading, and a missing PowerShell 5.1 is checked last because
     // every other refusal is cheaper to explain.
+    // M6: sandboxRequested must mean a sandbox that was actually usable, not merely the bare
+    // presence of the --sandbox switch. Before sandboxArgumentWithoutValidFolder existed, the
+    // switch's mere presence (StartupGate.HasSandboxArgument) was used to decide sandboxRequested
+    // and, separately and independently, SandboxOptions.TryParse decided whether MainForm actually
+    // got a sandbox: --sandbox with nothing after it (or Program.cs's own TryParse call
+    // discarding its own success flag) bypassed the environment-variable refusal below while
+    // still starting a REAL, non-sandboxed run.
     internal static StartupRefusal Evaluate(
         bool isElevated,
         bool safeModeVariableSet,
         bool dataRootVariableSet,
         bool sandboxRequested,
+        bool sandboxArgumentWithoutValidFolder,
         bool anotherInstanceRunning,
         bool solutionFound,
         bool powerShell51Found)
@@ -34,6 +43,11 @@ internal static class StartupGate
         if (isElevated)
         {
             return StartupRefusal.RunningElevated;
+        }
+
+        if (sandboxArgumentWithoutValidFolder)
+        {
+            return StartupRefusal.SandboxRequestedWithoutFolder;
         }
 
         if (!sandboxRequested && (safeModeVariableSet || dataRootVariableSet))
@@ -72,14 +86,16 @@ internal static class StartupGate
         return false;
     }
 
-    // The folder after --sandbox, or null when the switch is absent or has nothing after it.
+    // The folder after --sandbox, or null when the switch is absent, has nothing after it, or
+    // what follows it is empty or all whitespace (M6: none of those is a valid folder either).
     internal static string? SandboxFolder(IReadOnlyList<string> args)
     {
         for (int i = 0; i + 1 < args.Count; i++)
         {
             if (string.Equals(args[i], SandboxArgument, StringComparison.Ordinal))
             {
-                return args[i + 1];
+                string candidate = args[i + 1];
+                return string.IsNullOrWhiteSpace(candidate) ? null : candidate;
             }
         }
 
@@ -120,6 +136,8 @@ internal static class StartupGate
     {
         StartupRefusal.RunningElevated =>
             "This window is running as administrator. Tests 06 and 07 need a normal window. Close it and open it normally.",
+        StartupRefusal.SandboxRequestedWithoutFolder =>
+            "--sandbox needs a folder after it, for example --sandbox C:\\temp\\sandbox. Nothing was started.",
         StartupRefusal.SandboxEnvironmentVariableSet =>
             "EARSHOT_SAFE_MODE or EARSHOT_DATA_ROOT is set for this window. A real run never has either set. " +
             "Close the window that set it, or start this one with --sandbox for development.",

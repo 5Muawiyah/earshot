@@ -14,7 +14,7 @@ public sealed class StartupGateTests
     public void RunningElevatedWinsOverEverythingElse()
     {
         StartupRefusal refusal = StartupGate.Evaluate(
-            isElevated: true, safeModeVariableSet: true, dataRootVariableSet: true, sandboxRequested: true,
+            isElevated: true, safeModeVariableSet: true, dataRootVariableSet: true, sandboxRequested: true, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: true, solutionFound: false, powerShell51Found: false);
 
         Assert.AreEqual(StartupRefusal.RunningElevated, refusal);
@@ -24,11 +24,11 @@ public sealed class StartupGateTests
     public void SafeModeOrDataRootRefusesWithoutSandbox()
     {
         Assert.AreEqual(StartupRefusal.SandboxEnvironmentVariableSet, StartupGate.Evaluate(
-            isElevated: false, safeModeVariableSet: true, dataRootVariableSet: false, sandboxRequested: false,
+            isElevated: false, safeModeVariableSet: true, dataRootVariableSet: false, sandboxRequested: false, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true));
 
         Assert.AreEqual(StartupRefusal.SandboxEnvironmentVariableSet, StartupGate.Evaluate(
-            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: true, sandboxRequested: false,
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: true, sandboxRequested: false, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true));
     }
 
@@ -36,17 +36,53 @@ public sealed class StartupGateTests
     public void SandboxArgumentLetsTheSafetyVariablesThrough()
     {
         StartupRefusal refusal = StartupGate.Evaluate(
-            isElevated: false, safeModeVariableSet: true, dataRootVariableSet: true, sandboxRequested: true,
+            isElevated: false, safeModeVariableSet: true, dataRootVariableSet: true, sandboxRequested: true, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true);
 
         Assert.AreEqual(StartupRefusal.None, refusal);
+    }
+
+    // M6: "--sandbox with no folder starts REAL mode with the environment refusal bypassed."
+    // sandboxArgumentWithoutValidFolder must refuse outright, before the environment-variable
+    // check ever gets a chance to see sandboxRequested as a reason to let it through: a caller
+    // that could not parse a folder must never also pass sandboxRequested true.
+    [TestMethod]
+    public void SandboxArgumentWithoutAFolderRefusesEvenWithTheSafetyVariablesSet()
+    {
+        StartupRefusal refusal = StartupGate.Evaluate(
+            isElevated: false, safeModeVariableSet: true, dataRootVariableSet: true, sandboxRequested: false,
+            sandboxArgumentWithoutValidFolder: true, anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true);
+
+        Assert.AreEqual(StartupRefusal.SandboxRequestedWithoutFolder, refusal);
+    }
+
+    [TestMethod]
+    public void SandboxArgumentWithoutAFolderRefusesEvenWithNoSafetyVariablesSet()
+    {
+        StartupRefusal refusal = StartupGate.Evaluate(
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false,
+            sandboxArgumentWithoutValidFolder: true, anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true);
+
+        Assert.AreEqual(StartupRefusal.SandboxRequestedWithoutFolder, refusal);
+    }
+
+    // M6, the other half: --sandbox followed by only whitespace is just as unusable a folder as
+    // nothing at all.
+    private static readonly string[] SandboxWithWhitespaceFolder = { "--sandbox", "   " };
+    private static readonly string[] SandboxWithEmptyFolder = { "--sandbox", string.Empty };
+
+    [TestMethod]
+    public void SandboxFolderRejectsAWhitespaceOnlyValue()
+    {
+        Assert.IsNull(StartupGate.SandboxFolder(SandboxWithWhitespaceFolder));
+        Assert.IsNull(StartupGate.SandboxFolder(SandboxWithEmptyFolder));
     }
 
     [TestMethod]
     public void AnotherInstanceRefusesWhenNotElevatedAndNotSandboxed()
     {
         StartupRefusal refusal = StartupGate.Evaluate(
-            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false,
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: true, solutionFound: true, powerShell51Found: true);
 
         Assert.AreEqual(StartupRefusal.AnotherInstanceRunning, refusal);
@@ -56,7 +92,7 @@ public sealed class StartupGateTests
     public void MissingSolutionRefuses()
     {
         StartupRefusal refusal = StartupGate.Evaluate(
-            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false,
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: false, solutionFound: false, powerShell51Found: true);
 
         Assert.AreEqual(StartupRefusal.SolutionNotFound, refusal);
@@ -66,7 +102,7 @@ public sealed class StartupGateTests
     public void MissingPowerShell51Refuses()
     {
         StartupRefusal refusal = StartupGate.Evaluate(
-            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false,
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: false, solutionFound: true, powerShell51Found: false);
 
         Assert.AreEqual(StartupRefusal.WindowsPowerShell51Missing, refusal);
@@ -76,7 +112,7 @@ public sealed class StartupGateTests
     public void EverythingClearLetsTheWindowOpen()
     {
         StartupRefusal refusal = StartupGate.Evaluate(
-            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false,
+            isElevated: false, safeModeVariableSet: false, dataRootVariableSet: false, sandboxRequested: false, sandboxArgumentWithoutValidFolder: false,
             anotherInstanceRunning: false, solutionFound: true, powerShell51Found: true);
 
         Assert.AreEqual(StartupRefusal.None, refusal);
@@ -88,7 +124,7 @@ public sealed class StartupGateTests
         var messages = new HashSet<string>(StringComparer.Ordinal);
         foreach (StartupRefusal refusal in new[]
         {
-            StartupRefusal.RunningElevated, StartupRefusal.SandboxEnvironmentVariableSet,
+            StartupRefusal.RunningElevated, StartupRefusal.SandboxRequestedWithoutFolder, StartupRefusal.SandboxEnvironmentVariableSet,
             StartupRefusal.AnotherInstanceRunning, StartupRefusal.SolutionNotFound,
             StartupRefusal.WindowsPowerShell51Missing,
         })
