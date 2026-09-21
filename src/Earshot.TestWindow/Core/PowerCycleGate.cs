@@ -15,10 +15,9 @@ internal enum PowerCycleGateResult
 
 // The required-transition table. Only PowerCycleVerdict.PowerDown ever counts as a confirmed
 // shut down; restart, not-yet and unknown never do, whatever the requirement: an unreadable log
-// is unknown, never accepted as a shut down. A restart where a full shut down was needed is not
-// refused outright, unlike not-yet (nothing happened at all, so there is nothing to override):
-// most of the boot path still ran, so the half can still be tried, but only past the owner's own
-// deliberate acknowledgement that it does not settle the acceptance question a real shut down would.
+// is unknown, never accepted as a shut down. A restart where a full shut down was needed is
+// refused with no way past it: a restart does not exercise what the power cycle tests exist to
+// exercise, and the newest transition decides, so a proper shut down afterwards puts it right.
 internal static class PowerCycleGate
 {
     internal static PowerCycleGateResult Evaluate(PowerCycleRequirement requirement, PowerCycleVerdict verdict) => requirement switch
@@ -26,7 +25,7 @@ internal static class PowerCycleGate
         PowerCycleRequirement.FullShutDown => verdict switch
         {
             PowerCycleVerdict.PowerDown => PowerCycleGateResult.Start,
-            PowerCycleVerdict.Restart => PowerCycleGateResult.StartNoted,
+            PowerCycleVerdict.Restart => PowerCycleGateResult.Refuse,
             PowerCycleVerdict.NotYet => PowerCycleGateResult.Refuse,
             _ => PowerCycleGateResult.StartNoted,
         },
@@ -47,20 +46,27 @@ internal static class PowerCycleGate
         _ => PowerCycleGateResult.Start,
     };
 
-    // Refuse always means nothing at all was recorded since the first half finished: there is
-    // nothing an owner could deliberately carry on past, only a transition still to do.
-    internal static string RefusalMessage(PowerCycleRequirement requirement, PowerCycleVerdict verdict) =>
-        "Windows has not recorded a start since the first half finished. Do the shut down or restart this test asks for, then open this window again.";
+    // A refusal has nothing to click past: either the wrong transition was recorded where only a
+    // full shut down will do, or no start has been recorded at all since the first half finished.
+    internal static string RefusalMessage(PowerCycleRequirement requirement, PowerCycleVerdict verdict)
+    {
+        if (requirement == PowerCycleRequirement.FullShutDown && verdict == PowerCycleVerdict.Restart)
+        {
+            return "That was a restart, not a shut down. This test needs a full shut down, so the second half will not start. " +
+                "Shut down now (Start, Power, Shut down), start the PC again and open this window. Your first half is kept.";
+        }
+
+        return "Windows has not recorded a start since the first half finished. Do the shut down or restart this test asks for, then open this window again.";
+    }
 
     // StartNoted's own warning, shown before the deliberate click MainForm's own noted-start
     // control waits for; never shown for Start or Refuse, which have nothing to click past.
     internal static string NotedWarning(PowerCycleRequirement requirement, PowerCycleVerdict verdict)
     {
-        if (requirement == PowerCycleRequirement.FullShutDown && verdict == PowerCycleVerdict.Restart)
+        if (requirement == PowerCycleRequirement.Restart && verdict == PowerCycleVerdict.PowerDown)
         {
-            return "That was a restart, not a shut down. This test needs a full shut down to settle the acceptance question, so this " +
-                "half cannot count as a clean pass however it comes out. Shut down now (Start, Power, Shut down) instead if you can; " +
-                "carry on only if you want to try it anyway.";
+            return "That was a shut down, not a restart. This test asks for a restart, so this half cannot count as a clean pass " +
+                "however it comes out. Carry on only if you want to try it anyway.";
         }
 
         return "The event log could not be read, so Windows' own record of the shut down or restart is not available. This half " +

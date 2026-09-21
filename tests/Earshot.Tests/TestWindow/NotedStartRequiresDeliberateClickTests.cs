@@ -26,7 +26,7 @@ public sealed class NotedStartRequiresDeliberateClickTests
         string repoRoot = RepositoryLocator.RepositoryRoot();
         string scriptPath = Path.Combine(repoRoot, "tools", "live-tests", "08-AcceptancePowerCycle.ps1");
         string realExePath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        string warning = PowerCycleGate.NotedWarning(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Restart);
+        string warning = PowerCycleGate.NotedWarning(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Unknown);
 
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
@@ -43,7 +43,7 @@ public sealed class NotedStartRequiresDeliberateClickTests
             form.ShowNotedStartWarningForTests(host, row, instruction, warning);
 
             Assert.IsTrue(form.NotedStartWarningVisibleForTests, "the noted-start warning was never shown.");
-            StringAssert.Contains(form.NotedStartWarningTextForTests, "restart, not a shut down");
+            StringAssert.Contains(form.NotedStartWarningTextForTests, "could not be read");
             Assert.IsNull(form.ActiveRunnerForTests, "a noted start must never start anything before the deliberate click.");
 
             form.ClickNotedStartButtonForTests();
