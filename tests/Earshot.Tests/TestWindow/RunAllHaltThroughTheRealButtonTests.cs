@@ -9,7 +9,7 @@ namespace Earshot.Tests.TestWindow;
 // extracted decision; this drives the real "Run all, step by step" button against real evidence
 // on disk and proves the caller no longer bypasses it.
 [TestClass]
-public sealed class B2RunAllHaltTests
+public sealed class RunAllHaltThroughTheRealButtonTests
 {
     [TestMethod]
     public void ADeclinedStartOnDiskMakesRunAllHaltRatherThanStartARow()

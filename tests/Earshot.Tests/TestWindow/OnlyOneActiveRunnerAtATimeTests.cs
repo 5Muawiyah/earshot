@@ -10,7 +10,7 @@ namespace Earshot.Tests.TestWindow;
 // PowerShell 5.1, the real fakes: RunGate's own predicate is proved in RunGateTests.cs, but only
 // this proves the caller that used to skip it.
 [TestClass]
-public sealed class B1SingleRunnerTests
+public sealed class OnlyOneActiveRunnerAtATimeTests
 {
     [TestMethod]
     public void ClickingRunAllWhileARowsOwnStartIsAlreadyActiveNeverStartsASecondChild()
