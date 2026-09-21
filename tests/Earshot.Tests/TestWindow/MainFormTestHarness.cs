@@ -11,6 +11,15 @@ namespace Earshot.Tests.TestWindow;
 // tests that need this drive the real button click handlers, not a copy of their logic.
 internal static class MainFormTestHarness
 {
+    // The longest PumpUntil wait any test body performs while relying on the default below is
+    // 120 s (several tests wait that long for a prompt to arrive, and one waits out two such
+    // periods in sequence); this default must always exceed that, with headroom for the STA
+    // thread's own startup and the body's other, shorter waits around it, or a legitimately slow
+    // but otherwise successful body is reported as a hung harness instead of the result it was
+    // about to produce. Matches the timeout OrphanChildOnMissedExitTests.cs already passes
+    // explicitly for the same reason.
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(300);
+
     internal static void Run(string sandboxFolder, Action<MainForm> body, TimeSpan? timeout = null)
     {
         string repoRoot = RepositoryLocator.RepositoryRoot();
@@ -51,9 +60,13 @@ internal static class MainFormTestHarness
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        if (!thread.Join(timeout ?? TimeSpan.FromSeconds(60)))
+        TimeSpan effectiveTimeout = timeout ?? DefaultTimeout;
+        if (!thread.Join(effectiveTimeout))
         {
-            throw new TimeoutException("MainFormTestHarness's STA thread did not finish in time.");
+            throw new TimeoutException(
+                "MainFormTestHarness's STA thread did not finish within " + effectiveTimeout + ". If the test " +
+                "body itself is not hung, this default needs to grow again to stay above the longest PumpUntil " +
+                "wait any test performs inside it.");
         }
 
         if (failure is not null)

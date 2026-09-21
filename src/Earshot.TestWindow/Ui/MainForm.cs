@@ -1569,6 +1569,24 @@ internal sealed class MainForm : Form
 
     internal void ClickNotedStartButtonForTests() => _notedStartButton.PerformClick();
 
+    internal string StartButtonTextForTests => _startButton.Text;
+
+    // Test seam: the row list's own "State" column (SubItems[1]; SubItems[0] is always the same
+    // text as the ListViewItem's own Number), read the same way an owner reads it on screen,
+    // rather than re-deriving it independently from disk.
+    internal string? RowStateTextForTests(string number)
+    {
+        for (int i = 0; i < _displayRows.Count; i++)
+        {
+            if (_displayRows[i].Number == number)
+            {
+                return _rowList.Items[i].SubItems[1].Text;
+            }
+        }
+
+        return null;
+    }
+
     internal bool SelectRowForTests(string number)
     {
         for (int i = 0; i < _displayRows.Count; i++)
