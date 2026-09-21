@@ -47,15 +47,15 @@ public sealed class CopyBindingTests
     }
 
     [TestMethod]
-    public void OffFastStartupReadsAsAColdStart()
+    public void OffFastStartupSaysTheSettingIsSwitchedOff()
     {
-        StringAssert.Contains(Copy.FastStartupSentence("off"), "cold start");
+        StringAssert.Contains(Copy.FastStartupSentence("off"), "switched off");
     }
 
     [TestMethod]
-    public void OnFastStartupReadsAsAFastStartupShutDown()
+    public void OnFastStartupSaysTheSettingIsSwitchedOn()
     {
-        StringAssert.Contains(Copy.FastStartupSentence("on"), "Fast Startup shut down");
+        StringAssert.Contains(Copy.FastStartupSentence("on"), "switched on");
     }
 
     [TestMethod]

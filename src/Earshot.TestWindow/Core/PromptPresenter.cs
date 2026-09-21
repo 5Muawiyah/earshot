@@ -158,6 +158,20 @@ internal static class PromptPresenter
         return Array.Empty<HowToBlock>();
     }
 
+    // LiveTest.psm1's own shared default for every Close-AtRest step that does not pass its own
+    // -Consequence (00-Restore.ps1 and 02-Disconnect.ps1 do; every other shipped script relies on
+    // this one): a module-level PowerShell variable, never a literal any single script repeats, so
+    // it can never carry a wording.json entry under this project's own "scriptText must be in its
+    // own script" rule (WordingManifestTests.EveryWordingEntrysScriptTextIsInItsScript). Matched
+    // exactly, so 00 and 02's own distinct consequence text is never swapped for this one.
+    private const string CloseAtRestSharedConsequence =
+        "Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. " +
+        "If the AirPods are playing through this PC right now, that stops.";
+
+    private const string CloseAtRestSharedConsequencePlain =
+        "Stops this computer grabbing your AirPods when it starts up. If the AirPods are playing " +
+        "through this computer right now, that stops too.";
+
     private static PresentedPrompt PresentConfirmStep(ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording)
     {
         string consequence = message.Bound.GetValueOrDefault("Consequence", string.Empty);
@@ -165,10 +179,11 @@ internal static class PromptPresenter
         string heading = "Run this step now?";
         if (message.Stack.Contains("Close-AtRest", StringComparer.Ordinal))
         {
-            heading = "Put this PC back at rest?";
+            heading = "Stop this computer grabbing your AirPods again?";
         }
 
-        string plain = entry?.Plain ?? consequence;
+        string plain = entry?.Plain
+            ?? (consequence == CloseAtRestSharedConsequence ? CloseAtRestSharedConsequencePlain : consequence);
         return new PresentedPrompt
         {
             Heading = heading,

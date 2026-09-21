@@ -58,6 +58,10 @@ public sealed class ChooseExePathTests
 
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
+            // The plain-mode status line never echoes the raw rejected path
+            // (NoBannedWordsInPlainModeTests); technical details is switched on here so this test
+            // keeps proving the specific reason ExePathChoice gave, not only a generic message.
+            form.ClickTechnicalDetailsCheckBoxForTests();
             string before = form.ExePathForTests;
             form.ChooseExePathDialogForTests = () => @"\\server\share\Earshot.exe";
 
@@ -76,6 +80,7 @@ public sealed class ChooseExePathTests
 
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
+            form.ClickTechnicalDetailsCheckBoxForTests();
             string before = form.ExePathForTests;
             form.ChooseExePathDialogForTests = () => missing;
 

@@ -272,6 +272,8 @@ internal sealed class StepPanel : Panel
 
     internal string AcknowledgementTextForTests => _acknowledgementLabel.Text;
 
+    internal string HeadingTextForTests => _headingLabel.Text;
+
     internal string PlainLineTextForTests => _plainLineLabel.Text;
 
     internal IReadOnlyList<string> ListItemsForTests => _listItemsBox.Items.Cast<string>().ToList();

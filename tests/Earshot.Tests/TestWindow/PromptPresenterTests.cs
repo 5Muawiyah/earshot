@@ -75,7 +75,7 @@ public sealed class PromptPresenterTests
 
         PresentedPrompt presented = PromptPresenter.Present(Prompt("Confirm-Step", "Run it now? [y/N]", bound), "01", LoadWording());
 
-        Assert.AreEqual("Asks the AirPods to connect to this PC. If it works, the sound moves from your phone to this PC.", presented.PlainLine);
+        Assert.AreEqual("Asks the AirPods to connect to this computer. If it works, the sound moves from your phone to this computer.", presented.PlainLine);
         StringAssert.Contains(presented.DetailText, "KSPROPERTY_ONESHOT_RECONNECT");
 
         // The raw consequence under "What it does:" is the script's own words, so it is marked
@@ -97,7 +97,7 @@ public sealed class PromptPresenterTests
         var bound = new Dictionary<string, string> { ["Consequence"] = "Blocks the AirPods Bluetooth nodes." };
         PresentedPrompt presented = PromptPresenter.Present(
             Prompt("Confirm-Step", "Run it now? [y/N]", bound, AtRestStack), "01", LoadWording());
-        Assert.AreEqual("Put this PC back at rest?", presented.Heading);
+        Assert.AreEqual("Stop this computer grabbing your AirPods again?", presented.Heading);
     }
 
     [TestMethod]
@@ -107,7 +107,7 @@ public sealed class PromptPresenterTests
         PresentedPrompt presented = PromptPresenter.Present(
             Prompt("Read-Answer", "  [yes/no/unsure]", bound), "01", LoadWording());
 
-        Assert.AreEqual("Did the sound move from your phone to this PC?", presented.PlainLine);
+        Assert.AreEqual("Did the sound move from your phone to this computer?", presented.PlainLine);
         CollectionAssert.AreEqual(YesNoNotSureLabels, presented.Buttons.Select(b => b.Label).ToArray());
         CollectionAssert.AreEqual(YesNoUnsureReplies, presented.Buttons.Select(b => b.Reply).ToArray());
     }

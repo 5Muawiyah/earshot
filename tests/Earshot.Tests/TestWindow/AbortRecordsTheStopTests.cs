@@ -5,7 +5,7 @@ namespace Earshot.Tests.TestWindow;
 
 // S8's own acceptance line: "Abort test writes result.json with the stop recorded and the at-rest
 // offer shown." The shim's own throw on "A <seq>" reaching a script's catch/finally, and the
-// Close-AtRest prompt's "Put this PC back at rest?" heading, are both already proven elsewhere
+// Close-AtRest prompt's "Stop this computer grabbing your AirPods again?" heading, are both already proven elsewhere
 // (ProtocolWireTests.AbortReachesTheScriptsFinally with a synthetic probe; PromptPresenterTests
 // for the heading). This is the missing link: ChildRunner.Abort, called exactly as MainForm's own
 // Stop button calls it, against a real shipped script and the real fake device, all the way to a

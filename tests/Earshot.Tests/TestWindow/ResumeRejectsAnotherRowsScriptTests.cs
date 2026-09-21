@@ -44,6 +44,11 @@ public sealed class ResumeRejectsAnotherRowsScriptTests
 
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
+            // The plain-mode status line never names resume.txt or echoes a raw script path
+            // (NoBannedWordsInPlainModeTests); technical details is switched on here so this test
+            // keeps proving the real, specific reason is still recorded and surfaced somewhere,
+            // not only that a generic plain message appeared.
+            form.ClickTechnicalDetailsCheckBoxForTests();
             Assert.IsTrue(form.SelectRowForTests("10.5"));
 
             form.ClickStartForTests();

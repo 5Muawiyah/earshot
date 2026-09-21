@@ -362,14 +362,14 @@ internal sealed class MainForm : Form
 
         if (!ExePathChoice.IsValid(chosen, out string? reason))
         {
-            _statusLabel.Text = "That choice was not used: " + reason;
+            _statusLabel.Text = _showTechnicalDetails ? "That choice was not used: " + reason : Copy.PlainExeChoiceNotUsedStatus;
             return;
         }
 
         _exePath = chosen;
         _exePathLabel.Text = "Earshot.exe: " + _exePath;
         ExePathSettings.Write(WindowStateRoot(), _exePath);
-        _statusLabel.Text = "Earshot.exe is now: " + _exePath;
+        _statusLabel.Text = _showTechnicalDetails ? "Earshot.exe is now: " + _exePath : Copy.PlainExeChosenStatus;
         PopulateRows();
         UpdateStartButton();
     }
@@ -740,7 +740,7 @@ internal sealed class MainForm : Form
         string host = PowerShell51.ExecutablePath();
         if (!File.Exists(host))
         {
-            _statusLabel.Text = "Windows PowerShell 5.1 is not installed at " + host + ".";
+            _statusLabel.Text = _showTechnicalDetails ? "Windows PowerShell 5.1 is not installed at " + host + "." : Copy.PlainPowerShellMissingStatus;
             return;
         }
 
@@ -851,7 +851,7 @@ internal sealed class MainForm : Form
         string host = PowerShell51.ExecutablePath();
         if (!File.Exists(host))
         {
-            _statusLabel.Text = "Windows PowerShell 5.1 is not installed at " + host + ".";
+            _statusLabel.Text = _showTechnicalDetails ? "Windows PowerShell 5.1 is not installed at " + host + "." : Copy.PlainPowerShellMissingStatus;
             return;
         }
 
@@ -922,7 +922,9 @@ internal sealed class MainForm : Form
 
         if (!ResumeFile.TryParse(resumeTxtPath, _repoRoot, liveTestRoot, expectedScript, out ResumeInstruction? instruction, out string? reason))
         {
-            _statusLabel.Text = "resume.txt could not be used, so nothing was started: " + reason;
+            _statusLabel.Text = _showTechnicalDetails
+                ? "resume.txt could not be used, so nothing was started: " + reason
+                : Copy.PlainCouldNotContinueStatus;
             return;
         }
 
@@ -977,7 +979,7 @@ internal sealed class MainForm : Form
         _notedStartWarningLabel.Text = warning;
         _notedStartWarningLabel.Visible = true;
         _notedStartButton.Visible = true;
-        _statusLabel.Text = "This start needs a deliberate click before it counts as tried.";
+        _statusLabel.Text = Copy.NotedStartNeedsDeliberateClick;
     }
 
     private void ProceedWithNotedStart()
@@ -1125,7 +1127,9 @@ internal sealed class MainForm : Form
         _resultPanel.Visible = false;
         _handOffBox.Visible = false;
         _stepPanel.Visible = true;
-        _statusLabel.Text = "Running " + row.TestId + (isResume ? " (second half)..." : "...");
+        _statusLabel.Text = _showTechnicalDetails
+            ? "Running " + row.TestId + (isResume ? " (second half)..." : "...")
+            : Copy.PlainRunningStatus(row.Name, isResume);
         UpdateStartButton();
 
         // _activeRunner is already set (above) by the time this runs, so a throw here must never
@@ -1212,15 +1216,24 @@ internal sealed class MainForm : Form
                 _stepPanel.Show(_activeRunner!, presented, message.Seq, _showTechnicalDetails);
                 break;
             case ChildMessageKind.Exit:
-                _statusLabel.Text = row.TestId + " finished (exit " + message.ExitCode + ").";
+                // Provisional: OnRunFinished (called next, on this same thread) overwrites this
+                // with the plain-mode row's own verdict once result.json has actually been read,
+                // the same words RowPresenter shows in the list (Copy.PlainFinishedStatus).
+                _statusLabel.Text = _showTechnicalDetails
+                    ? row.TestId + " finished (exit " + message.ExitCode + ")."
+                    : Copy.PlainRunningStatus(row.Name, _activeIsResume);
                 OnRunFinished(row);
                 break;
             case ChildMessageKind.Crash:
-                _statusLabel.Text = row.TestId + " crashed: " + message.Text;
+                _statusLabel.Text = _showTechnicalDetails
+                    ? row.TestId + " crashed: " + message.Text
+                    : Copy.PlainRunCrashedStatus(row.Name);
                 OnRunFinished(row);
                 break;
             case ChildMessageKind.Unreadable:
-                _statusLabel.Text = "Unreadable message: " + message.Text;
+                _statusLabel.Text = _showTechnicalDetails
+                    ? "Unreadable message: " + message.Text
+                    : Copy.PlainUnreadableMessageStatus;
                 break;
         }
     }
@@ -1247,9 +1260,9 @@ internal sealed class MainForm : Form
         // A declined start (No at Show-Preconditions, or any other stop before the script
         // ever reaches the point of writing resume.txt) still produces a readable result.json, but
         // there is nothing pending to come back to. The pending detection elsewhere already
-        // requires resume.txt; the hand-off screen ("Now shut this PC down... it will pick up
-        // here") must ask for exactly the same thing, not show it whenever this happened to be a
-        // two-half test's first half regardless of what the run actually reached.
+        // requires resume.txt; the hand-off screen ("Now shut this computer down... it will pick
+        // up here") must ask for exactly the same thing, not show it whenever this happened to be
+        // a two-half test's first half regardless of what the run actually reached.
         bool wasFirstHalfOfTwoHalfTest = row.Halves == 2 && !_activeIsResume &&
             File.Exists(Path.Combine(_activeResultFolder!, "resume.txt"));
         if (result is not null && wasFirstHalfOfTwoHalfTest)
@@ -1261,10 +1274,21 @@ internal sealed class MainForm : Form
             _lastResultPresentation = ResultPresenter.Present(result, _activeResultFolder!, row.Row.Number, _wording);
             _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails);
             _resultPanel.Visible = true;
+
+            // The status line's own "Finished: ..." (plain mode only; technical mode already read
+            // "<TestId> finished (exit N)." the moment the exit message arrived, and stays that
+            // way): the same words RowPresenter/Copy.PlainRowText would show for this row in the
+            // list right now, so this can never claim a better verdict than the list itself does.
+            if (!_showTechnicalDetails)
+            {
+                _statusLabel.Text = Copy.PlainFinishedStatus(row.Name, RowPresenter.PlainText(ComputeState(row)));
+            }
         }
         else
         {
-            _statusLabel.Text = "No readable result.json: " + failure;
+            _statusLabel.Text = _showTechnicalDetails
+                ? "No readable result.json: " + failure
+                : Copy.PlainNoReadableResultStatus(row.Name);
         }
 
         _activeRunner = null;
@@ -1332,7 +1356,7 @@ internal sealed class MainForm : Form
         if (_currentPromptSeq is int seq)
         {
             _activeRunner.Abort(seq);
-            _statusLabel.Text = "Stop sent. Waiting up to 60 s for the test to finish on its own.";
+            _statusLabel.Text = Copy.StopSentWaitingStatus;
             _killDeadlineUtc = DateTimeOffset.UtcNow.AddSeconds(60);
         }
         else
@@ -1365,8 +1389,7 @@ internal sealed class MainForm : Form
             if ((DateTimeOffset.UtcNow - _lastActivityUtc).TotalSeconds >= maxSilenceSeconds)
             {
                 _silenceWarningShown = true;
-                _statusLabel.Text = "This test has been silent for " + Math.Max(1, maxSilenceSeconds / 60) +
-                    " minutes. Keep waiting, or Stop the test.";
+                _statusLabel.Text = Copy.SilentForMinutesStatus(Math.Max(1, maxSilenceSeconds / 60));
             }
         }
     }
@@ -1379,7 +1402,7 @@ internal sealed class MainForm : Form
         }
 
         DialogResult choice = MessageBox.Show(
-            "Stopping it now means no result is written and this PC may not be at rest.",
+            Copy.StopConfirmationWarning,
             "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (choice != DialogResult.Yes)
         {
@@ -1769,7 +1792,7 @@ internal sealed class MainForm : Form
         string host = PowerShell51.ExecutablePath();
         if (!File.Exists(host))
         {
-            _runAllStatusLabel.Text = "Windows PowerShell 5.1 is not installed at " + host + ".";
+            _runAllStatusLabel.Text = _showTechnicalDetails ? "Windows PowerShell 5.1 is not installed at " + host + "." : Copy.PlainPowerShellMissingStatus;
             return;
         }
 
@@ -1834,7 +1857,9 @@ internal sealed class MainForm : Form
         _resultPanel.Visible = false;
         _handOffBox.Text = string.Join(Environment.NewLine, lines);
         _handOffBox.Visible = true;
-        _statusLabel.Text = row.TestId + ": first half complete. Waiting for the power cycle.";
+        _statusLabel.Text = _showTechnicalDetails
+            ? row.TestId + ": first half complete. Waiting for the power cycle."
+            : Copy.PlainWaitingForPowerCycleStatus(row.PowerCycleRequirement, row.Name);
     }
 
     // The one call site every ChildRunner.MessageReceived and TranscriptLine closure must go

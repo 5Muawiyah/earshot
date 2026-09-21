@@ -215,17 +215,17 @@ internal static class Copy
     // own instruction, so HandOffRestart and HandOffAnyStart draw the same shape as
     // HandOffShutDown rather than quoting text that was never given.
     internal const string HandOffShutDown =
-        "Now shut this PC down. Use Start, Power, Shut down. Do not choose Restart: a restart " +
+        "Now shut this computer down. Use Start, Power, Shut down. Do not choose Restart: a restart " +
         "does not count for this test and this window will not accept one. Keep listening on your " +
-        "phone. Leave the PC off for ten seconds, start it, sign in, and open this window again. " +
+        "phone. Leave this computer off for ten seconds, start it, sign in, and open this window again. " +
         "It will pick up here.";
 
     internal const string HandOffRestart =
-        "Now restart this PC. Use Start, Power, Restart. Keep listening on your phone. When it has " +
+        "Now restart this computer. Use Start, Power, Restart. Keep listening on your phone. When it has " +
         "signed you back in, open this window again. It will pick up here.";
 
     internal const string HandOffAnyStart =
-        "Now shut this PC down or restart it, either is fine for this test. Keep listening on your " +
+        "Now shut this computer down or restart it, either is fine for this test. Keep listening on your " +
         "phone. When it has signed you back in, open this window again. It will pick up here.";
 
     internal static string HandOffText(PowerCycleRequirement requirement) => requirement switch
@@ -246,18 +246,24 @@ internal static class Copy
     // fail) means the hand-off screen should say shutting down now would not be a valid run.
     internal static bool FirstHalfGenuinelyFailed(string overall) => overall == "fail";
 
-    // 08's own words for its fastStartupAtPowerDown finding: HiberbootEnabled read 0 on this PC
-    // on 2026-09-20, so today it would say "Fast Startup is off on this PC, so this run tests a
-    // cold start."
-    internal static string FastStartupSentence(string value) =>
-        "Fast Startup is " + value + " on this PC, so this run tests " +
-        (value switch
-        {
-            "off" => "a cold start",
-            "on" => "a Fast Startup shut down",
-            _ => "a start whose kind could not be confirmed",
-        }) +
-        ". The window never changes that setting.";
+    // 08's own words for its fastStartupAtPowerDown finding, in the owner's own rewrite
+    // (plain-words.md's "explain the one hard word in the same sentence" rule): the reader learns
+    // what Fast Startup is in the same breath it is named, and this computer is never called "this
+    // PC". HiberbootEnabled read 0 on this computer on 2026-09-20, so today it would read the
+    // "off" branch below.
+    internal static string FastStartupSentence(string value) => value switch
+    {
+        "off" =>
+            "A setting called Fast Startup is switched off on this computer, which is fine. " +
+            "This run starts this computer completely off, not half asleep. The window never changes that setting.",
+        "on" =>
+            "A setting called Fast Startup is switched on, on this computer, which is fine too. " +
+            "This run starts this computer from Fast Startup's own quicker way of shutting down, not completely off. " +
+            "The window never changes that setting.",
+        _ =>
+            "It could not be read whether a setting called Fast Startup is switched on or off on this computer, " +
+            "so the kind of start this run tested could not be confirmed. The window never changes that setting.",
+    };
 
     // A test pins that none of these ever reads as running by itself: no "unattended",
     // "automatic" or "batch", and no "GUI" (this is a window, never named that to the owner). This
@@ -379,4 +385,61 @@ internal static class Copy
         null => AtRestNoSuchFinding,
         _ => AtRestUnknown,
     };
+
+    // The status line, in plain words. Every one of these has a technical twin MainForm still
+    // shows with technical details on (a TestId, a script name, an exit code or a raw path);
+    // these never carry any of the four, following the same shape the owner asked for: "Running:
+    // Connect with one click", "Finished: ...", "Waiting for you to shut the computer down".
+    internal static string PlainRunningStatus(string testName, bool isResume) =>
+        "Running: " + testName + (isResume ? ", the second half" : string.Empty);
+
+    // "Finished" never says more than RowPresenter/PlainBaseText already say for the same row,
+    // so a qualified pass, a failure or Unknown can never read better here than it does in the
+    // list: verdictText is always exactly Copy.PlainRowText's own output for the row that just
+    // finished.
+    internal static string PlainFinishedStatus(string testName, string verdictText) =>
+        "Finished: " + testName + ", " + verdictText + ".";
+
+    internal static string PlainRunCrashedStatus(string testName) =>
+        testName + ": the test stopped unexpectedly. Show technical details to see why.";
+
+    internal const string PlainUnreadableMessageStatus =
+        "The test sent something this window could not read. Show technical details to see what.";
+
+    internal static string PlainNoReadableResultStatus(string testName) =>
+        testName + ": nothing readable was saved for this run. Show technical details to see why.";
+
+    internal static string PlainWaitingForPowerCycleStatus(PowerCycleRequirement requirement, string testName) => requirement switch
+    {
+        PowerCycleRequirement.FullShutDown => testName + ": waiting for you to shut the computer down.",
+        PowerCycleRequirement.Restart => testName + ": waiting for you to restart the computer.",
+        _ => testName + ": waiting for you to shut the computer down or restart it.",
+    };
+
+    internal const string PlainExeChoiceNotUsedStatus = "That could not be used. Show technical details to see why.";
+
+    internal const string PlainExeChosenStatus = "Earshot has been found on this computer.";
+
+    // Windows PowerShell 5.1's own fixed install path is technical; plain-words.md's own
+    // "console route" line ("say who to ask") covers exactly this: nothing here can be started
+    // without it, and only whoever set Earshot up can fix that.
+    internal const string PlainPowerShellMissingStatus =
+        "A program this window needs could not be found on this computer, so nothing could be started. " +
+        "Ask whoever set Earshot up for help.";
+
+    internal const string PlainCouldNotContinueStatus =
+        "This test could not carry on from where it stopped. Ask whoever set Earshot up for help, or start it again from the beginning.";
+
+    internal const string NotedStartNeedsDeliberateClick = "This start needs a deliberate click before it counts as tried.";
+
+    internal const string StopSentWaitingStatus = "Stop sent. Waiting up to 60 s for the test to finish on its own.";
+
+    internal static string SilentForMinutesStatus(int minutes) =>
+        "This test has been silent for " + minutes + " minutes. Keep waiting, or Stop the test.";
+
+    // The stop confirmation box (a real Windows MessageBox, shown whether technical details is on
+    // or off, since it is a safety warning, never gated): this computer, never "this PC", and the
+    // same "may grab your AirPods" words AtRestNo already uses, never "at rest" itself.
+    internal const string StopConfirmationWarning =
+        "Stopping it now means no result is written, and this computer may still be able to grab your AirPods off your phone.";
 }

@@ -156,6 +156,10 @@ internal sealed class ResultPanel : Panel
 
         _evidenceLabel.Text = "The saved record of this run is here:" + Environment.NewLine +
             result.EvidenceFolder + Environment.NewLine + result.ResultJsonPath + Environment.NewLine + result.SummaryTxtPath;
+        // A raw folder and file path is jargon (plain-window-layout.md's Result section replaces
+        // this with a plain line and an "Open the folder" button in a later pass); until then, it
+        // must simply never appear when technical details is off.
+        _evidenceLabel.Visible = showTechnicalDetails;
 
         string atRestText = Copy.LeftAtRestText(result.LeftAtRest, result.LeftAtRestDetail);
         _atRestLabel.Text = atRestText;
@@ -187,6 +191,8 @@ internal sealed class ResultPanel : Panel
     internal bool TechnicalDetailsVisibleForTests => _failureList.Visible;
 
     internal string EvidenceTextForTests => _evidenceLabel.Text;
+
+    internal bool EvidenceVisibleForTests => _evidenceLabel.Visible;
 
     internal string AtRestTextForTests => _atRestLabel.Text;
 
