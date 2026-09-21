@@ -98,8 +98,18 @@ function Get-DeclinedRecordedOutcome
         }
     }
 
+    # LiveTest.psm1's own catch writes a fixed prefix that names "1223" in its advisory text on
+    # every Start-Process failure it catches (file not found and access denied included, not only
+    # a genuine decline), so matching for those digits anywhere in the string was vacuous: it
+    # matched every shape ran=false with an error can take. What actually tells a real Windows
+    # cancellation apart is the underlying Win32 message Start-Process appends after that prefix:
+    # "The operation was canceled by the user" is the one FormatMessage text ERROR_CANCELLED
+    # (1223) produces, verified directly against System.ComponentModel.Win32Exception(1223).Message
+    # on this machine; "The system cannot find the file specified" (error 2) and "Access is
+    # denied" (error 5) are what the same catch records for the two other failures this launch
+    # site can hit before Windows ever raises its own prompt.
     $hasError = ($null -ne $LastStep) -and (-not [string]::IsNullOrEmpty($LastStep.error))
-    $observedWindowsCancellation = $hasError -and ($LastStep.error -match '1223')
+    $observedWindowsCancellation = $hasError -and ($LastStep.error -match 'canceled by the user')
 
     if (($null -eq $ReturnValue) -and $observedWindowsCancellation)
     {

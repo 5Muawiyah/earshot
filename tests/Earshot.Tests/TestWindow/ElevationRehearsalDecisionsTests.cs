@@ -60,21 +60,23 @@ public sealed class ElevationRehearsalDecisionsTests
         Assert.AreEqual("fail", result.GetProperty("outcome").GetString());
     }
 
-    // Only an error naming Windows' own cancellation code (1223, ERROR_CANCELLED) is a
-    // recorded decline. LiveTest.psm1's own catch comment names it: "a declined prompt reports
-    // 1223".
+    // Only an error naming the genuine Windows message for ERROR_CANCELLED ("The operation was
+    // canceled by the user") is a recorded decline. LiveTest.psm1's own catch always writes a
+    // fixed prefix naming "1223" in its advisory text, on every Start-Process failure it catches,
+    // not only a genuine decline, so the fixture below carries that same fixed prefix (the real
+    // recorded shape) rather than the cancellation message alone.
     [TestMethod]
     public void DeclinedWithTheReal1223ShapeIsAPass()
     {
         JsonElement result = RunDriver("""
-            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'The elevated run could not be started (a declined prompt reports 1223): System.ComponentModel.Win32Exception: The operation was canceled by the user' })
+            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'The elevated run could not be started (a declined prompt reports 1223): Start-Process : This command cannot be run due to the error: The operation was canceled by the user.' })
             $r | ConvertTo-Json -Compress
             """);
         Assert.AreEqual("pass", result.GetProperty("outcome").GetString());
     }
 
-    // M5's own two named cases: neither ever reaches Start-Process, so neither can be a Windows
-    // decline, whatever ElevationRehearsalDecisions.ps1 used to think of their shape.
+    // Neither of these two ever reaches Start-Process, so neither can be a Windows decline,
+    // whatever ElevationRehearsalDecisions.ps1 used to think of their shape.
     [TestMethod]
     public void ANoInTheWindowsOwnStepIsInconclusiveNeverAPass()
     {
@@ -96,14 +98,49 @@ public sealed class ElevationRehearsalDecisionsTests
         Assert.AreEqual("inconclusive", result.GetProperty("outcome").GetString());
     }
 
-    // A ran=false error that names neither 1223 nor either named exemption (some other launch
-    // failure entirely) is also inconclusive: it does not settle whether Windows' own box ever
-    // appeared either.
+    // The vacuous shape the old check passed: a launch failure whose recorded error carries the
+    // same fixed "reports 1223" prefix every Start-Process failure gets, but whose actual message
+    // names a different Win32 error entirely (ERROR_FILE_NOT_FOUND, here), never Windows' own
+    // cancellation text. Fully live: this drives a real -Verb RunAs Start-Process at a path that
+    // cannot exist, which Windows refuses before it would ever raise its own prompt (proved safe
+    // by running it directly on this machine first), through the exact expression
+    // LiveTest.psm1's own catch uses to build $step.error, so the fixture is what Invoke-EarshotElevated
+    // really records, not a guess at its shape.
     [TestMethod]
-    public void SomeOtherLaunchFailureIsInconclusiveNeverAPass()
+    public void ARealFileNotFoundLaunchFailureIsInconclusiveNeverAPass()
     {
         JsonElement result = RunDriver("""
-            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'The system cannot find the file specified' })
+            $fakeExe = Join-Path $env:TEMP ('earshot-rehearsal-probe-' + [guid]::NewGuid().ToString('N') + '.exe')
+            $stepError = $null
+            try
+            {
+                Start-Process -FilePath $fakeExe -Verb RunAs -PassThru | Out-Null
+            }
+            catch
+            {
+                $stepError = ('The elevated run could not be started (a declined prompt reports 1223): ' + ($_ | Out-String).Trim())
+            }
+            if ($null -eq $stepError) { throw 'the probe launch did not fail; nothing was recorded to test against.' }
+            if ($stepError -notmatch '1223') { throw 'the probe did not reproduce the fixed prefix this test exists to check: ' + $stepError }
+            if ($stepError -match 'canceled by the user') { throw 'the probe reproduced a real cancellation message, not a file-not-found one: ' + $stepError }
+            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = $stepError })
+            $r | ConvertTo-Json -Compress
+            """);
+        Assert.AreEqual("inconclusive", result.GetProperty("outcome").GetString());
+    }
+
+    // Access denied's own real message text ("Access is denied"), verified directly against
+    // System.ComponentModel.Win32Exception(5).Message on this machine and placed in the same real
+    // "This command cannot be run due to the error: {0}." template Start-Process actually wraps
+    // failures in (proved live by the file-not-found test above): reliably reproducing an
+    // access-denied launch failure needs a machine actually configured to deny it, which this one
+    // is not, so the template is live and only the fill-in text is sourced from the documented
+    // Win32 message rather than a second live probe.
+    [TestMethod]
+    public void AnAccessDeniedLaunchFailureIsInconclusiveNeverAPass()
+    {
+        JsonElement result = RunDriver("""
+            $r = Get-DeclinedRecordedOutcome -ReturnValue $null -LastStep ([pscustomobject]@{ ran = $false; exitCode = $null; error = 'The elevated run could not be started (a declined prompt reports 1223): Start-Process : This command cannot be run due to the error: Access is denied.' })
             $r | ConvertTo-Json -Compress
             """);
         Assert.AreEqual("inconclusive", result.GetProperty("outcome").GetString());
