@@ -56,7 +56,7 @@ internal static class Banner
                 continue;
             }
 
-            if (chosen is null || run.OrderingUtc > chosen.OrderingUtc)
+            if (chosen is null || IsNewerThan(run, chosen))
             {
                 chosen = run;
             }
@@ -69,8 +69,18 @@ internal static class Banner
             return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
 
-        bool newerUnreadableExists = runs.Any(run => !run.ReadSucceeded && run.OrderingUtc > chosen.OrderingUtc);
+        bool newerUnreadableExists = runs.Any(run => !run.ReadSucceeded && IsNewerThan(run, chosen));
         if (newerUnreadableExists)
+        {
+            return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
+        }
+
+        // One signal or the other was wrong about which run actually happened later (the one
+        // situation neither a stamp nor a sequence alone can be fully trusted in): at-rest, being
+        // safety-critical, is never read from a chosen run while that stands, whatever it says.
+        bool disagreement = EvidenceStore.SequenceDisagreesWithStampOrder(
+            runs.Select(run => (run.Sequence, run.Stamp)).ToList());
+        if (disagreement)
         {
             return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
@@ -84,7 +94,12 @@ internal static class Banner
         };
     }
 
-    private sealed record ScannedRun(string Stamp, ParsedResult? Result, DateTimeOffset OrderingUtc, bool ReadSucceeded);
+    // Sequence decides it when both runs have a marker (RunSequence, immune to the system clock);
+    // a run without one falls back to OrderingUtc, exactly as every run did before this existed.
+    private static bool IsNewerThan(ScannedRun a, ScannedRun b) =>
+        a.Sequence is long sa && b.Sequence is long sb ? sa > sb : a.OrderingUtc > b.OrderingUtc;
+
+    private sealed record ScannedRun(string Stamp, ParsedResult? Result, DateTimeOffset OrderingUtc, bool ReadSucceeded, long? Sequence);
 
     // Every run folder under the live test root, across every test: its own result (when its
     // result.json is readable at all), and the timestamp it is ordered by, its own finishedUtc
@@ -147,7 +162,8 @@ internal static class Banner
                 bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt")) || staleRunStarted;
                 bool readable = result is not null && !killed;
                 DateTimeOffset ordering = readable ? result!.FinishedUtc ?? stampUtc : NewestWriteTimeUtc(testFolder, stampUtc);
-                runs.Add(new ScannedRun(stamp, result, ordering, readable));
+                long? sequence = RunSequence.TryReadMarker(testFolder);
+                runs.Add(new ScannedRun(stamp, result, ordering, readable, sequence));
             }
         }
 

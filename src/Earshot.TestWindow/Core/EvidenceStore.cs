@@ -14,10 +14,16 @@ internal static partial class EvidenceStore
 
     internal static bool IsRunStamp(string name) => StampPatternRegex().IsMatch(name);
 
-    // Every run folder for one TestId under the live test root, newest stamp first. A stamp
-    // format sorts lexically the same as chronologically (yyyyMMdd'T'HHmmss'Z', UTC), so an
-    // ordinal sort needs no date parsing. Anything under the root whose top folder is not a
-    // stamp, or that holds no folder named exactly TestId, is ignored: it is not this test's evidence.
+    // Every run folder for one TestId under the live test root, newest first. Ordered by
+    // RunSequence's own marker (gui-sequence.txt) where a folder has one, since a stamp
+    // (yyyyMMdd'T'HHmmss'Z', UTC, otherwise sorting lexically the same as chronologically) is only
+    // ever as trustworthy as the system clock was at the moment it was written: with the clock
+    // stepped back between two runs, a later run's own stamp can read earlier than an older run's,
+    // hiding a later kill or a later not-at-rest result behind it, or letting a later fail read as
+    // the chosen, reported "Passed" run. A folder with no marker at all (an older run, from before
+    // this existed) is still ordered by its stamp, exactly as before. Anything under the root
+    // whose top folder is not a stamp, or that holds no folder named exactly TestId, is ignored:
+    // it is not this test's evidence.
     internal static IReadOnlyList<(string Stamp, string Folder)> FindRunFolders(string liveTestRoot, string testId)
     {
         var found = new List<(string Stamp, string Folder)>();
@@ -41,8 +47,51 @@ internal static partial class EvidenceStore
             }
         }
 
-        found.Sort((a, b) => string.CompareOrdinal(b.Stamp, a.Stamp));
+        found.Sort((a, b) => CompareNewestFirst(a, b));
         return found;
+    }
+
+    // Negative when a is newer than b (so a sorts first). Sequence decides it when both folders
+    // have a marker; a folder without one always falls back to comparing by stamp for that one
+    // comparison, never treated as though it were older or newer than a sequence could say.
+    private static int CompareNewestFirst((string Stamp, string Folder) a, (string Stamp, string Folder) b)
+    {
+        long? sequenceA = RunSequence.TryReadMarker(a.Folder);
+        long? sequenceB = RunSequence.TryReadMarker(b.Folder);
+        if (sequenceA is long va && sequenceB is long vb)
+        {
+            return vb.CompareTo(va);
+        }
+
+        return string.CompareOrdinal(b.Stamp, a.Stamp);
+    }
+
+    // True when any two folders in this set carry a sequence marker whose order disagrees with
+    // their stamp order: the one situation neither signal alone can be fully trusted in, since one
+    // of them was necessarily wrong about which of the two actually happened later. Surfaced to
+    // the owner (StateDeriver's HistoryNote, Banner's own red) rather than silently preferring
+    // sequence and saying nothing.
+    internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<(long? Sequence, string Stamp)> entries)
+    {
+        for (int i = 0; i < entries.Count; i++)
+        {
+            for (int j = i + 1; j < entries.Count; j++)
+            {
+                if (entries[i].Sequence is not long si || entries[j].Sequence is not long sj || si == sj)
+                {
+                    continue;
+                }
+
+                bool iNewerBySequence = si > sj;
+                bool iNewerByStamp = string.CompareOrdinal(entries[i].Stamp, entries[j].Stamp) > 0;
+                if (iNewerBySequence != iNewerByStamp)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     // Every run folder for one TestId, read and validated, newest stamp first: exactly what
@@ -87,9 +136,16 @@ internal static partial class EvidenceStore
             HasSetAsideFile = File.Exists(Path.Combine(folder, "gui-set-aside.txt")),
             HasKilledMarker = File.Exists(Path.Combine(folder, "gui-killed.txt")),
             HasStaleRunStartedMarker = hasRunStartedMarker && !isActiveFolder,
+            Sequence = RunSequence.TryReadMarker(folder),
             PowerCycleVerdict = TryReadPowerCycleVerdict(Path.Combine(folder, "gui-power-cycle.json")),
         };
     }
+
+    // A convenience over LoadEvidence's own already-read RunEvidence, for a caller (MainForm's
+    // ComputeState) that needs to know whether this row's own evidence contains a sequence/stamp
+    // disagreement, without reading every marker file from disk a second time.
+    internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<RunEvidence> evidence) =>
+        SequenceDisagreesWithStampOrder(evidence.Select(run => (run.Sequence, run.Stamp)).ToList());
 
     // The fail-closed read of result.json. Every early return below enforces one rule for
     // trusting that file, and the comment beside each one names which rule it is.

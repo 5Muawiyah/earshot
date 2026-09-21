@@ -87,6 +87,11 @@ internal sealed class RunEvidence
     // marker file and the caller's own activeFolder, into the one fact StateDeriver,
     // Banner.Compute and PendingRunFinder each need: never a live, currently running half.
     public bool HasStaleRunStartedMarker { get; init; }
+
+    // gui-sequence.txt (RunSequence): null for a folder this window never assigned one to (an
+    // older run, from before this feature existed). Never guessed; a folder without one is only
+    // ever ordered by its stamp, the same as before this existed.
+    public long? Sequence { get; init; }
     public string? PowerCycleVerdict { get; init; }
 
     public bool ReadSucceeded => Result is not null;

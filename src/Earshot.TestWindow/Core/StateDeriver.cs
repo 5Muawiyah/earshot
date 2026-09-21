@@ -7,7 +7,38 @@ namespace Earshot.TestWindow.Core;
 // and recording the red run.
 internal static class StateDeriver
 {
+    // sequenceTimeDisagreement: EvidenceStore.SequenceDisagreesWithStampOrder over this same
+    // evidence, the caller's own job (it already has the evidence loaded; recomputing it here
+    // would mean re-reading every marker file from disk a second time). True overrides LeftAtRest
+    // to "unknown" and adds a note, on every return path below, whatever Kind was otherwise
+    // decided: one signal or the other was wrong about which run actually happened later, so
+    // at-rest (safety-critical) is never trusted from either while that stands, even though Kind
+    // itself (pass/fail/etc.) still reflects the sequence-corrected, ordinarily-derived verdict.
     internal static DerivedRowState Derive(
+        TestRowSpec spec,
+        IReadOnlyList<RunEvidence> runsNewestFirst,
+        string? chosenExePath,
+        DateTimeOffset? chosenExeLastWriteUtc,
+        bool sequenceTimeDisagreement = false)
+    {
+        DerivedRowState state = DeriveCore(spec, runsNewestFirst, chosenExePath, chosenExeLastWriteUtc);
+        if (!sequenceTimeDisagreement)
+        {
+            return state;
+        }
+
+        return state with
+        {
+            LeftAtRest = "unknown",
+            HistoryNote = CombineHistoryNote(state.HistoryNote,
+                "the run-order sequence and the recorded times disagree about which run is newest; at-rest is treated as unknown until this is resolved"),
+        };
+    }
+
+    private static string CombineHistoryNote(string? existing, string addition) =>
+        existing is null ? addition : existing + "; " + addition;
+
+    private static DerivedRowState DeriveCore(
         TestRowSpec spec,
         IReadOnlyList<RunEvidence> runsNewestFirst,
         string? chosenExePath,

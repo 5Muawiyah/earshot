@@ -568,7 +568,8 @@ internal sealed class MainForm : Form
         TestRowSpec spec = row.ToSpec();
         IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(LiveTestRoot(), row.TestId, _activeResultFolder);
         DateTimeOffset? exeWrite = File.Exists(_exePath) ? File.GetLastWriteTimeUtc(_exePath) : null;
-        return StateDeriver.Derive(spec, evidence, _exePath, exeWrite);
+        bool sequenceTimeDisagreement = EvidenceStore.SequenceDisagreesWithStampOrder(evidence);
+        return StateDeriver.Derive(spec, evidence, _exePath, exeWrite, sequenceTimeDisagreement);
     }
 
     // A hand-built row for the administrator prompt check, never one of the 16 in
@@ -1022,6 +1023,11 @@ internal sealed class MainForm : Form
             File.WriteAllText(
                 Path.Combine(resultFolder, "gui-run-started.txt"),
                 DateTimeOffset.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+
+            // Assigned once per run folder, never reissued on a resumed second half (RunSequence's
+            // own job): the one ordering signal that survives the system clock being stepped back
+            // between two runs.
+            RunSequence.EnsureMarker(LiveTestRoot(), resultFolder);
         }
         catch (Exception ex)
         {
