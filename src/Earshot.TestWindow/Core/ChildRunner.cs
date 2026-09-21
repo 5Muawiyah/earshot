@@ -12,6 +12,7 @@ internal sealed class ChildRunner : IDisposable
     private readonly object _gate = new();
     private readonly HashSet<int> _repliedSeq = new();
     private bool _stdinClosed;
+    private bool _started;
     private Task? _readLoop;
 
     private readonly object _readLoopExceptionsGate = new();
@@ -114,6 +115,7 @@ internal sealed class ChildRunner : IDisposable
     internal void Start()
     {
         _process.Start();
+        _started = true;
         _readLoop = Task.Run(ReadLoop);
     }
 
@@ -279,7 +281,20 @@ internal sealed class ChildRunner : IDisposable
 
     internal int ExitCode => _process.ExitCode;
 
-    internal void Kill() => _process.Kill(entireProcessTree: true);
+    // A guarded no-op, not an unhandled InvalidOperationException, for a runner whose Start()
+    // was never called or whose own call to Process.Start() itself threw (a host that has gone
+    // missing between PowerShell51.ExecutablePath() being read and the process actually being
+    // launched, proved by StartFailureTests): there is no OS process to kill, so nothing here has
+    // anything to do.
+    internal void Kill()
+    {
+        if (!_started)
+        {
+            return;
+        }
+
+        _process.Kill(entireProcessTree: true);
+    }
 
     internal Task WaitForReadLoopAsync() => _readLoop ?? Task.CompletedTask;
 

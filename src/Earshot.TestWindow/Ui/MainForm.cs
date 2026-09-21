@@ -973,7 +973,27 @@ internal sealed class MainForm : Form
         _stepPanel.Visible = true;
         _statusLabel.Text = "Running " + row.TestId + (isResume ? " (second half)..." : "...");
         UpdateStartButton();
-        runner.Start();
+
+        // _activeRunner is already set (above) by the time this runs, so a throw here must never
+        // simply unwind out of BeginRun: that left _activeRunner pointing at a runner whose
+        // process never started, which RunGate.CanStart then read as a run still in progress,
+        // refusing every further start including row 00 Restore, the only way off a red banner.
+        // Caught, not swallowed: the raw exception is recorded (Trace) and its own type and
+        // message are put in front of the owner, then this run is torn down exactly like a kill
+        // (MarkUnknownAndReset), which also clears _activeRunner and leaves the window usable.
+        try
+        {
+            runner.Start();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "ChildRunner.Start() threw before " + row.TestId + " could run (recorded, not swallowed): " + ex);
+            MarkUnknownAndReset(
+                "Could not start " + row.TestId + ": " + ex.GetType().Name + ": " + ex.Message +
+                " This row now reads Unknown until Restore has run.");
+            runner.Dispose();
+        }
     }
 
     private void HandleMessage(DisplayRow row, ChildMessage message)
