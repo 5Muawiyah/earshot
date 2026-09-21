@@ -1511,11 +1511,15 @@ internal sealed class MainForm : Form
         return args;
     }
 
-    // M4 test seams. ClickRehearsalButtonForTests uses PerformClick (bypasses Enabled, the same
-    // as every other *ForTests click), so it proves StartRehearsal's own runtime sandbox guard
-    // independently of the Enabled=false set at construction: even a stray click while sandboxed
-    // must never start anything.
+    // Test seams for the rehearsal control. PerformClick (the same pattern every other *ForTests
+    // click uses) does nothing on a disabled control (Button.CanSelect is false while Enabled is
+    // false), so a click alone can never prove StartRehearsal's own runtime sandbox guard when the
+    // button is disabled at construction, the way it always is in a sandbox window: a test wanting
+    // to prove that guard fires even if something else left the button clickable has to force
+    // Enabled true first (ForceRehearsalButtonEnabledForTests), then assert it, then click for real.
     internal bool RehearsalButtonEnabledForTests => _rehearsalButton.Enabled;
+
+    internal void ForceRehearsalButtonEnabledForTests() => _rehearsalButton.Enabled = true;
 
     internal string RowDetailTextForTests => _rowDetailLabel.Text;
 
@@ -1618,6 +1622,12 @@ internal sealed class MainForm : Form
     internal bool StartButtonEnabledForTests => _startButton.Enabled;
 
     internal bool RunAllButtonEnabledForTests => _runAllButton.Enabled;
+
+    // Test seam: Run all's own button is legitimately disabled for as long as a row's Start is
+    // active (BeginRun), so a real click cannot reach StartOrContinueRunAll then; PerformClick is
+    // a no-op on a disabled control. A test proving the handler itself still refuses a second
+    // child, not only that the button happened to be greyed out, forces Enabled true first.
+    internal void ForceRunAllButtonEnabledForTests() => _runAllButton.Enabled = true;
 
     internal int SelectedIndexForTests => _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
 

@@ -163,9 +163,11 @@ internal sealed class StepPanel : Panel
         return control;
     }
 
-    // Test seam only: the same PerformClick pattern MainForm's own *ForTests members use
-    // (PerformClick raises Click directly, bypassing the click-safety timer's Enabled gate, which
-    // only stops a real mouse click reaching a disabled button through the message loop).
+    // Test seam only: the same PerformClick pattern MainForm's own *ForTests members use.
+    // PerformClick does nothing while a button is disabled (Button.CanSelect is false while
+    // Enabled is false), the same as a real mouse click would find, so a test using this while the
+    // click-safety timer still has the row's buttons disabled reaches nothing at all; callers wait
+    // out ClickSafetyDelay first.
     internal void ClickFirstButtonForTests() => ClickButtonForTests(0);
 
     internal void ClickButtonForTests(int index) => (_buttonRow.Controls.Count > index ? _buttonRow.Controls[index] as Button : null)?.PerformClick();

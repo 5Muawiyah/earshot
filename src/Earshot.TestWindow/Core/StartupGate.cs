@@ -85,20 +85,82 @@ internal static class StartupGate
         return false;
     }
 
+    // The four real folders a sandbox folder must never be inside: exactly what
+    // SandboxOptions.ChildEnvironment redirects LOCALAPPDATA, APPDATA, ProgramData and
+    // ProgramFiles away from for the sandboxed child. A --sandbox folder somewhere underneath one
+    // of these would leave those redirected paths still inside the real one, so the child's
+    // "sandboxed" writes would land on this machine's real data after all.
+    internal static IReadOnlyList<string> RealProtectedRoots() => new[]
+    {
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        Environment.GetEnvironmentVariable("ProgramData") ?? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        Environment.GetEnvironmentVariable("ProgramFiles") ?? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+    };
+
     // The folder after --sandbox, or null when the switch is absent, has nothing after it, or
-    // what follows it is empty or all whitespace: none of those is a valid folder either.
-    internal static string? SandboxFolder(IReadOnlyList<string> args)
+    // what follows it is not a usable sandbox folder. Before this, any non-whitespace text
+    // counted: a following switch ("--sandbox --other") read as a literal folder named
+    // "--other", a relative path resolved against whatever the process's own current directory
+    // happened to be, and a folder that was itself inside the real %LOCALAPPDATA% (or the other
+    // three redirected roots) left the "sandboxed" child writing to this machine's real data
+    // after all, none of which SandboxRequestedWithoutFolder's own refusal ever caught.
+    internal static string? SandboxFolder(IReadOnlyList<string> args) => SandboxFolder(args, RealProtectedRoots());
+
+    // protectedRoots is a parameter, not RealProtectedRoots() read directly, so a test can supply
+    // folders of its own rather than fighting whatever this machine's real %LOCALAPPDATA% happens
+    // to be.
+    internal static string? SandboxFolder(IReadOnlyList<string> args, IReadOnlyList<string> protectedRoots)
     {
         for (int i = 0; i + 1 < args.Count; i++)
         {
             if (string.Equals(args[i], SandboxArgument, StringComparison.Ordinal))
             {
                 string candidate = args[i + 1];
-                return string.IsNullOrWhiteSpace(candidate) ? null : candidate;
+                return IsUsableSandboxFolder(candidate, protectedRoots) ? candidate : null;
             }
         }
 
         return null;
+    }
+
+    // A usable --sandbox folder: an absolute path (never relative, and never another switch,
+    // which a missing folder argument would otherwise read as one, since it is just as much
+    // non-whitespace text as a real path), naming a folder that actually exists and holds either
+    // nothing at all or only this same sandbox's own four redirected sub-folders (safe to reuse
+    // across runs), outside every one of the real roots those four sub-folders stand in for.
+    private static bool IsUsableSandboxFolder(string candidate, IReadOnlyList<string> protectedRoots)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || !Path.IsPathFullyQualified(candidate))
+        {
+            return false;
+        }
+
+        string full = Path.GetFullPath(candidate);
+        foreach (string root in protectedRoots)
+        {
+            if (string.IsNullOrEmpty(root))
+            {
+                continue;
+            }
+
+            string fullRoot = Path.GetFullPath(root);
+            if (string.Equals(full, fullRoot, StringComparison.OrdinalIgnoreCase) ||
+                full.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return Directory.Exists(full) && IsEmptyOrAnEarlierSandboxLayout(full);
+    }
+
+    private static readonly string[] SandboxSubFolderNames = { "local", "roaming", "programdata", "programfiles" };
+
+    private static bool IsEmptyOrAnEarlierSandboxLayout(string folder)
+    {
+        string[] entries = Directory.GetFileSystemEntries(folder);
+        return entries.All(entry => SandboxSubFolderNames.Contains(Path.GetFileName(entry), StringComparer.OrdinalIgnoreCase));
     }
 
     // The scripts are found from the repository: walk up from the exe looking for Earshot.slnx,

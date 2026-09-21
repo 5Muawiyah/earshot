@@ -142,15 +142,115 @@ public sealed class StartupGateTests
     private static readonly string[] SandboxWithNoFolder = { "--sandbox" };
 
     [TestMethod]
-    public void SandboxArgumentParsing()
+    public void HasSandboxArgumentOnlyEverFindsTheLiteralSwitch()
     {
         Assert.IsFalse(StartupGate.HasSandboxArgument(NoArguments));
         Assert.IsFalse(StartupGate.HasSandboxArgument(OtherArgumentOnly));
         Assert.IsTrue(StartupGate.HasSandboxArgument(SandboxWithFolder));
+    }
 
+    [TestMethod]
+    public void SandboxFolderReadsNullWhenTheSwitchIsMissingOrHasNothingAfterIt()
+    {
         Assert.IsNull(StartupGate.SandboxFolder(SandboxWithNoFolder));
-        Assert.AreEqual(@"C:\temp\sandbox", StartupGate.SandboxFolder(SandboxWithFolder));
         Assert.IsNull(StartupGate.SandboxFolder(OtherArgumentOnly));
+    }
+
+    // The three shapes that used to read as a usable folder even though none of them named one: a
+    // relative path (resolved against whatever the process's own current directory happened to
+    // be), a following switch (just as much non-whitespace text as a real path), and a folder
+    // nested inside one of the four real roots SandboxOptions.ChildEnvironment redirects away from
+    // (which left the "sandboxed" child writing to this machine's real data after all).
+    [TestMethod]
+    public void SandboxFolderRejectsARelativePath()
+    {
+        string[] args = { "--sandbox", @"relative\sandbox" };
+        Assert.IsNull(StartupGate.SandboxFolder(args));
+    }
+
+    [TestMethod]
+    public void SandboxFolderRejectsWhatLooksLikeAnotherSwitch()
+    {
+        string[] args = { "--sandbox", "--other" };
+        Assert.IsNull(StartupGate.SandboxFolder(args));
+    }
+
+    [TestMethod]
+    public void SandboxFolderRejectsAFolderInsideAProtectedRoot()
+    {
+        using var protectedRoot = new TempFolder();
+        string nested = Path.Combine(protectedRoot.Path, "nested", "sandbox");
+        Directory.CreateDirectory(nested);
+        string[] args = { "--sandbox", nested };
+
+        Assert.IsNull(StartupGate.SandboxFolder(args, new[] { protectedRoot.Path }));
+    }
+
+    [TestMethod]
+    public void SandboxFolderRejectsTheProtectedRootItself()
+    {
+        using var protectedRoot = new TempFolder();
+        string[] args = { "--sandbox", protectedRoot.Path };
+
+        Assert.IsNull(StartupGate.SandboxFolder(args, new[] { protectedRoot.Path }));
+    }
+
+    // The one-argument overload must actually consult RealProtectedRoots(), not an empty list: a
+    // folder nested under this machine's own real %LOCALAPPDATA% is refused even though the path
+    // shape alone (absolute, well formed) would otherwise pass.
+    [TestMethod]
+    public void TheRealSandboxFolderOverloadUsesThisMachinesRealProtectedRoots()
+    {
+        string nested = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "earshot-startupgate-tests-should-never-exist");
+        string[] args = { "--sandbox", nested };
+
+        Assert.IsNull(StartupGate.SandboxFolder(args));
+    }
+
+    [TestMethod]
+    public void SandboxFolderRejectsAFolderThatDoesNotExist()
+    {
+        using var parent = new TempFolder();
+        string missing = Path.Combine(parent.Path, "does-not-exist");
+        string[] args = { "--sandbox", missing };
+
+        Assert.IsNull(StartupGate.SandboxFolder(args, Array.Empty<string>()));
+    }
+
+    [TestMethod]
+    public void SandboxFolderAcceptsAnExistingEmptyFolderOutsideEveryProtectedRoot()
+    {
+        using var folder = new TempFolder();
+        string[] args = { "--sandbox", folder.Path };
+
+        Assert.AreEqual(folder.Path, StartupGate.SandboxFolder(args, Array.Empty<string>()));
+    }
+
+    // Reusing a folder an earlier --sandbox run already redirected LOCALAPPDATA/APPDATA/
+    // ProgramData/ProgramFiles into must stay usable, since a folder that starts out empty always
+    // ends up holding exactly these once the window has run in it once.
+    [TestMethod]
+    public void SandboxFolderAcceptsAFolderThatAlreadyHoldsOnlyItsOwnFourSubFolders()
+    {
+        using var folder = new TempFolder();
+        Directory.CreateDirectory(Path.Combine(folder.Path, "local"));
+        Directory.CreateDirectory(Path.Combine(folder.Path, "roaming"));
+        string[] args = { "--sandbox", folder.Path };
+
+        Assert.AreEqual(folder.Path, StartupGate.SandboxFolder(args, Array.Empty<string>()));
+    }
+
+    [TestMethod]
+    public void SandboxFolderRejectsAFolderThatHoldsAnythingOutsideItsOwnSandboxLayout()
+    {
+        using var folder = new TempFolder();
+        Directory.CreateDirectory(Path.Combine(folder.Path, "local"));
+        File.WriteAllText(Path.Combine(folder.Path, "notes.txt"), "not part of the sandbox layout");
+        string[] args = { "--sandbox", folder.Path };
+
+        Assert.IsNull(StartupGate.SandboxFolder(args, Array.Empty<string>()));
     }
 
     // Real temporary folders: a repository root is found by walking up to Earshot.slnx, and a

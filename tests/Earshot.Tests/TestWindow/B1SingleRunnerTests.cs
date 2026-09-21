@@ -32,8 +32,15 @@ public sealed class B1SingleRunnerTests
                 form.SelectedIndexForTests + " startEnabled=" + form.StartButtonEnabledForTests + " status=" + form.StatusTextForTests);
             Assert.IsGreaterThan(0, first!.ProcessId, "no real child process was started.");
 
-            // The bug: neither Run all's button nor OnRunAllCarryOnClicked checked
-            // _activeRunner at all, so this click used to start a second ChildRunner outright.
+            // Run all's own button is disabled for as long as this row's Start is active
+            // (BeginRun), which is itself enough to stop a real mouse click; Button.PerformClick is
+            // a no-op on a disabled control, so a click against that Enabled=false would never
+            // reach the handler this test exists to prove. Forcing it enabled proves the handler
+            // itself (StartOrContinueRunAll, and BeginRun beneath it) still refuses a second child,
+            // not only that the button happened to be greyed out.
+            form.ForceRunAllButtonEnabledForTests();
+            Assert.IsTrue(form.RunAllButtonEnabledForTests, "the click below must reach a genuinely enabled button to prove anything.");
+
             form.ClickRunAllForTests();
             MainFormTestHarness.PumpUntil(() => false, TimeSpan.FromMilliseconds(300));
 

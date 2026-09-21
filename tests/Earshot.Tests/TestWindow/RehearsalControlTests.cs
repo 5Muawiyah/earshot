@@ -47,13 +47,19 @@ public sealed class RehearsalControlTests
     }
 
     // Belt and braces: even a click that reaches the handler despite Enabled=false must refuse,
-    // in the handler itself.
+    // in the handler itself. Button.PerformClick does nothing on a disabled control (Button.CanSelect
+    // is false while Enabled is false), so proving that the handler's own guard fires, not only
+    // that the button happens to be disabled, needs the button forced enabled first; a plain click
+    // against the construction-time Enabled=false never reaches StartRehearsal at all.
     [TestMethod]
     public void ClickingTheRehearsalButtonInASandboxWindowStartsNothing()
     {
         using var sandbox = new TempFolder();
         MainFormTestHarness.Run(sandbox.Path, form =>
         {
+            form.ForceRehearsalButtonEnabledForTests();
+            Assert.IsTrue(form.RehearsalButtonEnabledForTests, "the click below must reach a genuinely enabled button to prove anything.");
+
             form.ClickRehearsalButtonForTests();
 
             Assert.IsNull(form.ActiveRunnerForTests, "a sandboxed window must never start the rehearsal, whatever called the click handler.");
