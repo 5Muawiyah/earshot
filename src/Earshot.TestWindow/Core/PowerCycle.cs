@@ -12,6 +12,18 @@ internal enum PowerCycleVerdict
     PowerDown,
 }
 
+// Which of the two genuinely different reasons produced PowerCycleVerdict.Unknown: the evidence
+// itself could not be read at all (a parse failure, the script's own recorded error, or a shape
+// TryReadUtcArray/TryReadPower109 could not make sense of), or it read fine but no shut down or
+// restart record (Kernel-Power 109) with a recognised value was found between the first half's
+// own snapshot and the newest start. The two are not the same claim: only ReasonForUnknown tells
+// them apart, from the same evidence Decide already read.
+internal enum PowerCycleUnknownReason
+{
+    LogCouldNotBeRead,
+    NoTransitionRecordFoundBetweenTheFirstHalfAndTheStart,
+}
+
 // Decides a verdict from the raw rows Get-PowerCycleEvidence.ps1 returns; it reads nothing
 // itself:
 //   1. read error: unknown;
@@ -79,6 +91,68 @@ internal static class PowerCycle
                 5 => PowerCycleVerdict.Restart,
                 4 or 6 => PowerCycleVerdict.PowerDown,
                 _ => PowerCycleVerdict.Unknown,
+            };
+        }
+    }
+
+    // Null when Decide over this same evidence would not read as Unknown at all (there is no
+    // reason to give); otherwise which of the two reasons it was. Mirrors Decide's own rules
+    // exactly, rule for rule, so the two can never disagree about when Unknown applies.
+    internal static PowerCycleUnknownReason? ReasonForUnknown(string evidenceJson)
+    {
+        ArgumentNullException.ThrowIfNull(evidenceJson);
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(evidenceJson);
+        }
+        catch (JsonException)
+        {
+            return PowerCycleUnknownReason.LogCouldNotBeRead;
+        }
+
+        using (document)
+        {
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return PowerCycleUnknownReason.LogCouldNotBeRead;
+            }
+
+            if (root.TryGetProperty("error", out _))
+            {
+                return PowerCycleUnknownReason.LogCouldNotBeRead;
+            }
+
+            if (!TryReadUtcArray(root, "kernelGeneral12", out List<DateTimeOffset>? starts) ||
+                !TryReadPower109(root, out List<(DateTimeOffset Utc, int? ShutdownActionType)>? power109))
+            {
+                return PowerCycleUnknownReason.LogCouldNotBeRead;
+            }
+
+            if (starts!.Count == 0)
+            {
+                // NotYet, not Unknown: no reason to give.
+                return null;
+            }
+
+            DateTimeOffset newestStart = starts.Max();
+            (DateTimeOffset Utc, int? ShutdownActionType)? newest109BeforeStart = power109!
+                .Where(row => row.Utc < newestStart)
+                .OrderByDescending(row => row.Utc)
+                .Select(row => (row.Utc, row.ShutdownActionType) as (DateTimeOffset, int?)?)
+                .FirstOrDefault();
+
+            if (newest109BeforeStart is null)
+            {
+                return PowerCycleUnknownReason.NoTransitionRecordFoundBetweenTheFirstHalfAndTheStart;
+            }
+
+            return newest109BeforeStart.Value.ShutdownActionType switch
+            {
+                5 or 4 or 6 => null, // Restart or PowerDown, not Unknown: no reason to give.
+                _ => PowerCycleUnknownReason.NoTransitionRecordFoundBetweenTheFirstHalfAndTheStart,
             };
         }
     }

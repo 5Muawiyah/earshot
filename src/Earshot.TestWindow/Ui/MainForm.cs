@@ -806,9 +806,11 @@ internal sealed class MainForm : Form
         // write time.
         DateTimeOffset since = FirstHalfSnapshotFinishedUtc(pending.Folder, row.TestId) ?? File.GetLastWriteTimeUtc(resumeTxtPath);
         PowerCycleVerdict verdict;
+        PowerCycleUnknownReason? unknownReason;
         if (PowerCycleVerdictOverrideForTests is { } overrideVerdict)
         {
             verdict = overrideVerdict();
+            unknownReason = PowerCycle.ReasonForUnknown("{}");
             PowerCycleEvidenceFile.Write(pending.Folder, "{}", verdict);
         }
         else
@@ -816,6 +818,7 @@ internal sealed class MainForm : Form
             string probeScript = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Get-PowerCycleEvidence.ps1");
             string evidenceJson = ChildRunner.RunPowerCycleProbe(host, probeScript, since, TimeSpan.FromSeconds(30));
             verdict = PowerCycle.Decide(evidenceJson);
+            unknownReason = PowerCycle.ReasonForUnknown(evidenceJson);
             PowerCycleEvidenceFile.Write(pending.Folder, evidenceJson, verdict);
         }
 
@@ -830,7 +833,7 @@ internal sealed class MainForm : Form
 
         if (gate == PowerCycleGateResult.StartNoted)
         {
-            ShowNotedStartWarning(host, row, instruction!, PowerCycleGate.NotedWarning(row.PowerCycleRequirement, verdict));
+            ShowNotedStartWarning(host, row, instruction!, PowerCycleGate.NotedWarning(row.PowerCycleRequirement, verdict, unknownReason));
             return;
         }
 
@@ -991,7 +994,7 @@ internal sealed class MainForm : Form
         {
             if (RunGate.ShouldProcessMessage(_activeRunner, runner) && _activeRunner is not null)
             {
-                MarkUnknownAndReset("The test process ended without ever reporting a result. This row now reads Unknown until Restore has run.");
+                MarkUnknownAndReset("The test process ended without ever reporting a result. " + Copy.RowUnknownUntilItRunsAgain);
             }
         });
 
@@ -1035,7 +1038,7 @@ internal sealed class MainForm : Form
                 "ChildRunner.Start() threw before " + row.TestId + " could run (recorded, not swallowed): " + ex);
             MarkUnknownAndReset(
                 "Could not start " + row.TestId + ": " + ex.GetType().Name + ": " + ex.Message +
-                " This row now reads Unknown until Restore has run.");
+                " " + Copy.RowUnknownUntilItRunsAgain);
             runner.Dispose();
         }
     }
@@ -1265,7 +1268,7 @@ internal sealed class MainForm : Form
             RecordPostDisposalDeliveryFailure(ex);
         }
 
-        MarkUnknownAndReset("Stopped by force. This row now reads Unknown until Restore has run.");
+        MarkUnknownAndReset("Stopped by force. " + Copy.RowUnknownUntilItRunsAgain);
     }
 
     // A process that ends without ever sending "type": "exit" or "type": "crash" (killed

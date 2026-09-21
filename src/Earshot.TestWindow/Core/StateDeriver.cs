@@ -14,6 +14,10 @@ internal static class StateDeriver
     // decided: one signal or the other was wrong about which run actually happened later, so
     // at-rest (safety-critical) is never trusted from either while that stands, even though Kind
     // itself (pass/fail/etc.) still reflects the sequence-corrected, ordinarily-derived verdict.
+    // A Qualifier is set too, even for an otherwise clean Passed: DerivedRowState.IsGreen requires
+    // Qualifier is null, so this is what keeps a row with an unresolved disagreement from ever
+    // reading as a clean green pass, the same as every other amber caveat this method already
+    // qualifies a pass with (an earlier build, a second half only on record, and the rest).
     internal static DerivedRowState Derive(
         TestRowSpec spec,
         IReadOnlyList<RunEvidence> runsNewestFirst,
@@ -30,6 +34,7 @@ internal static class StateDeriver
         return state with
         {
             LeftAtRest = "unknown",
+            Qualifier = CombineQualifier(state.Qualifier, "run order not confirmed"),
             HistoryNote = CombineHistoryNote(state.HistoryNote,
                 "the run-order sequence and the recorded times disagree about which run is newest; at-rest is treated as unknown until this is resolved"),
         };

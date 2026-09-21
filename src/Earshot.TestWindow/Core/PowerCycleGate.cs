@@ -61,7 +61,11 @@ internal static class PowerCycleGate
 
     // StartNoted's own warning, shown before the deliberate click MainForm's own noted-start
     // control waits for; never shown for Start or Refuse, which have nothing to click past.
-    internal static string NotedWarning(PowerCycleRequirement requirement, PowerCycleVerdict verdict)
+    // unknownReason (PowerCycle.ReasonForUnknown over the same evidence, null when verdict was not
+    // actually Unknown) says which of the two different things happened: the event log itself
+    // could not be read, or it read fine but named no shut down or restart record between the
+    // first half and the start. The two are not the same claim and must not share one message.
+    internal static string NotedWarning(PowerCycleRequirement requirement, PowerCycleVerdict verdict, PowerCycleUnknownReason? unknownReason = null)
     {
         if (requirement == PowerCycleRequirement.Restart && verdict == PowerCycleVerdict.PowerDown)
         {
@@ -69,7 +73,14 @@ internal static class PowerCycleGate
                 "however it comes out. Carry on only if you want to try it anyway.";
         }
 
-        return "The event log could not be read, so Windows' own record of the shut down or restart is not available. This half " +
-            "cannot count as a clean pass however it comes out. Carry on only if you want to try it anyway.";
+        string reasonText = unknownReason switch
+        {
+            PowerCycleUnknownReason.NoTransitionRecordFoundBetweenTheFirstHalfAndTheStart =>
+                "The event log was read, but it named no shut down or restart between the first half and this start, so " +
+                "Windows' own record of it is not available.",
+            _ => "The event log could not be read, so Windows' own record of the shut down or restart is not available.",
+        };
+
+        return reasonText + " This half cannot count as a clean pass however it comes out. Carry on only if you want to try it anyway.";
     }
 }

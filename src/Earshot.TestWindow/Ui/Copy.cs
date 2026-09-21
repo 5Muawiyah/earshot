@@ -49,7 +49,16 @@ internal static class Copy
         "Not available in a sandbox window: this always runs for real and always raises a real " +
         "Windows prompt, so a development sandbox never runs it.";
 
-    internal const string RehearsalUnlocksRows = "Passing this unlocks row 15, and offers 00's uninstall and 07's plan B.";
+    internal const string RehearsalUnlocksRows =
+        "Passing this unlocks row 15. Rows 00 and 07 still never offer their uninstall or plan B in this " +
+        "build; passing this only means the console route (open a console and run the command each row names) is trusted.";
+
+    // The three places a row is marked Unknown by force (a missed exit, a forced stop, a failed
+    // start) used to say it stayed Unknown "until Restore has run": false, since a fresh run of
+    // the row's own test, once it reads a clean result, becomes the newer evidence and clears it
+    // exactly the same way. Restore is one way to clear the banner (and so unlock every other
+    // row), never the only way this one row's own Unknown clears.
+    internal const string RowUnknownUntilItRunsAgain = "This row now reads Unknown until it runs again (or Restore runs).";
 
     // 00's uninstall variant and 07's plan B are real branches those scripts declare
     // (-OfferUninstall, -AllowPlanB) that this row can never reach, because this window never

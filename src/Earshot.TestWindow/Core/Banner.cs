@@ -9,8 +9,9 @@ internal enum BannerLevel
     Red,
 }
 
-// Rows other than 00 Restore stay locked while Level is Red, until a newer Restore run records
-// leftAtRest of yes or not-applicable.
+// Rows other than 00 Restore stay locked while Level is Red, until the newest readable result
+// (from any test that ends at rest, not only a Restore run) records leftAtRest of yes or
+// not-applicable.
 internal sealed record BannerState
 {
     public required BannerLevel Level { get; init; }

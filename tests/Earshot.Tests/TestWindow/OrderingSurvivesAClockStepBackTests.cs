@@ -126,6 +126,32 @@ public sealed class OrderingSurvivesAClockStepBackTests
         Assert.AreEqual("yes", state.LeftAtRest);
     }
 
+    // A row can never read as a clean green pass while its own evidence disagrees about run
+    // order: IsGreen requires Qualifier to be null, so even a chosen run that itself passed
+    // cleanly must never leave this row looking exactly like an ordinary, fully-confirmed pass.
+    [TestMethod]
+    public void ARowIsNeverGreenWhenSequenceAndTimeDisagreeEvenIfTheChosenRunPassedCleanly()
+    {
+        using var root = new TempFolder();
+        TestRowSpec spec = TestRowSpecFixtures.OneHalf("01-a2dp-oneshot");
+
+        string olderFolder = Path.Combine(root.Path, EarlierBySequenceLaterByStamp, spec.TestId);
+        WriteResult(olderFolder, spec.TestId, "pass", "c1", "pass", leftAtRest: "yes");
+        RunSequence.EnsureMarker(root.Path, olderFolder);
+
+        string newerFolder = Path.Combine(root.Path, LaterBySequenceEarlierByStamp, spec.TestId);
+        WriteResult(newerFolder, spec.TestId, "pass", "c1", "pass", leftAtRest: "yes");
+        RunSequence.EnsureMarker(root.Path, newerFolder);
+
+        IReadOnlyList<RunEvidence> evidence = EvidenceStore.LoadEvidence(root.Path, spec.TestId);
+        bool disagreement = EvidenceStore.SequenceDisagreesWithStampOrder(evidence);
+        DerivedRowState state = StateDeriver.Derive(spec, evidence, null, null, disagreement);
+
+        Assert.IsTrue(disagreement, "The fixture is deliberately built so sequence and stamp order disagree.");
+        Assert.AreEqual(RowStateKind.Passed, state.Kind, "Kind itself still reflects the sequence-corrected verdict: a clean pass.");
+        Assert.IsFalse(state.IsGreen, "A row must never read as a clean green pass while run order is unconfirmed, whatever the chosen run itself says.");
+    }
+
     private static void WriteResult(string folder, string testId, string overall, string criterionId, string outcome, string? leftAtRest = null)
     {
         var fixture = new ResultJsonFixture(testId, overall).WithCriterion(criterionId, outcome);
