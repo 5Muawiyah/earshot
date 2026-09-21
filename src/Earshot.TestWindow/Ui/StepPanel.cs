@@ -23,6 +23,12 @@ internal sealed class StepPanel : Panel
     private ChildRunner? _runner;
     private int _currentSeq;
 
+    // M9: the one notification MainForm needs to clear its own silence-watchdog state
+    // (_currentPromptSeq) the moment a reply actually leaves this panel, not only when the run
+    // itself ends. Raised only for a reply that was actually sent (Abort does not raise it: the
+    // watchdog's own kill-deadline countdown takes over from there, section 8.3).
+    internal event Action<int>? ReplySent;
+
     internal StepPanel()
     {
         Dock = DockStyle.Fill;
@@ -132,6 +138,7 @@ internal sealed class StepPanel : Panel
             if (button.SendsReply)
             {
                 _runner?.ReplyFromOwnerClick(seqAtBuildTime, button.Reply);
+                ReplySent?.Invoke(seqAtBuildTime);
             }
         };
         return control;
@@ -144,4 +151,9 @@ internal sealed class StepPanel : Panel
         control.Click += (_, _) => _runner?.Abort(seqAtBuildTime);
         return control;
     }
+
+    // Test seam only: the same PerformClick pattern MainForm's own *ForTests members use
+    // (PerformClick raises Click directly, bypassing the click-safety timer's Enabled gate, which
+    // only stops a real mouse click reaching a disabled button through the message loop).
+    internal void ClickFirstButtonForTests() => (_buttonRow.Controls.Count > 0 ? _buttonRow.Controls[0] as Button : null)?.PerformClick();
 }

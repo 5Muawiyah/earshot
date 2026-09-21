@@ -52,7 +52,7 @@
       "proves": "Unblocking alone does not pull the AirPods off the phone.",
       "settles": "Whether enabling the nodes can take the AirPods off the phone with no connect request, which decides if Block at boot off needs a warning and whether the connect path can be shortened.",
       "powerCycleRequirement": "none",
-      "maxSilenceSeconds": 900
+      "maxSilenceSeconds": 150
     },
     {
       "number": "04",
@@ -200,7 +200,7 @@
       "proves": "The wait before Earshot blocks again is about right.",
       "settles": "Whether the idle grace Earshot uses is the right wait before the nodes are blocked again, measured against real driver churn.",
       "powerCycleRequirement": "none",
-      "maxSilenceSeconds": 900
+      "maxSilenceSeconds": 650
     },
     {
       "number": "14",

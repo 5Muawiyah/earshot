@@ -119,6 +119,19 @@ internal sealed class MainForm : Form
 
         var contentHost = new Panel { Dock = DockStyle.Fill };
         _stepPanel = new StepPanel { Visible = false };
+        // M9: the silence watchdog must stop treating a reply as though the prompt it answered
+        // were still pending. Without this, _currentPromptSeq was set once by the first prompt and
+        // never cleared again until the whole run ended, so OnWatchdogTick's own "no prompt
+        // pending" gate was permanently false from the second prompt onwards: the watchdog could
+        // never fire again for the rest of any run.
+        _stepPanel.ReplySent += seq =>
+        {
+            if (_currentPromptSeq == seq)
+            {
+                _currentPromptSeq = null;
+                _lastActivityUtc = DateTimeOffset.UtcNow;
+            }
+        };
         _resultPanel = new ResultPanel { Visible = false };
         _handOffBox = new TextBox
         {
@@ -979,6 +992,17 @@ internal sealed class MainForm : Form
     internal void SafeBeginInvokeForTests(Action action) => SafeBeginInvoke(action);
 
     internal IReadOnlyList<Exception> PostDisposalDeliveryFailuresForTests => _postDisposalDeliveryFailures;
+
+    // M9 test seams: drives the real silence watchdog tick and lets a test move "the last
+    // activity was seen" into the past without a real wait, so both directions (fires on real
+    // silence; never fires while a prompt is pending, however long) are provable in milliseconds.
+    internal void ForceWatchdogTickForTests() => OnWatchdogTick();
+
+    internal void SetLastActivityUtcForTests(DateTimeOffset utc) => _lastActivityUtc = utc;
+
+    internal int? CurrentPromptSeqForTests => _currentPromptSeq;
+
+    internal void ClickCurrentPromptButtonForTests() => _stepPanel.ClickFirstButtonForTests();
 
     internal bool SelectRowForTests(string number)
     {
