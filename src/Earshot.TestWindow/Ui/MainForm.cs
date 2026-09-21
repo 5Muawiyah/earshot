@@ -358,6 +358,14 @@ internal sealed class MainForm : Form
     internal Func<string, DialogResult> ConfirmDialogForTests { get; set; } =
         message => MessageBox.Show(message, "Earshot live tests", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
+    // Test seam: null in every real run, where StartResumedSecondHalf always reads this
+    // machine's own real event log through RunPowerCycleProbe. Set, it is read instead, so a
+    // test can choose the verdict a resumed half sees (a restart where a full shut down was
+    // required, for example) without depending on what this machine's own history happens to
+    // say right now.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Func<PowerCycleVerdict>? PowerCycleVerdictOverrideForTests { get; set; }
+
     // When Windows ends the session while a half is running, the form cancels the close once, so
     // Windows shows its own "this app is preventing shut down" screen with the window title
     // "Earshot live tests: a test is still running". If the owner forces it, the child dies with
@@ -710,10 +718,19 @@ internal sealed class MainForm : Form
         // "since" is the first-half snapshot's finishedUtc, else resume.txt's last
         // write time.
         DateTimeOffset since = FirstHalfSnapshotFinishedUtc(pending.Folder, row.TestId) ?? File.GetLastWriteTimeUtc(resumeTxtPath);
-        string probeScript = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Get-PowerCycleEvidence.ps1");
-        string evidenceJson = ChildRunner.RunPowerCycleProbe(host, probeScript, since, TimeSpan.FromSeconds(30));
-        PowerCycleVerdict verdict = PowerCycle.Decide(evidenceJson);
-        PowerCycleEvidenceFile.Write(pending.Folder, evidenceJson, verdict);
+        PowerCycleVerdict verdict;
+        if (PowerCycleVerdictOverrideForTests is { } overrideVerdict)
+        {
+            verdict = overrideVerdict();
+            PowerCycleEvidenceFile.Write(pending.Folder, "{}", verdict);
+        }
+        else
+        {
+            string probeScript = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Get-PowerCycleEvidence.ps1");
+            string evidenceJson = ChildRunner.RunPowerCycleProbe(host, probeScript, since, TimeSpan.FromSeconds(30));
+            verdict = PowerCycle.Decide(evidenceJson);
+            PowerCycleEvidenceFile.Write(pending.Folder, evidenceJson, verdict);
+        }
 
         PowerCycleGateResult gate = PowerCycleGate.Evaluate(row.PowerCycleRequirement, verdict);
         if (gate == PowerCycleGateResult.Refuse)
