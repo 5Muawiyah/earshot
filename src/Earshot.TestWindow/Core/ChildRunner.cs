@@ -14,6 +14,9 @@ internal sealed class ChildRunner : IDisposable
     private bool _stdinClosed;
     private Task? _readLoop;
 
+    private readonly object _readLoopExceptionsGate = new();
+    private readonly List<Exception> _readLoopExceptions = new();
+
     internal event Action<string>? TranscriptLine;
     internal event Action<ChildMessage>? MessageReceived;
 
@@ -134,12 +137,14 @@ internal sealed class ChildRunner : IDisposable
                 {
                     line = _process.StandardOutput.ReadLine();
                 }
-                catch (IOException)
+                catch (IOException ex)
                 {
+                    RecordReadLoopException(ex);
                     return;
                 }
-                catch (ObjectDisposedException)
+                catch (ObjectDisposedException ex)
                 {
+                    RecordReadLoopException(ex);
                     return;
                 }
 
@@ -163,6 +168,41 @@ internal sealed class ChildRunner : IDisposable
             ReadLoopEnded?.Invoke();
         }
     }
+
+    // Caught, not swallowed: a killed process's own broken pipe is expected and never surfaced as
+    // a failure, but the exception itself is still recorded, the same two ways MainForm's own
+    // SafeBeginInvoke records what it catches, for a test or anyone reading this process's own
+    // diagnostic output to actually find. Locked, since ReadLoop runs on its own ThreadPool
+    // thread and a test can read this list from another one at the same time.
+    private void RecordReadLoopException(Exception ex)
+    {
+        lock (_readLoopExceptionsGate)
+        {
+            _readLoopExceptions.Add(ex);
+        }
+
+        Trace.TraceWarning("ChildRunner's read loop ended on a caught " + ex.GetType().Name +
+            " (expected from a killed process's broken pipe, not a sign anything is wrong): " + ex);
+    }
+
+    internal IReadOnlyList<Exception> ReadLoopExceptionsForTests
+    {
+        get
+        {
+            lock (_readLoopExceptionsGate)
+            {
+                return _readLoopExceptions.ToArray();
+            }
+        }
+    }
+
+    // Test seam: ReadLoop's own two catches (IOException, ObjectDisposedException) are racy by
+    // nature (a killed process's pipe can break before ReadLine reaches a clean end of stream
+    // instead of after, so a real kill just as often reads as a clean EOF with nothing to catch at
+    // all, documented on ReadLoop itself), so proving the recording mechanism itself works right
+    // drives the same private method those catches call, rather than depending on which outcome a
+    // real kill happens to race into.
+    internal void RecordReadLoopExceptionForTests(Exception ex) => RecordReadLoopException(ex);
 
     // The one call site for a reply, asserted from source across the whole project. One reply
     // per seq: a second click for the same seq is ignored, silently, rather than sent twice.

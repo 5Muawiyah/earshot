@@ -57,6 +57,10 @@ internal sealed class MainForm : Form
     private readonly Label _rehearsalStatusLabel;
     private readonly DisplayRow _rehearsalRow;
 
+    // Written from whichever ChildRunner's own background ReadLoop thread delivered the message
+    // that raced this form's disposal, and from this UI thread too (KillActiveRun's own drain);
+    // locked so two of those at once can never corrupt the list.
+    private readonly object _postDisposalDeliveryFailuresGate = new();
     private readonly List<Exception> _postDisposalDeliveryFailures = new();
 
     private ChildRunner? _activeRunner;
@@ -1451,10 +1455,12 @@ internal sealed class MainForm : Form
     // it can pass and then go stale before BeginInvoke actually runs, and a check on one thread
     // followed by a call on another cannot be made atomic against a Dispose happening in between.
     // The try/catch below is what is actually safe under that race. Anything it catches is
-    // recorded, twice, never swallowed: PostDisposalDeliveryFailuresForTests for a test to read,
-    // and a trace line for anyone reading this process's own diagnostic output, because an
-    // uncaught exception here is unhandled on a background thread by construction and takes the
-    // whole process down with it.
+    // recorded, twice, never swallowed: PostDisposalDeliveryFailuresForTests for a test to read
+    // (locked, since a background ReadLoop thread and this UI thread's own KillActiveRun can both
+    // write to it), and a trace line for whatever is listening to this process's own diagnostic
+    // output (Trace.Listeners holds at least the test host's own capture under a test run,
+    // verified directly rather than assumed), because an uncaught exception here is unhandled on
+    // a background thread by construction and takes the whole process down with it.
     private void SafeBeginInvoke(Action action)
     {
         try
@@ -1473,7 +1479,11 @@ internal sealed class MainForm : Form
 
     private void RecordPostDisposalDeliveryFailure(Exception ex)
     {
-        _postDisposalDeliveryFailures.Add(ex);
+        lock (_postDisposalDeliveryFailuresGate)
+        {
+            _postDisposalDeliveryFailures.Add(ex);
+        }
+
         System.Diagnostics.Trace.TraceWarning("A message delivery from ChildRunner arrived after this window's handle was gone: " + ex);
     }
 
@@ -1486,7 +1496,16 @@ internal sealed class MainForm : Form
 
     internal void SafeBeginInvokeForTests(Action action) => SafeBeginInvoke(action);
 
-    internal IReadOnlyList<Exception> PostDisposalDeliveryFailuresForTests => _postDisposalDeliveryFailures;
+    internal IReadOnlyList<Exception> PostDisposalDeliveryFailuresForTests
+    {
+        get
+        {
+            lock (_postDisposalDeliveryFailuresGate)
+            {
+                return _postDisposalDeliveryFailures.ToArray();
+            }
+        }
+    }
 
     // M9 test seams: drives the real silence watchdog tick and lets a test move "the last
     // activity was seen" into the past without a real wait, so both directions (fires on real
