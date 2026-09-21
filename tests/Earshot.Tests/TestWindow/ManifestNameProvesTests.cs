@@ -15,16 +15,16 @@ public sealed class ManifestNameProvesTests
     // The manifest's own table, column "What it proves (row copy)", copied exactly.
     private static readonly Dictionary<string, string> ExpectedProves = new(StringComparer.Ordinal)
     {
-        ["00"] = "Puts this PC back to a known state. Run it whenever a test stops early.",
-        ["01"] = "Earshot can connect the AirPods to this PC.",
+        ["00"] = "Puts this computer back to a known state. Run it whenever a test stops early.",
+        ["01"] = "Earshot can connect the AirPods to this computer.",
         ["02"] = "Earshot can hand the AirPods back to the phone.",
         ["03"] = "Unblocking alone does not pull the AirPods off the phone.",
         ["04"] = "The block is still there after a restart.",
         ["05"] = "Unblocking works and the sound devices come back.",
         ["06"] = "Call protection can be switched on and off.",
         ["07"] = "The tray can start its background task with no administrator prompt.",
-        ["08"] = "ACCEPTANCE. After a full shut down and start, the AirPods stay on the phone.",
-        ["09"] = "Shutting down while connected does not make this PC grab the AirPods at the next start.",
+        ["08"] = "The main thing this checks: after a full shut down and start, the AirPods stay on the phone.",
+        ["09"] = "Shutting down while connected does not make this computer grab the AirPods at the next start.",
         ["10"] = "What Windows tells Earshot during each kind of restart.",
         ["11"] = "There is still no battery reading, connected or not.",
         ["12"] = "How Windows reports sound device changes to Earshot.",

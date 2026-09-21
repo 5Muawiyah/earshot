@@ -801,8 +801,7 @@ internal sealed class MainForm : Form
 
         if (_activeRunner is not null)
         {
-            DialogResult runChoice = ConfirmDialogForTests(
-                "A test is still running. Closing now stops it, the same as Stop the test: no result is written and this PC may not be at rest. Close anyway?");
+            DialogResult runChoice = ConfirmDialogForTests(Copy.CloseWhileRunningConfirmation);
             if (runChoice != DialogResult.Yes)
             {
                 e.Cancel = true;
@@ -817,7 +816,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        DialogResult choice = ConfirmDialogForTests("This PC is not at rest. Close anyway?");
+        DialogResult choice = ConfirmDialogForTests(Copy.CloseNotAtRestConfirmation);
         if (choice != DialogResult.Yes)
         {
             e.Cancel = true;

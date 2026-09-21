@@ -223,6 +223,17 @@ internal static class Copy
     internal static string AtRestOnPurpose(string reason) =>
         "Left able to grab them on purpose. " + reason + " Shut down as the test asks, or run Restore to put it back.";
 
+    // The two close-window confirmations (OnFormClosing): shown as a real Windows message box,
+    // unconditionally, never behind the technical-details toggle, so they carry this window's own
+    // plain words directly rather than "this PC"/"at rest", the same corrected phrase AtRestNo
+    // already uses for the same fact.
+    internal const string CloseWhileRunningConfirmation =
+        "A test is still running. Closing now stops it, the same as Stop the test: no result is " +
+        "saved, and this computer may grab your AirPods off your phone the next time it starts. Close anyway?";
+
+    internal const string CloseNotAtRestConfirmation =
+        "This computer may grab your AirPods off your phone the next time it starts. Close anyway?";
+
     // The at-rest banner shown at the top of Home. Banner.Compute only ever returns Red or Amber
     // here (None never reaches this: MainForm hides the banner outright for it), and it never says
     // which exact leftAtRest value caused Red (no, unknown, unreadable, or a newer run whose result
