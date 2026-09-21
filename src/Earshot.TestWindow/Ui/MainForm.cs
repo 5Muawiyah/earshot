@@ -574,7 +574,9 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (_activeRunner is not null || _banner.RowsLockedExceptRestore)
+        // Rehearsal is never exempt from the banner lock: it is not row 00, so nothing here ever
+        // passes rowIsExemptFromBannerLock true.
+        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, rowIsExemptFromBannerLock: false))
         {
             return;
         }
@@ -673,16 +675,13 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // Exactly one child may exist. Checked here, not only via the Start button's own
-        // Enabled state, because Run all and its carry-on button call this same start path
-        // programmatically, never through a click a disabled button could have blocked.
-        if (!RunGate.CanStart(_activeRunner))
-        {
-            return;
-        }
-
         DisplayRow row = _displayRows[index];
-        if (_banner.RowsLockedExceptRestore && row.Row.Number != "00")
+
+        // Exactly one child may exist, and the red banner locks every row except 00 Restore: one
+        // combined check, not only via the Start button's own Enabled state, because Run all and
+        // its carry-on button call this same start path programmatically, never through a click a
+        // disabled button could have blocked.
+        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, row.Row.Number == "00"))
         {
             return;
         }
@@ -829,6 +828,15 @@ internal sealed class MainForm : Form
             return;
         }
 
+        // The same combined gate every start path uses: reachable in a real window by starting
+        // another run (the rehearsal, or a fresh Start on a different row) while this warning sits
+        // pending, which used to leave two children alive at once. A refusal here leaves the
+        // warning showing, since nothing about it has been acted on.
+        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, pending.Row.Row.Number == "00"))
+        {
+            return;
+        }
+
         _pendingNotedStart = null;
         _notedStartWarningLabel.Visible = false;
         _notedStartButton.Visible = false;
@@ -883,8 +891,20 @@ internal sealed class MainForm : Form
         return result?.FinishedUtc;
     }
 
+    // The one place every start path ends up before a child is actually made active: StartFreshRun,
+    // StartResumedChildRunner (itself reached from both the ordinary and the noted-start path) and
+    // StartRehearsal all funnel through here. Checking the combined gate again at this single
+    // choke point, not only at each caller's own entry, means a future start path that forgets its
+    // own check still cannot start a second child or bypass the banner: it has nowhere else to go
+    // to actually begin one.
     private void BeginRun(DisplayRow row, ChildRunner runner, string resultFolder, bool isResume)
     {
+        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, row.Row.Number == "00"))
+        {
+            runner.Dispose();
+            return;
+        }
+
         _activeRunner = runner;
         _activeResultFolder = resultFolder;
         _activeIsResume = isResume;
@@ -1259,6 +1279,21 @@ internal sealed class MainForm : Form
             // clicking "Run all, step by step" again resumes here rather than from the start.
             SaveRunAllProgress();
 
+            // The combined gate again, right before the item this loop actually chose is started:
+            // a kill (or anything else) that turns the banner red between one call to AdvanceRunAll
+            // and the next must stop Run all here rather than start the next item over a PC that is
+            // not at rest. RunAllAdvance.Decide already read the evidence before the kill happened,
+            // so it alone cannot see this.
+            if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, row.Row.Number == "00"))
+            {
+                HaltRunAll(row, new DerivedRowState
+                {
+                    Kind = RowStateKind.Unknown,
+                    Reason = "the at-rest banner locks every row except Restore until it clears",
+                });
+                return;
+            }
+
             PendingRun? pending = FindPendingRun(row);
             if (pending is not null)
             {
@@ -1325,15 +1360,16 @@ internal sealed class MainForm : Form
     private void StartOrContinueRunAll()
     {
         // Run all's own button stayed enabled during a run; nothing stopped a second click
-        // (or a click while a single-row Start was mid-flight) from starting a second child.
-        if (!RunGate.CanStart(_activeRunner))
+        // (or a click while a single-row Start was mid-flight) from starting a second child. Run
+        // all's own entry point is never exempt from the banner lock, whatever item it would land
+        // on: the owner starts it again from Restore's own row instead.
+        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, rowIsExemptFromBannerLock: false))
         {
-            return;
-        }
+            if (_activeRunner is null)
+            {
+                _runAllStatusLabel.Text = _banner.Message;
+            }
 
-        if (_banner.RowsLockedExceptRestore)
-        {
-            _runAllStatusLabel.Text = _banner.Message;
             return;
         }
 

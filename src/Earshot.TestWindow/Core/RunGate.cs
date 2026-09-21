@@ -9,6 +9,20 @@ internal static class RunGate
 {
     internal static bool CanStart(object? activeRunner) => activeRunner is null;
 
+    // The one combined check every route that can start a child must pass, so a new route can
+    // never forget either rule by only remembering one of them. A row exempt from the banner lock
+    // (00 Restore, the only way off a red banner) still needs no active runner; nothing is ever
+    // exempt from the single-runner rule.
+    internal static bool CanStart(object? activeRunner, bool bannerRowsLockedExceptRestore, bool rowIsExemptFromBannerLock)
+    {
+        if (activeRunner is not null)
+        {
+            return false;
+        }
+
+        return !bannerRowsLockedExceptRestore || rowIsExemptFromBannerLock;
+    }
+
     internal static bool ShouldProcessMessage(object? activeRunner, object sourceRunner)
     {
         ArgumentNullException.ThrowIfNull(sourceRunner);
