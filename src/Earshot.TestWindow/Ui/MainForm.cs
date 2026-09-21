@@ -261,7 +261,19 @@ internal sealed class MainForm : Form
         Controls.Add(leftPanel);
 
         FormClosing += OnFormClosing;
+        Activated += OnWindowActivated;
 
+        PopulateRows();
+        UpdateStartButton();
+        UpdateRowDetail();
+    }
+
+    // A console run of one of the two commands rows 00 and 07 point the owner at
+    // (Copy.RestoreUninstallOfferNotAvailable, Copy.PlanBNotAvailable) happens entirely outside
+    // this window; the owner returning to it (alt-tab, clicking back onto it) is the moment this
+    // window has any chance to notice what that run left on disk.
+    private void OnWindowActivated(object? sender, EventArgs e)
+    {
         PopulateRows();
         UpdateStartButton();
         UpdateRowDetail();
@@ -493,8 +505,7 @@ internal sealed class MainForm : Form
     private void PopulateRows()
     {
         // Recomputed at every open and after every half.
-        _banner = Banner.Compute(LiveTestRoot());
-        UpdateBannerLabel();
+        RefreshBanner();
         UpdateRehearsalStatus();
 
         int selected = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
@@ -514,6 +525,21 @@ internal sealed class MainForm : Form
         {
             _rowList.Items[selected].Selected = true;
         }
+    }
+
+    // Recomputes the banner from disk right now and updates both the cached copy and the visible
+    // label, then hands back that same fresh value. A start gate that instead read the cached
+    // _banner field could still see whatever it was at the last PopulateRows: a console run of one
+    // of the two commands Copy.RestoreUninstallOfferNotAvailable/PlanBNotAvailable point the owner
+    // at (rows 00 and 07's own unavailable branches) can leave the machine not at rest while this
+    // window stays open with its last banner still None, and Start started a child anyway. Every
+    // start site (and BeginRun) calls this at the moment it actually checks RunGate.CanStart,
+    // never the cached field, so a fresh disk read decides, not a stale in-memory one.
+    private BannerState RefreshBanner()
+    {
+        _banner = Banner.Compute(LiveTestRoot());
+        UpdateBannerLabel();
+        return _banner;
     }
 
     private void UpdateBannerLabel()
@@ -581,7 +607,7 @@ internal sealed class MainForm : Form
 
         // Rehearsal is never exempt from the banner lock: it is not row 00, so nothing here ever
         // passes rowIsExemptFromBannerLock true.
-        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, rowIsExemptFromBannerLock: false))
+        if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, rowIsExemptFromBannerLock: false))
         {
             return;
         }
@@ -665,7 +691,7 @@ internal sealed class MainForm : Form
 
         DisplayRow row = _displayRows[index];
         // The red banner locks every row except 00 Restore.
-        bool lockedByBanner = _banner.RowsLockedExceptRestore && row.Row.Number != "00";
+        bool lockedByBanner = RefreshBanner().RowsLockedExceptRestore && row.Row.Number != "00";
 
         PendingRun? pending = FindPendingRun(row);
         _startButton.Text = pending is not null ? "Carry on with the second half" : "Start";
@@ -686,7 +712,7 @@ internal sealed class MainForm : Form
         // combined check, not only via the Start button's own Enabled state, because Run all and
         // its carry-on button call this same start path programmatically, never through a click a
         // disabled button could have blocked.
-        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, row.Row.Number == "00"))
+        if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, row.Row.Number == "00"))
         {
             return;
         }
@@ -837,7 +863,7 @@ internal sealed class MainForm : Form
         // another run (the rehearsal, or a fresh Start on a different row) while this warning sits
         // pending, which used to leave two children alive at once. A refusal here leaves the
         // warning showing, since nothing about it has been acted on.
-        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, pending.Row.Row.Number == "00"))
+        if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, pending.Row.Row.Number == "00"))
         {
             return;
         }
@@ -904,7 +930,7 @@ internal sealed class MainForm : Form
     // to actually begin one.
     private void BeginRun(DisplayRow row, ChildRunner runner, string resultFolder, bool isResume)
     {
-        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, row.Row.Number == "00"))
+        if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, row.Row.Number == "00"))
         {
             runner.Dispose();
             return;
@@ -1309,7 +1335,7 @@ internal sealed class MainForm : Form
             // and the next must stop Run all here rather than start the next item over a PC that is
             // not at rest. RunAllAdvance.Decide already read the evidence before the kill happened,
             // so it alone cannot see this.
-            if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, row.Row.Number == "00"))
+            if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, row.Row.Number == "00"))
             {
                 HaltRunAll(row, new DerivedRowState
                 {
@@ -1388,7 +1414,7 @@ internal sealed class MainForm : Form
         // (or a click while a single-row Start was mid-flight) from starting a second child. Run
         // all's own entry point is never exempt from the banner lock, whatever item it would land
         // on: the owner starts it again from Restore's own row instead.
-        if (!RunGate.CanStart(_activeRunner, _banner.RowsLockedExceptRestore, rowIsExemptFromBannerLock: false))
+        if (!RunGate.CanStart(_activeRunner, RefreshBanner().RowsLockedExceptRestore, rowIsExemptFromBannerLock: false))
         {
             if (_activeRunner is null)
             {
@@ -1550,6 +1576,13 @@ internal sealed class MainForm : Form
         OnFormClosing(this, args);
         return args;
     }
+
+    // Test seam: the real Activated handler, so a test can prove the banner and rows are
+    // refreshed from disk without the headless form ever needing real Win32 focus, which
+    // ForceControlCreationForTests's own real handle does not, by itself, guarantee raises.
+    internal void RaiseActivatedForTests() => OnWindowActivated(this, EventArgs.Empty);
+
+    internal bool BannerVisibleForTests => _bannerLabel.Visible;
 
     // Test seams for the rehearsal control. PerformClick (the same pattern every other *ForTests
     // click uses) does nothing on a disabled control (Button.CanSelect is false while Enabled is
