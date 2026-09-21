@@ -35,6 +35,35 @@ internal static class Copy
         "Locked. Run the administrator prompt check first. It proves this window can raise the " +
         "Windows permission box and read the answer before anything real depends on it.";
 
+    // M4: the rehearsal control's own name and its permanently visible warning, beside its
+    // button, never only in a tooltip. Two facts it must say plainly, in this window's own
+    // words: Windows will raise a real prompt, and this is the elevated launch site's first
+    // execution in any form (test-gui.md section 10.1/10.2; Test-ElevatedLaunch.ps1's own
+    // docstring: "this launch site's ... first execution in any form").
+    internal const string RehearsalRowName = "Administrator prompt check";
+
+    internal const string RehearsalWarning =
+        "This starts a real check. Windows will raise a real administrator permission prompt, " +
+        "twice. This is the first time this launch has ever been run, in any form. Only the " +
+        "owner runs this, by hand, from this window; nothing else ever calls it.";
+
+    internal const string RehearsalNeverInSandbox =
+        "Not available in a sandbox window: this always runs for real and always raises a real " +
+        "Windows prompt, so a development sandbox never runs it.";
+
+    internal const string RehearsalUnlocksRows = "Passing this unlocks row 15, and offers 00's uninstall and 07's plan B.";
+
+    // M13: 00's uninstall variant and 07's plan B are real branches those scripts declare
+    // (-OfferUninstall, -AllowPlanB) that this row can never reach, because this window never
+    // passes either as true anywhere. No silently missing path: said plainly on the row itself.
+    internal const string RestoreUninstallOfferNotAvailable =
+        "This row never offers to uninstall Earshot: -OfferUninstall is not wired to a control " +
+        "in this build. Run the uninstall yourself, from Windows, if you need it.";
+
+    internal const string PlanBNotAvailable =
+        "This row never tries the elevated plan B for the missing third value: -AllowPlanB is " +
+        "not wired to a control in this build.";
+
     // section 10.3: "Derived from result.json only: a step with elevated true, ran false and an
     // error." Two independent messages, never guessed at from anything the window itself
     // observed while the step ran.

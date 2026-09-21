@@ -180,6 +180,7 @@ internal static partial class EvidenceStore
                 Findings = ReadFindings(root),
                 Errors = ReadErrors(root),
                 StepCount = CountArrayOrObjectMember(root, "steps"),
+                Steps = ReadSteps(root),
                 Exe = TryGetString(root, "exe"),
                 StartedUtc = TryGetDate(root, "startedUtc"),
                 FinishedUtc = TryGetDate(root, "finishedUtc"),
@@ -299,6 +300,38 @@ internal static partial class EvidenceStore
             {
                 list.Add(message);
             }
+        }
+
+        return list;
+    }
+
+    // M13: leniently read too, the same as findings and errors: steps are shown and reasoned
+    // about (a declined elevated prompt), never used to decide pass or fail.
+    private static List<StepRecord> ReadSteps(JsonElement root)
+    {
+        var list = new List<StepRecord>();
+        if (!root.TryGetProperty("steps", out JsonElement element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return list;
+        }
+
+        IEnumerable<JsonElement> items = element.ValueKind switch
+        {
+            JsonValueKind.Array => element.EnumerateArray(),
+            JsonValueKind.Object => new[] { element },
+            _ => Array.Empty<JsonElement>(),
+        };
+
+        foreach (JsonElement item in items)
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            bool elevated = item.TryGetProperty("elevated", out JsonElement elevatedElement) && elevatedElement.ValueKind == JsonValueKind.True;
+            bool ran = item.TryGetProperty("ran", out JsonElement ranElement) && ranElement.ValueKind == JsonValueKind.True;
+            list.Add(new StepRecord(elevated, ran, TryGetString(item, "error")));
         }
 
         return list;

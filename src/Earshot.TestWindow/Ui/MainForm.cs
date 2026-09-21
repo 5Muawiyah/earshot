@@ -31,6 +31,13 @@ internal sealed class MainForm : Form
     private readonly Button _runAllCarryOnButton;
     private readonly System.Windows.Forms.Timer _watchdogTimer;
 
+    // M4: the administrator prompt check's own control, separate from the row list (it is a
+    // utility check, not one of the 16 numbered tests, and never appears in Run all's own order).
+    private readonly Button _rehearsalButton;
+    private readonly Label _rehearsalWarningLabel;
+    private readonly Label _rehearsalStatusLabel;
+    private readonly DisplayRow _rehearsalRow;
+
     private readonly List<Exception> _postDisposalDeliveryFailures = new();
 
     private ChildRunner? _activeRunner;
@@ -157,6 +164,28 @@ internal sealed class MainForm : Form
         _runAllButton = new Button { Text = Copy.RunAllButtonLabel, Dock = DockStyle.Top, Height = 28 };
         _runAllButton.Click += (_, _) => StartOrContinueRunAll();
 
+        // M4: beside row 15 rather than inside the row list, since this is a utility check, not
+        // one of the 16 numbered tests. Disabled outright in a sandbox window (never Visible at
+        // all is not enough on its own; StartRehearsal itself refuses too, section 8.1's own
+        // belt-and-braces): an unattended or development sandbox must never run this, because it
+        // always raises a real Windows administrator prompt, in any mode.
+        _rehearsalRow = BuildRehearsalDisplayRow();
+        _rehearsalWarningLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 48, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed,
+            Text = Copy.RehearsalWarning,
+        };
+        _rehearsalStatusLabel = new Label
+        {
+            Dock = DockStyle.Top, Height = 20, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            Text = sandbox is null ? string.Empty : Copy.RehearsalNeverInSandbox,
+        };
+        _rehearsalButton = new Button
+        {
+            Text = Copy.RehearsalRowName, Dock = DockStyle.Top, Height = 28, Enabled = sandbox is null,
+        };
+        _rehearsalButton.Click += (_, _) => StartRehearsal();
+
         var rightPanel = new Panel { Dock = DockStyle.Fill };
         rightPanel.Controls.Add(contentHost);
         rightPanel.Controls.Add(_statusLabel);
@@ -166,6 +195,9 @@ internal sealed class MainForm : Form
         rightPanel.Controls.Add(_caseBox);
         rightPanel.Controls.Add(_stopButton);
         rightPanel.Controls.Add(_startButton);
+        rightPanel.Controls.Add(_rehearsalStatusLabel);
+        rightPanel.Controls.Add(_rehearsalWarningLabel);
+        rightPanel.Controls.Add(_rehearsalButton);
         rightPanel.Controls.Add(_runAllExplanationLabel);
         rightPanel.Controls.Add(_runAllButton);
 
@@ -203,6 +235,19 @@ internal sealed class MainForm : Form
         if (row.WaitsOnWindowsUpdate)
         {
             text += Environment.NewLine + "This variant waits on Windows Update offering a restart; it may take a while for one to appear.";
+        }
+
+        // M13: "the brief forbids a silently missing path." Restore's own uninstall offer and
+        // 07's plan B are real branches these scripts declare (-OfferUninstall, -AllowPlanB) that
+        // this window never passes as true anywhere, so this row can never reach them; said here
+        // rather than left for the owner to notice on his own.
+        if (row.Number == "00")
+        {
+            text += Environment.NewLine + Environment.NewLine + Copy.RestoreUninstallOfferNotAvailable;
+        }
+        else if (row.Number == "07")
+        {
+            text += Environment.NewLine + Environment.NewLine + Copy.PlanBNotAvailable;
         }
 
         _rowDetailLabel.Text = text;
@@ -279,6 +324,7 @@ internal sealed class MainForm : Form
         // Recomputed at every open and after every half (design.md section 4.6).
         _banner = Banner.Compute(LiveTestRoot());
         UpdateBannerLabel();
+        UpdateRehearsalStatus();
 
         int selected = _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
         _rowList.Items.Clear();
@@ -328,11 +374,92 @@ internal sealed class MainForm : Form
         return StateDeriver.Derive(spec, evidence, _exePath, exeWrite);
     }
 
+    // M4: a hand-built row for the administrator prompt check, never one of the 16 in
+    // Data\tests.json (Number "AR" so it can never collide with a real one, and so it is never
+    // picked up by RunAllOrder, which walks the manifest's own numbered rows). Its TestId matches
+    // ElevationGate.RehearsalTestId exactly, so ComputeState-style evidence lookups and the lock
+    // rule agree on where its result.json lives.
+    private static DisplayRow BuildRehearsalDisplayRow()
+    {
+        var row = new ManifestRow
+        {
+            Number = "AR",
+            Script = "gui/Test-ElevatedLaunch.ps1",
+            TestId = ElevationGate.RehearsalTestId,
+            Kind = "utility",
+            Halves = 1,
+            Name = Copy.RehearsalRowName,
+            Title = "Administrator prompt check",
+            Proves = "This window's one elevated launch site can raise the Windows permission box and read the answer.",
+            Settles = "Whether this window's one elevated launch site can raise the Windows permission box and read the answer, before test 15, 00's uninstall variant or 07's plan B ever depend on it.",
+        };
+        return new DisplayRow { Row = row };
+    }
+
+    // M4: never in a sandbox window (an unattended or development sandbox must never raise a
+    // real Windows administrator prompt), never while another run is active (RunGate's own rule,
+    // section 8.2), and always through the production driver: D8 and section 10.2 are explicit
+    // that nothing about this site's own execution may be faked.
+    private void StartRehearsal()
+    {
+        if (_sandbox is not null)
+        {
+            _rehearsalStatusLabel.Text = Copy.RehearsalNeverInSandbox;
+            return;
+        }
+
+        if (_activeRunner is not null || _banner.RowsLockedExceptRestore)
+        {
+            return;
+        }
+
+        string host = PowerShell51.ExecutablePath();
+        if (!File.Exists(host))
+        {
+            _statusLabel.Text = "Windows PowerShell 5.1 is not installed at " + host + ".";
+            return;
+        }
+
+        string liveTestRoot = LiveTestRoot();
+        string stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        string runRoot = Path.Combine(liveTestRoot, stamp);
+        Directory.CreateDirectory(runRoot);
+
+        string driver = RehearsalLaunch.DriverPath(_repoRoot);
+        string scriptPath = RehearsalLaunch.ScriptPath(_repoRoot);
+        var runner = new ChildRunner(host, driver, scriptPath, _exePath, runRoot, resume: false, variant: 0, offerUninstall: false, allowPlanB: false);
+        BeginRun(_rehearsalRow, runner, Path.Combine(runRoot, ElevationGate.RehearsalTestId), isResume: false);
+    }
+
+    // Refreshed at every open and after every half (PopulateRows), the same as the banner: NotRun
+    // until anything has ever been recorded, then whatever ElevationGate itself would say about
+    // it, in this window's own words.
+    private void UpdateRehearsalStatus()
+    {
+        if (_sandbox is not null)
+        {
+            return;
+        }
+
+        ParsedResult? rehearsal = ElevationGate.FindNewestRehearsal(LiveTestRoot());
+        DateTimeOffset harnessNewestWriteUtc = ElevationGate.HarnessNewestWriteUtc(_repoRoot);
+        bool unlocked = ElevationGate.IsUnlocked(rehearsal, harnessNewestWriteUtc);
+
+        _rehearsalStatusLabel.Text = rehearsal switch
+        {
+            null => "Not yet run. " + Copy.RehearsalUnlocksRows,
+            { Overall: "pass" } when unlocked => "Passed. " + Copy.RehearsalUnlocksRows,
+            { Overall: "pass" } => "Passed, but an older one: run it again after this build's own harness files changed. " + Copy.RehearsalUnlocksRows,
+            { Overall: "fail" } => "Failed. " + Copy.RehearsalUnlocksRows,
+            _ => "Inconclusive. " + Copy.RehearsalUnlocksRows,
+        };
+    }
+
     // section 10.2's lock rule, wired to row 15: its whole test is the elevated uninstall/install
-    // cycle, so it is unambiguous. 00's uninstall variant and 07's plan B are the other two rows
-    // the spec names, but neither has its own control surface in this build yet (StartFreshRun
-    // never passes -OfferUninstall or -AllowPlanB as true anywhere): their primary, unelevated
-    // rows must stay usable, so they are deliberately not gated here. Recorded as a known gap.
+    // cycle, so it is unambiguous. M13: 00's uninstall variant and 07's plan B are the other two
+    // rows the spec names; this round does not give either its own locked row (the safer of the
+    // spec's two sanctioned options was taken instead: UpdateRowDetail's own note on rows 00 and
+    // 07 says plainly what is not offered and why), so neither is gated here either.
     private bool IsElevationLocked(DisplayRow row)
     {
         if (row.Row.Number != "15")
@@ -1057,6 +1184,20 @@ internal sealed class MainForm : Form
         OnFormClosing(this, args);
         return args;
     }
+
+    // M4 test seams. ClickRehearsalButtonForTests uses PerformClick (bypasses Enabled, the same
+    // as every other *ForTests click), so it proves StartRehearsal's own runtime sandbox guard
+    // independently of the Enabled=false set at construction: even a stray click while sandboxed
+    // must never start anything.
+    internal bool RehearsalButtonEnabledForTests => _rehearsalButton.Enabled;
+
+    internal string RowDetailTextForTests => _rowDetailLabel.Text;
+
+    internal string RehearsalStatusTextForTests => _rehearsalStatusLabel.Text;
+
+    internal string RehearsalWarningTextForTests => _rehearsalWarningLabel.Text;
+
+    internal void ClickRehearsalButtonForTests() => _rehearsalButton.PerformClick();
 
     internal bool HandOffVisibleForTests => _handOffBox.Visible;
 

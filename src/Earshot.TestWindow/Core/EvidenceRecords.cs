@@ -10,6 +10,12 @@ internal sealed record CriterionRecord(string Id, string Criterion, string Outco
 // it, while Value gives the string a caller doing exact comparisons (leftAtRest) wants.
 internal sealed record FindingRecord(string Name, string? Value, string Detail);
 
+// M13: one step as Invoke-Earshot/Invoke-EarshotElevated recorded it, the fields section 10.3's
+// own decision needs. Elevated true, Ran false and a non-empty Error is "you chose No on the
+// Windows permission box" (section 10.3), derived from result.json alone, nothing this window
+// observed while the step ran.
+internal sealed record StepRecord(bool Elevated, bool Ran, string? Error);
+
 // A result.json that passed every fail-closed check in test-gui.md section 6.2: the test id
 // matches its folder, overall is exactly pass/fail/inconclusive, and it agrees with itself once
 // recomputed from its own criteria.
@@ -21,6 +27,11 @@ internal sealed class ParsedResult
     public required IReadOnlyList<FindingRecord> Findings { get; init; }
     public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
     public required int StepCount { get; init; }
+    public IReadOnlyList<StepRecord> Steps { get; init; } = Array.Empty<StepRecord>();
+
+    // section 10.3: "Derived from result.json only: a step with elevated true, ran false and an
+    // error." The declined-prompt copy is Ui.Copy's own job to render; this is the fact alone.
+    public bool HasDeclinedElevatedStep => Steps.Any(s => s.Elevated && !s.Ran && !string.IsNullOrEmpty(s.Error));
     public string? Exe { get; init; }
     public DateTimeOffset? StartedUtc { get; init; }
     public DateTimeOffset? FinishedUtc { get; init; }

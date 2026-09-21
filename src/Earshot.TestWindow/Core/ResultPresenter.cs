@@ -14,6 +14,10 @@ internal sealed record ResultPresentation
     // string the owner sees. Null means no such finding was recorded.
     public string? LeftAtRest { get; init; }
     public string? LeftAtRestDetail { get; init; }
+
+    // M13, section 10.3: "a step with elevated true, ran false and an error" is derived here,
+    // from result.json alone; Ui.Copy.DeclinedElevatedPrompt is the one place its words live.
+    public bool HasDeclinedElevatedStep { get; init; }
     public required string EvidenceFolder { get; init; }
     public required string ResultJsonPath { get; init; }
     public required string SummaryTxtPath { get; init; }
@@ -42,6 +46,7 @@ internal static class ResultPresenter
             Errors = result.Errors,
             LeftAtRest = leftAtRestFinding?.Value,
             LeftAtRestDetail = leftAtRestFinding?.Detail,
+            HasDeclinedElevatedStep = result.HasDeclinedElevatedStep,
             EvidenceFolder = folder,
             ResultJsonPath = Path.Combine(folder, "result.json"),
             SummaryTxtPath = Path.Combine(folder, "summary.txt"),

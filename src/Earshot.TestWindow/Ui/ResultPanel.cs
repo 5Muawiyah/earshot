@@ -12,6 +12,7 @@ internal sealed class ResultPanel : Panel
     private readonly TextBox _errorsBox;
     private readonly Label _evidenceLabel;
     private readonly Label _atRestLabel;
+    private readonly Label _declinedElevatedPromptLabel;
     private IReadOnlyList<FailureRow> _failures = Array.Empty<FailureRow>();
 
     internal ResultPanel()
@@ -63,7 +64,17 @@ internal sealed class ResultPanel : Panel
         _evidenceLabel = new Label { AutoSize = true, MaximumSize = new Size(704, 0), Margin = new Padding(0, 0, 0, 12) };
         _atRestLabel = new Label { AutoSize = true, MaximumSize = new Size(704, 0), Font = new Font(Font, FontStyle.Bold) };
 
+        // M13: section 10.3's own words, shown here rather than only in a criterion's own detail
+        // text, since "you chose No on the Windows permission box" is the one fact about the run
+        // that most needs to be seen without having to open the failure list first.
+        _declinedElevatedPromptLabel = new Label
+        {
+            AutoSize = true, MaximumSize = new Size(704, 0), ForeColor = Color.DarkRed, Visible = false,
+            Margin = new Padding(0, 0, 0, 8),
+        };
+
         stack.Controls.Add(heading);
+        stack.Controls.Add(_declinedElevatedPromptLabel);
         stack.Controls.Add(_failureList);
         stack.Controls.Add(_selectedCaption);
         stack.Controls.Add(_selectedDetailBox);
@@ -78,6 +89,9 @@ internal sealed class ResultPanel : Panel
     internal void Show(ResultPresentation result)
     {
         ArgumentNullException.ThrowIfNull(result);
+
+        _declinedElevatedPromptLabel.Visible = result.HasDeclinedElevatedStep;
+        _declinedElevatedPromptLabel.Text = Copy.DeclinedElevatedPrompt;
 
         _failures = result.Failures;
         _failureList.Items.Clear();
