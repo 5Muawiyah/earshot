@@ -34,6 +34,23 @@ internal static class StateDeriver
             };
         }
 
+        // B4 (review round 1): the single newest run folder for this test, whatever it says,
+        // outranks every older one. If it is missing, truncated, empty, for the wrong test, or
+        // otherwise fails EvidenceStore's own fail-closed checks (including "overall pass with no
+        // criteria", which those checks already reject as self-disagreeing), the row is Unknown
+        // right here and no older evidence, not even a genuine earlier pass, is ever consulted.
+        // This is different from an honestly empty "stopped before any step" run (ReadSucceeded
+        // true, zero criteria), which section 6.2 still lets fall through to older evidence.
+        if (!runsNewestFirst[0].ReadSucceeded)
+        {
+            return new DerivedRowState
+            {
+                Kind = RowStateKind.Unknown,
+                Reason = runsNewestFirst[0].ReadFailureReason,
+                HistoryNote = "the newest run, in " + runsNewestFirst[0].Folder + ", could not be read; no older result is trusted while that stands",
+            };
+        }
+
         (RunEvidence? verdictRun, HalfKind verdictHalf, string? historyNote, RunEvidence? newestUnreadable) =
             FindVerdictRun(spec, runsNewestFirst);
 
