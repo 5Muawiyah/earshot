@@ -1581,6 +1581,8 @@ internal sealed class MainForm : Form
 
     internal bool StartButtonEnabledForTests => _startButton.Enabled;
 
+    internal bool RunAllButtonEnabledForTests => _runAllButton.Enabled;
+
     internal int SelectedIndexForTests => _rowList.SelectedIndices.Count > 0 ? _rowList.SelectedIndices[0] : -1;
 
     // Control.CreateControl() (protected on every Control) silently does nothing while Visible

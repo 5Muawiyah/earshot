@@ -83,6 +83,9 @@ public sealed class NotedStartRequiresDeliberateClickTests
 
             Assert.IsTrue(form.SelectRowForTests("01"));
 
+            // The real proof is this: the button is withdrawn (invisible), which is itself what
+            // stops a click reaching ProceedWithNotedStart (Control.PerformClick is a no-op on an
+            // invisible control). The click below is only a defensive extra, never load-bearing.
             Assert.IsFalse(form.NotedStartWarningVisibleForTests, "a warning belonging to row 08 must not survive selecting a different row.");
             form.ClickNotedStartButtonForTests();
             Assert.IsNull(form.ActiveRunnerForTests, "a withdrawn warning's button must not start anything.");

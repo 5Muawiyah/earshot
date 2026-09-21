@@ -60,14 +60,27 @@ public sealed class RestartRefusalBlocksEveryButtonTests
             form.PowerCycleVerdictOverrideForTests = () => PowerCycleVerdict.Restart;
             Assert.IsTrue(form.SelectRowForTests("08"));
 
+            // Start is genuinely clickable here (Button.PerformClick is a no-op on a disabled or
+            // invisible control, so a click that never reaches StartSelectedRow would leave
+            // StatusTextForTests exactly as it was; the refusal message below is only possible if
+            // the click actually ran the real gate check).
+            Assert.IsTrue(form.StartButtonEnabledForTests, "Start must be enabled for this click to prove anything.");
             form.ClickStartForTests();
             Assert.IsNull(form.ActiveRunnerForTests, "Start built a child even though the verdict was a restart, not a shut down.");
-            Assert.IsFalse(form.NotedStartWarningVisibleForTests, "a refusal must never show the noted-start warning: there is nothing to click past.");
             StringAssert.Contains(form.StatusTextForTests, "restart, not a shut down");
 
+            // The noted-start button is never even made visible for a refusal (there is nothing
+            // to click past), which is the real proof here: PerformClick on an invisible button is
+            // itself a no-op (Control.CanSelect requires Visible), so clicking it afterwards would
+            // prove nothing on its own and is not what this asserts on.
+            Assert.IsFalse(form.NotedStartWarningVisibleForTests, "a refusal must never show the noted-start warning: there is nothing to click past.");
             form.ClickNotedStartButtonForTests();
             Assert.IsNull(form.ActiveRunnerForTests, "the noted-start button started a child although nothing was pending for it.");
 
+            // Run all is genuinely clickable too (nothing disables it while no run is active);
+            // AdvanceRunAll's own halt-on-waiting-row behaviour is what stops it here, not a
+            // disabled button silently absorbing the click.
+            Assert.IsTrue(form.RunAllButtonEnabledForTests, "Run all must be enabled for this click to prove anything.");
             form.ClickRunAllForTests();
             MainFormTestHarness.PumpUntil(() => false, TimeSpan.FromMilliseconds(300));
             Assert.IsNull(form.ActiveRunnerForTests, "Run all built a child even though the verdict was a restart, not a shut down.");
