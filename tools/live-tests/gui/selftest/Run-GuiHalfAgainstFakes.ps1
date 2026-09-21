@@ -30,6 +30,10 @@
 .PARAMETER Case
     none, one, two or one of Fakes.psm1's named at-rest cases. Defaults to 'one': a normal
     machine with a small amount of real-looking evidence to count.
+
+.PARAMETER SpeakerAddress
+    Test 14's protected-device half only, forwarded the same way Invoke-GuiHalf.ps1 forwards it:
+    only when the target script declares -SpeakerAddress and this is not empty.
 #>
 
 #Requires -Version 5.1
@@ -45,7 +49,8 @@ param(
     [switch]$Resume,
     [int]$Variant = 0,
     [switch]$OfferUninstall,
-    [switch]$AllowPlanB
+    [switch]$AllowPlanB,
+    [string]$SpeakerAddress = ''
 )
 
 Set-StrictMode -Version 2.0
@@ -160,6 +165,7 @@ if ($declared.ContainsKey('Resume') -and $Resume) { $forward['Resume'] = [switch
 if ($declared.ContainsKey('Variant') -and $Variant -ne 0) { $forward['Variant'] = $Variant }
 if ($declared.ContainsKey('OfferUninstall') -and $OfferUninstall) { $forward['OfferUninstall'] = [switch]$true }
 if ($declared.ContainsKey('AllowPlanB') -and $AllowPlanB) { $forward['AllowPlanB'] = [switch]$true }
+if ($declared.ContainsKey('SpeakerAddress') -and -not [string]::IsNullOrEmpty($SpeakerAddress)) { $forward['SpeakerAddress'] = $SpeakerAddress }
 
 $global:LASTEXITCODE = 0
 try

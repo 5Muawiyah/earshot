@@ -17,6 +17,15 @@ internal sealed class MainForm : Form
 
     private readonly ListView _rowList;
     private readonly Label _rowDetailLabel;
+
+    // Test 14 only: the second device's address is chosen from these buttons, never typed
+    // (SpeakerCandidateFinder reads the candidates off an earlier run's own node evidence).
+    // _chosenSpeakerAddress is null until one is clicked, or after "No second device" clears it,
+    // and is what StartFreshRun forwards as -SpeakerAddress.
+    private readonly Label _speakerChoiceLabel;
+    private readonly FlowLayoutPanel _speakerChoiceRow;
+    private string? _chosenSpeakerAddress;
+
     private readonly Button _startButton;
     private readonly Button _stopButton;
     private readonly ComboBox _caseBox;
@@ -96,8 +105,17 @@ internal sealed class MainForm : Form
 
         _rowDetailLabel = new Label { Dock = DockStyle.Bottom, Height = 110, AutoEllipsis = false, TextAlign = ContentAlignment.TopLeft };
 
+        _speakerChoiceLabel = new Label
+        {
+            Dock = DockStyle.Bottom, Height = 20, TextAlign = ContentAlignment.MiddleLeft, ForeColor = SystemColors.GrayText,
+            Text = Copy.SpeakerAddressChoicePrompt, Visible = false,
+        };
+        _speakerChoiceRow = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, FlowDirection = FlowDirection.LeftToRight, Visible = false };
+
         var leftPanel = new Panel { Dock = DockStyle.Left, Width = 460 };
         leftPanel.Controls.Add(_rowList);
+        leftPanel.Controls.Add(_speakerChoiceRow);
+        leftPanel.Controls.Add(_speakerChoiceLabel);
         leftPanel.Controls.Add(_rowDetailLabel);
 
         _startButton = new Button { Text = "Start", Dock = DockStyle.Top, Height = 32 };
@@ -216,6 +234,7 @@ internal sealed class MainForm : Form
         if (_rowList.SelectedIndices.Count == 0)
         {
             _rowDetailLabel.Text = string.Empty;
+            UpdateSpeakerChoice(null);
             return;
         }
 
@@ -223,6 +242,7 @@ internal sealed class MainForm : Form
         if (index < 0 || index >= _displayRows.Count)
         {
             _rowDetailLabel.Text = string.Empty;
+            UpdateSpeakerChoice(null);
             return;
         }
 
@@ -255,7 +275,59 @@ internal sealed class MainForm : Form
             text += Environment.NewLine + Environment.NewLine + Copy.Test10VariantNotSandboxTestable;
         }
 
+        if (row.Row.Number == "14")
+        {
+            IReadOnlyList<string> candidates = SpeakerCandidateFinder.Find(LiveTestRoot());
+            if (candidates.Count == 0)
+            {
+                text += Environment.NewLine + Environment.NewLine + Copy.SpeakerAddressNoCandidates;
+            }
+
+            UpdateSpeakerChoice(candidates);
+        }
+        else
+        {
+            UpdateSpeakerChoice(null);
+        }
+
         _rowDetailLabel.Text = text;
+    }
+
+    // Rebuilds the speaker-address choice buttons for test 14 (candidates is null for every other
+    // row, or when nothing is selected). A previously chosen address is kept only while it is
+    // still among the candidates read this time; anything else (no row 14, no candidates, a stale
+    // choice) resets it to null, which StartFreshRun then reads as "no second device".
+    private void UpdateSpeakerChoice(IReadOnlyList<string>? candidates)
+    {
+        _speakerChoiceRow.Controls.Clear();
+
+        if (candidates is null || candidates.Count == 0)
+        {
+            _speakerChoiceRow.Visible = false;
+            _speakerChoiceLabel.Visible = false;
+            _chosenSpeakerAddress = null;
+            return;
+        }
+
+        if (_chosenSpeakerAddress is not null && !candidates.Contains(_chosenSpeakerAddress, StringComparer.Ordinal))
+        {
+            _chosenSpeakerAddress = null;
+        }
+
+        _speakerChoiceLabel.Visible = true;
+        _speakerChoiceRow.Visible = true;
+
+        foreach (string address in candidates)
+        {
+            string captured = address;
+            var button = new Button { Text = address, AutoSize = true, Margin = new Padding(4) };
+            button.Click += (_, _) => _chosenSpeakerAddress = captured;
+            _speakerChoiceRow.Controls.Add(button);
+        }
+
+        var noneButton = new Button { Text = Copy.SpeakerAddressChoiceNone, AutoSize = true, Margin = new Padding(4) };
+        noneButton.Click += (_, _) => _chosenSpeakerAddress = null;
+        _speakerChoiceRow.Controls.Add(noneButton);
     }
 
     // Closing while the banner is red asks first. Closing during a run asks first too, and
@@ -566,16 +638,23 @@ internal sealed class MainForm : Form
         Directory.CreateDirectory(runRoot);
         string scriptPath = Path.Combine(_repoRoot, "tools", "live-tests", row.Script);
 
+        // Test 14 only: the second device's address chosen from SpeakerAddressChoicesForTests's
+        // own buttons (never typed), forwarded as -SpeakerAddress. Both drivers declare that
+        // parameter and forward it to the target script only when it is not empty, exactly the
+        // way -Variant already works for every other row.
+        var extra = new List<(string Name, string Value)>();
+        if (row.Row.Number == "14" && !string.IsNullOrEmpty(_chosenSpeakerAddress))
+        {
+            extra.Add(("SpeakerAddress", _chosenSpeakerAddress));
+        }
+
         ChildRunner runner;
         if (_sandbox is not null)
         {
             string driver = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "selftest", "Run-GuiHalfAgainstFakes.ps1");
-            var extra = new List<(string Name, string Value)>
-            {
-                ("SandboxRoot", _sandbox.Folder),
-                ("TestId", row.TestId),
-                ("Case", (string)_caseBox.SelectedItem!),
-            };
+            extra.Add(("SandboxRoot", _sandbox.Folder));
+            extra.Add(("TestId", row.TestId));
+            extra.Add(("Case", (string)_caseBox.SelectedItem!));
             runner = new ChildRunner(
                 host, driver, scriptPath, _exePath, runRoot, resume: false, variant: row.VariantNumber, offerUninstall: false, allowPlanB: false,
                 environmentOverrides: _sandbox.ChildEnvironment, extraArguments: extra);
@@ -583,7 +662,9 @@ internal sealed class MainForm : Form
         else
         {
             string driver = Path.Combine(_repoRoot, "tools", "live-tests", "gui", "Invoke-GuiHalf.ps1");
-            runner = new ChildRunner(host, driver, scriptPath, _exePath, runRoot, resume: false, variant: row.VariantNumber, offerUninstall: false, allowPlanB: false);
+            runner = new ChildRunner(
+                host, driver, scriptPath, _exePath, runRoot, resume: false, variant: row.VariantNumber, offerUninstall: false, allowPlanB: false,
+                extraArguments: extra.Count > 0 ? extra : null);
         }
 
         BeginRun(row, runner, Path.Combine(runRoot, row.TestId), isResume: false);
@@ -1211,6 +1292,17 @@ internal sealed class MainForm : Form
     internal bool RehearsalButtonEnabledForTests => _rehearsalButton.Enabled;
 
     internal string RowDetailTextForTests => _rowDetailLabel.Text;
+
+    // Test 14's speaker-address choice: one entry per visible button (candidates, then "No second
+    // device", in that order), the address PerformClick chose (null once cleared or before any
+    // click), and the click itself, the same PerformClick pattern every other *ForTests click uses.
+    internal IReadOnlyList<string> SpeakerAddressChoicesForTests =>
+        _speakerChoiceRow.Controls.OfType<Button>().Select(button => button.Text).ToArray();
+
+    internal string? ChosenSpeakerAddressForTests => _chosenSpeakerAddress;
+
+    internal void ClickSpeakerAddressChoiceForTests(int index) =>
+        (_speakerChoiceRow.Controls.Count > index ? _speakerChoiceRow.Controls[index] as Button : null)?.PerformClick();
 
     internal string RehearsalStatusTextForTests => _rehearsalStatusLabel.Text;
 

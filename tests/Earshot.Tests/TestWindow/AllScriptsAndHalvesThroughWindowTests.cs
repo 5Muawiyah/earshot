@@ -23,14 +23,6 @@ namespace Earshot.Tests.TestWindow;
 //
 // Known exceptions, each with its own obstacle:
 //
-//   14-set-device-refusal|first: only ExePath, RunRoot, Resume, Variant, OfferUninstall and
-//   AllowPlanB ever reach the target script through the window's own drivers (Invoke-GuiHalf.ps1's
-//   and Run-GuiHalfAgainstFakes.ps1's own Get-EarshotTwScriptParameters), so -SpeakerAddress can
-//   never be forwarded. refuses-protected-move therefore always reads inconclusive through the
-//   window (no second device was ever given), never expectations.psd1's pinned "pass" for the
-//   "one" case. Still driven; the mismatch itself is asserted below (CriterionOutcomeOverrides),
-//   so a future change that starts or stops matching expectations.psd1 is still caught.
-//
 //   Test 10, variants 2 to 5 (tools\live-tests\selftest\Fakes.psm1's own StartStates has an entry
 //   only for "10-shutdown-messages-v1"): these are not part of Invoke-SelfTest.ps1's own $tests
 //   table at all (it only ever drives variant 1), so they are outside this sweep by construction,
@@ -39,12 +31,17 @@ namespace Earshot.Tests.TestWindow;
 //   Test10VariantNotSandboxTestable).
 //
 // Timing, not correctness: 03-AllowPages.ps1's first half loops on the real, unstubbed
-// Wait-Seconds for its own $WatchSeconds (120 s by default; the window cannot shorten it either,
-// for the same forwarding reason as -SpeakerAddress above), because nothing in the fake world ever
-// moves the render endpoint for a plain "diag gate allow". Every criterion it records is decided by
-// whether the endpoint ever went Active, never by how long the wait was, so the evidence still
-// matches expectations.psd1 exactly; it is simply the slow half, and is given a longer timeout
-// and driven alongside everything else in parallel rather than excepted.
+// Wait-Seconds for its own $WatchSeconds (120 s by default), because nothing in the fake world
+// ever moves the render endpoint for a plain "diag gate allow". Every criterion it records is
+// decided by whether the endpoint ever went Active, never by how long the wait was, so the
+// evidence still matches expectations.psd1 exactly; it is simply the slow half, and is given a
+// longer timeout and driven alongside everything else in parallel rather than excepted.
+//
+// 14-set-device-refusal|first now forwards -SpeakerAddress too: Invoke-GuiHalf.ps1 and
+// Run-GuiHalfAgainstFakes.ps1 both declare it and forward it to the target script when it is not
+// empty, the same rule -Variant already follows, so this row is driven with the plan's own
+// SpeakerAddress=C7D8E9F0A1B2 (Invoke-SelfTest.ps1's own Extra for this row) and expects exactly
+// what expectations.psd1 says, with no exception.
 [TestClass]
 public sealed class AllScriptsAndHalvesThroughWindowTests
 {
@@ -55,10 +52,6 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
 
     private const int ExpectedScriptCount = 16;
     private const int ExpectedHalfCount = 22;
-
-    // 14-set-device-refusal|first only: see the class comment's first known exception.
-    private static readonly Dictionary<string, string> CriterionOutcomeOverrides =
-        new(StringComparer.Ordinal) { ["refuses-protected-move"] = "inconclusive" };
 
     [TestMethod]
     public void EveryScriptAndHalfIsDrivenThroughTheWindowWithMatchingEvidence()
@@ -150,7 +143,12 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         }
 
         TestRowSpec spec = displayRow.ToSpec();
-        int variant = ReadVariant(row.Extra);
+        int variant = ReadIntExtra(row.Extra, "Variant");
+
+        // Test 14 only: forwarded to the driver exactly as the row detail's own chosen-button
+        // value would be, now that Invoke-GuiHalf.ps1 and Run-GuiHalfAgainstFakes.ps1 both declare
+        // -SpeakerAddress and forward it to the target script when it is not empty.
+        string? speakerAddress = ReadStringExtra(row.Extra, "SpeakerAddress");
 
         using var sandbox = new Earshot.Tests.TempFolder();
         var sandboxOptions = new SandboxOptions { Folder = sandbox.Path };
@@ -166,7 +164,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
             string where = row.Script + " " + half;
 
             (ParsedResult? result, List<string> haltProblems) = DriveHalf(
-                row, half, host, driverScript, scriptPath, exePath, runRoot, variant, sandboxOptions, owner, timeout);
+                row, half, host, driverScript, scriptPath, exePath, runRoot, variant, speakerAddress, sandboxOptions, owner, timeout);
             foreach (string problem in haltProblems)
             {
                 problems.Add(problem);
@@ -199,7 +197,11 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         }
     }
 
-    private static int ReadVariant(IReadOnlyList<string> extra)
+    // A row's own Extra list (Invoke-SelfTest.ps1's "name=value" strings) read for one name.
+    // WatchSeconds and WatchMinutes are the only names left with nowhere to go: neither driver
+    // ever declares them, so 03 and 13 run with their own shipped default instead (see the class
+    // comment's "Timing, not correctness" note), exactly as a real window run would.
+    private static string? ReadStringExtra(IReadOnlyList<string> extra, string name)
     {
         foreach (string entry in extra)
         {
@@ -209,19 +211,19 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
                 continue;
             }
 
-            string name = entry[..split];
-            string value = entry[(split + 1)..];
-            if (string.Equals(name, "Variant", StringComparison.Ordinal) && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+            if (string.Equals(entry[..split], name, StringComparison.Ordinal))
             {
-                return parsed;
+                return entry[(split + 1)..];
             }
         }
 
-        // Every other name in a row's own Extra (WatchSeconds, WatchMinutes, SpeakerAddress) is
-        // not one Invoke-GuiHalf.ps1/Run-GuiHalfAgainstFakes.ps1 ever forwards to the target
-        // script (see the class comment's known exceptions): the script runs with its own shipped
-        // default for it instead, exactly as a real window run would.
-        return 0;
+        return null;
+    }
+
+    private static int ReadIntExtra(IReadOnlyList<string> extra, string name)
+    {
+        string? value = ReadStringExtra(extra, name);
+        return value is not null && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : 0;
     }
 
     // Drives one half through the real protocol: ChildRunner, the sandbox twin of the production
@@ -229,7 +231,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
     // the half could not be driven to one) and whatever went wrong along the way.
     private static (ParsedResult? Result, List<string> Problems) DriveHalf(
         SelfTestPlanRow row, string half, string host, string driverScript, string scriptPath, string exePath,
-        string runRoot, int variant, SandboxOptions sandboxOptions, FakeOwnerAnswers owner, TimeSpan timeout)
+        string runRoot, int variant, string? speakerAddress, SandboxOptions sandboxOptions, FakeOwnerAnswers owner, TimeSpan timeout)
     {
         var problems = new List<string>();
         string where = row.Script + " " + half;
@@ -241,6 +243,10 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
             ("TestId", row.Id),
             ("Case", "one"),
         };
+        if (!string.IsNullOrEmpty(speakerAddress))
+        {
+            extraArguments.Add(("SpeakerAddress", speakerAddress));
+        }
 
         var messages = new BlockingCollection<ChildMessage>();
         var transcript = new ConcurrentQueue<string>();
@@ -382,18 +388,9 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
             return problems;
         }
 
-        bool isKnownException = string.Equals(row.Id, "14-set-device-refusal", StringComparison.Ordinal) && string.Equals(half, "first", StringComparison.Ordinal);
-
-        // The known exception overrides refuses-protected-move to inconclusive (below), which
-        // Complete-LiveTestRun's own recompute rule (any inconclusive criterion, with no failing
-        // one, makes the overall inconclusive) turns into an overall of inconclusive rather than
-        // expectations.psd1's plain "pass" for the "one" case. Allowed here, not silently ignored:
-        // a run that still came out "pass" despite the override (SpeakerAddress reaching the
-        // script after all) would still be flagged as unexpected below.
-        IReadOnlyList<string> allowedOverall = isKnownException ? new[] { "pass", "inconclusive" } : expected.Overall;
-        if (!allowedOverall.Contains(result.Overall, StringComparer.Ordinal))
+        if (!expected.Overall.Contains(result.Overall, StringComparer.Ordinal))
         {
-            problems.Add(where + ": the run came out " + result.Overall + ", and expectations.psd1's \"one\" case implies " + string.Join(" or ", allowedOverall) + ".");
+            problems.Add(where + ": the run came out " + result.Overall + ", and expectations.psd1's \"one\" case implies " + string.Join(" or ", expected.Overall) + ".");
         }
 
         var actualIds = new HashSet<string>(result.Criteria.Select(c => c.Id).Where(id => id != "run"), StringComparer.Ordinal);
@@ -417,11 +414,6 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
 
             string actualOutcome = result.Criteria.First(c => c.Id == id).Outcome;
             string wantedOutcome = expected.Criteria[id];
-            if (isKnownException && CriterionOutcomeOverrides.TryGetValue(id, out string? overridden))
-            {
-                wantedOutcome = overridden;
-            }
-
             if (wantedOutcome == "any")
             {
                 continue;
@@ -429,10 +421,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
 
             if (actualOutcome != wantedOutcome)
             {
-                string note = isKnownException && CriterionOutcomeOverrides.ContainsKey(id)
-                    ? " (adjusted for the known exception: -SpeakerAddress cannot be forwarded through the window)"
-                    : string.Empty;
-                problems.Add(where + ": \"" + id + "\" came out " + actualOutcome + ", and expectations.psd1's \"one\" case implies " + wantedOutcome + "." + note);
+                problems.Add(where + ": \"" + id + "\" came out " + actualOutcome + ", and expectations.psd1's \"one\" case implies " + wantedOutcome + ".");
             }
         }
 

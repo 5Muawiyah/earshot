@@ -34,6 +34,11 @@
 
 .PARAMETER AllowPlanB
     Test 07's elevated variant only.
+
+.PARAMETER SpeakerAddress
+    Test 14's protected-device half only: a second Bluetooth audio device's twelve hex character
+    address, chosen from the row's own buttons (never typed). Forwarded to the target script only
+    when it declares -SpeakerAddress and this is not empty, the same rule -Variant already follows.
 #>
 
 #Requires -Version 5.1
@@ -46,7 +51,8 @@ param(
     [switch]$Resume,
     [int]$Variant = 0,
     [switch]$OfferUninstall,
-    [switch]$AllowPlanB
+    [switch]$AllowPlanB,
+    [string]$SpeakerAddress = ''
 )
 
 Set-StrictMode -Version 2.0
@@ -114,6 +120,7 @@ if ($declared.ContainsKey('Resume') -and $Resume) { $forward['Resume'] = [switch
 if ($declared.ContainsKey('Variant') -and $Variant -ne 0) { $forward['Variant'] = $Variant }
 if ($declared.ContainsKey('OfferUninstall') -and $OfferUninstall) { $forward['OfferUninstall'] = [switch]$true }
 if ($declared.ContainsKey('AllowPlanB') -and $AllowPlanB) { $forward['AllowPlanB'] = [switch]$true }
+if ($declared.ContainsKey('SpeakerAddress') -and -not [string]::IsNullOrEmpty($SpeakerAddress)) { $forward['SpeakerAddress'] = $SpeakerAddress }
 
 $global:LASTEXITCODE = 0
 try

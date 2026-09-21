@@ -64,6 +64,22 @@ internal static class Copy
         "not wired to a control in this build. To run it, open a console and run: powershell " +
         "-File tools\\live-tests\\Run-LiveTests.ps1 -Test 07 -ExePath <path to Earshot.exe> -AllowPlanB";
 
+    // Test 14's own "Moving the pin off a protected device" half needs a second Bluetooth audio
+    // device's address, and this window never offers a text box to type one into. It is chosen
+    // from buttons built out of SpeakerCandidateFinder's own read of an earlier run's node
+    // evidence; this is shown on the row instead when that read comes back empty, so the owner
+    // knows what to do rather than finding a button row with nothing on it.
+    internal const string SpeakerAddressNoCandidates =
+        "No second Bluetooth audio device has been read yet, so this half cannot be tried: nothing " +
+        "in an earlier run's own record of the Bluetooth nodes showed one. Pair a second device " +
+        "with an A2DP sink (a speaker, for example), run 01 or 02 once with it nearby, then come " +
+        "back to this row to choose it.";
+
+    internal const string SpeakerAddressChoicePrompt =
+        "Second device for the protected-device half, read from an earlier run's own node list:";
+
+    internal const string SpeakerAddressChoiceNone = "No second device";
+
     // The sandbox's fake machine (tools\live-tests\selftest\Fakes.psm1) has a starting state for
     // "10-shutdown-messages-v1" only: variants 2 to 5 have none, so a sandboxed run of one of them
     // fails immediately rather than settling anything about the row. Said here rather than left
