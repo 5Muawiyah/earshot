@@ -17,6 +17,15 @@ internal sealed class ChildRunner : IDisposable
     internal event Action<string>? TranscriptLine;
     internal event Action<ChildMessage>? MessageReceived;
 
+    // Fires exactly once, after ReadLoop ends for any reason: a clean EOF, a killed process's
+    // broken pipe, or (in principle) any other exception the try/finally below catches nothing
+    // more specific for. Posted from the same background thread and through the same
+    // SafeBeginInvoke marshalling as MessageReceived, so on the UI thread it is always handled
+    // after any exit or crash message this same run already sent (both are queued, in order, from
+    // ReadLoop's own sequential reads), never before: a subscriber can tell "nothing else is
+    // coming" apart from "something else already came and this is just the pipe closing after it".
+    internal event Action? ReadLoopEnded;
+
     internal ChildRunner(
         string host,
         string driverScript,
@@ -116,35 +125,42 @@ internal sealed class ChildRunner : IDisposable
     // message being noticed at all, not this loop.
     private void ReadLoop()
     {
-        while (true)
+        try
         {
-            string? line;
-            try
+            while (true)
             {
-                line = _process.StandardOutput.ReadLine();
-            }
-            catch (IOException)
-            {
-                return;
-            }
-            catch (ObjectDisposedException)
-            {
-                return;
-            }
+                string? line;
+                try
+                {
+                    line = _process.StandardOutput.ReadLine();
+                }
+                catch (IOException)
+                {
+                    return;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
 
-            if (line is null)
-            {
-                return;
-            }
+                if (line is null)
+                {
+                    return;
+                }
 
-            if (Protocol.IsProtocolLine(line))
-            {
-                MessageReceived?.Invoke(Protocol.ParseMessage(line));
+                if (Protocol.IsProtocolLine(line))
+                {
+                    MessageReceived?.Invoke(Protocol.ParseMessage(line));
+                }
+                else
+                {
+                    TranscriptLine?.Invoke(line);
+                }
             }
-            else
-            {
-                TranscriptLine?.Invoke(line);
-            }
+        }
+        finally
+        {
+            ReadLoopEnded?.Invoke();
         }
     }
 

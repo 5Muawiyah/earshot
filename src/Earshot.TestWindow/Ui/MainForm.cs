@@ -787,6 +787,19 @@ internal sealed class MainForm : Form
             }
         });
 
+        // A process that ends without ever sending an exit or a crash message (killed
+        // externally, torn down by Windows, or anything else that never reached Invoke-GuiHalf.ps1's
+        // own finally): ReadLoopEnded's own ordering guarantee means this only ever still finds
+        // _activeRunner set to this same runner when neither of those arrived first, since either
+        // one would already have cleared it through OnRunFinished by the time this is handled.
+        runner.ReadLoopEnded += () => SafeBeginInvoke(() =>
+        {
+            if (RunGate.ShouldProcessMessage(_activeRunner, runner) && _activeRunner is not null)
+            {
+                MarkUnknownAndReset("The test process ended without ever reporting a result. This row now reads Unknown until Restore has run.");
+            }
+        });
+
         _resultPanel.Visible = false;
         _handOffBox.Visible = false;
         _stepPanel.Visible = true;
@@ -970,7 +983,6 @@ internal sealed class MainForm : Form
             return;
         }
 
-        DisplayRow? row = _activeDisplayRow;
         ChildRunner runner = _activeRunner;
         runner.Kill();
 
@@ -991,6 +1003,23 @@ internal sealed class MainForm : Form
             RecordPostDisposalDeliveryFailure(ex);
         }
 
+        MarkUnknownAndReset("Stopped by force. This row now reads Unknown until Restore has run.");
+    }
+
+    // A process that ends without ever sending "type": "exit" or "type": "crash" (killed
+    // externally, crashed before it could report, PowerShell itself torn down) is read exactly
+    // like a forced kill: nothing here decided that, nothing was learned about the step it was
+    // on, and nothing here can call Kill() on a process that is already gone, so this shares
+    // KillActiveRun's own marker and reset rather than trying to stop it again.
+    private void MarkUnknownAndReset(string statusText)
+    {
+        if (_activeRunner is null)
+        {
+            return;
+        }
+
+        DisplayRow? row = _activeDisplayRow;
+
         if (_activeResultFolder is not null)
         {
             Directory.CreateDirectory(_activeResultFolder);
@@ -1000,7 +1029,7 @@ internal sealed class MainForm : Form
         _stepPanel.Visible = false;
         _resultPanel.Visible = false;
         _handOffBox.Visible = false;
-        _statusLabel.Text = "Stopped by force. This row now reads Unknown until Restore has run.";
+        _statusLabel.Text = statusText;
 
         _activeRunner = null;
         _activeIsResume = false;
@@ -1013,9 +1042,9 @@ internal sealed class MainForm : Form
         PopulateRows();
         UpdateStartButton();
 
-        // A forced kill is the owner overriding the sequence, not a script-decided outcome: Run
-        // all treats it exactly like an ordinary halt on failure, never advanced
-        // past on its own.
+        // A forced kill, or a process ending on its own with nothing reported, is never a
+        // script-decided outcome: Run all treats either one exactly like an ordinary halt on
+        // failure, never advanced past on its own.
         if (_runAllActive && row is not null)
         {
             HaltRunAll(row, new DerivedRowState { Kind = RowStateKind.Unknown, Reason = "stopped by force" });
