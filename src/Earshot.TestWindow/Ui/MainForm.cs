@@ -906,8 +906,17 @@ internal sealed class MainForm : Form
                 // A prompt on screen is never a hang. While one is pending the
                 // silence watchdog has nothing to say, and Stop's own behaviour changes: it can
                 // abort this exact seq rather than only wait-then-kill.
+                //
+                // Any kill deadline armed for an earlier abort is withdrawn here too: aborting one
+                // prompt does not always stop the script, since the shim's own throw on that abort
+                // unwinds into the script's own finally, where the at-rest closing check can still
+                // ask a genuine new question (offering to block the nodes) from the very same,
+                // still-alive process. A new prompt arriving is proof the process answered, not
+                // proof it is hung, so a deadline armed for the prompt it replaces must never
+                // outlive it.
                 _currentPromptSeq = message.Seq;
                 _silenceWarningShown = false;
+                _killDeadlineUtc = null;
                 PresentedPrompt presented = PromptPresenter.Present(message, row.Row.Number, _wording, _transcript);
                 _stepPanel.Show(_activeRunner!, presented, message.Seq);
                 break;
@@ -1394,6 +1403,8 @@ internal sealed class MainForm : Form
     internal void SetLastActivityUtcForTests(DateTimeOffset utc) => _lastActivityUtc = utc;
 
     internal int? CurrentPromptSeqForTests => _currentPromptSeq;
+
+    internal bool HasKillDeadlineForTests => _killDeadlineUtc is not null;
 
     internal void ClickCurrentPromptButtonForTests() => _stepPanel.ClickFirstButtonForTests();
 
