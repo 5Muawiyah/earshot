@@ -31,6 +31,8 @@ internal sealed class MainForm : Form
     private readonly Button _runAllCarryOnButton;
     private readonly System.Windows.Forms.Timer _watchdogTimer;
 
+    private readonly List<Exception> _postDisposalDeliveryFailures = new();
+
     private ChildRunner? _activeRunner;
     private string? _activeResultFolder;
     private bool _activeIsResume;
@@ -500,33 +502,21 @@ internal sealed class MainForm : Form
         // B1: routed by identity, on the UI thread, at the moment each is actually handled, not
         // when it was queued. A message from a runner that is no longer _activeRunner (it ended,
         // or was superseded) is dropped rather than handled against whatever runner is active now.
-        runner.MessageReceived += message =>
+        runner.MessageReceived += message => SafeBeginInvoke(() =>
         {
-            if (IsHandleCreated)
+            if (RunGate.ShouldProcessMessage(_activeRunner, runner))
             {
-                BeginInvoke(new Action(() =>
-                {
-                    if (RunGate.ShouldProcessMessage(_activeRunner, runner))
-                    {
-                        HandleMessage(row, message);
-                    }
-                }));
+                HandleMessage(row, message);
             }
-        };
-        runner.TranscriptLine += line =>
+        });
+        runner.TranscriptLine += line => SafeBeginInvoke(() =>
         {
-            if (IsHandleCreated)
+            if (RunGate.ShouldProcessMessage(_activeRunner, runner))
             {
-                BeginInvoke(new Action(() =>
-                {
-                    if (RunGate.ShouldProcessMessage(_activeRunner, runner))
-                    {
-                        _transcript.Add(line);
-                        _lastActivityUtc = DateTimeOffset.UtcNow;
-                    }
-                }));
+                _transcript.Add(line);
+                _lastActivityUtc = DateTimeOffset.UtcNow;
             }
-        };
+        });
 
         _resultPanel.Visible = false;
         _handOffBox.Visible = false;
@@ -695,7 +685,25 @@ internal sealed class MainForm : Form
         }
 
         DisplayRow? row = _activeDisplayRow;
-        _activeRunner.Kill();
+        ChildRunner runner = _activeRunner;
+        runner.Kill();
+
+        // Priority-zero fix: Kill() only asks the OS to terminate the process tree; ReadLoop's
+        // ReadLine keeps running on its own ThreadPool thread until the killed process's stdout
+        // pipe actually closes, a short time later, not synchronously with Kill() returning. This
+        // method is called from OnFormClosing (a real close while a half is running) as well as
+        // from tests that dispose the form right after calling it (MainFormTestHarness's own
+        // cleanup): either way, once this method returns, the form may be disposed at any moment.
+        // Draining the read loop here, before that can happen, is what SafeBeginInvoke's disposal
+        // guard below is the last line of defence for, not the primary fix.
+        try
+        {
+            runner.WaitForReadLoopAsync().Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (AggregateException ex)
+        {
+            _postDisposalDeliveryFailures.Add(ex);
+        }
 
         if (_activeResultFolder is not null)
         {
@@ -927,12 +935,50 @@ internal sealed class MainForm : Form
         _statusLabel.Text = row.TestId + ": first half complete. Waiting for the power cycle.";
     }
 
+    // Priority-zero fix (hosted build crash): the one call site every ChildRunner.MessageReceived
+    // and TranscriptLine closure must go through, never a raw BeginInvoke. ReadLoop runs on its
+    // own ThreadPool thread and can still be delivering a message the instant this form's handle
+    // is destroyed (Dispose, or the STA thread's own teardown in MainFormTestHarness): a plain
+    // IsHandleCreated read is not enough, because it can pass and then go stale before BeginInvoke
+    // actually runs. This is the one place that race is allowed to happen and be caught: it must
+    // never throw out into ReadLoop's own call stack, which nothing there catches, and which is
+    // unhandled on a background thread by construction. The failure is recorded, not swallowed:
+    // PostDisposalDeliveryFailuresForTests names it for a test, and it is exactly the shape "no
+    // silent catches" asks for even though this call is neither COM, CfgMgr32, Bluetooth nor Task
+    // Scheduler.
+    private void SafeBeginInvoke(Action action)
+    {
+        // No IsHandleCreated pre-check: that was the original bug. A check on one thread and a
+        // BeginInvoke a few CPU cycles later on another can straddle a Dispose happening in
+        // between (this form's own OnFormClosing kills the run and lets the close proceed;
+        // MainFormTestHarness's cleanup disposes right after its own kill), so IsHandleCreated can
+        // read true and then go stale before BeginInvoke actually runs. The try/catch is the only
+        // thing here that is actually safe under that race; IsHandleCreated could stay as a
+        // cheap first guess, but would add nothing this catch does not already cover.
+        try
+        {
+            BeginInvoke(action);
+        }
+        catch (ObjectDisposedException ex)
+        {
+            _postDisposalDeliveryFailures.Add(ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _postDisposalDeliveryFailures.Add(ex);
+        }
+    }
+
     // Test seams only (Earshot.Tests, via InternalsVisibleTo): review round 1's own rule is that
     // a fix whose only proof is an extracted predicate in isolation proves nothing about the
     // caller that used to bypass it. These let a test drive this form's real click handlers
     // headlessly (constructed, handle forced, never Shown) and observe what a real click actually
     // does, the same way MainForm.cs 1090-1150ish's own private methods are wired to controls.
     internal ChildRunner? ActiveRunnerForTests => _activeRunner;
+
+    internal void SafeBeginInvokeForTests(Action action) => SafeBeginInvoke(action);
+
+    internal IReadOnlyList<Exception> PostDisposalDeliveryFailuresForTests => _postDisposalDeliveryFailures;
 
     internal bool SelectRowForTests(string number)
     {

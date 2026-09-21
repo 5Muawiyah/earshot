@@ -106,11 +106,38 @@ internal sealed class ChildRunner : IDisposable
         _readLoop = Task.Run(ReadLoop);
     }
 
+    // Priority-zero fix (hosted build crash): this runs on a ThreadPool thread (Task.Run) with
+    // nothing above it to catch an exception, so anything this loop lets escape is unhandled on a
+    // background thread by construction. Killing a real child (section 8.3's hard stop, or a test
+    // harness's own cleanup) can break its stdout pipe before ReadLine reaches a clean end of
+    // stream instead of after, and an IOException or ObjectDisposedException from that is not a
+    // sign anything is wrong: it is what a killed process's pipe does. Treated exactly like a
+    // clean EOF (the loop simply ends); MessageReceived/TranscriptLine's own subscribers
+    // (MainForm's SafeBeginInvoke) are what is responsible for a child that ends without an exit
+    // message being noticed at all (design.md section 5.2), not this loop.
     private void ReadLoop()
     {
-        string? line;
-        while ((line = _process.StandardOutput.ReadLine()) is not null)
+        while (true)
         {
+            string? line;
+            try
+            {
+                line = _process.StandardOutput.ReadLine();
+            }
+            catch (IOException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            if (line is null)
+            {
+                return;
+            }
+
             if (Protocol.IsProtocolLine(line))
             {
                 MessageReceived?.Invoke(Protocol.ParseMessage(line));
