@@ -360,12 +360,19 @@ public sealed class TrayContextTests
     // block is sent for that session end, and the click must still not send the allow that would enable the nodes:
     // if the process is killed by the shutdown the nodes would stay enabled across the power cycle. Every assertion
     // up to the pump is made with no pump in between, since the refusal is synchronous.
+    // Runs with the hand-back setting both on and off. Render is not ACTIVE in this fixture, so the query-time
+    // block behaves the same either way (the query only changes when render is ACTIVE); this proves that
+    // parity rather than assuming it.
     [TestMethod]
-    public void AClickWhileTheSessionEndsIsRefusedWithACardAndSendsNothing()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void AClickWhileTheSessionEndsIsRefusedWithACardAndSendsNothing(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.HandBackOnShutdownAndSleep = handBackOn,
+                arrange: t => t.Block.Status = Block(BlockState.Blocked));
             tray.Context.OnSessionEnding(null, SessionQuery());
             Assert.IsEmpty(tray.Block.Calls, "This test needs the session end that sends no block.");
 
@@ -381,12 +388,16 @@ public sealed class TrayContextTests
     }
 
     // The same through the menu, for every command that changes the device, a setting the gate holds, or setup.
+    // Runs with the hand-back setting both on and off; render is not ACTIVE here either.
     [TestMethod]
-    public void TheMenuCommandsAreRefusedWhileTheSessionEndsAndNothingIsSavedOrSent()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void TheMenuCommandsAreRefusedWhileTheSessionEndsAndNothingIsSavedOrSent(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false,
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => { s.ProtectAudioQuality = false; s.HandBackOnShutdownAndSleep = handBackOn; },
                 arrange: t => t.Block.Status = Block(BlockState.Blocked));
             tray.Context.OnSessionEnding(null, SessionQuery());
 
@@ -414,12 +425,17 @@ public sealed class TrayContextTests
 
     // Before setup the chosen device is only saved: no operation runs, so nothing but the tray's own check stands
     // between a choice made while the session ends and the settings file.
+    // Runs with the hand-back setting both on and off; render is not ACTIVE here either.
     [TestMethod]
-    public void ADeviceChosenBeforeSetupWhileTheSessionEndsIsNotSaved()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void ADeviceChosenBeforeSetupWhileTheSessionEndsIsNotSaved(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.NotSetUp));
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.HandBackOnShutdownAndSleep = handBackOn,
+                arrange: t => t.Block.Status = Block(BlockState.NotSetUp));
             tray.Context.OnSessionEnding(null, SessionQuery());
 
             tray.Context.ApplyDeviceChoiceAsync(new PickerChoice("Other", "Other", "AABBCCDDEEFF", Guid.NewGuid()), CardPlace.NearTray).GetAwaiter().GetResult();
@@ -434,12 +450,17 @@ public sealed class TrayContextTests
     // The session-end block is on the gate, so the coordinator is busy, when the click comes. The tray refuses
     // before it answers anything else: one card that says why, not "Finishing another change first." and then a
     // refusal.
+    // Runs with the hand-back setting both on and off; render is not ACTIVE here either.
     [TestMethod]
-    public void AClickWhileTheSessionEndBlockRunsGetsOnlyTheRefusalCard()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void AClickWhileTheSessionEndBlockRunsGetsOnlyTheRefusalCard(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Block(BlockState.Blocked));
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.HandBackOnShutdownAndSleep = handBackOn,
+                arrange: t => t.Block.Status = Block(BlockState.Blocked));
             var blocking = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             tray.Block.OnBlock = _ => blocking.Task;
             tray.Block.Status = Block(BlockState.Allowed);
@@ -463,12 +484,16 @@ public sealed class TrayContextTests
 
     // A protection change was already running when Windows started to end the session, and the coordinator stopped
     // it. That is not an error: the owner is told the change was stopped and why, and the log says the same.
+    // Runs with the hand-back setting both on and off; render is not ACTIVE here either.
     [TestMethod]
-    public void AChangeStoppedByTheSessionEndGetsTheSessionCardNotTheErrorCard()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void AChangeStoppedByTheSessionEndGetsTheSessionCardNotTheErrorCard(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => { s.ProtectAudioQuality = false; s.HandBackOnShutdownAndSleep = handBackOn; });
             var apply = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             tray.Protection.OnApply = (_, _) => apply.Task;
             tray.ClickMenu(MenuModel.ProtectAudioQuality);
@@ -487,12 +512,16 @@ public sealed class TrayContextTests
 
     // The same, with the session end cancelled again before the protect verb returns. The card must not depend on
     // how the flag stands at that moment: it is still not an error.
+    // Runs with the hand-back setting both on and off; render is not ACTIVE here either.
     [TestMethod]
-    public void AChangeStoppedByASessionEndThatIsThenCancelledStillGetsNoErrorCard()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void AChangeStoppedByASessionEndThatIsThenCancelledStillGetsNoErrorCard(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => { s.ProtectAudioQuality = false; s.HandBackOnShutdownAndSleep = handBackOn; });
             var apply = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             tray.Protection.OnApply = (_, _) => apply.Task;
             tray.ClickMenu(MenuModel.ProtectAudioQuality);
@@ -552,12 +581,16 @@ public sealed class TrayContextTests
 
     // WM_ENDSESSION with wParam FALSE after refusals by click and by menu: the tray is fully usable again with no
     // restart. Nothing is busy, the menu toggle is enabled, and the next click connects.
+    // Runs with the hand-back setting both on and off; render is not ACTIVE here either.
     [TestMethod]
-    public void AfterACancelledSessionEndTheTrayIsUsableAgainAndTheNextClickConnects()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void AfterACancelledSessionEndTheTrayIsUsableAgainAndTheNextClickConnects(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.ProtectAudioQuality = false,
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => { s.ProtectAudioQuality = false; s.HandBackOnShutdownAndSleep = handBackOn; },
                 arrange: t => t.Block.Status = Block(BlockState.Blocked));
             tray.Context.OnSessionEnding(null, SessionQuery());
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
@@ -584,12 +617,16 @@ public sealed class TrayContextTests
     }
 
     // Exit while the session ends still completes inside the limits it already has: the message loop ends.
+    // Runs with the hand-back setting both on and off; render is not ACTIVE here either.
     [TestMethod]
-    public void ExitWhileTheSessionEndsStillEndsTheMessageLoop()
+    [DataRow(true)]
+    [DataRow(false)]
+    public void ExitWhileTheSessionEndsStillEndsTheMessageLoop(bool handBackOn)
     {
         StaThread.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), exitWaitLimit: TimeSpan.FromSeconds(5),
+                settings: s => s.HandBackOnShutdownAndSleep = handBackOn,
                 arrange: t => t.Block.Status = Block(BlockState.Blocked));
             tray.Context.OnSessionEnding(null, SessionQuery());
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));

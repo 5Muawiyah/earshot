@@ -92,11 +92,10 @@ public sealed class VoiceOverSettingsLoadTests : IDisposable
     }
 
     // Pins the exact member names the shipped build writes, through the real store (JsonSettingsStore,
-    // backed by the source-generated SettingsJsonContext), not a hand-typed sample: the workshop SPEC's
-    // own JSON sample (section 6) is camelCase, and a camelCase block is silently ignored on read as
-    // unknown members (RespectNullableAnnotations only resets the file for an explicit null on a
-    // non-nullable member, never for a member name in the wrong case), so documentation that copied the
-    // spec's sample would be wrong for this product.
+    // backed by the source-generated SettingsJsonContext), not a hand-typed sample: a camelCase JSON
+    // sample is silently ignored on read as unknown members (RespectNullableAnnotations only resets the
+    // file for an explicit null on a non-nullable member, never for a member name in the wrong case), so
+    // documentation written against a camelCase sample would be wrong for this product.
     [TestMethod]
     public void TheWrittenJsonUsesThesePascalCaseVoiceOverMemberNames()
     {

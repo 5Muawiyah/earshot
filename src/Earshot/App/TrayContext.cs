@@ -72,11 +72,18 @@ internal sealed record TrayStartOptions(
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
 
     // The budgets HandBackAsync runs the shut-down hand-back to: a 4 s cap, 1.5 s of it for the disconnect.
-    // Injectable so a test can shrink them.
+    // Chosen against Windows' own documented shut-down time limit (an application without a visible window is
+    // terminated if it does not answer WM_QUERYENDSESSION or WM_ENDSESSION within 5 s), with margin kept back
+    // for the reply itself to return; not a measured duration, since no page documents how long a disconnect
+    // or a block actually takes and this repository never invents one. Injectable so a test can shrink them.
+    // https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-endsession
     public TimeSpan HandBackBudget { get; init; } = TimeSpan.FromSeconds(4);
     public TimeSpan DisconnectHandBackWait { get; init; } = TimeSpan.FromMilliseconds(1500);
 
-    // The same for sleep: a 1.5 s cap, 0.75 s of it for the disconnect.
+    // The same for sleep: a 1.5 s cap, 0.75 s of it for the disconnect. Chosen against PBT_APMSUSPEND's own
+    // documented budget ("The system allows approximately two seconds for an application to handle this
+    // notification"), again with margin kept back, not measured.
+    // https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
     public TimeSpan SleepHandBackBudget { get; init; } = TimeSpan.FromMilliseconds(1500);
     public TimeSpan SleepDisconnectWait { get; init; } = TimeSpan.FromMilliseconds(750);
 
@@ -1025,7 +1032,7 @@ internal sealed class TrayContext : ApplicationContext
     //
     // Speaks Connected or Disconnected only when the snapshot says exactly that: Connecting,
     // Disconnecting and Unknown are states the app only assumed (a read in flight, or no read at all),
-    // and the voiceover design (section 9) says never to announce one of those. The closed six-phrase
+    // and those are never announced. The closed six-phrase
     // set has no line for any of them, so widening it is not an option either. What the owner asked to
     // hear about is shown instead, as the same short line the tray's own tooltip would show, and the log
     // records why nothing was spoken.
@@ -1161,8 +1168,7 @@ internal sealed class TrayContext : ApplicationContext
 
     // Stops and disposes whatever announcer is running, and writes the owner's setting back to off, so
     // the menu tick and the persisted setting both agree that speech is off. Used for the two failures
-    // section 4 of the voiceover design says end with "Earshot has turned it off": the engine throwing on
-    // open, and repeated Speak failures.
+    // that end with "Earshot has turned it off": the engine throwing on open, and repeated Speak failures.
     private void TurnVoiceOverOff()
     {
         StopVoice();

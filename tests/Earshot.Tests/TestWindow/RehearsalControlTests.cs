@@ -31,7 +31,7 @@ public sealed class RehearsalControlTests
         Assert.IsTrue(File.Exists(path));
         StringAssert.EndsWith(path, Path.Combine("gui", "Invoke-GuiHalf.ps1"));
         Assert.IsFalse(path.Contains("selftest", StringComparison.OrdinalIgnoreCase),
-            "the rehearsal must never run through the sandbox driver: D8 says nothing about this site may be faked.");
+            "the rehearsal must never run through the sandbox driver: nothing about this site may be faked.");
     }
 
     // Safety rule: an unattended or development sandbox must never run this, because it

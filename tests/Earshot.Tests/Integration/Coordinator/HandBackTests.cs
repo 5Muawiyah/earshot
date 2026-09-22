@@ -178,7 +178,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "the block that was still running finished"));
     }
 
-    // M2: a non-cancellation fault from the disconnect (a COM call failing, say) is never a silent catch: it is
+    // A non-cancellation fault from the disconnect (a COM call failing, say) is never a silent catch: it is
     // recorded with its raw code, and the procedure still goes on to send the block, which is the at-rest action.
     [TestMethod]
     public void AnUnexpectedDisconnectFaultIsRecordedAndTheProcedureStillSendsTheBlock()
@@ -198,7 +198,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in"));
     }
 
-    // M2: a fault starting the block itself (a disposed system worker, say) is never a silent catch either.
+    // A fault starting the block itself (a disposed system worker, say) is never a silent catch either.
     [TestMethod]
     public void AFaultStartingTheBlockIsRecordedWithItsRawCode()
     {
@@ -215,7 +215,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "not sent:"));
     }
 
-    // M2: a block task that faults after being sent (rather than timing out) is also recorded, not left as an
+    // A block task that faults after being sent (rather than timing out) is also recorded, not left as an
     // unobserved task exception with no finished, cut-short or error line at all.
     [TestMethod]
     public void ABlockTaskThatFaultsAfterBeingSentIsRecorded()
@@ -233,7 +233,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "faulted:"));
     }
 
-    // M3: the started line reads the real streaming state passed in, rather than always saying "streaming none".
+    // The started line reads the real streaming state passed in, rather than always saying "streaming none".
     [TestMethod]
     public void TheStartedLineReadsTheRealStreamingStateWhenAHeldLinkIsPassedIn()
     {
@@ -248,7 +248,7 @@ public sealed class HandBackTests
         Assert.IsFalse(h.Log.Has(LogLevel.Info, "streaming none"));
     }
 
-    // M5: a suspend or session end arriving while another device action (an allow that a connect sends, say) is
+    // A suspend or session end arriving while another device action (an allow that a connect sends, say) is
     // already running waits for it, never running beside it on the same SystemWorker; the order is pinned
     // through the shared trace.
     [TestMethod]
@@ -440,7 +440,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "nothing to disconnect"));
     }
 
-    // M6: render is re-read at WM_ENDSESSION regardless of what the query found. Sound started on the pinned
+    // Render is re-read at WM_ENDSESSION regardless of what the query found. Sound started on the pinned
     // container between the query (not in use, so it queued a block) and WM_ENDSESSION is still disconnected;
     // the block already in flight is still the one this hand-back waits for, never a second one.
     [TestMethod]

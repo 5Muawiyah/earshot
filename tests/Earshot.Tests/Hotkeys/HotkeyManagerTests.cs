@@ -265,7 +265,7 @@ public sealed class HotkeyManagerTests
         Assert.IsTrue(entries[2].Message.Contains("id=0x" + BlockId.ToString("X"), StringComparison.Ordinal));
     }
 
-    // Spec section 5: "Apply, ReleaseAll and Dispose must be called on the thread that owns the window."
+    // Apply, ReleaseAll and Dispose must all be called on the thread that owns the window.
     // Apply was already checked (ApplyFromAnotherThreadThrows); this covers the other two, which an
     // off-thread call would otherwise silently fail to release (UnregisterHotKey frees a hot key only for
     // the thread that registered it).

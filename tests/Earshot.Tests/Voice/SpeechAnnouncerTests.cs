@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Voice;
 
-// The acceptance tests from the voiceover design (SPEC.md section 7), ported against SpeechAnnouncer and
+// The acceptance tests for the voiceover feature, ported against SpeechAnnouncer and
 // FakeSpeechEngine. No test here constructs a real SpeechSynthesizer, produces sound or touches a real
 // audio device: every one uses FakeSpeechEngine and ManualTime. Every wait is on one of the fake's own
 // signals with a timeout; a test that announces and then asserts without waiting on a signal races the

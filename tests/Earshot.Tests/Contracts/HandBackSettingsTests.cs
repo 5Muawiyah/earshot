@@ -4,9 +4,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Contracts;
 
-// T1 (handback-on-shutdown-and-sleep, section 7 and 11): the setting defaults on, an older file with no
-// member reads as on, and the value round-trips through the shipped source-generated serialiser without
-// moving SchemaVersion.
+// The hand-back setting defaults on, an older file with no member reads as on, and the value round-trips
+// through the shipped source-generated serialiser without moving SchemaVersion.
 [TestClass]
 public sealed class HandBackSettingsTests : IDisposable
 {
@@ -34,7 +33,7 @@ public sealed class HandBackSettingsTests : IDisposable
 
         Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
         Assert.IsTrue(store.Current.HandBackOnShutdownAndSleep);
-        Assert.AreEqual(1, store.Current.SchemaVersion, "L17: the newer-schema rule is untouched by this member.");
+        Assert.AreEqual(1, store.Current.SchemaVersion, "The newer-schema rule is untouched by this member.");
     }
 
     [TestMethod]

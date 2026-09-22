@@ -126,7 +126,7 @@ public sealed class TrayHandBackTests
             Assert.IsFalse(tray.Log.Has(LogLevel.Debug, "reply returned after"));
             Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.StartsWith("Hand-back (shutdown): started", StringComparison.Ordinal)));
 
-            // m1: TrayContext never calls HandBackAsync at all with the setting off, so HandBackText.Off's own
+            // TrayContext never calls HandBackAsync at all with the setting off, so HandBackText.Off's own
             // line, written from inside that method, never had a chance to fire for a session end; a reader must
             // still be able to tell "off" from "never reached" here the same way the suspend branch already lets
             // them.
@@ -134,7 +134,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // M5: a sleep hold has no session-ending flag of its own, and HandBackInProgress has already cleared again
+    // A sleep hold has no session-ending flag of its own, and HandBackInProgress has already cleared again
     // by the time OnPowerChanged itself returns (the suspend handler only returns once the hold is over), so the
     // only way to prove a menu action and a hotkey are refused while the hold is actually up is reentrant, from
     // inside the hand-back's own block step: every device action started there is refused with the existing card
@@ -168,6 +168,31 @@ public sealed class TrayHandBackTests
             tray.Context.OnPowerChanged(null, new PowerEventArgs(PowerEventKind.Suspend));
 
             Assert.IsTrue(ranReentrant, "The reentrant block step never ran.");
+        });
+    }
+
+    // With EARSHOT_SAFE_MODE=1 the hand-back logs and sends nothing: ServiceRegistry wraps Connection and
+    // Block in the Safe* decorators before TrayContext or the coordinator ever see them, and those
+    // decorators refuse every device-changing call without touching the real (here, fake) controller at
+    // all, so the fake's own Calls list proves the real device action never ran.
+    [TestMethod]
+    public void SafeModeMakesTheHandBackLogAndSendNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                safeMode: true,
+                snapshot: TargetRenderActive(),
+                settings: s => s.HandBackOnShutdownAndSleep = true);
+            tray.Connection.Calls.Clear();
+            tray.Block.Calls.Clear();
+
+            tray.Context.OnSessionEnding(null, WmEndSession());
+
+            Assert.IsEmpty(tray.Connection.Calls, "Safe mode must never reach the real connection controller.");
+            Assert.IsEmpty(tray.Block.Calls, "Safe mode must never reach the real block controller.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "Safe mode: no device actions."));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "finished in"));
         });
     }
 
@@ -359,14 +384,15 @@ public sealed class TrayHandBackTests
             // pumped hold for the fake hand-back has finished.
             Assert.AreEqual(0, endResult);
             Assert.IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(150), endElapsed,
-                "measured elapsed for the real WM_ENDSESSION SendMessage call, as an upper-bound check only: " +
+                "measured elapsed for the real WM_ENDSESSION SendMessage call, checked as a lower bound: " +
                 "SendMessage must not return before the fake hand-back's own 200 ms delay has actually elapsed.");
 
             // WM_POWERBROADCAST PBT_APMSUSPEND: answered TRUE (1), again only once its own held fake hand-back
             // (150 ms) has finished.
             Assert.AreEqual(1, suspendResult);
             Assert.IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(100), suspendElapsed,
-                "measured elapsed for the real WM_POWERBROADCAST SendMessage call, as an upper-bound check only.");
+                "measured elapsed for the real WM_POWERBROADCAST SendMessage call, checked as a lower bound: " +
+                "SendMessage must not return before the fake hand-back's own 150 ms delay has actually elapsed.");
 
             CollectionAssert.AreEqual(
                 ExpectedRealMessageOrder,
@@ -407,6 +433,78 @@ public sealed class TrayHandBackTests
         window.Dispatch(ref unknown);
 
         Assert.IsNull(raised, "An unrecognised wParam must not raise PowerChanged.");
+    }
+
+    // Every other real-message test wires a fake handler directly to the window's own events, which proves
+    // the pump primitive and the window's own message handling but never that TrayContext installs HoldReply
+    // on that path at all. This drives a real WM_ENDSESSION into TrayContext's own real ShellMessageWindow
+    // (TrayHarness builds the real TrayContext, so this is TrayContext.Window, not a window built for the
+    // test), with the device layer faked, on a private desktop, through the real user32 SendMessageW, which
+    // blocks the sender until the window procedure has actually returned.
+    [TestMethod]
+    public void ARealWmEndSessionToTheRealWindowRunsTheRealHandBackAndHoldsTheReply()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
+            using var tray = new TrayHarness(
+                snapshot: TargetRenderActive(),
+                settings: s => s.HandBackOnShutdownAndSleep = true,
+                time: TimeProvider.System,
+                handBackBudget: TimeSpan.FromSeconds(2),
+                disconnectHandBackWait: TimeSpan.FromMilliseconds(500));
+            tray.Block.OnBlock = _ => Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(80));
+                return ControllerResult.Ok("Blocked at boot");
+            });
+
+            nint hwnd = tray.Context.Window.Handle;
+
+            nint endResult = 0;
+            TimeSpan endElapsed = default;
+            Exception? senderFailure = null;
+            var sender = new Thread(() =>
+            {
+                try
+                {
+                    var clock = Stopwatch.StartNew();
+                    endResult = Earshot.Tests.Phase5.TestWindows.Send(hwnd, NativeMethods.WM_ENDSESSION, 1, 0);
+                    clock.Stop();
+                    endElapsed = clock.Elapsed;
+                }
+                catch (Exception ex)
+                {
+                    senderFailure = ex;
+                }
+                finally
+                {
+                    tray.Ui.Post(_ => Application.ExitThread(), null);
+                }
+            })
+            { IsBackground = true, Name = "Earshot end-to-end hand-back real message sender" };
+            sender.Start();
+
+            Application.Run();
+            Assert.IsTrue(sender.Join(TimeSpan.FromSeconds(15)), "The sender thread did not finish.");
+            if (senderFailure is not null)
+            {
+                throw new AssertFailedException("The sender thread threw.", senderFailure);
+            }
+
+            // The window procedure only returns once HoldReply's pump has finished, which is only once the
+            // fake hand-back's own 80 ms block delay has actually elapsed: proof this ran through TrayContext's
+            // real wiring, not a fake attached straight to the window.
+            Assert.AreEqual(0, endResult);
+            Assert.IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(70), endElapsed,
+                "measured elapsed for the real WM_ENDSESSION SendMessage call, checked as a lower bound: " +
+                "SendMessage must not return before the fake hand-back's own 80 ms block delay has actually elapsed.");
+
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.StartsWith("Hand-back (shutdown): started", StringComparison.Ordinal)),
+                "The real hand-back must actually have started.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "finished in"), "The real hand-back must actually have finished.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Debug, "reply returned after"), "HoldReply itself must have run.");
+        });
     }
 
     public TestContext? TestContext { get; set; }

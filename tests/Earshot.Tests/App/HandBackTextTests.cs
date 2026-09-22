@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.App;
 
-// T15: every shape byte for byte, invariant culture under a non-English culture, and no device name, address
+// Every shape byte for byte, invariant culture under a non-English culture, and no device name, address
 // or container id in any of them. The live-test scripts (test 17, test 18) parse exactly this text, so a
 // change here is a format change they must be told about too.
 [TestClass]
