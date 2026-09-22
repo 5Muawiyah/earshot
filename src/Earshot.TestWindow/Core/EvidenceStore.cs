@@ -70,16 +70,24 @@ internal static partial class EvidenceStore
     // their stamp order: the one situation neither signal alone can be fully trusted in, since one
     // of them was necessarily wrong about which of the two actually happened later. Surfaced to
     // the owner (StateDeriver's HistoryNote, Banner's own red) rather than silently preferring
-    // sequence and saying nothing.
+    // sequence and saying nothing. Two different run folders carrying the very same sequence
+    // number is itself never a tie to be skipped past: RunSequence.TakeNext never legitimately
+    // hands the same value out twice, so two folders holding it is itself a sign the count cannot
+    // be trusted, exactly the same fail-closed shape as an order that disagrees outright.
     internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<(long? Sequence, string Stamp)> entries)
     {
         for (int i = 0; i < entries.Count; i++)
         {
             for (int j = i + 1; j < entries.Count; j++)
             {
-                if (entries[i].Sequence is not long si || entries[j].Sequence is not long sj || si == sj)
+                if (entries[i].Sequence is not long si || entries[j].Sequence is not long sj)
                 {
                     continue;
+                }
+
+                if (si == sj)
+                {
+                    return true;
                 }
 
                 bool iNewerBySequence = si > sj;

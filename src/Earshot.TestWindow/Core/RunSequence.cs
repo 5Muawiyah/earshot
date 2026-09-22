@@ -85,6 +85,14 @@ internal static class RunSequence
         }
     }
 
+    // No missing file (0, the never-before-seen case) never reads the same as a file that is
+    // there but cannot be trusted: a truncated, corrupt or locked counter file used to fall back
+    // to 0 here too, so the very next call reissued 1, which a marker already on disk could
+    // already hold, and two different run folders ended up sharing one sequence number silently.
+    // Every read failure below is left to propagate instead: the one caller, RunSequence.EnsureMarker
+    // by way of MainForm's own BeginRun, already wraps that call in a try/catch that records the
+    // raw exception (Trace) and marks the run Unknown rather than starting a child against a
+    // counter that cannot be trusted.
     private static long ReadLastIssued(string path)
     {
         if (!File.Exists(path))
@@ -92,27 +100,15 @@ internal static class RunSequence
             return 0;
         }
 
-        try
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
+        if (document.RootElement.ValueKind == JsonValueKind.Object &&
+            document.RootElement.TryGetProperty("lastIssued", out JsonElement element) &&
+            element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out long value))
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
-            if (document.RootElement.ValueKind == JsonValueKind.Object &&
-                document.RootElement.TryGetProperty("lastIssued", out JsonElement element) &&
-                element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out long value))
-            {
-                return value;
-            }
-        }
-        catch (JsonException)
-        {
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            return value;
         }
 
-        return 0;
+        throw new InvalidDataException("run-sequence.json does not hold a numeric 'lastIssued': " + path);
     }
 
     // Write to a temp file in the same folder, then rename over the real one: File.Move's own
