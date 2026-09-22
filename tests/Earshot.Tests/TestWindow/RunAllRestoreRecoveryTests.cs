@@ -30,7 +30,7 @@ public sealed class RunAllRestoreRecoveryTests
             form.ClickRunAllForTests();
 
             Assert.IsTrue(form.RunAllRestoreAdviceVisibleForTests, "the red-banner advice step never appeared.");
-            StringAssert.Contains(form.RunAllRestoreAdviceTextForTests, "click");
+            Assert.IsTrue(form.RunAllRestoreAdviceTextForTests.Contains("click", StringComparison.OrdinalIgnoreCase));
             Assert.IsNull(form.ActiveRunnerForTests, "Run all started something before the owner ever clicked through the advice.");
             Assert.IsFalse(form.RunAllActiveForTests, "Run all must not read as active until the owner has acted on the advice.");
         });

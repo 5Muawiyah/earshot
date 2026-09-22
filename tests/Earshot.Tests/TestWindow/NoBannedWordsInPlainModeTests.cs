@@ -158,7 +158,8 @@ public sealed class NoBannedWordsInPlainModeTests
         }
 
         yield return (nameof(Copy.AtRestOnPurpose), Copy.AtRestOnPurpose("Because a live test needed it enabled."));
-        yield return (nameof(Copy.BannerPlainText), Copy.BannerPlainText(BannerLevel.Red));
+        yield return (nameof(Copy.BannerPlainText), Copy.BannerPlainText(BannerLevel.Red, BannerRedCause.KnownNotAtRest));
+        yield return (nameof(Copy.BannerPlainText), Copy.BannerPlainText(BannerLevel.Red, BannerRedCause.UnknownOrUnreadable));
         yield return (nameof(Copy.BannerPlainText), Copy.BannerPlainText(BannerLevel.Amber));
         yield return (nameof(Copy.HandOffText), Copy.HandOffText(PowerCycleRequirement.FullShutDown));
         yield return (nameof(Copy.HandOffText), Copy.HandOffText(PowerCycleRequirement.Restart));

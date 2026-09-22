@@ -923,7 +923,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        _bannerLabel.Text = _showTechnicalDetails ? _banner.Message ?? string.Empty : Copy.BannerPlainText(_banner.Level);
+        _bannerLabel.Text = _showTechnicalDetails ? _banner.Message ?? string.Empty : Copy.BannerPlainText(_banner.Level, _banner.RedCause);
         _bannerLabel.ForeColor = _banner.Level == BannerLevel.Red ? Color.White : Color.Black;
         _bannerLabel.BackColor = _banner.Level == BannerLevel.Red ? Color.Firebrick : Color.Goldenrod;
         _bannerLabel.Visible = true;
@@ -2046,12 +2046,12 @@ internal sealed class MainForm : Form
     }
 
     // The deliberate step shown before Restore ever starts under a red or unknown banner: the same
-    // plain advice the not-at-rest result line gives (Copy.AtRestNo), shown as a step to act on
-    // first, since it is usually all that is needed; Restore itself is what runs once the owner
-    // says they have done it, never silently skipped past.
+    // cause-picked plain advice the at-rest banner itself gives (Copy.AtRestNoText), shown as a
+    // step to act on first, since it is usually all that is needed; Restore itself is what runs
+    // once the owner says they have done it, never silently skipped past.
     private void ShowRunAllRestoreAdvice()
     {
-        _runAllRestoreAdviceLabel.Text = Copy.RunAllRestoreAdviceHeading + Environment.NewLine + Environment.NewLine + Copy.AtRestNo;
+        _runAllRestoreAdviceLabel.Text = Copy.RunAllRestoreAdviceHeading + Environment.NewLine + Environment.NewLine + Copy.AtRestNoText(RefreshBanner().RedCause);
         _runAllRestoreAdviceLabel.Visible = true;
         _runAllRestoreContinueButton.Visible = true;
         _runAllStatusLabel.Text = string.Empty;

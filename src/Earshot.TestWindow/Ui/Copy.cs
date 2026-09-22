@@ -197,17 +197,38 @@ internal static class Copy
         "This computer is leaving your AirPods alone. Your AirPods' Bluetooth connection is blocked, " +
         "so this computer will not grab them off your phone the next time it starts.";
 
-    // Corrected from live evidence: telling the owner to run Restore first was wrong for the
-    // commonest cause. Restore turns the AirPods connection on, Windows then plays sound through
-    // them, and the closing block is refused while that sound is live, so Restore ends red again
-    // every time. What actually clears it is getting the AirPods off this computer first (a click
-    // on the Earshot icon, or the AirPods back in their case) so nothing is using them when the
-    // block runs; Restore is the fallback, tried only once that has not worked.
+    // Corrected from live evidence, twice. First: telling the owner to run Restore first was
+    // wrong for the commonest cause; getting the AirPods off this computer first (a click on the
+    // Earshot icon, or the AirPods back in their case) is what actually clears it, Restore is the
+    // fallback tried once that has not worked. Second: "click the icon" is itself only right when
+    // the AirPods are actually known connected to this computer already (AtRestNo, this text);
+    // when they are not known connected at all (unknown, unreadable or a kill: AtRestNoUnknownCause,
+    // right below), a click would connect them here instead of clearing anything, so that text
+    // never mentions clicking. Neither text promises a click alone clears the warning any more:
+    // nothing here ever re-reads the device after one, so it never could.
     internal const string AtRestNo =
-        "This computer may grab your AirPods off your phone the next time it starts. " +
-        "Before you shut down: check Earshot is running (its icon is near the clock), then click " +
-        "the icon once so your AirPods go back to your phone. If the warning is still here after " +
-        "that, run Restore, and say Yes to its last question while your AirPods are in their case.";
+        "Your AirPods are playing from this computer. Click the Earshot icon once so they go back " +
+        "to your phone, then run Restore and say Yes at the end while your AirPods are in their " +
+        "case. " + AtRestClearsSentence;
+
+    // The other cause: this window does not know where the AirPods are at all (unread, unreadable,
+    // or a kill), so a click here is never offered, since a left click connects them to this
+    // computer rather than sending them back to the phone.
+    internal const string AtRestNoUnknownCause =
+        "Put your AirPods in their case, then run Restore and say Yes at the end. Do not click the " +
+        "Earshot icon: that would connect them to this computer. " + AtRestClearsSentence;
+
+    // Said once, appended to both AtRestNo and AtRestNoUnknownCause: replaces the old, false
+    // promise that a click alone clears the warning (nothing here ever re-reads the device after
+    // one, so it never could).
+    private const string AtRestClearsSentence =
+        "The warning clears when a test ends with this computer leaving your AirPods alone.";
+
+    // Picks AtRestNo or AtRestNoUnknownCause by Banner's own recorded cause; anything other than a
+    // definite "no" (unknown, unreadable, a kill, or a sequence/order disagreement) is the unknown
+    // text, never the click advice, since that is only ever right about a trusted "no".
+    internal static string AtRestNoText(BannerRedCause cause) =>
+        cause == BannerRedCause.KnownNotAtRest ? AtRestNo : AtRestNoUnknownCause;
 
     internal const string AtRestUnknown =
         "We do not know. It could not be read whether your AirPods' Bluetooth connection is blocked, so this " +
@@ -234,22 +255,20 @@ internal static class Copy
     internal const string CloseNotAtRestConfirmation =
         "This computer may grab your AirPods off your phone the next time it starts. Close anyway?";
 
-    // The at-rest banner shown at the top of Home. Banner.Compute only ever returns Red or Amber
-    // here (None never reaches this: MainForm hides the banner outright for it), and it never says
-    // which exact leftAtRest value caused Red (no, unknown, unreadable, or a newer run whose result
-    // cannot be trusted): that collapsing is deliberate, fail-closed design in Banner.cs itself, so
-    // this reuses the SAME corrected advice (AtRestNo, click the Earshot icon first, Restore only as
-    // the fallback) for every Red cause rather than inventing a finer distinction Banner.cs does not
-    // expose. Amber (left enabled on purpose, for a test still in progress) gets its own short plain
-    // line, since "Left enabled on purpose." (Banner.cs's own internal caption) says nothing plain
-    // about what "enabled" means or what to do about it.
+    // The at-rest banner shown at the top of Home. Banner.Compute now says which shape a Red level
+    // is (BannerRedCause), so this picks AtRestNoText's own two versions by cause rather than
+    // reusing the click-the-icon advice for every Red cause, which used to be wrong (and could
+    // connect the AirPods here) whenever the cause was anything other than a trusted "no". Amber
+    // (left enabled on purpose, for a test still in progress) gets its own short plain line, since
+    // "Left enabled on purpose." (Banner.cs's own internal caption) says nothing plain about what
+    // "enabled" means or what to do about it.
     internal const string BannerAmberPlain =
         "This computer's AirPods connection was left able to grab them, on purpose, so a test still in " +
         "progress could finish. No action is needed yet; the test itself will say when to shut down.";
 
-    internal static string BannerPlainText(BannerLevel level) => level switch
+    internal static string BannerPlainText(BannerLevel level, BannerRedCause cause = BannerRedCause.UnknownOrUnreadable) => level switch
     {
-        BannerLevel.Red => AtRestNo,
+        BannerLevel.Red => AtRestNoText(cause),
         BannerLevel.Amber => BannerAmberPlain,
         _ => string.Empty,
     };
