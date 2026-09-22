@@ -506,6 +506,22 @@ internal static class Copy
 
     internal const string NotedStartNeedsDeliberateClick = "This start needs a deliberate click before it counts as tried.";
 
+    // The button beside NotedStartNeedsDeliberateClick's own warning: was hardcoded inline in
+    // MainForm rather than routed through here, so the banned-words sweep never scanned it.
+    internal const string NotedStartButtonLabel = "Start anyway";
+
+    // Shown alongside a row's own plain detail (never gated by technical details, the same as
+    // Copy.RestoreUninstallOfferNotAvailable): "variant" is jargon, so this names the fact plainly
+    // instead of the script's own word for it.
+    internal const string WaitsOnWindowsUpdatePlain =
+        "This way of restarting waits for Windows Update to offer a restart. It may take a while to appear.";
+
+    // Was hardcoded with the row's own TestId (technical) and shown unconditionally, even with
+    // technical details off; testName is the row's own plain Name instead, the same pattern
+    // PlainRunCrashedStatus already uses for a start that fails outright.
+    internal static string PlainCouldNotStartStatus(string testName) =>
+        testName + ": this test could not be started. Show technical details to see why.";
+
     internal const string StopSentWaitingStatus = "Stop sent. Waiting up to 60 s for the test to finish on its own.";
 
     internal static string SilentForMinutesStatus(int minutes) =>

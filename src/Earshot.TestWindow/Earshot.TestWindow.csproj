@@ -23,7 +23,7 @@
     <None Include="Data\wording.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Drawn, not captured (see HowToPictureGenerator's own comment): PromptPresenter loads
          these by name, and a missing file shows nothing rather than an error on screen
-         (HowToPictureCoverageTests lists any that are missing). -->
+         (HowToBlockTests.EveryPictureNamedInWordingJsonExistsOnDisk lists any that are missing). -->
     <None Include="Data\pictures\*.png" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Data\pictures\README.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

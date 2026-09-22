@@ -189,6 +189,17 @@ public sealed class NoBannedWordsInPlainModeTests
         yield return (nameof(Copy.PlainFinishedStatus), Copy.PlainFinishedStatus("Battery reading, connected or not", Copy.PlainFailed));
         yield return (nameof(Copy.PlainRunCrashedStatus), Copy.PlainRunCrashedStatus("Connect with one click"));
         yield return (nameof(Copy.PlainNoReadableResultStatus), Copy.PlainNoReadableResultStatus("Connect with one click"));
+        yield return (nameof(Copy.PlainCouldNotStartStatus), Copy.PlainCouldNotStartStatus("Connect with one click"));
+
+        // Shown unconditionally, never gated by the technical-details toggle (a row's own detail
+        // text, and the status line for a refused or noted power-cycle start): never previously
+        // scanned here at all.
+        yield return (nameof(Copy.WaitsOnWindowsUpdatePlain), Copy.WaitsOnWindowsUpdatePlain);
+        yield return (nameof(PowerCycleGate.RefusalMessage), PowerCycleGate.RefusalMessage(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Restart));
+        yield return (nameof(PowerCycleGate.RefusalMessage), PowerCycleGate.RefusalMessage(PowerCycleRequirement.FullShutDown, PowerCycleVerdict.NotYet));
+        yield return (nameof(PowerCycleGate.NotedWarning), PowerCycleGate.NotedWarning(PowerCycleRequirement.Restart, PowerCycleVerdict.PowerDown));
+        yield return (nameof(PowerCycleGate.NotedWarning), PowerCycleGate.NotedWarning(
+            PowerCycleRequirement.FullShutDown, PowerCycleVerdict.Unknown, PowerCycleUnknownReason.NoTransitionRecordFoundBetweenTheFirstHalfAndTheStart));
         yield return (nameof(Copy.PlainWaitingForPowerCycleStatus), Copy.PlainWaitingForPowerCycleStatus(PowerCycleRequirement.FullShutDown, "Full shut down and start"));
         yield return (nameof(Copy.PlainWaitingForPowerCycleStatus), Copy.PlainWaitingForPowerCycleStatus(PowerCycleRequirement.Restart, "Full shut down and start"));
         yield return (nameof(Copy.PlainWaitingForPowerCycleStatus), Copy.PlainWaitingForPowerCycleStatus(PowerCycleRequirement.AnyStart, "Full shut down and start"));

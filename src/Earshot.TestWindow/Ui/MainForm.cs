@@ -233,7 +233,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Bottom, Height = 48, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DarkRed, Visible = false,
         };
-        _notedStartButton = new Button { Text = "Start anyway, noted", Dock = DockStyle.Bottom, Height = 28, Visible = false };
+        _notedStartButton = new Button { Text = Copy.NotedStartButtonLabel, Dock = DockStyle.Bottom, Height = 28, Visible = false };
         _notedStartButton.Click += (_, _) => ProceedWithNotedStart();
 
         var listButtonRow = new FlowLayoutPanel
@@ -291,7 +291,11 @@ internal sealed class MainForm : Form
         };
         _technicalDetailsCheckBox.CheckedChanged += (_, _) => OnTechnicalDetailsToggled();
 
-        _statusLabel = new Label { Dock = DockStyle.Bottom, Height = 32, TextAlign = ContentAlignment.MiddleLeft };
+        // 32 px only ever fit one short line: PowerCycleGate.RefusalMessage's own ~230-character
+        // sentence wraps to more lines than that at this window's own (now smaller) width, and the
+        // rest was clipped, invisible, never scrolled to. A plain Label already wraps by width; the
+        // only thing missing was room to show what it wrapped to.
+        _statusLabel = new Label { Dock = DockStyle.Bottom, Height = 64, TextAlign = ContentAlignment.MiddleLeft };
         _bannerLabel = new Label
         {
             AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, Visible = false,
@@ -683,7 +687,7 @@ internal sealed class MainForm : Form
 
         if (row.WaitsOnWindowsUpdate)
         {
-            text += Environment.NewLine + "This variant waits on Windows Update offering a restart; it may take a while for one to appear.";
+            text += Environment.NewLine + Copy.WaitsOnWindowsUpdatePlain;
         }
 
         // A path this window never reaches must never be silently missing. Restore's own
@@ -1432,7 +1436,9 @@ internal sealed class MainForm : Form
             System.Diagnostics.Trace.TraceWarning(
                 "ChildRunner.Start() threw before " + row.TestId + " could run (recorded, not swallowed): " + ex);
             MarkUnknownAndReset(
-                "Could not start " + row.TestId + ": " + ex.GetType().Name + ": " + ex.Message +
+                (_showTechnicalDetails
+                    ? "Could not start " + row.TestId + ": " + ex.GetType().Name + ": " + ex.Message
+                    : Copy.PlainCouldNotStartStatus(row.Name)) +
                 " " + Copy.RowUnknownUntilItRunsAgain);
             runner.Dispose();
         }
@@ -1910,7 +1916,7 @@ internal sealed class MainForm : Form
             }
 
             DerivedRowState state = ComputeState(row);
-            switch (RunAllSummary.Classify(state.Kind))
+            switch (RunAllSummary.Classify(state))
             {
                 case RunAllSummaryBucket.Worked: worked++; break;
                 case RunAllSummaryBucket.DidNotWork: didNotWork++; break;

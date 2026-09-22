@@ -77,9 +77,15 @@ public sealed class StartFailureTests
             Assert.IsNull(form.ActiveRunnerForTests, "_activeRunner must be cleared after a failed Start(), or every later start (including row 00 Restore) stays refused.");
             Assert.IsTrue(RunGate.CanStart(form.ActiveRunnerForTests), "RunGate must not see a failed start as an active runner.");
 
-            // The reason is shown, not swallowed: the raw exception's own type name appears in the
-            // status text an owner would actually see.
-            StringAssert.Contains(form.StatusTextForTests, "Win32Exception");
+            // The reason is shown, not swallowed, but with technical details off (the default) it
+            // is this row's own plain name and Copy's own plain sentence, never the raw exception
+            // type name: that used to leak here regardless of the toggle, exactly the class of leak
+            // NoBannedWordsInPlainModeTests exists to catch.
+            Assert.IsFalse(form.ShowTechnicalDetailsForTests, "sanity: technical details must be off by default for this to prove anything.");
+            StringAssert.Contains(form.StatusTextForTests, "Start failure test");
+            StringAssert.Contains(form.StatusTextForTests, "this test could not be started");
+            Assert.IsFalse(form.StatusTextForTests.Contains("Win32Exception", StringComparison.Ordinal),
+                "the raw exception type name must never appear with technical details off.");
 
             // The row reads Unknown from disk too, the same way a kill does: a stale or missing
             // result under this folder must never be trusted as a pass by a later StateDeriver

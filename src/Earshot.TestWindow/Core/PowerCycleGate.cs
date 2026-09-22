@@ -53,7 +53,7 @@ internal static class PowerCycleGate
         if (requirement == PowerCycleRequirement.FullShutDown && verdict == PowerCycleVerdict.Restart)
         {
             return "That was a restart, not a shut down. This test needs a full shut down, so the second half will not start. " +
-                "Shut down now (Start, Power, Shut down), start the PC again and open this window. Your first half is kept.";
+                "Shut down now (Start, Power, Shut down), start this computer again and open this window. Your first half is kept.";
         }
 
         return "Windows has not recorded a start since the first half finished. Do the shut down or restart this test asks for, then open this window again.";

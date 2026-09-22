@@ -344,7 +344,7 @@ internal sealed class StepPanel : Panel
     // entry rarely names more than one), with the first block that actually has a picture shown
     // beside them; never hidden by the technical-details toggle, since these are this window's own
     // plain words, never the script's. A missing picture file shows nothing, never an error on
-    // screen (HowToPictureCoverageTests is what catches that, for the writer to see).
+    // screen (HowToBlockTests.EveryPictureNamedInWordingJsonExistsOnDisk is what catches that, for the writer to see).
     private void RenderHowTo(IReadOnlyList<HowToBlock> blocks)
     {
         _howToPictureBox.Image?.Dispose();
