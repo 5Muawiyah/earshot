@@ -853,9 +853,9 @@ internal sealed class TrayContext : ApplicationContext
             ((long)(_time.GetUtcNow() - started).TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms.");
     }
 
-    // Real-timer continuation-dispatch latency is normally sub-millisecond; this is generous headroom for a
-    // slower or busier machine, chosen small enough that it never meaningfully eats into HandBackBudget or
-    // SleepHandBackBudget's own margin under the documented Windows caps (comment at their declarations below).
+    // Chosen, not measured: small enough that it never meaningfully eats into HandBackBudget's or
+    // SleepHandBackBudget's own margin under the Windows time limits they are chosen against (see the comments
+    // where those two are declared, TrayStartOptions.HandBackBudget and TrayStartOptions.SleepHandBackBudget).
     private static readonly TimeSpan CutShortFlushGrace = TimeSpan.FromMilliseconds(200);
 
     // The pump itself, apart from the logging around it, so the real message-path test can drive the exact same

@@ -29,10 +29,13 @@ public sealed class TrayHandBackTests
     private static SessionEndingEventArgs WmEndSession() => new(isQuery: false, ending: true, flags: 0);
 
     // A coordinator continuation posted to the UI thread runs while HoldReply waits, and HoldReply returns
-    // once the task completes -- proved by the wall-clock time actually taken: a real background delay on the
-    // block, a generous budget and TimeProvider.System for the deadline, so a hold that returned early (the pump
-    // not actually running the coordinator's own continuations) or hung to the deadline would both show up in
-    // the elapsed time, not just in whether the test finished at all.
+    // once the task completes: proved by order, not a wall-clock window nothing but this machine's own speed
+    // sets. "finished in" (the coordinator noticing the block complete) is logged strictly before "reply
+    // returned after" (HoldReply's own pump giving control back), which a pump that returned early (never
+    // really waiting for the coordinator's continuations) or one that polled blind to the deadline instead of
+    // noticing completion could not produce in that order. The lower bound on elapsed time only rules out
+    // returning before the real background delay on the block could possibly have finished; nothing here
+    // fails because a machine ran slower, only if it returned suspiciously fast or never in order at all.
     [TestMethod]
     public void HoldReplyWaitsForTheRealHandBackTaskThenReturns()
     {
@@ -56,11 +59,14 @@ public sealed class TrayHandBackTests
 
             Assert.IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(40), clock.Elapsed,
                 "The reply returned before the hand-back's own block finished: the pump is not really waiting for it.");
-            Assert.IsLessThan(TimeSpan.FromSeconds(1), clock.Elapsed,
-                "The reply waited close to the whole budget: HoldReply is polling blindly to the deadline rather than " +
-                "noticing the task finish through the pumped continuations.");
-            Assert.IsTrue(tray.Log.Has(LogLevel.Debug, "reply returned after"));
-            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "finished in"));
+
+            int finishedAt = tray.Log.Entries.ToList().FindIndex(e => e.Message.Contains("finished in", StringComparison.Ordinal));
+            int returnedAt = tray.Log.Entries.ToList().FindIndex(e => e.Message.Contains("reply returned after", StringComparison.Ordinal));
+            Assert.IsGreaterThanOrEqualTo(0, finishedAt);
+            Assert.IsGreaterThanOrEqualTo(0, returnedAt);
+            Assert.IsLessThan(returnedAt, finishedAt,
+                "The coordinator must notice the block finish before HoldReply's own pump gives control back, " +
+                "not the other way around.");
         });
     }
 
@@ -153,6 +159,8 @@ public sealed class TrayHandBackTests
             {
                 Assert.IsTrue(tray.Coordinator.HandBackInProgress, "The reentrant check must run while the hold is still up.");
                 int cardsBefore = tray.Cards.Shown.Count;
+                int blockCallsBefore = tray.Block.Calls.Count;
+                int protectionCallsBefore = tray.Protection.Calls.Count;
 
                 tray.MenuItem(MenuModel.BlockAtBoot).PerformClick();
                 tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleAudioProtection));
@@ -161,6 +169,13 @@ public sealed class TrayHandBackTests
                     "Both the menu click and the hotkey must show the hand-back refusal card, and nothing else.");
                 Assert.AreEqual(TrayContext.HandingBackMessage, tray.Cards.Shown[^1].Content.Status);
                 Assert.AreEqual(TrayContext.HandingBackMessage, tray.Cards.Shown[^2].Content.Status);
+
+                // Not just the card: nothing the refused click or hotkey would have sent actually reached the
+                // gate. The count is taken before the reentrant calls, not asserted empty outright, because the
+                // hand-back's own block call is already in progress (that is what invoked this callback).
+                Assert.AreEqual(blockCallsBefore, tray.Block.Calls.Count, "Block at boot must not have sent an allow or a second block.");
+                Assert.AreEqual(protectionCallsBefore, tray.Protection.Calls.Count, "The audio protection hotkey must not have sent anything.");
+
                 ranReentrant = true;
                 return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
             };

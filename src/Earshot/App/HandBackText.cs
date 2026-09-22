@@ -59,7 +59,9 @@ internal static class HandBackText
 
     public static string ResumeNothingToDo(string reason) => ResumePrefix + "nothing to do: " + reason;
 
-    public static string ResumeSuspendLogged() => "WM_POWERBROADCAST received: PBT_APMRESUMESUSPEND";
+    // Written once, at PBT_APMRESUMEAUTOMATIC, while the setting is off, so a reader can tell "off" from
+    // "never reached" here too.
+    public static string ResumeOff() => ResumePrefix + "off, so the resume check does not run";
 
     private static string Utc(DateTimeOffset t) => t.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
 

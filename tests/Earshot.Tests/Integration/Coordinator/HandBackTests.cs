@@ -270,6 +270,7 @@ public sealed class HandBackTests
         Assert.IsFalse(handBack.IsCompleted, "The hand-back must wait for the connect already in flight to finish.");
         Assert.IsFalse(h.Trace.Contains("block"), "Nothing the hand-back sends has run yet.");
         Assert.IsTrue(h.Log.Has(LogLevel.Debug, "waiting for connect to finish"));
+        Assert.IsTrue(h.Coordinator.HandBackInProgress, "HandBackInProgress must already be set while still waiting for the connect, not only once the exclusive slot is claimed.");
 
         pendingConnect.SetResult(Results.Connected());
         h.Pump();
@@ -280,6 +281,108 @@ public sealed class HandBackTests
         CollectionAssert.Contains(h.Trace, "block");
         Assert.IsTrue(h.Trace.IndexOf("connect") < h.Trace.IndexOf("block"),
             "The operation already in flight finishes before the hand-back's own block runs; never beside it.");
+    }
+
+    // A query-time block that completes before WM_ENDSESSION leaves _sessionBlock holding a reference to
+    // an already-finished task; the hand-back must still run and the reply must still return within its own
+    // cap, never spin re-awaiting that finished task forever. Timeout is a permanent safety net for this exact
+    // defect class (a spin that would otherwise hang the whole test run), not part of the red-check alone.
+    [TestMethod]
+    [Timeout(5000)]
+    public void AHandBackRunsAndReturnsWithinTheCapWhenTheQueryTimeBlockAlreadyCompleted()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+        Assert.HasCount(1, h.Block.Calls, "The not-in-use query already queued and completed its block (the fake resolves synchronously).");
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(handBack.IsCompleted,
+            "The hand-back must run and the reply must return within the cap, not spin re-awaiting the already-finished query block.");
+        Assert.HasCount(1, h.Block.Calls, "The query's own block is reused, not sent again.");
+    }
+
+    // The wait for the operation already in flight is bounded by the one shared deadline; if it has not
+    // finished by then, the hand-back is cut short before it ever started, and never sends anything, then or
+    // later once the abandoned claim on the exclusive slot finally gets its turn.
+    [TestMethod]
+    public void AHandBackIsCutShortBeforeItStartsWhenTheOperationInFlightOutlivesTheDeadline()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Trace.Clear();
+        var pendingConnect = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(_ => pendingConnect.Task);
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+        Assert.IsTrue(h.Coordinator.IsBusy, "The connect must be the operation in flight.");
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + TimeSpan.FromMilliseconds(500), DisconnectWait);
+        h.Pump();
+        Assert.IsFalse(handBack.IsCompleted);
+
+        h.Advance(TimeSpan.FromMilliseconds(500));
+        h.Pump();
+
+        Assert.IsTrue(handBack.IsCompleted, "The hand-back must return once the shared deadline passes, not wait for the operation in flight forever.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short before it started: waiting for connect."));
+        Assert.IsFalse(h.Trace.Contains("block"), "Nothing was ever sent: the hand-back never started.");
+        Assert.IsFalse(h.Coordinator.HandBackInProgress, "HandBackInProgress must clear once the reply has returned.");
+
+        pendingConnect.SetResult(Results.Connected());
+        h.Pump();
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.IsFalse(h.Trace.Contains("block"),
+            "The abandoned claim must still send nothing once it finally runs: the deadline had already passed.");
+    }
+
+    // With the setting on, a query while the AirPods are in use still cancels an operation already in
+    // flight, exactly as it would if a block were being sent right now, even though no block is actually sent
+    // at the query in this case.
+    [TestMethod]
+    public void AQueryWhileInUseWithHandBackOnStillStopsAnOperationInFlight()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Active(1));
+        var pendingConnect = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(ct =>
+        {
+            ct.Register(() => pendingConnect.TrySetCanceled(ct));
+            return pendingConnect.Task;
+        });
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+        Assert.IsTrue(h.Coordinator.IsBusy, "The connect must be the operation in flight.");
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "is stopped."), "The operation in flight must be stopped, exactly as it would be if a block were being sent now.");
+        Assert.IsTrue(toggle.IsCompleted, "The stopped connect must have completed (cancelled), not still be waiting on the never-resolved fake.");
+    }
+
+    // The resume check runs only with the hand-back setting on; with it off, today's code has no resume
+    // check at all, so this must be the byte-for-byte "off" path for it too.
+    [TestMethod]
+    public void ResumeCheckDoesNothingWithTheSettingOff()
+    {
+        using CoordinatorHarness h = Harness(handBack: false);
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        Task task = h.Coordinator.ResumeCheckAsync();
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsFalse(h.Block.Calls.Contains("block"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): off, so the resume check does not run"));
     }
 
     // A block completed inside the budget logs "finished in", never "cut short".

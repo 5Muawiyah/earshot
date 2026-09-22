@@ -843,6 +843,17 @@ internal sealed class BlockCoordinator : IDisposable
                     // A block now would be refused on the sink entry (it is vetoed while the AirPods render) and
                     // would disconnect the owner for a shut down another application may still cancel. The
                     // hand-back at WM_ENDSESSION disconnects, confirms, then blocks, in order.
+                    //
+                    // The query still cancels an operation in flight, exactly as it would if a block were being
+                    // sent right now: an allow queued before the hand-back's own disconnect must not run after
+                    // it, and its own clean-up blocks again anything it already allowed.
+                    if (_currentCancel is { } inFlight)
+                    {
+                        _log.Info("Session ending: " + (_currentName ?? "the operation in flight") + " is stopped.");
+                        _currentStoppedForSessionEnd = true;
+                        inFlight.Cancel();
+                    }
+
                     _log.Info(HandBackText.SessionEndingNoBlockAtQuery());
                     return;
                 }
@@ -1081,54 +1092,97 @@ internal sealed class BlockCoordinator : IDisposable
             return;
         }
 
-        // Another device action (an allow, say) may already be running when a suspend or session end arrives: the
-        // hand-back's own disconnect and block calls must never run beside it on the same SystemWorker. Wait for
-        // it to finish first; RaiseChanged is not needed for this wait alone, since _handingBack is not yet set
-        // and nothing new refuses on it until it is.
-        //
-        // Not bounded by the hand-back's own deadline: every operation RunExclusiveAsync starts already has its
-        // own bounded budget (a connect, an allow, a protect verb, all finish or time themselves out in a few
-        // seconds at most; see their own StatusReadBudget-scale constants), so this waits for that budget, not a
-        // second one layered on top of it. HandBackCoreAsync still enforces the shared deadline for its own
-        // disconnect and block once it starts, so a genuinely stuck operation in flight is the only way this
-        // wait could run long, and that is an existing-operation defect this hand-back does not newly introduce.
-        if (_current is { } inFlight)
-        {
-            string waitingFor = _currentName ?? "the operation in flight";
-            _log.Write(LogLevel.Debug, HandBackText.Prefix(trigger) + "waiting for " + waitingFor + " to finish.");
-            try
-            {
-                await inFlight;
-            }
-            catch (Exception)
-            {
-                // Whatever that operation's own outcome was is reported by its own caller; only its completion,
-                // however it ended, matters here.
-            }
-        }
+        // t0 is the moment the message arrived, taken once, here: "finished in" must count the whole hold,
+        // including any wait behind an operation already in flight, not just the work after it.
+        DateTimeOffset t0 = _time.GetUtcNow();
 
-        if (_disposed)
-        {
-            return;
-        }
-
+        // Set before anything waits, not once the exclusive slot is actually claimed: every device action
+        // (menu, hotkey, click, streaming) refuses on HandBackInProgress from the instant the message
+        // arrives, the same guarantee SessionEndInProgress already gives a session end. The hand-back itself
+        // then runs inside the same exclusive slot (RunExclusiveAsync) every other device action uses, so an
+        // action already queued behind an operation in flight is ordered with the hand-back, never beside it,
+        // and the wait for that operation is bounded by the one shared deadline: if it has not finished by
+        // then, the hand-back is cut short before it ever started, and never runs after this reply returns.
         _handingBack = true;
         RaiseChanged();
-        Task core = HandBackCoreAsync(trigger, deadline, disconnectWait, streamingHeld);
-        _handBackInFlight = core;
-        try
+        string name = trigger == HandBackTrigger.SessionEnd ? "hand-back (shutdown)" : "hand-back (sleep)";
+
+        // RunExclusiveAsync's own ct parameter is deliberately CancellationToken.None here, not a token tied to
+        // the deadline: Task.WaitAsync(CancellationToken) on the exclusive slot's task, with a real (non-None)
+        // token, was proved on this machine not to observe that task's completion at all, hanging the wait
+        // forever even though the token itself never fires (a live check, kept as the read-only probe this rule
+        // always prefers over an assumption). The deadline is enforced instead by racing the whole claim
+        // against Task.Delay, and by a check inside the claim itself in case the deadline lands in the instant
+        // after the race is decided but before the body has started.
+        bool startedInTime = true;
+        Task<bool> handBackTask = RunExclusiveAsync<bool>(
+            name,
+            async ct =>
+            {
+                _ = ct;
+                if (_time.GetUtcNow() >= deadline)
+                {
+                    startedInTime = false;
+                    return false;
+                }
+
+                Task core = HandBackCoreAsync(trigger, t0, deadline, disconnectWait, streamingHeld);
+                _handBackInFlight = core;
+                await core;
+                return true;
+            },
+            CancellationToken.None);
+
+        Task winner = await Task.WhenAny(handBackTask, Task.Delay(Remaining(deadline), _time));
+        if (winner != handBackTask)
         {
-            await core;
-        }
-        finally
-        {
+            string waitingFor = _currentName ?? "the operation in flight";
+            _log.Warn(HandBackText.Prefix(trigger) + "cut short before it started: waiting for " + waitingFor + ".");
             _handingBack = false;
             _handBackInFlight = null;
             RaiseChanged();
-            if (!_disposed)
-            {
-                _ = RefreshStatusAsync();
-            }
+
+            // The claim on the exclusive slot is not abandoned: it still runs once _current frees up, but the
+            // deadline check inside the body above means it starts no device action once it gets there. Observed
+            // here so a fault in it is never an unobserved task exception, not awaited, since the reply must
+            // return now.
+            _ = ObserveAbandonedHandBackClaimAsync(handBackTask);
+            return;
+        }
+
+        await handBackTask;
+        if (!startedInTime)
+        {
+            _log.Warn(HandBackText.Prefix(trigger) + "cut short before it started: the shared deadline passed while waiting for the exclusive slot.");
+        }
+
+        _handingBack = false;
+        _handBackInFlight = null;
+        RaiseChanged();
+        if (!_disposed)
+        {
+            _ = RefreshStatusAsync();
+        }
+    }
+
+    // A hand-back's own claim on the exclusive slot, still running after HandBackAsync itself gave up waiting
+    // for it at the shared deadline: recorded once it ends, however it ends, rather than left as a task nobody
+    // ever awaits. It starts no device action by then (the deadline check inside the claim's own body), so
+    // there is nothing left to log beyond a fault, which RunExclusiveAsync's own body would already have
+    // surfaced if this were the ordinary path; this only guards against an unobserved exception.
+    private async Task ObserveAbandonedHandBackClaimAsync(Task<bool> handBackTask)
+    {
+        try
+        {
+            await handBackTask;
+        }
+        catch (Exception ex)
+        {
+            // Every fault HandBackCoreAsync itself can end in is already caught and logged at its own step; this
+            // is a backstop against something unexpected escaping RunExclusiveAsync's own machinery, not silent
+            // regardless.
+            _log.Warn("Hand-back: the claim abandoned at the deadline ended unexpectedly (" +
+                ex.GetType().Name + ": " + ex.Message + ").");
         }
     }
 
@@ -1142,6 +1196,14 @@ internal sealed class BlockCoordinator : IDisposable
     {
         if (_disposed)
         {
+            return;
+        }
+
+        if (!Settings.HandBackOnShutdownAndSleep)
+        {
+            // With the setting off, today's code has no resume check at all: this is the byte-for-byte "off"
+            // path for it too, not merely nothing logged.
+            _log.Info(HandBackText.ResumeOff());
             return;
         }
 
@@ -1214,9 +1276,8 @@ internal sealed class BlockCoordinator : IDisposable
         return true;
     }
 
-    private async Task HandBackCoreAsync(HandBackTrigger trigger, DateTimeOffset deadline, TimeSpan disconnectWait, bool streamingHeld)
+    private async Task HandBackCoreAsync(HandBackTrigger trigger, DateTimeOffset t0, DateTimeOffset deadline, TimeSpan disconnectWait, bool streamingHeld)
     {
-        DateTimeOffset t0 = _time.GetUtcNow();
         Guid container = WatchedContainer();
         RenderState render = CoordinatorRules.RenderOf(_snapshot, container);
         BlockState nodes = _blockStatus?.State ?? BlockState.Unknown;
@@ -1235,7 +1296,7 @@ internal sealed class BlockCoordinator : IDisposable
         // returns and inside this same budget.
         if (trigger == HandBackTrigger.SessionEnd && _sessionBlockIssued && _sessionBlock is { } queryBlock)
         {
-            string? reuseDisconnectOutcome = await DisconnectStepAsync(trigger, container, t0, deadline, disconnectWait, render);
+            string? reuseDisconnectOutcome = await DisconnectStepAsync(trigger, container, t0, deadline, disconnectWait, render, _sessionBlockIssuedAtUtc);
             if (reuseDisconnectOutcome is null)
             {
                 return;
@@ -1290,7 +1351,11 @@ internal sealed class BlockCoordinator : IDisposable
     // for a non-cancellation fault), or null when the shared deadline passed while still waiting on it: "cut
     // short" naming "disconnect" has already been logged, and the caller must return at once without sending
     // the block, the same as WaitForBlockAsync's own cut-short leaves the block step.
-    private async Task<string?> DisconnectStepAsync(HandBackTrigger trigger, Guid container, DateTimeOffset t0, DateTimeOffset deadline, TimeSpan disconnectWait, RenderState render)
+    //
+    // blockAlreadySentAt is null on the normal path (nothing has been sent yet when the disconnect is cut
+    // short), and the query's own issue time on the reuse path: the query-time block was already sent before
+    // this disconnect ever ran, so "block was not sent" would say the opposite of what happened.
+    private async Task<string?> DisconnectStepAsync(HandBackTrigger trigger, Guid container, DateTimeOffset t0, DateTimeOffset deadline, TimeSpan disconnectWait, RenderState render, DateTimeOffset? blockAlreadySentAt = null)
     {
         if (render != RenderState.Active)
         {
@@ -1319,7 +1384,7 @@ internal sealed class BlockCoordinator : IDisposable
         }
         catch (TimeoutException)
         {
-            _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["disconnect"], null));
+            _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["disconnect"], blockAlreadySentAt));
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1368,13 +1433,29 @@ internal sealed class BlockCoordinator : IDisposable
     // Waits for a block task up to deadline, never cancelling it: the block is the at-rest action, and a gate
     // request already sent stays sent even once this hand-back has stopped waiting for it (see the class
     // comment: gate changes are waited for, never cancelled). Logs "finished" or "cut short" either way.
+    // Success and AlreadyInState carry nothing more worth saying; Partial and Failed name the first entry that
+    // was not OK and its raw code, so "block Partial" is never the whole story when a reader wants to know
+    // which of the eight nodes was vetoed and why.
+    private static string DescribeBlockOutcome(ControllerResult result)
+    {
+        if (result.Status is OpStatus.Success or OpStatus.AlreadyInState)
+        {
+            return result.Status.ToString();
+        }
+
+        StepOutcome? vetoed = result.Steps.FirstOrDefault(step => !step.Ok);
+        return vetoed is null
+            ? result.Status + ": " + result.UserMessage
+            : result.Status + ": " + vetoed.Step + " " + vetoed.CodeName;
+    }
+
     private async Task WaitForBlockAsync(HandBackTrigger trigger, Task<ControllerResult> block, DateTimeOffset t0, DateTimeOffset deadline, DateTimeOffset? blockAlreadySentAt, string disconnectOutcome)
     {
         TimeSpan remaining = Remaining(deadline);
         try
         {
             ControllerResult result = await block.WaitAsync(remaining, _time);
-            _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, result.Status.ToString()));
+            _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, DescribeBlockOutcome(result)));
         }
         catch (TimeoutException)
         {
@@ -1429,6 +1510,19 @@ internal sealed class BlockCoordinator : IDisposable
         return left > TimeSpan.Zero ? left : TimeSpan.Zero;
     }
 
+    // The one task, among the coordinator's own tracked slots, that is genuinely still running, or null when
+    // none is. Filtered to incomplete work only: a slot that still holds a reference to an already-finished
+    // task (_sessionBlock is set once when a query-time block is queued and never nulled once it completes)
+    // must never be the one a caller awaits in a loop, because awaiting an already-completed task returns at
+    // once, and a loop whose own break condition depends on something else entirely (_handingBack, cleared
+    // only once the hand-back's own continuation runs) then spins the UI thread forever re-awaiting that same
+    // finished task without ever giving the real, still-running work (_handBackInFlight, say) a turn to be
+    // the one actually waited on.
+    private Task? IncompleteWork() =>
+        _current ??
+        (_sessionBlock is { IsCompleted: false } sessionBlock ? sessionBlock : null) ??
+        (_handBackInFlight is { IsCompleted: false } handBackInFlight ? handBackInFlight : null);
+
     // Waits for the operation in flight, then runs body as the one in flight. The task body returns completes only
     // after body has, clean-up included.
     //
@@ -1455,14 +1549,14 @@ internal sealed class BlockCoordinator : IDisposable
                 return refusedAtSessionEnd();
             }
 
-            if (_current is null && _sessionBlock is not { IsCompleted: false } && !_handingBack)
+            Task? inFlight = IncompleteWork();
+            if (inFlight is null)
             {
                 break;
             }
 
-            Task waitFor = _current ?? _sessionBlock ?? _handBackInFlight ?? Task.CompletedTask;
             _log.Write(LogLevel.Debug, name + ": waiting for " + (_currentName ?? (_handingBack ? "the hand-back" : "the session-end block")) + " to finish.");
-            await waitFor.WaitAsync(ct);
+            await inFlight.WaitAsync(ct);
         }
 
         ct.ThrowIfCancellationRequested();
