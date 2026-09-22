@@ -25,8 +25,18 @@ public sealed class NoDocumentCitationsTests
     // upper-case hex address a test fixture writes ("B4C5D6E7F809": "C" is followed by the digit
     // "5", never a lower-case letter, so no word ever starts there). Kept in the same shape as the
     // search that found the first 69, so the two can never silently drift apart.
-    private static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b[:']|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review round|\bplain-[a-z-]+\.md\b|\btest-gui[a-z0-9-]*\.md\b",
+    //
+    // closing-step-disconnect-first is a named design document's own slug (its file lives outside
+    // this repository, gitignored, the same as the ones the labels above once named): a comment
+    // citing it by name is exactly the kind of external reference this class exists to keep out,
+    // caught the same way plain-*.md and test-gui*.md are above.
+    //
+    // internal, not private: NoDocumentCitationsInLiveTestsTests (tests\Earshot.Tests\LiveTests)
+    // runs the same search over tools\live-tests and tests\Earshot.Tests\LiveTests, which this
+    // class's own OwnedFolders does not reach, and it reuses this exact Regex instance rather than
+    // a second copy of the pattern text, so the two searches can never silently drift apart.
+    internal static readonly Regex Citation = new(
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b[:']|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review round|\bplain-[a-z-]+\.md\b|\btest-gui[a-z0-9-]*\.md\b|\bclosing-step-disconnect-first\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] OwnedFolders =

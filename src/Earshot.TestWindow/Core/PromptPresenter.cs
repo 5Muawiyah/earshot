@@ -172,11 +172,14 @@ internal static class PromptPresenter
         "Stops this computer grabbing your AirPods when it starts up. If the AirPods are playing " +
         "through this computer right now, that stops too.";
 
-    // The closing step's own disconnect-first offer (closing-step-disconnect-first.md D1/D2):
-    // sent, through LiveTest.psm1's own $script:AtRestDisconnectConsequence, whenever render
-    // reads ACTIVE or cannot be read, before the block offer. Same reasoning as the shared default
-    // above: a module-level PowerShell variable, never a literal any single script repeats, so it
-    // can never carry a wording.json entry either. Matched exactly.
+    // The closing step's own disconnect-first offer: sent, through LiveTest.psm1's own
+    // $script:AtRestDisconnectConsequence, whenever render reads ACTIVE or cannot be read, before
+    // the block offer, so the block is not vetoed by Windows while a filter is still in use. Same
+    // reasoning as the shared default above: a module-level PowerShell variable, never a literal
+    // any single script repeats, so it can never carry a wording.json entry either. Matched
+    // exactly, so a drift between this copy and LiveTest.psm1's own text is caught by
+    // CloseAtRestDisconnectOfferPresentationTests, which reads the module's own text rather than
+    // repeating it by hand.
     private const string CloseAtRestDisconnectConsequence =
         "Disconnects the AirPods from this PC first, with the same one-shot disconnect a left click sends, " +
         "and reads the render endpoint again. Windows refuses to disable the A2DP sink entry while it is rendering " +
@@ -186,10 +189,13 @@ internal static class PromptPresenter
         "Your AirPods will stop playing from this computer, so that the next step can block them.";
 
     // What the block offer says when the disconnect above was declined, did not confirm, failed to
-    // start or timed out: LiveTest.psm1's own $script:AtRestBlockWhilePlayingConsequence.
+    // start or timed out: LiveTest.psm1's own $script:AtRestBlockWhilePlayingConsequence. "May
+    // still be playing", not "still read as playing": a declined, failed or timed-out disconnect
+    // never re-reads render at all, so nothing here is a confirmed reading, only the reason the
+    // block is offered with this text instead of the caller's own.
     private const string CloseAtRestBlockWhilePlayingConsequence =
         "Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. " +
-        "If the AirPods are playing through this PC right now, that stops. The AirPods still read as playing from this PC, " +
+        "If the AirPods are playing through this PC right now, that stops. The AirPods may still be playing from this PC, " +
         "so Windows may refuse the audio entry as it did on 21 September; the re-read afterwards decides.";
 
     private const string CloseAtRestBlockWhilePlayingConsequencePlain =

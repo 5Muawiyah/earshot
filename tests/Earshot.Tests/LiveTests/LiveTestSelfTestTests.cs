@@ -46,9 +46,9 @@ public sealed class LiveTestSelfTestTests
 
     // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
     // overrides in Invoke-SelfTest.ps1's $tests): 13-GraceWindow's doubled delay and its
-    // unreadable figure (2); 00-Restore's atrest-guard-throws and, added for
-    // closing-step-disconnect-first.md, atrest-render-active (2); 01-A2dpOneShot's
-    // atrest-decline, atrest-block-ineffective, atrest-setup-unknown, atrest-config-missing,
+    // unreadable figure (2); 00-Restore's atrest-guard-throws and, added for the closing step's
+    // own disconnect-first fix, atrest-render-active (2); 01-A2dpOneShot's atrest-decline,
+    // atrest-block-ineffective, atrest-setup-unknown, atrest-config-missing,
     // atrest-nodes-probe-fails, atrest-nodes-stay-unreadable and, added for the same fix,
     // atrest-disconnect-declined, atrest-disconnect-not-confirmed and atrest-audio-unreadable (9);
     // 09-ShutdownWhileConnected's declined-start, which runs both of that row's halves (2);
@@ -56,9 +56,9 @@ public sealed class LiveTestSelfTestTests
     // run on both of that row's halves (6); 18-HandBackOnSleep's no-sleep-event,
     // handback-cut-short and repaged-at-wake, on that row's one half (3). 2+2+9+2+6+3 = 24,
     // printed by Invoke-SelfTest.ps1 itself (runs 99, halves 25, cases-per-half 3: 99 - 25*3 = 24)
-    // rather than re-derived here, because this arithmetic has been wrong before (the printed
-    // count decided the closing-step-disconnect-first.md fix too: the spec's own hand-worked
-    // total, from before tests 17 and 18 existed on this tree, did not match what actually ran).
+    // rather than re-derived here, because this arithmetic has been wrong before: a hand count
+    // made before tests 17 and 18 existed on this tree did not match what the runner actually
+    // printed once they did.
     private const int ExpectedExtraCases = 24;
 
     [TestMethod]

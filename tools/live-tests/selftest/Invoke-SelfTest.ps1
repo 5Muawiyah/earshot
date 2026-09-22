@@ -91,9 +91,10 @@ $tests = @(
     # unexpectedly deep in the at-rest closing step (Run-OneHalf.ps1's Invoke-Earshot, label
     # 'at-rest-nodes'), proving Close-AtRest's own catch and Complete-LiveTestRun's wrapping one,
     # not the null handling (see 01's cases for that). 00-Restore's own criteria are untouched.
-    # atrest-render-active is the regression case for closing-step-disconnect-first.md: the allow
-    # pages the AirPods (Fakes.psm1's own case-restricted rule), so the closing step's disconnect
-    # runs first, confirms, and only then blocks; the old step, with no disconnect, is vetoed here.
+    # atrest-render-active is the regression case for the closing step's own disconnect-first fix:
+    # the allow pages the AirPods (Fakes.psm1's own case-restricted rule), so the closing step's
+    # disconnect runs first, confirms, and only then blocks; the old step, with no disconnect, is
+    # vetoed here.
     [ordered]@{ Number = '00'; Id = '00-restore'; Script = '00-Restore.ps1'; Halves = @('first'); Extra = @()
         Cases = @('none', 'one', 'two', 'atrest-guard-throws', 'atrest-render-active') }
     # Added on top of the shared three: 01 never calls "diag gate block" itself and ends with the
@@ -327,10 +328,15 @@ function Invoke-Half
 # cases below: a row's own bespoke case (atrest-decline and the rest, grace-doubled, ...) has a
 # different, deliberately provoked outcome and carries its own explicit expectation instead.
 #
-# DisconnectCount (closing-step-disconnect-first.md D1/D2): the closing step disconnects first,
-# through "diag disconnect", whenever render reads ACTIVE (or cannot be read) as its own offer
-# begins; a positive not-ACTIVE reading skips it. Traced from each half's own StartState, its own
-# gate calls and Update-FakeWorldForOwnerAction, the same way BlockCount always has been.
+# DisconnectCount: how many times the exact command line "diag disconnect" ran anywhere in the
+# run, not only inside the closing step. Test-Expectations counts by command text
+# (Read-RunResult's StepCommandCounts, the same field BlockCount is checked against), so a script
+# that sends "diag disconnect" itself outside the closing step (12-callback-thread, mid-test) has
+# that send folded into this count too, the same way 02's and 06's own mid-test "diag gate block"
+# already folds into BlockCount. The closing step itself disconnects first, through "diag
+# disconnect", whenever render reads ACTIVE (or cannot be read) as its own offer begins; a
+# positive not-ACTIVE reading skips it. Traced from each half's own StartState, its own gate calls
+# and Update-FakeWorldForOwnerAction, the same way BlockCount always has been.
 #
 #   00-restore|first                    yes, 1, 0   allows on its own, then the offer blocks again; nothing renders
 #   01-a2dp-oneshot|first                yes, 1, 1   the last KS step is ks-reconnect-all-while-active; nothing after it disconnects

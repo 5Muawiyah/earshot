@@ -62,20 +62,28 @@ sourced account of what was actually measured that day and what was not.
   restart with the AirPods connected on purpose, and test 05's first half does too when you
   choose its optional restart. Blocking the nodes first would answer nothing about what
   those halves are testing.
-- Anything else, it offers ONE live step, `diag gate block`, with the usual typed
+- Anything else, it offers up to TWO confirmed live steps. First, only when the render
+  endpoint reads ACTIVE or cannot be read at all, `diag disconnect`, the same one-shot
+  disconnect a left click sends, with its own typed confirmation: Windows refuses to disable
+  the AirPods' audio entry while it is still rendering, so a block sent straight into that
+  state is only partly effective. The disconnect is confirmed by a fresh read of render, never
+  by the step's own exit code. Then, always, `diag gate block`, with the usual typed
   confirmation, described plainly: it blocks the nodes so this PC does not page the AirPods
-  at the next boot, and if they are playing through this PC right now, that stops.
-- If you decline, the step fails, or the nodes still do not read Blocked afterwards, the
+  at the next boot, and if they are playing through this PC right now, that stops. A declined
+  or unconfirmed disconnect still reaches the block offer, with a consequence that says
+  plainly the AirPods may still be playing here.
+- If you decline the block, it fails, or the nodes still do not read Blocked afterwards, the
   summary carries a warning block that is hard to miss, saying the machine is not at rest,
   what happens if it is shut down or restarted like that, and how to fix it: start the
   Earshot tray, whose own start-up check blocks the nodes when they are not in use, or run
   `diag gate block` yourself. (`00-Restore.ps1` does the opposite: it allows the nodes, so it
   is never the right remedy here.)
 
-`result.json` carries this as a top-level `atRest` object, holding what was read before,
-whether a block was offered and accepted, what it returned, and what was read after, plus a
-finding named `leftAtRest`: `yes`, `no`, `no-on-purpose`, `not-applicable` or `unknown`. It
-never changes a test's own criteria, its overall outcome, or its exit code.
+`result.json` carries this as a top-level `atRest` object, holding what render read before the
+offer, the disconnect step's own record (or `null` when it was not needed), whether a block
+was offered and accepted, what it returned, and what the nodes read after, plus a finding
+named `leftAtRest`: `yes`, `no`, `no-on-purpose`, `not-applicable` or `unknown`. It never
+changes a test's own criteria, its overall outcome, or its exit code.
 
 ## Running a test
 
@@ -269,8 +277,8 @@ line" is what a boot block that held produces.
 `tools\live-tests\selftest` runs every script in this folder, and both halves of
 every resumable one, against a fake machine: eighteen scripts, twenty-five halves,
 three sets of fake inputs holding 0, 1 and 2 matching lines and list items (seventy-
-five runs), plus the bespoke extra cases named against each row in
-`Invoke-SelfTest.ps1`'s `$tests`, ninety-five runs in total. Only the
+five runs), plus the twenty-four bespoke extra cases named against each row in
+`Invoke-SelfTest.ps1`'s `$tests`, ninety-nine runs in total. Only the
 device-touching and owner-prompting helpers are replaced;
 `Get-EarshotLogLines`, `Get-DiagEvidence`, `Copy-AppEvidence`, `Read-KsEvidence`,
 `Read-EarshotJsonFile`, `Add-Criterion` and `Complete-LiveTestRun` all run for

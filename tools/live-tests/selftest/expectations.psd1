@@ -70,9 +70,9 @@
         'atrest-guard-throws' = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' }
             Findings = @{ 'leftAtRest' = 'unknown' }
             ExpectedErrors = 1 }
-        # The regression case for closing-step-disconnect-first.md: the allow pages the AirPods
-        # (Fakes.psm1's own case-restricted rule, Update-FakeWorld), so the closing step reads
-        # render ACTIVE, disconnects first, confirms, and only then blocks. On the old step, with
+        # The regression case for the closing step's own disconnect-first fix: the allow pages the
+        # AirPods (Fakes.psm1's own case-restricted rule, Update-FakeWorld), so the closing step
+        # reads render ACTIVE, disconnects first, confirms, and only then blocks. On the old step, with
         # no disconnect, this is exactly where the block is vetoed (Get-FakeGateEvidence's own
         # world rule): leftAtRest no, blockStep.gateResult partial, "diag disconnect" ran 0 times.
         'atrest-render-active' = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' }
@@ -199,7 +199,7 @@
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 }
             SummaryContains = @(
                 'THE MACHINE IS NOT AT REST.'
-                'The AirPods were still playing from this PC when the block ran, and Windows refuses to disable their audio entry while they are (CR_REMOVE_VETOED on 21 September 2026).'
+                'You declined to disconnect them first, so the AirPods may still be playing from this PC, and Windows refuses to disable their audio entry while they are (CR_REMOVE_VETOED on 21 September 2026).'
                 'Stop them playing from this PC (put them in their case, or left-click the Earshot icon, which disconnects and then blocks), then run 00-Restore.ps1 and accept its closing offers.'
             )
             ExpectedErrors = 0 }
@@ -578,9 +578,15 @@
                 'sleep-happened' = 'pass'; 'suspend-logged' = 'fail'; 'handback-started' = 'pass'
                 'handback-disconnect-confirmed' = 'fail'; 'handback-block-sent' = 'fail'; 'handback-finished-or-sent' = 'fail'
                 'resume-logged' = 'fail'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+        # The render endpoint reads ACTIVE again once the owner is back (this computer re-paged the
+        # AirPods, the point of this case), so the resume check never got the chance to re-block:
+        # the nodes read Allowed, not Blocked, at the close. The closing step's own re-read is what
+        # has to offer the block, and it renders too, so the disconnect-first fix runs here as well.
         'repaged-at-wake' = @{ Overall = 'fail'; Criteria = @{
                 'sleep-happened' = 'pass'; 'suspend-logged' = 'pass'; 'handback-started' = 'pass'
                 'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
-                'resume-logged' = 'pass'; 'nodes-after-wake' = 'fail'; 'not-repaged-at-wake' = 'fail'; 'heard-handed-back' = 'pass' } }
+                'resume-logged' = 'pass'; 'nodes-after-wake' = 'fail'; 'not-repaged-at-wake' = 'fail'; 'heard-handed-back' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 } }
     }
 }

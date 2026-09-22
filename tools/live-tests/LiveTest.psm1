@@ -1333,8 +1333,8 @@ $script:AtRestDefaultConsequence = 'Blocks the AirPods Bluetooth nodes so this P
 # cannot be read. Three Restore runs on 2026-09-21 (evidence under
 # %LOCALAPPDATA%\Earshot\livetest\, 20260921T161741Z, 20260921T162832Z, 20260921T162919Z) sent
 # "diag gate block" with the AirPods still rendering, and Windows refused the A2DP sink entry
-# (CR_REMOVE_VETOED). The order matches the product's own DisconnectCoreAsync
-# (src\Earshot\App\BlockCoordinator.cs, around 1594): disconnect, confirm, then block.
+# (CR_REMOVE_VETOED). The order matches the product's own disconnect-then-block sequence
+# (src\Earshot\App\BlockCoordinator.cs, DisconnectCoreAsync calling BlockAfterDisconnectAsync).
 $script:AtRestDisconnectConsequence = 'Disconnects the AirPods from this PC first, with the same one-shot disconnect a left click sends, ' +
     'and reads the render endpoint again. Windows refuses to disable the A2DP sink entry while it is rendering ' +
     '(CR_REMOVE_VETOED, 21 September 2026), so a block sent now would only partly take. Your AirPods will stop playing from this computer.'
@@ -1343,8 +1343,10 @@ $script:AtRestDisconnectConsequence = 'Disconnects the AirPods from this PC firs
 # start or timed out: the block is still offered (nothing that reaches a block today stops
 # reaching it), but the owner is told plainly that it may only partly work. A fixed text, not the
 # caller's own -Consequence: 00 and 02's own texts describe the allow they reverse, which stays
-# true but is secondary here.
-$script:AtRestBlockWhilePlayingConsequence = [string]$script:AtRestDefaultConsequence + ' The AirPods still read as playing from this PC, ' +
+# true but is secondary here. "May still be playing", not "still read as playing": a declined,
+# failed or timed-out disconnect never re-reads render at all, so this is never a confirmed
+# reading, only the reason the block is offered with this text instead of the caller's own.
+$script:AtRestBlockWhilePlayingConsequence = [string]$script:AtRestDefaultConsequence + ' The AirPods may still be playing from this PC, ' +
     'so Windows may refuse the audio entry as it did on 21 September; the re-read afterwards decides.'
 
 # What Complete-LiveTestRun calls before it writes result.json, on every script, so no test can
@@ -1452,9 +1454,9 @@ function Close-AtRest
         $detail.offered = $true
 
         # Disconnect first when render reads ACTIVE or cannot be read at all (fail closed, the
-        # same rule entry 26 applies elsewhere): Windows refuses to disable the A2DP sink node
-        # while it is rendering, so a block sent while playing here is vetoed. Only a positive
-        # not-ACTIVE reading skips this. See closing-step-disconnect-first.md D1.
+        # same rule the block step below already follows for its own re-read): Windows refuses to
+        # disable the A2DP sink node while it is rendering, so a block sent while playing here is
+        # vetoed. Only a positive not-ACTIVE reading skips this.
         $audioBeforeOffer = Get-AudioState -Run $Run -Label 'at-rest-audio'
         $statesBeforeOffer = Get-TargetEndpointStates -AudioJson $audioBeforeOffer
         $renderBefore = $statesBeforeOffer.Render
@@ -1582,7 +1584,28 @@ function Close-AtRest
         }
         if (-not $disconnectConfirmedOrNotNeeded)
         {
-            Write-Line -Run $Run -Text 'The AirPods were still playing from this PC when the block ran, and Windows refuses to disable their audio entry while they are (CR_REMOVE_VETOED on 21 September 2026).'
+            # The cause decides the wording: a declined disconnect, or one that failed to start or
+            # timed out, never re-reads render at all, so "were still playing" would assert a fact
+            # nobody confirmed. Only a disconnect that ran and read render back ACTIVE earns that
+            # certainty; anything else says "may".
+            $stillPlayingText = 'Whether the AirPods left this PC could not be confirmed, so they may still be playing here'
+            if ($null -ne $disconnectStep)
+            {
+                if ($disconnectStep.accepted -eq $false)
+                {
+                    $stillPlayingText = 'You declined to disconnect them first, so the AirPods may still be playing from this PC'
+                }
+                elseif (-not $disconnectStep.Contains('confirmed'))
+                {
+                    $stillPlayingText = 'The disconnect could not be confirmed before the block ran, so the AirPods may still be playing from this PC'
+                }
+                elseif ($disconnectStep.renderAfter -eq 'Active')
+                {
+                    $stillPlayingText = 'The AirPods were still playing from this PC when the block ran'
+                }
+            }
+
+            Write-Line -Run $Run -Text ([string]$stillPlayingText + ', and Windows refuses to disable their audio entry while they are (CR_REMOVE_VETOED on 21 September 2026).')
             Write-Line -Run $Run -Text 'Stop them playing from this PC (put them in their case, or left-click the Earshot icon, which disconnects and then blocks), then run 00-Restore.ps1 and accept its closing offers.'
         }
         Write-Line -Run $Run -Text 'If this PC is shut down or restarted like this, Windows will page the AirPods at the next boot,'

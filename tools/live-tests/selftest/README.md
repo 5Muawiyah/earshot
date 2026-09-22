@@ -41,8 +41,8 @@ belt and braces rather than one contradicting the other.
 `Invoke-SelfTest.ps1` runs every shipped script, and both halves of every resumable one, in its
 own `powershell.exe` 5.1 process against its own sandbox under `%TEMP%`. Eighteen scripts,
 twenty-five halves, three sets of fake inputs (seventy-five runs), plus the bespoke extra cases
-named against each row in `Invoke-SelfTest.ps1`'s `$tests` (twenty more), ninety-five runs in
-total.
+named against each row in `Invoke-SelfTest.ps1`'s `$tests` (twenty-four more), ninety-nine runs
+in total.
 
 The three sets differ only in how many items every counted thing holds, because 0, 1 and more
 than 1 are the three shapes a returned list takes:

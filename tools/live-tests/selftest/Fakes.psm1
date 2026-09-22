@@ -610,6 +610,44 @@ function Get-FakeKsEvidence
     }
 }
 
+# The node dump src\Earshot\Boot\DiagGate.cs's own WriteDiagNodes writes for nodesBefore and
+# nodesAfter: a classified state string and the node list, without the "target" flag ProbeNodes.cs's
+# own report carries (Get-FakeNodes above) -- diag gate never classifies by target the way a probe
+# does. NodeState mirrors the vocabulary BlockStateClassifier.Classify already returns (Allowed,
+# Blocked, Mixed, ...), so it is used directly as the "state" value.
+function Get-FakeDiagNodeDump
+{
+    param([Parameter(Mandatory = $true)][string]$NodeState)
+
+    $disabled = ($NodeState -eq 'Blocked')
+    $mixed = ($NodeState -eq 'Mixed')
+    $nodes = @()
+    foreach ($service in @('0000110B', '0000111E', '0000110A'))
+    {
+        $problem = 0
+        $configFlagsDisabled = $disabled
+        if ($mixed)
+        {
+            $configFlagsDisabled = $true
+            if ($service -ne '0000110B') { $problem = 22 }
+        }
+        elseif ($disabled)
+        {
+            $problem = 22
+        }
+
+        $nodes = $nodes + @([ordered]@{
+                instanceId          = ('BTHENUM\{' + $service + '-0000-1000-8000-00805F9B34FB}_VID&0001005D_PID&2038\8&' + $script:PinnedAddress + '&0&' + $script:PinnedAddress + '_C00000000')
+                present             = $true
+                status              = '0x0180200A'
+                problem             = $problem
+                configFlagsDisabled = $configFlagsDisabled
+            })
+    }
+
+    return [ordered]@{ state = $NodeState; nodes = $nodes }
+}
+
 function Get-FakeGateEvidence
 {
     param(
@@ -638,13 +676,19 @@ function Get-FakeGateEvidence
     # sent the block. This is not restricted to any one case: any half whose world still renders
     # when "diag gate block" runs hits it, which is what makes the closing step's disconnect-first
     # order provable rather than merely asserted for one case.
+    #
+    # The shape matches src\Earshot\Boot\DiagGate.cs's own writer: the eight cm-disable rows are
+    # the elevated task's own status file, nested under statusFile.steps, exactly where DiagGate.cs
+    # puts GateStatusFile.Steps; the top-level "steps" is GateRunResult.Steps instead, the
+    # task-scheduler-level record of the RunEx call that started the task, which is a single
+    # success step here because the veto happens inside the task, never at that outer level.
     if ($Verb -eq 'block' -and $script:World.Render -eq 'Active')
     {
-        $steps = @()
+        $blockSteps = @()
         foreach ($service in @('0000110B', '0000111E', '0000110A', '00001108', '0000111F', '00001112', '00001203', '00001132'))
         {
             $vetoed = ($service -eq '0000110B')
-            $steps = $steps + @([ordered]@{
+            $blockSteps = $blockSteps + @([ordered]@{
                     step     = ('cm-disable:BTHENUM\{' + $service + '-0000-1000-8000-00805F9B34FB}_VID&0001005D_PID&2038\8&' + $script:PinnedAddress + '&0&' + $script:PinnedAddress + '_C00000000')
                     ok       = -not $vetoed
                     code     = $(if ($vetoed) { 23 } else { 0 })
@@ -659,8 +703,16 @@ function Get-FakeGateEvidence
             runMilliseconds    = 5500
             lastTaskResult     = 'partial'
             lastTaskResultCode = 2
-            statusFile         = [ordered]@{ exitCode = 2; result = 'partial'; state = 'Mixed'; nonce = '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64' }
-            steps              = $steps
+            statusFile         = [ordered]@{
+                exitCode = 2; result = 'partial'; state = 'Mixed'; nonce = '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64'
+                steps    = $blockSteps
+            }
+            nodesBefore        = (Get-FakeDiagNodeDump -NodeState $script:World.NodeState)
+            nodesAfter         = (Get-FakeDiagNodeDump -NodeState 'Mixed')
+            steps              = @([ordered]@{
+                    step = 'task-run:\Earshot\Gate'; ok = $true; code = 0; codeName = 'S_OK'
+                    detail = ('block ' + '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64')
+                })
         }
     }
 
@@ -799,7 +851,11 @@ function Update-FakeWorld
         {
             # The veto rule (Get-FakeGateEvidence) already decided, from render at call time,
             # whether this was vetoed; NodeState mirrors that here rather than recomputing it, so
-            # the two cannot disagree.
+            # the two cannot disagree. Render moves to Unplugged either way, vetoed or not: the
+            # owner's machine dropped it within five seconds of a vetoed block on 2026-09-21 (a
+            # "Disconnected (pinned)" notification in the application log), but that is one log
+            # sample, not a rule this fake has otherwise measured, so nothing here claims a vetoed
+            # block always drops render.
             if ($script:World.Render -eq 'Active') { $script:World.NodeState = 'Mixed' } else { $script:World.NodeState = 'Blocked' }
             $script:World.Render = 'Unplugged'
         }

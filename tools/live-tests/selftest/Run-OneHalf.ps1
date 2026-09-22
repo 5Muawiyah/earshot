@@ -392,9 +392,10 @@ function global:Invoke-FakeEarshot
     return $returned
 }
 
-# The fake answer for case atrest-decline's one intercepted step: exactly what the real
-# Invoke-Earshot records when Confirm-Step returns false, without moving the fake machine, so
-# Close-AtRest's re-read afterwards still finds the nodes wherever they already were.
+# The fake answer for a declined live step (atrest-decline's "at-rest-block", and
+# atrest-disconnect-declined's "at-rest-disconnect"): exactly what the real Invoke-Earshot records
+# when Confirm-Step returns false, without moving the fake machine, so Close-AtRest's next read
+# still finds the nodes or the render endpoint wherever they already were.
 function global:Invoke-FakeDeclinedStep
 {
     param(
@@ -427,7 +428,7 @@ function global:Invoke-FakeDeclinedStep
 
     Write-Line -Run $Run -Text ('LIVE STEP (self-test, declined): ' + $step.commandText)
     Write-Line -Run $Run -Text ('  What it does: ' + $Consequence)
-    Write-Line -Run $Run -Text '  Skipped at your request (self-test, case atrest-decline).'
+    Write-Line -Run $Run -Text ('  Skipped at your request (self-test, case ' + (Get-FakeContext).Case + ').')
     [void]$Run.Steps.Add($step)
     return $null
 }

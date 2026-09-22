@@ -24,17 +24,23 @@ internal sealed record ExpectationsPlanRow(
 
 // Fakes.psm1's own Answers and Notes tables (read by Export-FakeOwnerTables.ps1), in the order
 // Get-FakeAnswer/Get-FakeNote themselves search them: first case-insensitive Contains match on the
-// question text wins.
+// question text wins. CloseAtRestDisconnect and CloseAtRestBlockWhilePlaying are LiveTest.psm1's
+// own $script:AtRestDisconnectConsequence and $script:AtRestBlockWhilePlayingConsequence, read by
+// the same script, so a test asserting what PromptPresenter.cs maps either text to compares
+// against what the module actually says today rather than a hand-kept copy that can drift from it
+// unnoticed.
 internal sealed class FakeOwnerTables
 {
     public required IReadOnlyList<(string Key, string Value)> Answers { get; init; }
     public required IReadOnlyList<(string Key, string Value)> Notes { get; init; }
+    public required string CloseAtRestDisconnect { get; init; }
+    public required string CloseAtRestBlockWhilePlaying { get; init; }
 }
 
 // Runs the three exporter scripts under tools\live-tests\gui\selftest and parses what they print.
-// Every one of them reads real source (Invoke-SelfTest.ps1's $tests, Fakes.psm1's tables,
-// expectations.psd1) rather than a hand-kept copy, so this fixture data cannot drift from what the
-// self-test itself actually does.
+// Every one of them reads real source (Invoke-SelfTest.ps1's $tests, Fakes.psm1's tables and
+// LiveTest.psm1's own closing-step consequence texts, expectations.psd1) rather than a hand-kept
+// copy, so this fixture data cannot drift from what the self-test itself actually does.
 internal static class SelfTestFixtures
 {
     private static readonly TimeSpan ExporterTimeout = TimeSpan.FromSeconds(60);
@@ -62,7 +68,14 @@ internal static class SelfTestFixtures
         string json = RunExporter(host, Path.Combine(repoRoot, "tools", "live-tests", "gui", "selftest", "Export-FakeOwnerTables.ps1"));
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
-        return new FakeOwnerTables { Answers = ReadPairs(root.GetProperty("answers")), Notes = ReadPairs(root.GetProperty("notes")) };
+        JsonElement consequences = root.GetProperty("closeAtRestConsequences");
+        return new FakeOwnerTables
+        {
+            Answers = ReadPairs(root.GetProperty("answers")),
+            Notes = ReadPairs(root.GetProperty("notes")),
+            CloseAtRestDisconnect = consequences.GetProperty("disconnect").GetString()!,
+            CloseAtRestBlockWhilePlaying = consequences.GetProperty("blockWhilePlaying").GetString()!,
+        };
     }
 
     internal static IReadOnlyDictionary<string, ExpectationsPlanRow> LoadExpectations(string repoRoot, string host)

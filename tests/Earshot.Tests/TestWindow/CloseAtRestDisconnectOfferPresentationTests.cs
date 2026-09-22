@@ -11,26 +11,20 @@ namespace Earshot.Tests.TestWindow;
 // repeats, so neither can carry a wording.json entry under this project's own "scriptText must be
 // in its own script" rule (WordingManifestTests.EveryWordingEntrysScriptTextIsInItsScript) -- the
 // same reason the pre-existing CloseAtRestSharedConsequence has no entry either. PromptPresenter
-// matches all three by exact text instead. This file pins the plain line each one falls back to,
-// so a mismatch between LiveTest.psm1's own literal text and PromptPresenter's copy of it is
-// caught here rather than only by the slower, real-run sweep in NoBannedWordsInPlainModeTests.
+// matches all three by exact text instead.
+//
+// This file pins the plain line each one falls back to, reading both texts out of
+// tools\live-tests\LiveTest.psm1 itself (SelfTestFixtures.LoadOwnerTables, through
+// Export-FakeOwnerTables.ps1) rather than repeating them as a second, hand-kept copy: a hand-kept
+// copy would go on matching PromptPresenter.cs's own constant even after LiveTest.psm1's real text
+// moved away from it, which is exactly the gap that let the two of them drift silently before this
+// file read the module directly. So a mismatch between LiveTest.psm1's own text and
+// PromptPresenter's copy of it is caught here, not only by the slower, real-run sweep in
+// NoBannedWordsInPlainModeTests.
 [TestClass]
 public sealed class CloseAtRestDisconnectOfferPresentationTests
 {
     private static readonly string[] AtRestStack = { "Confirm-Step", "Close-AtRest" };
-
-    // Verbatim from tools\live-tests\LiveTest.psm1's $script:AtRestDisconnectConsequence.
-    private const string DisconnectConsequence =
-        "Disconnects the AirPods from this PC first, with the same one-shot disconnect a left click sends, " +
-        "and reads the render endpoint again. Windows refuses to disable the A2DP sink entry while it is rendering " +
-        "(CR_REMOVE_VETOED, 21 September 2026), so a block sent now would only partly take. Your AirPods will stop playing from this computer.";
-
-    // Verbatim from tools\live-tests\LiveTest.psm1's $script:AtRestBlockWhilePlayingConsequence
-    // ($script:AtRestDefaultConsequence plus its own addendum).
-    private const string BlockWhilePlayingConsequence =
-        "Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. " +
-        "If the AirPods are playing through this PC right now, that stops. The AirPods still read as playing from this PC, " +
-        "so Windows may refuse the audio entry as it did on 21 September; the re-read afterwards decides.";
 
     private static IReadOnlyList<WordingEntry> LoadWording() =>
         Wording.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "wording.json"));
@@ -45,10 +39,22 @@ public sealed class CloseAtRestDisconnectOfferPresentationTests
         Stack = AtRestStack,
     };
 
+    private static FakeOwnerTables LoadTables()
+    {
+        string host = PowerShell51.ExecutablePath();
+        if (!File.Exists(host))
+        {
+            Assert.Inconclusive("Windows PowerShell 5.1 is not installed at " + host + ".");
+        }
+
+        return SelfTestFixtures.LoadOwnerTables(RepositoryLocator.RepositoryRoot(), host);
+    }
+
     [TestMethod]
     public void TheDisconnectOfferGetsItsOwnHeadingAndPlainLineWithNoTechnicalWord()
     {
-        var bound = new Dictionary<string, string> { ["Consequence"] = DisconnectConsequence };
+        FakeOwnerTables tables = LoadTables();
+        var bound = new Dictionary<string, string> { ["Consequence"] = tables.CloseAtRestDisconnect };
         PresentedPrompt presented = PromptPresenter.Present(Prompt(bound), "01", LoadWording());
 
         Assert.AreEqual("Stop your AirPods playing from this computer?", presented.Heading);
@@ -69,7 +75,8 @@ public sealed class CloseAtRestDisconnectOfferPresentationTests
     [TestMethod]
     public void TheBlockWhilePlayingOfferKeepsTheCloseAtRestHeadingAndGetsItsOwnPlainLine()
     {
-        var bound = new Dictionary<string, string> { ["Consequence"] = BlockWhilePlayingConsequence };
+        FakeOwnerTables tables = LoadTables();
+        var bound = new Dictionary<string, string> { ["Consequence"] = tables.CloseAtRestBlockWhilePlaying };
         PresentedPrompt presented = PromptPresenter.Present(Prompt(bound), "01", LoadWording());
 
         Assert.AreEqual("Stop this computer grabbing your AirPods again?", presented.Heading);
