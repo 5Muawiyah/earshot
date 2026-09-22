@@ -76,6 +76,10 @@ internal sealed record TrayStartOptions(
     public TimeSpan HandBackBudget { get; init; } = TimeSpan.FromSeconds(4);
     public TimeSpan DisconnectHandBackWait { get; init; } = TimeSpan.FromMilliseconds(1500);
 
+    // The same for sleep: a 1.5 s cap, 0.75 s of it for the disconnect.
+    public TimeSpan SleepHandBackBudget { get; init; } = TimeSpan.FromMilliseconds(1500);
+    public TimeSpan SleepDisconnectWait { get; init; } = TimeSpan.FromMilliseconds(750);
+
     // The clock HoldReply checks its deadline against. TimeProvider.System by default; a test can inject one it
     // drives, so a cut-short hold is provable without a real multi-second wait.
     public TimeProvider Time { get; init; } = TimeProvider.System;
@@ -172,6 +176,8 @@ internal sealed class TrayContext : ApplicationContext
     private readonly TimeSpan _streamingShutdownWait;
     private readonly TimeSpan _handBackBudget;
     private readonly TimeSpan _disconnectHandBackWait;
+    private readonly TimeSpan _sleepHandBackBudget;
+    private readonly TimeSpan _sleepDisconnectWait;
     private readonly TimeProvider _time;
     private readonly TrayIconFactory _icons;
     private readonly StartupRegistration _startup;
@@ -264,6 +270,7 @@ internal sealed class TrayContext : ApplicationContext
         _window.SettingChanged += (_, _) => RefreshIcon(remeasure: true, force: false);
         _window.DisplayChanged += (_, _) => RefreshIcon(remeasure: true, force: false);
         _window.SessionEnding += OnSessionEnding;
+        _window.PowerChanged += OnPowerChanged;
 
         // WM_CLOSE asks Earshot to close, so it takes the same orderly path as Exit on the menu, the block before
         // closing included. There is no click to place a card by.
@@ -279,6 +286,8 @@ internal sealed class TrayContext : ApplicationContext
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;
+        _sleepHandBackBudget = options.SleepHandBackBudget;
+        _sleepDisconnectWait = options.SleepDisconnectWait;
         _time = options.Time;
 
         _menu = new TrayMenu(CurrentMenuState);
@@ -403,6 +412,7 @@ internal sealed class TrayContext : ApplicationContext
             _registry.Settings.Changed -= OnSettingsChanged;
             _coordinator.Changed -= OnCoordinatorChanged;
             _window.SessionEnding -= OnSessionEnding;
+            _window.PowerChanged -= OnPowerChanged;
             _notifyIcon.MouseClick -= OnIconMouseClick;
             _notifyIcon.MouseDown -= OnIconMouseDownForStreaming;
             _menu.PlayFromPhoneItemClicked -= OnPlayFromPhoneItemClicked;
@@ -807,6 +817,44 @@ internal sealed class TrayContext : ApplicationContext
         {
             Application.DoEvents();
             Thread.Sleep(2);
+        }
+    }
+
+    // The hidden window raises this for WM_POWERBROADCAST. Internal so a test can raise it without a real
+    // message. Suspend holds the reply the same way OnSessionEnding does; the resume kinds never hold anything
+    // (sleep is not a session end, and nothing documented gives an application a budget to answer them in).
+    internal void OnPowerChanged(object? sender, PowerEventArgs e)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        switch (e.Kind)
+        {
+            case PowerEventKind.Suspend:
+                if (_registry.Settings.Current.HandBackOnShutdownAndSleep)
+                {
+                    DateTimeOffset deadline = _time.GetUtcNow() + _sleepHandBackBudget;
+                    Task handBack = _coordinator.HandBackAsync(HandBackTrigger.Suspend, _sleepHandBackBudget, _sleepDisconnectWait);
+                    HoldReply(handBack, deadline);
+                }
+                else
+                {
+                    _log.Info("Hand-back: off, so nothing runs for this suspend.");
+                }
+
+                break;
+
+            case PowerEventKind.ResumeAutomatic:
+                // Not held: resume is not a race against a Windows-imposed budget, and _handingBack has already
+                // cleared by the time this arrives (the suspend handler above has returned).
+                _ = _coordinator.ResumeCheckAsync();
+                break;
+
+            case PowerEventKind.ResumeSuspend:
+                _log.Write(LogLevel.Debug, "WM_POWERBROADCAST: PBT_APMRESUMESUSPEND (logged only).");
+                break;
         }
     }
 

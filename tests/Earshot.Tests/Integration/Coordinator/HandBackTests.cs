@@ -346,4 +346,97 @@ public sealed class HandBackTests
         Assert.IsTrue(task.IsCompleted);
         Assert.Contains((false, Devices.Container), h.Connection.Calls);
     }
+
+    // T12: the sleep trigger runs the same procedure under its own prefix and its own budgets.
+    [TestMethod]
+    public void SuspendRunsTheSameProcedureUnderTheSleepPrefix()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Active(1));
+        h.Trace.Clear();
+
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, TimeSpan.FromMilliseconds(1500), TimeSpan.FromMilliseconds(750));
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        CollectionAssert.AreEqual(DisconnectThenBlock, h.Trace);
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (sleep): started at"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (sleep): finished in"));
+    }
+
+    // T12: the resume check blocks at once, no idle grace, when the nodes read enabled and not in use.
+    [TestMethod]
+    public void ResumeCheckBlocksAtOnceWhenNodesAreEnabledAndNotInUse()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        Task task = h.Coordinator.ResumeCheckAsync();
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.Contains("block", h.Block.Calls);
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): the nodes were enabled"));
+    }
+
+    // T12: render ACTIVE at resume leaves the nodes to the idle rule and only logs the evidence line.
+    [TestMethod]
+    public void ResumeCheckLeavesActiveRenderToTheIdleRule()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Active(1));
+        h.Block.Calls.Clear();
+
+        Task task = h.Coordinator.ResumeCheckAsync();
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsFalse(h.Block.Calls.Contains("block"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): connected at resume; the resume check did not hold"));
+    }
+
+    // T12: nodes already blocked, or Block at boot off, is one log line and no block.
+    [TestMethod]
+    public void ResumeCheckLogsOnceWhenThereIsNothingToDo()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Blocked(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        Task task = h.Coordinator.ResumeCheckAsync();
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsFalse(h.Block.Calls.Contains("block"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): nothing to do"));
+    }
+
+    // T12: a block still running from a cut-short sleep hand-back is waited for first, never raced.
+    [TestMethod]
+    public void ResumeCheckWaitsForABlockStillRunningFromASuspendHandBack()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        var pending = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnBlock = _ => pending.Task;
+
+        Task suspend = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, TimeSpan.Zero, TimeSpan.FromMilliseconds(750));
+        h.Pump();
+        Assert.IsTrue(suspend.IsCompleted, "The suspend hand-back itself returns (cut short) once its own budget passes.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short"));
+
+        Task resume = h.Coordinator.ResumeCheckAsync();
+        h.Pump();
+        Assert.IsFalse(resume.IsCompleted, "The resume check must wait for the block the suspend hand-back left running.");
+        Assert.HasCount(1, h.Block.Calls, "Nothing has sent a second block while the first is still in flight.");
+
+        // The fake's own status mutation is bypassed by overriding OnBlock directly, so the test sets what the
+        // gate would have: the nodes read Blocked once the cut-short block actually finishes.
+        h.Block.Status = Statuses.Blocked();
+        pending.SetResult(ControllerResult.Ok("Blocked at boot"));
+        h.Pump();
+        Assert.IsTrue(resume.IsCompleted);
+        Assert.HasCount(1, h.Block.Calls, "The resume check found the nodes already blocked and sent none of its own.");
+    }
 }

@@ -19,6 +19,23 @@ internal sealed class SessionEndingEventArgs(bool isQuery, bool ending, uint fla
     public uint Flags { get; } = flags;
 }
 
+// The WM_POWERBROADCAST wParam kinds this window acts on. PowerRegisterSuspendResumeNotification (Windows 8+)
+// would deliver the same three to a callback with no window; it is not used here because this window already
+// receives broadcasts (it is not message-only), and a second registration would be a second, unproven path to
+// the same events for no gain.
+// https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
+internal enum PowerEventKind
+{
+    Suspend,           // PBT_APMSUSPEND
+    ResumeAutomatic,   // PBT_APMRESUMEAUTOMATIC
+    ResumeSuspend,     // PBT_APMRESUMESUSPEND
+}
+
+internal sealed class PowerEventArgs(PowerEventKind kind) : EventArgs
+{
+    public PowerEventKind Kind { get; } = kind;
+}
+
 // A hidden top-level window that receives the shell broadcasts the tray needs. It is not a
 // message-only window: those never receive broadcasts such as TaskbarCreated or WM_SETTINGCHANGE.
 // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features
@@ -60,6 +77,9 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
     public event EventHandler? DisplayChanged;
 
     public event EventHandler<SessionEndingEventArgs>? SessionEnding;
+
+    // WM_POWERBROADCAST for PBT_APMSUSPEND, PBT_APMRESUMEAUTOMATIC and PBT_APMRESUMESUSPEND.
+    public event EventHandler<PowerEventArgs>? PowerChanged;
 
     // WM_CLOSE: something asked Earshot to close. The window itself is not closed by it (see WndProc).
     public event EventHandler? CloseRequested;
@@ -171,6 +191,33 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
                         " (lParam 0x" + flags.ToString("X8", CultureInfo.InvariantCulture) + ").");
                     SessionEnding?.Invoke(this, new SessionEndingEventArgs(isQuery: false, ending, flags));
                     m.Result = 0;
+                    return;
+                }
+
+                case NativeMethods.WM_POWERBROADCAST:
+                {
+                    int wParam = unchecked((int)(long)m.WParam);
+                    PowerEventKind? kind = wParam switch
+                    {
+                        NativeMethods.PBT_APMSUSPEND => PowerEventKind.Suspend,
+                        NativeMethods.PBT_APMRESUMEAUTOMATIC => PowerEventKind.ResumeAutomatic,
+                        NativeMethods.PBT_APMRESUMESUSPEND => PowerEventKind.ResumeSuspend,
+                        _ => null,
+                    };
+
+                    if (kind is not { } known)
+                    {
+                        // An event this window does not act on (PBT_APMPOWERSTATUSCHANGE and others): not this
+                        // window's to answer, so it falls through to the default handling below.
+                        break;
+                    }
+
+                    _log.Info("WM_POWERBROADCAST received: " + known + " (wParam 0x" + wParam.ToString("X", CultureInfo.InvariantCulture) + ").");
+                    PowerChanged?.Invoke(this, new PowerEventArgs(known));
+
+                    // TRUE: "If an application processes this message, it should return TRUE."
+                    // https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
+                    m.Result = 1;
                     return;
                 }
 

@@ -15,6 +15,12 @@ namespace Earshot.Tests.Phase1;
 [TestClass]
 public sealed class TrayHandBackTests
 {
+    private static readonly string[] ExpectedRealMessageOrder =
+    [
+        "session-ending hand-back started", "session-ending hand-back finished",
+        "suspend hand-back started", "suspend hand-back finished",
+    ];
+
     private static MouseEventArgs Press(MouseButtons button) => new(button, clicks: 1, x: 0, y: 0, delta: 0);
 
     private static SessionEndingEventArgs WmEndSession() => new(isQuery: false, ending: true, flags: 0);
@@ -166,17 +172,16 @@ public sealed class TrayHandBackTests
         });
     }
 
-
     // T11, the one execution of the real message path this feature keeps. A real ShellMessageWindow, on a
     // thread of its own attached to a private desktop, pumping real messages (Application.Run); a second,
-    // ordinary thread sends WM_QUERYENDSESSION and then a real WM_ENDSESSION (wParam TRUE) to it with the real
-    // user32 SendMessageW, which blocks the sender until the window procedure has returned. The handler wired to
-    // SessionEnding is a fake hand-back (never the real coordinator: this proves the message plumbing and the
-    // hold, not the device logic already proved in HandBackTests) that finishes only after a real delay, driven
-    // through TrayContext's own pump primitive, so a regression that stopped holding the reply, or moved the
-    // hold off the real window procedure, shows up as SendMessage returning early.
+    // ordinary thread sends WM_QUERYENDSESSION, a real WM_ENDSESSION (wParam TRUE), and a real WM_POWERBROADCAST
+    // with PBT_APMSUSPEND, to it with the real user32 SendMessageW, which blocks the sender until the window
+    // procedure has returned. Each handler is wired to a fake hand-back (never the real coordinator: this proves
+    // the message plumbing and the hold, not the device logic already proved in HandBackTests) that finishes
+    // only after a real delay, held through TrayContext's own pump primitive, so a regression that stopped
+    // holding the reply, or moved the hold off the real window procedure, shows up as SendMessage returning early.
     [TestMethod]
-    public void ARealWmEndSessionOnAPrivateDesktopHoldsTheReplyForTheFakeHandBack()
+    public void ARealMessagePathOnAPrivateDesktopHoldsTheReplyForTheFakeHandBack()
     {
         Earshot.Tests.Phase5.CardDesktop.Run(() =>
         {
@@ -187,19 +192,32 @@ public sealed class TrayHandBackTests
             using var window = new ShellMessageWindow(log);
             nint hwnd = window.Handle;
 
+            var order = new List<string>();
             window.SessionEnding += (_, e) =>
             {
                 if (!e.IsQuery && e.Ending)
                 {
+                    order.Add("session-ending hand-back started");
                     // The fake hand-back: a real 200 ms delay on a pool thread, held through the exact primitive
                     // TrayContext.HoldReply uses, with a generous 5 s cap that this delay never approaches.
                     Task fake = Task.Run(async () => await Task.Delay(TimeSpan.FromMilliseconds(200)));
                     TrayContext.PumpUntilTaskOrDeadline(fake, DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5), TimeProvider.System);
+                    order.Add("session-ending hand-back finished");
+                }
+            };
+            window.PowerChanged += (_, e) =>
+            {
+                if (e.Kind == PowerEventKind.Suspend)
+                {
+                    order.Add("suspend hand-back started");
+                    Task fake = Task.Run(async () => await Task.Delay(TimeSpan.FromMilliseconds(150)));
+                    TrayContext.PumpUntilTaskOrDeadline(fake, DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5), TimeProvider.System);
+                    order.Add("suspend hand-back finished");
                 }
             };
 
-            nint queryResult = 0, endResult = 0;
-            TimeSpan queryElapsed = default, endElapsed = default;
+            nint queryResult = 0, endResult = 0, suspendResult = 0;
+            TimeSpan queryElapsed = default, endElapsed = default, suspendElapsed = default;
             Exception? senderFailure = null;
             var sender = new Thread(() =>
             {
@@ -214,6 +232,11 @@ public sealed class TrayHandBackTests
                     endResult = Earshot.Tests.Phase5.TestWindows.Send(hwnd, NativeMethods.WM_ENDSESSION, 1, 0);
                     endClock.Stop();
                     endElapsed = endClock.Elapsed;
+
+                    var suspendClock = Stopwatch.StartNew();
+                    suspendResult = Earshot.Tests.Phase5.TestWindows.Send(hwnd, NativeMethods.WM_POWERBROADCAST, (nint)NativeMethods.PBT_APMSUSPEND, 0);
+                    suspendClock.Stop();
+                    suspendElapsed = suspendClock.Elapsed;
                 }
                 catch (Exception ex)
                 {
@@ -245,12 +268,50 @@ public sealed class TrayHandBackTests
                 "measured elapsed for the real WM_ENDSESSION SendMessage call, as an upper-bound check only: " +
                 "SendMessage must not return before the fake hand-back's own 200 ms delay has actually elapsed.");
 
+            // WM_POWERBROADCAST PBT_APMSUSPEND: answered TRUE (1), again only once its own held fake hand-back
+            // (150 ms) has finished.
+            Assert.AreEqual(1, suspendResult);
+            Assert.IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(100), suspendElapsed,
+                "measured elapsed for the real WM_POWERBROADCAST SendMessage call, as an upper-bound check only.");
+
+            CollectionAssert.AreEqual(
+                ExpectedRealMessageOrder,
+                order,
+                "The handler ran in order and each hold finished before its SendMessage returned.");
+
             Assert.IsTrue(log.Has(LogLevel.Info, "WM_QUERYENDSESSION received"));
             Assert.IsTrue(log.Has(LogLevel.Info, "WM_ENDSESSION received"));
+            Assert.IsTrue(log.Has(LogLevel.Info, "WM_POWERBROADCAST received"));
 
             TestContext?.WriteLine("WM_QUERYENDSESSION SendMessage elapsed: " + queryElapsed.TotalMilliseconds + " ms.");
             TestContext?.WriteLine("WM_ENDSESSION SendMessage elapsed: " + endElapsed.TotalMilliseconds + " ms.");
+            TestContext?.WriteLine("WM_POWERBROADCAST SendMessage elapsed: " + suspendElapsed.TotalMilliseconds + " ms.");
         });
+    }
+
+    // T13: PBT_APMRESUMESUSPEND is logged and raised like the other two kinds; an unrecognised wParam falls
+    // through to the base window procedure untouched (m.Result is never set by ShellMessageWindow for it).
+    [TestMethod]
+    public void ResumeSuspendIsRaisedAndAnUnknownWParamFallsThroughToTheBaseHandler()
+    {
+        var log = new CapturingLog();
+        using var window = new ShellMessageWindow(log);
+        PowerEventKind? raised = null;
+        window.PowerChanged += (_, e) => raised = e.Kind;
+
+        var resumeSuspend = Message.Create(window.Handle, NativeMethods.WM_POWERBROADCAST, (nint)NativeMethods.PBT_APMRESUMESUSPEND, 0);
+        window.Dispatch(ref resumeSuspend);
+
+        Assert.AreEqual(PowerEventKind.ResumeSuspend, raised);
+        Assert.AreEqual(1, resumeSuspend.Result);
+        Assert.IsTrue(log.Has(LogLevel.Info, "WM_POWERBROADCAST received: ResumeSuspend"));
+
+        raised = null;
+        const int unknownWParam = 0x0006; // PBT_APMPOWERSTATUSCHANGE: not one of the three this window acts on.
+        var unknown = Message.Create(window.Handle, NativeMethods.WM_POWERBROADCAST, (nint)unknownWParam, 0);
+        window.Dispatch(ref unknown);
+
+        Assert.IsNull(raised, "An unrecognised wParam must not raise PowerChanged.");
     }
 
     public TestContext? TestContext { get; set; }

@@ -79,6 +79,25 @@ internal static partial class NativeMethods
     internal const uint ENDSESSION_CRITICAL = 0x40000000;
     internal const uint ENDSESSION_LOGOFF = 0x80000000;
 
+    // "Notifies applications that a power-management event has occurred."
+    // https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
+    internal const int WM_POWERBROADCAST = 0x0218;
+
+    // wParam values for WM_POWERBROADCAST.
+    // "The system allows approximately two seconds for an application to handle this notification."
+    // https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
+    internal const int PBT_APMSUSPEND = 0x0004;
+
+    // "Notifies applications that the system has resumed operation... sent only after PBT_APMRESUMEAUTOMATIC
+    // when the resume is triggered by user input, such as pressing a key."
+    // https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmresumesuspend
+    internal const int PBT_APMRESUMESUSPEND = 0x0007;
+
+    // "Notifies applications that the system has resumed operation. This event ... is delivered every time the
+    // system resumes." Not delivered when the system resumes only to immediately enter hibernation.
+    // https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmresumeautomatic
+    internal const int PBT_APMRESUMEAUTOMATIC = 0x0012;
+
     // WM_MOUSEACTIVATE results. The card answers MA_NOACTIVATE so a click never takes focus.
     internal const int MA_ACTIVATE = 1;
     internal const int MA_ACTIVATEANDEAT = 2;

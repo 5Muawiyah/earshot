@@ -263,6 +263,11 @@ internal sealed class BlockCoordinator : IDisposable
     // cut-short sleep hand-back left running, before it reads the node state.
     private Task? _handBackInFlight;
 
+    // Set only while a hand-back has cut short with its own block still running (ObserveHandBackBlockAsync),
+    // cleared once that block's outcome has been recorded. A resume check waits for this, not for
+    // _handBackInFlight, which has already completed by the time a hand-back cuts short.
+    private Task? _cutShortBlockInFlight;
+
     public BlockCoordinator(
         IDeviceMonitor monitor,
         IConnectionController connection,
@@ -1083,6 +1088,81 @@ internal sealed class BlockCoordinator : IDisposable
         }
     }
 
+    // PBT_APMRESUMEAUTOMATIC: the resume check, the start-up check's rule under the reason Resume. Waits first
+    // for a block a cut-short sleep hand-back left running (one operation at a time), then reads the node state
+    // fresh: nodes enabled and render not ACTIVE blocks at once, no idle grace; render ACTIVE leaves the idle
+    // rule to it and only logs; nodes blocked or Block at boot off logs once. Never refused: sleep is not a
+    // session end, and _handingBack has already cleared by the time PBT_APMRESUMEAUTOMATIC can arrive (the
+    // suspend handler has returned).
+    public async Task ResumeCheckAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_handBackInFlight is { IsCompleted: false } inFlight)
+        {
+            try
+            {
+                await inFlight;
+            }
+            catch (OperationCanceledException)
+            {
+                // The hand-back's own budgets never cancel HandBackAsync itself; this is defensive only.
+            }
+        }
+
+        // A hand-back that cut short leaves its own block running behind it (see ObserveHandBackBlockAsync):
+        // that is the block a resume check must not race, not the hand-back procedure above, which has already
+        // returned by the time a cut-short happens.
+        if (_cutShortBlockInFlight is { IsCompleted: false } cutShort)
+        {
+            try
+            {
+                await cutShort;
+            }
+            catch (Exception)
+            {
+                // Already logged by ObserveHandBackBlockAsync; the resume check reads the node state fresh next.
+            }
+        }
+
+        await RunExclusiveAsync("resume check", ResumeCheckCoreAsync, CancellationToken.None);
+    }
+
+    private async Task<bool> ResumeCheckCoreAsync(CancellationToken ct)
+    {
+        BootBlockStatus? status = await ReadBlockStatusAsync(ct);
+        Guid container = WatchedContainer();
+        RenderState render = CoordinatorRules.RenderOf(_snapshot, container);
+        if (status is { BlockAtBoot: true, TasksInstalled: true })
+        {
+            if (render == RenderState.Active)
+            {
+                _log.Info(HandBackText.ResumeConnected());
+                return true;
+            }
+
+            if (render == RenderState.NotActive && CoordinatorRules.NodesEnabled(status))
+            {
+                _log.Info(HandBackText.ResumeBlocked());
+                await AutomaticBlockAsync("resume block", BlockReason.Resume, container, ct);
+                return true;
+            }
+        }
+
+        string reason = status is null
+            ? "the boot block status could not be read"
+            : !status.BlockAtBoot
+                ? BlockAtBootOffReason(status)
+                : status.State == BlockState.NotSetUp
+                    ? "the boot block is not set up"
+                    : "the nodes read " + Describe(status);
+        _log.Info(HandBackText.ResumeNothingToDo(reason));
+        return true;
+    }
+
     private async Task HandBackCoreAsync(HandBackTrigger trigger, TimeSpan budget, TimeSpan disconnectWait)
     {
         DateTimeOffset t0 = _time.GetUtcNow();
@@ -1175,13 +1255,18 @@ internal sealed class BlockCoordinator : IDisposable
         catch (TimeoutException)
         {
             _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["block"], blockAlreadySentAt));
-            _ = ObserveHandBackBlockAsync(trigger, block);
+            Task observe = ObserveHandBackBlockAsync(trigger, block);
+            _cutShortBlockInFlight = observe;
+            _ = observe;
         }
     }
 
     // The block a cut-short hand-back stopped waiting for is not abandoned: the gate runs it to completion in its
     // own SYSTEM process, so this only records the outcome once it arrives, the same way LogSessionBlockAsync does
-    // for the legacy session-end block.
+    // for the legacy session-end block. HandBackAsync's own outer task (and with it, _handBackInFlight) has
+    // already completed by the time this runs, since the cut-short is precisely what let it return; a resume
+    // check that must wait for this block, not for the hand-back procedure that gave up waiting for it, reads
+    // _cutShortBlockInFlight instead (see ResumeCheckAsync).
     private async Task ObserveHandBackBlockAsync(HandBackTrigger trigger, Task<ControllerResult> block)
     {
         try
@@ -1197,6 +1282,7 @@ internal sealed class BlockCoordinator : IDisposable
         }
         finally
         {
+            _cutShortBlockInFlight = null;
             if (!_disposed)
             {
                 _ = RefreshStatusAsync();
@@ -2177,7 +2263,7 @@ internal sealed class BlockCoordinator : IDisposable
     // otherwise leave the read from before it in hand.
     private async Task<string?> BlockSkipReasonAsync(BlockCheck check, BootBlockStatus? status, bool refreshSnapshot)
     {
-        bool automatic = check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.Closing;
+        bool automatic = check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.Closing or BlockReason.Resume;
         if (automatic)
         {
             status = await ReadBlockStatusAsync(CancellationToken.None);
