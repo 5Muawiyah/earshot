@@ -1107,82 +1107,61 @@ internal sealed class BlockCoordinator : IDisposable
         RaiseChanged();
         string name = trigger == HandBackTrigger.SessionEnd ? "hand-back (shutdown)" : "hand-back (sleep)";
 
-        // RunExclusiveAsync's own ct parameter is deliberately CancellationToken.None here, not a token tied to
-        // the deadline: Task.WaitAsync(CancellationToken) on the exclusive slot's task, with a real (non-None)
-        // token, was proved on this machine not to observe that task's completion at all, hanging the wait
-        // forever even though the token itself never fires (a live check, kept as the read-only probe this rule
-        // always prefers over an assumption). The deadline is enforced instead by racing the whole claim
-        // against Task.Delay, and by a check inside the claim itself in case the deadline lands in the instant
-        // after the race is decided but before the body has started.
-        bool startedInTime = true;
+        // Bounded by the shared deadline: Task.WaitAsync(CancellationToken), which is what RunExclusiveAsync's
+        // own wait loop uses on the exclusive slot's task, does complete once that task does, but only after
+        // one real thread-pool hop for the continuation to run on; a caller that checks completion synchronously,
+        // in the same turn the antecedent finished, can see it as still pending (a live check, not an
+        // assumption). This token only ever bounds the wait for that slot: the body below never passes it to
+        // HandBackCoreAsync, so once this has actually started, nothing here can cut it short externally --
+        // HandBackCoreAsync enforces the same deadline itself, honestly, naming the real step (WaitForBlockAsync,
+        // DisconnectStepAsync), which racing a second, independent timer against the whole claim used to override
+        // even once the hand-back had genuinely started and was already running its own correct cut-short.
+        using var waitBudget = new CancellationTokenSource(Remaining(deadline), _time);
         Task<bool> handBackTask = RunExclusiveAsync<bool>(
             name,
             async ct =>
             {
                 _ = ct;
-                if (_time.GetUtcNow() >= deadline)
-                {
-                    startedInTime = false;
-                    return false;
-                }
-
                 Task core = HandBackCoreAsync(trigger, t0, deadline, disconnectWait, streamingHeld);
                 _handBackInFlight = core;
                 await core;
                 return true;
             },
-            CancellationToken.None);
+            waitBudget.Token);
 
-        Task winner = await Task.WhenAny(handBackTask, Task.Delay(Remaining(deadline), _time));
-        if (winner != handBackTask)
-        {
-            string waitingFor = _currentName ?? "the operation in flight";
-            _log.Warn(HandBackText.Prefix(trigger) + "cut short before it started: waiting for " + waitingFor + ".");
-            _handingBack = false;
-            _handBackInFlight = null;
-            RaiseChanged();
-
-            // The claim on the exclusive slot is not abandoned: it still runs once _current frees up, but the
-            // deadline check inside the body above means it starts no device action once it gets there. Observed
-            // here so a fault in it is never an unobserved task exception, not awaited, since the reply must
-            // return now.
-            _ = ObserveAbandonedHandBackClaimAsync(handBackTask);
-            return;
-        }
-
-        await handBackTask;
-        if (!startedInTime)
-        {
-            _log.Warn(HandBackText.Prefix(trigger) + "cut short before it started: the shared deadline passed while waiting for the exclusive slot.");
-        }
-
-        _handingBack = false;
-        _handBackInFlight = null;
-        RaiseChanged();
-        if (!_disposed)
-        {
-            _ = RefreshStatusAsync();
-        }
-    }
-
-    // A hand-back's own claim on the exclusive slot, still running after HandBackAsync itself gave up waiting
-    // for it at the shared deadline: recorded once it ends, however it ends, rather than left as a task nobody
-    // ever awaits. It starts no device action by then (the deadline check inside the claim's own body), so
-    // there is nothing left to log beyond a fault, which RunExclusiveAsync's own body would already have
-    // surfaced if this were the ordinary path; this only guards against an unobserved exception.
-    private async Task ObserveAbandonedHandBackClaimAsync(Task<bool> handBackTask)
-    {
         try
         {
             await handBackTask;
         }
+        catch (OperationCanceledException) when (waitBudget.IsCancellationRequested)
+        {
+            // The exclusive slot was still held by something else when the shared deadline passed: the body
+            // above never ran, so the hand-back never started at all. Never confused with a hand-back that did
+            // start and cut itself short internally (HandBackCoreAsync's own lines already say that honestly,
+            // naming the step); this line only ever describes the wait itself.
+            string waitingFor = _currentName ?? "the operation in flight";
+            _log.Warn(HandBackText.Prefix(trigger) + "cut short before it started: waiting for " + waitingFor + ".");
+        }
         catch (Exception ex)
         {
-            // Every fault HandBackCoreAsync itself can end in is already caught and logged at its own step; this
-            // is a backstop against something unexpected escaping RunExclusiveAsync's own machinery, not silent
-            // regardless.
-            _log.Warn("Hand-back: the claim abandoned at the deadline ended unexpectedly (" +
-                ex.GetType().Name + ": " + ex.Message + ").");
+            // Never a silent catch: this is the backstop for whatever HandBackCoreAsync's own steps did not
+            // already catch and log at their own level (an unexpected OperationCanceledException that matches
+            // neither RunExclusiveAsync's session-end catch nor the one just above, say). Caught by type alone,
+            // not filtered by a "when", because the finally below is what actually protects the coordinator:
+            // _handingBack must clear on every way out of this method, this one included, or a fault here
+            // leaves Earshot refusing every later click as "a hand-back is already running" until restarted.
+            _log.Error(HandBackText.Prefix(trigger) + "ended unexpectedly (" + ex.GetType().Name + ": " + ex.Message + ").", ex);
+        }
+        finally
+        {
+            _handingBack = false;
+            _handBackInFlight = null;
+            RaiseChanged();
+        }
+
+        if (!_disposed)
+        {
+            _ = RefreshStatusAsync();
         }
     }
 

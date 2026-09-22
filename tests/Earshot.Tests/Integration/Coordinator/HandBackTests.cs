@@ -233,6 +233,36 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "faulted:"));
     }
 
+    // A fault none of HandBackCoreAsync's own steps catches (an OperationCanceledException the block task ends
+    // in, which WaitForBlockAsync's own catch deliberately excludes, since that type is reserved for the shared
+    // deadline elsewhere) used to escape HandBackAsync itself: _handingBack was set to false only after the
+    // await, on the line straight after the try/catch, so an exception neither catch there matched left it
+    // stuck true forever, every later action refused as "a hand-back is already running" until the process
+    // restarted. Every exit now runs through a finally instead.
+    [TestMethod]
+    public void AFaultThatEscapesTheProcedureStillClearsHandingBackSoTheNextSessionEndRuns()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.OnBlock = _ => Task.FromException<ControllerResult>(new OperationCanceledException("unexpected"));
+
+        Task first = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(first.IsCompleted, "The first hand-back's own outer task must complete, faulted or not, not hang.");
+        Assert.IsFalse(h.Coordinator.HandBackInProgress,
+            "HandBackInProgress must clear even though the procedure faulted, or every later click is refused until restart.");
+
+        h.Block.OnBlock = null;
+        h.Block.Calls.Clear();
+        Task second = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(second.IsCompleted, "A second session end after the fault must actually run.");
+        Assert.IsTrue(h.Block.Calls.Contains("block"), "The second hand-back must have reached its own block step, not been refused as already running.");
+        Assert.IsFalse(h.Log.Has(LogLevel.Debug, "a hand-back is already running; this one does nothing."));
+    }
+
     // The started line reads the real streaming state passed in, rather than always saying "streaming none".
     [TestMethod]
     public void TheStartedLineReadsTheRealStreamingStateWhenAHeldLinkIsPassedIn()
@@ -273,7 +303,8 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Coordinator.HandBackInProgress, "HandBackInProgress must already be set while still waiting for the connect, not only once the exclusive slot is claimed.");
 
         pendingConnect.SetResult(Results.Connected());
-        h.Pump();
+        // A real thread-pool hop, not merely a posted continuation: see PumpAfterRealHop's own comment.
+        h.PumpAfterRealHop(() => handBack.IsCompleted);
 
         Assert.IsTrue(toggle.IsCompleted);
         Assert.IsTrue(handBack.IsCompleted);
@@ -283,10 +314,39 @@ public sealed class HandBackTests
             "The operation already in flight finishes before the hand-back's own block runs; never beside it.");
     }
 
-    // A query-time block that completes before WM_ENDSESSION leaves _sessionBlock holding a reference to
-    // an already-finished task; the hand-back must still run and the reply must still return within its own
-    // cap, never spin re-awaiting that finished task forever. Timeout is a permanent safety net for this exact
-    // defect class (a spin that would otherwise hang the whole test run), not part of the red-check alone.
+    // The same defect as the test above, in a shape that needs no real thread-pool hop at all: nothing is ever
+    // in flight when this hand-back starts, so RunExclusiveAsync's wait loop never calls Task.WaitAsync(ct) on a
+    // still-running task, and the slot is claimed at once. Only the block step is left pending, past the shared
+    // deadline, advanced on the manual clock; that is what the old race (Task.WhenAny against an independent
+    // Task.Delay) used to get wrong even for a hand-back that had already started. The honest cut-short,
+    // naming "block", must still fire; the misleading "cut short before it started" must never join it.
+    [TestMethod]
+    public void AHandBackThatHasAlreadyStartedNeverLogsCutShortBeforeItStartedEvenPastItsOwnDeadline()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        var pendingBlock = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnBlock = _ => pendingBlock.Task;
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(h.Coordinator.HandBackInProgress, "Nothing else was running, so the slot was claimed at once.");
+        Assert.IsFalse(handBack.IsCompleted, "Still waiting on its own block, which nothing has resolved yet.");
+
+        h.Advance(Budget + TimeSpan.FromSeconds(1));
+
+        Assert.IsTrue(handBack.IsCompleted, "HandBackCoreAsync's own deadline cuts it short honestly; the slot was never contended, so nothing here needed the real thread-pool hop PumpAfterRealHop exists for.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short"), "The honest cut-short, naming the block step, must still fire.");
+        Assert.IsFalse(h.Log.Has(LogLevel.Warn, "cut short before it started"),
+            "The misleading line this defect used to also log for a hand-back that had already started must never appear beside it.");
+    }
+
+    // A query-time block that completes before WM_ENDSESSION leaves _sessionBlock holding a reference to an
+    // already-finished task, reused rather than sent again. This alone does not reproduce the spin the review
+    // named (that needs a second operation actually queued through RunExclusiveAsync while the hand-back is
+    // running and _current is still null, which the next test below constructs): kept as its own, narrower
+    // regression for the reuse path, not as proof of that defect. Timeout is a permanent safety net regardless.
     [TestMethod]
     [Timeout(5000)]
     public void AHandBackRunsAndReturnsWithinTheCapWhenTheQueryTimeBlockAlreadyCompleted()
@@ -305,6 +365,63 @@ public sealed class HandBackTests
         Assert.IsTrue(handBack.IsCompleted,
             "The hand-back must run and the reply must return within the cap, not spin re-awaiting the already-finished query block.");
         Assert.HasCount(1, h.Block.Calls, "The query's own block is reused, not sent again.");
+    }
+
+    // The spin _sessionBlock's own staleness causes is only reachable while _handingBack is true and something
+    // else calls into RunExclusiveAsync: reusing an already-completed query-time block by itself (the test
+    // above) never does that. This reproduces it for real: a first session end (render not ACTIVE) queues and
+    // completes a block, leaving _sessionBlock referencing that finished task; it is then cancelled, which
+    // clears every session-end flag except _sessionBlock itself. A second session end,
+    // now with render ACTIVE, takes the hand-back's normal disconnect-then-block path rather than the reuse
+    // branch; from inside the disconnect step (reentrant, the same trick the M5 tests use), a second, unrelated
+    // operation is queued through RunExclusiveAsync while _handingBack is still true and _current is still null
+    // -- exactly the state that made the old, unguarded "_current ?? _sessionBlock ?? _handBackInFlight" pick
+    // the finished _sessionBlock over the hand-back that was actually running.
+    [TestMethod]
+    [Timeout(5000)]
+    public void AnOperationQueuedDuringTheHandBackDoesNotSpinWhenAnEarlierCancelledSessionEndLeftASessionBlockStale()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+        Assert.HasCount(1, h.Block.Calls, "The first, cancelled session end's own query must have queued and completed a block.");
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: false, flags: 0));
+        h.Pump();
+
+        h.Publish(Devices.Active(2));
+        h.Block.Calls.Clear();
+        h.Connection.Calls.Clear();
+
+        Task<ToggleReport>? second = null;
+        bool reentered = false;
+        h.Connection.OnDisconnect = _ =>
+        {
+            // Fired reentrant, from inside the hand-back's own disconnect step: _current is the hand-back's own
+            // exclusive slot at this point, _sessionBlock is the stale completed task from the first, cancelled
+            // session end, and _handingBack is true. Not pumped here: only started, so RunExclusiveAsync's own
+            // wait loop is the thing under test, not a nested pump. Only the first call reenters: the second
+            // toggle's own eventual disconnect must reach this same fake too, and must not recurse forever.
+            if (!reentered)
+            {
+                reentered = true;
+                second = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: false), CancellationToken.None);
+            }
+
+            return Task.FromResult(Results.Disconnected());
+        };
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(handBack.IsCompleted, "The hand-back itself must not spin either.");
+        Assert.IsNotNull(second, "The reentrant disconnect hook never ran.");
+        Assert.IsTrue(second.IsCompleted, "The operation queued from inside the disconnect step must not have spun re-awaiting the stale, completed _sessionBlock.");
     }
 
     // The wait for the operation already in flight is bounded by the one shared deadline; if it has not

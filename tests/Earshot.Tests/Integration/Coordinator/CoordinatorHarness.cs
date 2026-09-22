@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using Earshot.App;
 using Earshot.Audio.Connect;
@@ -85,6 +86,27 @@ internal sealed class CoordinatorHarness : IDisposable
         if (CheckInvariantOnPump)
         {
             AssertAtRest("after a pump");
+        }
+    }
+
+    // Task.WaitAsync(CancellationToken) on a task this harness completed with SetResult only observes that
+    // completion after one real thread-pool hop for its own continuation to run on, not merely a posted
+    // continuation Pump's synchronous drain can catch in the same turn: a plain Pump() right after SetResult can
+    // see the waiter as still pending. This gives that hop a short, bounded, real wait to actually happen
+    // (ManualTime does not move it along; only wall-clock time does), then pumps again.
+    public void PumpAfterRealHop(Func<bool> done, TimeSpan? limit = null)
+    {
+        var clock = Stopwatch.StartNew();
+        TimeSpan bound = limit ?? TimeSpan.FromSeconds(2);
+        while (!done())
+        {
+            if (clock.Elapsed > bound)
+            {
+                Assert.Fail("PumpAfterRealHop: still not done after " + bound.TotalMilliseconds + " ms of real waiting.");
+            }
+
+            Thread.Sleep(2);
+            Pump();
         }
     }
 
