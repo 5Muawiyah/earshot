@@ -5,8 +5,12 @@ internal sealed record FailureRow(string Id, string Expected, string Observed);
 
 // One plain line for a check that did not pass: PlainLine (the check's own plain name, or a
 // neutral fallback when wording.json has no entry for it yet) and, when wording.json wrote one,
-// PlainMeaning, a second line saying what that failing (or not settling) actually means.
-internal sealed record PlainCheckLine(string CriterionId, string PlainLine, string? PlainMeaning, bool HasWordingEntry);
+// PlainMeaning, a second line saying what that failing (or not settling) actually means. Outcome
+// ("fail" or "inconclusive", never "pass": these are only ever built for a check that is not one)
+// is the criterion's own raw outcome, kept alongside the words rather than folded into them, so
+// the caller that renders this line can mark it (a cross or a question mark, "Did not work:" or
+// "Could not tell:") without needing to parse PlainLine's own words back apart to tell which.
+internal sealed record PlainCheckLine(string CriterionId, string PlainLine, string? PlainMeaning, bool HasWordingEntry, string Outcome);
 
 internal sealed record ResultPresentation
 {
@@ -88,12 +92,12 @@ internal static class ResultPresenter
 
         if (entry is not null)
         {
-            return new PlainCheckLine(criterion.Id, entry.Plain, entry.PlainMeaning, HasWordingEntry: true);
+            return new PlainCheckLine(criterion.Id, entry.Plain, entry.PlainMeaning, HasWordingEntry: true, Outcome: criterion.Outcome);
         }
 
         string neutral = criterion.Outcome == "fail"
             ? "One check did not work. Show technical details to see which."
             : "We could not tell for one check. Show technical details to see which.";
-        return new PlainCheckLine(criterion.Id, neutral, null, HasWordingEntry: false);
+        return new PlainCheckLine(criterion.Id, neutral, null, HasWordingEntry: false, Outcome: criterion.Outcome);
     }
 }

@@ -17,16 +17,16 @@ public sealed class NoDocumentCitationsTests
     // The exact search used to find the citations this class exists to keep out: the word
     // "section" immediately followed by a number (optionally with a decimal part), a short
     // internal label made of a single letter immediately followed by one or two digits and then a
-    // colon, a phrase naming a round of review, or that same short label carried into an
-    // identifier or a file name itself (B1SingleRunnerTests, M4Something): the label followed by
-    // an upper-case letter that itself starts a real word (a lower-case letter after it,
-    // PascalCase's own shape), never merely by a colon. The lower-case-letter requirement is what
-    // keeps this from also flagging an upper-case hex address a test fixture writes
-    // ("B4C5D6E7F809": "C" is followed by the digit "5", never a lower-case letter, so no word
-    // ever starts there). Kept in the same shape as the search that found the first 69, so the two
-    // can never silently drift apart.
+    // colon or an apostrophe (a possessive, "M1's own fix"), a phrase naming a round of review, or
+    // that same short label carried into an identifier or a file name itself
+    // (B1SingleRunnerTests, M4Something): the label followed by an upper-case letter that itself
+    // starts a real word (a lower-case letter after it, PascalCase's own shape), never merely by a
+    // colon. The lower-case-letter requirement is what keeps this from also flagging an
+    // upper-case hex address a test fixture writes ("B4C5D6E7F809": "C" is followed by the digit
+    // "5", never a lower-case letter, so no word ever starts there). Kept in the same shape as the
+    // search that found the first 69, so the two can never silently drift apart.
     private static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b:|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review round|\bplain-[a-z-]+\.md\b|\btest-gui[a-z0-9-]*\.md\b",
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b[:']|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review round|\bplain-[a-z-]+\.md\b|\btest-gui[a-z0-9-]*\.md\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] OwnedFolders =

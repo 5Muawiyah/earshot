@@ -34,7 +34,7 @@ public sealed class RehearsalControlTests
             "the rehearsal must never run through the sandbox driver: D8 says nothing about this site may be faked.");
     }
 
-    // M4's own safety rule: an unattended or development sandbox must never run this, because it
+    // Safety rule: an unattended or development sandbox must never run this, because it
     // always raises a real Windows prompt, in any mode. MainFormTestHarness always sandboxes.
     [TestMethod]
     public void TheRehearsalButtonIsDisabledInASandboxWindow()

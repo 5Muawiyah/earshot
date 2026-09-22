@@ -35,6 +35,10 @@ public sealed class ResultViewQualifiedPassTests
             "a qualified pass must never read the clean \"" + Copy.ResultVerdictPassed + "\" sentence. qualifier=" + qualifier);
         Assert.AreNotEqual(Color.DarkGreen, panel.VerdictColorForTests,
             "a qualified pass must not show in the same colour as a clean pass. qualifier=" + qualifier);
+        Assert.IsFalse(panel.VerdictTextForTests.StartsWith('✓'),
+            "a qualified pass must never keep the plain pass tick. qualifier=" + qualifier);
+        Assert.IsTrue(panel.VerdictTextForTests.StartsWith(Copy.QualifiedPassSymbol, StringComparison.Ordinal),
+            "a qualified pass must show its own distinct symbol. qualifier=" + qualifier);
 
         // Show() alone, never switching MainView (the same shortcut
         // InconclusiveShowsTheExactCouldNotTellVerdictSentence/UnknownShowsTheExactHarshestVerdictSentence

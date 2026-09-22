@@ -206,7 +206,11 @@ internal sealed class ResultPanel : Panel
         _plainSummaryLabel.Text = Copy.PlainCheckSummarySentence(result.TotalCriteria, result.FailedCount, result.InconclusiveCount);
         _plainLinesLabel.Text = string.Join(
             Environment.NewLine + Environment.NewLine,
-            result.PlainFailureLines.Select(line => line.PlainMeaning is null ? line.PlainLine : line.PlainLine + Environment.NewLine + line.PlainMeaning));
+            result.PlainFailureLines.Select(line =>
+            {
+                string marked = Copy.PlainCheckLinePrefix(line.Outcome) + line.PlainLine;
+                return line.PlainMeaning is null ? marked : marked + Environment.NewLine + line.PlainMeaning;
+            }));
         _plainSummaryLabel.Visible = !showTechnicalDetails;
         _plainLinesLabel.Visible = !showTechnicalDetails && result.PlainFailureLines.Count > 0;
 

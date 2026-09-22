@@ -78,6 +78,11 @@ public sealed class CopyBindingTests
         var state = new DerivedRowState { Kind = RowStateKind.Passed, Qualifier = "on an earlier build" };
         AssertNeverGreenOrBarePassed(state);
         StringAssert.Contains(RowPresenter.Text(state), Copy.Passed, "The amber text should still say Passed, with its qualifier.");
+
+        // The row's own small symbol must not carry the pass mark either, or amber would read as
+        // green at a glance even with the qualifier's words right there.
+        Assert.AreNotEqual("✓", RowPresenter.Symbol(state));
+        Assert.AreEqual(Copy.QualifiedPassSymbol, RowPresenter.Symbol(state));
     }
 
     [TestMethod]

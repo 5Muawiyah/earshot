@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// S8's own acceptance line: "Abort test writes result.json with the stop recorded and the at-rest
-// offer shown." The shim's own throw on "A <seq>" reaching a script's catch/finally, and the
+// Abort test writes result.json with the stop recorded and the at-rest offer shown. The shim's
+// own throw on "A <seq>" reaching a script's catch/finally, and the
 // Close-AtRest prompt's "Stop this computer grabbing your AirPods again?" heading, are both already proven elsewhere
 // (ProtocolWireTests.AbortReachesTheScriptsFinally with a synthetic probe; PromptPresenterTests
 // for the heading). This is the missing link: ChildRunner.Abort, called exactly as MainForm's own

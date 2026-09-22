@@ -343,6 +343,13 @@ internal static class Copy
         return string.Join(" ", parts);
     }
 
+    // A failed or inconclusive check used to be listed as a plain, affirmative-reading sentence
+    // with nothing marking it as bad, so the sense of the whole list depended on colour alone.
+    // Every check line under a failed or inconclusive result is now led by a marker and this
+    // prefix, so the sense holds even in black and white.
+    internal static string PlainCheckLinePrefix(string outcome) =>
+        outcome == "fail" ? "✗ Did not work: " : "? Could not tell: ";
+
     internal static string RunAllStoppedForFailure(string testNumber) =>
         "Run all stopped at test " + testNumber + ". Read the result, then choose to carry on.";
 
@@ -563,10 +570,15 @@ internal static class Copy
     internal const string CarryOnSecondHalfButtonLabel = "Carry on with the second half";
 
     // The row states shown as text are already plain (Copy.PlainBaseText); this is the small
-    // symbol shown beside each one, so colour is never the only signal.
-    internal static string RowStateSymbol(RowStateKind kind) => kind switch
+    // symbol shown beside each one, so colour is never the only signal. A qualified pass (an
+    // unconfirmed shut down, an earlier build, and the rest) never gets the tick: RowText/
+    // PlainRowText already refuse to shorten it back to the bare word, and the symbol beside it
+    // must not carry the pass mark either, or amber would read as green at a glance.
+    internal const string QualifiedPassSymbol = "○";
+
+    internal static string RowStateSymbol(RowStateKind kind, string? qualifier = null) => kind switch
     {
-        RowStateKind.Passed => "✓",
+        RowStateKind.Passed => qualifier is null ? "✓" : QualifiedPassSymbol,
         RowStateKind.Failed => "✗",
         RowStateKind.Locked => "■",
         RowStateKind.WaitingForShutDown => "»",
@@ -603,12 +615,11 @@ internal static class Copy
     };
 
     // The verdict sentence with its own symbol (Copy.RowStateSymbol, the same one the row list
-    // already shows beside its state text), so the Result view's headline never relies on the
-    // sentence's own words alone either. qualifier only ever changes the wording for a Passed
-    // kind (see ResultVerdictSentence); every other kind ignores it, since only a pass can ever
-    // carry one that changes whether the sentence still reads as clean.
+    // already shows beside its state text, qualifier included), so the Result view's headline
+    // never relies on the sentence's own words alone either, and a qualified pass's amber
+    // sentence is never shown beside the plain pass tick.
     internal static string ResultVerdictLine(RowStateKind kind, string? qualifier = null) =>
-        RowStateSymbol(kind) + " " + ResultVerdictSentence(kind, qualifier);
+        RowStateSymbol(kind, qualifier) + " " + ResultVerdictSentence(kind, qualifier);
 
     // The qualifier's own plain reason, shown as the Result view's second line under a qualified
     // pass, one sentence per qualifier named in the fix (the reviewer's own two examples, verbatim)

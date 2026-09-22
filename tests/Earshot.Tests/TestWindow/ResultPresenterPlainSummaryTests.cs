@@ -93,4 +93,50 @@ public sealed class ResultPresenterPlainSummaryTests
         PlainCheckLine line = presentation.PlainFailureLines[0];
         Assert.AreEqual("We could not tell for one check. Show technical details to see which.", line.PlainLine);
     }
+
+    // A failed or inconclusive check used to be listed as a plain, affirmative-reading sentence
+    // with nothing marking it as bad, so the sense of the whole list depended on colour alone.
+    // Every line now carries its own criterion outcome, and Copy.PlainCheckLinePrefix marks it
+    // with a cross ("Did not work:") or a question mark ("Could not tell:") whether the line's
+    // own words came from wording.json or the neutral fallback.
+    [TestMethod]
+    public void AFailedChecksLineCarriesTheFailOutcomeAndTheCrossPrefix()
+    {
+        ParsedResult result = BuildResult("fail", ("some-brand-new-check", "fail"));
+        ResultPresentation presentation = ResultPresenter.Present(result, @"C:\nowhere", "01", new List<WordingEntry>());
+
+        PlainCheckLine line = presentation.PlainFailureLines[0];
+        Assert.AreEqual("fail", line.Outcome);
+        Assert.AreEqual("✗ Did not work: ", Copy.PlainCheckLinePrefix(line.Outcome));
+    }
+
+    [TestMethod]
+    public void AnInconclusiveChecksLineCarriesTheInconclusiveOutcomeAndTheQuestionMarkPrefix()
+    {
+        ParsedResult result = BuildResult("inconclusive", ("some-brand-new-check", "inconclusive"));
+        ResultPresentation presentation = ResultPresenter.Present(result, @"C:\nowhere", "01", new List<WordingEntry>());
+
+        PlainCheckLine line = presentation.PlainFailureLines[0];
+        Assert.AreEqual("inconclusive", line.Outcome);
+        Assert.AreEqual("? Could not tell: ", Copy.PlainCheckLinePrefix(line.Outcome));
+    }
+
+    // The marker survives through to what ResultPanel actually renders, not only through
+    // ResultPresenter's own data: the real caller ResultPanel.Show builds the label text from.
+    [TestMethod]
+    public void ResultPanelRendersTheMarkedPrefixOnEveryPlainCheckLine()
+    {
+        ParsedResult result = BuildResult("fail", ("a", "fail"), ("b", "inconclusive"), ("c", "pass"));
+        ResultPresentation presentation = ResultPresenter.Present(result, @"C:\nowhere", "01", new List<WordingEntry>());
+
+        using var sandbox = new TempFolder();
+        MainFormTestHarness.Run(sandbox.Path, form =>
+        {
+            ResultPanel panel = form.ResultPanelForTests;
+            panel.Show(presentation, showTechnicalDetails: false, RowStateKind.Failed);
+
+            StringAssert.Contains(panel.PlainLinesTextForTests, "✗ Did not work: One check did not work.");
+            StringAssert.Contains(panel.PlainLinesTextForTests, "? Could not tell: We could not tell for one check.");
+        });
+    }
 }

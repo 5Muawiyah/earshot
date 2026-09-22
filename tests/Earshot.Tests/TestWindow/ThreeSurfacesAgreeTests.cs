@@ -30,8 +30,8 @@ public sealed class ThreeSurfacesAgreeTests
         string rowText = Copy.PlainRowText(state);
         Assert.AreNotEqual(Copy.PlainPassed, rowText, "row: a qualified pass must not read as the bare \"Worked\".");
 
-        // The Result view: the same rule ResultPanel.Show applies (M1's own fix), checked directly
-        // against the Copy functions ResultPanel.Show itself calls.
+        // The Result view: the same rule ResultPanel.Show itself applies, checked directly against
+        // the Copy functions ResultPanel.Show itself calls.
         string verdictLine = Copy.ResultVerdictLine(state.Kind, state.Qualifier);
         Assert.IsFalse(verdictLine.Contains(Copy.ResultVerdictPassed, StringComparison.Ordinal),
             "Result view: a qualified pass must not show the clean \"This test worked.\" sentence.");
