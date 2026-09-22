@@ -67,32 +67,55 @@ internal static partial class EvidenceStore
     }
 
     // True when any two folders in this set carry a sequence marker whose order disagrees with
-    // their stamp order: the one situation neither signal alone can be fully trusted in, since one
-    // of them was necessarily wrong about which of the two actually happened later. Surfaced to
-    // the owner (StateDeriver's HistoryNote, Banner's own red) rather than silently preferring
-    // sequence and saying nothing. Two different run folders carrying the very same sequence
-    // number is itself never a tie to be skipped past: RunSequence.TakeNext never legitimately
-    // hands the same value out twice, so two folders holding it is itself a sign the count cannot
-    // be trusted, exactly the same fail-closed shape as an order that disagrees outright.
-    internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<(long? Sequence, string Stamp)> entries)
+    // the order of what actually happened to each of them (EventTimeUtc: the latest sequence
+    // marker was issued, a kill marker was written, or a trusted result's own finishedUtc,
+    // ComputeEventTimeUtc below): the one situation neither signal alone can be fully trusted in,
+    // since one of them was necessarily wrong about which of the two actually happened later.
+    // Never compared against the folder's own bare stamp: a resumed half reuses its first half's
+    // run folder, keeping that folder's original stamp forever however much later its own newest
+    // event actually happened, so comparing against the stamp read every legitimate resume-after-
+    // an-intervening-run as a disagreement, permanently, since the folder's stamp can never catch
+    // up. Surfaced to the owner (StateDeriver's HistoryNote, Banner's own red) rather than
+    // silently preferring sequence and saying nothing.
+    //
+    // A disagreeing pair is skipped, not surfaced, when some third entry in the same set is newer
+    // than BOTH of them by sequence AND by event time (dominates them): whichever of the pair was
+    // actually right or wrong about their own order can no longer change which run is genuinely
+    // newest overall, since something unambiguous already outranks both, so the old disagreement
+    // between them must never keep the banner locked for ever after a real Restore (or any other
+    // run) that itself is unambiguously the newest thing that has happened. Two different run
+    // folders carrying the very same sequence number is never forgiven this way: RunSequence.
+    // TakeNext never legitimately hands the same value out twice, so two folders holding it is a
+    // sign the count itself cannot be trusted, not a mere ordering ambiguity a later run can settle.
+    internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<(long? Sequence, DateTimeOffset EventTimeUtc)> entries)
     {
-        for (int i = 0; i < entries.Count; i++)
-        {
-            for (int j = i + 1; j < entries.Count; j++)
-            {
-                if (entries[i].Sequence is not long si || entries[j].Sequence is not long sj)
-                {
-                    continue;
-                }
+        List<(long Sequence, DateTimeOffset EventTimeUtc)> withSequence = entries
+            .Where(e => e.Sequence is not null)
+            .Select(e => (e.Sequence!.Value, e.EventTimeUtc))
+            .ToList();
 
+        for (int i = 0; i < withSequence.Count; i++)
+        {
+            for (int j = i + 1; j < withSequence.Count; j++)
+            {
+                long si = withSequence[i].Sequence;
+                long sj = withSequence[j].Sequence;
                 if (si == sj)
                 {
                     return true;
                 }
 
                 bool iNewerBySequence = si > sj;
-                bool iNewerByStamp = string.CompareOrdinal(entries[i].Stamp, entries[j].Stamp) > 0;
-                if (iNewerBySequence != iNewerByStamp)
+                bool iNewerByEventTime = withSequence[i].EventTimeUtc > withSequence[j].EventTimeUtc;
+                if (iNewerBySequence == iNewerByEventTime)
+                {
+                    continue;
+                }
+
+                bool dominated = withSequence.Any(k =>
+                    k.Sequence > si && k.EventTimeUtc > withSequence[i].EventTimeUtc &&
+                    k.Sequence > sj && k.EventTimeUtc > withSequence[j].EventTimeUtc);
+                if (!dominated)
                 {
                     return true;
                 }
@@ -131,6 +154,14 @@ internal static partial class EvidenceStore
 
         bool hasRunStartedMarker = File.Exists(Path.Combine(folder, "gui-run-started.txt"));
         bool isActiveFolder = activeFolder is not null && string.Equals(folder, activeFolder, StringComparison.OrdinalIgnoreCase);
+        bool hasKilledMarker = File.Exists(Path.Combine(folder, "gui-killed.txt"));
+        bool hasStaleRunStartedMarker = hasRunStartedMarker && !isActiveFolder;
+
+        // Trusted the same way Banner.cs's own scan trusts a run: a real result, never a killed or
+        // stale-started folder whose result.json (if any) is that half's own victim, not evidence
+        // of what actually happened last.
+        bool trustworthy = result is not null && !hasKilledMarker && !hasStaleRunStartedMarker;
+        DateTimeOffset stampUtc = ParseStampUtc(stamp);
 
         return new RunEvidence
         {
@@ -142,18 +173,60 @@ internal static partial class EvidenceStore
             HasFirstHalfSnapshotFile = hasSnapshotFile,
             HasResumeFile = File.Exists(Path.Combine(folder, "resume.txt")),
             HasSetAsideFile = File.Exists(Path.Combine(folder, "gui-set-aside.txt")),
-            HasKilledMarker = File.Exists(Path.Combine(folder, "gui-killed.txt")),
-            HasStaleRunStartedMarker = hasRunStartedMarker && !isActiveFolder,
+            HasKilledMarker = hasKilledMarker,
+            HasStaleRunStartedMarker = hasStaleRunStartedMarker,
             Sequence = RunSequence.TryReadMarker(folder),
             PowerCycleVerdict = TryReadPowerCycleVerdict(Path.Combine(folder, "gui-power-cycle.json")),
+            EventTimeUtc = ComputeEventTimeUtc(folder, result, trustworthy, stampUtc),
         };
     }
 
+    // The stamp format IsRunStamp already validated (^\d{8}T\d{6}Z$) for anything that reaches
+    // here, so this always parses.
+    internal static DateTimeOffset ParseStampUtc(string stamp) =>
+        DateTimeOffset.ParseExact(stamp, "yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+
+    // The newest last-write time of any file directly in this folder (result.json, resume.txt,
+    // gui-killed.txt, gui-sequence.txt and the rest), falling back to the given time when the
+    // folder holds nothing at all: an untrusted folder (a kill, a stale start, or a read failure)
+    // is ordered by whatever actually happened last inside it, not by a stale record's own idea of
+    // when it finished.
+    internal static DateTimeOffset NewestWriteTimeUtc(string folder, DateTimeOffset fallback)
+    {
+        DateTimeOffset newest = fallback;
+        if (!Directory.Exists(folder))
+        {
+            return newest;
+        }
+
+        foreach (string file in Directory.EnumerateFiles(folder))
+        {
+            var written = new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
+            if (written > newest)
+            {
+                newest = written;
+            }
+        }
+
+        return newest;
+    }
+
+    // The single definition of "the newest moment anything is actually known to have happened in
+    // this run folder", shared by Banner.cs's own cross-test scan and every per-row RunEvidence:
+    // a trusted result's own finishedUtc (embedded by the script the moment it genuinely finished,
+    // deliberately preferred here over any file's own real write time, which a fixture's own
+    // narrative finishedUtc need not match), or, for a killed, stale or otherwise untrusted folder
+    // (no finishedUtc worth trusting), the newest real write time of anything inside it, which a
+    // reissued sequence marker or a kill marker are both ordinary files that already fall out of.
+    // stampUtc is the last resort, when nothing else in the folder is known at all.
+    internal static DateTimeOffset ComputeEventTimeUtc(string folder, ParsedResult? result, bool trustworthy, DateTimeOffset stampUtc) =>
+        trustworthy ? result!.FinishedUtc ?? stampUtc : NewestWriteTimeUtc(folder, stampUtc);
+
     // A convenience over LoadEvidence's own already-read RunEvidence, for a caller (MainForm's
-    // ComputeState) that needs to know whether this row's own evidence contains a sequence/stamp
+    // ComputeState) that needs to know whether this row's own evidence contains a sequence/order
     // disagreement, without reading every marker file from disk a second time.
     internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<RunEvidence> evidence) =>
-        SequenceDisagreesWithStampOrder(evidence.Select(run => (run.Sequence, run.Stamp)).ToList());
+        SequenceDisagreesWithStampOrder(evidence.Select(run => (run.Sequence, run.EventTimeUtc)).ToList());
 
     // The fail-closed read of result.json. Every early return below enforces one rule for
     // trusting that file, and the comment beside each one names which rule it is.

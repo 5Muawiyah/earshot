@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace Earshot.TestWindow.Core;
 
 internal enum BannerLevel
@@ -93,24 +91,17 @@ internal static class Banner
         }
 
         // One signal or the other was wrong about which run actually happened later (the one
-        // situation neither a stamp nor a sequence alone can be fully trusted in): at-rest, being
-        // safety-critical, is never read from a chosen run while that stands, whatever it says.
+        // situation neither a real event time nor a sequence alone can be fully trusted in):
+        // at-rest, being safety-critical, is never read from a chosen run while that stands,
+        // whatever it says. Compared against each run's own OrderingUtc (the newest moment
+        // anything is actually known to have happened in it), never against the folder's own bare
+        // stamp: a resumed half reuses its first half's folder, keeping that folder's original
+        // stamp forever however much later its own newest event actually happened, so comparing
+        // against the stamp read every legitimate resume-after-an-intervening-run as a
+        // disagreement, permanently, since the stamp itself could never catch up.
         bool disagreement = EvidenceStore.SequenceDisagreesWithStampOrder(
-            runs.Select(run => (run.Sequence, run.Stamp)).ToList());
+            runs.Select(run => (run.Sequence, run.OrderingUtc)).ToList());
         if (disagreement)
-        {
-            return new BannerState { Level = BannerLevel.Red, Message = RedMessage, RedCause = BannerRedCause.UnknownOrUnreadable };
-        }
-
-        // A second, separate cross-check against each run's own OrderingUtc (already the newest
-        // of a kill marker's write time, a readable result's finishedUtc, or the folder's stamp):
-        // a run folder's stamp never moves once a resumed second half writes back into it, so two
-        // folders can agree with each other about sequence-vs-stamp order and still both be wrong,
-        // when a run folder's sequence was never brought up to date with what actually last
-        // happened inside it (a kill, or a second half's own finish) after another run's folder
-        // was created in between. Whenever the sequence and the real newest-write order disagree
-        // about which of two runs happened later, that is itself never resolved silently.
-        if (SequenceDisagreesWithOrderingUtc(runs))
         {
             return new BannerState { Level = BannerLevel.Red, Message = RedMessage, RedCause = BannerRedCause.UnknownOrUnreadable };
         }
@@ -134,34 +125,6 @@ internal static class Banner
     private static bool IsNewerThan(ScannedRun a, ScannedRun b) =>
         a.Sequence is long sa && b.Sequence is long sb ? sa > sb : a.OrderingUtc > b.OrderingUtc;
 
-    // True when any two scanned runs carry different sequence numbers whose order contradicts the
-    // order of their own OrderingUtc (each already the newest thing known to have happened inside
-    // that run folder). Two different run folders sharing the same sequence number is never
-    // compared here: EvidenceStore.SequenceDisagreesWithStampOrder already fails closed on that,
-    // via the stamp-based check just above this one in Compute.
-    private static bool SequenceDisagreesWithOrderingUtc(List<ScannedRun> runs)
-    {
-        for (int i = 0; i < runs.Count; i++)
-        {
-            for (int j = i + 1; j < runs.Count; j++)
-            {
-                if (runs[i].Sequence is not long si || runs[j].Sequence is not long sj || si == sj)
-                {
-                    continue;
-                }
-
-                bool iNewerBySequence = si > sj;
-                bool iNewerByOrdering = runs[i].OrderingUtc > runs[j].OrderingUtc;
-                if (iNewerBySequence != iNewerByOrdering)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
     private sealed record ScannedRun(string Stamp, ParsedResult? Result, DateTimeOffset OrderingUtc, bool ReadSucceeded, long? Sequence);
 
     // Every run folder under the live test root, across every test: its own result (when its
@@ -184,7 +147,7 @@ internal static class Banner
                 continue;
             }
 
-            DateTimeOffset stampUtc = ParseStampUtc(stamp);
+            DateTimeOffset stampUtc = EvidenceStore.ParseStampUtc(stamp);
 
             foreach (string testFolder in Directory.EnumerateDirectories(stampFolder))
             {
@@ -224,41 +187,12 @@ internal static class Banner
                     !(activeFolder is not null && string.Equals(testFolder, activeFolder, StringComparison.OrdinalIgnoreCase));
                 bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt")) || staleRunStarted;
                 bool readable = result is not null && !killed;
-                DateTimeOffset ordering = readable ? result!.FinishedUtc ?? stampUtc : NewestWriteTimeUtc(testFolder, stampUtc);
+                DateTimeOffset ordering = EvidenceStore.ComputeEventTimeUtc(testFolder, result, readable, stampUtc);
                 long? sequence = RunSequence.TryReadMarker(testFolder);
                 runs.Add(new ScannedRun(stamp, result, ordering, readable, sequence));
             }
         }
 
         return runs;
-    }
-
-    // The stamp format EvidenceStore.IsRunStamp already validated (^\d{8}T\d{6}Z$), so this
-    // always parses for anything that reached here.
-    private static DateTimeOffset ParseStampUtc(string stamp) =>
-        DateTimeOffset.ParseExact(stamp, "yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
-
-    // The newest last-write time of any file directly in this folder (result.json, resume.txt,
-    // gui-killed.txt and the rest), falling back to the run's own stamp when the folder holds
-    // nothing at all: a kill or a read failure is ordered by whatever actually happened last, not
-    // by a stale record's own idea of when it finished.
-    private static DateTimeOffset NewestWriteTimeUtc(string testFolder, DateTimeOffset fallback)
-    {
-        DateTimeOffset newest = fallback;
-        if (!Directory.Exists(testFolder))
-        {
-            return newest;
-        }
-
-        foreach (string file in Directory.EnumerateFiles(testFolder))
-        {
-            var written = new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
-            if (written > newest)
-            {
-                newest = written;
-            }
-        }
-
-        return newest;
     }
 }

@@ -63,10 +63,10 @@ public sealed class RunSequenceFailClosedTests
     [TestMethod]
     public void TwoDifferentFoldersSharingTheSameSequenceNumberIsItselfADisagreement()
     {
-        var entries = new List<(long? Sequence, string Stamp)>
+        var entries = new List<(long? Sequence, DateTimeOffset EventTimeUtc)>
         {
-            (5L, "20260920T000000Z"),
-            (5L, "20260921T000000Z"),
+            (5L, new DateTimeOffset(2026, 9, 20, 0, 0, 0, TimeSpan.Zero)),
+            (5L, new DateTimeOffset(2026, 9, 21, 0, 0, 0, TimeSpan.Zero)),
         };
 
         Assert.IsTrue(EvidenceStore.SequenceDisagreesWithStampOrder(entries),
@@ -78,7 +78,10 @@ public sealed class RunSequenceFailClosedTests
     [TestMethod]
     public void ASingleEntryIsNeverItsOwnDisagreement()
     {
-        var entries = new List<(long? Sequence, string Stamp)> { (5L, "20260920T000000Z") };
+        var entries = new List<(long? Sequence, DateTimeOffset EventTimeUtc)>
+        {
+            (5L, new DateTimeOffset(2026, 9, 20, 0, 0, 0, TimeSpan.Zero)),
+        };
         Assert.IsFalse(EvidenceStore.SequenceDisagreesWithStampOrder(entries));
     }
 }

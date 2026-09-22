@@ -32,7 +32,13 @@ public sealed class StateDeriverPropertyTests
 
     private static (bool WroteSnapshot, bool SnapshotPasses, string Verdict) GenerateCase(Random random, TempFolder root)
     {
-        string stamp = "20260920T" + random.Next(0, 235959).ToString("000000", System.Globalization.CultureInfo.InvariantCulture) + "Z";
+        // Hour, minute and second drawn separately (never a single 0-235959 integer read as if it
+        // were HHMMSS): a real run folder's stamp is always a genuine calendar time, and a fixture
+        // that can hand back "65 seconds" exercises nothing a real one ever does.
+        string stamp = "20260920T" +
+            random.Next(0, 24).ToString("00", System.Globalization.CultureInfo.InvariantCulture) +
+            random.Next(0, 60).ToString("00", System.Globalization.CultureInfo.InvariantCulture) +
+            random.Next(0, 60).ToString("00", System.Globalization.CultureInfo.InvariantCulture) + "Z";
         string folder = Path.Combine(root.Path, stamp, "08-acceptance-power-cycle");
         Directory.CreateDirectory(folder);
 

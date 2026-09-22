@@ -94,5 +94,17 @@ internal sealed class RunEvidence
     public long? Sequence { get; init; }
     public string? PowerCycleVerdict { get; init; }
 
+    // The newest moment anything is actually known to have happened in this run folder
+    // (EvidenceStore.ComputeEventTimeUtc): a trusted result's own finishedUtc, or, for a killed,
+    // stale or otherwise untrusted folder, the newest real write time of anything inside it (a
+    // kill marker, a reissued sequence marker, and the rest), falling back to the folder's own
+    // stamp only when nothing else is known. A resumed half's folder keeps its first half's
+    // original stamp forever however much later its own newest event actually happened, so this,
+    // never the bare Stamp above, is what ordering and the sequence/order disagreement check
+    // compare runs by. Left at its default (never read) by a fixture that only exercises
+    // StateDeriver's own walk, which never looks at it; only ReadRunEvidence (a real read off
+    // disk) and Banner.cs's own scan ever compute it for real.
+    public DateTimeOffset EventTimeUtc { get; init; }
+
     public bool ReadSucceeded => Result is not null;
 }
