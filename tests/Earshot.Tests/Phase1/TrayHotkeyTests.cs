@@ -319,8 +319,8 @@ public sealed class TrayHotkeyTests
         });
     }
 
-    // Section 8 of the follow-up review: a registration problem is surfaced as one card summarising it,
-    // not one card per shortcut, even when several shortcuts have a problem at once.
+    // A registration problem is surfaced as one card summarising it, not one card per shortcut, even when
+    // several shortcuts have a problem at once.
     [TestMethod]
     public void ARegistrationProblemShowsOneSummarisingCard()
     {

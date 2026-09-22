@@ -26,9 +26,13 @@ public sealed class NoSpecCitationsTests
     // after "D2" there are a closing quote and a comma, never one of the three this looks for. "section N"
     // and "N.N" cover a design document's own numbering; "review round" and the two project slugs cover
     // the documents by name.
+    // Case-insensitive: "Section 9" at the start of a sentence is exactly as much a citation as "section 9".
+    // The PascalCase lookahead is the one part kept case-sensitive on purpose ((?-i:...)): under IgnoreCase,
+    // [A-Z][a-z] would stop meaning "an upper-case letter starting a new word" and start meaning "any two
+    // letters", turning every hex GUID's own run of letters and digits (B3AB, and worse) into a false hit.
     private static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b)|\b[BDHLMmST][0-9]{1,2}(?=[A-Z][a-z])|review round|handback-on-shutdown-and-sleep|handback-review",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b| names\b| the other half\b)|\b[BDHLMmST][0-9]{1,2}(?=(?-i:[A-Z][a-z]))|review round|handback-on-shutdown-and-sleep|handback-review",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly string[] OwnedFolders =
     {
@@ -37,14 +41,11 @@ public sealed class NoSpecCitationsTests
     };
 
     // This file's own path, captured at compile time, the same trick NoDocumentCitationsTests uses: the
-    // pattern has to appear literally in the regex above, so this one file is excluded from the scan below,
-    // not because its comments are special but because the check's own source is not a citation of anything.
-    // TestWindow's own NoDocumentCitationsTests.cs is excluded for the identical reason: its own regex and
-    // doc comments necessarily spell out example labels (B1SingleRunnerTests, M4Something) to say what they
-    // catch, and that file is already read by its own, narrower check.
+    // pattern has to appear literally in the regex above, so this one file, and only this one, is excluded
+    // from the scan below, not because its comments are special but because the check's own source is not a
+    // citation of anything. TestWindow's own NoDocumentCitationsTests.cs is scanned like every other file:
+    // its own example labels are written so they do not themselves match (see its own comments).
     private static string ThisFilePath([CallerFilePath] string path = "") => path;
-
-    private static readonly string[] SelfExcludedFileNames = { "NoSpecCitationsTests.cs", "NoDocumentCitationsTests.cs" };
 
     [TestMethod]
     public void NoCommentOrTestNameCitesADesignDocumentOrAReviewRound()
@@ -61,9 +62,7 @@ public sealed class NoSpecCitationsTests
 
             foreach (string file in Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories))
             {
-                if (IsBuildOutput(file) ||
-                    string.Equals(Path.GetFullPath(file), thisFile, StringComparison.OrdinalIgnoreCase) ||
-                    SelfExcludedFileNames.Contains(Path.GetFileName(file), StringComparer.OrdinalIgnoreCase))
+                if (IsBuildOutput(file) || string.Equals(Path.GetFullPath(file), thisFile, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

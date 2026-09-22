@@ -263,6 +263,15 @@ internal sealed class BlockCoordinator : IDisposable
     // HandBackAsync; a second end-session or power message, a click and a menu action are refused while it holds.
     private bool _handingBack;
 
+    // Set at the start of a sleep hand-back (PBT_APMSUSPEND), cleared only once PBT_APMRESUMEAUTOMATIC has
+    // actually arrived (ResumeCheckAsync), never earlier: _handingBack itself only covers HandBackAsync's own
+    // procedure, which clears as soon as that finishes or cuts short, but Windows does not promise the machine
+    // has actually finished suspending by then, still less that it has already resumed. An allow-capable action
+    // reached in that gap must be refused the same way one reached during _sessionEnding is, or it could enable
+    // the nodes moments before the machine actually sleeps. Never set for a shut-down hand-back: _sessionEnding
+    // already covers that one, for as long as Windows leaves undocumented (see OnSessionEnding's own comment).
+    private bool _sleeping;
+
     // The current hand-back's own task, so a resume check (which runs through the ordinary one-operation-at-a-
     // time queue, RunExclusiveAsync, that HandBackAsync itself does not go through) can wait for a block a
     // cut-short sleep hand-back left running, before it reads the node state.
@@ -1104,6 +1113,11 @@ internal sealed class BlockCoordinator : IDisposable
         // and the wait for that operation is bounded by the one shared deadline: if it has not finished by
         // then, the hand-back is cut short before it ever started, and never runs after this reply returns.
         _handingBack = true;
+        if (trigger == HandBackTrigger.Suspend)
+        {
+            _sleeping = true;
+        }
+
         RaiseChanged();
         string name = trigger == HandBackTrigger.SessionEnd ? "hand-back (shutdown)" : "hand-back (sleep)";
 
@@ -1168,15 +1182,19 @@ internal sealed class BlockCoordinator : IDisposable
     // PBT_APMRESUMEAUTOMATIC: the resume check, the start-up check's rule under the reason Resume. Waits first
     // for a block a cut-short sleep hand-back left running (one operation at a time), then reads the node state
     // fresh: nodes enabled and render not ACTIVE blocks at once, no idle grace; render ACTIVE leaves the idle
-    // rule to it and only logs; nodes blocked or Block at boot off logs once. Never refused: sleep is not a
-    // session end, and _handingBack has already cleared by the time PBT_APMRESUMEAUTOMATIC can arrive (the
-    // suspend handler has returned).
+    // rule to it and only logs; nodes blocked or Block at boot off logs once. This call itself is never refused
+    // (sleep is not a session end), but it is what ends the refusal every allow-capable action has been under
+    // since the suspend message: _sleeping clears here, not when the suspend handler's own HandBackAsync call
+    // returned, since Windows never promises the machine has finished suspending by then, still less resumed.
     public async Task ResumeCheckAsync()
     {
         if (_disposed)
         {
             return;
         }
+
+        _sleeping = false;
+        RaiseChanged();
 
         if (!Settings.HandBackOnShutdownAndSleep)
         {
@@ -1522,9 +1540,19 @@ internal sealed class BlockCoordinator : IDisposable
     {
         while (true)
         {
-            if (_sessionEnding && refusedAtSessionEnd is not null)
+            if (refusedAtSessionEnd is not null && (_sessionEnding || _handingBack || _sleeping))
             {
-                _log.Info(name + ": not started, because the session is ending.");
+                // The same refusal a session end already gets, now also while a sleep hold is up, and for the
+                // whole of a sleep, not only while HandBackAsync's own procedure is still running: the tray's
+                // own guard (RefusedAtSessionEnd, HandBackInProgress) is the first line of defence for a click,
+                // a menu action or a hotkey, but the coordinator is the one place every caller reaches, so an
+                // action that queues behind the hand-back here would otherwise wait its turn and run once the
+                // hand-back finishes, an allow landing as the machine actually sleeps, or in the gap between the
+                // suspend handler returning and PBT_APMRESUMEAUTOMATIC actually arriving, rather than never
+                // running at all. _handingBack and _sleeping are never both what the hand-back's own call into
+                // this method sees (it always passes refusedAtSessionEnd: null), so this never refuses the
+                // hand-back itself.
+                _log.Info(name + ": not started, because " + (_sessionEnding ? "the session is ending." : _handingBack ? "Earshot is handing the AirPods back." : "the machine is asleep."));
                 return refusedAtSessionEnd();
             }
 

@@ -55,7 +55,7 @@ public sealed class AbortRecordsTheStopTests
         runner.Abort(firstPrompt.Seq);
 
         // Whatever follows (a crash from the script's own catch, or a further prompt from its
-        // closing at-rest check, exactly the "at-rest offer" S8 names) is answered the way a
+        // closing at-rest check, the same "at-rest offer" prompt) is answered the way a
         // satisfied owner would, until the child actually exits.
         bool sawExit = DriveToExit(runner, messages, transcript, out int exitCode);
         Assert.IsTrue(sawExit, "No exit arrived after the abort." + Environment.NewLine + string.Join(Environment.NewLine, transcript));

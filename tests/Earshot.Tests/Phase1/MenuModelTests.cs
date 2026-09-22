@@ -37,7 +37,7 @@ public sealed class MenuModelTests
         Assert.AreEqual("Exit", state.Exit.Text);
     }
 
-    // Section 9 of the hotkeys spec: the bound shortcut text sits next to its command in the menu.
+    // The bound shortcut text sits next to its command in the menu.
     [TestMethod]
     public void MenuLabelsShowTheirBoundShortcut()
     {
@@ -271,7 +271,7 @@ public sealed class MenuModelTests
         Assert.IsTrue(safe.SetUp.Enabled);
     }
 
-    // Section 7 of the hand-back spec: default on, and the check always follows the saved setting.
+    // The hand-back menu item: default on, and the check always follows the saved setting.
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]

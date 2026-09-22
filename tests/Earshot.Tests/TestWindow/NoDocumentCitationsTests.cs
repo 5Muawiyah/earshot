@@ -17,26 +17,28 @@ public sealed class NoDocumentCitationsTests
     // The exact search used to find the citations this class exists to keep out: the word
     // "section" immediately followed by a number (optionally with a decimal part), a short
     // internal label made of a single letter immediately followed by one or two digits and then a
-    // colon or an apostrophe (a possessive, "M1's own fix"), a phrase naming a round of review, or
-    // that same short label carried into an identifier or a file name itself
-    // (B1SingleRunnerTests, M4Something): the label followed by an upper-case letter that itself
-    // starts a real word (a lower-case letter after it, PascalCase's own shape), never merely by a
-    // colon. The lower-case-letter requirement is what keeps this from also flagging an
-    // upper-case hex address a test fixture writes ("B4C5D6E7F809": "C" is followed by the digit
-    // "5", never a lower-case letter, so no word ever starts there). Kept in the same shape as the
-    // search that found the first 69, so the two can never silently drift apart.
+    // colon or a possessive (the label, then an apostrophe and "s", as in a fix credited to its
+    // own label), a phrase naming a round of review, or that same short label carried into an
+    // identifier or a file name itself: the label, then a capital letter that itself starts a real
+    // word directly after it with nothing between them (a lower-case letter after that capital,
+    // PascalCase's own shape, as a class name built by running two such words together would
+    // read), never merely by a colon. The lower-case-letter requirement is what keeps this from
+    // also flagging an upper-case hex address a test fixture writes (four capital letters and
+    // digits running together: none of them is ever followed by a lower-case letter, so no word
+    // ever starts there). Kept in the same shape as the search that found the first 69, so the two
+    // can never silently drift apart.
     //
-    // closing-step-disconnect-first is a named design document's own slug (its file lives outside
-    // this repository, gitignored, the same as the ones the labels above once named): a comment
-    // citing it by name is exactly the kind of external reference this class exists to keep out,
-    // caught the same way plain-*.md and test-gui*.md are above.
+    // The closing-step design document's own slug (a file that lives outside this repository,
+    // gitignored, the same as the ones the labels above once named) is caught the same way the
+    // plain-*.md and test-gui*.md names are: a comment citing it by name is exactly the kind of
+    // external reference this class exists to keep out.
     //
     // internal, not private: NoDocumentCitationsInLiveTestsTests (tests\Earshot.Tests\LiveTests)
     // runs the same search over tools\live-tests and tests\Earshot.Tests\LiveTests, which this
     // class's own OwnedFolders does not reach, and it reuses this exact Regex instance rather than
     // a second copy of the pattern text, so the two searches can never silently drift apart.
     internal static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b[:']|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review round|\bplain-[a-z-]+\.md\b|\btest-gui[a-z0-9-]*\.md\b|\bclosing-step-disconnect-first\b",
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BMmHST][0-9]{1,2}\b[:']|\b[BMmHST][0-9]{1,2}(?=[A-Z][a-z])|review\x20round|\bplain-[a-z-]+\.md\b|\btest-gui[a-z0-9-]*\.md\b|\bclosing\x2dstep\x2ddisconnect\x2dfirst\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] OwnedFolders =
@@ -75,9 +77,9 @@ public sealed class NoDocumentCitationsTests
 
                 filesRead++;
 
-                // The file's own name carries a label just as a class or member name inside it
-                // can (B1SingleRunnerTests.cs), and nothing above ever reads a file name as a
-                // "line", so this is checked once here rather than being silently skipped.
+                // The file's own name carries a label just as a class or member name inside it can (a file
+                // combining a label with the rest of a class name the same way), and nothing above ever
+                // reads a file name as a "line", so this is checked once here rather than being silently skipped.
                 string fileName = Path.GetFileName(file);
                 if (Citation.IsMatch(fileName))
                 {

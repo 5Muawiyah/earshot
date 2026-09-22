@@ -131,8 +131,8 @@ internal static class MenuModel
             _ => false,
         };
 
-    // Section 9 of the hotkeys spec: "put the current shortcut text next to each command in the tray menu."
-    // Only shown when hotkeys are switched on and the text for this action actually parses: an owner mid-way
+    // Puts the current shortcut text next to each command in the tray menu. Only shown when hotkeys are
+    // switched on and the text for this action actually parses: an owner mid-way
     // through typing an invalid shortcut, or with hotkeys off, sees the label exactly as before.
     private static string WithShortcut(string label, HotkeySettings hotkeys, HotkeyAction action)
     {

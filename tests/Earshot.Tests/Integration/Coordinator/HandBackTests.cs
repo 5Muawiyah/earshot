@@ -342,6 +342,35 @@ public sealed class HandBackTests
             "The misleading line this defect used to also log for a hand-back that had already started must never appear beside it.");
     }
 
+    // t0 is taken once, at the moment HandBackAsync itself is called, not once the exclusive slot is actually
+    // claimed: "finished in" must count the whole hold, including any wait behind an operation already in
+    // flight. Proved with an exact figure, not merely a "the line exists" check: the manual clock only moves
+    // when the test moves it, so 3000 ms in the logged line can only be the 3 seconds spent waiting, never a
+    // coincidence of wall-clock timing.
+    [TestMethod]
+    public void FinishedInCountsTheWholeHoldIncludingTheWaitForAnOperationAlreadyInFlight()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        var pendingConnect = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(_ => pendingConnect.Task);
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + TimeSpan.FromSeconds(30), DisconnectWait);
+        h.Pump();
+        Assert.IsFalse(handBack.IsCompleted, "Still waiting for the connect already in flight.");
+
+        h.Advance(TimeSpan.FromSeconds(3));
+        pendingConnect.SetResult(Results.Connected());
+        h.PumpAfterRealHop(() => handBack.IsCompleted);
+
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in 3000 ms"),
+            "The 3 seconds spent waiting for the connect already in flight must be counted, not only the work that ran once the slot was actually claimed.");
+    }
+
     // A query-time block that completes before WM_ENDSESSION leaves _sessionBlock holding a reference to an
     // already-finished task, reused rather than sent again. This alone does not reproduce the spin the review
     // named (that needs a second operation actually queued through RunExclusiveAsync while the hand-back is
@@ -502,6 +531,68 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): off, so the resume check does not run"));
     }
 
+    // The coordinator itself refuses an action that could enable the nodes while a sleep hold is up, not only
+    // the tray's own guard in front of it: otherwise an action reaching the coordinator directly would simply
+    // queue behind the hand-back through RunExclusiveAsync's own wait and run once it finishes, an allow
+    // landing as the machine actually sleeps rather than never running at all.
+    [TestMethod]
+    public void ACoordinatorLevelConnectIsRefusedDuringASleepHoldRatherThanQueuedBehindIt()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        var pendingBlock = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnBlock = _ => pendingBlock.Task;
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + TimeSpan.FromSeconds(10), DisconnectWait);
+        h.Pump();
+        Assert.IsTrue(h.Coordinator.HandBackInProgress, "The hand-back's own block must still be pending.");
+        h.Connection.Calls.Clear();
+
+        Task<ToggleReport> connect = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        Assert.IsTrue(connect.IsCompleted, "The connect must be refused at once, not queued behind the hand-back.");
+        Assert.IsEmpty(h.Connection.Calls, "Nothing was sent: the connect never reached the fake connection controller.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "connect: not started, because Earshot is handing the AirPods back."));
+
+        pendingBlock.SetResult(ControllerResult.Ok("Blocked at boot"));
+        h.PumpAfterRealHop(() => handBack.IsCompleted);
+    }
+
+    // HandBackInProgress itself only covers HandBackAsync's own procedure, which has now finished: the gap the
+    // test above cannot reach. Windows never promises the machine has actually finished suspending by the time
+    // the suspend handler's reply returns, still less that it has already resumed, so an allow-capable action
+    // reaching the coordinator in that gap must still be refused, exactly as it was while the hand-back itself
+    // was running, until PBT_APMRESUMEAUTOMATIC actually arrives.
+    [TestMethod]
+    public void ACoordinatorLevelConnectStaysRefusedAfterTheSuspendHandBackFinishesUntilResume()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + TimeSpan.FromSeconds(10), DisconnectWait);
+        h.PumpAfterRealHop(() => handBack.IsCompleted);
+        Assert.IsFalse(h.Coordinator.HandBackInProgress, "The procedure itself has finished.");
+        h.Connection.Calls.Clear();
+
+        Task<ToggleReport> connect = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        Assert.IsTrue(connect.IsCompleted, "Refused at once, not queued.");
+        Assert.IsEmpty(h.Connection.Calls, "Nothing was sent: the machine has not resumed yet.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "connect: not started, because the machine is asleep."));
+
+        _ = h.Coordinator.ResumeCheckAsync();
+        h.Pump();
+        h.Connection.Calls.Clear();
+
+        Task<ToggleReport> afterResume = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+
+        Assert.IsTrue(afterResume.IsCompleted);
+        Assert.IsTrue(h.Connection.Calls.Count > 0, "The connect must actually reach the fake connection controller now that resume has run, not be refused again.");
+    }
+
     // A block completed inside the budget logs "finished in", never "cut short".
     [TestMethod]
     public void ABlockCompletedInsideTheBudgetLogsFinished()
@@ -609,7 +700,7 @@ public sealed class HandBackTests
         Assert.IsFalse(h.Coordinator.HandBackInProgress);
     }
 
-    // Section 3.3: with the setting on, a query while the AirPods are in use issues no block (it would be
+    // With the setting on, a query while the AirPods are in use issues no block (it would be
     // vetoed on the sink entry); the hand-back at WM_ENDSESSION is what disconnects and blocks, in order.
     [TestMethod]
     public void AQueryWhileInUseWithHandBackOnIssuesNoBlock()
@@ -625,7 +716,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "no block issued at the query"));
     }
 
-    // Section 3.3: a query while not in use still blocks at once, as today, gaining the query-to-end gap.
+    // A query while not in use still blocks at once, as today, gaining the query-to-end gap.
     [TestMethod]
     public void AQueryWhileNotInUseWithHandBackOnStillBlocksAsToday()
     {
@@ -639,7 +730,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Block.Calls.Contains("block"));
     }
 
-    // Section 3.3 / 8.2: the block a not-in-use query already queued is the one the hand-back at WM_ENDSESSION
+    // The block a not-in-use query already queued is the one the hand-back at WM_ENDSESSION
     // waits for; nothing sends a second block.
     [TestMethod]
     public void WmEndSessionReusesTheQueryTimeBlockRatherThanSendingASecondOne()
@@ -684,6 +775,63 @@ public sealed class HandBackTests
         Assert.IsTrue(handBack.IsCompleted);
         Assert.Contains((false, Devices.Container), h.Connection.Calls, "Sound that started after the query must still be disconnected.");
         Assert.HasCount(1, h.Block.Calls, "The query's own block is still reused, not sent again.");
+    }
+
+    // blockAlreadySentAt only ever describes what has actually happened before the disconnect step runs: on the
+    // reuse branch (a block already queued at the query) it is the query's own issue time, so a disconnect
+    // that is itself cut short here must say "block was sent at", the query's own time, never "block was not
+    // sent", which would say the opposite of what happened, since the block genuinely is already on its way.
+    [TestMethod]
+    public void WmEndSessionsReuseBranchNamesTheQueryBlockAsAlreadySentWhenItsOwnDisconnectIsCutShort()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+        Assert.HasCount(1, h.Block.Calls, "The not-in-use query already queued and completed its block.");
+
+        // Sound started after the query, so render is ACTIVE by WM_ENDSESSION: the reuse branch's own disconnect
+        // step actually runs this time (see the test above), rather than "nothing to disconnect".
+        h.Publish(Devices.Active(2));
+        h.Connection.Calls.Clear();
+        var pendingDisconnect = new TaskCompletionSource<ConnectResult>();
+        h.Connection.OnDisconnect = _ => pendingDisconnect.Task;
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + TimeSpan.FromMilliseconds(50), TimeSpan.FromSeconds(10));
+        h.Pump();
+        Assert.IsFalse(handBack.IsCompleted, "The disconnect has not returned.");
+
+        h.Advance(TimeSpan.FromMilliseconds(50));
+
+        Assert.IsTrue(handBack.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "block was sent at"),
+            "The query's own block genuinely is already sent; saying otherwise would be backwards.");
+        Assert.IsFalse(h.Log.Has(LogLevel.Warn, "block was not sent"));
+    }
+
+    // A Partial or Failed block outcome that reaches this line the ordinary way (not through the retry path
+    // below, which already proves the retry's own outcome) names the first vetoed step and its raw code, not
+    // merely the bare status: a reader must be able to tell which of the eight nodes was vetoed and why
+    // without opening the gate's own log.
+    [TestMethod]
+    public void APartialBlockOutcomeNamesTheVetoedStepAndItsRawCode()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.OnBlock = _ => Task.FromResult(new ControllerResult(
+            OpStatus.Partial,
+            "One entry vetoed",
+            [StepOutcomes.FromHResult("block:cm-disable", unchecked((int)0x80070005))]));
+
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "block Partial: block:cm-disable"),
+            "The vetoed step's own name must be in the line, not just the bare status \"Partial\".");
     }
 
     // The result written is the result observed: a query-time block that came back Partial is retried exactly

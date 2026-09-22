@@ -234,7 +234,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // Section 7: the menu item toggles the saved setting.
+    // The menu item toggles the saved setting.
     [TestMethod]
     public void ClickingTheMenuItemTogglesTheSetting()
     {
@@ -252,7 +252,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // Section 7: refused while the session ends, like every setting change; PerformClick runs the handler
+    // Refused while the session ends, like every setting change; PerformClick runs the handler
     // regardless of the item's own Enabled state, so this proves the handler's own guard, not just the menu's.
     [TestMethod]
     public void TheMenuItemIsRefusedWhileTheSessionIsEnding()
@@ -270,8 +270,8 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // Section 4.2 ("Steps as 3.2"): a held streaming link is let go before the sleep hand-back's own disconnect,
-    // the same first step 3.2 has for shut down.
+    // A held streaming link is let go before the sleep hand-back's own disconnect, the same first step the
+    // shut-down hand-back has.
     [TestMethod]
     public void SuspendLetsGoOfAStreamingLinkBeforeTheHandBack()
     {
