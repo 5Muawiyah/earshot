@@ -158,8 +158,6 @@ internal sealed class MainForm : Form
     private bool _moreOpen;
     private readonly Label _rehearsalTeaserLabel;
     private readonly Label _caseBoxLabel;
-    private readonly Label _bannerHowToStepsLabel;
-    private readonly PictureBox _bannerHowToPictureBox;
     private readonly Button _backButton;
 
     internal MainForm(string repoRoot, IReadOnlyList<ManifestRow> rows, IReadOnlyList<WordingEntry> wording, SandboxOptions? sandbox, string exePath)
@@ -301,23 +299,6 @@ internal sealed class MainForm : Form
             AutoSize = true, MaximumSize = new Size(1040, 0), TextAlign = ContentAlignment.MiddleLeft, Visible = false,
             Font = new Font(Font, FontStyle.Bold), AutoEllipsis = false,
         };
-        _bannerHowToStepsLabel = new Label
-        {
-            AutoSize = true, MaximumSize = new Size(700, 0), TextAlign = ContentAlignment.TopLeft, Visible = false,
-            Text = string.Join(Environment.NewLine, Copy.AtRestHowToSteps.Select((step, index) => (index + 1) + ". " + step)),
-        };
-        _bannerHowToPictureBox = new PictureBox
-        {
-            Width = 160, Height = 160, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, Visible = false,
-            Image = HowToPictures.TryLoad("earshot-icon-taskbar"),
-        };
-        var bannerHowToRow = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        };
-        bannerHowToRow.Controls.Add(_bannerHowToStepsLabel);
-        bannerHowToRow.Controls.Add(_bannerHowToPictureBox);
-
         var contentHost = new Panel { Dock = DockStyle.Fill };
         _stepPanel = new StepPanel { Visible = false };
         // The silence watchdog must stop treating a reply as though the prompt it answered
@@ -450,7 +431,6 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(16),
         };
         homeFlow.Controls.Add(_bannerLabel);
-        homeFlow.Controls.Add(bannerHowToRow);
         homeFlow.Controls.Add(homeTitleLabel);
         homeFlow.Controls.Add(homeIntroLabel1);
         homeFlow.Controls.Add(homeIntroLabel2);
@@ -913,26 +893,22 @@ internal sealed class MainForm : Form
         return _banner;
     }
 
-    // The at-rest banner sits at the top of Home, with its own
-    // find-and-click-the-Earshot-icon how-to block and picture beside it; _bannerLabel is AutoSize
-    // now, so only Visible needs setting here, never a fixed Height that could clip its own wrapped
-    // text.
+    // The at-rest banner sits at the top of Home. No how-to block or picture beside it any more:
+    // Copy.AtRestNo never advises a click, so there is no step here for one to illustrate.
+    // _bannerLabel is AutoSize, so only Visible needs setting here, never a fixed Height that
+    // could clip its own wrapped text.
     private void UpdateBannerLabel()
     {
         if (_banner.Level == BannerLevel.None)
         {
             _bannerLabel.Visible = false;
-            _bannerHowToStepsLabel.Visible = false;
-            _bannerHowToPictureBox.Visible = false;
             return;
         }
 
-        _bannerLabel.Text = _showTechnicalDetails ? _banner.Message ?? string.Empty : Copy.BannerPlainText(_banner.Level, _banner.RedCause);
+        _bannerLabel.Text = _showTechnicalDetails ? _banner.Message ?? string.Empty : Copy.BannerPlainText(_banner.Level);
         _bannerLabel.ForeColor = _banner.Level == BannerLevel.Red ? Color.White : Color.Black;
         _bannerLabel.BackColor = _banner.Level == BannerLevel.Red ? Color.Firebrick : Color.Goldenrod;
         _bannerLabel.Visible = true;
-        _bannerHowToStepsLabel.Visible = true;
-        _bannerHowToPictureBox.Visible = _bannerHowToPictureBox.Image is not null;
     }
 
     private DerivedRowState ComputeState(DisplayRow row)
@@ -2064,12 +2040,13 @@ internal sealed class MainForm : Form
     }
 
     // The deliberate step shown before Restore ever starts under a red or unknown banner: the same
-    // cause-picked plain advice the at-rest banner itself gives (Copy.AtRestNoText), shown as a
-    // step to act on first, since it is usually all that is needed; Restore itself is what runs
-    // once the owner says they have done it, never silently skipped past.
+    // one plain advice the at-rest banner itself gives (Copy.AtRestNo, never a click, whatever the
+    // cause), shown as a step to act on first; Restore itself is what runs once the owner says
+    // they have done it, never silently skipped past.
     private void ShowRunAllRestoreAdvice()
     {
-        _runAllRestoreAdviceLabel.Text = Copy.RunAllRestoreAdviceHeading + Environment.NewLine + Environment.NewLine + Copy.AtRestNoText(RefreshBanner().RedCause);
+        RefreshBanner();
+        _runAllRestoreAdviceLabel.Text = Copy.RunAllRestoreAdviceHeading + Environment.NewLine + Environment.NewLine + Copy.AtRestNo;
         _runAllRestoreAdviceLabel.Visible = true;
         _runAllRestoreContinueButton.Visible = true;
         _runAllStatusLabel.Text = string.Empty;

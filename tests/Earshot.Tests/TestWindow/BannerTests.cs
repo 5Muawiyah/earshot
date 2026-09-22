@@ -121,17 +121,16 @@ public sealed class BannerTests
     }
 
     // Also pins the leftAtRest copy itself: "no" and "unknown" must each say plainly, in the
-    // reader's own words, what state the machine is actually left in, and "unknown" must never
-    // read as "yes".
+    // reader's own words, what to do, and neither may ever advise a click. LiveTest.psm1's own
+    // at-rest check writes leftAtRest "no" whenever the nodes read anything but Blocked, which
+    // includes a declined offer with the AirPods still on the phone: it never reads the actual
+    // Bluetooth connection, so "no" is never trusted to mean the AirPods are known playing from
+    // this computer, and a click can never safely be advised for it.
     [TestMethod]
-    public void NoAndUnknownEachSayTheMachineIsLeftInTheStateEarshotExistsToPrevent()
+    public void NoAndUnknownEachSayWhatToDoWithoutEverAdvisingAClick()
     {
-        // A per-row "no" is only ever recorded once a concrete node state is read (LiveTest.psm1's
-        // own at-rest check), so it always means the AirPods are known playing from this computer
-        // right then; the words say that plainly, never the old abstract "may grab them" warning,
-        // which told every cause (a click here too, or an unknown cause) to click the icon, wrong
-        // for the causes where the AirPods are not known connected at all.
-        StringAssert.Contains(Copy.LeftAtRestText("no", null), "playing from this computer");
+        StringAssert.Contains(Copy.LeftAtRestText("no", null), "case");
+        Assert.IsFalse(Copy.LeftAtRestText("no", null).Contains("click", StringComparison.OrdinalIgnoreCase));
         StringAssert.Contains(Copy.LeftAtRestText("unknown", null), "grab them off your phone");
     }
 

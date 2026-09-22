@@ -96,18 +96,6 @@ internal static class Copy
     // will raise a real prompt, and this is the elevated launch site's first execution in any form.
     internal const string RehearsalRowName = "Permission box check";
 
-    // The at-rest banner's own how-to block on Home: find and click the Earshot icon. Reused
-    // verbatim from Data\wording.json's own "find-and-left-click-the-earshot-icon" howToBlocks
-    // entry (same picture, "earshot-icon-taskbar"), added here as a small static use rather than
-    // plumbing a new wording.json entry for a block that is never bound to a script prompt.
-    internal static readonly IReadOnlyList<string> AtRestHowToSteps = new[]
-    {
-        "Look at the bottom-right corner of the screen, next to the clock.",
-        "If you cannot see the Earshot icon, click the small ^ arrow to show hidden icons.",
-        "Click the Earshot icon once with the left mouse button. Do not double-click.",
-        "A small card should appear near the clock.",
-    };
-
     internal const string RehearsalWarning =
         "This starts a real check. Windows will show a real box asking for permission, twice. " +
         "This is the first time this has ever been run, in any form. Only the owner runs this, " +
@@ -197,38 +185,17 @@ internal static class Copy
         "This computer is leaving your AirPods alone. Your AirPods' Bluetooth connection is blocked, " +
         "so this computer will not grab them off your phone the next time it starts.";
 
-    // Corrected from live evidence, twice. First: telling the owner to run Restore first was
-    // wrong for the commonest cause; getting the AirPods off this computer first (a click on the
-    // Earshot icon, or the AirPods back in their case) is what actually clears it, Restore is the
-    // fallback tried once that has not worked. Second: "click the icon" is itself only right when
-    // the AirPods are actually known connected to this computer already (AtRestNo, this text);
-    // when they are not known connected at all (unknown, unreadable or a kill: AtRestNoUnknownCause,
-    // right below), a click would connect them here instead of clearing anything, so that text
-    // never mentions clicking. Neither text promises a click alone clears the warning any more:
-    // nothing here ever re-reads the device after one, so it never could.
+    // A single text for every red cause, never advising a click: LiveTest.psm1's own at-rest
+    // check writes leftAtRest "no" whenever the nodes read anything but Blocked, which includes a
+    // declined offer with the AirPods still on the phone; it never reads the actual Bluetooth
+    // connection. There is no cause a "no" can be trusted to mean "the AirPods are known playing
+    // from this computer", so a click can never safely be advised for any red cause: a left click
+    // connects the AirPods here, exactly wrong whenever they are already on the phone. Never
+    // promises a click alone clears the warning either: nothing here ever re-reads the device
+    // after one, so it never could.
     internal const string AtRestNo =
-        "Your AirPods are playing from this computer. Click the Earshot icon once so they go back " +
-        "to your phone, then run Restore and say Yes at the end while your AirPods are in their " +
-        "case. " + AtRestClearsSentence;
-
-    // The other cause: this window does not know where the AirPods are at all (unread, unreadable,
-    // or a kill), so a click here is never offered, since a left click connects them to this
-    // computer rather than sending them back to the phone.
-    internal const string AtRestNoUnknownCause =
-        "Put your AirPods in their case, then run Restore and say Yes at the end. Do not click the " +
-        "Earshot icon: that would connect them to this computer. " + AtRestClearsSentence;
-
-    // Said once, appended to both AtRestNo and AtRestNoUnknownCause: replaces the old, false
-    // promise that a click alone clears the warning (nothing here ever re-reads the device after
-    // one, so it never could).
-    private const string AtRestClearsSentence =
-        "The warning clears when a test ends with this computer leaving your AirPods alone.";
-
-    // Picks AtRestNo or AtRestNoUnknownCause by Banner's own recorded cause; anything other than a
-    // definite "no" (unknown, unreadable, a kill, or a sequence/order disagreement) is the unknown
-    // text, never the click advice, since that is only ever right about a trusted "no".
-    internal static string AtRestNoText(BannerRedCause cause) =>
-        cause == BannerRedCause.KnownNotAtRest ? AtRestNo : AtRestNoUnknownCause;
+        "Put your AirPods in their case. Then run Restore (row 00) and say Yes to its last " +
+        "question. The warning clears when a test ends with this computer leaving your AirPods alone.";
 
     internal const string AtRestUnknown =
         "We do not know. It could not be read whether your AirPods' Bluetooth connection is blocked, so this " +
@@ -246,8 +213,7 @@ internal static class Copy
 
     // The two close-window confirmations (OnFormClosing): shown as a real Windows message box,
     // unconditionally, never behind the technical-details toggle, so they carry this window's own
-    // plain words directly rather than "this PC"/"at rest", the same corrected phrase AtRestNo
-    // already uses for the same fact.
+    // plain words directly, this computer, never "this PC" or "at rest" itself.
     internal const string CloseWhileRunningConfirmation =
         "A test is still running. Closing now stops it, the same as Stop the test: no result is " +
         "saved, and this computer may grab your AirPods off your phone the next time it starts. Close anyway?";
@@ -255,20 +221,21 @@ internal static class Copy
     internal const string CloseNotAtRestConfirmation =
         "This computer may grab your AirPods off your phone the next time it starts. Close anyway?";
 
-    // The at-rest banner shown at the top of Home. Banner.Compute now says which shape a Red level
-    // is (BannerRedCause), so this picks AtRestNoText's own two versions by cause rather than
-    // reusing the click-the-icon advice for every Red cause, which used to be wrong (and could
-    // connect the AirPods here) whenever the cause was anything other than a trusted "no". Amber
-    // (left enabled on purpose, for a test still in progress) gets its own short plain line, since
-    // "Left enabled on purpose." (Banner.cs's own internal caption) says nothing plain about what
-    // "enabled" means or what to do about it.
+    // The at-rest banner shown at the top of Home. Banner.Compute only ever returns Red or Amber
+    // here (None never reaches this: MainForm hides the banner outright for it), and it never says
+    // which exact leftAtRest value caused Red: that collapsing is deliberate, since there is no
+    // cause a "no" can be trusted to mean the AirPods are known connected to this computer (see
+    // AtRestNo's own note), so every Red cause reads the same one text. Amber (left enabled on
+    // purpose, for a test still in progress) gets its own short plain line, since "Left enabled on
+    // purpose." (Banner.cs's own internal caption) says nothing plain about what "enabled" means or
+    // what to do about it.
     internal const string BannerAmberPlain =
         "This computer's AirPods connection was left able to grab them, on purpose, so a test still in " +
         "progress could finish. No action is needed yet; the test itself will say when to shut down.";
 
-    internal static string BannerPlainText(BannerLevel level, BannerRedCause cause = BannerRedCause.UnknownOrUnreadable) => level switch
+    internal static string BannerPlainText(BannerLevel level) => level switch
     {
-        BannerLevel.Red => AtRestNoText(cause),
+        BannerLevel.Red => AtRestNo,
         BannerLevel.Amber => BannerAmberPlain,
         _ => string.Empty,
     };
@@ -387,9 +354,8 @@ internal static class Copy
     // Run all under a red or unknown banner never simply refuses: every other row stays locked
     // exactly as before, but row 00 Restore (the one start the gate already allows under red) is
     // offered first, and Run all only carries on with the rest once Restore itself records this
-    // computer at rest. AtRestNo is shown first, as the deliberate step to act on before Restore
-    // ever starts, since it is usually all that is needed and Restore alone often is not enough
-    // (see AtRestNo's own note).
+    // computer at rest. AtRestNo is shown first, as the one step to act on: put the AirPods in
+    // their case, then run Restore, the same advice for every cause.
     internal const string RunAllRestoreAdviceHeading = "This computer is not known to be safe to shut down yet";
 
     internal const string RunAllRestoreContinueButtonLabel = "I have done that, run Restore now";
@@ -528,8 +494,8 @@ internal static class Copy
         "This test has been silent for " + minutes + " minutes. Keep waiting, or Stop the test.";
 
     // The stop confirmation box (a real Windows MessageBox, shown whether technical details is on
-    // or off, since it is a safety warning, never gated): this computer, never "this PC", and the
-    // same "may grab your AirPods" words AtRestNo already uses, never "at rest" itself.
+    // or off, since it is a safety warning, never gated): this computer, never "this PC", and
+    // never "at rest" itself.
     internal const string StopConfirmationWarning =
         "Stopping it now means no result is written, and this computer may still be able to grab your AirPods off your phone.";
 

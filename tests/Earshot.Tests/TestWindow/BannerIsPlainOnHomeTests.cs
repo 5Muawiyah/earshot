@@ -6,14 +6,12 @@ namespace Earshot.Tests.TestWindow;
 
 // The at-rest banner on Home showed Banner.RedMessage/"Left enabled on purpose." directly,
 // unconditionally: Banner.cs's own internal, technical text, never gated by "Show technical
-// details" and never updated for the corrected guidance (click the Earshot icon first; Restore is
-// the fallback, tried only once that has not worked, not the first step) already carried by
-// Copy.AtRestNo and already shown correctly on the Result view's own leftAtRest line. Found by
-// looking at a real screenshot of Home with a not-at-rest fixture on disk: the reddest, most
-// safety-critical text in the whole window read "This PC may be left able to page the AirPods at
-// the next start. Run Restore before you shut down." with technical details off, containing two
-// banned words ("PC", "page") and the wrong first step. Real MainForm, a real fixture on disk, no
-// script or device involved.
+// details" and never updated for the plain advice (Copy.AtRestNo) already shown correctly on the
+// Result view's own leftAtRest line. Found by looking at a real screenshot of Home with a
+// not-at-rest fixture on disk: the reddest, most safety-critical text in the whole window read
+// "This PC may be left able to page the AirPods at the next start. Run Restore before you shut
+// down." with technical details off, containing two banned words ("PC", "page"). Real MainForm, a
+// real fixture on disk, no script or device involved.
 [TestClass]
 public sealed class BannerIsPlainOnHomeTests
 {
@@ -35,8 +33,7 @@ public sealed class BannerIsPlainOnHomeTests
 
             Assert.AreEqual(
                 Copy.AtRestNo, form.BannerTextForTests,
-                "the banner must show this window's own corrected plain advice (click the Earshot icon " +
-                "first, Restore only as the fallback), not Banner.cs's own internal technical message.");
+                "the banner must show this window's own plain advice, not Banner.cs's own internal technical message.");
             Assert.IsFalse(form.BannerTextForTests.Contains("PC", StringComparison.Ordinal), "the banner must never say \"PC\".");
             Assert.IsFalse(form.BannerTextForTests.Contains("page", StringComparison.OrdinalIgnoreCase), "the banner must never say \"page\".");
         });

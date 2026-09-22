@@ -7,29 +7,19 @@ internal enum BannerLevel
     Red,
 }
 
-// Which shape a Red level actually is, so the advice shown for it can stop giving the same
-// "click the Earshot icon" instruction regardless of cause: that instruction is only ever right
-// when the newest trusted run itself recorded leftAtRest "no" (which LiveTest.psm1's own
-// Complete-LiveTestRun only ever writes once it has read a concrete, non-null node state, so the
-// AirPods are known connected to this computer right then). Every other Red cause (no readable
-// run at all, a newer unreadable or killed folder, a sequence/order disagreement, or leftAtRest
-// itself reading "unknown" or missing) means this window does not actually know where the AirPods
-// are, and a click would only ever risk connecting them here.
-internal enum BannerRedCause
-{
-    NotRed,
-    KnownNotAtRest,
-    UnknownOrUnreadable,
-}
-
 // Rows other than 00 Restore stay locked while Level is Red, until the newest readable result
 // (from any test that ends at rest, not only a Restore run) records leftAtRest of yes or
-// not-applicable.
+// not-applicable. Red never says which exact cause it is (no readable run at all, a newer
+// unreadable or killed folder, a sequence/order disagreement, or leftAtRest itself reading "no",
+// "unknown" or missing): LiveTest.psm1's own at-rest check writes leftAtRest "no" whenever the
+// nodes read anything but Blocked, which includes a declined offer with the AirPods still on the
+// phone, so a "no" is never trusted to mean the AirPods are known connected to this computer
+// either. Every Red cause gets the same advice (Copy.AtRestNo): never a click, only put the
+// AirPods in their case and run Restore.
 internal sealed record BannerState
 {
     public required BannerLevel Level { get; init; }
     public string? Message { get; init; }
-    public BannerRedCause RedCause { get; init; } = BannerRedCause.NotRed;
 
     internal bool RowsLockedExceptRestore => Level == BannerLevel.Red;
 }
@@ -81,13 +71,13 @@ internal static class Banner
         {
             // Nothing anywhere has a readable result: fail closed, the same as the old "every run
             // folder has no result.json" rule.
-            return new BannerState { Level = BannerLevel.Red, Message = RedMessage, RedCause = BannerRedCause.UnknownOrUnreadable };
+            return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
 
         bool newerUnreadableExists = runs.Any(run => !run.ReadSucceeded && IsNewerThan(run, chosen));
         if (newerUnreadableExists)
         {
-            return new BannerState { Level = BannerLevel.Red, Message = RedMessage, RedCause = BannerRedCause.UnknownOrUnreadable };
+            return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
 
         // One signal or the other was wrong about which run actually happened later (the one
@@ -103,7 +93,7 @@ internal static class Banner
             runs.Select(run => (run.Sequence, run.OrderingUtc)).ToList());
         if (disagreement)
         {
-            return new BannerState { Level = BannerLevel.Red, Message = RedMessage, RedCause = BannerRedCause.UnknownOrUnreadable };
+            return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
 
         string? leftAtRest = chosen.Result!.LeftAtRest;
@@ -111,12 +101,7 @@ internal static class Banner
         {
             "yes" or "not-applicable" => new BannerState { Level = BannerLevel.None },
             "no-on-purpose" => new BannerState { Level = BannerLevel.Amber, Message = "Left enabled on purpose." },
-            // LiveTest.psm1's own at-rest check only ever writes leftAtRest "no" once it has read a
-            // concrete, non-null node state after the block (never when that read itself failed,
-            // which is recorded as "unknown" instead): the AirPods are known connected to this
-            // computer right then, never merely unread.
-            "no" => new BannerState { Level = BannerLevel.Red, Message = RedMessage, RedCause = BannerRedCause.KnownNotAtRest },
-            _ => new BannerState { Level = BannerLevel.Red, Message = RedMessage, RedCause = BannerRedCause.UnknownOrUnreadable },
+            _ => new BannerState { Level = BannerLevel.Red, Message = RedMessage },
         };
     }
 
