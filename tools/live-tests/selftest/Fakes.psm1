@@ -181,6 +181,7 @@ $script:CaseItemCounts = @{
     none = 0; one = 1; two = 2; 'grace-doubled' = 0; 'grace-unparsable' = 0
     'atrest-decline' = 0; 'atrest-guard-throws' = 0; 'atrest-block-ineffective' = 0
     'atrest-setup-unknown' = 0; 'atrest-config-missing' = 0; 'atrest-nodes-probe-fails' = 0; 'atrest-nodes-stay-unreadable' = 0
+    'atrest-render-active' = 0; 'atrest-disconnect-declined' = 0; 'atrest-disconnect-not-confirmed' = 0; 'atrest-audio-unreadable' = 0
     'declined-start' = 0
     'handback-cut-short' = 0; 'handback-not-reached' = 0; 'no-sleep-event' = 1; 'repaged-at-wake' = 1
 }
@@ -195,6 +196,7 @@ function Initialize-FakeMachine
             'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+            'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
     )
 
@@ -252,6 +254,7 @@ function New-FakeSandbox
             'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+            'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
     )
 
@@ -411,18 +414,34 @@ function Get-FakeNodes
 {
     $nodes = @()
     $disabled = ($script:World.NodeState -eq 'Blocked')
-    $problem = 0
-    if ($disabled) { $problem = 22 }
+
+    # Mixed is what a block runs into while render is ACTIVE (Update-FakeWorld, "diag gate
+    # block"): Windows vetoes the A2DP sink node (0000110B) alone, exactly as the owner's machine
+    # showed three times on 2026-09-21 (nodesAfter: that entry Enabled, problem 0,
+    # configFlagsDisabled true), while the other target nodes disable normally.
+    $mixed = ($script:World.NodeState -eq 'Mixed')
 
     foreach ($service in @('0000110B', '0000111E', '0000110A'))
     {
+        $problem = 0
+        $configFlagsDisabled = $disabled
+        if ($mixed)
+        {
+            $configFlagsDisabled = $true
+            if ($service -ne '0000110B') { $problem = 22 }
+        }
+        elseif ($disabled)
+        {
+            $problem = 22
+        }
+
         $nodes = $nodes + @([ordered]@{
                 instanceId          = ('BTHENUM\{' + $service + '-0000-1000-8000-00805F9B34FB}_VID&0001005D_PID&2038\8&' + $script:PinnedAddress + '&0&' + $script:PinnedAddress + '_C00000000')
                 target              = $true
                 present             = $true
                 status              = '0x0180200A'
                 problem             = $problem
-                configFlagsDisabled = $disabled
+                configFlagsDisabled = $configFlagsDisabled
             })
     }
 
@@ -614,6 +633,37 @@ function Get-FakeGateEvidence
         }
     }
 
+    # The one world rule proved on the owner's machine three times on 2026-09-21: Windows refuses
+    # to disable the A2DP sink node (0000110B) while it is rendering (CR_REMOVE_VETOED), whatever
+    # sent the block. This is not restricted to any one case: any half whose world still renders
+    # when "diag gate block" runs hits it, which is what makes the closing step's disconnect-first
+    # order provable rather than merely asserted for one case.
+    if ($Verb -eq 'block' -and $script:World.Render -eq 'Active')
+    {
+        $steps = @()
+        foreach ($service in @('0000110B', '0000111E', '0000110A', '00001108', '0000111F', '00001112', '00001203', '00001132'))
+        {
+            $vetoed = ($service -eq '0000110B')
+            $steps = $steps + @([ordered]@{
+                    step     = ('cm-disable:BTHENUM\{' + $service + '-0000-1000-8000-00805F9B34FB}_VID&0001005D_PID&2038\8&' + $script:PinnedAddress + '&0&' + $script:PinnedAddress + '_C00000000')
+                    ok       = -not $vetoed
+                    code     = $(if ($vetoed) { 23 } else { 0 })
+                    codeName = $(if ($vetoed) { 'CR_REMOVE_VETOED' } else { 'CR_SUCCESS' })
+                    detail   = $(if ($vetoed) { 'A driver or app refused to let the node go.' } else { $null })
+                })
+        }
+
+        return [ordered]@{
+            outcome            = 'Completed'
+            nonce              = '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64'
+            runMilliseconds    = 5500
+            lastTaskResult     = 'partial'
+            lastTaskResultCode = 2
+            statusFile         = [ordered]@{ exitCode = 2; result = 'partial'; state = 'Mixed'; nonce = '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64' }
+            steps              = $steps
+        }
+    }
+
     return [ordered]@{
         outcome            = 'Completed'
         nonce              = '4f1c9b7a2e6d4a118c3f0b5d9e2a7c64'
@@ -736,8 +786,23 @@ function Update-FakeWorld
 
     switch -Regex ($text)
     {
-        '^diag gate allow' { $script:World.NodeState = 'Allowed' }
-        '^diag gate block' { $script:World.NodeState = 'Blocked'; $script:World.Render = 'Unplugged' }
+        '^diag gate allow'
+        {
+            $script:World.NodeState = 'Allowed'
+            # atrest-render-active only (row 00): models the third Restore run on 2026-09-21,
+            # where the allow was followed by the AirPods rendering again with no click line
+            # between them. Restricted by case name, not a plain rule, because test 03's
+            # no-auto-page criterion depends on a plain allow never paging in the fake.
+            if ((Get-FakeContext).Case -eq 'atrest-render-active') { $script:World.Render = 'Active' }
+        }
+        '^diag gate block'
+        {
+            # The veto rule (Get-FakeGateEvidence) already decided, from render at call time,
+            # whether this was vetoed; NodeState mirrors that here rather than recomputing it, so
+            # the two cannot disagree.
+            if ($script:World.Render -eq 'Active') { $script:World.NodeState = 'Mixed' } else { $script:World.NodeState = 'Blocked' }
+            $script:World.Render = 'Unplugged'
+        }
         '^diag gate protect-on' { $script:World.Protection = 'Protected' }
         '^diag gate protect-off' { $script:World.Protection = 'NotProtected' }
         '^diag gate setboot-off' { Write-FakeMachineFiles -DataFolder $script:Context.DataFolder -BlockAtBoot $false -Items $script:Context.Items }
@@ -798,7 +863,31 @@ function Get-FakeCommandAnswer
         {
             'ks' { $evidence = Get-FakeKsEvidence -Action $Command[2] -Filter $Command[3] -FilterChoice $(if ($Command.Count -gt 4) { [string]$Command[4] } else { '' }) }
             'connect' { $evidence = Get-FakeKsEvidence -Action 'reconnect' -Filter 'all' }
-            'disconnect' { $evidence = Get-FakeKsEvidence -Action 'disconnect' -Filter 'all' }
+            'disconnect'
+            {
+                # atrest-disconnect-not-confirmed: the closing step's own disconnect runs but
+                # never reaches the wanted state, so Update-FakeWorld (Test-FakeReached) leaves
+                # render exactly where it was, and the harness's own re-read is what has to say
+                # so. Every other case gets the plain answer, filters and all.
+                if ((Get-FakeContext).Case -eq 'atrest-disconnect-not-confirmed')
+                {
+                    $evidence = [ordered]@{
+                        action                                      = 'disconnect'
+                        filterChoice                                = 'all'
+                        payload                                     = 'documented'
+                        error                                       = $null
+                        sendFault                                   = $null
+                        filters                                     = (Get-FakeKsFilters -Filter 'all')
+                        notifications                                = @()
+                        confirmation                                 = [ordered]@{ reached = $false; unreachable = $true; source = $null }
+                        millisecondsToFirstWantedStateNotification  = $null
+                    }
+                }
+                else
+                {
+                    $evidence = Get-FakeKsEvidence -Action 'disconnect' -Filter 'all'
+                }
+            }
             'gate' { $evidence = Get-FakeGateEvidence -Verb $Command[2] -Argument $(if ($Command.Count -gt 3) { [string]$Command[3] } else { '' }) }
             'protect-unelevated' { $evidence = Get-FakeUnelevatedEvidence -Mode $Command[2] }
             'battery-sweep' { $evidence = Get-FakeSweepEvidence }

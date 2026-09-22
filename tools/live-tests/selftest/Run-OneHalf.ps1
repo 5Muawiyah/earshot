@@ -46,8 +46,15 @@
     file is missing), atrest-nodes-probe-fails and atrest-nodes-stay-unreadable (the node read
     fails once, or fails both times), atrest-guard-throws (something throws outside all of that,
     proving Close-AtRest's and Complete-LiveTestRun's own guards rather than any of the above).
-    declined-start answers 'n' to the "ready to start" prompt, for the one test that needs to
-    prove the at-rest reason is not set before the owner has actually agreed to go ahead.
+    atrest-render-active (row 00 only) models the third Restore run of 2026-09-21: the allow pages
+    the AirPods, so the closing step's own disconnect-first order is what keeps the block from
+    being vetoed. atrest-disconnect-declined and atrest-disconnect-not-confirmed intercept
+    'at-rest-disconnect' the same way atrest-decline intercepts 'at-rest-block'; atrest-audio-
+    unreadable intercepts 'at-rest-audio' the way the other atrest-nodes-* cases intercept
+    'at-rest-nodes', proving the disconnect is still offered when render cannot be read at all
+    (fail closed). declined-start answers 'n' to the "ready to start" prompt, for the one test
+    that needs to prove the at-rest reason is not set before the owner has actually agreed to go
+    ahead.
 
 .PARAMETER RunRoot
     The evidence folder, shared by the two halves of a resumable test.
@@ -68,6 +75,7 @@ param(
         'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
         'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+        'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case,
     [Parameter(Mandatory = $true)][string]$RunRoot,
     [string]$ExtraArguments = ''
@@ -119,6 +127,13 @@ function Resolve-EarshotExe
 #                                      case atrest-block-ineffective: answered as a plain success,
 #                                      but Update-FakeWorld (Fakes.psm1) leaves the world where it
 #                                      was, so only the closing check's own re-read can catch it.
+#   'at-rest-audio'                   case atrest-audio-unreadable: answered as a failed probe,
+#                                      the same shape as the at-rest-nodes cases above; the
+#                                      after-read is not intercepted, so the disconnect step still
+#                                      confirms normally once it has run.
+#   'at-rest-disconnect'              case atrest-disconnect-declined: answered as a declined live
+#                                      step, the same shape as atrest-decline above, without moving
+#                                      the fake machine.
 function Invoke-Earshot
 {
     param(
@@ -153,6 +168,18 @@ function Invoke-Earshot
     }
 
     if ($Label -eq 'at-rest-block' -and $case -eq 'atrest-decline')
+    {
+        return (Invoke-FakeDeclinedStep -Run $Run -Label $Label -Command $Command -Consequence $Consequence)
+    }
+
+    # Both belong to Close-AtRest's own disconnect-first step alone (no shipped script uses
+    # either label), so neither changes what any other criterion sees.
+    if ($Label -eq 'at-rest-audio' -and $case -eq 'atrest-audio-unreadable')
+    {
+        return (Invoke-FakeFailedProbe -Run $Run -Label $Label -Command $Command)
+    }
+
+    if ($Label -eq 'at-rest-disconnect' -and $case -eq 'atrest-disconnect-declined')
     {
         return (Invoke-FakeDeclinedStep -Run $Run -Label $Label -Command $Command -Consequence $Consequence)
     }

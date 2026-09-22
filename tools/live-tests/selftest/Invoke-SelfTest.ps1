@@ -68,6 +68,7 @@ param(
     [ValidateSet('', 'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
         'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+        'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
@@ -90,8 +91,11 @@ $tests = @(
     # unexpectedly deep in the at-rest closing step (Run-OneHalf.ps1's Invoke-Earshot, label
     # 'at-rest-nodes'), proving Close-AtRest's own catch and Complete-LiveTestRun's wrapping one,
     # not the null handling (see 01's cases for that). 00-Restore's own criteria are untouched.
+    # atrest-render-active is the regression case for closing-step-disconnect-first.md: the allow
+    # pages the AirPods (Fakes.psm1's own case-restricted rule), so the closing step's disconnect
+    # runs first, confirms, and only then blocks; the old step, with no disconnect, is vetoed here.
     [ordered]@{ Number = '00'; Id = '00-restore'; Script = '00-Restore.ps1'; Halves = @('first'); Extra = @()
-        Cases = @('none', 'one', 'two', 'atrest-guard-throws') }
+        Cases = @('none', 'one', 'two', 'atrest-guard-throws', 'atrest-render-active') }
     # Added on top of the shared three: 01 never calls "diag gate block" itself and ends with the
     # nodes Allowed in every case, so this is where the at-rest closing step's own offer is the
     # only "diag gate block" step in the run, exercised cleanly (Run-OneHalf.ps1's Invoke-Earshot,
@@ -102,10 +106,17 @@ $tests = @(
     # missing, and this must still check the nodes rather than call it not-applicable),
     # atrest-nodes-probe-fails (the first node read fails but the later one, after the offer,
     # still answers) and atrest-nodes-stay-unreadable (neither read ever answers, so the honest
-    # record is unknown, never a guessed no).
+    # record is unknown, never a guessed no). 01 also renders at its own close (the last KS step
+    # leaves render ACTIVE), so it is where the closing step's own disconnect-first order is
+    # exercised on every one of its cases, plus three more built for it:
+    # atrest-disconnect-declined (the disconnect offer is declined, the block still offered and
+    # vetoed while playing), atrest-disconnect-not-confirmed (the disconnect verb runs but render
+    # never leaves ACTIVE on the re-read) and atrest-audio-unreadable (the pre-offer render read
+    # fails, so the disconnect is offered anyway, fail closed).
     [ordered]@{ Number = '01'; Id = '01-a2dp-oneshot'; Script = '01-A2dpOneShot.ps1'; Halves = @('first'); Extra = @()
         Cases = @('none', 'one', 'two', 'atrest-decline', 'atrest-block-ineffective',
-            'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable') }
+            'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
+            'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable') }
     [ordered]@{ Number = '02'; Id = '02-disconnect'; Script = '02-Disconnect.ps1'; Halves = @('first'); Extra = @() }
     [ordered]@{ Number = '03'; Id = '03-allow-pages'; Script = '03-AllowPages.ps1'; Halves = @('first'); Extra = @('WatchSeconds=30') }
     [ordered]@{ Number = '04'; Id = '04-block-and-reboot'; Script = '04-BlockAndReboot.ps1'; Halves = @('first', 'resume'); Extra = @() }
@@ -316,54 +327,61 @@ function Invoke-Half
 # cases below: a row's own bespoke case (atrest-decline and the rest, grace-doubled, ...) has a
 # different, deliberately provoked outcome and carries its own explicit expectation instead.
 #
-#   00-restore|first                    yes, 1   allows on its own, then the offer blocks again
-#   01-a2dp-oneshot|first                yes, 1   never blocks itself; the offer is the only one
-#   02-disconnect|first                  yes, 2   one block mid-test, allows again, then the offer
-#   03-allow-pages|first                 yes, 1   blocks itself at the end; nothing left to offer
-#   04-block-and-reboot|first            yes, 1   blocks itself; nothing left to offer
-#   04-block-and-reboot|resume            yes, 0   starts and stays Blocked; nothing to offer
-#   05-allow|first                 no-on-purpose, 0   the fake owner always chooses the restart
-#   05-allow|resume                      yes, 1   starts Allowed (the enable held); the offer blocks
-#   06-handsfree|first                   yes, 2   one block mid-test, allows again, then the offer
-#   07-task-runex|first                  yes, 1   never blocks itself; the offer is the only one
-#   08-acceptance-power-cycle|first      yes, 0   starts Blocked; nothing to offer
-#   08-acceptance-power-cycle|resume     yes, 0   stays Blocked; nothing to offer
-#   09-shutdown-while-connected|first   no-on-purpose, 0   the reason is always given once ready
-#   09-shutdown-while-connected|resume    yes, 0   stays Blocked; nothing to offer
-#   10-shutdown-messages-v1|first  no-on-purpose, 0   the reason is always given once ready
-#   10-shutdown-messages-v1|resume        yes, 0   stays Blocked; nothing to offer
-#   11-battery-disconnected|first        yes, 1   never blocks itself; the offer is the only one
-#   12-callback-thread|first             yes, 1   never blocks itself; the offer is the only one
-#   13-grace-window|first                yes, 0   starts and stays Blocked; nothing to offer
-#   14-set-device-refusal|first          yes, 1   set-device never touches the nodes
-#   15-uninstall-reversal|first          yes, 1   uninstall allows, install does not re-block
-#   15-uninstall-reversal|resume          yes, 1   stays Allowed from the first half; the offer blocks
+# DisconnectCount (closing-step-disconnect-first.md D1/D2): the closing step disconnects first,
+# through "diag disconnect", whenever render reads ACTIVE (or cannot be read) as its own offer
+# begins; a positive not-ACTIVE reading skips it. Traced from each half's own StartState, its own
+# gate calls and Update-FakeWorldForOwnerAction, the same way BlockCount always has been.
+#
+#   00-restore|first                    yes, 1, 0   allows on its own, then the offer blocks again; nothing renders
+#   01-a2dp-oneshot|first                yes, 1, 1   the last KS step is ks-reconnect-all-while-active; nothing after it disconnects
+#   02-disconnect|first                  yes, 2, 0   the block-while-connected leg is vetoed (Mixed) and drops render; the allow then reads Allowed
+#   03-allow-pages|first                 yes, 1, 0   blocks itself at the end; nothing left to offer
+#   04-block-and-reboot|first            yes, 1, 0   blocks itself; nothing left to offer
+#   04-block-and-reboot|resume            yes, 0, 0   starts and stays Blocked; nothing to offer
+#   05-allow|first                 no-on-purpose, 0, 0   the fake owner always chooses the restart
+#   05-allow|resume                      yes, 1, 0   starts Allowed (the enable held); the offer blocks; nothing renders
+#   06-handsfree|first                   yes, 2, 0   the owner text "Disconnect the AirPods ... connect them again" matches the away phrase first
+#   07-task-runex|first                  yes, 1, 0   never blocks itself; the offer is the only one; nothing renders
+#   08-acceptance-power-cycle|first      yes, 0, 0   starts Blocked; nothing to offer
+#   08-acceptance-power-cycle|resume     yes, 0, 0   stays Blocked; nothing to offer
+#   09-shutdown-while-connected|first   no-on-purpose, 0, 0   the reason is always given once ready
+#   09-shutdown-while-connected|resume    yes, 0, 0   stays Blocked; nothing to offer
+#   10-shutdown-messages-v1|first  no-on-purpose, 0, 0   the reason is always given once ready
+#   10-shutdown-messages-v1|resume        yes, 0, 0   stays Blocked; nothing to offer
+#   11-battery-disconnected|first        yes, 1, 1   "Connect the AirPods to this PC now" and nothing afterwards moves it
+#   12-callback-thread|first             yes, 1, 1   the script's own "diag disconnect" mid-test counts here too (DisconnectCount
+#                                                     counts the command line, not only the closing step's own send); render reads
+#                                                     Unplugged by the close, so the closing step itself sends none
+#   13-grace-window|first                yes, 0, 0   starts and stays Blocked; nothing to offer
+#   14-set-device-refusal|first          yes, 1, 0   set-device never touches the nodes; nothing renders
+#   15-uninstall-reversal|first          yes, 1, 0   uninstall allows, install does not re-block; nothing renders
+#   15-uninstall-reversal|resume          yes, 1, 0   stays Allowed from the first half; the offer blocks; nothing renders
 $script:AtRestDefaults = @{
-    '00-restore|first'                   = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '01-a2dp-oneshot|first'              = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '02-disconnect|first'                = @{ LeftAtRest = 'yes'; BlockCount = 2 }
-    '03-allow-pages|first'               = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '04-block-and-reboot|first'          = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '04-block-and-reboot|resume'         = @{ LeftAtRest = 'yes'; BlockCount = 0 }
-    '05-allow|first'                     = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
-    '05-allow|resume'                    = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '06-handsfree|first'                 = @{ LeftAtRest = 'yes'; BlockCount = 2 }
-    '07-task-runex|first'                = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '08-acceptance-power-cycle|first'    = @{ LeftAtRest = 'yes'; BlockCount = 0 }
-    '08-acceptance-power-cycle|resume'   = @{ LeftAtRest = 'yes'; BlockCount = 0 }
-    '09-shutdown-while-connected|first'  = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
-    '09-shutdown-while-connected|resume' = @{ LeftAtRest = 'yes'; BlockCount = 0 }
-    '10-shutdown-messages-v1|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
-    '10-shutdown-messages-v1|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0 }
-    '11-battery-disconnected|first'      = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '12-callback-thread|first'           = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '13-grace-window|first'              = @{ LeftAtRest = 'yes'; BlockCount = 0 }
-    '14-set-device-refusal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '15-uninstall-reversal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '15-uninstall-reversal|resume'       = @{ LeftAtRest = 'yes'; BlockCount = 1 }
-    '17-handback-on-shutdown|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
-    '17-handback-on-shutdown|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0 }
-    '18-handback-on-sleep|first'         = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '00-restore|first'                   = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '01-a2dp-oneshot|first'              = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 1 }
+    '02-disconnect|first'                = @{ LeftAtRest = 'yes'; BlockCount = 2; DisconnectCount = 0 }
+    '03-allow-pages|first'               = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '04-block-and-reboot|first'          = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '04-block-and-reboot|resume'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '05-allow|first'                     = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
+    '05-allow|resume'                    = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '06-handsfree|first'                 = @{ LeftAtRest = 'yes'; BlockCount = 2; DisconnectCount = 0 }
+    '07-task-runex|first'                = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '08-acceptance-power-cycle|first'    = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '08-acceptance-power-cycle|resume'   = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '09-shutdown-while-connected|first'  = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
+    '09-shutdown-while-connected|resume' = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '10-shutdown-messages-v1|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
+    '10-shutdown-messages-v1|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '11-battery-disconnected|first'      = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 1 }
+    '12-callback-thread|first'           = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 1 }
+    '13-grace-window|first'              = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '14-set-device-refusal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '15-uninstall-reversal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '15-uninstall-reversal|resume'       = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '17-handback-on-shutdown|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
+    '17-handback-on-shutdown|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '18-handback-on-sleep|first'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
 }
 
 # What the expectations for one case say should have been recorded, against what was. The
@@ -404,6 +422,13 @@ function Test-Expectations
         if ($actualCount -ne $wantedAtRest.BlockCount)
         {
             $problems = $problems + @([string]$Where + ': "diag gate block" ran ' + $actualCount + ' time(s), and the default table for "' + $key + '" implies ' + $wantedAtRest.BlockCount + '.')
+        }
+
+        $actualDisconnectCount = 0
+        if ($Recorded.StepCommandCounts.Contains('diag disconnect')) { $actualDisconnectCount = [int]$Recorded.StepCommandCounts['diag disconnect'] }
+        if ($actualDisconnectCount -ne $wantedAtRest.DisconnectCount)
+        {
+            $problems = $problems + @([string]$Where + ': "diag disconnect" ran ' + $actualDisconnectCount + ' time(s), and the default table for "' + $key + '" implies ' + $wantedAtRest.DisconnectCount + '.')
         }
     }
     if (-not $Expectations.Contains($key))

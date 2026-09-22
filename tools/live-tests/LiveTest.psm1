@@ -1328,6 +1328,25 @@ $script:AtRestUnknown        = 'unknown'
 $script:AtRestDefaultConsequence = 'Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. ' +
     'If the AirPods are playing through this PC right now, that stops.'
 
+# The closing step's own disconnect offer, sent through the existing 'diag disconnect' verb (the
+# same one-shot disconnect a left click sends) whenever the render endpoint reads ACTIVE or
+# cannot be read. Three Restore runs on 2026-09-21 (evidence under
+# %LOCALAPPDATA%\Earshot\livetest\, 20260921T161741Z, 20260921T162832Z, 20260921T162919Z) sent
+# "diag gate block" with the AirPods still rendering, and Windows refused the A2DP sink entry
+# (CR_REMOVE_VETOED). The order matches the product's own DisconnectCoreAsync
+# (src\Earshot\App\BlockCoordinator.cs, around 1594): disconnect, confirm, then block.
+$script:AtRestDisconnectConsequence = 'Disconnects the AirPods from this PC first, with the same one-shot disconnect a left click sends, ' +
+    'and reads the render endpoint again. Windows refuses to disable the A2DP sink entry while it is rendering ' +
+    '(CR_REMOVE_VETOED, 21 September 2026), so a block sent now would only partly take. Your AirPods will stop playing from this computer.'
+
+# What the block offer says when the disconnect above was declined, did not confirm, failed to
+# start or timed out: the block is still offered (nothing that reaches a block today stops
+# reaching it), but the owner is told plainly that it may only partly work. A fixed text, not the
+# caller's own -Consequence: 00 and 02's own texts describe the allow they reverse, which stays
+# true but is secondary here.
+$script:AtRestBlockWhilePlayingConsequence = [string]$script:AtRestDefaultConsequence + ' The AirPods still read as playing from this PC, ' +
+    'so Windows may refuse the audio entry as it did on 21 September; the re-read afterwards decides.'
+
 # What Complete-LiveTestRun calls before it writes result.json, on every script, so no test can
 # forget it. "At rest" means the AirPods Bluetooth nodes read Blocked, so Windows has nothing to
 # page at the next boot: the state the 19 September incident was missing, because test 01 and
@@ -1364,14 +1383,16 @@ function Close-AtRest
     $offerText = $(if ([string]::IsNullOrEmpty($Consequence)) { $script:AtRestDefaultConsequence } else { $Consequence })
 
     $detail = [ordered]@{
-        before      = $null
-        setUp       = $null
-        blockAtBoot = $null
-        reason      = $(if ([string]::IsNullOrEmpty($Reason)) { $null } else { $Reason })
-        offered     = $false
-        accepted    = $null
-        blockStep   = $null
-        after       = $null
+        before        = $null
+        setUp         = $null
+        blockAtBoot   = $null
+        reason        = $(if ([string]::IsNullOrEmpty($Reason)) { $null } else { $Reason })
+        offered       = $false
+        accepted      = $null
+        renderBefore  = $null
+        disconnectStep = $null
+        blockStep     = $null
+        after         = $null
     }
 
     Write-Section -Run $Run -Title 'Is the machine at rest?'
@@ -1429,8 +1450,79 @@ function Close-AtRest
         }
 
         $detail.offered = $true
+
+        # Disconnect first when render reads ACTIVE or cannot be read at all (fail closed, the
+        # same rule entry 26 applies elsewhere): Windows refuses to disable the A2DP sink node
+        # while it is rendering, so a block sent while playing here is vetoed. Only a positive
+        # not-ACTIVE reading skips this. See closing-step-disconnect-first.md D1.
+        $audioBeforeOffer = Get-AudioState -Run $Run -Label 'at-rest-audio'
+        $statesBeforeOffer = Get-TargetEndpointStates -AudioJson $audioBeforeOffer
+        $renderBefore = $statesBeforeOffer.Render
+        $detail.renderBefore = $renderBefore
+        Write-Line -Run $Run -Text ('  render reads ' + $(if ($null -eq $renderBefore) { 'unknown' } else { $renderBefore }) + '.')
+
+        $shouldDisconnectFirst = ($renderBefore -eq 'Active' -or $null -eq $renderBefore)
+        $disconnectStep = $null
+
+        if (-not $shouldDisconnectFirst)
+        {
+            Write-Line -Run $Run -Text ('The AirPods are not playing from this PC (render reads ' + $renderBefore + '), so nothing is disconnected first.')
+        }
+        else
+        {
+            $beforeDisconnectCount = $Run.Steps.Count
+            $disconnect = Invoke-Earshot -Run $Run -Label 'at-rest-disconnect' -Command @('diag', 'disconnect') -Live -Consequence $script:AtRestDisconnectConsequence
+
+            $lastDisconnectStep = $null
+            if ($Run.Steps.Count -gt $beforeDisconnectCount) { $lastDisconnectStep = $Run.Steps[$Run.Steps.Count - 1] }
+            $disconnectDeclined = ($null -ne $lastDisconnectStep -and $lastDisconnectStep.error -eq 'skipped at the owner request')
+
+            if ($disconnectDeclined)
+            {
+                $disconnectStep = [ordered]@{ offered = $true; accepted = $false; error = 'skipped at the owner request' }
+            }
+            elseif ($null -eq $disconnect)
+            {
+                $disconnectError = $(if ($null -ne $lastDisconnectStep) { $lastDisconnectStep.error } else { 'The disconnect step did not run.' })
+                $disconnectStep = [ordered]@{ offered = $true; accepted = $true; error = $disconnectError }
+            }
+            else
+            {
+                # The verb's own evidence and exit code are recorded and printed, never decisive:
+                # the same rule the block step already follows below. Only the harness's own
+                # re-read of render, right after, is what "confirmed" means here.
+                $disconnectEvidence = Get-DiagEvidence -Run $Run
+                $disconnectSummary = Read-KsEvidence -Run $Run -Evidence $disconnectEvidence
+
+                $audioAfterDisconnect = Get-AudioState -Run $Run -Label 'at-rest-audio-after'
+                $statesAfterDisconnect = Get-TargetEndpointStates -AudioJson $audioAfterDisconnect
+                $renderAfterDisconnect = $statesAfterDisconnect.Render
+                $confirmedByRender = ($null -ne $renderAfterDisconnect -and $renderAfterDisconnect -ne 'Active')
+
+                $disconnectStep = [ordered]@{
+                    offered              = $true
+                    accepted             = $true
+                    processExitCode      = $disconnect.exitCode
+                    confirmedByVerb      = $disconnectSummary.Reached
+                    millisecondsToState  = $disconnectSummary.MillisToState
+                    renderAfter          = $renderAfterDisconnect
+                    confirmed            = $confirmedByRender
+                }
+
+                Write-Line -Run $Run -Text ('  render now ' + $(if ($null -eq $renderAfterDisconnect) { 'unknown' } else { $renderAfterDisconnect }) + '.')
+            }
+        }
+
+        $detail.disconnectStep = $disconnectStep
+
+        # The block offer is never removed: a declined or unconfirmed disconnect still reaches it,
+        # with a consequence that says plainly the AirPods may still be playing here. Only a
+        # confirmed disconnect, or one that was never needed, keeps the caller's own text.
+        $disconnectConfirmedOrNotNeeded = ($null -eq $disconnectStep) -or ($disconnectStep.Contains('confirmed') -and $disconnectStep.confirmed -eq $true)
+        $blockOfferText = $(if ($disconnectConfirmedOrNotNeeded) { $offerText } else { $script:AtRestBlockWhilePlayingConsequence })
+
         $beforeStepCount = $Run.Steps.Count
-        $block = Invoke-Earshot -Run $Run -Label 'at-rest-block' -Command @('diag', 'gate', 'block') -Live -Consequence $offerText
+        $block = Invoke-Earshot -Run $Run -Label 'at-rest-block' -Command @('diag', 'gate', 'block') -Live -Consequence $blockOfferText
 
         $lastStep = $null
         if ($Run.Steps.Count -gt $beforeStepCount) { $lastStep = $Run.Steps[$Run.Steps.Count - 1] }
@@ -1488,6 +1580,11 @@ function Close-AtRest
         {
             Write-Line -Run $Run -Text ('The block itself reported ' + $gateResult + ' (exit ' + $gateExitCode + '), not a plain success.')
         }
+        if (-not $disconnectConfirmedOrNotNeeded)
+        {
+            Write-Line -Run $Run -Text 'The AirPods were still playing from this PC when the block ran, and Windows refuses to disable their audio entry while they are (CR_REMOVE_VETOED on 21 September 2026).'
+            Write-Line -Run $Run -Text 'Stop them playing from this PC (put them in their case, or left-click the Earshot icon, which disconnects and then blocks), then run 00-Restore.ps1 and accept its closing offers.'
+        }
         Write-Line -Run $Run -Text 'If this PC is shut down or restarted like this, Windows will page the AirPods at the next boot,'
         Write-Line -Run $Run -Text 'and they will bounce between the phone and this PC.'
         Write-Line -Run $Run -Text 'To fix it: start the Earshot tray, whose own start-up check blocks the nodes when they are not'
@@ -1537,7 +1634,7 @@ function Complete-LiveTestRun
         $atRestDetail = [ordered]@{
             before = $null; setUp = $null; blockAtBoot = $null
             reason = $(if ([string]::IsNullOrEmpty($AtRestReason)) { $null } else { $AtRestReason })
-            offered = $false; accepted = $null; blockStep = $null; after = $null
+            offered = $false; accepted = $null; renderBefore = $null; disconnectStep = $null; blockStep = $null; after = $null
         }
     }
 

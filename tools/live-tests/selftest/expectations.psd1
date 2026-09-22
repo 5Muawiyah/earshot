@@ -70,6 +70,14 @@
         'atrest-guard-throws' = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' }
             Findings = @{ 'leftAtRest' = 'unknown' }
             ExpectedErrors = 1 }
+        # The regression case for closing-step-disconnect-first.md: the allow pages the AirPods
+        # (Fakes.psm1's own case-restricted rule, Update-FakeWorld), so the closing step reads
+        # render ACTIVE, disconnects first, confirms, and only then blocks. On the old step, with
+        # no disconnect, this is exactly where the block is vetoed (Get-FakeGateEvidence's own
+        # world rule): leftAtRest no, blockStep.gateResult partial, "diag disconnect" ran 0 times.
+        'atrest-render-active' = @{ Overall = 'pass'; Criteria = @{ 'nodes' = 'pass'; 'protection' = 'pass'; 'block-at-boot' = 'pass'; 'tasks-as-shipped' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 } }
     }
 
     # ------------------------------------------------------------ 01 A2DP one-shot
@@ -111,7 +119,7 @@
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
                 'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
             FindingsInclude = @{ 'leftAtRest' = 'no' }
-            Steps = @{ 'diag gate block' = 0 }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 1 }
             SummaryContains = @(
                 'THE MACHINE IS NOT AT REST.'
                 'Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot.'
@@ -127,7 +135,7 @@
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
                 'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
             FindingsInclude = @{ 'leftAtRest' = 'no' }
-            Steps = @{ 'diag gate block' = 1 }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 }
             SummaryContains = @('THE MACHINE IS NOT AT REST.')
             ExpectedErrors = 0 }
         # The task probe that answers setUp fails the real way (an error recorded, $null
@@ -140,7 +148,7 @@
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
                 'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
             FindingsInclude = @{ 'leftAtRest' = 'yes' }
-            Steps = @{ 'diag gate block' = 1 }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 }
             ExpectedErrors = 1 }
         # config.json itself is missing (New-FakeSandbox removes it for this case), so
         # Get-BlockAtBootSetting answers $null without throwing or recording an error, the real
@@ -152,7 +160,7 @@
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
                 'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
             FindingsInclude = @{ 'leftAtRest' = 'yes' }
-            Steps = @{ 'diag gate block' = 1 }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 }
             ExpectedErrors = 0 }
         # The node probe fails once, before the offer, so there is nothing positive to say yet;
         # the offer still happens ("still offer and warn"), and the re-read after it succeeds, so
@@ -163,7 +171,7 @@
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
                 'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
             FindingsInclude = @{ 'leftAtRest' = 'yes' }
-            Steps = @{ 'diag gate block' = 1 }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 }
             ExpectedErrors = 1 }
         # Neither the read before the offer nor the one after it ever answers, even though the
         # offer itself still runs (and, in the fake world, actually blocks the nodes): the script
@@ -175,9 +183,53 @@
                 'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
                 'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
             FindingsInclude = @{ 'leftAtRest' = 'unknown' }
-            Steps = @{ 'diag gate block' = 1 }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 }
             SummaryContains = @('THE MACHINE IS NOT AT REST.')
             ExpectedErrors = 2 }
+        # The disconnect offer is declined: the block is still offered (nothing that reaches a
+        # block today stops reaching it), with the while-playing consequence, and is vetoed
+        # because render is still ACTIVE (Get-FakeGateEvidence's own world rule). Both new warning
+        # lines, and the headline, must reach summary.txt, not only result.json.
+        'atrest-disconnect-declined' = @{ Overall = 'pass'; Criteria = @{
+                'topology-reachable' = 'pass'; 'preconditions' = 'pass'; 'protection-on' = 'pass'
+                'K1-src-protected' = 'pass'; 'K1-src-active' = 'pass'; 'K1-budget' = 'pass'
+                'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
+                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'no' }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 }
+            SummaryContains = @(
+                'THE MACHINE IS NOT AT REST.'
+                'The AirPods were still playing from this PC when the block ran, and Windows refuses to disable their audio entry while they are (CR_REMOVE_VETOED on 21 September 2026).'
+                'Stop them playing from this PC (put them in their case, or left-click the Earshot icon, which disconnects and then blocks), then run 00-Restore.ps1 and accept its closing offers.'
+            )
+            ExpectedErrors = 0 }
+        # The disconnect verb runs but never reaches the wanted state (Get-FakeCommandAnswer's own
+        # case-keyed branch), so render still reads ACTIVE on the harness's own re-read: confirmed
+        # is false, the block is offered with the while-playing consequence, and is vetoed.
+        'atrest-disconnect-not-confirmed' = @{ Overall = 'pass'; Criteria = @{
+                'topology-reachable' = 'pass'; 'preconditions' = 'pass'; 'protection-on' = 'pass'
+                'K1-src-protected' = 'pass'; 'K1-src-active' = 'pass'; 'K1-budget' = 'pass'
+                'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
+                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'no' }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 }
+            SummaryContains = @(
+                'THE MACHINE IS NOT AT REST.'
+                'The AirPods were still playing from this PC when the block ran, and Windows refuses to disable their audio entry while they are (CR_REMOVE_VETOED on 21 September 2026).'
+            )
+            ExpectedErrors = 0 }
+        # The pre-offer render read fails outright (the same failed-probe shape as the node reads
+        # above), so renderBefore is not recorded, not a positive not-ACTIVE reading: the
+        # disconnect is offered anyway (fail closed). It runs for real and confirms, so the block
+        # that follows uses the ordinary consequence and is not vetoed.
+        'atrest-audio-unreadable' = @{ Overall = 'pass'; Criteria = @{
+                'topology-reachable' = 'pass'; 'preconditions' = 'pass'; 'protection-on' = 'pass'
+                'K1-src-protected' = 'pass'; 'K1-src-active' = 'pass'; 'K1-budget' = 'pass'
+                'K1-wave-absent' = 'pass'; 'K1-all-protected' = 'pass'; 'K1-src-unprotected' = 'pass'
+                'K1-wave-brings-a2dp' = 'pass'; 'restored' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 }
+            ExpectedErrors = 1 }
     }
 
     # -------------------------------------------------------------- 02 disconnect
@@ -324,7 +376,7 @@
         # and blocks them, exactly as any other run that never got going would.
         'declined-start' = @{ Overall = 'inconclusive'; Criteria = @{}
             FindingsInclude = @{ 'leftAtRest' = 'yes' }
-            Steps = @{ 'diag gate block' = 1 } }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
     }
     # end-session-logged counts the query and end lines, so it is a fail when the log holds
     # neither. That is the answer, and the run still reaches the two criteria after it.
@@ -401,31 +453,31 @@
                 'secondsFromIdleToBlock' = $null; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = $null
                 'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0; 'leftAtRest' = 'yes'
             }
-            Steps = @{ 'diag gate block' = 0 } }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
         one  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 1; 'idleDelaySecondsAtBlock' = 45
                 'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 1; 'leftAtRest' = 'yes'
             }
-            Steps = @{ 'diag gate block' = 0 } }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
         two  = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 2; 'idleDelaySecondsAtBlock' = 45
                 'suggestedIdleGraceSeconds' = 45; 'idleRuleReArmed' = 2; 'leftAtRest' = 'yes'
             }
-            Steps = @{ 'diag gate block' = 0 } }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
         'grace-doubled' = @{ Overall = 'pass'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'pass' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = 90
                 'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0; 'leftAtRest' = 'yes'
             }
-            Steps = @{ 'diag gate block' = 0 } }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
         'grace-unparsable' = @{ Overall = 'inconclusive'; Criteria = @{ 'not-too-short' = 'pass'; 'blocks-when-idle' = 'pass'; 'not-too-long' = 'inconclusive' }
             Findings = @{
                 'secondsFromIdleToBlock' = 15; 'idleBlockDeferrals' = 0; 'idleDelaySecondsAtBlock' = $null
                 'suggestedIdleGraceSeconds' = $null; 'idleRuleReArmed' = 0; 'leftAtRest' = 'yes'
             }
-            Steps = @{ 'diag gate block' = 0 } }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
     }
 
     # ------------------------------------------------------ 14 set-device refusal

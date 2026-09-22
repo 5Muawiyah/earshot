@@ -172,6 +172,30 @@ internal static class PromptPresenter
         "Stops this computer grabbing your AirPods when it starts up. If the AirPods are playing " +
         "through this computer right now, that stops too.";
 
+    // The closing step's own disconnect-first offer (closing-step-disconnect-first.md D1/D2):
+    // sent, through LiveTest.psm1's own $script:AtRestDisconnectConsequence, whenever render
+    // reads ACTIVE or cannot be read, before the block offer. Same reasoning as the shared default
+    // above: a module-level PowerShell variable, never a literal any single script repeats, so it
+    // can never carry a wording.json entry either. Matched exactly.
+    private const string CloseAtRestDisconnectConsequence =
+        "Disconnects the AirPods from this PC first, with the same one-shot disconnect a left click sends, " +
+        "and reads the render endpoint again. Windows refuses to disable the A2DP sink entry while it is rendering " +
+        "(CR_REMOVE_VETOED, 21 September 2026), so a block sent now would only partly take. Your AirPods will stop playing from this computer.";
+
+    private const string CloseAtRestDisconnectConsequencePlain =
+        "Your AirPods will stop playing from this computer, so that the next step can block them.";
+
+    // What the block offer says when the disconnect above was declined, did not confirm, failed to
+    // start or timed out: LiveTest.psm1's own $script:AtRestBlockWhilePlayingConsequence.
+    private const string CloseAtRestBlockWhilePlayingConsequence =
+        "Blocks the AirPods Bluetooth nodes so this PC does not page them at the next boot. " +
+        "If the AirPods are playing through this PC right now, that stops. The AirPods still read as playing from this PC, " +
+        "so Windows may refuse the audio entry as it did on 21 September; the re-read afterwards decides.";
+
+    private const string CloseAtRestBlockWhilePlayingConsequencePlain =
+        "This computer will try to block your AirPods now. Because they may still be playing here, Windows may only " +
+        "let part of it happen; the record will say.";
+
     private static PresentedPrompt PresentConfirmStep(ChildMessage message, string testNumber, IReadOnlyList<WordingEntry> wording)
     {
         string consequence = message.Bound.GetValueOrDefault("Consequence", string.Empty);
@@ -182,8 +206,19 @@ internal static class PromptPresenter
             heading = "Stop this computer grabbing your AirPods again?";
         }
 
+        // The disconnect offer gets its own heading: it is a different device action from the
+        // block (it stops audio the owner can hear now), matched exactly the same way as the
+        // shared and while-playing consequences below.
+        if (consequence == CloseAtRestDisconnectConsequence)
+        {
+            heading = "Stop your AirPods playing from this computer?";
+        }
+
         string plain = entry?.Plain
-            ?? (consequence == CloseAtRestSharedConsequence ? CloseAtRestSharedConsequencePlain : consequence);
+            ?? (consequence == CloseAtRestSharedConsequence ? CloseAtRestSharedConsequencePlain
+                : consequence == CloseAtRestDisconnectConsequence ? CloseAtRestDisconnectConsequencePlain
+                : consequence == CloseAtRestBlockWhilePlayingConsequence ? CloseAtRestBlockWhilePlayingConsequencePlain
+                : consequence);
         return new PresentedPrompt
         {
             Heading = heading,

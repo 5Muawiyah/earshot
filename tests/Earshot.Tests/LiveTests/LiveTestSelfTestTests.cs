@@ -31,9 +31,11 @@ public sealed class LiveTestSelfTestTests
 {
     // 66 short-lived PowerShell processes when this was measured, on 2026-09-18 (commit 8d2db48).
     // Test 13's two extra self-test cases, added the next day, brought the count to 68. The
-    // at-rest closing step's own cases across 00, 01 and 09 bring today's count to 77, and
-    // RealLauncherSelfTestTests.cs runs one PowerShell process more again, separately. Generous,
-    // because a machine under load is not a defect.
+    // at-rest closing step's own cases across 00, 01 and 09 bring the count to 77, tests 17 and
+    // 18 bring it to 95 (99 runs total, four of which are the closing step's own disconnect-first
+    // cases added next: see ExpectedExtraCases below), and RealLauncherSelfTestTests.cs runs one
+    // PowerShell process more again, separately. Generous, because a machine under load is not a
+    // defect.
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(20);
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
@@ -44,14 +46,20 @@ public sealed class LiveTestSelfTestTests
 
     // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
     // overrides in Invoke-SelfTest.ps1's $tests): 13-GraceWindow's doubled delay and its
-    // unreadable figure (2); 00-Restore's atrest-guard-throws (1); 01-A2dpOneShot's
+    // unreadable figure (2); 00-Restore's atrest-guard-throws and, added for
+    // closing-step-disconnect-first.md, atrest-render-active (2); 01-A2dpOneShot's
     // atrest-decline, atrest-block-ineffective, atrest-setup-unknown, atrest-config-missing,
-    // atrest-nodes-probe-fails and atrest-nodes-stay-unreadable (6); 09-ShutdownWhileConnected's
-    // declined-start, which runs both of that row's halves (2); 17-HandBackOnShutdown's
-    // declined-start, handback-cut-short and handback-not-reached, each run on both of that
-    // row's halves (6); 18-HandBackOnSleep's no-sleep-event, handback-cut-short and
-    // repaged-at-wake, on that row's one half (3).
-    private const int ExpectedExtraCases = 20;
+    // atrest-nodes-probe-fails, atrest-nodes-stay-unreadable and, added for the same fix,
+    // atrest-disconnect-declined, atrest-disconnect-not-confirmed and atrest-audio-unreadable (9);
+    // 09-ShutdownWhileConnected's declined-start, which runs both of that row's halves (2);
+    // 17-HandBackOnShutdown's declined-start, handback-cut-short and handback-not-reached, each
+    // run on both of that row's halves (6); 18-HandBackOnSleep's no-sleep-event,
+    // handback-cut-short and repaged-at-wake, on that row's one half (3). 2+2+9+2+6+3 = 24,
+    // printed by Invoke-SelfTest.ps1 itself (runs 99, halves 25, cases-per-half 3: 99 - 25*3 = 24)
+    // rather than re-derived here, because this arithmetic has been wrong before (the printed
+    // count decided the closing-step-disconnect-first.md fix too: the spec's own hand-worked
+    // total, from before tests 17 and 18 existed on this tree, did not match what actually ran).
+    private const int ExpectedExtraCases = 24;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()
