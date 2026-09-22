@@ -117,7 +117,7 @@ internal static class Wording
 
     // A precondition or physical action line can be a compound script line: a fixed opening
     // phrase concatenated at runtime with dynamic, already-plain content (10-ShutdownMessages.ps1's
-    // own per-variant restart instruction is the one case among the sixteen shipped scripts). Its
+    // own per-variant restart instruction is the one case among the eighteen shipped scripts). Its
     // wording entry is keyed on the fixed opening phrase alone, because that is the only substring
     // guaranteed to appear literally in the script; whatever follows it is shown exactly as the
     // script produced it, since it is real, on-screen information (what to click or type), never

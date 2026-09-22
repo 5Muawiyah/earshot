@@ -230,6 +230,37 @@
       "maxSilenceSeconds": 900,
       "firstHalfOnlyCriteriaIds": [ "uninstall", "install-again" ],
       "secondHalfOnlyCriteriaIds": [ "delayed-deletion" ]
+    },
+    {
+      "number": "17",
+      "script": "17-HandBackOnShutdown.ps1",
+      "testId": "17-handback-on-shutdown",
+      "kind": "power-cycle-full-shutdown",
+      "halves": 2,
+      "name": "Hand back on shut down",
+      "title": "Hand back on shut down, then the next boot",
+      "proves": "Earshot hands the AirPods back before this computer shuts down, and leaves them alone at the next start.",
+      "settles": "Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone.",
+      "powerCycleRequirement": "full-shut-down",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [ "connected-first" ],
+      "secondHalfOnlyCriteriaIds": [
+        "end-session-logged", "handback-started", "handback-disconnect-confirmed", "handback-block-sent",
+        "handback-finished", "nodes-after-boot", "not-paged-at-boot", "heard-handed-back", "shutdown-was-clean"
+      ]
+    },
+    {
+      "number": "18",
+      "script": "18-HandBackOnSleep.ps1",
+      "testId": "18-handback-on-sleep",
+      "kind": "owner-present",
+      "halves": 1,
+      "name": "Hand back on sleep",
+      "title": "Hand back on sleep, then wake",
+      "proves": "Earshot hands the AirPods back before this computer sleeps, and does not take them back by itself on waking.",
+      "settles": "Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
     }
   ]
 }

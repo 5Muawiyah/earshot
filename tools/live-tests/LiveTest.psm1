@@ -1114,6 +1114,56 @@ function Get-FastStartupSetting
     }
 }
 
+# The System event log entries a hand-back test needs: sleep and wake (Microsoft-Windows-Kernel-Power
+# 42, 107), a dirty boot (Microsoft-Windows-Kernel-Power 41), a shutdown or restart request (User32
+# 1074), and the boot type (Microsoft-Windows-Kernel-Boot 27). Read-only; none of the five needs
+# elevation for the signed-in user on this machine. Returns ,$found: a list of
+# [ordered]@{ utc; id; provider; message }, oldest first, at or after SinceUtc.
+#
+# Get-WinEvent throws when nothing matches the filter, which is its own way of saying zero, not a
+# read failure, so only a different error is written down with Write-Failure. A read that fails for
+# any other reason returns the empty list too, never a guess.
+# https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.diagnostics/get-winevent
+function Get-PowerEvents
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [Parameter(Mandatory = $true)][datetime]$SinceUtc
+    )
+
+    $found = @()
+    try
+    {
+        $events = Get-WinEvent -FilterHashtable @{
+            LogName      = 'System'
+            ProviderName = @('Microsoft-Windows-Kernel-Power', 'Microsoft-Windows-Kernel-Boot', 'User32')
+            Id           = @(42, 107, 41, 1074, 27)
+            StartTime    = $SinceUtc
+        } -ErrorAction Stop
+
+        foreach ($event in ($events | Sort-Object TimeCreated))
+        {
+            $found = $found + @([ordered]@{
+                    utc      = $event.TimeCreated.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+                    id       = [int]$event.Id
+                    provider = [string]$event.ProviderName
+                    message  = [string]$event.Message
+                })
+        }
+    }
+    catch
+    {
+        if (([string]($_.Exception.Message)) -notmatch 'No events were found')
+        {
+            Write-Failure -Run $Run -Message ('The System event log could not be read: ' + ($_ | Out-String).Trim())
+        }
+
+        return ,$found
+    }
+
+    return ,$found
+}
+
 # The Earshot log lines written at or after the given UTC time whose text holds the
 # pattern. The log is plain text, one entry per line, starting with the UTC stamp.
 function Get-EarshotLogLines
@@ -1570,6 +1620,6 @@ Export-ModuleMember -Function `
     Get-GateExitName, Get-OutPath, Copy-AppEvidence, Get-DiagEvidence, Read-KsEvidence,
     Get-NodeState, Get-AudioState, Get-TopologyState, Get-ServiceState, Get-TaskState,
     Get-TargetEndpointStates, Read-EarshotJsonFile, Get-BlockAtBootSetting, Get-ProtectAudioSetting,
-    Get-EarshotLogLines, Save-EarshotLog, Get-FastStartupSetting,
+    Get-EarshotLogLines, Save-EarshotLog, Get-FastStartupSetting, Get-PowerEvents,
     Add-Criterion, Add-Finding, Write-Failure, Write-ResumeInstruction, Close-AtRest, Complete-LiveTestRun,
     Get-LiveTestExitCode

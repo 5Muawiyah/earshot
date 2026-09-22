@@ -92,7 +92,7 @@ internal static class ResumeFile
         if (!string.Equals(actualScriptFolder, expectedScriptFolder, StringComparison.OrdinalIgnoreCase) ||
             !knownScriptFileNames.Contains(Path.GetFileName(scriptPath), StringComparer.OrdinalIgnoreCase))
         {
-            reason = "resume.txt's script is not one of the 16 shipped scripts inside this repository's tools\\live-tests: " + scriptPath;
+            reason = "resume.txt's script is not one of the 18 shipped scripts inside this repository's tools\\live-tests: " + scriptPath;
             return false;
         }
 

@@ -6,8 +6,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// Scripts equal the 16 shipped; TestIds equal the
-// -TestId literals; halves sum to 22; markers agree with selftest\expectations.psd1, read
+// Scripts equal the 18 shipped; TestIds equal the
+// -TestId literals; halves sum to 25; markers agree with selftest\expectations.psd1, read
 // through a real Windows PowerShell 5.1 child exactly as the harness itself reads it
 // (Import-PowerShellDataFile), never re-typed as a C# literal.
 [TestClass]
@@ -19,7 +19,7 @@ public sealed class ManifestTests
         Manifest.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "tests.json"));
 
     [TestMethod]
-    public void SixteenRowsSummingToTwentyTwoHalves()
+    public void EighteenRowsSummingToTwentyFiveHalves()
     {
         IReadOnlyList<ManifestRow> rows = LoadManifest();
         Assert.AreEqual(Manifest.ExpectedRowCount, rows.Count);
@@ -27,7 +27,7 @@ public sealed class ManifestTests
     }
 
     [TestMethod]
-    public void ScriptsEqualTheSixteenShipped()
+    public void ScriptsEqualTheEighteenShipped()
     {
         string liveTestsRoot = Path.Combine(RepositoryLocator.RepositoryRoot(), "tools", "live-tests");
         string[] shipped = Directory.EnumerateFiles(liveTestsRoot, "*.ps1", SearchOption.TopDirectoryOnly)

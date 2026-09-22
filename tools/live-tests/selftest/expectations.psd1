@@ -463,4 +463,72 @@
         one  = @{ Overall = @('pass', 'fail'); Criteria = @{ 'delayed-deletion' = 'any' } }
         two  = @{ Overall = @('pass', 'fail'); Criteria = @{ 'delayed-deletion' = 'any' } }
     }
+
+    # ------------------------------------------------------ 17 hand back on shut down
+    '17-handback-on-shutdown|first' = @{
+        none = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
+        one  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
+        two  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
+        'declined-start' = @{ Overall = 'inconclusive'; Criteria = @{} }
+        'handback-cut-short' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
+        'handback-not-reached' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
+    }
+    '17-handback-on-shutdown|resume' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'end-session-logged' = 'fail'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'inconclusive'
+                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail' } }
+        one  = @{ Overall = 'pass'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'end-session-logged' = 'pass'; 'handback-started' = 'pass'; 'handback-disconnect-confirmed' = 'pass'
+                'handback-block-sent' = 'pass'; 'handback-finished' = 'pass'; 'shutdown-was-clean' = 'pass' }
+            FindingsInclude = @{ 'handBackFinishedMs' = 303; 'handBackDisconnectMs' = 37 } }
+        two  = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'end-session-logged' = 'pass'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'pass'
+                'handback-block-sent' = 'pass'; 'handback-finished' = 'pass'; 'shutdown-was-clean' = 'pass' } }
+        'declined-start' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'end-session-logged' = 'fail'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'inconclusive'
+                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail' } }
+        'handback-cut-short' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'end-session-logged' = 'pass'; 'handback-started' = 'pass'; 'handback-disconnect-confirmed' = 'pass'
+                'handback-block-sent' = 'pass'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'pass' }
+            FindingsInclude = @{ 'handBackCutShortStillRunning' = 'block' } }
+        'handback-not-reached' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'end-session-logged' = 'fail'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'inconclusive'
+                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail' }
+            FindingsInclude = @{ 'handBackFinishedMs' = $null; 'handBackDisconnectMs' = $null } }
+    }
+
+    # ------------------------------------------------------ 18 hand back on sleep
+    '18-handback-on-sleep|first' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'fail'; 'handback-started' = 'fail'
+                'handback-disconnect-confirmed' = 'inconclusive'; 'handback-block-sent' = 'fail'; 'handback-finished-or-sent' = 'fail'
+                'resume-logged' = 'fail'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+        one  = @{ Overall = 'inconclusive'; Criteria = @{
+                'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'pass'; 'handback-started' = 'pass'
+                'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
+                'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' }
+            FindingsInclude = @{ 'handBackFinishedMs' = 280; 'handBackDisconnectMs' = 22 } }
+        two  = @{ Overall = 'fail'; Criteria = @{
+                'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'fail'; 'handback-started' = 'pass'
+                'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
+                'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+        'no-sleep-event' = @{ Overall = 'inconclusive'; Criteria = @{
+                'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'pass'; 'handback-started' = 'pass'
+                'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
+                'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+        'handback-cut-short' = @{ Overall = 'fail'; Criteria = @{
+                'sleep-happened' = 'pass'; 'suspend-logged' = 'fail'; 'handback-started' = 'pass'
+                'handback-disconnect-confirmed' = 'fail'; 'handback-block-sent' = 'fail'; 'handback-finished-or-sent' = 'fail'
+                'resume-logged' = 'fail'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+        'repaged-at-wake' = @{ Overall = 'fail'; Criteria = @{
+                'sleep-happened' = 'pass'; 'suspend-logged' = 'pass'; 'handback-started' = 'pass'
+                'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
+                'resume-logged' = 'pass'; 'nodes-after-wake' = 'fail'; 'not-repaged-at-wake' = 'fail'; 'heard-handed-back' = 'pass' } }
+    }
 }

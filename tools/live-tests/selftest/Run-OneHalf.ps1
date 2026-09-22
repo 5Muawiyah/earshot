@@ -68,7 +68,7 @@ param(
         'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
         'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
-        'declined-start')][string]$Case,
+        'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case,
     [Parameter(Mandatory = $true)][string]$RunRoot,
     [string]$ExtraArguments = ''
 )
@@ -262,6 +262,18 @@ function Read-Host
 function Start-Process
 {
     throw ('The self-test never starts a process. Something reached Start-Process: ' + ($args -join ' '))
+}
+
+# The System event log side, for tests 17 and 18: never a real Get-WinEvent call, the fake table
+# in Fakes.psm1 instead (Get-FakePowerEvents), case-aware the same way every other fake answer is.
+function Get-PowerEvents
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [Parameter(Mandatory = $true)][datetime]$SinceUtc
+    )
+
+    return (Get-FakePowerEvents)
 }
 '@
 

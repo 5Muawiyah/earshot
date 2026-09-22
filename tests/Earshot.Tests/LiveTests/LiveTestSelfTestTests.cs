@@ -38,8 +38,8 @@ public sealed class LiveTestSelfTestTests
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
     // to tools\live-tests without being added here would otherwise be run by nothing.
-    private const int ExpectedScripts = 16;
-    private const int ExpectedHalves = 22;
+    private const int ExpectedScripts = 18;
+    private const int ExpectedHalves = 25;
     private const int ExpectedCases = 3;
 
     // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
@@ -47,8 +47,11 @@ public sealed class LiveTestSelfTestTests
     // unreadable figure (2); 00-Restore's atrest-guard-throws (1); 01-A2dpOneShot's
     // atrest-decline, atrest-block-ineffective, atrest-setup-unknown, atrest-config-missing,
     // atrest-nodes-probe-fails and atrest-nodes-stay-unreadable (6); 09-ShutdownWhileConnected's
-    // declined-start, which runs both of that row's halves (2).
-    private const int ExpectedExtraCases = 11;
+    // declined-start, which runs both of that row's halves (2); 17-HandBackOnShutdown's
+    // declined-start, handback-cut-short and handback-not-reached, each run on both of that
+    // row's halves (6); 18-HandBackOnSleep's no-sleep-event, handback-cut-short and
+    // repaged-at-wake, on that row's one half (3).
+    private const int ExpectedExtraCases = 20;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

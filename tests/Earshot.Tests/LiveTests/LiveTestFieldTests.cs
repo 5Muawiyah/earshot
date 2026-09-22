@@ -55,7 +55,10 @@ public sealed class LiveTestFieldTests
         new(
             "diag gate evidence",
             ["src/Earshot/Boot/DiagGate.cs", NodesProbe],
-            ["exitCode", "lastTaskResult", "lastTaskResultCode", "nonce", "outcome", "result", "runMilliseconds", "statusFile"]),
+            [
+                "codeName", "exitCode", "finishedUtc", "lastTaskResult", "lastTaskResultCode", "nonce",
+                "outcome", "result", "runMilliseconds", "startedUtc", "statusFile", "steps",
+            ]),
         new(
             "diag connect and ks evidence",
             ["src/Earshot/Audio/Connect/DiagConnect.cs", AudioProbe],
@@ -88,8 +91,10 @@ public sealed class LiveTestFieldTests
 
     // Names that come from neither. The startup value under the user's Run key is called Earshot, and
     // HiberbootEnabled is the registry value Windows keeps Fast Startup in, which the two tests that
-    // power the machine down read so their evidence says which kind of shutdown it was.
-    private static readonly string[] NotJson = ["Earshot", "HiberbootEnabled"];
+    // power the machine down read so their evidence says which kind of shutdown it was. "overall" is
+    // written by tools\live-tests\LiveTest.psm1's own Complete-LiveTestRun into a run's result.json,
+    // not by any C# report, which test 17 reads out of test 09's newest result to record test09Result.
+    private static readonly string[] NotJson = ["Earshot", "HiberbootEnabled", "overall"];
 
     private static ServiceRegistry NoServices() => throw new AssertFailedException("Writing a report needs no services.");
 
@@ -201,6 +206,31 @@ public sealed class LiveTestFieldTests
 
         Assert.IsEmpty(problems, string.Join(Environment.NewLine, problems));
         Assert.IsGreaterThan(0, LiveTestScriptTests.FieldReads.Count, "No field read was found in the scripts, which cannot be right.");
+    }
+
+    // tools\live-tests\selftest\Fakes.psm1 hand-writes the Hand-back lines 17 and 18 parse. This
+    // pins every shape against the real, unfaked HandBackText: a fixture that drifted from the real
+    // formatter would still let the self-test pass (it only checks itself), so the literal text is
+    // read back out of Fakes.psm1 and compared byte for byte against what HandBackText returns for
+    // the same arguments. See HandBackFormatterAgainstRealParserTests for the other half: those same
+    // lines run through the scripts' real parser in a real PowerShell 5.1 process.
+    [TestMethod]
+    public void HandBackFixturesInFakesPsm1MatchTheRealFormatter()
+    {
+        string path = Path.Combine(RepositoryRoot(), "tools", "live-tests", "selftest", "Fakes.psm1");
+        Assert.IsTrue(File.Exists(path), path + " is gone, so the Hand-back fixtures cannot be checked.");
+        string text = File.ReadAllText(path);
+
+        var problems = new List<string>();
+        foreach ((string label, string _, string pinText) in RealHandBackLines.Messages)
+        {
+            if (!text.Contains(pinText, StringComparison.Ordinal))
+            {
+                problems.Add("Fakes.psm1 has no line matching the real formatter's \"" + label + "\" shape: \"" + pinText + "\"");
+            }
+        }
+
+        Assert.IsEmpty(problems, string.Join(Environment.NewLine, problems));
     }
 
     [TestMethod]

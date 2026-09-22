@@ -23,6 +23,7 @@ internal static class HowToPictureGenerator
         ["earshot-icon-taskbar"] = EarshotIconTaskbar,
         ["earshot-icon-menu"] = EarshotIconMenu,
         ["start-power-shutdown"] = StartPowerShutdown,
+        ["start-power-sleep"] = StartPowerSleep,
         ["bluetooth-connect"] = BluetoothConnect,
         ["airpods-playing"] = AirPodsPlaying,
         ["permission-box"] = PermissionBox,
@@ -105,6 +106,29 @@ internal static class HowToPictureGenerator
         using var crossPen = new Pen(Color.FromArgb(255, 200, 40, 40), 3);
         g.DrawLine(crossPen, restartBounds.Left, restartBounds.Top, restartBounds.Right, restartBounds.Bottom);
         g.DrawLine(crossPen, restartBounds.Right, restartBounds.Top, restartBounds.Left, restartBounds.Bottom);
+
+        return ToPngBytes(bitmap);
+    }
+
+    // Start, Power, Sleep: the same three-step shape as StartPowerShutdown, but with nothing to
+    // avoid, so only the last step is ringed.
+    private static byte[] StartPowerSleep()
+    {
+        const int width = 420, height = 100;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var font = new Font(FontFamily.GenericSansSerif, 14f);
+        using var pen = new Pen(Ink, 2);
+
+        DrawLabelledStep(g, pen, font, 20, "Start");
+        DrawArrow(g, pen, 110, 40);
+        DrawLabelledStep(g, pen, font, 150, "Power");
+        DrawArrow(g, pen, 240, 40);
+        DrawLabelledStep(g, pen, font, 280, "Sleep");
+
+        // Ring "Sleep".
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawRectangle(ringPen, 272, 12, 116, 56);
 
         return ToPngBytes(bitmap);
     }

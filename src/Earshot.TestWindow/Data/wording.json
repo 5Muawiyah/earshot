@@ -27,6 +27,16 @@
         "Sign in, then open this window again."
       ]
     },
+    "put-this-computer-to-sleep": {
+      "picture": "start-power-sleep",
+      "steps": [
+        "Click Start.",
+        "Click Power.",
+        "Click Sleep.",
+        "Wait at least thirty seconds, then wake this computer up.",
+        "Sign in, then open this window again."
+      ]
+    },
     "restart": {
       "picture": null,
       "steps": [
@@ -444,6 +454,33 @@
     { "test": "15", "kind": "check", "scriptText": "install-again", "plain": "Installing Earshot again should set this computer up properly, and its own checks should confirm it." },
     { "test": "15", "kind": "check", "scriptText": "delayed-deletion", "plain": "Whatever was left to finish after the restart, removing files or the install that followed, should finish correctly." },
     { "test": "15", "kind": "check", "scriptText": "uninstall", "plain": "Removing Earshot should work." },
-    { "test": "15", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." }
+    { "test": "15", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." },
+
+    { "test": "17", "kind": "instruction", "scriptText": "Left-click the tray icon to connect the AirPods to this PC, and play something so they stay in use.", "plain": "Left-click the tray icon to connect the AirPods to this computer, and play something so they stay in use." },
+    { "test": "17", "kind": "question", "scriptText": "Is \"Hand back at shut down and sleep\" ticked in the tray menu right now?", "plain": "Is \"Hand back at shut down and sleep\" ticked in the tray menu right now?" },
+    { "test": "17", "kind": "question", "scriptText": "Did the AirPods connect to this PC by themselves after this boot?", "plain": "After this start, did the AirPods connect to this computer by themselves?" },
+    { "test": "17", "kind": "question", "scriptText": "Before the screen went dark, or just after, did the AirPods go back to your phone?", "plain": "Before the screen went dark, or just after, did the AirPods go back to your phone?" },
+    { "test": "17", "kind": "precondition", "scriptText": "Earshot is installed from a release built from the current head, set up, and running in the tray.", "plain": "Earshot is installed from an up-to-date build, set up, and its icon is showing near the clock." },
+    { "test": "17", "kind": "precondition", "scriptText": "Block at boot is on.", "plain": "Block at boot is on." },
+    { "test": "17", "kind": "precondition", "scriptText": "\"Hand back at shut down and sleep\" is ticked in the menu.", "plain": "\"Hand back at shut down and sleep\" is ticked in the tray menu." },
+    { "test": "17", "kind": "precondition", "scriptText": "The AirPods are paired with this PC and available to connect.", "plain": "The AirPods are paired with this computer and ready to connect." },
+    { "test": "17", "kind": "action", "scriptText": "Connect the AirPods to this PC with a left click on the tray icon and keep audio playing from this PC.", "plain": "Connect the AirPods to this computer: click the Earshot icon near the clock once, and keep sound playing from this computer.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "17", "kind": "action", "scriptText": "Shut down from the Start menu (not Restart), straight away, while they are still connected and playing.", "plain": "Shut down completely straight away, while they are still connected and playing. Do not click Restart.", "howTo": ["shut-down-completely"] },
+    { "test": "17", "kind": "action", "scriptText": "Listen: notice whether the AirPods go back to your phone as the screen goes dark, or just after.", "plain": "Listen: notice whether the AirPods go back to your phone as the screen goes dark, or just after." },
+    { "test": "17", "kind": "action", "scriptText": "Wait about ten seconds with the machine off, start it again, sign in, and run the command this half prints.", "plain": "Wait about ten seconds with this computer off, start it again, sign in, then open this window again, select this row and choose Carry on with the second half. You do not need to type anything." },
+
+    { "test": "18", "kind": "instruction", "scriptText": "Left-click the tray icon to connect the AirPods to this PC, and play something so they stay in use.", "plain": "Left-click the tray icon to connect the AirPods to this computer, and play something so they stay in use." },
+    { "test": "18", "kind": "instruction", "scriptText": "Put this computer to sleep (Start, Power, Sleep), wait at least thirty seconds, wake it, sign in, then come back here.", "plain": "Put this computer to sleep: click Start, then Power, then Sleep. Wait at least thirty seconds, wake it up, sign in, then come back to this window." },
+    { "test": "18", "kind": "question", "scriptText": "After this computer woke, did it take the AirPods back by itself?", "plain": "After this computer woke, did it take the AirPods back by itself?" },
+    { "test": "18", "kind": "question", "scriptText": "At the moment this computer fell asleep, did the AirPods go back to your phone?", "plain": "At the moment this computer fell asleep, did the AirPods go back to your phone?" },
+    { "test": "18", "kind": "precondition", "scriptText": "Earshot is installed from a release built from the current head, set up, and running in the tray.", "plain": "Earshot is installed from an up-to-date build, set up, and its icon is showing near the clock." },
+    { "test": "18", "kind": "precondition", "scriptText": "Block at boot is on.", "plain": "Block at boot is on." },
+    { "test": "18", "kind": "precondition", "scriptText": "\"Hand back at shut down and sleep\" is ticked in the menu.", "plain": "\"Hand back at shut down and sleep\" is ticked in the tray menu." },
+    { "test": "18", "kind": "precondition", "scriptText": "The AirPods are paired with this PC and available to connect.", "plain": "The AirPods are paired with this computer and ready to connect." },
+    { "test": "18", "kind": "precondition", "scriptText": "This PC can sleep (this half records what it finds; it does not refuse on this alone).", "plain": "This computer can sleep. If we are not sure yet, this test records what it finds rather than refusing to start." },
+    { "test": "18", "kind": "action", "scriptText": "Connect the AirPods to this PC with a left click on the tray icon and play something so they stay in use.", "plain": "Connect the AirPods to this computer: click the Earshot icon near the clock once, and keep sound playing from this computer.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "18", "kind": "action", "scriptText": "Choose Start, then Power, then Sleep.", "plain": "Click Start, then Power, then Sleep.", "howTo": ["put-this-computer-to-sleep"] },
+    { "test": "18", "kind": "action", "scriptText": "Wait at least thirty seconds, then wake this PC.", "plain": "Wait at least thirty seconds, then wake this computer up." },
+    { "test": "18", "kind": "action", "scriptText": "Press Enter here once you have signed back in.", "plain": "Come back to this window once you have signed back in." }
   ]
 }

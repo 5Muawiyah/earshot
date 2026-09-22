@@ -57,6 +57,22 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'boot'; Text = 'Boot task finished at boot' }
     [ordered]@{ Pattern = 'args:'; Text = 'Gate rejected the args: status 1234' }
     [ordered]@{ Pattern = 'unregister'; Text = 'Notification client unregister requested' }
+
+    # test 17 and test 18: the hand-back's own lines. None, one or two copies each, the same as
+    # every other generic pattern, except for the bespoke cases below (handback-cut-short,
+    # handback-not-reached, no-sleep-event, repaged-at-wake), which carry none of these generic
+    # copies (they count as 0, like declined-start) and inject their own bespoke lines instead.
+    [ordered]@{ Pattern = 'Hand-back (shutdown): started at'; Text = 'Hand-back (shutdown): started at 2026-09-22T01:31:42.000Z (WM_ENDSESSION, shutdown or restart); render Active; nodes Allowed; streaming none; Block at boot on' }
+    [ordered]@{ Pattern = 'Hand-back (shutdown): disconnect'; Text = 'Hand-back (shutdown): disconnect S_OK, confirmed after 37 ms' }
+    [ordered]@{ Pattern = 'Hand-back (shutdown): block sent at'; Text = 'Hand-back (shutdown): block sent at 2026-09-22T01:31:42.400Z' }
+    [ordered]@{ Pattern = 'Hand-back (shutdown): finished in'; Text = 'Hand-back (shutdown): finished in 303 ms; disconnect confirmed; block Success' }
+    [ordered]@{ Pattern = 'Hand-back (sleep): started at'; Text = 'Hand-back (sleep): started at 2026-09-22T01:41:00.000Z (PBT_APMSUSPEND); render Active; nodes Allowed; streaming none; Block at boot on' }
+    [ordered]@{ Pattern = 'Hand-back (sleep): disconnect'; Text = 'Hand-back (sleep): disconnect S_OK, confirmed after 22 ms' }
+    [ordered]@{ Pattern = 'Hand-back (sleep): block sent at'; Text = 'Hand-back (sleep): block sent at 2026-09-22T01:41:00.300Z' }
+    [ordered]@{ Pattern = 'Hand-back (sleep): finished in'; Text = 'Hand-back (sleep): finished in 280 ms; disconnect confirmed; block Success' }
+    [ordered]@{ Pattern = 'WM_POWERBROADCAST received: Suspend'; Text = 'WM_POWERBROADCAST received: Suspend (wParam 0x4).' }
+    [ordered]@{ Pattern = 'WM_POWERBROADCAST received: ResumeAutomatic'; Text = 'WM_POWERBROADCAST received: ResumeAutomatic (wParam 0x12).' }
+    [ordered]@{ Pattern = 'Hand-back (resume):'; Text = 'Hand-back (resume): the nodes were enabled and not in use, so they are blocked now' }
 )
 
 # The one pattern that is also written with a stamp in the past, so the -SinceUtc filter in
@@ -90,6 +106,9 @@ $script:StartStates = @{
     '14-set-device-refusal|first'        = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '15-uninstall-reversal|first'        = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '15-uninstall-reversal|resume'       = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'NotProtected'; SetUp = $true }
+    '17-handback-on-shutdown|first'      = @{ NodeState = 'Allowed'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
+    '17-handback-on-shutdown|resume'     = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '18-handback-on-sleep|first'         = @{ NodeState = 'Blocked'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
 }
 
 # The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
@@ -131,6 +150,9 @@ $script:Answers = [ordered]@{
     'in a contrast theme'                              = 'yes'
     'did the icon disappear cleanly'                   = 'yes'
     'did the airpods connect to this pc by themselves' = 'no'
+    'is "hand back at shut down and sleep" ticked'     = 'yes'
+    'did the airpods go back to your phone'            = 'yes'
+    'did it take the airpods back by itself'           = 'no'
     'did earshot ever cut the connection'              = 'no'
     'did the list show your airpods and your phone'    = 'yes'
     'were devices that are not present now shown'      = 'yes'
@@ -160,6 +182,7 @@ $script:CaseItemCounts = @{
     'atrest-decline' = 0; 'atrest-guard-throws' = 0; 'atrest-block-ineffective' = 0
     'atrest-setup-unknown' = 0; 'atrest-config-missing' = 0; 'atrest-nodes-probe-fails' = 0; 'atrest-nodes-stay-unreadable' = 0
     'declined-start' = 0
+    'handback-cut-short' = 0; 'handback-not-reached' = 0; 'no-sleep-event' = 1; 'repaged-at-wake' = 1
 }
 
 function Initialize-FakeMachine
@@ -172,7 +195,7 @@ function Initialize-FakeMachine
             'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
-            'declined-start')][string]$Case
+            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -202,6 +225,11 @@ function Initialize-FakeMachine
         Protection = $start.Protection
         SetUp      = $start.SetUp
     }
+
+    # test 18's own case: the resume check never got the chance to re-block, because this computer
+    # re-paged the AirPods first, so the nodes read Allowed, not Blocked, and the closing step's
+    # own re-read is what has to offer the block.
+    if ($Case -eq 'repaged-at-wake') { $script:World.NodeState = 'Allowed' }
 }
 
 function Get-FakeContext
@@ -224,7 +252,7 @@ function New-FakeSandbox
             'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
-            'declined-start')][string]$Case
+            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -295,6 +323,34 @@ function New-FakeSandbox
         $index = $index + 1
         $blockStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
         $lines = $lines + @([string]$blockStamp + ' INFO  Blocking the nodes: the AirPods were not in use for a while with nothing in flight (2001-02-03T04:05:06.009Z).')
+    }
+
+    # test 17 and test 18, handback-cut-short: the hold ran out before the block it had already
+    # sent came back, on both the shutdown and the sleep shape, so whichever of the two scripts
+    # reads this sees its own "started", "disconnect" and "cut short" lines, and no "finished in"
+    # line at all. The sleep shape carries its own point (test 18's own case): the block was never
+    # sent either, so "cut short ... block was not sent" reads as a fail there.
+    elseif ($Case -eq 'handback-cut-short')
+    {
+        $index = $index + 1; $q1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$q1 + ' INFO  WM_QUERYENDSESSION received: shutdown or restart (lParam 0x00000000).')
+        $index = $index + 1; $e1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$e1 + ' INFO  WM_ENDSESSION received: ending, shutdown or restart (lParam 0x00000000).')
+        $index = $index + 1; $t1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$t1 + ' INFO  Hand-back (shutdown): started at ' + $t1 + ' (WM_ENDSESSION, shutdown or restart); render Active; nodes Allowed; streaming none; Block at boot on')
+        $index = $index + 1; $t2 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$t2 + ' INFO  Hand-back (shutdown): disconnect S_OK, confirmed after 20 ms')
+        $index = $index + 1; $t3 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$t3 + ' INFO  Hand-back (shutdown): block sent at ' + $t3)
+        $index = $index + 1; $t4 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$t4 + ' WARN  Hand-back (shutdown): cut short at 4000 ms; still running: block; block was sent at ' + $t3)
+
+        $index = $index + 1; $s1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$s1 + ' INFO  Hand-back (sleep): started at ' + $s1 + ' (PBT_APMSUSPEND); render Active; nodes Allowed; streaming none; Block at boot on')
+        $index = $index + 1; $s2 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$s2 + ' INFO  Hand-back (sleep): disconnect S_OK, not confirmed within 750 ms')
+        $index = $index + 1; $s3 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$s3 + ' WARN  Hand-back (sleep): cut short at 1500 ms; still running: disconnect, block; block was not sent')
     }
 
     # A line with no stamp at all and a line no pattern looks for, so reading a log that holds
@@ -617,6 +673,34 @@ function Get-FakeBattery
     return [ordered]@{ hasSource = $false; hasValue = $false }
 }
 
+# What Get-PowerEvents answers with, for tests 17 and 18. A fixed set with one of each id the real
+# helper asks for, at increasing timestamps: a 1074 shutdown request, a 42 sleep, a 107 wake, a 27
+# boot type. none/one/two take the first 0, 1 or 2 of those, in order, which keeps 17's
+# shutdown-was-clean (needs only the 1074) and 18's sleep-happened (needs the 42 AND a later 107)
+# each reading exactly what the shared cases can honestly show: shutdown-was-clean can pass on the
+# shared "one" case, sleep-happened stays inconclusive until the bespoke case below supplies both.
+# no-sleep-event is the one case that answers empty regardless of the shared count, test 18's own
+# point: nothing here says a sleep happened at all.
+function Get-FakePowerEvents
+{
+    $fake = Get-FakeContext
+    if ($fake.Case -eq 'no-sleep-event') { return , @() }
+
+    $all = @(
+        [ordered]@{ utc = '2026-09-22T01:31:42.000Z'; id = 1074; provider = 'User32'; message = 'shutdown.exe (2036) has initiated the restart of computer on behalf of user for the following reason: No title for this reason could be found' }
+        [ordered]@{ utc = '2026-09-22T01:41:00.000Z'; id = 42; provider = 'Microsoft-Windows-Kernel-Power'; message = 'The system is entering sleep.' }
+        [ordered]@{ utc = '2026-09-22T01:45:12.000Z'; id = 107; provider = 'Microsoft-Windows-Kernel-Power'; message = 'The system has resumed from sleep.' }
+        [ordered]@{ utc = '2026-09-22T01:45:20.000Z'; id = 27; provider = 'Microsoft-Windows-Kernel-Boot'; message = 'The boot type was 0x0.' }
+    )
+
+    $counts = $script:CaseItemCounts
+    $count = 1
+    if ($counts.ContainsKey($fake.Case)) { $count = $counts[$fake.Case] }
+    if ($fake.Case -eq 'handback-cut-short' -or $fake.Case -eq 'repaged-at-wake') { $count = 4 }
+
+    return , @($all | Select-Object -First $count)
+}
+
 # ------------------------------------------------------------- how a command moves the world
 
 # Whether a ks run reached the state it asked for. The evidence is the table this module built,
@@ -785,6 +869,15 @@ function Update-FakeWorldForOwnerAction
         }
     }
 
+    # test 18's own sleep instruction: the hand-back released the link before sleep, so render
+    # reads not-ACTIVE by the time the owner is back to answer. repaged-at-wake is that one case's
+    # own point: this computer took the AirPods back by itself on waking, so render stays ACTIVE.
+    if ($lower.Contains('put this computer to sleep'))
+    {
+        if ((Get-FakeContext).Case -ne 'repaged-at-wake') { $script:World.Render = 'Unplugged' }
+        return
+    }
+
     # "left-click its tray icon once" is the acceptance test's way of saying connect them.
     foreach ($towards in @('connect', 'left-click'))
     {
@@ -817,5 +910,5 @@ Export-ModuleMember -Function `
     Initialize-FakeMachine, Get-FakeContext, New-FakeSandbox, Write-FakeMachineFiles,
     Get-FakeNodes, Get-FakeAudio, Get-FakeServices, Get-FakeTask, Get-FakeTopology,
     Get-FakeKsFilters, Get-FakeKsEvidence, Get-FakeGateEvidence, Get-FakeUnelevatedEvidence,
-    Get-FakeSweepEvidence, Get-FakeBattery, Test-FakeReached, Update-FakeWorld, Get-FakeCommandAnswer,
+    Get-FakeSweepEvidence, Get-FakeBattery, Get-FakePowerEvents, Test-FakeReached, Update-FakeWorld, Get-FakeCommandAnswer,
     Get-FakeAnswer, Get-FakeNote, Update-FakeWorldForOwnerAction, Write-FakeGap, Get-FakeEvidenceName

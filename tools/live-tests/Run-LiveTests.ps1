@@ -205,6 +205,20 @@ $tests = @(
         Settles = 'Whether uninstall restores the nodes, services, tasks and folders, and whether install passes its own read-back checks.'
         Needs = 'Set up, a release build to hand, tray closed, two or three administrator prompts to approve.'
         Halves = 'two'
+    },
+    [ordered]@{
+        Number = '17'; Script = '17-HandBackOnShutdown.ps1'
+        Title = 'Hand back on shut down, then the next boot'
+        Settles = 'Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone.'
+        Needs = 'Set up from a release build, tray running, Block at boot on, Hand back at shut down and sleep ticked, AirPods paired, able to power down.'
+        Halves = 'two'
+    },
+    [ordered]@{
+        Number = '18'; Script = '18-HandBackOnSleep.ps1'
+        Title = 'Hand back on sleep, then wake'
+        Settles = 'Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes.'
+        Needs = 'Set up, tray running, Block at boot on, Hand back at shut down and sleep ticked, this PC able to sleep.'
+        Halves = 'one, but it takes a while'
     }
 )
 
@@ -306,8 +320,8 @@ $declared = Get-ScriptParameters -Path $script
 # Every option the owner passed, and which tests take it. An option the chosen test does not declare
 # stops the run: passing -Variant to a test that ignores it would look like it had been honoured.
 $options = @(
-    [ordered]@{ Name = 'RunRoot'; Passed = (-not [string]::IsNullOrEmpty($RunRoot)); Value = $RunRoot; Takers = '04, 05, 08, 09, 10, 15' }
-    [ordered]@{ Name = 'Resume'; Passed = [bool]$Resume; Value = $true; Takers = '04, 05, 08, 09, 10, 15' }
+    [ordered]@{ Name = 'RunRoot'; Passed = (-not [string]::IsNullOrEmpty($RunRoot)); Value = $RunRoot; Takers = '04, 05, 08, 09, 10, 15, 17' }
+    [ordered]@{ Name = 'Resume'; Passed = [bool]$Resume; Value = $true; Takers = '04, 05, 08, 09, 10, 15, 17' }
     [ordered]@{ Name = 'Variant'; Passed = ($Variant -ne 0); Value = $Variant; Takers = '10' }
     [ordered]@{ Name = 'AllowPlanB'; Passed = [bool]$AllowPlanB; Value = $true; Takers = '07' }
     [ordered]@{ Name = 'Note'; Passed = (-not [string]::IsNullOrEmpty($Note)); Value = $Note; Takers = '04' }

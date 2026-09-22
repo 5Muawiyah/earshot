@@ -31,6 +31,8 @@ public sealed class ManifestNameProvesTests
         ["13"] = "The wait before Earshot blocks again is about right.",
         ["14"] = "Earshot refuses to treat a phone as the AirPods.",
         ["15"] = "Uninstall puts everything back, and install sets it up again.",
+        ["17"] = "Earshot hands the AirPods back before this computer shuts down, and leaves them alone at the next start.",
+        ["18"] = "Earshot hands the AirPods back before this computer sleeps, and does not take them back by itself on waking.",
     };
 
     private static IReadOnlyList<ManifestRow> LoadManifest() =>

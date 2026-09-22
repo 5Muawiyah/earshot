@@ -125,7 +125,7 @@ anything.
 
 ## Tests that need a restart
 
-Six tests are in two halves, because a script cannot survive a restart. The first
+Seven tests are in two halves, because a script cannot survive a restart. The first
 half stops, tells you how to restart, and prints the exact command to run after you
 log back in. That command is also saved as `resume.txt` in the evidence folder, so
 it is never lost.
@@ -138,6 +138,7 @@ it is never lost.
 | 09 | shut down while the AirPods are connected to this PC |
 | 10 | one restart per variant, five variants: the fifth signs out and back in rather than restarting |
 | 15 | a restart, to check the delayed file deletion |
+| 17 | a full power down, not a restart: shut down from the Start menu with the AirPods connected and Hand back on |
 
 ## Where the evidence goes
 
@@ -184,6 +185,8 @@ recorded that way rather than guessed at.
 | 13 | The value of the idle grace window. |
 | 14 | That a phone can never be pinned as the device Earshot disables. |
 | 15 | Whether uninstall reverses everything and install passes its own checks. |
+| 17 | Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone. |
+| 18 | Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes. |
 
 ## What the backlog asks, and where it is answered
 
@@ -264,9 +267,11 @@ criterion after it lost, and it happens on the success path, because "no matchin
 line" is what a boot block that held produces.
 
 `tools\live-tests\selftest` runs every script in this folder, and both halves of
-every resumable one, against a fake machine: sixteen scripts, twenty-two halves,
-three sets of fake inputs holding 0, 1 and 2 matching lines and list items, so
-sixty-six runs. Only the device-touching and owner-prompting helpers are replaced;
+every resumable one, against a fake machine: eighteen scripts, twenty-five halves,
+three sets of fake inputs holding 0, 1 and 2 matching lines and list items (seventy-
+five runs), plus the bespoke extra cases named against each row in
+`Invoke-SelfTest.ps1`'s `$tests`, ninety-five runs in total. Only the
+device-touching and owner-prompting helpers are replaced;
 `Get-EarshotLogLines`, `Get-DiagEvidence`, `Copy-AppEvidence`, `Read-KsEvidence`,
 `Read-EarshotJsonFile`, `Add-Criterion` and `Complete-LiveTestRun` all run for
 real. Nothing there touches a device, registers a task, elevates or starts

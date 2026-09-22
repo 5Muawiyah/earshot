@@ -109,7 +109,7 @@ public sealed class ResumeFileTests
         bool parsed = ResumeFile.TryParse(path, RepoRoot, _liveTestRoot, KnownScripts, out ResumeInstruction? instruction, out string? reason);
 
         Assert.IsFalse(parsed);
-        StringAssert.Contains(reason, "one of the 16 shipped scripts");
+        StringAssert.Contains(reason, "one of the 18 shipped scripts");
     }
 
     [TestMethod]

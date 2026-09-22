@@ -2456,7 +2456,7 @@ internal sealed class MainForm : Form
     internal TimeSpan ExitGracePeriodForTests { get; set; } = TimeSpan.FromSeconds(20);
 
     // Test seam: drives the real BeginRun/OnRunFinished pipeline for a runner and script built
-    // entirely by the test (not one of the 16 shipped scripts), so the orphan-on-missed-exit path
+    // entirely by the test (not one of the 18 shipped scripts), so the orphan-on-missed-exit path
     // can be proved against a child that deliberately outlives its own exit message.
     internal void BeginRunForTests(DisplayRow row, ChildRunner runner, string resultFolder) =>
         BeginRun(row, runner, resultFolder, isResume: false);

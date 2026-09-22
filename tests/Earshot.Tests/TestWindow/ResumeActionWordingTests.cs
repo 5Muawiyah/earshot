@@ -4,8 +4,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// The physical-action lines Show-Preconditions prints for 04, 08, 09 and 10 (wording.json's own
-// Action entries) told the reader, in plain words, to "ask whoever set Earshot up to run the
+// The physical-action lines Show-Preconditions prints for 04, 08, 09, 10 and 17 (wording.json's
+// own Action entries) told the reader, in plain words, to "ask whoever set Earshot up to run the
 // command this half shows you": true only outside the window (a genuine console route), but never
 // true through it, since the window reads resume.txt itself and offers "Carry on with the second
 // half" the moment the row is selected again. Nobody running through the window ever needs to
@@ -25,9 +25,9 @@ public sealed class ResumeActionWordingTests
             .Where(e => e.Kind == WordingKind.Action && e.ScriptText.Contains("run the command", StringComparison.Ordinal))
             .ToList();
 
-        // Sanity: this must find the four entries the fix touches (04, 08, 09, 10), not zero
+        // Sanity: this must find the five entries the fix touches (04, 08, 09, 10, 17), not zero
         // (which would mean the fixture query itself stopped matching anything).
-        Assert.AreEqual(4, resumeActions.Count, "expected one resume-action entry each for 04, 08, 09 and 10.");
+        Assert.AreEqual(5, resumeActions.Count, "expected one resume-action entry each for 04, 08, 09, 10 and 17.");
 
         foreach (WordingEntry entry in resumeActions)
         {

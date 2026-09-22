@@ -9,7 +9,7 @@ namespace Earshot.Tests.TestWindow;
 
 // Today only three halves (SandboxFakesSmokeTests, Test10VariantSmokeTests) are ever driven
 // through the window's own real protocol over the shipped scripts. This drives every script and
-// half tools\live-tests\selftest\Invoke-SelfTest.ps1's own $tests table covers (16 scripts, 22
+// half tools\live-tests\selftest\Invoke-SelfTest.ps1's own $tests table covers (18 scripts, 25
 // halves), each against the fakes, through the same real ChildRunner/Invoke-GuiHalf machinery,
 // answering exactly the way Fakes.psm1's own Get-FakeAnswer/Get-FakeNote would for the "one" case,
 // and checks three things for every half: (a) it is driven to a recorded result.json, (b) the row
@@ -42,6 +42,17 @@ namespace Earshot.Tests.TestWindow;
 // empty, the same rule -Variant already follows, so this row is driven with the plan's own
 // SpeakerAddress=C7D8E9F0A1B2 (Invoke-SelfTest.ps1's own Extra for this row) and expects exactly
 // what expectations.psd1 says, with no exception.
+//
+// Real, not faked: tools\live-tests\gui\selftest\DeviceStubs.ps1 replaces only
+// Resolve-EarshotExe, Invoke-Earshot, Invoke-EarshotElevated and Start-Process; Get-PowerEvents
+// (like Get-EarshotLogLines before it) runs for real here, reading this machine's actual System
+// event log, unlike tools\live-tests\selftest\Run-OneHalf.ps1's path, which fakes it. Nothing in
+// this sandbox ever really shuts this machine down or puts it to sleep, so a criterion that can
+// only pass on a genuine 1074 shutdown-request event near the fake $shutdownStartUtc timestamp
+// (17-HandBackOnShutdown.ps1's own "shutdown-was-clean", and the "overall" it decides) cannot be
+// pinned to expectations.psd1's "one" case through this path, and is excepted below;
+// expectations.psd1 itself stays exact, because Run-OneHalf.ps1's own path still fakes
+// Get-PowerEvents and is still checked against it in full.
 [TestClass]
 public sealed class AllScriptsAndHalvesThroughWindowTests
 {
@@ -50,8 +61,20 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
     // 03-AllowPages.ps1 only: see the class comment's "Timing, not correctness" note.
     private static readonly TimeSpan LongHalfTimeout = TimeSpan.FromSeconds(200);
 
-    private const int ExpectedScriptCount = 16;
-    private const int ExpectedHalfCount = 22;
+    // See the class comment's "Real, not faked" note. Keyed by "<script> <half>".
+    private static readonly HashSet<string> RowsWhereOverallIsNotPinned = new(StringComparer.Ordinal)
+    {
+        "17-HandBackOnShutdown.ps1 resume",
+    };
+
+    // Keyed by "<script> <half>|<criterion id>".
+    private static readonly HashSet<string> CriteriaNotPinnedThroughThisPath = new(StringComparer.Ordinal)
+    {
+        "17-HandBackOnShutdown.ps1 resume|shutdown-was-clean",
+    };
+
+    private const int ExpectedScriptCount = 18;
+    private const int ExpectedHalfCount = 25;
 
     [TestMethod]
     public void EveryScriptAndHalfIsDrivenThroughTheWindowWithMatchingEvidence()
@@ -388,7 +411,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
             return problems;
         }
 
-        if (!expected.Overall.Contains(result.Overall, StringComparer.Ordinal))
+        if (!expected.Overall.Contains(result.Overall, StringComparer.Ordinal) && !RowsWhereOverallIsNotPinned.Contains(where))
         {
             problems.Add(where + ": the run came out " + result.Overall + ", and expectations.psd1's \"one\" case implies " + string.Join(" or ", expected.Overall) + ".");
         }
@@ -414,7 +437,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
 
             string actualOutcome = result.Criteria.First(c => c.Id == id).Outcome;
             string wantedOutcome = expected.Criteria[id];
-            if (wantedOutcome == "any")
+            if (wantedOutcome == "any" || CriteriaNotPinnedThroughThisPath.Contains(where + "|" + id))
             {
                 continue;
             }

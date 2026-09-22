@@ -68,7 +68,7 @@ param(
     [ValidateSet('', 'none', 'one', 'two', 'grace-doubled', 'grace-unparsable',
         'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
-        'declined-start')][string]$Case = '',
+        'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -129,6 +129,21 @@ $tests = @(
         Cases = @('none', 'one', 'two', 'grace-doubled', 'grace-unparsable') }
     [ordered]@{ Number = '14'; Id = '14-set-device-refusal'; Script = '14-SetDeviceRefusal.ps1'; Halves = @('first'); Extra = @('SpeakerAddress=C7D8E9F0A1B2') }
     [ordered]@{ Number = '15'; Id = '15-uninstall-reversal'; Script = '15-UninstallReversal.ps1'; Halves = @('first', 'resume'); Extra = @() }
+    # declined-start: as 09's, the owner says no to "ready to start" and nothing shuts down.
+    # handback-cut-short: the hold ran out with its own block still running; the resume half sees
+    # no "finished in" line, only "cut short". handback-not-reached: no hand-back line at all (the
+    # shared none/one/two's own generic hand-back lines are what would otherwise be there; this
+    # case carries none of them), so handback-started fails and the finding stays null rather than
+    # reading a missing line as 0.
+    [ordered]@{ Number = '17'; Id = '17-handback-on-shutdown'; Script = '17-HandBackOnShutdown.ps1'; Halves = @('first', 'resume'); Extra = @()
+        Cases = @('none', 'one', 'two', 'declined-start', 'handback-cut-short', 'handback-not-reached') }
+    # no-sleep-event: no Kernel-Power 42 or 107 at all, so sleep-happened is inconclusive and so is
+    # the run overall. handback-cut-short: the same shape as 17's, on the sleep prefix, where the
+    # block was never sent either, so handback-finished-or-sent fails. repaged-at-wake: the render
+    # endpoint reads ACTIVE again once the owner is back, so not-repaged-at-wake fails and the
+    # closing step offers a block.
+    [ordered]@{ Number = '18'; Id = '18-handback-on-sleep'; Script = '18-HandBackOnSleep.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'no-sleep-event', 'handback-cut-short', 'repaged-at-wake') }
 )
 
 $defaultCases = @('none', 'one', 'two')
@@ -346,6 +361,9 @@ $script:AtRestDefaults = @{
     '14-set-device-refusal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1 }
     '15-uninstall-reversal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1 }
     '15-uninstall-reversal|resume'       = @{ LeftAtRest = 'yes'; BlockCount = 1 }
+    '17-handback-on-shutdown|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0 }
+    '17-handback-on-shutdown|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0 }
+    '18-handback-on-sleep|first'         = @{ LeftAtRest = 'yes'; BlockCount = 0 }
 }
 
 # What the expectations for one case say should have been recorded, against what was. The

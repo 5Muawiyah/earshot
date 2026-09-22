@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.TestWindow;
 
-// StartResumedSecondHalf used to pass every one of the 16 shipped scripts to ResumeFile.TryParse,
+// StartResumedSecondHalf used to pass every one of the 18 shipped scripts to ResumeFile.TryParse,
 // not just the one this row is allowed to resume, so a resume.txt naming a different (but still
 // genuine, still shipped) script was accepted. Real MainForm, real "Carry on with the second
 // half" click, real files on disk; nothing here ever starts a process, since the point is that
@@ -55,7 +55,7 @@ public sealed class ResumeRejectsAnotherRowsScriptTests
 
             Assert.IsNull(form.ActiveRunnerForTests, "a resume.txt naming a different shipped script must never start anything.");
             StringAssert.Contains(form.StatusTextForTests, "resume.txt could not be used");
-            StringAssert.Contains(form.StatusTextForTests, "not one of the 16 shipped scripts");
+            StringAssert.Contains(form.StatusTextForTests, "not one of the 18 shipped scripts");
         });
     }
 }
