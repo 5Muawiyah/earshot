@@ -1416,10 +1416,11 @@ internal sealed class MainForm : Form
                 Path.Combine(resultFolder, "gui-run-started.txt"),
                 DateTimeOffset.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
 
-            // Assigned once per run folder, never reissued on a resumed second half (RunSequence's
-            // own job): the one ordering signal that survives the system clock being stepped back
-            // between two runs.
-            RunSequence.EnsureMarker(LiveTestRoot(), resultFolder);
+            // Assigned once per half. A resumed second half (isResume true) takes a fresh number
+            // here even though it reuses the first half's run folder: the two halves are different
+            // events, and the run folder's ordering must reflect whichever one actually happened
+            // last, not be frozen at whatever was true when the first half started.
+            RunSequence.EnsureMarker(LiveTestRoot(), resultFolder, reissueForNewHalf: isResume);
         }
         catch (Exception ex)
         {

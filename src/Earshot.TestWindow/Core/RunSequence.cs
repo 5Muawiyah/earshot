@@ -30,16 +30,27 @@ internal static class RunSequence
         return next;
     }
 
-    // Assigns a run folder its sequence number the first time anything is written for it, and
-    // never again: a resumed second half reuses the same run folder and must never be issued a
-    // fresh number just for resuming into it, or ordering between the first and second half of
-    // the very same run would itself become meaningless.
-    internal static long EnsureMarker(string liveTestRoot, string runFolder)
+    // Assigns a run folder its sequence number the first time anything is written for it. A plain
+    // call (reissueForNewHalf false, the default) never touches an existing marker: called more
+    // than once for the very same half, it must keep answering with that half's own number.
+    //
+    // reissueForNewHalf true is the second half actually starting: a resumed run keeps its first
+    // half's run folder (same stamp), but the two halves are different events, often minutes or
+    // days apart with other tests run in between. Leaving the first half's number in place would
+    // make the run folder's ordering stop at whatever else was true when the FIRST half started,
+    // so a second half that ends not at rest, or is killed, could read as older than a run that
+    // happened between the two halves and never outrank it. The run folder's sequence must be
+    // that of its latest half, so a genuine second-half start always takes a fresh number, whether
+    // or not one already exists.
+    internal static long EnsureMarker(string liveTestRoot, string runFolder, bool reissueForNewHalf = false)
     {
-        long? existing = TryReadMarker(runFolder);
-        if (existing is long value)
+        if (!reissueForNewHalf)
         {
-            return value;
+            long? existing = TryReadMarker(runFolder);
+            if (existing is long value)
+            {
+                return value;
+            }
         }
 
         long next = TakeNext(liveTestRoot);

@@ -86,6 +86,19 @@ internal static class Banner
             return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
         }
 
+        // A second, separate cross-check against each run's own OrderingUtc (already the newest
+        // of a kill marker's write time, a readable result's finishedUtc, or the folder's stamp):
+        // a run folder's stamp never moves once a resumed second half writes back into it, so two
+        // folders can agree with each other about sequence-vs-stamp order and still both be wrong,
+        // when a run folder's sequence was never brought up to date with what actually last
+        // happened inside it (a kill, or a second half's own finish) after another run's folder
+        // was created in between. Whenever the sequence and the real newest-write order disagree
+        // about which of two runs happened later, that is itself never resolved silently.
+        if (SequenceDisagreesWithOrderingUtc(runs))
+        {
+            return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
+        }
+
         string? leftAtRest = chosen.Result!.LeftAtRest;
         return leftAtRest switch
         {
@@ -99,6 +112,34 @@ internal static class Banner
     // a run without one falls back to OrderingUtc, exactly as every run did before this existed.
     private static bool IsNewerThan(ScannedRun a, ScannedRun b) =>
         a.Sequence is long sa && b.Sequence is long sb ? sa > sb : a.OrderingUtc > b.OrderingUtc;
+
+    // True when any two scanned runs carry different sequence numbers whose order contradicts the
+    // order of their own OrderingUtc (each already the newest thing known to have happened inside
+    // that run folder). Two different run folders sharing the same sequence number is never
+    // compared here: EvidenceStore.SequenceDisagreesWithStampOrder already fails closed on that,
+    // via the stamp-based check just above this one in Compute.
+    private static bool SequenceDisagreesWithOrderingUtc(List<ScannedRun> runs)
+    {
+        for (int i = 0; i < runs.Count; i++)
+        {
+            for (int j = i + 1; j < runs.Count; j++)
+            {
+                if (runs[i].Sequence is not long si || runs[j].Sequence is not long sj || si == sj)
+                {
+                    continue;
+                }
+
+                bool iNewerBySequence = si > sj;
+                bool iNewerByOrdering = runs[i].OrderingUtc > runs[j].OrderingUtc;
+                if (iNewerBySequence != iNewerByOrdering)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     private sealed record ScannedRun(string Stamp, ParsedResult? Result, DateTimeOffset OrderingUtc, bool ReadSucceeded, long? Sequence);
 
