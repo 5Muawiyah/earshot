@@ -212,7 +212,18 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
                         break;
                     }
 
-                    _log.Info("WM_POWERBROADCAST received: " + known + " (wParam 0x" + wParam.ToString("X", CultureInfo.InvariantCulture) + ").");
+                    // The harness (and a reader following along in the System event log) parses the Windows
+                    // constant name, not the enum member's own C# spelling; PowerEventKind.ToString() would read
+                    // "Suspend" or "ResumeAutomatic" where the documented name is PBT_APMSUSPEND or
+                    // PBT_APMRESUMEAUTOMATIC.
+                    string windowsName = known switch
+                    {
+                        PowerEventKind.Suspend => "PBT_APMSUSPEND",
+                        PowerEventKind.ResumeAutomatic => "PBT_APMRESUMEAUTOMATIC",
+                        PowerEventKind.ResumeSuspend => "PBT_APMRESUMESUSPEND",
+                        _ => known.ToString(),
+                    };
+                    _log.Info("WM_POWERBROADCAST received: " + windowsName + " (wParam 0x" + wParam.ToString("X", CultureInfo.InvariantCulture) + ").");
                     PowerChanged?.Invoke(this, new PowerEventArgs(known));
 
                     // TRUE: "If an application processes this message, it should return TRUE."

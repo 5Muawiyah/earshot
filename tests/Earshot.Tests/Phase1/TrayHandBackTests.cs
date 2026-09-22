@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows.Forms;
 using Earshot.App;
 using Earshot.Contracts;
+using Earshot.Hotkeys;
 using Earshot.Interop;
 using Earshot.Streaming;
 using Earshot.Tests.Streaming;
@@ -124,6 +125,43 @@ public sealed class TrayHandBackTests
 
             Assert.IsFalse(tray.Log.Has(LogLevel.Debug, "reply returned after"));
             Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.StartsWith("Hand-back (shutdown): started", StringComparison.Ordinal)));
+        });
+    }
+
+    // M5: a sleep hold has no session-ending flag of its own, and HandBackInProgress has already cleared again
+    // by the time OnPowerChanged itself returns (the suspend handler only returns once the hold is over), so the
+    // only way to prove a menu action and a hotkey are refused while the hold is actually up is reentrant, from
+    // inside the hand-back's own block step: every device action started there is refused with the existing card
+    // and starts nothing.
+    [TestMethod]
+    public void MenuActionsAndHotkeysDuringASleepHoldAreRefusedAndStartNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.HandBackOnShutdownAndSleep = true);
+
+            bool ranReentrant = false;
+            tray.Block.OnBlock = _ =>
+            {
+                Assert.IsTrue(tray.Coordinator.HandBackInProgress, "The reentrant check must run while the hold is still up.");
+                int cardsBefore = tray.Cards.Shown.Count;
+
+                tray.MenuItem(MenuModel.BlockAtBoot).PerformClick();
+                tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.ToggleAudioProtection));
+
+                Assert.AreEqual(cardsBefore + 2, tray.Cards.Shown.Count,
+                    "Both the menu click and the hotkey must show the hand-back refusal card, and nothing else.");
+                Assert.AreEqual(TrayContext.HandingBackMessage, tray.Cards.Shown[^1].Content.Status);
+                Assert.AreEqual(TrayContext.HandingBackMessage, tray.Cards.Shown[^2].Content.Status);
+                ranReentrant = true;
+                return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
+            };
+
+            tray.Context.OnPowerChanged(null, new PowerEventArgs(PowerEventKind.Suspend));
+
+            Assert.IsTrue(ranReentrant, "The reentrant block step never ran.");
         });
     }
 
@@ -354,7 +392,8 @@ public sealed class TrayHandBackTests
 
         Assert.AreEqual(PowerEventKind.ResumeSuspend, raised);
         Assert.AreEqual(1, resumeSuspend.Result);
-        Assert.IsTrue(log.Has(LogLevel.Info, "WM_POWERBROADCAST received: ResumeSuspend"));
+        Assert.IsTrue(log.Has(LogLevel.Info, "WM_POWERBROADCAST received: PBT_APMRESUMESUSPEND"),
+            "The Windows constant name is what a reader (and the live-test harness) parses, not the enum member's own spelling.");
 
         raised = null;
         const int unknownWParam = 0x0006; // PBT_APMPOWERSTATUSCHANGE: not one of the three this window acts on.

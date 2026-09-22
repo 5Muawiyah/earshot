@@ -94,11 +94,12 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "nothing to disconnect"));
     }
 
-    // T3, and the target of the "block before confirmation" mutation: a disconnect that never confirms (the
-    // fake never publishes a snapshot where render has left ACTIVE) must never be followed by a block while
-    // render still reads ACTIVE.
+    // The design sends the block regardless of whether the disconnect confirmed (today's code already blocks at
+    // the query while the AirPods are in use, and gets seven of eight): a disconnect that never confirms (the
+    // fake never publishes a snapshot where render has left ACTIVE) is still followed by a block, and a vetoed
+    // sink entry is recorded honestly as Partial, never as "not sent" and never as an assumed Success.
     [TestMethod]
-    public void TheBlockIsNeverSentWhileRenderStillReadsActiveAfterTheDisconnectTimesOut()
+    public void TheBlockIsStillSentAfterAnUnconfirmedDisconnectAndAVetoedEntryIsRecordedAsPartial()
     {
         using CoordinatorHarness h = Harness();
         Arrange(h, Statuses.Allowed(), Devices.Active(1));
@@ -109,17 +110,21 @@ public sealed class HandBackTests
             ct.Register(() => pending.TrySetCanceled(ct));
             return pending.Task;
         };
+        h.Block.OnBlock = _ => Task.FromResult(new ControllerResult(OpStatus.Partial, "One entry vetoed", Array.Empty<StepOutcome>()));
 
         Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
         Assert.IsFalse(task.IsCompleted, "The disconnect has not been abandoned yet.");
 
         h.Advance(DisconnectWait);
+        h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
-        Assert.IsFalse(h.Block.Calls.Contains("block"), "Render is still ACTIVE (the disconnect never confirmed), so no block may be sent.");
+        Assert.IsTrue(h.Block.Calls.Contains("block"),
+            "Render is still ACTIVE (the disconnect never confirmed), but the block is sent anyway: refusing it " +
+            "would leave every node enabled by choice.");
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "not confirmed within"));
-        Assert.IsTrue(h.Log.Has(LogLevel.Info, "block not sent"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "block Partial"));
     }
 
     // T4: a disconnect that never confirms is abandoned at DisconnectHandBackWait; the block is still sent once
@@ -171,6 +176,110 @@ public sealed class HandBackTests
         pending.SetResult(ControllerResult.Ok("Blocked at boot"));
         h.Pump();
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "the block that was still running finished"));
+    }
+
+    // M2: a non-cancellation fault from the disconnect (a COM call failing, say) is never a silent catch: it is
+    // recorded with its raw code, and the procedure still goes on to send the block, which is the at-rest action.
+    [TestMethod]
+    public void AnUnexpectedDisconnectFaultIsRecordedAndTheProcedureStillSendsTheBlock()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Active(1));
+        h.Block.Calls.Clear();
+        h.Block.ActiveLink = ActiveLinkOnBlock.Stays;
+        h.Connection.OnDisconnect = _ => throw new InvalidOperationException("COM call failed");
+
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsTrue(h.Block.Calls.Contains("block"), "The block still runs after an unexpected disconnect fault.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "disconnect failed"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in"));
+    }
+
+    // M2: a fault starting the block itself (a disposed system worker, say) is never a silent catch either.
+    [TestMethod]
+    public void AFaultStartingTheBlockIsRecordedWithItsRawCode()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.OnBlock = _ => throw new ObjectDisposedException("SystemWorker");
+
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "the block could not be started"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "not sent:"));
+    }
+
+    // M2: a block task that faults after being sent (rather than timing out) is also recorded, not left as an
+    // unobserved task exception with no finished, cut-short or error line at all.
+    [TestMethod]
+    public void ABlockTaskThatFaultsAfterBeingSentIsRecorded()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.OnBlock = _ => Task.FromException<ControllerResult>(new InvalidOperationException("gate pipe broke"));
+
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Error, "the block faulted"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "faulted:"));
+    }
+
+    // M3: the started line reads the real streaming state passed in, rather than always saying "streaming none".
+    [TestMethod]
+    public void TheStartedLineReadsTheRealStreamingStateWhenAHeldLinkIsPassedIn()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait, streamingHeld: true);
+        h.Pump();
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "streaming held"));
+        Assert.IsFalse(h.Log.Has(LogLevel.Info, "streaming none"));
+    }
+
+    // M5: a suspend or session end arriving while another device action (an allow that a connect sends, say) is
+    // already running waits for it, never running beside it on the same SystemWorker; the order is pinned
+    // through the shared trace.
+    [TestMethod]
+    public void AHandBackWaitsForAnOperationAlreadyInFlightRatherThanRunningBesideIt()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Trace.Clear();
+        var pendingConnect = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(_ => pendingConnect.Task);
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
+        h.Pump();
+        Assert.IsTrue(h.Coordinator.IsBusy, "The connect must be the operation in flight.");
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + TimeSpan.FromSeconds(10), DisconnectWait);
+        h.Pump();
+
+        Assert.IsFalse(handBack.IsCompleted, "The hand-back must wait for the connect already in flight to finish.");
+        Assert.IsFalse(h.Trace.Contains("block"), "Nothing the hand-back sends has run yet.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "waiting for connect to finish"));
+
+        pendingConnect.SetResult(Results.Connected());
+        h.Pump();
+
+        Assert.IsTrue(toggle.IsCompleted);
+        Assert.IsTrue(handBack.IsCompleted);
+        CollectionAssert.Contains(h.Trace, "connect");
+        CollectionAssert.Contains(h.Trace, "block");
+        Assert.IsTrue(h.Trace.IndexOf("connect") < h.Trace.IndexOf("block"),
+            "The operation already in flight finishes before the hand-back's own block runs; never beside it.");
     }
 
     // T4: a block completed inside the budget logs "finished in", never "cut short".
@@ -329,6 +438,32 @@ public sealed class HandBackTests
         Assert.IsTrue(handBack.IsCompleted);
         Assert.HasCount(1, h.Block.Calls, "The query's own block is reused, not sent again.");
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "nothing to disconnect"));
+    }
+
+    // M6: render is re-read at WM_ENDSESSION regardless of what the query found. Sound started on the pinned
+    // container between the query (not in use, so it queued a block) and WM_ENDSESSION is still disconnected;
+    // the block already in flight is still the one this hand-back waits for, never a second one.
+    [TestMethod]
+    public void WmEndSessionStillDisconnectsSoundThatStartedAfterTheQueryEvenWhileReusingItsBlock()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+        Assert.HasCount(1, h.Block.Calls, "The not-in-use query already queued its block.");
+
+        // Sound started after the query, before WM_ENDSESSION arrives.
+        h.Publish(Devices.Active(2));
+        h.Connection.Calls.Clear();
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(handBack.IsCompleted);
+        Assert.Contains((false, Devices.Container), h.Connection.Calls, "Sound that started after the query must still be disconnected.");
+        Assert.HasCount(1, h.Block.Calls, "The query's own block is still reused, not sent again.");
     }
 
     // The result written is the result observed: a query-time block that came back Partial is retried exactly

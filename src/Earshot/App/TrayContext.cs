@@ -750,14 +750,26 @@ internal sealed class TrayContext : ApplicationContext
     // operations itself, for one that was already waiting there when the session end began.
     private bool RefusedAtSessionEnd(string action, string title, CardPlace place)
     {
-        if (!_coordinator.SessionEndInProgress)
+        if (_coordinator.SessionEndInProgress)
         {
-            return false;
+            _log.Info(action + ": not started, because the session is ending.");
+            ShowCard(title, BlockCoordinator.SessionEndingMessage, place);
+            return true;
         }
 
-        _log.Info(action + ": not started, because the session is ending.");
-        ShowCard(title, BlockCoordinator.SessionEndingMessage, place);
-        return true;
+        // A sleep hold has no session-ending flag of its own (it is not a session end), so it is caught here too:
+        // every caller of this method (menu action, hotkey, play from a phone, choose or set device) is refused
+        // the same way the left click already refuses a connect while the AirPods are being handed back. The
+        // coordinator's own exclusive queue still keeps a refused action from landing beside the hand-back even
+        // if a card were missed here.
+        if (_coordinator.HandBackInProgress)
+        {
+            _log.Info(action + ": not started, because Earshot is handing the AirPods back.");
+            ShowCard(title, HandingBackMessage, place);
+            return true;
+        }
+
+        return false;
     }
 
     // Why the tray cancelled the connect or disconnect in flight.
@@ -781,6 +793,9 @@ internal sealed class TrayContext : ApplicationContext
         // A query is not acted on: the session end may still be cancelled, and the owner's music with it.
         if (!e.IsQuery && e.Ending)
         {
+            // Read before StopStreaming claims it: the Started line the hand-back writes describes the world as
+            // it stood the instant the session began ending, not after this same handler has already let go of it.
+            bool streamingHeld = _streaming is not null;
             StopStreaming(wait: false, "the session is ending");
 
             // Forgotten, not remembered as applied: should Windows abandon the shutdown after all and Earshot stay
@@ -793,7 +808,7 @@ internal sealed class TrayContext : ApplicationContext
                 // BlockCoordinator.HandBackAsync's own comment on why this is never two separate "now plus
                 // budget" reads.
                 DateTimeOffset deadline = _time.GetUtcNow() + _handBackBudget;
-                Task handBack = _coordinator.HandBackAsync(HandBackTrigger.SessionEnd, deadline, _disconnectHandBackWait);
+                Task handBack = _coordinator.HandBackAsync(HandBackTrigger.SessionEnd, deadline, _disconnectHandBackWait, streamingHeld);
                 HoldReply(handBack, deadline);
             }
         }
@@ -855,15 +870,16 @@ internal sealed class TrayContext : ApplicationContext
             case PowerEventKind.Suspend:
                 if (_registry.Settings.Current.HandBackOnShutdownAndSleep)
                 {
-                    // The same first step as the shut-down hand-back (3.2's step 2, "as 3.2" for sleep): a held
-                    // streaming link is let go before the disconnect, not waited for on its own. Unlike a
-                    // shutdown, sleep is never abandoned once it starts, so _streamingApplied is left as it is:
-                    // the machine will resume with the tray still running, and a settings change that asks for
-                    // nothing different must not restart a feature nothing actually stopped asking for.
+                    // The same first step as the shut-down hand-back: a held streaming link is let go before the
+                    // disconnect, not waited for on its own. Unlike a shutdown, sleep is never abandoned once it
+                    // starts, so _streamingApplied is left as it is: the machine will resume with the tray still
+                    // running, and a settings change that asks for nothing different must not restart a feature
+                    // nothing actually stopped asking for.
+                    bool streamingHeld = _streaming is not null;
                     StopStreaming(wait: false, "the machine is sleeping");
 
                     DateTimeOffset deadline = _time.GetUtcNow() + _sleepHandBackBudget;
-                    Task handBack = _coordinator.HandBackAsync(HandBackTrigger.Suspend, deadline, _sleepDisconnectWait);
+                    Task handBack = _coordinator.HandBackAsync(HandBackTrigger.Suspend, deadline, _sleepDisconnectWait, streamingHeld);
                     HoldReply(handBack, deadline);
                 }
                 else
