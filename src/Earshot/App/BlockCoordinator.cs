@@ -1121,15 +1121,25 @@ internal sealed class BlockCoordinator : IDisposable
         RaiseChanged();
         string name = trigger == HandBackTrigger.SessionEnd ? "hand-back (shutdown)" : "hand-back (sleep)";
 
-        // Bounded by the shared deadline: Task.WaitAsync(CancellationToken), which is what RunExclusiveAsync's
-        // own wait loop uses on the exclusive slot's task, does complete once that task does, but only after
-        // one real thread-pool hop for the continuation to run on; a caller that checks completion synchronously,
-        // in the same turn the antecedent finished, can see it as still pending (a live check, not an
-        // assumption). This token only ever bounds the wait for that slot: the body below never passes it to
-        // HandBackCoreAsync, so once this has actually started, nothing here can cut it short externally --
-        // HandBackCoreAsync enforces the same deadline itself, honestly, naming the real step (WaitForBlockAsync,
-        // DisconnectStepAsync), which racing a second, independent timer against the whole claim used to override
-        // even once the hand-back had genuinely started and was already running its own correct cut-short.
+        // Bounded by the shared deadline through the exclusive slot's own task, Task.WaitAsync(CancellationToken),
+        // which is what RunExclusiveAsync's own wait loop uses: this token only ever bounds the wait for that
+        // slot. The body below never passes it to HandBackCoreAsync, so once this has actually started, nothing
+        // here can cut it short externally -- HandBackCoreAsync enforces the same deadline itself, honestly,
+        // naming the real step (WaitForBlockAsync, DisconnectStepAsync), which racing a second, independent
+        // timer against the whole claim used to override even once the hand-back had genuinely started and was
+        // already running its own correct cut-short.
+        //
+        // An earlier version of this comment claimed, as a probe result, that Task.WaitAsync(CancellationToken)
+        // itself only ever observes an antecedent's completion after a real thread-pool hop, never within the
+        // same synchronous drain a test's Pump() does. Both reviewers disputed that, and a direct probe run
+        // against the exact mechanism (a TaskCompletionSource(RunContinuationsAsynchronously) completed under a
+        // captured SynchronizationContext, then awaited through WaitAsync(CancellationToken) with a real, linked
+        // token) shows it wrong: one synchronous drain observes it, no real wait needed. What the harness's own
+        // tests still need PumpAfterRealHop for is a different, narrower shape -- two such slots nested, the
+        // second's WaitAsync waiting on a task whose own SetResult runs from inside a continuation of a third
+        // task -- which a second probe, in the same run, reproduced needing a short real wait even though a
+        // single WaitAsync in isolation does not. The exact mechanism for that nested case is not established
+        // here; treat PumpAfterRealHop's real wait as an empirical fact of this harness, not an explained one.
         using var waitBudget = new CancellationTokenSource(Remaining(deadline), _time);
         Task<bool> handBackTask = RunExclusiveAsync<bool>(
             name,

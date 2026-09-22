@@ -89,11 +89,14 @@ internal sealed class CoordinatorHarness : IDisposable
         }
     }
 
-    // Task.WaitAsync(CancellationToken) on a task this harness completed with SetResult only observes that
-    // completion after one real thread-pool hop for its own continuation to run on, not merely a posted
-    // continuation Pump's synchronous drain can catch in the same turn: a plain Pump() right after SetResult can
-    // see the waiter as still pending. This gives that hop a short, bounded, real wait to actually happen
-    // (ManualTime does not move it along; only wall-clock time does), then pumps again.
+    // Some hand-back tests need this, not a plain Pump(), because a plain Pump() right after resolving the
+    // operation already in flight can still see the hand-back as pending: not a Task.WaitAsync(CancellationToken)
+    // limitation in general (a direct probe shows one synchronous drain observes that in isolation), but a
+    // narrower shape -- an exclusive slot's own completion signalled from inside another task's continuation,
+    // then waited on again through a second WaitAsync -- that a second probe reproduced needing a short real
+    // wait. This gives that a short, bounded, real wait to actually happen (ManualTime does not move it along;
+    // only wall-clock time does), then pumps again. See HandBackAsync's own comment on the deadline-bounded
+    // wait for the fuller account, including what the earlier, disproved version of this comment claimed.
     public void PumpAfterRealHop(Func<bool> done, TimeSpan? limit = null)
     {
         var clock = Stopwatch.StartNew();

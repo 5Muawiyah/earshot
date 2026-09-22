@@ -303,7 +303,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Coordinator.HandBackInProgress, "HandBackInProgress must already be set while still waiting for the connect, not only once the exclusive slot is claimed.");
 
         pendingConnect.SetResult(Results.Connected());
-        // A real thread-pool hop, not merely a posted continuation: see PumpAfterRealHop's own comment.
+        // The real wait PumpAfterRealHop exists for, not merely a posted continuation: see its own comment.
         h.PumpAfterRealHop(() => handBack.IsCompleted);
 
         Assert.IsTrue(toggle.IsCompleted);
@@ -314,8 +314,8 @@ public sealed class HandBackTests
             "The operation already in flight finishes before the hand-back's own block runs; never beside it.");
     }
 
-    // The same defect as the test above, in a shape that needs no real thread-pool hop at all: nothing is ever
-    // in flight when this hand-back starts, so RunExclusiveAsync's wait loop never calls Task.WaitAsync(ct) on a
+    // The same defect as the test above, in a shape that needs no real wait at all: nothing is ever in flight
+    // when this hand-back starts, so RunExclusiveAsync's wait loop never calls Task.WaitAsync(ct) on a
     // still-running task, and the slot is claimed at once. Only the block step is left pending, past the shared
     // deadline, advanced on the manual clock; that is what the old race (Task.WhenAny against an independent
     // Task.Delay) used to get wrong even for a hand-back that had already started. The honest cut-short,
@@ -336,7 +336,7 @@ public sealed class HandBackTests
 
         h.Advance(Budget + TimeSpan.FromSeconds(1));
 
-        Assert.IsTrue(handBack.IsCompleted, "HandBackCoreAsync's own deadline cuts it short honestly; the slot was never contended, so nothing here needed the real thread-pool hop PumpAfterRealHop exists for.");
+        Assert.IsTrue(handBack.IsCompleted, "HandBackCoreAsync's own deadline cuts it short honestly; the slot was never contended, so nothing here needed the real wait PumpAfterRealHop exists for.");
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short"), "The honest cut-short, naming the block step, must still fire.");
         Assert.IsFalse(h.Log.Has(LogLevel.Warn, "cut short before it started"),
             "The misleading line this defect used to also log for a hand-back that had already started must never appear beside it.");
