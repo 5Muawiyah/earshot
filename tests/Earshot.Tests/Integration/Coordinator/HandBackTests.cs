@@ -263,6 +263,43 @@ public sealed class HandBackTests
         Assert.IsFalse(h.Log.Has(LogLevel.Debug, "a hand-back is already running; this one does nothing."));
     }
 
+    // _handingBack and _sleeping used to be set, and the first Changed raised, before the try/finally began: a
+    // subscriber's own Changed handler throwing there escaped the whole method without ever reaching the
+    // finally that clears them, leaving HandBackInProgress stuck true and every later hand-back doing nothing
+    // (with the setting on, the query defers to it too, so the next shut down would send no block at all).
+    [TestMethod]
+    public void AChangedHandlerThatThrowsWhenTheHandBackStartsStillLetsTheFlagsClearSoTheNextHandBackRuns()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+
+        bool thrown = false;
+        h.Coordinator.Changed += (_, _) =>
+        {
+            if (!thrown)
+            {
+                thrown = true;
+                throw new InvalidOperationException("a subscriber's own bug");
+            }
+        };
+
+        Task first = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(thrown, "The throwing handler never ran.");
+        Assert.IsTrue(first.IsCompleted, "The first hand-back's own outer task must complete, not hang.");
+        Assert.IsFalse(h.Coordinator.HandBackInProgress,
+            "HandBackInProgress must clear even though a Changed subscriber faulted, or every later hand-back is refused until restart.");
+
+        h.Block.Calls.Clear();
+        Task second = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(second.IsCompleted);
+        Assert.IsTrue(h.Block.Calls.Contains("block"), "The second hand-back must actually send a block, not defer to a setting nothing acts on again.");
+        Assert.IsFalse(h.Log.Has(LogLevel.Debug, "a hand-back is already running; this one does nothing."));
+    }
+
     // The started line reads the real streaming state passed in, rather than always saying "streaming none".
     [TestMethod]
     public void TheStartedLineReadsTheRealStreamingStateWhenAHeldLinkIsPassedIn()
@@ -314,32 +351,53 @@ public sealed class HandBackTests
             "The operation already in flight finishes before the hand-back's own block runs; never beside it.");
     }
 
-    // The same defect as the test above, in a shape that needs no real wait at all: nothing is ever in flight
-    // when this hand-back starts, so RunExclusiveAsync's wait loop never calls Task.WaitAsync(ct) on a
-    // still-running task, and the slot is claimed at once. Only the block step is left pending, past the shared
-    // deadline, advanced on the manual clock; that is what the old race (Task.WhenAny against an independent
-    // Task.Delay) used to get wrong even for a hand-back that had already started. The honest cut-short,
-    // naming "block", must still fire; the misleading "cut short before it started" must never join it.
+    // The same defect as the test above, in the exact shape that used to catch even a hand-back that had
+    // genuinely started: an operation already in flight frees the exclusive slot one tick before the shared
+    // deadline, so the hand-back claims the slot and starts with a tick to spare, then its own block step is
+    // still pending one tick later when that same deadline passes. On the old code, Task.Delay(Remaining(deadline))
+    // was created once, at the very start, before the wait for the slot; WaitForBlockAsync's own block.WaitAsync
+    // timer, created only once the slot was claimed, lands on the exact same due time, and ManualTime's own
+    // tie-break (equal due times fire in registration order) let the independent Task.Delay win the race even
+    // though the hand-back's own honest cut-short had already run. The honest cut-short, naming "block", must
+    // still fire; the misleading "cut short before it started" must never join it.
     [TestMethod]
-    public void AHandBackThatHasAlreadyStartedNeverLogsCutShortBeforeItStartedEvenPastItsOwnDeadline()
+    public void AHandBackGrantedTheSlotOneTickBeforeItsOwnDeadlineNeverLogsCutShortBeforeItStartedBesideItsHonestOne()
     {
         using CoordinatorHarness h = Harness();
         Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        var pendingConnect = new TaskCompletionSource<ConnectResult>();
+        h.Connection.Connects.Enqueue(_ => pendingConnect.Task);
         var pendingBlock = new TaskCompletionSource<ControllerResult>();
         h.Block.OnBlock = _ => pendingBlock.Task;
 
-        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
         h.Pump();
 
-        Assert.IsTrue(h.Coordinator.HandBackInProgress, "Nothing else was running, so the slot was claimed at once.");
-        Assert.IsFalse(handBack.IsCompleted, "Still waiting on its own block, which nothing has resolved yet.");
+        DateTimeOffset deadline = h.Time.GetUtcNow() + TimeSpan.FromMilliseconds(50);
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, deadline, DisconnectWait);
+        h.Pump();
+        Assert.IsFalse(handBack.IsCompleted, "Still waiting for the connect already in flight.");
 
-        h.Advance(Budget + TimeSpan.FromSeconds(1));
+        // The slot is granted one tick (one millisecond: the smallest unit "cut short at N ms" can even show,
+        // since Ms() truncates to whole milliseconds, and the smallest a real Task.WaitAsync(TimeSpan) timeout
+        // reliably holds off for) before the shared deadline. The wait loop's own completion needs the real
+        // wait PumpAfterRealHop exists for (see CoordinatorHarness's own comment on it): a plain Pump() here
+        // can leave it still suspended, and the deadline firing a tick later would then cancel that very wait,
+        // reproducing a different, narrower race than the one this test means to prove. Waiting for the block
+        // call itself confirms the slot was actually claimed and the body genuinely started.
+        h.Advance(TimeSpan.FromMilliseconds(49));
+        pendingConnect.SetResult(Results.Connected());
+        h.PumpAfterRealHop(() => h.Block.Calls.Contains("block"));
+        Assert.IsTrue(h.Coordinator.HandBackInProgress, "The hand-back must have claimed the slot and genuinely started.");
+        Assert.IsFalse(handBack.IsCompleted, "Still waiting on its own block, one tick later.");
 
-        Assert.IsTrue(handBack.IsCompleted, "HandBackCoreAsync's own deadline cuts it short honestly; the slot was never contended, so nothing here needed the real wait PumpAfterRealHop exists for.");
-        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short"), "The honest cut-short, naming the block step, must still fire.");
+        // One tick later, the shared deadline passes while the block step is still pending.
+        h.Advance(TimeSpan.FromMilliseconds(1));
+
+        Assert.IsTrue(handBack.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short at 50 ms"), "The honest cut-short, naming the block step, must still fire.");
         Assert.IsFalse(h.Log.Has(LogLevel.Warn, "cut short before it started"),
-            "The misleading line this defect used to also log for a hand-back that had already started must never appear beside it.");
+            "Granted the slot before the deadline, so the hand-back genuinely started; the misleading line must never appear beside the honest one.");
     }
 
     // t0 is taken once, at the moment HandBackAsync itself is called, not once the exclusive slot is actually

@@ -216,6 +216,11 @@ internal sealed class BlockCoordinator : IDisposable
     private Task? _current;
     private string? _currentName;
     private CancellationTokenSource? _currentCancel;
+
+    // The two names HandBackAsync's own claim on the exclusive slot uses (see there). HandBackCoreAsync never
+    // observes the cancellation a session end sends an operation in flight (_ = ct; in the body passed to
+    // RunExclusiveAsync), so cancelling a hand-back this way changes nothing about whether it keeps running.
+    private bool CurrentIsHandBack => _currentName is "hand-back (shutdown)" or "hand-back (sleep)";
     private Task? _sessionBlock;
     private bool _sessionEnding;
     private bool _sessionBlockIssued;
@@ -742,22 +747,40 @@ internal sealed class BlockCoordinator : IDisposable
             [new StepOutcome(action, Ok: false, SessionEndInterruptedCode, SessionEndInterruptedCodeName,
                 "Stopped because the session began ending; whether it finished is not known.")]);
 
-    // The result of a change that was not started because a session end is in progress. The tray shows it as a
-    // card, as it does any result that is not a success.
-    private static ControllerResult RefusedAtSessionEnd(string action) =>
-        new(OpStatus.NotAttempted, SessionEndingMessage, [StepOutcomes.NotAttempted(action, "The session is ending, so nothing was sent.")]);
+    // True only once a sleep hand-back's own procedure has already finished (or cut short) but the machine has
+    // not yet resumed: RunExclusiveAsync's own refusal check fires on _sleeping the same as it does on
+    // _sessionEnding or _handingBack, but "Windows is closing Earshot" is not true here, and never was -- the
+    // machine is going to sleep, not closing Earshot.
+    private bool RefusedBecauseAsleep => _sleeping && !_sessionEnding && !_handingBack;
 
-    // The same for a connect. Reported as cancelled because the session is ending, so the tray logs that reason
-    // and treats it neither as a connect that worked nor as one that failed.
+    private string RefusalMessage() => RefusedBecauseAsleep
+        ? "The computer is going to sleep, so nothing was changed."
+        : SessionEndingMessage;
+
+    private string RefusalDetail() => RefusedBecauseAsleep
+        ? "The computer is going to sleep, so nothing was sent."
+        : "The session is ending, so nothing was sent.";
+
+    private string RefusalReason() => RefusedBecauseAsleep ? "the computer is going to sleep" : "the session is ending";
+
+    // The result of a change that was not started because a session end is in progress, or the machine is
+    // going to sleep (see RefusedBecauseAsleep). The tray shows it as a card, as it does any result that is
+    // not a success.
+    private ControllerResult RefusedAtSessionEnd(string action) =>
+        new(OpStatus.NotAttempted, RefusalMessage(), [StepOutcomes.NotAttempted(action, RefusalDetail())]);
+
+    // The same for a connect. Reported as cancelled because of whichever of the two is true, so the tray logs
+    // that reason and treats it neither as a connect that worked nor as one that failed.
     private ToggleReport RefusedAtSessionEnd(ToggleRequest request, List<StepOutcome>? steps = null)
     {
-        ShowCard(request, SessionEndingMessage);
+        string message = RefusalMessage();
+        ShowCard(request, message);
         IReadOnlyList<StepOutcome> outcome = steps is null
-            ? [StepOutcomes.NotAttempted("connect", "The session is ending, so nothing was sent.")]
+            ? [StepOutcomes.NotAttempted("connect", RefusalDetail())]
             : steps;
-        return new ToggleReport(request.Connect, OpStatus.NotAttempted, SessionEndingMessage, outcome, Cancelled: true)
+        return new ToggleReport(request.Connect, OpStatus.NotAttempted, message, outcome, Cancelled: true)
         {
-            CancelledBecause = "the session is ending",
+            CancelledBecause = RefusalReason(),
         };
     }
 
@@ -858,7 +881,8 @@ internal sealed class BlockCoordinator : IDisposable
                     // it, and its own clean-up blocks again anything it already allowed.
                     if (_currentCancel is { } inFlight)
                     {
-                        _log.Info("Session ending: " + (_currentName ?? "the operation in flight") + " is stopped.");
+                        _log.Info("Session ending: " + (_currentName ?? "the operation in flight") +
+                            (CurrentIsHandBack ? " continues; it does not observe this cancellation." : " is stopped."));
                         _currentStoppedForSessionEnd = true;
                         inFlight.Cancel();
                     }
@@ -903,7 +927,8 @@ internal sealed class BlockCoordinator : IDisposable
             {
                 // With Block at boot on, the operation in flight must not go on to send an allow as the session ends; it
                 // stops at its next step, and its clean-up blocks again anything it already allowed.
-                _log.Info("Session ending: " + (_currentName ?? "the operation in flight") + " is stopped.");
+                _log.Info("Session ending: " + (_currentName ?? "the operation in flight") +
+                    (CurrentIsHandBack ? " continues; it does not observe this cancellation." : " is stopped."));
                 _currentStoppedForSessionEnd = true;
                 inFlight.Cancel();
             }
@@ -1105,22 +1130,6 @@ internal sealed class BlockCoordinator : IDisposable
         // including any wait behind an operation already in flight, not just the work after it.
         DateTimeOffset t0 = _time.GetUtcNow();
 
-        // Set before anything waits, not once the exclusive slot is actually claimed: every device action
-        // (menu, hotkey, click, streaming) refuses on HandBackInProgress from the instant the message
-        // arrives, the same guarantee SessionEndInProgress already gives a session end. The hand-back itself
-        // then runs inside the same exclusive slot (RunExclusiveAsync) every other device action uses, so an
-        // action already queued behind an operation in flight is ordered with the hand-back, never beside it,
-        // and the wait for that operation is bounded by the one shared deadline: if it has not finished by
-        // then, the hand-back is cut short before it ever started, and never runs after this reply returns.
-        _handingBack = true;
-        if (trigger == HandBackTrigger.Suspend)
-        {
-            _sleeping = true;
-        }
-
-        RaiseChanged();
-        string name = trigger == HandBackTrigger.SessionEnd ? "hand-back (shutdown)" : "hand-back (sleep)";
-
         // Bounded by the shared deadline through the exclusive slot's own task, Task.WaitAsync(CancellationToken),
         // which is what RunExclusiveAsync's own wait loop uses: this token only ever bounds the wait for that
         // slot. The body below never passes it to HandBackCoreAsync, so once this has actually started, nothing
@@ -1129,32 +1138,46 @@ internal sealed class BlockCoordinator : IDisposable
         // timer against the whole claim used to override even once the hand-back had genuinely started and was
         // already running its own correct cut-short.
         //
-        // An earlier version of this comment claimed, as a probe result, that Task.WaitAsync(CancellationToken)
-        // itself only ever observes an antecedent's completion after a real thread-pool hop, never within the
-        // same synchronous drain a test's Pump() does. Both reviewers disputed that, and a direct probe run
-        // against the exact mechanism (a TaskCompletionSource(RunContinuationsAsynchronously) completed under a
-        // captured SynchronizationContext, then awaited through WaitAsync(CancellationToken) with a real, linked
-        // token) shows it wrong: one synchronous drain observes it, no real wait needed. What the harness's own
-        // tests still need PumpAfterRealHop for is a different, narrower shape -- two such slots nested, the
-        // second's WaitAsync waiting on a task whose own SetResult runs from inside a continuation of a third
-        // task -- which a second probe, in the same run, reproduced needing a short real wait even though a
-        // single WaitAsync in isolation does not. The exact mechanism for that nested case is not established
-        // here; treat PumpAfterRealHop's real wait as an empirical fact of this harness, not an explained one.
+        // TaskCreationOptions.RunContinuationsAsynchronously is why PumpAfterRealHop exists: it schedules a
+        // completed task's continuations onto the thread pool rather than running them inline on the thread
+        // that called SetResult, so a plain Pump() right after resolving the operation already in flight can
+        // still see the hand-back as pending, needing a further, short real wait for that continuation to
+        // actually run. https://learn.microsoft.com/dotnet/api/system.threading.tasks.taskcreationoptions
         using var waitBudget = new CancellationTokenSource(Remaining(deadline), _time);
-        Task<bool> handBackTask = RunExclusiveAsync<bool>(
-            name,
-            async ct =>
-            {
-                _ = ct;
-                Task core = HandBackCoreAsync(trigger, t0, deadline, disconnectWait, streamingHeld);
-                _handBackInFlight = core;
-                await core;
-                return true;
-            },
-            waitBudget.Token);
 
         try
         {
+            // Set before anything waits, not once the exclusive slot is actually claimed: every device action
+            // (menu, hotkey, click, streaming) refuses on HandBackInProgress from the instant the message
+            // arrives, the same guarantee SessionEndInProgress already gives a session end. The hand-back itself
+            // then runs inside the same exclusive slot (RunExclusiveAsync) every other device action uses, so an
+            // action already queued behind an operation in flight is ordered with the hand-back, never beside
+            // it, and the wait for that operation is bounded by the one shared deadline: if it has not finished
+            // by then, the hand-back is cut short before it ever started, and never runs after this reply
+            // returns. Inside the try, not before it: a Changed handler that throws here must still hit the
+            // finally below, or _handingBack (and, for a suspend, _sleeping) is left stuck true and every later
+            // hand-back does nothing, deferring to a setting that is never actually acted on again.
+            _handingBack = true;
+            if (trigger == HandBackTrigger.Suspend)
+            {
+                _sleeping = true;
+            }
+
+            RaiseChanged();
+            string name = trigger == HandBackTrigger.SessionEnd ? "hand-back (shutdown)" : "hand-back (sleep)";
+
+            Task<bool> handBackTask = RunExclusiveAsync<bool>(
+                name,
+                async ct =>
+                {
+                    _ = ct;
+                    Task core = HandBackCoreAsync(trigger, t0, deadline, disconnectWait, streamingHeld);
+                    _handBackInFlight = core;
+                    await core;
+                    return true;
+                },
+                waitBudget.Token);
+
             await handBackTask;
         }
         catch (OperationCanceledException) when (waitBudget.IsCancellationRequested)

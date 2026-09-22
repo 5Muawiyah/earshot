@@ -90,13 +90,13 @@ internal sealed class CoordinatorHarness : IDisposable
     }
 
     // Some hand-back tests need this, not a plain Pump(), because a plain Pump() right after resolving the
-    // operation already in flight can still see the hand-back as pending: not a Task.WaitAsync(CancellationToken)
-    // limitation in general (a direct probe shows one synchronous drain observes that in isolation), but a
-    // narrower shape -- an exclusive slot's own completion signalled from inside another task's continuation,
-    // then waited on again through a second WaitAsync -- that a second probe reproduced needing a short real
-    // wait. This gives that a short, bounded, real wait to actually happen (ManualTime does not move it along;
-    // only wall-clock time does), then pumps again. See HandBackAsync's own comment on the deadline-bounded
-    // wait for the fuller account, including what the earlier, disproved version of this comment claimed.
+    // operation already in flight can still see the hand-back as pending. The cause is
+    // TaskCreationOptions.RunContinuationsAsynchronously: the exclusive slot's own TaskCompletionSource is
+    // created with it, so its continuations are scheduled onto the thread pool rather than run inline on the
+    // thread that calls SetResult, and a synchronous Pump() right there can run before that scheduled
+    // continuation does. This gives that continuation a short, bounded, real wait to actually happen (ManualTime
+    // does not move it along; only wall-clock time does), then pumps again.
+    // https://learn.microsoft.com/dotnet/api/system.threading.tasks.taskcreationoptions
     public void PumpAfterRealHop(Func<bool> done, TimeSpan? limit = null)
     {
         var clock = Stopwatch.StartNew();
