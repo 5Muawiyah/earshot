@@ -18,6 +18,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _toggle = new();
     private readonly ToolStripMenuItem _playFromPhone = new();
     private readonly ToolStripMenuItem _blockAtBoot = new();
+    private readonly ToolStripMenuItem _handBack = new();
     private readonly ToolStripMenuItem _protectAudio = new();
     private readonly ToolStripMenuItem _protectCaveat = new();
     private readonly ToolStripMenuItem _openOnStartup = new();
@@ -39,6 +40,7 @@ internal sealed class TrayMenu : IDisposable
             _playFromPhone,
             new ToolStripSeparator(),
             _blockAtBoot,
+            _handBack,
             _protectAudio,
             _protectCaveat,
             _openOnStartup,
@@ -52,6 +54,7 @@ internal sealed class TrayMenu : IDisposable
 
         _toggle.Click += (_, _) => ToggleClicked?.Invoke(this, EventArgs.Empty);
         _blockAtBoot.Click += (_, _) => BlockAtBootClicked?.Invoke(this, EventArgs.Empty);
+        _handBack.Click += (_, _) => HandBackClicked?.Invoke(this, EventArgs.Empty);
         _protectAudio.Click += (_, _) => ProtectAudioClicked?.Invoke(this, EventArgs.Empty);
         _openOnStartup.Click += (_, _) => OpenOnStartupClicked?.Invoke(this, EventArgs.Empty);
         _speakStatus.Click += (_, _) => SpeakStatusClicked?.Invoke(this, EventArgs.Empty);
@@ -69,6 +72,8 @@ internal sealed class TrayMenu : IDisposable
     public event EventHandler<StreamingMenuItemEventArgs>? PlayFromPhoneItemClicked;
 
     public event EventHandler? BlockAtBootClicked;
+
+    public event EventHandler? HandBackClicked;
 
     public event EventHandler? ProtectAudioClicked;
 
@@ -98,6 +103,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_playFromPhone, state.PlayFromPhone);
         SetPlayFromPhoneItems(state.PlayFromPhoneItems);
         Set(_blockAtBoot, state.BlockAtBoot);
+        Set(_handBack, state.HandBack);
         Set(_protectAudio, state.ProtectAudio);
         Set(_protectCaveat, state.ProtectCaveat);
         Set(_openOnStartup, state.OpenOnStartup);

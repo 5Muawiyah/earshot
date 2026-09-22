@@ -28,6 +28,7 @@ public sealed class MenuModelTests
         Assert.AreEqual("Connect", state.Toggle.Text);
         Assert.AreEqual("Disconnect", Build(snapshot: Target(ConnectionState.Connected)).Toggle.Text);
         Assert.AreEqual("Block at boot", state.BlockAtBoot.Text);
+        Assert.AreEqual("Hand back at shut down and sleep", state.HandBack.Text);
         Assert.AreEqual("Protect audio quality", state.ProtectAudio.Text);
         Assert.AreEqual("Turns off the AirPods microphone", state.ProtectCaveat.Text);
         Assert.AreEqual("Open on startup", state.OpenOnStartup.Text);
@@ -72,7 +73,7 @@ public sealed class MenuModelTests
     {
         MenuState state = Build(block: Block(BlockState.NotSetUp));
         MenuItemState[] items =
-            [state.Toggle, state.BlockAtBoot, state.ProtectAudio, state.ProtectCaveat,
+            [state.Toggle, state.BlockAtBoot, state.HandBack, state.ProtectAudio, state.ProtectCaveat,
              state.OpenOnStartup, state.ChooseDevice, state.SetUp, state.Exit];
 
         foreach (MenuItemState item in items)
@@ -167,6 +168,7 @@ public sealed class MenuModelTests
 
         Assert.IsFalse(state.Toggle.Enabled);
         Assert.IsFalse(state.BlockAtBoot.Enabled);
+        Assert.IsFalse(state.HandBack.Enabled);
         Assert.IsFalse(state.ProtectAudio.Enabled);
         Assert.IsFalse(state.OpenOnStartup.Enabled);
         Assert.IsFalse(state.SetUp.Enabled);
@@ -267,6 +269,24 @@ public sealed class MenuModelTests
         Assert.IsTrue(safe.ProtectAudio.Enabled);
         Assert.IsTrue(safe.OpenOnStartup.Enabled);
         Assert.IsTrue(safe.SetUp.Enabled);
+    }
+
+    // Section 7 of the hand-back spec: default on, and the check always follows the saved setting.
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void HandBackFollowsTheSetting(bool handBack)
+    {
+        MenuItemState item = Build(settings: Settings(s => s.HandBackOnShutdownAndSleep = handBack)).HandBack;
+
+        Assert.AreEqual(handBack, item.Checked);
+        Assert.IsTrue(item.Visible);
+    }
+
+    [TestMethod]
+    public void HandBackIsCheckedByDefault()
+    {
+        Assert.IsTrue(Build().HandBack.Checked);
     }
 
     [TestMethod]

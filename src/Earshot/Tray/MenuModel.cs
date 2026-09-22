@@ -24,6 +24,7 @@ internal sealed record MenuState(
     MenuItemState PlayFromPhone,
     IReadOnlyList<StreamingMenuItem> PlayFromPhoneItems,
     MenuItemState BlockAtBoot,
+    MenuItemState HandBack,
     MenuItemState ProtectAudio,
     MenuItemState ProtectCaveat,
     MenuItemState OpenOnStartup,
@@ -42,6 +43,7 @@ internal static class MenuModel
     // Kept exactly as StreamingLabels has it, referenced rather than duplicated, as with AnnouncerCopy below.
     public const string PlayFromPhone = StreamingLabels.Parent;
     public const string BlockAtBoot = "Block at boot";
+    public const string HandBackOnShutdownAndSleep = "Hand back at shut down and sleep";
     public const string ProtectAudioQuality = "Protect audio quality";
     public const string ProtectCaveat = "Turns off the AirPods microphone";
     public const string OpenOnStartup = "Open on startup";
@@ -98,6 +100,7 @@ internal static class MenuModel
             PlayFromPhone: new MenuItemState(streaming?.ParentText ?? PlayFromPhone, Checked: false, Enabled: streaming is { ParentEnabled: true }, Visible: streaming is not null),
             PlayFromPhoneItems: streaming?.Items ?? [],
             BlockAtBoot: new MenuItemState(WithShortcut(BlockAtBoot, settings.Hotkeys, HotkeyAction.ToggleBlockAtBoot), Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
+            HandBack: new MenuItemState(HandBackOnShutdownAndSleep, Checked: settings.HandBackOnShutdownAndSleep, Enabled: !busy, Visible: true),
             ProtectAudio: new MenuItemState(
                 WithShortcut(ProtectAudioQuality, settings.Hotkeys, HotkeyAction.ToggleAudioProtection),
                 Checked: settings.ProtectAudioQuality,

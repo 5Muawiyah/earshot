@@ -117,7 +117,7 @@ public sealed class TrayStreamingTests
             CollectionAssert.AreEqual(
                 Sequence.Of(
                     "Connect", "Play from a phone", "-",
-                    "Block at boot", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
+                    "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
                     "Speak status", "-",
                     "Choose device...", "-",
                     "Exit"),

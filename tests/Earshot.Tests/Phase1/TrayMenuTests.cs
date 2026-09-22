@@ -17,13 +17,13 @@ public sealed class TrayMenuTests
     private static readonly string[] DesignedOrder =
     [
         "Connect", "-",
-        "Block at boot", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
+        "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
         "Speak status", "-",
         "Choose device...", "Set up Earshot...", "-",
         "Exit",
     ];
 
-    private static readonly string[] CommandOrder = ["toggle", "block", "protect", "startup", "device", "setup", "exit"];
+    private static readonly string[] CommandOrder = ["toggle", "block", "handback", "protect", "startup", "device", "setup", "exit"];
 
     // The Play from a phone submenu as StreamingCoordinator builds it with one device in use.
     private static readonly StreamingMenuModel PlayingFromAPhone = new(
@@ -200,6 +200,7 @@ public sealed class TrayMenuTests
 
             Assert.IsFalse(Item("Disconnect").Enabled);
             Assert.AreEqual(CheckState.Unchecked, Item("Block at boot").CheckState);
+            Assert.AreEqual(CheckState.Checked, Item("Hand back at shut down and sleep").CheckState, "Default on.");
             Assert.AreEqual(CheckState.Indeterminate, Item("Protect audio quality").CheckState);
             Assert.IsFalse(Item("Turns off the AirPods microphone").Enabled);
             Assert.IsTrue(Item("Exit").Enabled);
@@ -216,6 +217,7 @@ public sealed class TrayMenuTests
             var raised = new List<string>();
             menu.ToggleClicked += (_, _) => raised.Add("toggle");
             menu.BlockAtBootClicked += (_, _) => raised.Add("block");
+            menu.HandBackClicked += (_, _) => raised.Add("handback");
             menu.ProtectAudioClicked += (_, _) => raised.Add("protect");
             menu.OpenOnStartupClicked += (_, _) => raised.Add("startup");
             menu.ChooseDeviceClicked += (_, _) => raised.Add("device");
