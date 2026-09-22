@@ -121,6 +121,11 @@ internal sealed class MainForm : Form
     // own verdict kind at the moment the Result view was last shown, so flipping the
     // technical-details toggle can redraw the same panel without re-deriving anything.
     private RowStateKind _lastResultRowStateKind;
+    // Cached the same way: a qualified pass ("shut down not confirmed", "on an earlier build", and
+    // the rest) must read amber on the Result view's own verdict line too, not only on the row,
+    // so this is never re-derived separately from the single ComputeState call that already found
+    // it.
+    private string? _lastResultQualifier;
 
     // The silence watchdog and the abort/kill sequence. A prompt on screen is never
     // a hang (test 12 waits hours at one), so the watchdog only ever looks at silence while
@@ -634,7 +639,7 @@ internal sealed class MainForm : Form
 
         if (_lastResultPresentation is not null)
         {
-            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails, _lastResultRowStateKind);
+            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails, _lastResultRowStateKind, _lastResultQualifier);
         }
 
         // The row list's own State column reads plain or technical the same way: PopulateRows
@@ -1540,7 +1545,8 @@ internal sealed class MainForm : Form
             DerivedRowState state = ComputeState(row);
             _lastResultPresentation = ResultPresenter.Present(result, _activeResultFolder!, row.Row.Number, _wording);
             _lastResultRowStateKind = state.Kind;
-            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails, state.Kind);
+            _lastResultQualifier = state.Qualifier;
+            _resultPanel.Show(_lastResultPresentation, _showTechnicalDetails, state.Kind, state.Qualifier);
             _resultPanel.Visible = true;
 
             // The status line's own "Finished: ..." (plain mode only; technical mode already read

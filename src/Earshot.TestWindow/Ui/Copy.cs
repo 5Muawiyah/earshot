@@ -586,9 +586,16 @@ internal static class Copy
     internal const string ResultVerdictInconclusive = "We could not tell.";
     internal const string ResultVerdictUnknown = "We do not know what happened, and that is not a pass.";
 
-    internal static string ResultVerdictSentence(RowStateKind kind) => kind switch
+    // A pass carrying a qualifier (an earlier build, a second half only on record, an unconfirmed
+    // shut down, and the rest) is never allowed to read as this clean a sentence: RowText/
+    // PlainRowText already refuse to shorten a qualified pass back to the bare word on the row
+    // itself, and the Result view's own single verdict line must say the same thing, not just the
+    // row underneath it.
+    internal const string ResultVerdictQualifiedPassed = "This test worked, but it does not count yet.";
+
+    internal static string ResultVerdictSentence(RowStateKind kind, string? qualifier = null) => kind switch
     {
-        RowStateKind.Passed => ResultVerdictPassed,
+        RowStateKind.Passed => qualifier is null ? ResultVerdictPassed : ResultVerdictQualifiedPassed,
         RowStateKind.Failed => ResultVerdictFailed,
         RowStateKind.Inconclusive => ResultVerdictInconclusive,
         _ => ResultVerdictUnknown,
@@ -596,8 +603,39 @@ internal static class Copy
 
     // The verdict sentence with its own symbol (Copy.RowStateSymbol, the same one the row list
     // already shows beside its state text), so the Result view's headline never relies on the
-    // sentence's own words alone either.
-    internal static string ResultVerdictLine(RowStateKind kind) => RowStateSymbol(kind) + " " + ResultVerdictSentence(kind);
+    // sentence's own words alone either. qualifier only ever changes the wording for a Passed
+    // kind (see ResultVerdictSentence); every other kind ignores it, since only a pass can ever
+    // carry one that changes whether the sentence still reads as clean.
+    internal static string ResultVerdictLine(RowStateKind kind, string? qualifier = null) =>
+        RowStateSymbol(kind) + " " + ResultVerdictSentence(kind, qualifier);
+
+    // The qualifier's own plain reason, shown as the Result view's second line under a qualified
+    // pass, one sentence per qualifier named in the fix (the reviewer's own two examples, verbatim)
+    // plus every other qualifier StateDeriver ever writes (PlainQualifier's own switch, tested by
+    // ResultVerdictQualifierLineCoversEveryPlainQualifierTests so a new qualifier can never go
+    // silently unmapped here while still being named on the row).
+    internal static string ResultVerdictQualifierReason(string qualifier) => qualifier switch
+    {
+        "shut down not confirmed" => "the computer was not shut down completely, so this run cannot settle the question",
+        "on an earlier build" => "this was an older copy of Earshot",
+        "second half only on record" => "only the second half of this test is on record",
+        "run order not confirmed" => "we could not confirm which run of this test was the newest",
+        "restart half not run" => "the restart half of this test was not run",
+        _ => PlainQualifier(qualifier),
+    };
+
+    // qualifier can itself be several reasons StateDeriver joined with "; " (CombineQualifier):
+    // every one of them is said, not only the first, so the Result view never drops a caveat the
+    // row itself still carries.
+    internal static string ResultVerdictQualifierLine(string qualifier)
+    {
+        ArgumentNullException.ThrowIfNull(qualifier);
+        IEnumerable<string> sentences = qualifier.Split("; ").Select(part => UpperFirst(ResultVerdictQualifierReason(part)) + ".");
+        return string.Join(" ", sentences);
+    }
+
+    private static string UpperFirst(string text) =>
+        text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     // Result view, plain mode: a raw folder and file path is jargon, kept
     // behind technical details (ResultPanel's own EvidenceLabel, unchanged); this is what replaces

@@ -19,6 +19,7 @@ internal sealed class ResultPanel : Panel
     private readonly Label _plainRecordSavedLabel;
     private readonly Button _openFolderButton;
     private readonly Label _atRestLabel;
+    private readonly Label _verdictQualifierLabel;
     private readonly Label _declinedElevatedPromptLabel;
     private IReadOnlyList<FailureRow> _failures = Array.Empty<FailureRow>();
     private string? _currentEvidenceFolder;
@@ -50,6 +51,15 @@ internal sealed class ResultPanel : Panel
         _verdictLabel = new Label
         {
             AutoSize = true, MaximumSize = new Size(704, 0), Font = new Font(Font.FontFamily, 16f, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 2),
+        };
+
+        // A qualified pass's own second line, right under the headline (never only on the row): the
+        // qualifier's plain reason, in this window's own words, so "worked, but it does not count
+        // yet" is never left to say why on its own.
+        _verdictQualifierLabel = new Label
+        {
+            AutoSize = true, MaximumSize = new Size(704, 0), ForeColor = Color.DarkGoldenrod, Visible = false,
             Margin = new Padding(0, 0, 0, 10),
         };
 
@@ -120,6 +130,7 @@ internal sealed class ResultPanel : Panel
         // (plain).
         stack.Controls.Add(heading);
         stack.Controls.Add(_verdictLabel);
+        stack.Controls.Add(_verdictQualifierLabel);
         stack.Controls.Add(_declinedElevatedPromptLabel);
         stack.Controls.Add(_plainSummaryLabel);
         stack.Controls.Add(_plainLinesLabel);
@@ -146,17 +157,25 @@ internal sealed class ResultPanel : Panel
     // place StateDeriver's result is already computed (MainForm.ComputeState) - never re-derived
     // here, so the row list and this headline can never disagree about pass/fail/inconclusive/
     // unknown.
-    internal void Show(ResultPresentation result, bool showTechnicalDetails, RowStateKind verdictKind)
+    // verdictQualifier is state.Qualifier, sourced from the same single ComputeState call
+    // verdictKind already comes from: a qualified pass ("shut down not confirmed", "on an earlier
+    // build", and the rest) is never allowed to read this clean, on the row or here.
+    internal void Show(ResultPresentation result, bool showTechnicalDetails, RowStateKind verdictKind, string? verdictQualifier = null)
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        _verdictLabel.Text = Copy.ResultVerdictLine(verdictKind);
+        bool qualifiedPass = verdictKind == RowStateKind.Passed && verdictQualifier is not null;
+
+        _verdictLabel.Text = Copy.ResultVerdictLine(verdictKind, verdictQualifier);
         _verdictLabel.ForeColor = verdictKind switch
         {
-            RowStateKind.Passed => Color.DarkGreen,
+            RowStateKind.Passed => qualifiedPass ? Color.DarkGoldenrod : Color.DarkGreen,
             RowStateKind.Inconclusive => Color.Black,
             _ => Color.DarkRed,
         };
+
+        _verdictQualifierLabel.Visible = qualifiedPass;
+        _verdictQualifierLabel.Text = qualifiedPass ? Copy.ResultVerdictQualifierLine(verdictQualifier!) : string.Empty;
 
         _declinedElevatedPromptLabel.Visible = result.HasDeclinedElevatedStep;
         _declinedElevatedPromptLabel.Text = Copy.DeclinedElevatedPrompt;
@@ -277,6 +296,12 @@ internal sealed class ResultPanel : Panel
     internal string PlainLinesTextForTests => _plainLinesLabel.Text;
 
     internal string VerdictTextForTests => _verdictLabel.Text;
+
+    internal Color VerdictColorForTests => _verdictLabel.ForeColor;
+
+    internal bool VerdictQualifierVisibleForTests => _verdictQualifierLabel.Visible;
+
+    internal string VerdictQualifierTextForTests => _verdictQualifierLabel.Text;
 
     internal bool PlainRecordSavedVisibleForTests => _plainRecordSavedLabel.Visible;
 
