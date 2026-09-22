@@ -15,6 +15,7 @@ and the evidence behind each run.
 | 3 | Keep the AirPods on A2DP, so a browser tab or a game cannot drop them to call quality | The read-only walk from the audio endpoints to both the A2DP and Hands-Free filters shows both filters answer, so the connect path is reachable | Test 06, pending |
 | 4 | Show no battery figure that was not read off the device | Three independent read-only checks, each run against a positive control so a broken query could not be mistaken for a missing value | Done, see [What it does not do](#what-it-does-not-do). The same check with the AirPods disconnected is Test 11, pending |
 | 5 | Ask for exactly one administrator prompt, at setup, and nothing after | The elevated worker's argument-validation unit tests confirm it refuses anything it does not expect | Test 15, Uninstall reversal, which exercises the live setup and its reversal, pending |
+| 6 | Hand the AirPods back at shut down and sleep: release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting | No live run yet. Tests 17 and 18, pending; see [verification.md](verification.md) |
 
 ## v1.1 requirements
 
@@ -25,9 +26,9 @@ against a stand-in.
 
 | # | Requirement | Covered by |
 |---|---|---|
-| 6 | Keyboard shortcuts for connect, audio protection, block at boot and speak status, off until the owner types one into the settings file | `tests/Earshot.Tests/Hotkeys` and the tray wiring in `tests/Earshot.Tests/Phase1` |
-| 7 | Spoken status, off until the owner turns it on from the menu | `tests/Earshot.Tests/Voice` and the tray wiring in `tests/Earshot.Tests/Phase1` |
-| 8 | Play from a phone, off until the owner turns it on in the settings file | `tests/Earshot.Tests/Streaming` and the tray wiring in `tests/Earshot.Tests/Phase1` |
+| 7 | Keyboard shortcuts for connect, audio protection, block at boot and speak status, off until the owner types one into the settings file | `tests/Earshot.Tests/Hotkeys` and the tray wiring in `tests/Earshot.Tests/Phase1` |
+| 8 | Spoken status, off until the owner turns it on from the menu | `tests/Earshot.Tests/Voice` and the tray wiring in `tests/Earshot.Tests/Phase1` |
+| 9 | Play from a phone, off until the owner turns it on in the settings file | `tests/Earshot.Tests/Streaming` and the tray wiring in `tests/Earshot.Tests/Phase1` |
 
 ## What it does not do
 
@@ -51,13 +52,17 @@ against a stand-in.
   AirPods fresh device nodes, which would not carry the disable. Earshot
   blocks again the next time it sees them enabled and unused, but a boot in
   between can let Windows page them.
-- **Guarantee the shutdown-while-connected case.** Earshot answers the
-  shutdown message by starting a block and returning at once, but Windows
-  kills a tray program a few seconds into shutdown, and a forced shutdown
-  sends no message at all. If the block loses that race, the nodes are
-  enabled at the next boot, Windows may page the AirPods once, and the boot
-  task blocks them again afterwards. Disconnecting, or closing Earshot,
-  before you shut down avoids it entirely.
+- **Guarantee the shutdown-while-connected case.** With Hand back at shut
+  down and sleep on, Earshot releases the AirPods and blocks the nodes again
+  inside the time Windows gives it: up to 4 seconds at a shut down, restart
+  or sign-out, up to 1.5 seconds at sleep. It cannot do any of that when
+  Windows gives it no notice at all: a power cut, a held power button, a
+  kernel stop error, a forced shutdown such as `shutdown /f`, and the
+  battery reaching a critical level all send nothing. Earshot not running
+  (closed, crashed, or not yet started) is the same: nothing can run when
+  nobody is there to run it. In every one of those cases the nodes are left
+  as they were, and the fallback is the boot-time block task, which can lose
+  the race against Windows re-paging the AirPods first.
 - **Cover Fast Startup.** It was off on the machine this was built against,
   so whether a persistent device-node disable behaves the same through a
   hybrid shutdown is unverified. Tests 08 and 09, the two that power the

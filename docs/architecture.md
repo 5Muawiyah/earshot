@@ -36,12 +36,110 @@ stops the paging at boot. Nothing has to happen at shutdown for that to hold.
   crash for instance. Windows does not document where this task falls
   against its own reconnect, so it can lose the race. The design leans on
   the nodes already being disabled, not on this task winning.
-- **Shutting down while connected** is the one case the at-rest rule does not
-  cover; see [requirements.md](requirements.md#what-it-does-not-do) for what
-  Earshot does about it and why it cannot always win.
+- **Shutting down or sleeping while connected** is handled by the hand-back
+  below, which goes further than leaving it to the at-rest rule alone; see
+  [requirements.md](requirements.md#what-it-does-not-do) for what it still
+  cannot cover.
 
 With Block at boot off, Earshot still connects and disconnects, and
 Disconnect only asks the AirPods to disconnect.
+
+### Handing the AirPods back at shut down and sleep
+
+With **Hand back at shut down and sleep** on (the default), Earshot releases
+the AirPods and blocks their device nodes again before the session actually
+ends or the machine actually sleeps, so this PC does not take them back the
+moment it restarts or wakes.
+
+**Where it runs.** Entirely inside the tray's own hidden window, on the real
+Windows messages it already receives: `WM_ENDSESSION` (with the reply held
+open) for a shut down, a restart or a sign-out, and `WM_POWERBROADCAST` with
+`PBT_APMSUSPEND` for sleep. Nothing runs unless that window gets the
+message, which is why the tray has to be running for any of this to happen.
+
+**The fixed order**, the same for both triggers:
+
+1. Let go of any open Play from a phone link.
+2. Send the disconnect and wait for confirmation that the audio render
+   endpoint has left ACTIVE.
+3. Send the block whether or not the disconnect confirmed. Leaving every
+   node enabled by choice would break the at-rest guarantee, so the block
+   still goes out; if render had not actually left ACTIVE, Windows vetoes
+   that one sink entry and the outcome comes back Partial rather than an
+   assumed Success. The log records whatever the gate actually returned.
+
+**Two caps, held as constants in the tray's own code:**
+
+| Trigger | Cap |
+|---|---|
+| Shut down, restart, sign-out (`WM_ENDSESSION`) | 4 seconds |
+| Sleep (`PBT_APMSUSPEND`) | 1.5 seconds |
+
+Reaching a cap logs "cut short" and names what was still running. The cap
+is a single deadline, taken once and shared by both the reply hold and the
+hand-back's own work, so a step that overruns it is caught and its "cut
+short" line written before the reply returns, not as an afterthought once
+the process has moved on. A block that was already sent is never abandoned
+at the cap: it is a request already handed to the elevated Gate task, which
+keeps running in its own process and finishes on its own, and its outcome is
+still written to the log once it arrives, even after the tray itself has
+gone. A disconnect that has not confirmed by the time its own, shorter share
+of the cap runs out is treated the same way: the request stays sent, and
+Earshot moves on to check whether it can still block rather than waiting any
+longer.
+
+**Why sending the disconnect first still matters.** A block sent while the
+AirPods are still rendering audio is vetoed by Windows at that one sink
+entry, seen on the owner's machine, so sending the disconnect first gives
+Windows the best chance to have already left render before the block goes
+out. The block is sent either way; when the disconnect has not confirmed,
+the veto can still catch that one entry, and the outcome comes back Partial,
+recorded as such, rather than an assumed Success.
+
+**A block already queued at the query.** At `WM_QUERYENDSESSION`, if render
+was not ACTIVE then, the ordinary at-rest block described above already
+runs, and `WM_ENDSESSION`'s hand-back waits for that same block rather than
+sending a second one. Render is read again at `WM_ENDSESSION` regardless of
+what the query found, so audio started in between is still disconnected. If
+the block being reused comes back Failed, or Partial in a way the gate is
+not still running, it is sent once more before the reply returns, inside the
+same shared deadline, and the log names the status that triggered the retry.
+
+A step that throws instead of returning a result, the disconnect call or the
+block call itself, is never a silent catch: its raw code is recorded and
+logged, and the procedure still moves on to the block where it can.
+
+**What this deliberately does not do.** Nothing runs when Earshot is not
+running, whether it was closed, crashed, or never started; the boot-time
+block described above is the only fallback for that case, and it can lose
+the race. A permanent background service that could hand back the AirPods
+even without the tray running was considered and designed, but is not
+something built.
+
+**The log lines**, all written by one formatter so nothing here drifts from
+what a reader, or a live-test script, actually parses:
+
+- `Hand-back (shutdown): started at ...` and `Hand-back (sleep): started at ...`
+- `Hand-back (shutdown): nothing to disconnect`, or `disconnect ...,
+  confirmed after ... ms` / `not confirmed within ... ms`
+- `Hand-back (shutdown): block sent at ...`, or `block not sent: <reason>`
+- `Hand-back (shutdown): the block queued at the query was <status>, so it is
+  sent once more`
+- `Hand-back (shutdown): finished in ... ms; disconnect ...; block ...`
+- `Hand-back (shutdown): cut short at ... ms; still running: ...; block was
+  sent at ... ` / `not sent`
+- `Hand-back (resume): connected at resume; the resume check did not hold`
+- `Hand-back (resume): the nodes were enabled and not in use, so they are
+  blocked now`
+- `Hand-back (resume): nothing to do: <reason>`
+- `Hand-back: off, so nothing runs for this session end.` / `... suspend.`
+- `Session ending: no block issued at the query, because the AirPods are in
+  use and Hand back is on; the hand-back runs when Windows confirms the
+  session is ending.`
+
+The sleep and resume messages arrive at the tray's existing hidden window
+without any new registration: it already receives broadcast messages such as
+`WM_SETTINGCHANGE`, and `WM_POWERBROADCAST` reaches it the same way.
 
 ### Audio quality protection
 

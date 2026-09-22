@@ -53,9 +53,12 @@ tray icon does it.
   cannot drop the AirPods to a narrow voice channel. This turns off the
   AirPods microphone on this PC while it is on.
 - **Shows no battery figure.** There is no battery element in the tray at all.
+- **Hands the AirPods back at shut down and sleep**, on by default, releasing
+  them and blocking the nodes again before this PC can grab them back.
 - **v1.1: keyboard shortcuts, spoken status and playing audio from a paired
   phone.** All three are built, reviewed and off by default, and none has had
-  a live run yet.
+  a live run yet. The hand-back above is built and covered by its own tests,
+  and is in the same position on one point: it has not had a live run either.
 
 See [docs/requirements.md](docs/requirements.md) for what each point promises
 and the test that proves it, and [docs/overview.md](docs/overview.md) for a

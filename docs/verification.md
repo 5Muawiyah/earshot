@@ -30,6 +30,8 @@ stays pending until a run on the device has written the evidence for it.
 | Spoken status heard on a real run | Pending |
 | Play from a phone, with a real phone | Pending |
 | Shutdown refusals on a real shutdown | Pending. Covered by the same sitting as the power cycle test (08), since that is a real shutdown |
+| Hand back on shut down while connected (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
+| Hand back on sleep while connected (`tools\live-tests\18-HandBackOnSleep.ps1`) | Pending: no live run yet |
 
 ## Live tests
 

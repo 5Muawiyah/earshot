@@ -52,6 +52,7 @@ Top to bottom, with the exact wording:
 | `Connect`, or `Disconnect` when connected | The same as a left click. Greyed out while a change is already under way. |
 | `Play from a phone` | Shown only once this v1.1 setting is turned on. Opens a submenu listing the phones paired in Windows that can send audio to this PC, with `Refresh the list` and, once one is open, `Stop playing from <name>`. Greyed out before Windows 10 version 2004 (build 19041). |
 | `Block at boot` | A tick. Keeps the AirPods' device nodes disabled while they are not in use. Turning it on before setup has run starts setup. The tick shows what is in force; when the setting cannot be read it shows neither state. |
+| `Hand back at shut down and sleep` | A tick, on by default. Releases the AirPods and blocks the device nodes again when you shut down, restart or put the computer to sleep, so it does not grab them straight back. See [below](#handing-the-airpods-back). |
 | `Protect audio quality` | A tick, on by default. Turns off the Hands-Free profile, described above. |
 | `Turns off the AirPods microphone` | A caption under that setting, always visible and never clickable, telling you plainly what it costs. |
 | `Open on startup` | A tick, on by default. Writes one value named `Earshot` under the current user's `Run` key, with the `--startup` argument. Earshot has to be running for it to put the block back once you stop using the AirPods, so this keeps it running from sign-in. |
@@ -152,6 +153,36 @@ Windows 11 has. It has never been run against a real phone, so whether this
 PC's Bluetooth radio offers the source role at all, and what turning it on
 does to an AirPods link already open, are both open questions.
 
+The hand-back at shut down and sleep, described below, is built and covered
+by its own tests. Unlike these three it is on by default, but it is in the
+same position on one point: it has not been tried on a real shut down or a
+real sleep either.
+
+## Handing the AirPods back
+
+If the AirPods are playing from this computer when you shut down, restart,
+or put the computer to sleep, Earshot lets go of them and stops this
+computer grabbing them straight back. What happens to the AirPods after that
+is not something this computer decides: they go back to whatever device
+they prefer, which has been the phone every time this was tried; Earshot
+cannot choose the device for them, command the phone, or see what the phone
+does.
+
+Sleep works the same way, on a much shorter clock, because Windows gives an
+application far less time to act before the computer actually sleeps than it
+gives at shut down.
+
+This is on by default. Turn it off from **Hand back at shut down and
+sleep** in the right-click menu, the tick directly under Block at boot.
+
+**The honest limits.** This needs Earshot running. A power cut, a forced
+shutdown, or the battery reaching a critical level gives Windows no chance
+to run it at all, because none of those send Earshot any notice. When that
+happens, the fallback is the same one Earshot always has: the block Earshot
+runs at the next start-up. That fallback can lose the race, so the AirPods
+may connect to this computer briefly before it catches up and blocks them
+again.
+
 ## Shutdown safety
 
 Once Windows says the session is ending, Earshot refuses to start a connect,
@@ -159,6 +190,11 @@ an allow, or a setting change from any trigger, and says so on a card. A
 block that is already due still runs, and one known to have failed is tried
 once more. A close request from Windows, such as the one the Restart Manager
 can send, is treated the same as choosing Exit.
+
+The same refusal covers a sleep hand-back too, even though sleep is not a
+session end in Windows' own terms: every menu item, keyboard shortcut and
+click is refused with its own card while either hold is running, so nothing
+can start a change that would fight what the hand-back is doing.
 
 For what this does and does not guarantee when the PC is actually shut down,
 see [requirements.md](requirements.md#what-it-does-not-do) and
