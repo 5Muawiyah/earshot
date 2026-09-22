@@ -65,35 +65,47 @@ public sealed class TrayHandBackTests
 
     // T4 / T5: a block still running at the hand-back's own budget does not hang the window procedure: the hold
     // returns at the deadline, "cut short", and the block's own outcome is still recorded once it arrives later.
+    // A zero budget proves nothing about the real race (it faults before any real waiting starts, on either
+    // clock), so this drives a real, non-zero budget against the real clock (TimeProvider.System) with a step
+    // that genuinely overruns it: a fake disconnect that never completes and never observes its own cancellation
+    // token, so nothing but the shared deadline can end the wait. The call to OnSessionEnding is synchronous (it
+    // returns only once HoldReply's pump has stopped), so asserting on the log immediately after it returns
+    // proves the line was written before WndProc's own return, not by some later continuation that only runs if
+    // the process happens to still be pumping messages.
     [TestMethod]
     public void HoldReplyCutsShortAtItsOwnBudgetRatherThanHangingTheCaller()
     {
         StaThread.Run(() =>
         {
+            var budget = TimeSpan.FromMilliseconds(200);
             using var tray = new TrayHarness(
-                snapshot: Target(ConnectionState.Disconnected),
+                snapshot: TargetRenderActive(),
                 settings: s => s.HandBackOnShutdownAndSleep = true,
-                handBackBudget: TimeSpan.Zero);
+                time: TimeProvider.System,
+                handBackBudget: budget,
+                // Larger than the overall budget on purpose: the disconnect's own sub-cap must not be what ends
+                // this wait; only the shared deadline the pump also uses may.
+                disconnectHandBackWait: TimeSpan.FromSeconds(30));
 
-            // The harness's own start-up check may already have blocked the nodes through the default fake
-            // behaviour; put them back to enabled for this test's own scenario, read fresh.
-            tray.Block.Status = Block(BlockState.Allowed);
-            tray.Coordinator.RefreshStatusAsync();
-            tray.PumpUntilIdle();
+            // A disconnect that is sent and never comes back, and never reacts to its cancellation token: the
+            // most direct proof that only the shared deadline, not a well-behaved callee, ends the wait.
+            tray.Connection.OnDisconnect = _ => new TaskCompletionSource<ConnectResult>().Task;
 
-            var pending = new TaskCompletionSource<ControllerResult>();
-            tray.Block.OnBlock = _ => pending.Task;
-
+            var clock = Stopwatch.StartNew();
             tray.Context.OnSessionEnding(null, WmEndSession());
+            clock.Stop();
 
+            Assert.IsGreaterThanOrEqualTo(budget, clock.Elapsed,
+                "The reply returned before the hand-back's own budget passed.");
+            Assert.IsLessThan(TimeSpan.FromSeconds(5), clock.Elapsed,
+                "Generous upper bound for a slower machine: the reply must still return close to the budget, " +
+                "not hang on toward the disconnect's own much longer sub-cap.");
             Assert.IsTrue(tray.Log.Has(LogLevel.Debug, "reply returned after"),
                 "HoldReply must return the window procedure, not hang it, once its own budget has passed.");
-            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "cut short"));
-
-            // Not abandoned: the block is a gate request already sent, so it still finishes and is still logged.
-            pending.SetResult(ControllerResult.Ok("Blocked at boot"));
-            tray.PumpUntilIdle();
-            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "the block that was still running finished"));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "cut short"),
+                "The line must already be in the log by the time this synchronous call returns.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "still running: disconnect"),
+                "The step actually in flight (the disconnect) is the one named, not an assumed \"block\".");
         });
     }
 

@@ -47,6 +47,22 @@ internal static class Phase1Fixtures
         };
     }
 
+    // Target(ConnectionState.Connected) carries no endpoints, so CoordinatorRules.RenderOf reads it NotActive:
+    // it is only ever a Bluetooth-connection fixture. A hand-back test that must exercise the disconnect step
+    // (render ACTIVE) needs a render endpoint too, so this adds one.
+    public static DeviceSnapshot TargetRenderActive(Guid? container = null, string name = AirPodsName)
+    {
+        Guid id = container ?? AirPodsContainer;
+        var endpoint = new AudioEndpoint("{0.0.0.00000000}.render", EndpointFlow.Render, EndpointState.Active, name, id);
+        var model = new DeviceModel(id, name, ConnectionState.Connected, [endpoint]);
+        return new DeviceSnapshot(model, [model], DateTimeOffset.UnixEpoch)
+        {
+            Sequence = 1,
+            ReadStatus = SnapshotReadStatus.Ok,
+            Resolution = TargetResolution.Pinned,
+        };
+    }
+
     public static BootBlockStatus Block(BlockState state, bool blockAtBoot = true) =>
         new(state, AirPodsContainer, [], TasksInstalled: state != BlockState.NotSetUp, blockAtBoot);
 

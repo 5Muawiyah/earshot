@@ -49,7 +49,7 @@ public sealed class HandBackTests
         h.Connection.Calls.Clear();
         h.Block.Calls.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -66,7 +66,7 @@ public sealed class HandBackTests
         Arrange(h, Statuses.Allowed(), Devices.Active(1));
         h.Trace.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted, "The hand-back did not finish.");
@@ -85,7 +85,7 @@ public sealed class HandBackTests
         h.Trace.Clear();
         h.Connection.Calls.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -110,7 +110,7 @@ public sealed class HandBackTests
             return pending.Task;
         };
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
         Assert.IsFalse(task.IsCompleted, "The disconnect has not been abandoned yet.");
 
@@ -138,7 +138,7 @@ public sealed class HandBackTests
             return Task.FromResult(Results.Disconnected());
         };
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -156,7 +156,7 @@ public sealed class HandBackTests
         var pending = new TaskCompletionSource<ControllerResult>();
         h.Block.OnBlock = _ => pending.Task;
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(20));
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(20));
         h.Pump();
         Assert.IsFalse(task.IsCompleted, "The block is still running.");
 
@@ -180,7 +180,7 @@ public sealed class HandBackTests
         using CoordinatorHarness h = Harness();
         Arrange(h, Statuses.Allowed(), Devices.Idle(1));
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -197,7 +197,7 @@ public sealed class HandBackTests
         h.Block.Calls.Clear();
         h.Connection.Calls.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -214,7 +214,7 @@ public sealed class HandBackTests
         h.Block.Calls.Clear();
         h.Connection.Calls.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -229,7 +229,7 @@ public sealed class HandBackTests
         Arrange(h, Statuses.Blocked(), Devices.Idle(1));
         h.Block.Calls.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -248,7 +248,7 @@ public sealed class HandBackTests
         h.Protection.State = AudioProtectionState.NotProtected;
         h.Protection.Applies.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -264,11 +264,11 @@ public sealed class HandBackTests
         var pending = new TaskCompletionSource<ControllerResult>();
         h.Block.OnBlock = _ => pending.Task;
 
-        Task first = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task first = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
         Assert.IsTrue(h.Coordinator.HandBackInProgress);
 
-        Task second = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task second = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(second.IsCompleted, "A re-entrant call must return at once.");
@@ -323,12 +323,70 @@ public sealed class HandBackTests
         h.Pump();
         Assert.HasCount(1, h.Block.Calls);
 
-        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(handBack.IsCompleted);
         Assert.HasCount(1, h.Block.Calls, "The query's own block is reused, not sent again.");
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "nothing to disconnect"));
+    }
+
+    // The result written is the result observed: a query-time block that came back Partial is retried exactly
+    // once before the reply returns, and the line names the real outcome of whichever attempt actually finished
+    // last, never an assumed Success.
+    [TestMethod]
+    public void WmEndSessionRetriesAPartialQueryTimeBlockOnceAndReportsTheRetrysOutcome()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        var outcomes = new Queue<ControllerResult>(new[]
+        {
+            new ControllerResult(OpStatus.Partial, "One entry vetoed", Array.Empty<StepOutcome>()),
+            ControllerResult.Ok("Blocked at boot"),
+        });
+        h.Block.OnBlock = _ => Task.FromResult(outcomes.Dequeue());
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+        Assert.HasCount(1, h.Block.Calls);
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(handBack.IsCompleted);
+        Assert.HasCount(2, h.Block.Calls, "A Partial query-time block is sent once more, and only once.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "the block queued at the query was Partial, so it is sent once more"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "block Success"), "The retry succeeded, so the last outcome recorded is the retry's own.");
+    }
+
+    // As above, but the retry fails too: the line names Failed, never Success, because the gate never said so.
+    [TestMethod]
+    public void WmEndSessionRetriesAFailedQueryTimeBlockOnceAndNeverClaimsSuccessWhenTheRetryAlsoFails()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Idle(1));
+        h.Block.Calls.Clear();
+
+        h.Block.OnBlock = _ => Task.FromResult(new ControllerResult(OpStatus.Failed, "Access denied", Array.Empty<StepOutcome>()));
+
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Pump();
+        Assert.HasCount(1, h.Block.Calls);
+
+        Task handBack = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Pump();
+
+        Assert.IsTrue(handBack.IsCompleted);
+        Assert.HasCount(2, h.Block.Calls, "A Failed query-time block is sent once more, and only once.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "the block queued at the query was Failed, so it is sent once more"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "block Failed"));
+        Assert.IsFalse(
+            h.Log.Entries.Any(e => e.Message.StartsWith("Hand-back (shutdown): finished", StringComparison.Ordinal) && e.Message.Contains("block Success", StringComparison.Ordinal)),
+            "Never Success unless the gate said so: both attempts failed.");
     }
 
     // T10: the target of the "skip the disconnect" mutation, the most direct: render ACTIVE must call
@@ -340,7 +398,7 @@ public sealed class HandBackTests
         Arrange(h, Statuses.Allowed(), Devices.Active(1));
         h.Connection.Calls.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, Budget, DisconnectWait);
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -355,7 +413,7 @@ public sealed class HandBackTests
         Arrange(h, Statuses.Allowed(), Devices.Active(1));
         h.Trace.Clear();
 
-        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, TimeSpan.FromMilliseconds(1500), TimeSpan.FromMilliseconds(750));
+        Task task = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + TimeSpan.FromMilliseconds(1500), TimeSpan.FromMilliseconds(750));
         h.Pump();
 
         Assert.IsTrue(task.IsCompleted);
@@ -421,7 +479,7 @@ public sealed class HandBackTests
         var pending = new TaskCompletionSource<ControllerResult>();
         h.Block.OnBlock = _ => pending.Task;
 
-        Task suspend = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, TimeSpan.Zero, TimeSpan.FromMilliseconds(750));
+        Task suspend = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + TimeSpan.Zero, TimeSpan.FromMilliseconds(750));
         h.Pump();
         Assert.IsTrue(suspend.IsCompleted, "The suspend hand-back itself returns (cut short) once its own budget passes.");
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "cut short"));

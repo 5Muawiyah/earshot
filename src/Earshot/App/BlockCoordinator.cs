@@ -229,6 +229,11 @@ internal sealed class BlockCoordinator : IDisposable
     private bool _sessionBlockFailed;
     private bool _sessionBlockRetried;
 
+    // The query-time block's own result, read by a hand-back that reuses it (nothing was in use at the query, so
+    // nothing to disconnect) so the hand-back can log what actually happened instead of assuming success. Set by
+    // LogSessionBlockAsync before _sessionBlock completes, so it is always current once that task is awaited.
+    private ControllerResult? _sessionBlockResult;
+
     // The operation in flight was stopped because a session end began. Kept per operation, so why it stopped is
     // still known if the session end is cancelled again before it returns.
     private bool _currentStoppedForSessionEnd;
@@ -1023,6 +1028,7 @@ internal sealed class BlockCoordinator : IDisposable
         try
         {
             ControllerResult result = await block;
+            _sessionBlockResult = result;
             _sessionBlockFailed = _sessionBlockIssued && !result.IsSuccess && !CoordinatorRules.MayStillRun(result);
             string text = TrayReport.Describe("session-end block (queued " + Utc(issued) + ")", result.Status, result.UserMessage, result.Steps);
             _log.Write(result.IsSuccess ? LogLevel.Info : LogLevel.Warn, text);
@@ -1032,6 +1038,7 @@ internal sealed class BlockCoordinator : IDisposable
             StepOutcome step = StepOutcomes.FromHResult("session-end-block", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
             _log.Error("Session ending: the block queued at " + Utc(issued) + " failed. " + TrayReport.DescribeStep(step), ex);
             _sessionBlockFailed = _sessionBlockIssued;
+            _sessionBlockResult = ControllerResult.Fail(ex.GetType().Name + ": " + ex.Message, [step]);
         }
         finally
         {
@@ -1049,7 +1056,13 @@ internal sealed class BlockCoordinator : IDisposable
     // for: either everything finished, or the budget ran out ("cut short"). A call while one is already running
     // does nothing (the re-entry guard a second WM_ENDSESSION, a power message, a click or a menu action all
     // meet the same way, through HandBackInProgress).
-    public async Task HandBackAsync(HandBackTrigger trigger, TimeSpan budget, TimeSpan disconnectWait)
+    //
+    // deadline is an absolute instant, taken once by the caller and handed to both this procedure and its own
+    // reply pump (TrayContext.HoldReply), never recomputed here from a fresh "now" plus a budget: two clock reads
+    // a few instructions apart can disagree by more than nothing, and a pump whose deadline reads earlier than
+    // the work's own deadline can stop pumping before the work has finished timing itself out, so "cut short" is
+    // only ever logged by a continuation the caller may no longer be pumping for.
+    public async Task HandBackAsync(HandBackTrigger trigger, DateTimeOffset deadline, TimeSpan disconnectWait)
     {
         if (_disposed)
         {
@@ -1070,7 +1083,7 @@ internal sealed class BlockCoordinator : IDisposable
 
         _handingBack = true;
         RaiseChanged();
-        Task core = HandBackCoreAsync(trigger, budget, disconnectWait);
+        Task core = HandBackCoreAsync(trigger, deadline, disconnectWait);
         _handBackInFlight = core;
         try
         {
@@ -1163,10 +1176,9 @@ internal sealed class BlockCoordinator : IDisposable
         return true;
     }
 
-    private async Task HandBackCoreAsync(HandBackTrigger trigger, TimeSpan budget, TimeSpan disconnectWait)
+    private async Task HandBackCoreAsync(HandBackTrigger trigger, DateTimeOffset deadline, TimeSpan disconnectWait)
     {
         DateTimeOffset t0 = _time.GetUtcNow();
-        DateTimeOffset deadline = t0 + budget;
         Guid container = WatchedContainer();
         RenderState render = CoordinatorRules.RenderOf(_snapshot, container);
         BlockState nodes = _blockStatus?.State ?? BlockState.Unknown;
@@ -1176,11 +1188,14 @@ internal sealed class BlockCoordinator : IDisposable
         CancelIdleWait("a hand-back is running");
 
         // A block already queued at the query (render was not ACTIVE then, section 3.3): nothing to disconnect,
-        // and the block already in flight is the one this hand-back waits for, never a second one.
+        // and the block already in flight is the one this hand-back waits for, never a second one. The result
+        // written is the result that block actually returns, never an assumed success; a Failed or Partial one
+        // (not one that may still land) is retried exactly once, the same rule WM_ENDSESSION TRUE applies to a
+        // failed query-time block with the setting off, before this reply returns and inside this same budget.
         if (trigger == HandBackTrigger.SessionEnd && _sessionBlockIssued && _sessionBlock is { } queryBlock)
         {
             _log.Info(HandBackText.NothingToDisconnect(trigger));
-            await WaitForBlockAsync(trigger, AsControllerResultTask(queryBlock), t0, deadline, _sessionBlockIssuedAtUtc, "nothing to disconnect");
+            await WaitForBlockAsync(trigger, ReuseQueryBlockOrRetryAsync(queryBlock, trigger), t0, deadline, _sessionBlockIssuedAtUtc, "nothing to disconnect");
             return;
         }
 
@@ -1193,12 +1208,23 @@ internal sealed class BlockCoordinator : IDisposable
             ConnectResult? result = null;
             try
             {
-                result = await _connection.DisconnectAsync(container, disconnectBudget.Token);
+                // The sub-cap above (disconnectBudget) only cancels the token a well-behaved call observes; it
+                // does not by itself make an await return. This outer wait is the backstop against a call that
+                // never completes and never observes its own cancellation: the one deadline shared with the pump
+                // (see HandBackAsync), so the hand-back's own procedure times itself out the same instant the
+                // reply pump stops waiting for it, rather than leaving the reply held on a step that never logs
+                // "cut short" because it never reaches WaitForBlockAsync.
+                result = await _connection.DisconnectAsync(container, disconnectBudget.Token).WaitAsync(Remaining(deadline), _time);
             }
             catch (OperationCanceledException) when (disconnectBudget.IsCancellationRequested)
             {
                 // Sent, not confirmed: "Requests already sent stay sent" (ConnectionController). The steps a
                 // cancelled walk carries are not named on this line; the outcome recorded is enough to act on.
+            }
+            catch (TimeoutException)
+            {
+                _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["disconnect"], null));
+                return;
             }
 
             TimeSpan elapsed = _time.GetUtcNow() - disconnectStarted;
@@ -1230,15 +1256,30 @@ internal sealed class BlockCoordinator : IDisposable
     }
 
     // A block already queued at the query runs through LogSessionBlockAsync, whose Task is a plain Task, not a
-    // Task<ControllerResult>: the hand-back only needs to know when it ends, not its own copy of the result (the
-    // query-time code path already reads and logs that result itself), so this adapts the wait without a second
-    // await on the same task from two places. A plain await, not ContinueWith: the continuation must run through
-    // the same synchronization context as everything else here (the UI thread), never on a thread-pool thread of
-    // its own, or a test driving both with a manual context could never observe it complete.
-    private static async Task<ControllerResult> AsControllerResultTask(Task queryBlock)
+    // Task<ControllerResult>: the hand-back only needs to know when it ends, so this adapts the wait without a
+    // second await on the same task from two places, and reads the real outcome LogSessionBlockAsync recorded
+    // (_sessionBlockResult) rather than assuming success. A plain await, not ContinueWith: the continuation must
+    // run through the same synchronization context as everything else here (the UI thread), never on a
+    // thread-pool thread of its own, or a test driving both with a manual context could never observe it
+    // complete.
+    //
+    // A result that failed outright, or came back Partial, and is not one the gate may still land (MayStillRun),
+    // is sent once more here, the same rule WM_ENDSESSION TRUE applies to the setting-off retry: the outcome
+    // written is always the last one actually observed, success only when the gate said so.
+    private async Task<ControllerResult> ReuseQueryBlockOrRetryAsync(Task queryBlock, HandBackTrigger trigger)
     {
         await queryBlock;
-        return ControllerResult.Ok("queued at the query");
+        ControllerResult result = _sessionBlockResult ?? ControllerResult.Fail("The query's block outcome was not recorded.", Array.Empty<StepOutcome>());
+        if (result.IsSuccess || CoordinatorRules.MayStillRun(result))
+        {
+            return result;
+        }
+
+        _log.Warn(HandBackText.QueryBlockRetried(trigger, result.Status.ToString()));
+        DateTimeOffset t1 = _time.GetUtcNow();
+        Task<ControllerResult> retry = _block.BlockAsync(CancellationToken.None);
+        _log.Info(HandBackText.BlockSentAt(trigger, t1));
+        return await retry;
     }
 
     // Waits for a block task up to deadline, never cancelling it: the block is the at-rest action, and a gate

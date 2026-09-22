@@ -789,8 +789,11 @@ internal sealed class TrayContext : ApplicationContext
 
             if (_registry.Settings.Current.HandBackOnShutdownAndSleep)
             {
+                // One deadline, taken once, handed to both the work and the pump that waits for it: see
+                // BlockCoordinator.HandBackAsync's own comment on why this is never two separate "now plus
+                // budget" reads.
                 DateTimeOffset deadline = _time.GetUtcNow() + _handBackBudget;
-                Task handBack = _coordinator.HandBackAsync(HandBackTrigger.SessionEnd, _handBackBudget, _disconnectHandBackWait);
+                Task handBack = _coordinator.HandBackAsync(HandBackTrigger.SessionEnd, deadline, _disconnectHandBackWait);
                 HoldReply(handBack, deadline);
             }
         }
@@ -805,9 +808,26 @@ internal sealed class TrayContext : ApplicationContext
     {
         DateTimeOffset started = _time.GetUtcNow();
         PumpUntilTaskOrDeadline(task, deadline, _time);
+        if (!task.IsCompleted)
+        {
+            // The step that timed out at the deadline (a real TimeProvider timer, on a thread-pool thread) posts
+            // its own "cut short" line back to this thread through the captured synchronization context; the
+            // loop above can stop polling in the instant before that post is dispatched. A short, bounded flush
+            // gives that one continuation its turn before the reply actually returns, rather than leaving the
+            // line to a continuation nothing pumps for again once WndProc has returned. Bounded so a hand-back
+            // whose work is genuinely still running (not merely timing itself out) does not hold the reply any
+            // longer than CutShortFlushGrace past its own deadline.
+            PumpUntilTaskOrDeadline(task, deadline + CutShortFlushGrace, _time);
+        }
+
         _log.Write(LogLevel.Debug, "Hand-back: reply returned after " +
             ((long)(_time.GetUtcNow() - started).TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms.");
     }
+
+    // Real-timer continuation-dispatch latency is normally sub-millisecond; this is generous headroom for a
+    // slower or busier machine, chosen small enough that it never meaningfully eats into HandBackBudget or
+    // SleepHandBackBudget's own margin under the documented Windows caps (comment at their declarations below).
+    private static readonly TimeSpan CutShortFlushGrace = TimeSpan.FromMilliseconds(200);
 
     // The pump itself, apart from the logging around it, so the real message-path test can drive the exact same
     // primitive against a real window procedure without building a whole TrayContext on a private desktop thread.
@@ -843,7 +863,7 @@ internal sealed class TrayContext : ApplicationContext
                     StopStreaming(wait: false, "the machine is sleeping");
 
                     DateTimeOffset deadline = _time.GetUtcNow() + _sleepHandBackBudget;
-                    Task handBack = _coordinator.HandBackAsync(HandBackTrigger.Suspend, _sleepHandBackBudget, _sleepDisconnectWait);
+                    Task handBack = _coordinator.HandBackAsync(HandBackTrigger.Suspend, deadline, _sleepDisconnectWait);
                     HoldReply(handBack, deadline);
                 }
                 else

@@ -1419,8 +1419,12 @@ internal sealed class TrayHarness : IDisposable
         }
 
         // The registry's controllers, so safe mode wraps what the coordinator calls, exactly as the tray does.
+        // The same clock as TrayContext's own (options.Time, just below): production wires both the coordinator
+        // and the tray to the one TimeProvider.System (Program.Tray.cs), so a test that asks for the real clock
+        // must give it to both, or a deadline one of them computes against real time and the other against the
+        // harness's own frozen ManualTime would never agree on when the budget has passed.
         Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,
-            Registry.Settings, Registry.Cards, Log, Time, new CoordinatorOptions(safeMode, StartedAtLogon: false));
+            Registry.Settings, Registry.Cards, Log, time ?? Time, new CoordinatorOptions(safeMode, StartedAtLogon: false));
         Context = new TrayContext(Registry, Coordinator, options);
         Coordinator.Start();
         PumpUntilIdle();

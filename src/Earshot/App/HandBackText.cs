@@ -34,6 +34,11 @@ internal static class HandBackText
 
     public static string BlockNotSent(HandBackTrigger trigger, string reason) => Prefix(trigger) + "block not sent: " + reason;
 
+    // The block already queued at the query came back Failed or Partial (and is not one the gate may still land),
+    // so it is sent once more before the reply returns.
+    public static string QueryBlockRetried(HandBackTrigger trigger, string status) =>
+        Prefix(trigger) + "the block queued at the query was " + status + ", so it is sent once more";
+
     public static string Finished(HandBackTrigger trigger, TimeSpan elapsed, string disconnectOutcome, string blockOutcome) =>
         Prefix(trigger) + "finished in " + Ms(elapsed) + " ms; disconnect " + disconnectOutcome + "; block " + blockOutcome;
 
