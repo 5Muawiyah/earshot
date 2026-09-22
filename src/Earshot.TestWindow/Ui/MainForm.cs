@@ -1409,17 +1409,23 @@ internal sealed class MainForm : Form
         // Caught, not swallowed: the raw exception is recorded (Trace) and its own type and
         // message are put in front of the owner, then this run is torn down exactly like a kill
         // (MarkUnknownAndReset), which also clears _activeRunner and leaves the window usable.
+        //
+        // Everything that can throw runs BEFORE runner.Start(): a throw after the real child is
+        // already alive left this window believing nothing was running (MarkUnknownAndReset
+        // clears _activeRunner) while the process itself kept going, orphaned, and RunGate let a
+        // fresh start (Restore included) begin beside it. Written here even though Start() has not
+        // run yet, so a throw from any of these three still lands in the same catch and the same
+        // teardown; gui-run-started.txt genuinely meaning "started" is unaffected, since
+        // MarkUnknownAndReset removes it again the moment this catch runs.
         try
         {
-            runner.Start();
-
-            // Written the moment the half actually starts, gui- prefixed like this window's other
-            // markers and never touching what the scripts write (MarkUnknownAndReset already
-            // pre-creates this same folder for gui-killed.txt the same way, so resultFolder not
-            // existing yet is not new here). Removed again by OnRunFinished or
-            // MarkUnknownAndReset, whichever this window sees the half end through; the one case
-            // that leaves it behind is the window dying together with its own child (a forced
-            // session end, a power cut), which is exactly what it exists to catch.
+            // gui- prefixed like this window's other markers and never touching what the scripts
+            // write (MarkUnknownAndReset already pre-creates this same folder for gui-killed.txt
+            // the same way, so resultFolder not existing yet is not new here). Removed again by
+            // OnRunFinished or MarkUnknownAndReset, whichever this window sees the half end
+            // through; the one case that leaves it behind is the window dying together with its
+            // own child (a forced session end, a power cut), which is exactly what it exists to
+            // catch.
             Directory.CreateDirectory(resultFolder);
             File.WriteAllText(
                 Path.Combine(resultFolder, "gui-run-started.txt"),
@@ -1430,6 +1436,8 @@ internal sealed class MainForm : Form
             // events, and the run folder's ordering must reflect whichever one actually happened
             // last, not be frozen at whatever was true when the first half started.
             RunSequence.EnsureMarker(LiveTestRoot(), resultFolder, reissueForNewHalf: isResume);
+
+            runner.Start();
         }
         catch (Exception ex)
         {
@@ -1440,6 +1448,10 @@ internal sealed class MainForm : Form
                     ? "Could not start " + row.TestId + ": " + ex.GetType().Name + ": " + ex.Message
                     : Copy.PlainCouldNotStartStatus(row.Name)) +
                 " " + Copy.RowUnknownUntilItRunsAgain);
+            // Whether runner.Start() itself threw, or never even ran because something before it
+            // did: Dispose now kills a live process rather than only releasing the managed handle,
+            // so a real child that did make it as far as starting is never left running, orphaned,
+            // just because a later step in this same try block failed.
             runner.Dispose();
         }
     }

@@ -112,6 +112,11 @@ internal sealed class ChildRunner : IDisposable
 
     internal int ProcessId => _process.Id;
 
+    // Whether Start() has actually been called on this runner: a caller that only knows a runner
+    // was constructed cannot otherwise tell a real launch from one BeginRun's own try block threw
+    // out of before ever reaching Start().
+    internal bool StartedForTests => _started;
+
     internal void Start()
     {
         _process.Start();
@@ -298,8 +303,22 @@ internal sealed class ChildRunner : IDisposable
 
     internal Task WaitForReadLoopAsync() => _readLoop ?? Task.CompletedTask;
 
+    // A live process (Start() succeeded, and it has not already exited on its own) must never be
+    // leaked as an orphan just because something else threw before this window ever saw the run
+    // as active: Dispose used to only release the managed Process handle, never touching the real
+    // OS process at all, so a corrupt run-sequence.json (thrown after Start(), before this window
+    // finished setting the run up) left a real child alive after the window itself moved on,
+    // reading nothing as running. Recorded, not swallowed: a kill from here, rather than the
+    // ordinary KillActiveRun path, is itself surfaced.
     public void Dispose()
     {
+        if (_started && !_process.HasExited)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "ChildRunner.Dispose() found a live process (pid " + _process.Id + ") and killed it.");
+            _process.Kill(entireProcessTree: true);
+        }
+
         _process.Dispose();
     }
 
