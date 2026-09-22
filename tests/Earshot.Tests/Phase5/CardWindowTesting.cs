@@ -149,6 +149,12 @@ internal static class TestWindows
 
     public static nint Send(nint hwnd, int message) => SendMessageW(hwnd, (uint)message, 0, 0);
 
+    // With explicit wParam/lParam, for a message whose meaning depends on them (WM_QUERYENDSESSION,
+    // WM_ENDSESSION, WM_POWERBROADCAST): SendMessage blocks the calling thread until the receiving thread's
+    // window procedure has returned, which is exactly the real behaviour a hand-back's held reply depends on.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagew
+    public static nint Send(nint hwnd, int message, nint wParam, nint lParam) => SendMessageW(hwnd, (uint)message, wParam, lParam);
+
     [DllImport("user32.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern nint GetWindowLongPtrW(nint hWnd, int nIndex);

@@ -70,6 +70,15 @@ internal sealed record TrayStartOptions(
 
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
+
+    // The budgets HandBackAsync runs the shut-down hand-back to: a 4 s cap, 1.5 s of it for the disconnect.
+    // Injectable so a test can shrink them.
+    public TimeSpan HandBackBudget { get; init; } = TimeSpan.FromSeconds(4);
+    public TimeSpan DisconnectHandBackWait { get; init; } = TimeSpan.FromMilliseconds(1500);
+
+    // The clock HoldReply checks its deadline against. TimeProvider.System by default; a test can inject one it
+    // drives, so a cut-short hold is provable without a real multi-second wait.
+    public TimeProvider Time { get; init; } = TimeProvider.System;
 }
 
 // The tray: icon, tooltip, menu, left click and the cards they raise. Runs on the UI thread only.
@@ -117,6 +126,7 @@ internal sealed class TrayContext : ApplicationContext
     public const string BusyMessage = "Another change is still running. Try again shortly.";
     public const string FinishingFirstMessage = "Finishing another change first.";
     public const string ClosingMessage = "Closing once the current change finishes.";
+    public const string HandingBackMessage = "Earshot is handing the AirPods back.";
     public const string BlockingBeforeClosingMessage = "Blocking the AirPods before closing.";
     public const string BlockStatusUnreadableMessage = "Could not read the boot block status.";
     public const string GateNotRepinnedMessage = "Device saved. Boot block may still use the previous device.";
@@ -160,6 +170,9 @@ internal sealed class TrayContext : ApplicationContext
     private readonly Func<ILog, IStreamingPlatform> _streamingPlatformFactory;
     private readonly HostBusyGate _streamingGate = new();
     private readonly TimeSpan _streamingShutdownWait;
+    private readonly TimeSpan _handBackBudget;
+    private readonly TimeSpan _disconnectHandBackWait;
+    private readonly TimeProvider _time;
     private readonly TrayIconFactory _icons;
     private readonly StartupRegistration _startup;
     private readonly BluetoothDeviceList _devices;
@@ -264,11 +277,15 @@ internal sealed class TrayContext : ApplicationContext
         _voiceEngineFactory = options.VoiceEngineFactory;
         _streamingPlatformFactory = options.StreamingPlatformFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
+        _handBackBudget = options.HandBackBudget;
+        _disconnectHandBackWait = options.DisconnectHandBackWait;
+        _time = options.Time;
 
         _menu = new TrayMenu(CurrentMenuState);
         _menu.ToggleClicked += (_, _) => StartToggle();
         _menu.PlayFromPhoneItemClicked += OnPlayFromPhoneItemClicked;
         _menu.BlockAtBootClicked += (_, _) => Start("block at boot", place => BlockAtBootAsync(place));
+        _menu.HandBackClicked += (_, _) => OnHandBackClicked();
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
         _menu.OpenOnStartupClicked += (_, _) => OnOpenOnStartupClicked();
         _menu.SpeakStatusClicked += (_, _) => OnSpeakStatusClicked();
@@ -631,6 +648,16 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        // Sleep has no session-ending flag of its own (it is not a session end), so a click reaching here while
+        // the sleep hand-back holds the reply gets its own one-line card rather than "Finishing another change
+        // first."; the coordinator's own queue (RunExclusiveAsync) still keeps the two from running at once.
+        if (_coordinator.HandBackInProgress && !_coordinator.SessionEndInProgress)
+        {
+            _log.Info((wanted ? "connect" : "disconnect") + ": not started, because Earshot is handing the AirPods back.");
+            ShowCard(intent.DeviceName, HandingBackMessage, place);
+            return;
+        }
+
         if (_coordinator.IsBusy)
         {
             // Work the coordinator started itself, which a connect or disconnect waits for.
@@ -732,21 +759,54 @@ internal sealed class TrayContext : ApplicationContext
     internal void OnSessionEnding(object? sender, SessionEndingEventArgs e)
     {
         SessionEnding?.Invoke(this, e);
-        if (!_closed)
+        if (_closed)
         {
-            _coordinator.OnSessionEnding(e);
+            return;
+        }
 
-            // WM_ENDSESSION with the session really ending: the streaming connection is let go now, without waiting,
-            // because this handler must return at once and how long the process lives afterwards is not documented.
-            // A query is not acted on: the session end may still be cancelled, and the owner's music with it.
-            if (!e.IsQuery && e.Ending)
+        _coordinator.OnSessionEnding(e);
+
+        // WM_ENDSESSION with the session really ending: the streaming connection is let go now, without waiting,
+        // because this handler must return at once and how long the process lives afterwards is not documented.
+        // A query is not acted on: the session end may still be cancelled, and the owner's music with it.
+        if (!e.IsQuery && e.Ending)
+        {
+            StopStreaming(wait: false, "the session is ending");
+
+            // Forgotten, not remembered as applied: should Windows abandon the shutdown after all and Earshot stay
+            // open, the next settings change starts the feature again rather than finding nothing different.
+            _streamingApplied = null;
+
+            if (_registry.Settings.Current.HandBackOnShutdownAndSleep)
             {
-                StopStreaming(wait: false, "the session is ending");
-
-                // Forgotten, not remembered as applied: should Windows abandon the shutdown after all and Earshot stay
-                // open, the next settings change starts the feature again rather than finding nothing different.
-                _streamingApplied = null;
+                DateTimeOffset deadline = _time.GetUtcNow() + _handBackBudget;
+                Task handBack = _coordinator.HandBackAsync(HandBackTrigger.SessionEnd, _handBackBudget, _disconnectHandBackWait);
+                HoldReply(handBack, deadline);
             }
+        }
+    }
+
+    // Pumps this thread's own message queue until task completes or deadline passes, so the caller (the real
+    // window procedure, inside its own WndProc for WM_ENDSESSION or WM_POWERBROADCAST) does not return, and so
+    // does not let the session end or the sleep transition proceed, until the hand-back has finished or run out
+    // of its own budget. A blocking wait would deadlock: the coordinator's continuations are posted back to this
+    // same thread. https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.application.doevents
+    private void HoldReply(Task task, DateTimeOffset deadline)
+    {
+        DateTimeOffset started = _time.GetUtcNow();
+        PumpUntilTaskOrDeadline(task, deadline, _time);
+        _log.Write(LogLevel.Debug, "Hand-back: reply returned after " +
+            ((long)(_time.GetUtcNow() - started).TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms.");
+    }
+
+    // The pump itself, apart from the logging around it, so the real message-path test can drive the exact same
+    // primitive against a real window procedure without building a whole TrayContext on a private desktop thread.
+    internal static void PumpUntilTaskOrDeadline(Task task, DateTimeOffset deadline, TimeProvider time)
+    {
+        while (!task.IsCompleted && time.GetUtcNow() < deadline)
+        {
+            Application.DoEvents();
+            Thread.Sleep(2);
         }
     }
 
@@ -1739,6 +1799,26 @@ internal sealed class TrayContext : ApplicationContext
         // nothing between here and there awaits), so a burst of hotkey presses only starts one of these.
         string action = protect ? GateVerbs.ProtectOn : GateVerbs.ProtectOff;
         Launch(action, () => RunOperationAsync(action, ct => _coordinator.SetProtectionAsync(protect, place, ct), place, alwaysShowCard: viaHotkey), place);
+    }
+
+    // The menu tick toggles the saved HandBackOnShutdownAndSleep setting; nothing else runs from a click on it,
+    // since the hand-back itself only ever runs from OnSessionEnding (shut down) or OnPowerChanged (sleep).
+    // Refused while a session end is in progress, like every setting change.
+    private void OnHandBackClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        if (RefusedAtSessionEnd("hand back at shut down and sleep", TrayStatus.AppName, place))
+        {
+            return;
+        }
+
+        bool on = !_registry.Settings.Current.HandBackOnShutdownAndSleep;
+        TryUpdateSettings("hand back at shut down and sleep", s => s.HandBackOnShutdownAndSleep = on, place);
     }
 
     private void OnOpenOnStartupClicked()

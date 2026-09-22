@@ -74,6 +74,16 @@ internal enum BlockReason
     Idle,             // the idle rule: needs good reads of the nodes and the endpoints
     StartUp,          // the start-up check: the same
     Closing,          // the block before Earshot closes: the same
+    HandBack,         // the hand-back at shut down or sleep: never cancelled, no protection step
+    Resume,           // the resume check after sleep: the start-up check under another name
+}
+
+// What raised the hand-back: WM_ENDSESSION (shut down, restart or sign-out) or PBT_APMSUSPEND (sleep). Each
+// carries its own budget and its own wording for the log lines.
+internal enum HandBackTrigger
+{
+    SessionEnd,
+    Suspend,
 }
 
 // Why the gate refused to move the pin, where the device change can do something about it.

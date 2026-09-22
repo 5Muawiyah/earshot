@@ -1325,7 +1325,10 @@ internal sealed class TrayHarness : IDisposable
         Earshot.Tests.Voice.FakeSpeechEngine? voiceEngine = null,
         Earshot.Tests.Streaming.FakeStreamingPlatform? streamingPlatform = null,
         TimeSpan? streamingShutdownWait = null,
-        Queue<Earshot.Tests.Streaming.FakeStreamingPlatform>? streamingPlatforms = null)
+        Queue<Earshot.Tests.Streaming.FakeStreamingPlatform>? streamingPlatforms = null,
+        TimeSpan? handBackBudget = null,
+        TimeSpan? disconnectHandBackWait = null,
+        TimeProvider? time = null)
     {
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
@@ -1392,7 +1395,19 @@ internal sealed class TrayHarness : IDisposable
                 return streamingPlatforms is { Count: > 0 } ? streamingPlatforms.Dequeue() : Streaming;
             },
             StreamingShutdownWait = streamingShutdownWait ?? TrayContext.DefaultStreamingShutdownWait,
+            // The same clock as the coordinator's by default, so a hand-back test can drive both with one
+            // Advance; a test that wants HoldReply to pump against real time can pass TimeProvider.System.
+            Time = time ?? Time,
         };
+        if (handBackBudget is { } hb)
+        {
+            options = options with { HandBackBudget = hb };
+        }
+
+        if (disconnectHandBackWait is { } dw)
+        {
+            options = options with { DisconnectHandBackWait = dw };
+        }
         if (exitWaitLimit is { } limit)
         {
             // Unless a test asks for a longer wait for the coordinator, Exit gives up at the same limit.

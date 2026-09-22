@@ -220,6 +220,10 @@ internal sealed class BlockCoordinator : IDisposable
     private bool _sessionEnding;
     private bool _sessionBlockIssued;
 
+    // When the block for this session end was sent (the query, or a WM_ENDSESSION retry), so a hand-back that
+    // reuses that block (nothing was in use, so nothing to disconnect) can say when in a "cut short" line.
+    private DateTimeOffset _sessionBlockIssuedAtUtc;
+
     // The block sent for this session end is known to have failed (a result that says so, or an exception), so
     // WM_ENDSESSION TRUE sends it once more. Not set while it is still running or may still run.
     private bool _sessionBlockFailed;
@@ -249,6 +253,15 @@ internal sealed class BlockCoordinator : IDisposable
     private bool _startChecked;
     private bool _closing;
     private bool _disposed;
+
+    // A hand-back (shut down or sleep) is sending its own disconnect and block. Set for the whole of
+    // HandBackAsync; a second end-session or power message, a click and a menu action are refused while it holds.
+    private bool _handingBack;
+
+    // The current hand-back's own task, so a resume check (which runs through the ordinary one-operation-at-a-
+    // time queue, RunExclusiveAsync, that HandBackAsync itself does not go through) can wait for a block a
+    // cut-short sleep hand-back left running, before it reads the node state.
+    private Task? _handBackInFlight;
 
     public BlockCoordinator(
         IDeviceMonitor monitor,
@@ -286,8 +299,12 @@ internal sealed class BlockCoordinator : IDisposable
     // before closing is about to be sent.
     public event EventHandler? Changed;
 
-    // True while an operation, a block started at session end or the block before closing is in flight.
-    public bool IsBusy => _current is not null || _sessionBlock is { IsCompleted: false } || _closingBlock is { IsCompleted: false };
+    // True while an operation, a block started at session end, a hand-back or the block before closing is in flight.
+    public bool IsBusy => _current is not null || _sessionBlock is { IsCompleted: false } || _closingBlock is { IsCompleted: false } || _handingBack;
+
+    // True while a hand-back (shut down or sleep) is sending its own disconnect and block, for the tray's
+    // refusal card on a click or a menu action reached during the hold.
+    public bool HandBackInProgress => _handingBack;
 
     // True while something other than the block before closing is in flight, or waiting to run before it.
     public bool IsBusyBeyondClosingBlock =>
@@ -807,6 +824,32 @@ internal sealed class BlockCoordinator : IDisposable
             return;
         }
 
+        if (Settings.HandBackOnShutdownAndSleep)
+        {
+            if (e.IsQuery)
+            {
+                if (CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) == RenderState.Active)
+                {
+                    // A block now would be refused on the sink entry (it is vetoed while the AirPods render) and
+                    // would disconnect the owner for a shut down another application may still cancel. The
+                    // hand-back at WM_ENDSESSION disconnects, confirms, then blocks, in order.
+                    _log.Info(HandBackText.SessionEndingNoBlockAtQuery());
+                    return;
+                }
+
+                // Render is not ACTIVE: nothing would be vetoed, so the query-time block below runs exactly as it
+                // does with the setting off, and gains the query-to-end gap; WM_ENDSESSION's hand-back then waits
+                // for that same block rather than sending a second one (see HandBackAsync).
+            }
+            else
+            {
+                // WM_ENDSESSION: the hand-back, started by the caller right after this method returns, owns the
+                // block for this session end, in the fixed order. The legacy one-shot block below, and its retry,
+                // are for the setting-off branch only.
+                return;
+            }
+        }
+
         if (_sessionBlockIssued)
         {
             // One more try, once, at WM_ENDSESSION TRUE, and only when the first is known to have failed: one that is
@@ -852,6 +895,7 @@ internal sealed class BlockCoordinator : IDisposable
         }
 
         DateTimeOffset issued = _time.GetUtcNow();
+        _sessionBlockIssuedAtUtc = issued;
         Task<ControllerResult> block;
         try
         {
@@ -994,6 +1038,178 @@ internal sealed class BlockCoordinator : IDisposable
         }
     }
 
+    // The fixed hand-back procedure: send the disconnect and wait for it to confirm, then send the block and
+    // wait for it, all inside budget. Never cancelled by anything but its own budgets: it is the at-rest action,
+    // the same way the session-end block above is. Returns once the hold no longer has anything useful to wait
+    // for: either everything finished, or the budget ran out ("cut short"). A call while one is already running
+    // does nothing (the re-entry guard a second WM_ENDSESSION, a power message, a click or a menu action all
+    // meet the same way, through HandBackInProgress).
+    public async Task HandBackAsync(HandBackTrigger trigger, TimeSpan budget, TimeSpan disconnectWait)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (!Settings.HandBackOnShutdownAndSleep)
+        {
+            _log.Info(HandBackText.Off(trigger));
+            return;
+        }
+
+        if (_handingBack)
+        {
+            _log.Write(LogLevel.Debug, HandBackText.Prefix(trigger) + "a hand-back is already running; this one does nothing.");
+            return;
+        }
+
+        _handingBack = true;
+        RaiseChanged();
+        Task core = HandBackCoreAsync(trigger, budget, disconnectWait);
+        _handBackInFlight = core;
+        try
+        {
+            await core;
+        }
+        finally
+        {
+            _handingBack = false;
+            _handBackInFlight = null;
+            RaiseChanged();
+            if (!_disposed)
+            {
+                _ = RefreshStatusAsync();
+            }
+        }
+    }
+
+    private async Task HandBackCoreAsync(HandBackTrigger trigger, TimeSpan budget, TimeSpan disconnectWait)
+    {
+        DateTimeOffset t0 = _time.GetUtcNow();
+        DateTimeOffset deadline = t0 + budget;
+        Guid container = WatchedContainer();
+        RenderState render = CoordinatorRules.RenderOf(_snapshot, container);
+        BlockState nodes = _blockStatus?.State ?? BlockState.Unknown;
+        bool? blockAtBootKnown = _blockStatus is { BlockAtBootKnown: true } known ? known.BlockAtBoot : (bool?)null;
+        string startedReason = trigger == HandBackTrigger.SessionEnd ? "WM_ENDSESSION" : "PBT_APMSUSPEND";
+        _log.Info(HandBackText.Started(trigger, t0, startedReason, render, nodes, streamingHeld: false, blockAtBootKnown));
+        CancelIdleWait("a hand-back is running");
+
+        // A block already queued at the query (render was not ACTIVE then, section 3.3): nothing to disconnect,
+        // and the block already in flight is the one this hand-back waits for, never a second one.
+        if (trigger == HandBackTrigger.SessionEnd && _sessionBlockIssued && _sessionBlock is { } queryBlock)
+        {
+            _log.Info(HandBackText.NothingToDisconnect(trigger));
+            await WaitForBlockAsync(trigger, AsControllerResultTask(queryBlock), t0, deadline, _sessionBlockIssuedAtUtc, "nothing to disconnect");
+            return;
+        }
+
+        string disconnectOutcome = "nothing to disconnect";
+        if (render == RenderState.Active)
+        {
+            DateTimeOffset disconnectStarted = _time.GetUtcNow();
+            TimeSpan disconnectRemaining = Remaining(t0 + disconnectWait);
+            using var disconnectBudget = new CancellationTokenSource(disconnectRemaining, _time);
+            ConnectResult? result = null;
+            try
+            {
+                result = await _connection.DisconnectAsync(container, disconnectBudget.Token);
+            }
+            catch (OperationCanceledException) when (disconnectBudget.IsCancellationRequested)
+            {
+                // Sent, not confirmed: "Requests already sent stay sent" (ConnectionController). The steps a
+                // cancelled walk carries are not named on this line; the outcome recorded is enough to act on.
+            }
+
+            TimeSpan elapsed = _time.GetUtcNow() - disconnectStarted;
+            bool confirmed = result is { Confirmed: true };
+            string code = result is null ? "sent" : result.Outcome == ConnectOutcome.Confirmed ? "S_OK" : result.Outcome.ToString();
+            _log.Info(HandBackText.Disconnect(trigger, code, confirmed, elapsed));
+            disconnectOutcome = confirmed ? "confirmed" : "not confirmed";
+        }
+        else
+        {
+            _log.Info(HandBackText.NothingToDisconnect(trigger));
+        }
+
+        // D2's order: never send the block while render still reads ACTIVE. Read again now, since the disconnect
+        // may have timed out without confirming.
+        RenderState renderNow = CoordinatorRules.RenderOf(_snapshot, container);
+        string blocker = renderNow == RenderState.Active ? "the AirPods are still in use" : SessionBlockBlocker();
+        if (blocker.Length > 0)
+        {
+            _log.Info(HandBackText.BlockNotSent(trigger, blocker));
+            _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, "not sent: " + blocker));
+            return;
+        }
+
+        DateTimeOffset t1 = _time.GetUtcNow();
+        _log.Info(HandBackText.BlockSentAt(trigger, t1));
+        Task<ControllerResult> block = _block.BlockAsync(CancellationToken.None);
+        await WaitForBlockAsync(trigger, block, t0, deadline, t1, disconnectOutcome);
+    }
+
+    // A block already queued at the query runs through LogSessionBlockAsync, whose Task is a plain Task, not a
+    // Task<ControllerResult>: the hand-back only needs to know when it ends, not its own copy of the result (the
+    // query-time code path already reads and logs that result itself), so this adapts the wait without a second
+    // await on the same task from two places. A plain await, not ContinueWith: the continuation must run through
+    // the same synchronization context as everything else here (the UI thread), never on a thread-pool thread of
+    // its own, or a test driving both with a manual context could never observe it complete.
+    private static async Task<ControllerResult> AsControllerResultTask(Task queryBlock)
+    {
+        await queryBlock;
+        return ControllerResult.Ok("queued at the query");
+    }
+
+    // Waits for a block task up to deadline, never cancelling it: the block is the at-rest action, and a gate
+    // request already sent stays sent even once this hand-back has stopped waiting for it (see the class
+    // comment: gate changes are waited for, never cancelled). Logs "finished" or "cut short" either way.
+    private async Task WaitForBlockAsync(HandBackTrigger trigger, Task<ControllerResult> block, DateTimeOffset t0, DateTimeOffset deadline, DateTimeOffset? blockAlreadySentAt, string disconnectOutcome)
+    {
+        TimeSpan remaining = Remaining(deadline);
+        try
+        {
+            ControllerResult result = await block.WaitAsync(remaining, _time);
+            _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, result.Status.ToString()));
+        }
+        catch (TimeoutException)
+        {
+            _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["block"], blockAlreadySentAt));
+            _ = ObserveHandBackBlockAsync(trigger, block);
+        }
+    }
+
+    // The block a cut-short hand-back stopped waiting for is not abandoned: the gate runs it to completion in its
+    // own SYSTEM process, so this only records the outcome once it arrives, the same way LogSessionBlockAsync does
+    // for the legacy session-end block.
+    private async Task ObserveHandBackBlockAsync(HandBackTrigger trigger, Task<ControllerResult> block)
+    {
+        try
+        {
+            ControllerResult result = await block;
+            _log.Write(result.IsSuccess ? LogLevel.Info : LogLevel.Warn,
+                HandBackText.Prefix(trigger) + "the block that was still running finished: " + result.Status + ", " + result.UserMessage);
+        }
+        catch (Exception ex)
+        {
+            StepOutcome step = StepOutcomes.FromHResult("hand-back-block", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
+            _log.Error(HandBackText.Prefix(trigger) + "the block that was still running failed. " + TrayReport.DescribeStep(step), ex);
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                _ = RefreshStatusAsync();
+            }
+        }
+    }
+
+    private TimeSpan Remaining(DateTimeOffset deadline)
+    {
+        TimeSpan left = deadline - _time.GetUtcNow();
+        return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+    }
+
     // Waits for the operation in flight, then runs body as the one in flight. The task body returns completes only
     // after body has, clean-up included.
     //
@@ -1020,13 +1236,13 @@ internal sealed class BlockCoordinator : IDisposable
                 return refusedAtSessionEnd();
             }
 
-            if (_current is null && _sessionBlock is not { IsCompleted: false })
+            if (_current is null && _sessionBlock is not { IsCompleted: false } && !_handingBack)
             {
                 break;
             }
 
-            Task waitFor = _current ?? _sessionBlock!;
-            _log.Write(LogLevel.Debug, name + ": waiting for " + (_currentName ?? "the session-end block") + " to finish.");
+            Task waitFor = _current ?? _sessionBlock ?? _handBackInFlight ?? Task.CompletedTask;
+            _log.Write(LogLevel.Debug, name + ": waiting for " + (_currentName ?? (_handingBack ? "the hand-back" : "the session-end block")) + " to finish.");
             await waitFor.WaitAsync(ct);
         }
 
@@ -1741,9 +1957,9 @@ internal sealed class BlockCoordinator : IDisposable
 
             var facts = new ProtectionFacts(CoordinatorRules.PhaseOf(run.Status), run.Services?.State ?? AudioProtectionState.Unknown, protect, intentPending);
             ProtectionAction action = ProtectionPolicy.Next(goal, facts, progress);
-            if (blockGoal && (_closing || _sessionEnding || ct.IsCancellationRequested) && action is ProtectionAction.ReadServices or ProtectionAction.ProtectOn)
+            if (blockGoal && (_closing || _sessionEnding || _handingBack || ct.IsCancellationRequested) && action is ProtectionAction.ReadServices or ProtectionAction.ProtectOn)
             {
-                string cutShort = _closing ? "Earshot is closing" : _sessionEnding ? "the session is ending" : "the block was cut short";
+                string cutShort = _closing ? "Earshot is closing" : _sessionEnding ? "the session is ending" : _handingBack ? "a hand-back is running" : "the block was cut short";
                 _log.Info("protection Block: " + cutShort + ", so the nodes are blocked without changing protection first.");
                 action = ProtectionAction.BlockNodes;
             }
