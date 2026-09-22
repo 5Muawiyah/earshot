@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Integration.Coordinator;
 
-// T2 to T4, T7, T9, T10: the hand-back's own order, budgets and blockers, against fakes and a clock the test
+// The hand-back's own order, budgets and blockers, against fakes and a clock the test
 // moves, exactly as the rest of this folder tests the coordinator. Nothing here touches a device, a window or
 // Task Scheduler.
 [TestClass]
@@ -39,7 +39,7 @@ public sealed class HandBackTests
         h.Pump();
     }
 
-    // T2 (the setting-off branch): nothing runs, nothing is sent, and the reason is logged so a reader can
+    // Nothing runs, nothing is sent, and the reason is logged so a reader can
     // tell "off" from "never reached".
     [TestMethod]
     public void OffSendsNothingAndLogsWhy()
@@ -58,7 +58,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back: off"));
     }
 
-    // T3: render ACTIVE runs the disconnect, then the block, in that order, and finishes.
+    // Render ACTIVE runs the disconnect, then the block, in that order, and finishes.
     [TestMethod]
     public void ActiveRenderDisconnectsThenBlocksInOrder()
     {
@@ -76,7 +76,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "finished in"));
     }
 
-    // T3: render not ACTIVE sends no disconnect, straight to the block.
+    // Render not ACTIVE sends no disconnect, straight to the block.
     [TestMethod]
     public void NotInUseSkipsTheDisconnectAndBlocksAtOnce()
     {
@@ -127,7 +127,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "block Partial"));
     }
 
-    // T4: a disconnect that never confirms is abandoned at DisconnectHandBackWait; the block is still sent once
+    // A disconnect that never confirms is abandoned at DisconnectHandBackWait; the block is still sent once
     // render has actually left ACTIVE by then.
     [TestMethod]
     public void ADisconnectThatConfirmsStillLetsTheBlockRun()
@@ -151,7 +151,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "confirmed after"));
     }
 
-    // T4, and the target of the "return before the deadline without logging" mutation: a block that has not
+    // The "return before the deadline without logging" mutation: a block that has not
     // completed by HandBackBudget is left running and the hold reports "cut short", naming the block.
     [TestMethod]
     public void ABlockStillRunningAtTheBudgetIsReportedCutShort()
@@ -282,7 +282,7 @@ public sealed class HandBackTests
             "The operation already in flight finishes before the hand-back's own block runs; never beside it.");
     }
 
-    // T4: a block completed inside the budget logs "finished in", never "cut short".
+    // A block completed inside the budget logs "finished in", never "cut short".
     [TestMethod]
     public void ABlockCompletedInsideTheBudgetLogsFinished()
     {
@@ -297,7 +297,7 @@ public sealed class HandBackTests
         Assert.IsFalse(h.Log.Has(LogLevel.Warn, "cut short"));
     }
 
-    // T7: each blocker still lets the disconnect run, and names why the block was not sent.
+    // Each blocker still lets the disconnect run, and names why the block was not sent.
     [TestMethod]
     public void BlockAtBootOffStillDisconnectsButSendsNoBlock()
     {
@@ -346,7 +346,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "block not sent"));
     }
 
-    // T9: no protection step (ProtectOn, ReadServices) runs inside a hand-back, even though the coordinator's
+    // No protection step (ProtectOn, ReadServices) runs inside a hand-back, even though the coordinator's
     // own start-up check already settled its one-time reverify beforehand.
     [TestMethod]
     public void NoProtectionStepRunsInsideAHandBack()
@@ -364,7 +364,7 @@ public sealed class HandBackTests
         Assert.IsEmpty(h.Protection.Applies);
     }
 
-    // T6: a second hand-back started while one is already running does nothing; the first one finishes normally.
+    // A second hand-back started while one is already running does nothing; the first one finishes normally.
     [TestMethod]
     public void ASecondHandBackWhileOneIsRunningDoesNothing()
     {
@@ -524,7 +524,7 @@ public sealed class HandBackTests
             "Never Success unless the gate said so: both attempts failed.");
     }
 
-    // T10: the target of the "skip the disconnect" mutation, the most direct: render ACTIVE must call
+    // The target of the "skip the disconnect" mutation, the most direct: render ACTIVE must call
     // IConnectionController.DisconnectAsync.
     [TestMethod]
     public void ActiveRenderAlwaysCallsDisconnect()
@@ -540,7 +540,7 @@ public sealed class HandBackTests
         Assert.Contains((false, Devices.Container), h.Connection.Calls);
     }
 
-    // T12: the sleep trigger runs the same procedure under its own prefix and its own budgets.
+    // The sleep trigger runs the same procedure under its own prefix and its own budgets.
     [TestMethod]
     public void SuspendRunsTheSameProcedureUnderTheSleepPrefix()
     {
@@ -557,7 +557,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (sleep): finished in"));
     }
 
-    // T12: the resume check blocks at once, no idle grace, when the nodes read enabled and not in use.
+    // The resume check blocks at once, no idle grace, when the nodes read enabled and not in use.
     [TestMethod]
     public void ResumeCheckBlocksAtOnceWhenNodesAreEnabledAndNotInUse()
     {
@@ -573,7 +573,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): the nodes were enabled"));
     }
 
-    // T12: render ACTIVE at resume leaves the nodes to the idle rule and only logs the evidence line.
+    // Render ACTIVE at resume leaves the nodes to the idle rule and only logs the evidence line.
     [TestMethod]
     public void ResumeCheckLeavesActiveRenderToTheIdleRule()
     {
@@ -589,7 +589,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): connected at resume; the resume check did not hold"));
     }
 
-    // T12: nodes already blocked, or Block at boot off, is one log line and no block.
+    // Nodes already blocked, or Block at boot off, is one log line and no block.
     [TestMethod]
     public void ResumeCheckLogsOnceWhenThereIsNothingToDo()
     {
@@ -605,7 +605,7 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (resume): nothing to do"));
     }
 
-    // T12: a block still running from a cut-short sleep hand-back is waited for first, never raced.
+    // A block still running from a cut-short sleep hand-back is waited for first, never raced.
     [TestMethod]
     public void ResumeCheckWaitsForABlockStillRunningFromASuspendHandBack()
     {

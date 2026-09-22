@@ -1151,9 +1151,12 @@ internal sealed class BlockCoordinator : IDisposable
             {
                 await inFlight;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
-                // The hand-back's own budgets never cancel HandBackAsync itself; this is defensive only.
+                // The hand-back's own budgets never cancel HandBackAsync itself, so this is defensive only; not
+                // silent regardless, since an unexpected cancellation here is still worth a line, not nothing.
+                _log.Warn("Resume check: the hand-back still in flight ended in a cancellation it should never see (" +
+                    ex.GetType().Name + ": " + ex.Message + "). The nodes are read fresh next.");
             }
         }
 
@@ -1166,9 +1169,13 @@ internal sealed class BlockCoordinator : IDisposable
             {
                 await cutShort;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Already logged by ObserveHandBackBlockAsync; the resume check reads the node state fresh next.
+                // ObserveHandBackBlockAsync already catches and logs everything this task can end in, so this is
+                // a defensive backstop only; not silent regardless, since reaching it at all would mean that
+                // method's own catch was bypassed somehow, which is itself worth a line.
+                _log.Warn("Resume check: the block still running from a cut-short hand-back ended unexpectedly (" +
+                    ex.GetType().Name + ": " + ex.Message + "). The nodes are read fresh next.");
             }
         }
 
@@ -1218,7 +1225,7 @@ internal sealed class BlockCoordinator : IDisposable
         _log.Info(HandBackText.Started(trigger, t0, startedReason, render, nodes, streamingHeld, blockAtBootKnown));
         CancelIdleWait("a hand-back is running");
 
-        // A block already queued at the query (render was not ACTIVE then, section 3.3): the block already in
+        // A block already queued at the query (render was not ACTIVE then): the block already in
         // flight is the one this hand-back waits for, never a second one. Render is re-read here regardless of
         // what the query found, though: sound started on the pinned container between the query and this
         // WM_ENDSESSION is still disconnected, never silently left running because a block happened to be queued

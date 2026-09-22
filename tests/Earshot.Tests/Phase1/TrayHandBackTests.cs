@@ -12,8 +12,8 @@ using static Earshot.Tests.Phase1.Phase1Fixtures;
 
 namespace Earshot.Tests.Phase1;
 
-// T5, T6 and the menu item's own wiring: the pumped hold (HoldReply) on the real TrayContext, the setting-off
-// branch, re-entry, and the click. Drives the real TrayContext on an STA thread with fake controllers, exactly
+// The pumped hold (HoldReply) on the real TrayContext, the setting-off branch, re-entry, the click and the
+// menu item's own wiring. Drives the real TrayContext on an STA thread with fake controllers, exactly
 // as TrayContextTests does. Nothing here reaches a device, a window message or Task Scheduler.
 [TestClass]
 public sealed class TrayHandBackTests
@@ -28,7 +28,7 @@ public sealed class TrayHandBackTests
 
     private static SessionEndingEventArgs WmEndSession() => new(isQuery: false, ending: true, flags: 0);
 
-    // T5: a coordinator continuation posted to the UI thread runs while HoldReply waits, and HoldReply returns
+    // A coordinator continuation posted to the UI thread runs while HoldReply waits, and HoldReply returns
     // once the task completes -- proved by the wall-clock time actually taken: a real background delay on the
     // block, a generous budget and TimeProvider.System for the deadline, so a hold that returned early (the pump
     // not actually running the coordinator's own continuations) or hung to the deadline would both show up in
@@ -64,7 +64,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // T4 / T5: a block still running at the hand-back's own budget does not hang the window procedure: the hold
+    // A block still running at the hand-back's own budget does not hang the window procedure: the hold
     // returns at the deadline, "cut short", and the block's own outcome is still recorded once it arrives later.
     // A zero budget proves nothing about the real race (it faults before any real waiting starts, on either
     // clock), so this drives a real, non-zero budget against the real clock (TimeProvider.System) with a step
@@ -110,7 +110,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // T2: the setting off leaves WM_ENDSESSION exactly as it was before this feature: HoldReply is never
+    // The setting off leaves WM_ENDSESSION exactly as it was before this feature: HoldReply is never
     // entered, and the process answers at once.
     [TestMethod]
     public void TheSettingOffNeverEntersTheHold()
@@ -125,6 +125,12 @@ public sealed class TrayHandBackTests
 
             Assert.IsFalse(tray.Log.Has(LogLevel.Debug, "reply returned after"));
             Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.StartsWith("Hand-back (shutdown): started", StringComparison.Ordinal)));
+
+            // m1: TrayContext never calls HandBackAsync at all with the setting off, so HandBackText.Off's own
+            // line, written from inside that method, never had a chance to fire for a session end; a reader must
+            // still be able to tell "off" from "never reached" here the same way the suspend branch already lets
+            // them.
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Hand-back: off, so nothing runs for this session end."));
         });
     }
 
@@ -165,7 +171,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // T6: the session-ending guard set before the hand-back runs is still set afterwards (WM_ENDSESSION TRUE
+    // The session-ending guard set before the hand-back runs is still set afterwards (WM_ENDSESSION TRUE
     // never clears it -- only a later cancellation does), so a click that would connect (the only kind the
     // coordinator itself refuses at a session end; a disconnect is still let through even now) is still refused
     // with the existing card once the hold has returned.
@@ -260,7 +266,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // T11, the one execution of the real message path this feature keeps. A real ShellMessageWindow, on a
+    // The one execution of the real message path this feature keeps. A real ShellMessageWindow, on a
     // thread of its own attached to a private desktop, pumping real messages (Application.Run); a second,
     // ordinary thread sends WM_QUERYENDSESSION, a real WM_ENDSESSION (wParam TRUE), and a real WM_POWERBROADCAST
     // with PBT_APMSUSPEND, to it with the real user32 SendMessageW, which blocks the sender until the window
@@ -377,7 +383,7 @@ public sealed class TrayHandBackTests
         });
     }
 
-    // T13: PBT_APMRESUMESUSPEND is logged and raised like the other two kinds; an unrecognised wParam falls
+    // PBT_APMRESUMESUSPEND is logged and raised like the other two kinds; an unrecognised wParam falls
     // through to the base window procedure untouched (m.Result is never set by ShellMessageWindow for it).
     [TestMethod]
     public void ResumeSuspendIsRaisedAndAnUnknownWParamFallsThroughToTheBaseHandler()

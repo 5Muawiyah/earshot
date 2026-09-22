@@ -811,6 +811,13 @@ internal sealed class TrayContext : ApplicationContext
                 Task handBack = _coordinator.HandBackAsync(HandBackTrigger.SessionEnd, deadline, _disconnectHandBackWait, streamingHeld);
                 HoldReply(handBack, deadline);
             }
+            else
+            {
+                // TrayContext never calls HandBackAsync at all with the setting off, so HandBackText.Off's own
+                // line (written from inside that method) never fires for a session end; the suspend branch below
+                // has the same line for the same reason. One source, HandBackText.Off, for both.
+                _log.Info(HandBackText.Off(HandBackTrigger.SessionEnd));
+            }
         }
     }
 
@@ -884,7 +891,7 @@ internal sealed class TrayContext : ApplicationContext
                 }
                 else
                 {
-                    _log.Info("Hand-back: off, so nothing runs for this suspend.");
+                    _log.Info(HandBackText.Off(HandBackTrigger.Suspend));
                 }
 
                 break;
