@@ -59,6 +59,30 @@ internal static class RunSequence
         return next;
     }
 
+    // A non-mutating read of the counter's own current value, never incrementing or writing
+    // anything: the one number RunSequence has actually issued up to. Used to tell a marker a real
+    // half was assigned (never above this) apart from one a hand-forged gui-sequence.txt claims
+    // that this counter never legitimately handed out. Unlike TakeNext (which must throw on a
+    // corrupt counter file, since silently starting over from 0 there could reissue a number
+    // already sitting on disk), a read failure here is caught, not propagated: this runs on every
+    // Banner.Compute and row read, far more often than a half actually starts, and a corrupt
+    // counter must never crash the window over a read-only scan. 0 is the fail-closed answer
+    // either way, corrupt or genuinely never used: nothing this counter cannot itself vouch for is
+    // trusted as legitimately issued.
+    internal static long PeekLastIssued(string liveTestRoot)
+    {
+        try
+        {
+            return ReadLastIssued(Path.Combine(liveTestRoot, CounterFileName));
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "RunSequence.PeekLastIssued could not read the counter (recorded, not swallowed), treating it as 0: " + ex);
+            return 0;
+        }
+    }
+
     // Null when the folder has no marker (an older run, from before this feature existed, or one
     // this window never started) or the marker cannot be parsed as a whole number: never guessed,
     // the caller falls back to time ordering for a folder this returns null for.

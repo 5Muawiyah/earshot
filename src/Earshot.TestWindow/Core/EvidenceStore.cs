@@ -66,6 +66,14 @@ internal static partial class EvidenceStore
         return string.CompareOrdinal(b.Stamp, a.Stamp);
     }
 
+    // Whether any two folders in a set disagree (SequenceDisagreesWithStampOrder's own answer),
+    // and, when they do, whether an undominated pair sharing the exact same sequence number
+    // (IsDuplicateRecord) is among the reasons: a collision RunSequence.TakeNext never legitimately
+    // produces, so two folders holding one is a copied or duplicated record, not a mere ordering
+    // ambiguity, and the owner is told that specifically (Copy.AtRestDuplicateRecord) rather than
+    // the general disagreement wording.
+    internal readonly record struct SequenceOrderCheck(bool Disagrees, bool IsDuplicateRecord);
+
     // True when any two folders in this set carry a sequence marker whose order disagrees with
     // the order of what actually happened to each of them (EventTimeUtc: the latest sequence
     // marker was issued, a kill marker was written, or a trusted result's own finishedUtc,
@@ -78,21 +86,30 @@ internal static partial class EvidenceStore
     // up. Surfaced to the owner (StateDeriver's HistoryNote, Banner's own red) rather than
     // silently preferring sequence and saying nothing.
     //
-    // A disagreeing pair is skipped, not surfaced, when some third entry in the same set is newer
-    // than BOTH of them by sequence AND by event time (dominates them): whichever of the pair was
-    // actually right or wrong about their own order can no longer change which run is genuinely
-    // newest overall, since something unambiguous already outranks both, so the old disagreement
-    // between them must never keep the banner locked for ever after a real Restore (or any other
-    // run) that itself is unambiguously the newest thing that has happened. Two different run
-    // folders carrying the very same sequence number is never forgiven this way: RunSequence.
-    // TakeNext never legitimately hands the same value out twice, so two folders holding it is a
-    // sign the count itself cannot be trusted, not a mere ordering ambiguity a later run can settle.
-    internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<(long? Sequence, DateTimeOffset EventTimeUtc)> entries)
+    // A disagreeing pair (including two folders sharing the exact same number: RunSequence.
+    // TakeNext never legitimately hands the same value out twice, so that is exactly as much a
+    // disagreement as two that merely disorder) is forgiven, not surfaced, when some third entry
+    // in the same set is newer than BOTH of them by sequence AND by event time (dominates them):
+    // whichever of the pair was actually right or wrong (or which of a colliding pair is the real
+    // one) can no longer change which run is genuinely newest overall, since something unambiguous
+    // already outranks both, so neither an ordering disagreement nor a collision keeps the banner
+    // locked forever after a real Restore (or any other run) that itself is unambiguously the
+    // newest thing that has happened.
+    internal static bool SequenceDisagreesWithStampOrder(IReadOnlyList<(long? Sequence, DateTimeOffset EventTimeUtc)> entries) =>
+        DetectSequenceOrderIssue(entries).Disagrees;
+
+    // The same detection, but also saying whether an undominated collision (not just a plain
+    // ordering disagreement) is among the reasons, for a caller (Banner.Compute) that needs to
+    // pick different wording for the two.
+    internal static SequenceOrderCheck DetectSequenceOrderIssue(IReadOnlyList<(long? Sequence, DateTimeOffset EventTimeUtc)> entries)
     {
         List<(long Sequence, DateTimeOffset EventTimeUtc)> withSequence = entries
             .Where(e => e.Sequence is not null)
             .Select(e => (e.Sequence!.Value, e.EventTimeUtc))
             .ToList();
+
+        bool disagrees = false;
+        bool isDuplicateRecord = false;
 
         for (int i = 0; i < withSequence.Count; i++)
         {
@@ -100,14 +117,11 @@ internal static partial class EvidenceStore
             {
                 long si = withSequence[i].Sequence;
                 long sj = withSequence[j].Sequence;
-                if (si == sj)
-                {
-                    return true;
-                }
+                bool collision = si == sj;
 
                 bool iNewerBySequence = si > sj;
                 bool iNewerByEventTime = withSequence[i].EventTimeUtc > withSequence[j].EventTimeUtc;
-                if (iNewerBySequence == iNewerByEventTime)
+                if (!collision && iNewerBySequence == iNewerByEventTime)
                 {
                     continue;
                 }
@@ -115,14 +129,17 @@ internal static partial class EvidenceStore
                 bool dominated = withSequence.Any(k =>
                     k.Sequence > si && k.EventTimeUtc > withSequence[i].EventTimeUtc &&
                     k.Sequence > sj && k.EventTimeUtc > withSequence[j].EventTimeUtc);
-                if (!dominated)
+                if (dominated)
                 {
-                    return true;
+                    continue;
                 }
+
+                disagrees = true;
+                isDuplicateRecord = isDuplicateRecord || collision;
             }
         }
 
-        return false;
+        return new SequenceOrderCheck(disagrees, isDuplicateRecord);
     }
 
     // Every run folder for one TestId, read and validated, newest stamp first: exactly what
@@ -134,7 +151,7 @@ internal static partial class EvidenceStore
         var evidence = new List<RunEvidence>();
         foreach ((string stamp, string folder) in FindRunFolders(liveTestRoot, testId))
         {
-            evidence.Add(ReadRunEvidence(stamp, folder, testId, activeFolder));
+            evidence.Add(ReadRunEvidence(stamp, folder, testId, activeFolder, liveTestRoot));
         }
 
         return evidence;
@@ -143,8 +160,12 @@ internal static partial class EvidenceStore
     // Everything this run folder can tell the deriver about one test: its own result.json, the
     // first-half snapshot the window takes before shutting down or restarting at the power-cycle
     // boundary, whether resume.txt or gui-set-aside.txt are present, and the power-cycle verdict
-    // (power-down, restart, not-yet or unknown) recorded before a second half ran.
-    internal static RunEvidence ReadRunEvidence(string stamp, string folder, string testId, string? activeFolder = null)
+    // (power-down, restart, not-yet or unknown) recorded before a second half ran. liveTestRoot,
+    // when given, is where RunSequence's own counter lives, checked against this folder's own
+    // marker (HasUntrustedSequenceMarker); left null only by callers (tests) that are not
+    // exercising that check and have no real counter file to check against, never by LoadEvidence
+    // itself, which always has one.
+    internal static RunEvidence ReadRunEvidence(string stamp, string folder, string testId, string? activeFolder = null, string? liveTestRoot = null)
     {
         (ParsedResult? result, string? failure) = TryReadResult(Path.Combine(folder, "result.json"), testId);
 
@@ -156,11 +177,13 @@ internal static partial class EvidenceStore
         bool isActiveFolder = activeFolder is not null && string.Equals(folder, activeFolder, StringComparison.OrdinalIgnoreCase);
         bool hasKilledMarker = File.Exists(Path.Combine(folder, "gui-killed.txt"));
         bool hasStaleRunStartedMarker = hasRunStartedMarker && !isActiveFolder;
+        long? sequence = RunSequence.TryReadMarker(folder);
+        bool hasUntrustedSequenceMarker = liveTestRoot is not null && sequence is long seq && seq > RunSequence.PeekLastIssued(liveTestRoot);
 
-        // Trusted the same way Banner.cs's own scan trusts a run: a real result, never a killed or
-        // stale-started folder whose result.json (if any) is that half's own victim, not evidence
-        // of what actually happened last.
-        bool trustworthy = result is not null && !hasKilledMarker && !hasStaleRunStartedMarker;
+        // Trusted the same way Banner.cs's own scan trusts a run: a real result, never a killed,
+        // stale-started or forged-marker folder whose result.json (if any) is that half's own
+        // victim, or a hand-forged record, not evidence of what actually happened last.
+        bool trustworthy = result is not null && !hasKilledMarker && !hasStaleRunStartedMarker && !hasUntrustedSequenceMarker;
         DateTimeOffset stampUtc = ParseStampUtc(stamp);
 
         return new RunEvidence
@@ -175,7 +198,8 @@ internal static partial class EvidenceStore
             HasSetAsideFile = File.Exists(Path.Combine(folder, "gui-set-aside.txt")),
             HasKilledMarker = hasKilledMarker,
             HasStaleRunStartedMarker = hasStaleRunStartedMarker,
-            Sequence = RunSequence.TryReadMarker(folder),
+            Sequence = sequence,
+            HasUntrustedSequenceMarker = hasUntrustedSequenceMarker,
             PowerCycleVerdict = TryReadPowerCycleVerdict(Path.Combine(folder, "gui-power-cycle.json")),
             EventTimeUtc = ComputeEventTimeUtc(folder, result, trustworthy, stampUtc),
         };

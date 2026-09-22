@@ -92,6 +92,15 @@ internal sealed class RunEvidence
     // older run, from before this feature existed). Never guessed; a folder without one is only
     // ever ordered by its stamp, the same as before this existed.
     public long? Sequence { get; init; }
+
+    // True when Sequence holds a number RunSequence.TakeNext has never actually issued (above the
+    // counter's own current value): a hand-forged gui-sequence.txt, never a real half this window
+    // started, since TakeNext only ever hands out the next number past whatever it last issued.
+    // Read exactly like a kill: whatever result.json sits under a forged marker must never speak
+    // for it, however far in the future its own finishedUtc claims to be, but the forged number
+    // itself still stands for ordering, so it can outrank a genuine result older than it without
+    // ever becoming the one this row trusts.
+    public bool HasUntrustedSequenceMarker { get; init; }
     public string? PowerCycleVerdict { get; init; }
 
     // The newest moment anything is actually known to have happened in this run folder

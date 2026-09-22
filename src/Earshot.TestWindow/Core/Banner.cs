@@ -15,11 +15,15 @@ internal enum BannerLevel
 // nodes read anything but Blocked, which includes a declined offer with the AirPods still on the
 // phone, so a "no" is never trusted to mean the AirPods are known connected to this computer
 // either. Every Red cause gets the same advice (Copy.AtRestNo): never a click, only put the
-// AirPods in their case and run Restore.
+// AirPods in their case and run Restore. IsDuplicateRecordCause is the one exception to "never
+// says which cause": whether two folders sharing the exact same sequence number is among the
+// reasons is a fact about the evidence on disk, not a guess about the device, so it is named
+// (Copy.AtRestDuplicateRecord) rather than folded into the same wording as everything else.
 internal sealed record BannerState
 {
     public required BannerLevel Level { get; init; }
     public string? Message { get; init; }
+    public bool IsDuplicateRecordCause { get; init; }
 
     internal bool RowsLockedExceptRestore => Level == BannerLevel.Red;
 }
@@ -89,11 +93,11 @@ internal static class Banner
         // stamp forever however much later its own newest event actually happened, so comparing
         // against the stamp read every legitimate resume-after-an-intervening-run as a
         // disagreement, permanently, since the stamp itself could never catch up.
-        bool disagreement = EvidenceStore.SequenceDisagreesWithStampOrder(
+        EvidenceStore.SequenceOrderCheck orderCheck = EvidenceStore.DetectSequenceOrderIssue(
             runs.Select(run => (run.Sequence, run.OrderingUtc)).ToList());
-        if (disagreement)
+        if (orderCheck.Disagrees)
         {
-            return new BannerState { Level = BannerLevel.Red, Message = RedMessage };
+            return new BannerState { Level = BannerLevel.Red, Message = RedMessage, IsDuplicateRecordCause = orderCheck.IsDuplicateRecord };
         }
 
         string? leftAtRest = chosen.Result!.LeftAtRest;
@@ -170,10 +174,21 @@ internal static class Banner
                 // speak for it. Exempted only for this window's own currently active run.
                 bool staleRunStarted = File.Exists(Path.Combine(testFolder, "gui-run-started.txt")) &&
                     !(activeFolder is not null && string.Equals(testFolder, activeFolder, StringComparison.OrdinalIgnoreCase));
-                bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt")) || staleRunStarted;
+
+                // A sequence number above anything RunSequence has ever actually issued was never
+                // handed out by a real half: a hand-forged gui-sequence.txt, read exactly like a
+                // kill, since whatever result.json sits underneath it (however clean it looks,
+                // however far in the future its own finishedUtc claims to be) is not evidence of
+                // what actually happened. The forged number itself still stands for ordering (it is
+                // never dropped from ScannedRun.Sequence below), so it can still outrank a genuine
+                // result older than it and force the banner to show, but it can never itself become
+                // the chosen, trusted result.
+                long? sequence = RunSequence.TryReadMarker(testFolder);
+                bool sequenceForged = sequence is long seq && seq > RunSequence.PeekLastIssued(liveTestRoot);
+
+                bool killed = File.Exists(Path.Combine(testFolder, "gui-killed.txt")) || staleRunStarted || sequenceForged;
                 bool readable = result is not null && !killed;
                 DateTimeOffset ordering = EvidenceStore.ComputeEventTimeUtc(testFolder, result, readable, stampUtc);
-                long? sequence = RunSequence.TryReadMarker(testFolder);
                 runs.Add(new ScannedRun(stamp, result, ordering, readable, sequence));
             }
         }

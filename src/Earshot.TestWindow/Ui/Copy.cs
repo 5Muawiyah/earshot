@@ -197,6 +197,17 @@ internal static class Copy
         "Put your AirPods in their case. Then run Restore (row 00) and say Yes to its last " +
         "question. The warning clears when a test ends with this computer leaving your AirPods alone.";
 
+    // The one cause this window ever names specifically (Banner.IsDuplicateRecordCause): two
+    // saved records sharing the exact same number is a fact about the files on disk, not a guess
+    // about the device, so it is safe to say plainly rather than folding it into AtRestNo's own
+    // silence about cause. The same instruction and the same closing sentence either way: still
+    // never a click, still never a promise that a click alone clears it.
+    internal const string AtRestDuplicateRecord =
+        "Two saved records for a test share the same number, which should never happen: one of " +
+        "them has been copied or duplicated. Put your AirPods in their case. Then run Restore " +
+        "(row 00) and say Yes to its last question. The warning clears when a test ends with this " +
+        "computer leaving your AirPods alone.";
+
     internal const string AtRestUnknown =
         "We do not know. It could not be read whether your AirPods' Bluetooth connection is blocked, so this " +
         "computer must be treated as able to grab them off your phone, until Restore has run.";
@@ -225,17 +236,18 @@ internal static class Copy
     // here (None never reaches this: MainForm hides the banner outright for it), and it never says
     // which exact leftAtRest value caused Red: that collapsing is deliberate, since there is no
     // cause a "no" can be trusted to mean the AirPods are known connected to this computer (see
-    // AtRestNo's own note), so every Red cause reads the same one text. Amber (left enabled on
-    // purpose, for a test still in progress) gets its own short plain line, since "Left enabled on
-    // purpose." (Banner.cs's own internal caption) says nothing plain about what "enabled" means or
-    // what to do about it.
+    // AtRestNo's own note), so every Red cause reads the same one text, except a duplicate record
+    // (Banner.IsDuplicateRecordCause), a fact about the files on disk this window can say plainly.
+    // Amber (left enabled on purpose, for a test still in progress) gets its own short plain line,
+    // since "Left enabled on purpose." (Banner.cs's own internal caption) says nothing plain about
+    // what "enabled" means or what to do about it.
     internal const string BannerAmberPlain =
         "This computer's AirPods connection was left able to grab them, on purpose, so a test still in " +
         "progress could finish. No action is needed yet; the test itself will say when to shut down.";
 
-    internal static string BannerPlainText(BannerLevel level) => level switch
+    internal static string BannerPlainText(BannerLevel level, bool isDuplicateRecordCause = false) => level switch
     {
-        BannerLevel.Red => AtRestNo,
+        BannerLevel.Red => isDuplicateRecordCause ? AtRestDuplicateRecord : AtRestNo,
         BannerLevel.Amber => BannerAmberPlain,
         _ => string.Empty,
     };

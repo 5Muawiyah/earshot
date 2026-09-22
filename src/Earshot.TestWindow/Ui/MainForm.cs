@@ -905,7 +905,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        _bannerLabel.Text = _showTechnicalDetails ? _banner.Message ?? string.Empty : Copy.BannerPlainText(_banner.Level);
+        _bannerLabel.Text = _showTechnicalDetails ? _banner.Message ?? string.Empty : Copy.BannerPlainText(_banner.Level, _banner.IsDuplicateRecordCause);
         _bannerLabel.ForeColor = _banner.Level == BannerLevel.Red ? Color.White : Color.Black;
         _bannerLabel.BackColor = _banner.Level == BannerLevel.Red ? Color.Firebrick : Color.Goldenrod;
         _bannerLabel.Visible = true;
@@ -2040,13 +2040,15 @@ internal sealed class MainForm : Form
     }
 
     // The deliberate step shown before Restore ever starts under a red or unknown banner: the same
-    // one plain advice the at-rest banner itself gives (Copy.AtRestNo, never a click, whatever the
-    // cause), shown as a step to act on first; Restore itself is what runs once the owner says
-    // they have done it, never silently skipped past.
+    // one plain advice the at-rest banner itself gives (Copy.BannerPlainText, never a click,
+    // whatever the cause, except a duplicate record which is named plainly), shown as a step to
+    // act on first; Restore itself is what runs once the owner says they have done it, never
+    // silently skipped past.
     private void ShowRunAllRestoreAdvice()
     {
-        RefreshBanner();
-        _runAllRestoreAdviceLabel.Text = Copy.RunAllRestoreAdviceHeading + Environment.NewLine + Environment.NewLine + Copy.AtRestNo;
+        BannerState banner = RefreshBanner();
+        _runAllRestoreAdviceLabel.Text = Copy.RunAllRestoreAdviceHeading + Environment.NewLine + Environment.NewLine +
+            Copy.BannerPlainText(BannerLevel.Red, banner.IsDuplicateRecordCause);
         _runAllRestoreAdviceLabel.Visible = true;
         _runAllRestoreContinueButton.Visible = true;
         _runAllStatusLabel.Text = string.Empty;

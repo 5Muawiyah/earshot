@@ -123,6 +123,16 @@ internal static class StateDeriver
                     new StopReason("the test was stopped by force; nothing after that point is known", historyNote));
             }
 
+            // A sequence marker above anything RunSequence has ever actually issued was never
+            // handed out by a real half this window started: read exactly like a kill, since
+            // whatever result.json sits underneath it (however clean it looks, however far in the
+            // future its own finishedUtc claims to be) is not evidence of what actually happened.
+            if (run.HasUntrustedSequenceMarker)
+            {
+                return (null, HalfKind.NotApplicable, historyNote,
+                    new StopReason("this run's own sequence number was never issued; nothing here is trusted while that stands", historyNote));
+            }
+
             // gui-run-started.txt outliving the half it was written for, with no gui-killed.txt:
             // this window never saw it end, which a forced session end or a power cut (the window
             // dying together with its own child, before KillActiveRun or MarkUnknownAndReset ever
