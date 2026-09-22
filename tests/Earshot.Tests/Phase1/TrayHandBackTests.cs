@@ -3,6 +3,8 @@ using System.Windows.Forms;
 using Earshot.App;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Streaming;
+using Earshot.Tests.Streaming;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
@@ -169,6 +171,42 @@ public sealed class TrayHandBackTests
 
             Assert.IsTrue(tray.Registry.Settings.Current.HandBackOnShutdownAndSleep, "Refused: nothing was saved.");
             Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status);
+        });
+    }
+
+    // Section 4.2 ("Steps as 3.2"): a held streaming link is let go before the sleep hand-back's own disconnect,
+    // the same first step 3.2 has for shut down.
+    [TestMethod]
+    public void SuspendLetsGoOfAStreamingLinkBeforeTheHandBack()
+    {
+        StaThread.Run(() =>
+        {
+            var fake = new FakeStreamingPlatform();
+            fake.NextDiscovery(FakeStreamingPlatform.Found(new StreamingDevice("phone-1", "Test Phone", IPhoneContainer)));
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                settings: s =>
+                {
+                    s.HandBackOnShutdownAndSleep = true;
+                    s.Streaming = s.Streaming with { Enabled = true };
+                },
+                streamingPlatform: fake);
+            tray.PumpUntilIdle();
+            tray.Context.Menu.Refresh();
+            ToolStripMenuItem play = tray.Context.Menu.PlayFromPhoneItems.Single(i => i.Text == "Test Phone");
+            Assert.IsTrue(play.Enabled, "Test Phone cannot be clicked.");
+            play.PerformClick();
+            tray.PumpUntilIdle();
+            Assert.IsTrue(fake.CallsNamed("Open").Count > 0, "The link was never opened.");
+
+            tray.Context.OnPowerChanged(null, new PowerEventArgs(PowerEventKind.Suspend));
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Play from a phone: letting go of any connection, because the machine is sleeping"));
+            int letGoAt = tray.Log.Entries.ToList().FindIndex(e => e.Message.Contains("letting go of any connection, because the machine is sleeping", StringComparison.Ordinal));
+            int startedAt = tray.Log.Entries.ToList().FindIndex(e => e.Message.StartsWith("Hand-back (sleep): started", StringComparison.Ordinal));
+            Assert.IsGreaterThanOrEqualTo(0, letGoAt);
+            Assert.IsGreaterThanOrEqualTo(0, startedAt);
+            Assert.IsLessThan(startedAt, letGoAt, "The streaming link is let go before the hand-back's own started line, as it is for shut down.");
         });
     }
 

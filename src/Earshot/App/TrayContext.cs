@@ -835,6 +835,13 @@ internal sealed class TrayContext : ApplicationContext
             case PowerEventKind.Suspend:
                 if (_registry.Settings.Current.HandBackOnShutdownAndSleep)
                 {
+                    // The same first step as the shut-down hand-back (3.2's step 2, "as 3.2" for sleep): a held
+                    // streaming link is let go before the disconnect, not waited for on its own. Unlike a
+                    // shutdown, sleep is never abandoned once it starts, so _streamingApplied is left as it is:
+                    // the machine will resume with the tray still running, and a settings change that asks for
+                    // nothing different must not restart a feature nothing actually stopped asking for.
+                    StopStreaming(wait: false, "the machine is sleeping");
+
                     DateTimeOffset deadline = _time.GetUtcNow() + _sleepHandBackBudget;
                     Task handBack = _coordinator.HandBackAsync(HandBackTrigger.Suspend, _sleepHandBackBudget, _sleepDisconnectWait);
                     HoldReply(handBack, deadline);
