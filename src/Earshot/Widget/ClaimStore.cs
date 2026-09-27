@@ -12,8 +12,8 @@ internal sealed class ClaimStore
     private readonly string _path;
     private readonly ILog _log;
     private readonly Func<sbyte?> _currentSignalThreshold;
+    private readonly Func<DateTimeOffset> _now;
     private readonly Lock _gate = new();
-    private readonly object _writeGate = new();
     private WidgetClaim? _current;
     private Task _pendingWrite = Task.CompletedTask;
     private int _diskWriteCount;
@@ -27,14 +27,23 @@ internal sealed class ClaimStore
     // threshold validation (M1) can be exercised without WidgetDefaults.SignalThresholdDbm ever holding
     // anything but its shipped null, the way ClaimFlow's internal overload does for the same constant.
     internal ClaimStore(string path, ILog log, Func<sbyte?> currentSignalThreshold)
+        : this(path, log, currentSignalThreshold, static () => DateTimeOffset.UtcNow)
+    {
+    }
+
+    // Test-only: supplies "now" directly, so a claim whose ClaimedAtUtc is in the future can be exercised
+    // without waiting for the real clock to catch up to a fixture's fixed date.
+    internal ClaimStore(string path, ILog log, Func<sbyte?> currentSignalThreshold, Func<DateTimeOffset> now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(currentSignalThreshold);
+        ArgumentNullException.ThrowIfNull(now);
 
         _path = path;
         _log = log;
         _currentSignalThreshold = currentSignalThreshold;
+        _now = now;
         lock (_gate)
         {
             _current = Load();
@@ -53,11 +62,19 @@ internal sealed class ClaimStore
     }
 
     // Updates the in-memory claim immediately (so a reader never blocks on disk I/O and always sees what
-    // was just decided), then queues the actual write on a background thread, serialised with any other
-    // write this store has pending, so neither the UI thread (the service's callback) nor ClaimFlow's own
-    // caller ever waits on file I/O here. Saving is skipped outright, with nothing queued, when the claim
-    // carries an older generation (ClaimedAtUtc) or an older reading (Last.AtUtc within the same generation)
-    // than what is already current, or when nothing about it actually differs from what is current.
+    // was just decided), then queues the actual write, serialised with any other write or forget this store
+    // has pending, so neither the UI thread (the service's callback) nor ClaimFlow's own caller ever waits on
+    // file I/O here. Saving is skipped outright, with nothing queued, when the claim carries an older
+    // generation (ClaimedAtUtc) or an older reading (Last.AtUtc within the same generation) than what is
+    // already current, or when nothing about it actually differs from what is current.
+    //
+    // The decision of what _current becomes and the enqueue of the matching disk action happen inside the
+    // same lock as each other (here and in ForgetClaim), so the order those two things are decided in always
+    // matches the order the queued disk actions run in. Each queued action re-reads _current, under this same
+    // lock, immediately before touching disk: a write proceeds only while its claim is still current, and
+    // ForgetClaim's delete proceeds only while _current is still null, both decided and acted upon without
+    // releasing the lock in between, so nothing can land in the gap the way a save used to resurrect a
+    // deliberately forgotten claim.
     public void Save(WidgetClaim claim)
     {
         ArgumentNullException.ThrowIfNull(claim);
@@ -78,16 +95,16 @@ internal sealed class ClaimStore
             }
 
             _current = claim;
+            _pendingWrite = _pendingWrite.ContinueWith(
+                _ => WriteOne(claim), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
         }
-
-        QueueWrite(claim);
     }
 
-    // Test-only: lets a test wait for every write Save has queued so far to finish, so it can assert on the
-    // file or the log without racing the background writer.
+    // Test-only: lets a test wait for every write or forget Save/ForgetClaim has queued so far to finish, so
+    // it can assert on the file or the log without racing the background worker.
     internal Task IdleAsync()
     {
-        lock (_writeGate)
+        lock (_gate)
         {
             return _pendingWrite;
         }
@@ -97,44 +114,48 @@ internal sealed class ClaimStore
     // reading write the file once, not once per advertisement.
     internal int DiskWriteCount => Volatile.Read(ref _diskWriteCount);
 
-    private void QueueWrite(WidgetClaim claim)
-    {
-        lock (_writeGate)
-        {
-            // Chained onto whatever write is already pending, so this store's writes are always serialised
-            // to one at a time in the order Save queued them, however many threads call Save concurrently.
-            _pendingWrite = _pendingWrite.ContinueWith(
-                _ => WriteOne(claim), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
-        }
-    }
+    // Test-only: fires, from the background worker's own thread, right after a write's "is this claim still
+    // current" check passes and before the disk write happens. Exists so a test can force the exact
+    // interleaving the fix above makes impossible, rather than depending on the thread pool's own scheduling.
+    internal Action? TestHookAfterWriteCheckPassed;
 
     private void WriteOne(WidgetClaim claim)
     {
         lock (_gate)
         {
             // A later Save or a ForgetClaim already moved _current past this write's claim: nothing to do.
+            // The check and the write happen without releasing the lock in between, so nothing else can move
+            // _current on after this check passes and before the write actually reaches disk.
             if (!claim.Equals(_current))
             {
                 return;
             }
-        }
 
-        Interlocked.Increment(ref _diskWriteCount);
-        try
-        {
-            WriteAtomic(claim);
-        }
-        catch (IOException ex)
-        {
-            _log.Warn(
-                "The widget claim could not be saved, so only the in-memory value is current (0x" +
-                ex.HResult.ToString("X8") + "): " + _path);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            _log.Warn(
-                "The widget claim could not be saved, so only the in-memory value is current (0x" +
-                ex.HResult.ToString("X8") + "): " + _path);
+            TestHookAfterWriteCheckPassed?.Invoke();
+
+            Interlocked.Increment(ref _diskWriteCount);
+            try
+            {
+                WriteAtomic(claim);
+            }
+            catch (IOException ex)
+            {
+                _log.Warn(
+                    "The widget claim could not be saved, so only the in-memory value is current (0x" +
+                    ex.HResult.ToString("X8") + "): " + _path);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _log.Warn(
+                    "The widget claim could not be saved, so only the in-memory value is current (0x" +
+                    ex.HResult.ToString("X8") + "): " + _path);
+            }
+            catch (Exception ex)
+            {
+                // Anything else here would otherwise be an unobserved exception on a background task and
+                // simply vanish: logged rather than left for that mechanism to lose silently.
+                _log.Error("The widget claim could not be saved because of an unexpected error: " + _path, ex);
+            }
         }
     }
 
@@ -142,6 +163,23 @@ internal sealed class ClaimStore
     {
         lock (_gate)
         {
+            _current = null;
+            _pendingWrite = _pendingWrite.ContinueWith(
+                _ => ForgetOne(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        }
+    }
+
+    private void ForgetOne()
+    {
+        lock (_gate)
+        {
+            // A later Save already replaced what was forgotten: leave its write (already queued behind this
+            // one) to run and do not delete what it is about to write or has already written.
+            if (_current is not null)
+            {
+                return;
+            }
+
             try
             {
                 File.Delete(_path);
@@ -154,8 +192,10 @@ internal sealed class ClaimStore
             {
                 _log.Error("Could not delete the widget claim: " + _path, ex);
             }
-
-            _current = null;
+            catch (Exception ex)
+            {
+                _log.Error("Could not delete the widget claim because of an unexpected error: " + _path, ex);
+            }
         }
     }
 
@@ -234,6 +274,16 @@ internal sealed class ClaimStore
         {
             _log.Warn(
                 "The widget claim's signal threshold no longer matches phase 0's current one, so nothing is claimed: " + _path);
+            return false;
+        }
+
+        // A claim dated in the future (a corrupted file, or a clock that ran backwards before it was written)
+        // would otherwise become the baseline every later, genuine Save is compared against: Save refuses
+        // anything with an older or equal generation than what is already current, so a future ClaimedAtUtc
+        // would make every real claim look older forever and silently never persist.
+        if (claim.ClaimedAtUtc > _now())
+        {
+            _log.Warn("The widget claim file is dated in the future, so nothing is claimed: " + _path);
             return false;
         }
 

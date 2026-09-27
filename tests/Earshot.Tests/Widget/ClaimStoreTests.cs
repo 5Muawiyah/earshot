@@ -1,3 +1,4 @@
+using System.Reflection;
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Widget;
@@ -75,6 +76,7 @@ public sealed class ClaimStoreTests
         Assert.IsTrue(File.Exists(path));
 
         store.ForgetClaim();
+        await store.IdleAsync(); // the delete is now queued and serialised with any in-flight write, like a save
 
         Assert.IsFalse(File.Exists(path));
         Assert.IsNull(store.Current);
@@ -231,6 +233,102 @@ public sealed class ClaimStoreTests
 
         var reloaded = NewStore(path, new CapturingLog());
         Assert.AreEqual(redoneClaim, reloaded.Current, "The redone claim, not the stale one, must be what is on disk.");
+    }
+
+    // The generation check inside WriteOne and the actual disk write were not atomic with respect to each
+    // other: ForgetClaim could delete the file and null out _current in between a write's check passing and
+    // that same write actually reaching disk, resurrecting a claim the owner had just asked to forget. This
+    // forces the exact interleaving deterministically (a bare race loop was tried first and never landed it
+    // on this machine's thread pool; TestHookAfterWriteCheckPassed exists so the window does not depend on
+    // scheduling luck) rather than relying on it to happen by chance.
+    [TestMethod]
+    public async Task ForgetClaimIsNeverResurrectedByAWriteAlreadyPastItsCheck()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var log = new CapturingLog();
+        var store = NewStore(path, log);
+        Task? forgetTask = null;
+        store.TestHookAfterWriteCheckPassed = () => forgetTask = Task.Run(store.ForgetClaim);
+
+        store.Save(SampleClaim());
+        await store.IdleAsync();
+        Assert.IsNotNull(forgetTask, "The hook must have fired for this test to mean anything.");
+        await forgetTask!;
+        await store.IdleAsync();
+
+        Assert.IsFalse(File.Exists(path), "ForgetClaim must not be undone by a write that had already passed its check.");
+        Assert.IsNull(store.Current);
+    }
+
+    // A claim whose ClaimedAtUtc is somehow in the future (a corrupted file, a clock that ran backwards
+    // before it wrote) would otherwise make every later, genuine Save look "older" by ClaimStore's own
+    // ordering check, and so silently fail to persist forever. Refusing it on load means it never becomes
+    // the baseline a real claim is compared against.
+    [TestMethod]
+    public void AFutureDatedClaimedAtUtcIsRefusedOnLoad()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var future = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        string json =
+            "{\"SchemaVersion\":1,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
+            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"" + future.ToString("O") + "\"," +
+            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"" + future.ToString("O") + "\"}}";
+        File.WriteAllText(path, json);
+        var log = new CapturingLog();
+        var fixedNow = new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
+
+        var store = new ClaimStore(path, log, static () => (sbyte)-70, () => fixedNow);
+
+        Assert.IsNull(store.Current);
+        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "future"));
+        Assert.AreEqual(json, File.ReadAllText(path), "A future-dated claim is left in place, never rewritten.");
+    }
+
+    // A newer, genuine claim saved after a future-dated one was refused on load must persist normally: the
+    // refusal must not leave some other stale generation guard behind.
+    [TestMethod]
+    public async Task AGenuineClaimSavesNormallyAfterAFutureDatedOneWasRefused()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var future = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        string json =
+            "{\"SchemaVersion\":1,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
+            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"" + future.ToString("O") + "\"," +
+            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"" + future.ToString("O") + "\"}}";
+        File.WriteAllText(path, json);
+        var log = new CapturingLog();
+        var fixedNow = new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
+        var store = new ClaimStore(path, log, static () => (sbyte)-70, () => fixedNow);
+
+        store.Save(SampleClaim());
+        await store.IdleAsync();
+
+        Assert.AreEqual(SampleClaim(), store.Current);
+    }
+
+    // Only IOException and UnauthorizedAccessException were ever caught around the actual disk write; any
+    // other exception from inside a queued write would escape as an unobserved task exception and simply be
+    // lost. Forcing a genuinely different exception type (a NUL character in the path, which throws
+    // ArgumentException, verified on this machine) proves it is now logged rather than silently dropped.
+    [TestMethod]
+    public async Task AnExceptionInsideAQueuedWriteIsLoggedNotUnobserved()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var log = new CapturingLog();
+        var store = NewStore(path, log);
+        typeof(ClaimStore).GetField("_path", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(store, path + "\0bad");
+
+        store.Save(SampleClaim());
+        await store.IdleAsync();
+
+        Assert.IsTrue(
+            log.Entries.Any(e => e.Level is Earshot.Contracts.LogLevel.Warn or Earshot.Contracts.LogLevel.Error),
+            "An exception from inside a queued write must be logged, not left for an unobserved task exception to lose.");
     }
 
     // An invalid claim must be recognised, logged and left in place even when the file cannot be written
