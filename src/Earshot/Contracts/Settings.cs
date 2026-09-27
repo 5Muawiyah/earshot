@@ -31,6 +31,11 @@ public sealed class EarshotSettings
     // (Earshot.Streaming.StreamingSettings.Default), so an older settings file with no Streaming member reads
     // as "off": the menu item does not appear, nothing is enumerated and nothing listens until the owner asks.
     public Earshot.Streaming.StreamingSettings Streaming { get; set; } = Earshot.Streaming.StreamingSettings.Default;
+
+    // v1.1: the AirPods widget's data side. Defaults on (Earshot.Widget.WidgetSettings.Default), so an
+    // older settings file with no Widget member reads as the widget's own defaults; every feature that
+    // depends on the advertisement still fails closed on its own until phase 0 has proved what it needs.
+    public Earshot.Widget.WidgetSettings Widget { get; set; } = Earshot.Widget.WidgetSettings.Default;
 }
 
 // SYSTEM-owned, %ProgramData%\Earshot\config.json. Users-read, SYSTEM-write via setboot verbs only.
