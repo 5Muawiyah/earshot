@@ -21,7 +21,10 @@ namespace Earshot.Composition;
 // unfinished, not invented.
 internal static partial class CompositionRoot
 {
-    internal static IWidgetStatus? BuildWidget(ServiceRegistry r, Func<BootBlockStatus?> blockStatus, TimeProvider time)
+    // Returns the concrete service, not just IWidgetStatus: Start, Suspend, Resume and Close are not on
+    // that interface (WidgetStatusService's own header explains why), and TrayContext needs them for the
+    // widget's lifecycle. registry.WidgetStatus is also set, to the same instance, for the UI side.
+    internal static WidgetStatusService? BuildWidget(ServiceRegistry r, Func<BootBlockStatus?> blockStatus, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(r);
         ArgumentNullException.ThrowIfNull(blockStatus);
