@@ -1,6 +1,8 @@
+using System.Linq;
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
 using Earshot.Tray;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
 
@@ -9,6 +11,9 @@ namespace Earshot.Tests.Phase1;
 [TestClass]
 public sealed class MenuModelTests
 {
+    private static readonly int[] ExpectedThresholdPercents = [10, 20, 30, 40, 50, 60, 70, 80, 90];
+    private static readonly string[] ExpectedThresholdTexts = ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"];
+
     private static MenuState Build(
         DeviceSnapshot? snapshot = null,
         BootBlockStatus? block = null,
@@ -74,12 +79,100 @@ public sealed class MenuModelTests
         MenuState state = Build(block: Block(BlockState.NotSetUp));
         MenuItemState[] items =
             [state.Toggle, state.BlockAtBoot, state.HandBack, state.ProtectAudio, state.ProtectCaveat,
-             state.OpenOnStartup, state.ChooseDevice, state.SetUp, state.Exit];
+             state.OpenOnStartup, state.ShowOnTaskbar, state.LeftClickConnectsItem, state.CaseOpenCardItem,
+             state.LowBatteryAlert, state.NameOtherDeviceItem, state.ChooseDevice, state.SetUp, state.Exit];
 
         foreach (MenuItemState item in items)
         {
             Assert.IsFalse(item.Text.Contains((char)0x2014, StringComparison.Ordinal), item.Text);
         }
+
+        foreach (LowBatteryThresholdMenuItem item in state.LowBatteryThresholdItems)
+        {
+            Assert.IsFalse(item.Text.Contains((char)0x2014, StringComparison.Ordinal), item.Text);
+        }
+    }
+
+    // The widget's own settings menu: each item's Checked reflects the matching WidgetSettings field, and
+    // every one of them (the four toggles and the "name your device" item) is disabled while busy, exactly
+    // like every other menu item.
+    [TestMethod]
+    public void WidgetMenuItemsReflectWidgetSettings()
+    {
+        EarshotSettings settings = Settings(s => s.Widget = s.Widget with
+        {
+            Enabled = false,
+            LeftClickConnects = true,
+            CaseOpenCard = false,
+            LowBatteryAlert = false,
+            LowBatteryThresholdPercent = 30,
+        });
+
+        MenuState state = Build(settings: settings);
+
+        Assert.AreEqual(WidgetCopy.ShowOnTaskbar, state.ShowOnTaskbar.Text);
+        Assert.IsFalse(state.ShowOnTaskbar.Checked);
+        Assert.AreEqual(WidgetCopy.LeftClickConnects, state.LeftClickConnectsItem.Text);
+        Assert.IsTrue(state.LeftClickConnectsItem.Checked);
+        Assert.AreEqual(WidgetCopy.CardWhenCaseOpens, state.CaseOpenCardItem.Text);
+        Assert.IsFalse(state.CaseOpenCardItem.Checked);
+        Assert.AreEqual(WidgetCopy.LowBatteryAlert, state.LowBatteryAlert.Text);
+        Assert.IsFalse(state.LowBatteryAlert.Checked);
+        Assert.AreEqual(WidgetCopy.NameOtherDevice, state.NameOtherDeviceItem.Text);
+        Assert.IsTrue(state.NameOtherDeviceItem.Visible);
+
+        foreach (MenuItemState item in new[]
+                 {
+                     state.ShowOnTaskbar, state.LeftClickConnectsItem, state.CaseOpenCardItem,
+                     state.LowBatteryAlert, state.NameOtherDeviceItem,
+                 })
+        {
+            Assert.IsTrue(item.Visible);
+            Assert.IsTrue(item.Enabled);
+        }
+
+        MenuState busy = Build(settings: settings, busy: true);
+        Assert.IsFalse(busy.ShowOnTaskbar.Enabled);
+        Assert.IsFalse(busy.LeftClickConnectsItem.Enabled);
+        Assert.IsFalse(busy.CaseOpenCardItem.Enabled);
+        Assert.IsFalse(busy.LowBatteryAlert.Enabled);
+        Assert.IsFalse(busy.NameOtherDeviceItem.Enabled);
+    }
+
+    // The threshold submenu: ten fixed percentages, the saved one checked, and every entry disabled
+    // together whenever the alert itself is off, since there is nothing useful to choose from then.
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void LowBatteryThresholdItemsShowTenPercentagesWithTheSavedOneChecked(bool alertOn)
+    {
+        EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = alertOn, LowBatteryThresholdPercent = 40 });
+
+        MenuState state = Build(settings: settings);
+
+        Assert.AreEqual(9, state.LowBatteryThresholdItems.Count);
+        CollectionAssert.AreEqual(ExpectedThresholdPercents, state.LowBatteryThresholdItems.Select(i => i.Percent).ToArray());
+        CollectionAssert.AreEqual(ExpectedThresholdTexts, state.LowBatteryThresholdItems.Select(i => i.Text).ToArray());
+
+        LowBatteryThresholdMenuItem checkedItem = state.LowBatteryThresholdItems.Single(i => i.Checked);
+        Assert.AreEqual(40, checkedItem.Percent);
+        Assert.AreEqual(1, state.LowBatteryThresholdItems.Count(i => i.Checked));
+
+        foreach (LowBatteryThresholdMenuItem item in state.LowBatteryThresholdItems)
+        {
+            Assert.AreEqual(alertOn, item.Enabled);
+        }
+    }
+
+    // Busy disables the threshold submenu too, exactly like the alert item itself.
+    [TestMethod]
+    public void LowBatteryThresholdItemsAreDisabledWhileBusy()
+    {
+        EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = true });
+
+        MenuState state = Build(settings: settings, busy: true);
+
+        Assert.IsTrue(state.LowBatteryThresholdItems.All(i => !i.Enabled));
     }
 
     [TestMethod]
@@ -263,12 +356,24 @@ public sealed class MenuModelTests
         Assert.IsFalse(safe.SafeMode.Enabled, "The caption is a caption, not a command.");
 
         // Every action stays exactly as it is: each one reports its own refusal on a card.
-        Assert.AreEqual(normal with { SafeMode = safe.SafeMode }, safe);
+        //
+        // LowBatteryThresholdItems is a fresh List built on every Build() call (never the shared
+        // Array.Empty<T>() instance an unset PlayFromPhoneItems happens to be), so it can never be
+        // reference-equal across the two calls above even when every entry in it is identical: compared
+        // by content here, then substituted onto one side so the blanket record comparison below still
+        // proves every other field is untouched by safe mode.
+        CollectionAssert.AreEqual(normal.LowBatteryThresholdItems.ToArray(), safe.LowBatteryThresholdItems.ToArray());
+        Assert.AreEqual(normal with { SafeMode = safe.SafeMode, LowBatteryThresholdItems = safe.LowBatteryThresholdItems }, safe);
         Assert.IsTrue(safe.Toggle.Enabled);
         Assert.IsTrue(safe.BlockAtBoot.Enabled);
         Assert.IsTrue(safe.ProtectAudio.Enabled);
         Assert.IsTrue(safe.OpenOnStartup.Enabled);
         Assert.IsTrue(safe.SetUp.Enabled);
+        Assert.IsTrue(safe.ShowOnTaskbar.Enabled);
+        Assert.IsTrue(safe.LeftClickConnectsItem.Enabled);
+        Assert.IsTrue(safe.CaseOpenCardItem.Enabled);
+        Assert.IsTrue(safe.LowBatteryAlert.Enabled);
+        Assert.IsTrue(safe.NameOtherDeviceItem.Enabled);
     }
 
     // The hand-back menu item: default on, and the check always follows the saved setting.

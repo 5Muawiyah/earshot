@@ -119,6 +119,7 @@ public sealed class TrayStreamingTests
                     "Connect", "Play from a phone", "-",
                     "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
                     "Speak status", "-",
+                    "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Name your other device...", "-",
                     "Choose device...", "-",
                     "Exit"),
                 texts);

@@ -19,11 +19,14 @@ public sealed class TrayMenuTests
         "Connect", "-",
         "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
         "Speak status", "-",
+        "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Name your other device...", "-",
         "Choose device...", "Set up Earshot...", "-",
         "Exit",
     ];
 
     private static readonly string[] CommandOrder = ["toggle", "block", "handback", "protect", "startup", "device", "setup", "exit"];
+
+    private static readonly string[] WidgetCommandOrder = ["taskbar", "leftclick", "caseopen", "lowbattery", "othername"];
 
     // The Play from a phone submenu as StreamingCoordinator builds it with one device in use.
     private static readonly StreamingMenuModel PlayingFromAPhone = new(
@@ -112,6 +115,72 @@ public sealed class TrayMenuTests
             // Applying the state again rebuilds the submenu rather than adding to it.
             menu.Refresh();
             Assert.AreEqual(4, menu.PlayFromPhoneItems.Count);
+        });
+    }
+
+    [TestMethod]
+    public void TheLowBatteryThresholdSubmenuShowsItsItemsAndRaisesTheOneClicked()
+    {
+        StaThread.Run(() =>
+        {
+            EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = true, LowBatteryThresholdPercent = 30 });
+            MenuState state = State(settings: settings);
+            using var menu = new TrayMenu(() => state);
+            var clicked = new List<LowBatteryThresholdMenuItem>();
+            menu.LowBatteryThresholdItemClicked += (_, e) => clicked.Add(e.Item);
+
+            IReadOnlyList<ToolStripMenuItem> items = menu.LowBatteryThresholdItems;
+            Assert.AreEqual(9, items.Count);
+            CollectionAssert.AreEqual(
+                state.LowBatteryThresholdItems.Select(i => i.Text).ToArray(),
+                items.Select(i => i.Text).ToArray());
+            Assert.IsTrue(items[2].Checked, "30% is the third entry (10, 20, 30) and the saved threshold.");
+            Assert.IsTrue(items.All(i => i.Enabled), "The alert is on, so every entry is enabled.");
+
+            items[4].PerformClick();
+
+            Assert.AreEqual(1, clicked.Count);
+            Assert.AreEqual(50, clicked[0].Percent);
+
+            // Applying the state again rebuilds the submenu rather than adding to it.
+            menu.Refresh();
+            Assert.AreEqual(9, menu.LowBatteryThresholdItems.Count);
+        });
+    }
+
+    [TestMethod]
+    public void TheLowBatteryThresholdSubmenuIsDisabledWhenTheAlertItselfIsOff()
+    {
+        StaThread.Run(() =>
+        {
+            EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = false });
+            using var menu = new TrayMenu(() => State(settings: settings));
+
+            Assert.IsTrue(menu.LowBatteryThresholdItems.All(i => !i.Enabled));
+        });
+    }
+
+    [TestMethod]
+    public void ClickingTheWidgetMenuItemsRaisesTheirEvents()
+    {
+        StaThread.Run(() =>
+        {
+            EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = true });
+            using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp), settings: settings));
+            var raised = new List<string>();
+            menu.ShowOnTaskbarClicked += (_, _) => raised.Add("taskbar");
+            menu.LeftClickConnectsClicked += (_, _) => raised.Add("leftclick");
+            menu.CaseOpenCardClicked += (_, _) => raised.Add("caseopen");
+            menu.LowBatteryAlertClicked += (_, _) => raised.Add("lowbattery");
+            menu.NameOtherDeviceClicked += (_, _) => raised.Add("othername");
+
+            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Show on the taskbar").PerformClick();
+            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Left click connects straight away").PerformClick();
+            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Card when the case opens").PerformClick();
+            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Low battery alert").PerformClick();
+            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Name your other device...").PerformClick();
+
+            CollectionAssert.AreEqual(WidgetCommandOrder, raised);
         });
     }
 

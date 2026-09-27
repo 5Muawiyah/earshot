@@ -3,6 +3,12 @@ using Earshot.Streaming;
 
 namespace Earshot.Tray;
 
+// The low battery threshold submenu entry a click landed on, the same shape as StreamingMenuItemEventArgs.
+internal sealed class LowBatteryThresholdMenuItemEventArgs(LowBatteryThresholdMenuItem item) : EventArgs
+{
+    public LowBatteryThresholdMenuItem Item { get; } = item;
+}
+
 // The tray's right-click menu. It renders a MenuState and raises one event per command.
 //
 // The type is not called ContextMenu because WinForms still ships a System.Windows.Forms.ContextMenu
@@ -23,6 +29,11 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _protectCaveat = new();
     private readonly ToolStripMenuItem _openOnStartup = new();
     private readonly ToolStripMenuItem _speakStatus = new();
+    private readonly ToolStripMenuItem _showOnTaskbar = new();
+    private readonly ToolStripMenuItem _leftClickConnects = new();
+    private readonly ToolStripMenuItem _caseOpenCard = new();
+    private readonly ToolStripMenuItem _lowBatteryAlert = new();
+    private readonly ToolStripMenuItem _nameOtherDevice = new();
     private readonly ToolStripMenuItem _chooseDevice = new();
     private readonly ToolStripMenuItem _setUp = new();
     private readonly ToolStripMenuItem _exit = new();
@@ -46,6 +57,12 @@ internal sealed class TrayMenu : IDisposable
             _openOnStartup,
             _speakStatus,
             new ToolStripSeparator(),
+            _showOnTaskbar,
+            _leftClickConnects,
+            _caseOpenCard,
+            _lowBatteryAlert,
+            _nameOtherDevice,
+            new ToolStripSeparator(),
             _chooseDevice,
             _setUp,
             new ToolStripSeparator(),
@@ -58,6 +75,11 @@ internal sealed class TrayMenu : IDisposable
         _protectAudio.Click += (_, _) => ProtectAudioClicked?.Invoke(this, EventArgs.Empty);
         _openOnStartup.Click += (_, _) => OpenOnStartupClicked?.Invoke(this, EventArgs.Empty);
         _speakStatus.Click += (_, _) => SpeakStatusClicked?.Invoke(this, EventArgs.Empty);
+        _showOnTaskbar.Click += (_, _) => ShowOnTaskbarClicked?.Invoke(this, EventArgs.Empty);
+        _leftClickConnects.Click += (_, _) => LeftClickConnectsClicked?.Invoke(this, EventArgs.Empty);
+        _caseOpenCard.Click += (_, _) => CaseOpenCardClicked?.Invoke(this, EventArgs.Empty);
+        _lowBatteryAlert.Click += (_, _) => LowBatteryAlertClicked?.Invoke(this, EventArgs.Empty);
+        _nameOtherDevice.Click += (_, _) => NameOtherDeviceClicked?.Invoke(this, EventArgs.Empty);
         _chooseDevice.Click += (_, _) => ChooseDeviceClicked?.Invoke(this, EventArgs.Empty);
         _setUp.Click += (_, _) => SetUpClicked?.Invoke(this, EventArgs.Empty);
         _exit.Click += (_, _) => ExitClicked?.Invoke(this, EventArgs.Empty);
@@ -81,6 +103,19 @@ internal sealed class TrayMenu : IDisposable
 
     public event EventHandler? SpeakStatusClicked;
 
+    public event EventHandler? ShowOnTaskbarClicked;
+
+    public event EventHandler? LeftClickConnectsClicked;
+
+    public event EventHandler? CaseOpenCardClicked;
+
+    public event EventHandler? LowBatteryAlertClicked;
+
+    // One entry of the low battery threshold submenu was clicked.
+    public event EventHandler<LowBatteryThresholdMenuItemEventArgs>? LowBatteryThresholdItemClicked;
+
+    public event EventHandler? NameOtherDeviceClicked;
+
     public event EventHandler? ChooseDeviceClicked;
 
     public event EventHandler? SetUpClicked;
@@ -95,6 +130,9 @@ internal sealed class TrayMenu : IDisposable
     // The Play from a phone submenu in display order, for tests.
     internal IReadOnlyList<ToolStripMenuItem> PlayFromPhoneItems => _playFromPhone.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
 
+    // The low battery threshold submenu in display order, for tests.
+    internal IReadOnlyList<ToolStripMenuItem> LowBatteryThresholdItems => _lowBatteryAlert.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
+
     internal void Apply(MenuState state)
     {
         ArgumentNullException.ThrowIfNull(state);
@@ -108,6 +146,12 @@ internal sealed class TrayMenu : IDisposable
         Set(_protectCaveat, state.ProtectCaveat);
         Set(_openOnStartup, state.OpenOnStartup);
         Set(_speakStatus, state.SpeakStatus);
+        Set(_showOnTaskbar, state.ShowOnTaskbar);
+        Set(_leftClickConnects, state.LeftClickConnectsItem);
+        Set(_caseOpenCard, state.CaseOpenCardItem);
+        Set(_lowBatteryAlert, state.LowBatteryAlert);
+        SetLowBatteryThresholdItems(state.LowBatteryThresholdItems);
+        Set(_nameOtherDevice, state.NameOtherDeviceItem);
         Set(_chooseDevice, state.ChooseDevice);
         Set(_setUp, state.SetUp);
         Set(_exit, state.Exit);
@@ -154,6 +198,40 @@ internal sealed class TrayMenu : IDisposable
         if (sender is ToolStripMenuItem { Tag: StreamingMenuItem item })
         {
             PlayFromPhoneItemClicked?.Invoke(this, new StreamingMenuItemEventArgs(item));
+        }
+    }
+
+    // The submenu is rebuilt each time, exactly as SetPlayFromPhoneItems is: ten fixed percentages, so
+    // there is never a stale entry left over from an earlier threshold.
+    private void SetLowBatteryThresholdItems(IReadOnlyList<LowBatteryThresholdMenuItem> items)
+    {
+        ToolStripItem[] old = _lowBatteryAlert.DropDownItems.Cast<ToolStripItem>().ToArray();
+        _lowBatteryAlert.DropDownItems.Clear();
+        foreach (ToolStripItem item in old)
+        {
+            item.Click -= OnLowBatteryThresholdItemClick;
+            item.Dispose();
+        }
+
+        foreach (LowBatteryThresholdMenuItem item in items)
+        {
+            var child = new ToolStripMenuItem
+            {
+                Text = item.Text,
+                Checked = item.Checked,
+                Enabled = item.Enabled,
+                Tag = item,
+            };
+            child.Click += OnLowBatteryThresholdItemClick;
+            _lowBatteryAlert.DropDownItems.Add(child);
+        }
+    }
+
+    private void OnLowBatteryThresholdItemClick(object? sender, EventArgs e)
+    {
+        if (sender is ToolStripMenuItem { Tag: LowBatteryThresholdMenuItem item })
+        {
+            LowBatteryThresholdItemClicked?.Invoke(this, new LowBatteryThresholdMenuItemEventArgs(item));
         }
     }
 
