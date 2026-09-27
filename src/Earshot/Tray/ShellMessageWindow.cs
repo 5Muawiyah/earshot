@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Hotkeys;
 using Earshot.Interop;
+using Earshot.Widget;
 
 namespace Earshot.Tray;
 
@@ -34,6 +35,18 @@ internal enum PowerEventKind
 internal sealed class PowerEventArgs(PowerEventKind kind) : EventArgs
 {
     public PowerEventKind Kind { get; } = kind;
+}
+
+// AppBarRegistration.CallbackMessage as ABM_NEW registered it: wParam is the notification code (one of
+// Shell.ABN_STATECHANGE, ABN_POSCHANGED, ABN_FULLSCREENAPP, ABN_WINDOWARRANGE), lParam carries extra data
+// only for ABN_FULLSCREENAPP (nonzero while a full-screen application is opening, zero while it is closing)
+// and ABN_WINDOWARRANGE.
+// https://learn.microsoft.com/en-us/windows/win32/shell/application-desktop-toolbars
+internal sealed class AppBarNotificationEventArgs(int kind, nint lParam) : EventArgs
+{
+    public int Kind { get; } = kind;
+
+    public nint LParam { get; } = lParam;
 }
 
 // A hidden top-level window that receives the shell broadcasts the tray needs. It is not a
@@ -80,6 +93,11 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
 
     // WM_POWERBROADCAST for PBT_APMSUSPEND, PBT_APMRESUMEAUTOMATIC and PBT_APMRESUMESUSPEND.
     public event EventHandler<PowerEventArgs>? PowerChanged;
+
+    // AppBarRegistration.CallbackMessage: the appbar notification callback ABM_NEW registered against this
+    // window's handle. Raised for every notification code, undecoded; the caller (TrayContext) decides what
+    // ABN_STATECHANGE, ABN_POSCHANGED and ABN_FULLSCREENAPP mean for the gauge.
+    public event EventHandler<AppBarNotificationEventArgs>? AppBarNotification;
 
     // WM_CLOSE: something asked Earshot to close. The window itself is not closed by it (see WndProc).
     public event EventHandler? CloseRequested;
@@ -137,6 +155,16 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
         return string.Join(", ", parts);
     }
 
+    // The ABN_* notification code as a word, plus opening/closing for ABN_FULLSCREENAPP, for the log.
+    private static string DescribeAppBarNotification(int kind, nint lParam) => kind switch
+    {
+        Shell.ABN_STATECHANGE => "ABN_STATECHANGE",
+        Shell.ABN_POSCHANGED => "ABN_POSCHANGED",
+        Shell.ABN_FULLSCREENAPP => "ABN_FULLSCREENAPP (" + (lParam != 0 ? "opening" : "closing") + ")",
+        Shell.ABN_WINDOWARRANGE => "ABN_WINDOWARRANGE",
+        _ => "unknown (" + kind.ToString(CultureInfo.InvariantCulture) + ")",
+    };
+
     protected override void WndProc(ref Message m)
     {
         MessageReceived?.Invoke(this, new Hotkeys.WindowMessageEventArgs(m.Msg, m.WParam, m.LParam));
@@ -157,6 +185,15 @@ internal sealed class ShellMessageWindow : NativeWindow, IDisposable, IMessageWi
                 case NativeMethods.WM_DISPLAYCHANGE:
                     DisplayChanged?.Invoke(this, EventArgs.Empty);
                     break;
+
+                case (int)AppBarRegistration.CallbackMessage:
+                {
+                    int kind = unchecked((int)(long)m.WParam);
+                    nint lParam = m.LParam;
+                    _log.Info("AppBar notification received: " + DescribeAppBarNotification(kind, lParam) + ".");
+                    AppBarNotification?.Invoke(this, new AppBarNotificationEventArgs(kind, lParam));
+                    break;
+                }
 
                 case NativeMethods.WM_CLOSE:
                     // Nothing in Earshot sends this window WM_CLOSE, so it comes from outside, and it means the

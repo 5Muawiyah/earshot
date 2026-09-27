@@ -2,6 +2,7 @@ using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Tests.Phase1;
+using Earshot.Widget;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -58,6 +59,35 @@ public sealed class WidgetShellSignalTests
             var message = Message.Create(tray.Context.Window.Handle, unchecked((int)taskbarCreated), 0, 0);
             tray.Context.Window.Dispatch(ref message);
         }, "TaskbarCreated");
+
+    // The appbar notification callback (AppBarRegistration.CallbackMessage), ABN_STATECHANGE and
+    // ABN_POSCHANGED: neither arrives on the watcher's own schedule either, so both must poke it the same
+    // way TaskbarCreated, WM_SETTINGCHANGE and WM_DISPLAYCHANGE already do.
+    [TestMethod]
+    public void AppBarStateChangePokesTheTaskbarWatcher() =>
+        AssertDispatchPokes(tray =>
+        {
+            var message = Message.Create(tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_STATECHANGE, 0);
+            tray.Context.Window.Dispatch(ref message);
+        }, "ABN_STATECHANGE");
+
+    [TestMethod]
+    public void AppBarPosChangedPokesTheTaskbarWatcher() =>
+        AssertDispatchPokes(tray =>
+        {
+            var message = Message.Create(tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_POSCHANGED, 0);
+            tray.Context.Window.Dispatch(ref message);
+        }, "ABN_POSCHANGED");
+
+    // A full-screen application closing (ABN_FULLSCREENAPP, lParam 0) must poke for a fresh read rather than
+    // forcing the gauge back on: the taskbar's actual state still needs re-reading.
+    [TestMethod]
+    public void AppBarFullScreenClosingPokesTheTaskbarWatcher() =>
+        AssertDispatchPokes(tray =>
+        {
+            var message = Message.Create(tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 0);
+            tray.Context.Window.Dispatch(ref message);
+        }, "ABN_FULLSCREENAPP closing");
 
     private static void AssertDispatchPokes(Action<TrayHarness> dispatch, string signalName)
     {

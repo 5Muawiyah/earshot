@@ -1,6 +1,7 @@
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Icons;
+using Earshot.Interop;
 using Earshot.Popup;
 using Earshot.Tray;
 using Earshot.Widget;
@@ -24,6 +25,7 @@ internal sealed partial class TrayContext
     private WidgetStatusService? _widgetStatus;
     private GaugeController? _gaugeController;
     private TaskbarWatcher? _taskbarWatcher;
+    private AppBarRegistration? _appBarRegistration;
     private ThemeReader? _widgetTheme;
     private GaugeWindow? _gaugeWindow;
     private WidgetCardPresenter? _widgetCardPresenter;
@@ -123,11 +125,73 @@ internal sealed partial class TrayContext
 
         if (_taskbarWatcher is null)
         {
+            // Registered against the same hidden window that already carries every other shell broadcast,
+            // for the lifetime of the gauge's UI pipeline exactly: ABM_NEW here, ABM_REMOVE wherever
+            // _taskbarWatcher itself is torn down (CloseWidget, ApplyWidget's Enabled-off branch), since
+            // ABM_NEW with no ABM_SETPOS reserves no taskbar space, so registering it while the gauge is
+            // merely hidden by settings costs nothing worth guarding separately from the watcher's own
+            // start/stop.
+            _appBarRegistration = new AppBarRegistration(_window.Handle, _log);
+            LogAppBarOutcome(_appBarRegistration.Register());
+
             _taskbarWatcher = new TaskbarWatcher(new UiaTaskbarReader(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time);
             _taskbarWatcher.Start();
             _taskbarWatcher.Poke();
         }
     }
+
+    // Explorer's internal appbar list is new after it restarts, so the old registration is gone with it;
+    // called from TrayContext's TaskbarCreated listener, alongside (not instead of) the existing
+    // ResetBackoff/Poke calls on the same event.
+    private void OnTaskbarCreatedForAppBar()
+    {
+        if (_appBarRegistration is not { } registration)
+        {
+            return;
+        }
+
+        (StepOutcome removed, StepOutcome added) = registration.Reregister();
+        LogAppBarOutcome(removed);
+        LogAppBarOutcome(added);
+    }
+
+    // ABN_STATECHANGE and ABN_POSCHANGED ask only for an immediate re-measure. ABN_FULLSCREENAPP opening
+    // hides the gauge at once through the controller (NotifyFullScreenApp), without waiting for a poll;
+    // closing does not force a show, only a fresh read, since the taskbar's actual state still needs
+    // re-reading. ABN_WINDOWARRANGE is not wired to a fast path in this build (see the report).
+    private void OnAppBarNotification(object? sender, AppBarNotificationEventArgs e)
+    {
+        switch (e.Kind)
+        {
+            case Shell.ABN_STATECHANGE:
+            case Shell.ABN_POSCHANGED:
+                _taskbarWatcher?.Poke();
+                break;
+
+            case Shell.ABN_FULLSCREENAPP:
+                bool opening = e.LParam != 0;
+                _gaugeController?.NotifyFullScreenApp(opening);
+                if (!opening)
+                {
+                    _taskbarWatcher?.Poke();
+                }
+
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    // Logs one StepOutcome from AppBarRegistration (Register, or one half of Reregister), the same way
+    // LogVoiceOutcomes below logs a StepOutcome: Debug when it succeeded, Warn when it did not. A failure
+    // here loses only the fast notification paths; TaskbarWatcher's own poll still runs.
+    private void LogAppBarOutcome(StepOutcome outcome) =>
+        _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn, "AppBar: " + TrayReport.DescribeStep(outcome));
+
+    // The widget gauge's current state, for tests: proving a fast-path notification (ABN_FULLSCREENAPP)
+    // changed the controller's state synchronously, without reaching into TaskbarWatcher's own timing.
+    internal GaugeState? WidgetGaugeStateForTest => _gaugeController?.State;
 
     // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
     // left click and the menu's toggle item already use (Launch -> ToggleAsync -> BlockCoordinator), just
@@ -308,6 +372,8 @@ internal sealed partial class TrayContext
         _caseOpenCardPresenter = null;
         _taskbarWatcher?.Dispose();
         _taskbarWatcher = null;
+        _appBarRegistration?.Dispose();
+        _appBarRegistration = null;
         _gaugeController?.Dispose();
         _gaugeController = null;
         _gaugeWindow?.Dispose();
@@ -354,6 +420,8 @@ internal sealed partial class TrayContext
             _gaugeController?.TurnOff();
             _taskbarWatcher.Dispose();
             _taskbarWatcher = null;
+            _appBarRegistration?.Dispose();
+            _appBarRegistration = null;
             _shownGaugeForWorker = null;
         }
     }
