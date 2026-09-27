@@ -573,8 +573,19 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             if (result.UpdatedLast is OwnedBattery updated && _claim is not null)
             {
+                // Every owned advertisement carries a fresh read time, so Last as a whole (with its AtUtc)
+                // never equals what is on disk two adverts running: saving whenever Last changed would save
+                // on every single one. Only the nibbles decide whether the disk actually needs touching; the
+                // read time itself simply moves on in memory and rides along with whatever save a later
+                // value change makes.
+                bool valueChanged = updated.NibbleHigh != _claim.Last.NibbleHigh ||
+                    updated.NibbleLow != _claim.Last.NibbleLow ||
+                    updated.Case != _claim.Last.Case;
                 _claim = _claim with { Last = updated };
-                _claimStore.Save(_claim);
+                if (valueChanged)
+                {
+                    _claimStore.Save(_claim);
+                }
             }
 
             DecodedReading reading = ProximityDecoder.Decode(message, table, at);

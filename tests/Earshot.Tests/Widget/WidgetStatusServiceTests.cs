@@ -499,6 +499,67 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(3, store.Current!.Last.Case, "The stranger, however much time has passed, never overwrites the owner's claim.");
     }
 
+    // Every owned advertisement carries a new read time, so "save only when Last changes" (a record with an
+    // AtUtc field) never holds: comparing the whole Last record would write on every single advert. Only the
+    // battery values (the nibbles) actually decide whether the disk needs touching; the read time can move
+    // in memory for free.
+    [TestMethod]
+    public async Task TwentyIdenticalAdvertsWriteTheClaimToDiskOnce()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
+        await store.IdleAsync();
+        int baseline = store.DiskWriteCount;
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+
+        for (int i = 0; i < 20; i++)
+        {
+            _clock.Advance(TimeSpan.FromSeconds(1));
+            var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x03), -60, _clock.GetUtcNow(), SenderTag: 1);
+            _source.Raise(reading);
+        }
+
+        await store.IdleAsync();
+
+        Assert.AreEqual(30, service.Current.Case.Percent);
+        Assert.AreEqual(1, store.DiskWriteCount - baseline, "20 adverts carrying the same battery value must write to disk once, not twenty times.");
+    }
+
+    // Same 20 identical adverts, but the file cannot be written at all: one save is attempted (and logged),
+    // not twenty, because the service never even asks the store to save the 19 that changed nothing.
+    [TestMethod]
+    public async Task WithAReadOnlyClaimFileTwentyIdenticalAdvertsLogOneWarnNotTwenty()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
+        await store.IdleAsync();
+        string path = _temp.File("claim.json");
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+        using WidgetStatusService service = NewService(store);
+
+        try
+        {
+            service.Start();
+
+            for (int i = 0; i < 20; i++)
+            {
+                _clock.Advance(TimeSpan.FromSeconds(1));
+                var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x03), -60, _clock.GetUtcNow(), SenderTag: 1);
+                _source.Raise(reading);
+            }
+
+            await store.IdleAsync();
+
+            Assert.AreEqual(1, _log.Entries.Count(e => e.Level == Earshot.Contracts.LogLevel.Warn && e.Message.Contains("claim", StringComparison.OrdinalIgnoreCase)),
+                "One failed-save warning, not twenty.");
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+    }
+
     [TestMethod]
     public void CaseOpenedIsRaisedOnlyForAnOwnedAdvertisement()
     {
