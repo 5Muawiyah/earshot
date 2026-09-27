@@ -9,10 +9,10 @@ namespace Earshot.Widget;
 // apartment state cannot change afterwards.
 internal sealed class TaskbarWatcher : IDisposable
 {
-    // Design choices: 1 s while attached, 2 s while hidden by the taskbar itself (covered, no free
-    // space, no taskbar), doubled once if the mean of the last 20 reads exceeds 20 ms.
+    // Design choice: 1 s, doubled once if the mean of the last 20 reads exceeds 20 ms. A slower rate while
+    // hidden by the taskbar itself (covered, no free space, no taskbar) is not implemented in this build:
+    // PollIntervalMs never varies with GaugeState, only with read speed.
     public const int ShownPollIntervalMs = 1000;
-    public const int HiddenPollIntervalMs = 2000;
     private const int SlowReadWindowSize = 20;
     private const double SlowReadThresholdMs = 20.0;
 
