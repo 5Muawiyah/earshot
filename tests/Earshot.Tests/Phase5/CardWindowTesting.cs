@@ -78,6 +78,7 @@ internal static class CardDesktop
     // it cannot be the thread Run itself binds.
     public static void BindCurrentThread(nint desktop)
     {
+        DisableImeForThisThread();
         if (!SetThreadDesktop(desktop))
         {
             throw new AssertFailedException("SetThreadDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
@@ -102,6 +103,7 @@ internal static class CardDesktop
             {
                 try
                 {
+                    DisableImeForThisThread();
                     if (!SetThreadDesktop(desktop))
                     {
                         throw new AssertFailedException("SetThreadDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
@@ -127,22 +129,27 @@ internal static class CardDesktop
         }
         finally
         {
-            // The thread has ended, so nothing of ours is attached to the desktop any more, except
-            // possibly a COM RCW (a UI Automation client, say) still waiting for the GC to finalize it, or
-            // Windows' own last-active-window bookkeeping for a desktop a test showed and activated a
-            // window on. Both were originally assumed to clear within the retry budget below, and were
-            // observed here as CloseDesktop returning ERROR_BUSY (170), reproducibly under a full
-            // test-suite run but never in isolation. A later probe found that assumption wrong: once any
-            // test in the process has activated a window on one private desktop, a later test's own,
-            // differently named desktop can reliably fail to close afterwards, and neither a much larger
-            // retry budget (2000 attempts, 100 s) nor an extra GC.Collect/WaitForPendingFinalizers pass
-            // partway through the retries ever clears it - this is not a slow race that more waiting wins,
-            // it is a real stuck condition (see RetryCloseDesktop's own comment, and the report, for the
-            // full finding). It is therefore no longer logged and swallowed: RetryCloseDesktop fails the
-            // test instead.
+            // The work thread has ended. CloseDesktop fails while any thread in this process still has
+            // the desktop as its thread desktop. The one cause found here was the Text Services
+            // Framework's worker threads, created from a thread that activated a window with its IME
+            // enabled and keeping that thread's desktop for the life of the process; the thread above
+            // disables its IME before its first window, so they never start from a test desktop
+            // (CardDesktopTextServicesTests). A short ERROR_BUSY while the ended thread's state is torn
+            // down is still retried; running out of retries fails the test and names every thread that
+            // still holds the desktop.
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
+            CloseOrNameTheHolders(desktop);
+        }
+
+        failure?.Throw();
+    }
+
+    private static void CloseOrNameTheHolders(nint desktop)
+    {
+        try
+        {
             RetryCloseDesktop(
                 () =>
                 {
@@ -153,8 +160,10 @@ internal static class CardDesktop
                 retryDelay: TimeSpan.FromMilliseconds(50),
                 sleep: Thread.Sleep);
         }
-
-        failure?.Throw();
+        catch (AssertFailedException stuck)
+        {
+            throw new AssertFailedException(stuck.Message + " " + ThreadsHolding(desktop), stuck);
+        }
     }
 
     internal const uint ErrorBusy = 170;
@@ -203,6 +212,101 @@ internal static class CardDesktop
                 "why exhausting the budget is not treated as a benign teardown race.");
         }
     }
+
+    // Must run before the thread creates its first top-level window.
+    // https://learn.microsoft.com/en-us/windows/win32/api/imm/nf-imm-immdisableime
+    private static void DisableImeForThisThread()
+    {
+        if (!ImmDisableIME(GetCurrentThreadId()))
+        {
+            throw new AssertFailedException("ImmDisableIME failed for a card test thread, so the Text Services Framework could bind its threads to the test's private desktop and stop it closing.");
+        }
+    }
+
+    // Every thread of this process whose thread desktop is desktop, with the module its start address
+    // falls in, for the failure message when CloseDesktop keeps reporting ERROR_BUSY.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getthreaddesktop
+    private static string ThreadsHolding(nint desktop)
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        var holders = new List<string>();
+        foreach (System.Diagnostics.ProcessThread thread in process.Threads)
+        {
+            if (GetThreadDesktop(thread.Id) == desktop)
+            {
+                holders.Add("thread " + thread.Id.ToString(CultureInfo.InvariantCulture) + " starting in " + StartModule(process, thread.Id));
+            }
+        }
+
+        return holders.Count == 0
+            ? "No thread of this process reports the desktop as its thread desktop."
+            : "Threads still on the desktop: " + string.Join("; ", holders) + ".";
+    }
+
+    // ThreadQuerySetWin32StartAddress (9) through NtQueryInformationThread.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntqueryinformationthread
+    private static string StartModule(System.Diagnostics.Process process, int threadId)
+    {
+        const uint ThreadQueryInformation = 0x0040;
+        nint handle = OpenThread(ThreadQueryInformation, false, (uint)threadId);
+        if (handle == 0)
+        {
+            return "(OpenThread failed, Win32 error " + Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture) + ")";
+        }
+
+        nint start = 0;
+        int status;
+        try
+        {
+            status = NtQueryInformationThread(handle, 9, ref start, nint.Size, 0);
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+
+        if (status != 0)
+        {
+            return "(NtQueryInformationThread status 0x" + status.ToString("X8", CultureInfo.InvariantCulture) + ")";
+        }
+
+        foreach (System.Diagnostics.ProcessModule module in process.Modules)
+        {
+            long moduleBase = module.BaseAddress;
+            if (start >= moduleBase && start < moduleBase + module.ModuleMemorySize)
+            {
+                return module.ModuleName;
+            }
+        }
+
+        return "0x" + start.ToString("X", CultureInfo.InvariantCulture);
+    }
+
+    [DllImport("imm32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ImmDisableIME(uint idThread);
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern nint GetThreadDesktop(int dwThreadId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern nint OpenThread(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwThreadId);
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint hObject);
+
+    [DllImport("ntdll.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int NtQueryInformationThread(nint threadHandle, int threadInformationClass, ref nint threadInformation, int threadInformationLength, nint returnLength);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -281,6 +385,38 @@ public sealed class CardDesktopRetryPolicyTests
         Assert.AreEqual(5, attemptCount);
         Assert.AreEqual(5, sleeps);
     }
+}
+
+// The input method layer must never reach a CardDesktop.Run thread. Activating a window with the IME
+// enabled starts the Text Services Framework's process-wide worker threads (their start addresses are in
+// msctfmonitor.dll and MSCTF.dll); they are created from the activating thread, so they take its private
+// desktop as their thread desktop and keep it for the life of the process, and CloseDesktop then fails
+// with ERROR_BUSY forever, because "CloseDesktop will fail if any thread in the calling process is using
+// the specified desktop handle". Which test's desktop they land on depends on test order, and a later
+// desktop that happens to reuse the same handle value is caught too. Checked through the thread's default
+// IME window, which exists for every thread whose IME is enabled and never for one whose IME is disabled,
+// so this holds whatever order the tests run in.
+// https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-closedesktop
+// https://learn.microsoft.com/en-us/windows/win32/api/imm/nf-imm-immgetdefaultimewnd
+[TestClass]
+public sealed class CardDesktopTextServicesTests
+{
+    [TestMethod]
+    public void AWindowOnACardDesktopThreadHasNoImeWindow()
+    {
+        nint imeWindow = -1;
+        CardDesktop.Run(() =>
+        {
+            using var form = new Form { ShowInTaskbar = false };
+            imeWindow = ImmGetDefaultIMEWnd(form.Handle);
+        });
+
+        Assert.AreEqual(0, imeWindow, "A CardDesktop.Run thread must have its IME disabled before its first window, or the Text Services Framework's threads bind to its private desktop and it can never be closed.");
+    }
+
+    [DllImport("imm32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern nint ImmGetDefaultIMEWnd(nint hWnd);
 }
 
 // Read-only window queries for the card tests. Nothing here changes a window other than the test's own.
