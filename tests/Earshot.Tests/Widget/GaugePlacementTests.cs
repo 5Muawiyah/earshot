@@ -61,11 +61,13 @@ public sealed class GaugePlacementTests
     }
 
     [TestMethod]
-    public void NoOccupantsAtAllStartsAfterTheEdgeMargin()
+    public void NoOccupantsAtAllHidesTheGauge()
     {
+        // An empty read means the layout is unknown, not that the whole taskbar is free: there is no
+        // Start button and no "first merged interval" to anchor L on, so no placement is defensible.
         TaskbarLayout layout = Layout(Bar96, [], start: null);
         Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.AreEqual(0 + 8 + 24, placed!.Value.X);
+        Assert.IsNull(placed);
     }
 
     [TestMethod]

@@ -8,8 +8,9 @@ namespace Earshot.Widget;
 //   1. Project every occupant onto the axis, sort, merge overlaps.
 //   2. The task list end L is the end of the merged interval that contains the Start button's
 //      rectangle (Start plus the task buttons run together on the machine this was measured on); with
-//      no Start button, L is the end of the first merged interval; with no occupants at all, L is the
-//      taskbar's own start plus the edge margin.
+//      no Start button, L is the end of the first merged interval. Both rules need at least one merged
+//      interval to anchor on; with no occupants at all (an empty or failed read) there is no defensible
+//      L, so the result is null (hidden) rather than a placement guess.
 //   3. The candidate free run is the one that begins exactly at L. No other run is tried, so the gauge
 //      never appears anywhere but beside the app buttons.
 //   4. It qualifies when its length is at least Clearance + gaugeLong + Clearance; otherwise the result
@@ -61,8 +62,14 @@ internal static class GaugePlacement
         int axisEnd = horizontal ? t.Right : t.Bottom;
 
         List<(int Start, int End)> merged = MergedIntervals(layout.Occupied, t, horizontal);
+        if (merged.Count == 0)
+        {
+            // No occupants read at all: layout unknown, not "whole taskbar free". There is no Start
+            // button and no first merged interval to anchor L on, so no placement is defensible.
+            return null;
+        }
 
-        int l = FindL(merged, layout.StartButton, t, horizontal, axisStart + edgeMargin);
+        int l = FindL(merged, layout.StartButton, t, horizontal);
 
         (int Start, int End)? candidate = FreeRunAt(merged, l, axisStart + edgeMargin, axisEnd - edgeMargin);
         if (candidate is not { } run)
@@ -119,15 +126,11 @@ internal static class GaugePlacement
         return merged;
     }
 
-    // The task list end L: the end of the merged interval holding the Start button, the end of the
-    // first merged interval when Start was not found, or noOccupantsStart when there are no occupants.
-    private static int FindL(List<(int Start, int End)> merged, Rectangle? startButton, Rectangle t, bool horizontal, int noOccupantsStart)
+    // The task list end L: the end of the merged interval holding the Start button, or the end of the
+    // first merged interval when Start was not found. Callers only reach here with at least one merged
+    // interval; with none, there is no defensible L and Place returns null before calling this.
+    private static int FindL(List<(int Start, int End)> merged, Rectangle? startButton, Rectangle t, bool horizontal)
     {
-        if (merged.Count == 0)
-        {
-            return noOccupantsStart;
-        }
-
         if (startButton is { } start)
         {
             Rectangle clipped = Rectangle.Intersect(start, t);
