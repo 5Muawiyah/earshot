@@ -29,6 +29,10 @@ public sealed record DeviceSnapshot(
     public SnapshotReadStatus ReadStatus { get; init; } = SnapshotReadStatus.NotStarted;
 
     public TargetResolution Resolution { get; init; } = TargetResolution.None;
+
+    // The container of the default multimedia render endpoint (eRender, eMultimedia), read in the same
+    // enumeration. Guid.Empty when there is no default render device or it could not be read.
+    public Guid DefaultRenderContainerId { get; init; } = Guid.Empty;
 }
 
 public sealed class DeviceSnapshotEventArgs(DeviceSnapshot snapshot) : EventArgs

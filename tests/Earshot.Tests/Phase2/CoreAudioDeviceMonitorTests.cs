@@ -249,17 +249,30 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
     }
 
     [TestMethod]
-    public async Task NotificationsThatCannotChangeTheModelAreIgnored()
+    public async Task APropertyChangeThatCannotChangeTheModelIsIgnored()
     {
         await StartAndSettle();
 
-        _source.Notify(new EndpointNotification(EndpointNotificationKind.DefaultChanged, AirPodsRenderId, 0, CoreAudio.eRender, CoreAudio.eConsole, Guid.Empty, 0));
         _source.Notify(new EndpointNotification(EndpointNotificationKind.PropertyChanged, AirPodsRenderId, 0, 0, 0,
             CoreAudio.PKEY_AudioEndpoint_FormFactor.fmtid, CoreAudio.PKEY_AudioEndpoint_FormFactor.pid));
         await Task.Delay(50);
 
         Assert.AreEqual(0, _delay.Requests);
         Assert.AreEqual(0, _monitor.NotificationCount);
+    }
+
+    // The default render endpoint's container id is now part of the snapshot (the widget's "renders to the
+    // AirPods" inference), so a default-device change is no longer something the model can never reflect:
+    // it queues a refresh, the way a state, add or remove notification does.
+    [TestMethod]
+    public async Task ADefaultDeviceChangeNowQueuesARefresh()
+    {
+        await StartAndSettle();
+
+        _source.Notify(new EndpointNotification(EndpointNotificationKind.DefaultChanged, AirPodsRenderId, 0, CoreAudio.eRender, CoreAudio.eConsole, Guid.Empty, 0));
+
+        await Eventually.True(() => _delay.Requests == 1, "a refresh queued for the default device change");
+        Assert.AreEqual(1, _monitor.NotificationCount);
     }
 
     [TestMethod]

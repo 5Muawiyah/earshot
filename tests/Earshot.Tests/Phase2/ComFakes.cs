@@ -81,10 +81,22 @@ internal sealed class FakeEnumerator(ReleaseLedger ledger) : IMMDeviceEnumerator
         return FakeHr.SOk;
     }
 
+    // Configurable so a caller can test GetDefaultAudioEndpoint directly: null (the default) keeps the
+    // previous stub behaviour every existing caller of this fake already relies on.
+    public FakeDevice? DefaultRenderDevice { get; set; }
+
+    public int DefaultRenderDeviceHr { get; set; } = FakeHr.ENotImpl;
+
     public int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice? ppEndpoint)
     {
-        ppEndpoint = null;
-        return FakeHr.ENotImpl;
+        if (DefaultRenderDevice is null)
+        {
+            ppEndpoint = null;
+            return DefaultRenderDeviceHr < 0 ? DefaultRenderDeviceHr : FakeHr.ENotImpl;
+        }
+
+        ppEndpoint = ledger.Lend(DefaultRenderDevice);
+        return FakeHr.SOk;
     }
 
     public int GetDevice(string pwstrId, out IMMDevice? ppDevice)

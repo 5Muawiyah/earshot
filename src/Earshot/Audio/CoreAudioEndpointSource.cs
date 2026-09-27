@@ -8,7 +8,8 @@ namespace Earshot.Audio;
 // enumerator, EnumAudioEndpoints or GetCount failed); Steps then holds the failing call. When Ok is true,
 // Steps holds the per-endpoint reads that failed, which are expected on NOTPRESENT endpoints and are
 // never fatal.
-internal sealed record EndpointEnumeration(bool Ok, IReadOnlyList<EndpointReading> Readings, IReadOnlyList<StepOutcome> Steps)
+internal sealed record EndpointEnumeration(
+    bool Ok, IReadOnlyList<EndpointReading> Readings, IReadOnlyList<StepOutcome> Steps, Guid DefaultRenderContainerId = default)
 {
     public static EndpointEnumeration Failed(StepOutcome step) => new(false, Array.Empty<EndpointReading>(), new[] { step });
 }
@@ -65,7 +66,16 @@ internal sealed class CoreAudioEndpointSource : IEndpointSource
             return EndpointEnumeration.Failed(StepOutcomes.FromHResult(AudioWorker.Steps.CreateEnumerator, hr));
         }
 
-        return CoreAudioEndpointReader.ReadAll(enumerator);
+        EndpointEnumeration endpoints = CoreAudioEndpointReader.ReadAll(enumerator);
+        (Guid defaultRenderContainerId, StepOutcome defaultStep) = CoreAudioEndpointReader.ReadDefaultRenderContainer(enumerator, ComRelease.Rcw);
+        if (defaultStep.Ok)
+        {
+            return endpoints with { DefaultRenderContainerId = defaultRenderContainerId };
+        }
+
+        List<StepOutcome> steps = endpoints.Steps.ToList();
+        steps.Add(defaultStep);
+        return endpoints with { Steps = steps, DefaultRenderContainerId = defaultRenderContainerId };
     }
 }
 
@@ -84,6 +94,7 @@ internal static class CoreAudioEndpointReader
     internal const string InterfaceNameStep = "interface-name";
     internal const string ContainerStep = "container-id";
     internal const string ClearStep = "clear-propvariant";
+    internal const string DefaultRenderStep = "default-render-endpoint";
 
     // EnumAudioEndpoints(eAll, DEVICE_STATEMASK_ALL): render and capture endpoints in every state, because a
     // disconnected device is UNPLUGGED and a blocked one NOTPRESENT.
@@ -252,6 +263,60 @@ internal static class CoreAudioEndpointReader
         }
 
         return read.Value;
+    }
+
+    // The default multimedia render endpoint's container id, for the widget's "renders to the AirPods"
+    // inference: read on the audio worker in the same enumeration, never on its own.
+    // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-getdefaultaudioendpoint
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-device-containerid
+    internal static (Guid ContainerId, StepOutcome Step) ReadDefaultRenderContainer(IMMDeviceEnumerator enumerator, Action<object> release)
+    {
+        ArgumentNullException.ThrowIfNull(enumerator);
+        ArgumentNullException.ThrowIfNull(release);
+
+        int hr = enumerator.GetDefaultAudioEndpoint(CoreAudio.eRender, CoreAudio.eMultimedia, out IMMDevice? device);
+        if (hr < 0 || device is null)
+        {
+            return (Guid.Empty, StepOutcomes.FromHResult(DefaultRenderStep, hr < 0 ? hr : CoreAudio.E_POINTER));
+        }
+
+        try
+        {
+            hr = device.OpenPropertyStore(CoreAudio.STGM_READ, out IPropertyStore? store);
+            if (hr < 0 || store is null)
+            {
+                return (Guid.Empty, StepOutcomes.FromHResult(DefaultRenderStep, hr < 0 ? hr : CoreAudio.E_POINTER));
+            }
+
+            try
+            {
+                PropertyRead<Guid> read = PropVariantInterop.ReadGuid(store, CoreAudio.PKEY_Device_ContainerId);
+                if (read.ClearHr < 0)
+                {
+                    return (Guid.Empty, StepOutcomes.FromHResult(DefaultRenderStep, read.ClearHr));
+                }
+
+                if (read.Hr < 0)
+                {
+                    return (Guid.Empty, StepOutcomes.FromHResult(DefaultRenderStep, read.Hr));
+                }
+
+                if (!read.HasValue)
+                {
+                    return (Guid.Empty, StepOutcomes.FromHResult(DefaultRenderStep, read.Hr, detail: "no container id (vt " + read.VarType + ")", ok: false));
+                }
+
+                return (read.Value, StepOutcomes.FromHResult(DefaultRenderStep, 0));
+            }
+            finally
+            {
+                release(store);
+            }
+        }
+        finally
+        {
+            release(device);
+        }
     }
 
     private static void RecordClear(int clearHr, string step, List<StepOutcome> steps)

@@ -79,6 +79,7 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 
     // Audio worker thread only.
     private IReadOnlyList<EndpointReading>? _lastReadings;
+    private Guid _lastDefaultRenderContainerId;
     private long _lastSequence;
     private DateTimeOffset _lastTakenUtc;
     private bool _lastEnumerationFailed;
@@ -198,7 +199,11 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
     // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient
     internal void OnNotification(EndpointNotification notification)
     {
-        if (!notification.RequiresRefresh || Volatile.Read(ref _disposed) != 0)
+        // RequiresRefresh is silent on DefaultChanged (NotificationClient's own comment: "a default device
+        // change never changes grouping, names or states"), which was true before the snapshot carried the
+        // default render container. Now it can change that field alone, so it queues a refresh here too.
+        bool relevant = notification.RequiresRefresh || notification.Kind == EndpointNotificationKind.DefaultChanged;
+        if (!relevant || Volatile.Read(ref _disposed) != 0)
         {
             return;
         }
@@ -335,6 +340,7 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 
         _lastEnumerationFailed = false;
         _lastReadings = enumeration.Readings;
+        _lastDefaultRenderContainerId = enumeration.DefaultRenderContainerId;
         _lastSequence++;
         _lastTakenUtc = _utcNow();
         return PublishOnWorker(enumeration.Readings, steps, reason);
@@ -383,7 +389,7 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 
         // TakenUtc and Sequence are those of the enumeration that produced readings, also when this is a
         // rebuild after a settings change, so a rebuild never looks like a newer observation.
-        EndpointModel model = EndpointModelBuilder.Build(readings, settings.DeviceMatch, settings.PinnedContainerId, _lastTakenUtc);
+        EndpointModel model = EndpointModelBuilder.Build(readings, settings.DeviceMatch, settings.PinnedContainerId, _lastTakenUtc, _lastDefaultRenderContainerId);
         _appliedMatch = settings.DeviceMatch;
         _appliedPinned = settings.PinnedContainerId;
         _lastSteps = steps;

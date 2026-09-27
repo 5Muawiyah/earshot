@@ -599,4 +599,34 @@ public sealed class EndpointModelBuilderTests
         Assert.IsNotNull(target);
         return target;
     }
+
+    // The default render endpoint's container id
+
+    [TestMethod]
+    public void TheDefaultRenderContainerIsCarriedIntoTheSnapshot()
+    {
+        Guid defaultContainer = Guid.NewGuid();
+
+        DeviceSnapshot withDefault = EndpointModelBuilder.Build(Machine(), "AirPods", default, Taken, defaultContainer).Snapshot;
+        DeviceSnapshot withoutDefault = EndpointModelBuilder.Build(Machine(), "AirPods", default, Taken).Snapshot;
+
+        Assert.AreEqual(defaultContainer, withDefault.DefaultRenderContainerId);
+        Assert.AreEqual(Guid.Empty, withoutDefault.DefaultRenderContainerId);
+    }
+
+    [TestMethod]
+    public void AnUnreadableDefaultIsGuidEmptyWithAStep()
+    {
+        var ledger = new ReleaseLedger();
+        var enumerator = new FakeEnumerator(ledger)
+        {
+            DefaultRenderDevice = new FakeDevice(ledger, "default-render") { OpenStoreHr = FakeHr.EFail },
+        };
+
+        (Guid containerId, StepOutcome step) = CoreAudioEndpointReader.ReadDefaultRenderContainer(enumerator, ledger.Release);
+
+        Assert.AreEqual(Guid.Empty, containerId);
+        Assert.IsFalse(step.Ok);
+        Assert.AreEqual(FakeHr.EFail, step.Code);
+    }
 }

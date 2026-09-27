@@ -61,7 +61,8 @@ internal sealed record EndpointModel(DeviceSnapshot Snapshot, TargetResolution R
 internal static class EndpointModelBuilder
 {
     public static EndpointModel Build(
-        IReadOnlyList<EndpointReading> readings, string? deviceMatch, Guid pinnedContainerId, DateTimeOffset takenUtc)
+        IReadOnlyList<EndpointReading> readings, string? deviceMatch, Guid pinnedContainerId, DateTimeOffset takenUtc,
+        Guid defaultRenderContainerId = default)
     {
         ArgumentNullException.ThrowIfNull(readings);
 
@@ -75,15 +76,21 @@ internal static class EndpointModelBuilder
             .ToList();
 
         (DeviceModel? target, TargetResolution resolution) = ResolveTarget(groups, deviceMatch, pinnedContainerId);
-        var snapshot = new DeviceSnapshot(target, groups, takenUtc) { ReadStatus = SnapshotReadStatus.Ok, Resolution = resolution };
+        var snapshot = new DeviceSnapshot(target, groups, takenUtc)
+        {
+            ReadStatus = SnapshotReadStatus.Ok,
+            Resolution = resolution,
+            DefaultRenderContainerId = defaultRenderContainerId,
+        };
         return new EndpointModel(snapshot, resolution);
     }
 
     public static EndpointModel Build(
-        IReadOnlyList<AudioEndpoint> endpoints, string? deviceMatch, Guid pinnedContainerId, DateTimeOffset takenUtc)
+        IReadOnlyList<AudioEndpoint> endpoints, string? deviceMatch, Guid pinnedContainerId, DateTimeOffset takenUtc,
+        Guid defaultRenderContainerId = default)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        return Build(endpoints.Select(EndpointReading.Of).ToList(), deviceMatch, pinnedContainerId, takenUtc);
+        return Build(endpoints.Select(EndpointReading.Of).ToList(), deviceMatch, pinnedContainerId, takenUtc, defaultRenderContainerId);
     }
 
     public static (DeviceModel? Target, TargetResolution Resolution) ResolveTarget(
