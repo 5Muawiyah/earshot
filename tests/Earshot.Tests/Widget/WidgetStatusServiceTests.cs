@@ -22,6 +22,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     private int _posts;
     private List<EventArgs> _changedEvents = null!;
     private List<CaseOpenedEventArgs> _caseOpenedEvents = null!;
+    private List<OwnedReadingEventArgs> _ownedReadingEvents = null!;
     private ClaimStore? _claimStore;
 
     [TestInitialize]
@@ -36,6 +37,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _posts = 0;
         _changedEvents = new List<EventArgs>();
         _caseOpenedEvents = new List<CaseOpenedEventArgs>();
+        _ownedReadingEvents = new List<OwnedReadingEventArgs>();
     }
 
     // Save now queues its disk write on a background thread. Wait for anything still pending before the
@@ -65,6 +67,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
             () => table ?? ProximityDecodeTable.Unproved, () => claimThreshold);
         service.Changed += (sender, e) => { lock (_changedEvents) { _changedEvents.Add(e); } };
         service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
+        service.OwnedReadingApplied += (sender, e) => { lock (_ownedReadingEvents) { _ownedReadingEvents.Add(e); } };
         return service;
     }
 
@@ -452,6 +455,63 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, service.Current.Counters.AmbiguousCandidates);
         Assert.AreEqual(9, store.Current!.Last.Case, "claim.json must not be resynced from the ambiguous reading.");
         Assert.AreEqual(0, _caseOpenedEvents.Count, "No CaseOpened for a reading that was not confirmed as owned.");
+    }
+
+    // The seam LowBatteryAlertService feeds from: raised for an Owned verdict, carrying the exact decoded
+    // reading ApplyDecodedReadingLocked was given.
+    [TestMethod]
+    public void OwnedReadingAppliedIsRaisedForAnOwnedAdvertisement()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store);
+
+        service.Start();
+        _source.Raise(Owned(batteryB: 0x05)); // case nibble 5 -> 50%, needs no proved table
+
+        Assert.AreEqual(1, _ownedReadingEvents.Count);
+        Assert.AreEqual(50, _ownedReadingEvents[0].Reading.Case.Percent);
+    }
+
+    // OwnershipRule.Evaluate: a live connection to this PC waives the battery-consistency check but still
+    // reaches ApplyDecodedReadingLocked (OwnershipVerdict.OwnedByLiveConnection), so this must fire too.
+    [TestMethod]
+    public void OwnedReadingAppliedIsRaisedForALiveConnectionOwnedAdvertisement()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
+        using WidgetStatusService service = NewService(store);
+        PinContainer();
+        service.Start();
+        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
+
+        var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 1);
+        _source.Raise(reading);
+
+        Assert.AreEqual(1, service.Current.Counters.OwnedByLiveConnection, "Sanity: this reading must actually be OwnedByLiveConnection.");
+        Assert.AreEqual(1, _ownedReadingEvents.Count);
+        Assert.AreEqual(90, _ownedReadingEvents[0].Reading.Case.Percent);
+    }
+
+    // NoClaim, ModelOrColourMismatch, SignalBelowThreshold, BatteryUnreadable, BatteryInconsistent and
+    // AmbiguousCandidates all return before ApplyDecodedReadingLocked runs: none of them may raise this.
+    [TestMethod]
+    public void OwnedReadingAppliedIsNeverRaisedForANonOwnedVerdict()
+    {
+        var store = NewClaimStore(); // never Save()d: every advertisement reads NoClaim
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+
+        _source.Raise(Owned(batteryB: 0x05));
+
+        Assert.AreEqual(0, _ownedReadingEvents.Count, "NoClaim must not raise OwnedReadingApplied.");
+
+        store.Save(SampleClaim());
+        var stranger = new AdvertisementSample(
+            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(colour: WidgetFixtures.StrangerColour, batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 2);
+        _source.Raise(stranger);
+
+        Assert.AreEqual(0, _ownedReadingEvents.Count, "ModelOrColourMismatch must not raise OwnedReadingApplied.");
     }
 
     [TestMethod]

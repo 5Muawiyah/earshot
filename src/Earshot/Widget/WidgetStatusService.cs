@@ -144,6 +144,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
+    // Raised for every owned reading (Owned or OwnedByLiveConnection): the seam LowBatteryAlertService feeds
+    // from, and a later auto-pause step will reuse. See ApplyOwnedMessage for exactly where.
+    public event EventHandler<OwnedReadingEventArgs>? OwnedReadingApplied;
+
     public WidgetSnapshot Current
     {
         get
@@ -528,6 +532,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         ProximityDecodeTable table = _decodeTable();
         bool caseOpenedEdge = false;
         DateTimeOffset caseOpenedAt = at;
+        DecodedReading? ownedReading = null;
 
         // 11 to 14 are a shape neither permitted source describes at all (unlike the documented 0xF
         // "unknown"), so it is logged as the form drifting rather than treated the same as ordinary unknown.
@@ -595,11 +600,20 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             DecodedReading reading = ProximityDecoder.Decode(message, table, at);
             caseOpenedEdge = ApplyDecodedReadingLocked(reading, table, at);
+            ownedReading = reading;
         }
 
         if (caseOpenedEdge)
         {
             _uiPost(() => CaseOpened?.Invoke(this, new CaseOpenedEventArgs(caseOpenedAt)));
+        }
+
+        // Every case that is not Owned or OwnedByLiveConnection returned before this point (inside the lock
+        // above), so ownedReading being set at all already means one of those two verdicts: no verdict check
+        // is repeated here.
+        if (ownedReading is DecodedReading applied)
+        {
+            _uiPost(() => OwnedReadingApplied?.Invoke(this, new OwnedReadingEventArgs(applied, at)));
         }
     }
 

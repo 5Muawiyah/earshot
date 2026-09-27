@@ -10,6 +10,8 @@ public interface IWidgetStatus
 
     event EventHandler<CaseOpenedEventArgs>? CaseOpened;  // UI thread, owned advertisements only
 
+    event EventHandler<OwnedReadingEventArgs>? OwnedReadingApplied; // UI thread, every owned reading
+
     Task<ClaimOutcome> ClaimAsync(CancellationToken ct);  // UI thread
 
     void ForgetClaim();
