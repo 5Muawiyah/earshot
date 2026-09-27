@@ -179,6 +179,24 @@ public sealed class AutoPauseTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "could not pause"));
     }
 
+    // M4: the public constructor must read WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc itself,
+    // not accept an arbitrary gate, so nothing composing this class can wire up anything but phase 0's own
+    // proved value (which ships null, so this stays held off).
+    [TestMethod]
+    public async Task TheProductionConstructorReadsThePhase0GateItselfAndStaysHeldOff()
+    {
+        var sessions = OnePlayingSession();
+        var log = new CapturingLog();
+        var autoPause = new AutoPause(sessions, () => true, log);
+
+        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.IsFalse(paused, "WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc ships null, so the production constructor must stay held off.");
+        Assert.AreEqual(0, sessions.PauseCalls.Count);
+        Assert.IsTrue(log.Has(LogLevel.Info, "waiting for phase 0"));
+    }
+
     [TestMethod]
     public async Task SafeModeRefusesThePauseAndLogsIt()
     {

@@ -20,7 +20,17 @@ internal sealed class AutoPause
     private bool? _lastLeftInEar;
     private bool? _lastRightInEar;
 
-    public AutoPause(IMediaSessions sessions, Func<bool?> broadcastContinuesWhilePlayingFromThisPc, Func<bool> autoPauseEnabled, ILog log)
+    // Production entry point: always reads phase 0's gate from WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc
+    // itself, so nothing composing this class can accidentally wire up a different value (M4).
+    public AutoPause(IMediaSessions sessions, Func<bool> autoPauseEnabled, ILog log)
+        : this(sessions, static () => WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc, autoPauseEnabled, log)
+    {
+    }
+
+    // Test-only: supplies the gate directly, so a test can exercise the "phase 0 has proved this" path
+    // without WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc ever holding anything but its shipped
+    // null default, the way ClaimFlow's internal overload does for its own phase 0 constant.
+    internal AutoPause(IMediaSessions sessions, Func<bool?> broadcastContinuesWhilePlayingFromThisPc, Func<bool> autoPauseEnabled, ILog log)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(broadcastContinuesWhilePlayingFromThisPc);

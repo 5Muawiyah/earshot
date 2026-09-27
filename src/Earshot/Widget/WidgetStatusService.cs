@@ -66,7 +66,24 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private string? _watcherErrorName;
     private WidgetSnapshot? _lastPublished;
 
+    // Production entry point: always reads phase 0's proved shape from ProximityDecodeTable.Current itself,
+    // so nothing composing this service can accidentally wire up a different table (M4; acceptance 17).
     public WidgetStatusService(
+        Func<IAdvertisementSource> sourceFactory,
+        ClaimStore claimStore,
+        ISettingsStore settings,
+        IDeviceMonitor deviceMonitor,
+        Func<BootBlockStatus?> blockStatus,
+        ILog log,
+        Action<Action> uiPost,
+        TimeProvider timeProvider)
+        : this(sourceFactory, claimStore, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, static () => ProximityDecodeTable.Current)
+    {
+    }
+
+    // Test-only: supplies the decode table directly, so a test can exercise the proved paths without
+    // ProximityDecodeTable.Current ever holding anything but its shipped Unproved default.
+    internal WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ClaimStore claimStore,
         ISettingsStore settings,
