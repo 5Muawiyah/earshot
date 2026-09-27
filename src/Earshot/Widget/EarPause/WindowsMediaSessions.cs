@@ -53,11 +53,15 @@ internal sealed class WindowsMediaSessions : IMediaSessions
         }
 
         var views = new List<MediaSessionView>();
+        var seenAppIds = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (GlobalSystemMediaTransportControlsSession session in manager.GetSessions())
         {
             try
             {
-                views.Add(ViewOf(session));
+                string appId = session.SourceAppUserModelId;
+                int index = seenAppIds.TryGetValue(appId, out int count) ? count : 0;
+                seenAppIds[appId] = index + 1;
+                views.Add(ViewOf(session, index));
             }
             catch (Exception ex)
             {
@@ -105,13 +109,15 @@ internal sealed class WindowsMediaSessions : IMediaSessions
         }
     }
 
-    // SourceAppUserModelId is the only identifier this API gives (the comment on ViewOf below), so it is
-    // used as the session id, but two sessions from the same app (two tabs of one browser) share it: picking
-    // the first one found could act on the wrong one. The candidates are read once, then handed to the pure,
-    // testable PickSessionIndex, so the disambiguation rule itself is exercised without any WinRT type.
+    // SourceAppUserModelId is the only identifier this API gives, so the session id this class hands out is
+    // built from it (ComposeSessionId), never the bare app id itself once two sessions share one: a fresh
+    // GetSessions() here may not be in the same order, or even have the same count of that app's sessions, as
+    // the read the caller's sessionId came from, so the app id is recovered from it (AppIdOf) and the actual
+    // choice among same-app sessions still goes through the pure, testable PickSessionIndex.
     [SupportedOSPlatform("windows10.0.17763.0")]
     private static GlobalSystemMediaTransportControlsSession? FindSession(GlobalSystemMediaTransportControlsSessionManager manager, string sessionId, bool pause)
     {
+        string appId = AppIdOf(sessionId);
         IReadOnlyList<GlobalSystemMediaTransportControlsSession> sessions = manager.GetSessions();
         var candidates = new (string AppId, MediaPlaybackState Status)[sessions.Count];
         for (int i = 0; i < sessions.Count; i++)
@@ -119,8 +125,23 @@ internal sealed class WindowsMediaSessions : IMediaSessions
             candidates[i] = (sessions[i].SourceAppUserModelId, StatusOf(sessions[i].GetPlaybackInfo().PlaybackStatus));
         }
 
-        int? index = PickSessionIndex(candidates, sessionId, pause);
+        int? index = PickSessionIndex(candidates, appId, pause);
         return index is int i2 ? sessions[i2] : null;
+    }
+
+    // The first session of a given app id keeps the plain app id (the common case: one session per app, and
+    // every id this class handed out before this fix keeps meaning exactly what it always did); the second
+    // and later ones sharing it get a distinguishing suffix, so two sessions read in the same ReadAsync call
+    // are never given the identical id.
+    internal static string ComposeSessionId(string appId, int indexAmongSameAppSessions) =>
+        indexAmongSameAppSessions == 0 ? appId : appId + "#" + indexAmongSameAppSessions.ToString(CultureInfo.InvariantCulture);
+
+    // Recovers the app id from either shape ComposeSessionId can produce, so FindSession can look a session
+    // up by app id whichever form of id the caller was handed.
+    internal static string AppIdOf(string sessionId)
+    {
+        int hash = sessionId.LastIndexOf('#');
+        return hash < 0 ? sessionId : sessionId[..hash];
     }
 
     // Pure and testable without any WinRT type: among the sessions sharing the target app id, prefers
@@ -156,14 +177,17 @@ internal sealed class WindowsMediaSessions : IMediaSessions
         return firstMatch >= 0 ? firstMatch : null;
     }
 
-    // The session's SourceAppUserModelId doubles as its id: the API gives no other stable identifier.
-    // It names an application on this PC, not a device; nothing here persists it.
+    // SourceAppUserModelId names an application on this PC, not a device, and is the only stable identifier
+    // the API gives; nothing here persists it. indexAmongSameAppSessions (this session's position among ones
+    // sharing that app id, within this one ReadAsync call) keeps the id itself from collapsing two distinct
+    // sessions of the same app into one indistinguishable value.
     [SupportedOSPlatform("windows10.0.17763.0")]
-    private static MediaSessionView ViewOf(GlobalSystemMediaTransportControlsSession session)
+    private static MediaSessionView ViewOf(GlobalSystemMediaTransportControlsSession session, int indexAmongSameAppSessions)
     {
         GlobalSystemMediaTransportControlsSessionPlaybackInfo info = session.GetPlaybackInfo();
         string appId = session.SourceAppUserModelId;
-        return new MediaSessionView(appId, StatusOf(info.PlaybackStatus), info.Controls.IsPauseEnabled, info.Controls.IsPlayEnabled, appId);
+        string sessionId = ComposeSessionId(appId, indexAmongSameAppSessions);
+        return new MediaSessionView(sessionId, StatusOf(info.PlaybackStatus), info.Controls.IsPauseEnabled, info.Controls.IsPlayEnabled, appId);
     }
 
     [SupportedOSPlatform("windows10.0.17763.0")]
