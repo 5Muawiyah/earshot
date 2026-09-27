@@ -28,12 +28,19 @@ internal sealed class AppBarRegistration : IDisposable
 
     // ABM_NEW. Returns the raw outcome so the caller can log it; a failure here loses only the fast
     // notification paths, the poll still runs.
+    //
+    // No Win32 code is read on failure: SHAppBarMessage's own page documents no relationship with
+    // GetLastError at all ("This function returns a message-dependent value" is the whole of its Return
+    // value section, https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shappbarmessage),
+    // and the SHAppBarMessage import here has no SetLastError, so a code read after it would be whatever an
+    // unrelated earlier P/Invoke on this thread happened to leave behind, not this call's outcome. Recording
+    // that stale value as though it explained the failure would be worse than recording no code at all.
     public StepOutcome Register()
     {
         var data = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>(), hWnd = _hwnd, uCallbackMessage = CallbackMessage };
         nuint result = Shell.SHAppBarMessage(Shell.ABM_NEW, ref data);
         _registered = result != 0;
-        return StepOutcomes.FromWin32("sh-app-bar-message:abm-new", result != 0 ? 0u : unchecked((uint)Marshal.GetLastPInvokeError()), ok: _registered);
+        return StepOutcomes.FromWin32("sh-app-bar-message:abm-new", 0, _registered ? null : "ABM_NEW returned FALSE.", ok: _registered);
     }
 
     // ABM_REMOVE then ABM_NEW: Explorer's internal appbar list is new after it restarts, so the old
@@ -64,6 +71,8 @@ internal sealed class AppBarRegistration : IDisposable
         var data = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>(), hWnd = _hwnd };
         nuint result = Shell.SHAppBarMessage(Shell.ABM_REMOVE, ref data);
         _registered = false;
-        return StepOutcomes.FromWin32("sh-app-bar-message:abm-remove", result != 0 ? 0u : unchecked((uint)Marshal.GetLastPInvokeError()), ok: result != 0);
+        bool ok = result != 0;
+        // Same reasoning as Register: no Win32 code is documented for SHAppBarMessage, so none is invented.
+        return StepOutcomes.FromWin32("sh-app-bar-message:abm-remove", 0, ok ? null : "ABM_REMOVE returned FALSE.", ok: ok);
     }
 }
