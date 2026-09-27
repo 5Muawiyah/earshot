@@ -47,6 +47,18 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
 
     protected override bool ShowWithoutActivation => true;
 
+    // Mirrors ConnectCard.OnDpiChanged: the gauge is already sized and rendered for the display it is
+    // moving to (GaugeController re-measures the taskbar and calls Render at the new DPI on the very next
+    // layout, driven by TaskbarWatcher's own poll rather than this event), so the resize
+    // DefWindowProc would otherwise apply here is cancelled rather than fought afterwards.
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        e.Cancel = true;
+        base.OnDpiChanged(e);
+    }
+
     protected override CreateParams CreateParams
     {
         get

@@ -145,6 +145,45 @@ public sealed class GaugeWindowTests
         });
     }
 
+    // Mirrors ConnectCard.OnDpiChanged: the gauge is already sized for the display it is moving to, so a
+    // real WM_DPICHANGED must never let WinForms' default handling apply the message's own suggested
+    // rectangle. A real SendMessage (TestWindows.Send blocks until WndProc returns, exactly the real
+    // synchronous delivery https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagew
+    // documents), not a synthetic DpiChangedEventArgs, so the proof is the same WM_DPICHANGED path Windows
+    // itself would deliver on a real monitor or DPI change.
+    [TestMethod]
+    public void DpiChangedNeverAppliesTheSuggestedRect()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+            Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
+            Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
+            Application.DoEvents();
+            Rectangle before = gauge.Bounds;
+
+            // A suggested rectangle nothing here would ever produce on its own, so an unwanted resize is
+            // unmistakable if OnDpiChanged's cancellation stops working.
+            var suggested = new RECT { left = 500, top = 500, right = 900, bottom = 800 };
+            nint rectPtr = Marshal.AllocHGlobal(Marshal.SizeOf<RECT>());
+            try
+            {
+                Marshal.StructureToPtr(suggested, rectPtr, fDeleteOld: false);
+                nint wParam = (nint)(192 | (192 << 16)); // MAKEWPARAM(192, 192): a new DPI of 192 on both axes.
+                Earshot.Tests.Phase5.TestWindows.Send(gauge.Handle, NativeMethods.WM_DPICHANGED, wParam, rectPtr);
+                Application.DoEvents();
+
+                Assert.AreEqual(before, gauge.Bounds, "OnDpiChanged must cancel the event: the suggested rectangle from a real WM_DPICHANGED must never be applied.");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(rectPtr);
+            }
+        });
+    }
+
     [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(Point point);
 }
