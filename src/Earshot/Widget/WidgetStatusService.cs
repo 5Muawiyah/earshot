@@ -715,8 +715,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool autoPauseAvailable = WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc == true &&
             (table.LeftInEarBit is not null || table.RightInEarBit is not null);
 
+        // M6: per-bud InEar is only as good as the reading it came from. Battery never expires, so Percent,
+        // Charging and ReadAt stand whatever the age; InEar is cleared once the reading is no longer fresh,
+        // whatever the table proves, so a stale reading never keeps reporting a bud as in or out of the ear.
+        PartReading left = fresh ? _left : _left with { InEar = null };
+        PartReading right = fresh ? _right : _right with { InEar = null };
+
         return new WidgetSnapshot(
-            where, _left, _right, _case, batteryReadAt, earReadAt, lidOpen,
+            where, left, right, _case, batteryReadAt, earReadAt, lidOpen,
             _watcherState, _watcherErrorCode, _watcherErrorName,
             _claim is not null, autoPauseAvailable, BuildCountersLocked());
     }

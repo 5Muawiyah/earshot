@@ -205,6 +205,40 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNull(service.Current.EarReadAt);
     }
 
+    // M6, reviewer probe P2: per-bud InEar must go null once the reading is stale, on a table where the bud
+    // order is proved (so this is not just about the Elsewhere/NotInUse rollup: the raw per-bud field must
+    // clear too), while the battery percent it arrived with is unaffected, since battery never expires.
+    [TestMethod]
+    public void AStaleReadingClearsPerBudInEarButKeepsTheBatteryPercent()
+    {
+        var table = ProximityDecodeTable.Unproved with
+        {
+            HighNibbleIsRight = true,
+            LeftInEarBit = 0,
+            RightInEarBit = 1,
+            InEarWhenSet = true,
+        };
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store, table);
+        service.Start();
+
+        // High nibble (right) 3 -> 30%, low nibble (left) 5 -> 50%; both bits set: both buds in ear.
+        _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35));
+
+        Assert.AreEqual(true, service.Current.Left.InEar);
+        Assert.AreEqual(true, service.Current.Right.InEar);
+        Assert.AreEqual(50, service.Current.Left.Percent);
+        Assert.AreEqual(30, service.Current.Right.Percent);
+
+        _clock.Advance(WidgetTiming.EarFreshWindow + TimeSpan.FromSeconds(1));
+
+        Assert.IsNull(service.Current.Left.InEar, "A stale reading must not keep reporting a bud as in or out of the ear.");
+        Assert.IsNull(service.Current.Right.InEar);
+        Assert.AreEqual(50, service.Current.Left.Percent, "Battery never expires, whatever the ear state does.");
+        Assert.AreEqual(30, service.Current.Right.Percent);
+    }
+
     [TestMethod]
     public void BatteryKeepsItsReadTimeAndNeverExpires()
     {
