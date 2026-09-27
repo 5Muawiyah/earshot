@@ -23,8 +23,8 @@ internal sealed class ClaimStore
     {
     }
 
-    // Test-only: supplies the "phase 0 has proved this threshold" comparison directly, so a claim's
-    // threshold validation (M1) can be exercised without WidgetDefaults.SignalThresholdDbm ever holding
+    // Test-only: supplies the "phase 0 has proved this threshold" comparison directly, so the claim's
+    // threshold validation can be exercised without WidgetDefaults.SignalThresholdDbm ever holding
     // anything but its shipped null, the way ClaimFlow's internal overload does for the same constant.
     internal ClaimStore(string path, ILog log, Func<sbyte?> currentSignalThreshold)
         : this(path, log, currentSignalThreshold, static () => DateTimeOffset.UtcNow)

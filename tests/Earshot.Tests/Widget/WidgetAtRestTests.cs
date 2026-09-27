@@ -76,7 +76,7 @@ public sealed class WidgetAtRestTests
         return root.Namespace == "Earshot.Widget" || (root.Namespace?.StartsWith("Earshot.Widget.", StringComparison.Ordinal) ?? false);
     }
 
-    // ---- Escape fixtures (B2 red proof): each reproduces one finding the reviewers made against 98a4a6b. ----
+    // ---- Escape fixtures, the scanner's own red proof: each reproduces one finding a reviewer made. ----
 
     private sealed class EscapeConcreteConnectionControllerField
     {

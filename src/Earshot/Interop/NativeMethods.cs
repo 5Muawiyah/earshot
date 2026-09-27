@@ -186,7 +186,8 @@ internal static partial class NativeMethods
     internal static partial nint FindWindowW(string? lpClassName, string? lpWindowName);
 
     // The window (any process) at a screen point, or 0 when the point is over no window. Used for the
-    // covered check (2.4) and the click-through proof (F10): coordinates are physical screen pixels.
+    // gauge's covered-by-another-window check and the click-through proof: coordinates are physical screen
+    // pixels.
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-windowfrompoint
     [LibraryImport(User32)]
     internal static partial nint WindowFromPoint(POINT point);

@@ -80,7 +80,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private WidgetSnapshot? _lastPublished;
 
     // Production entry point: always reads phase 0's proved shape from ProximityDecodeTable.Current itself,
-    // so nothing composing this service can accidentally wire up a different table (M4; acceptance 17).
+    // so nothing composing this service can accidentally wire up a different table.
     public WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ClaimStore claimStore,
@@ -269,7 +269,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         // The internal overload, with the threshold and table read through the same injectable seams as the
-        // rest of the service (M4/M7), so a test can actually drive a claim through without either static
+        // rest of the service, so a test can actually drive a claim through without either static
         // default ever holding anything but what it ships with.
         ClaimOutcome outcome = await _claimFlow.RunAsync(
             source, _timeProvider, WidgetTiming.ClaimWindow, _claimThreshold(), _decodeTable(), ct).ConfigureAwait(false);
@@ -539,7 +539,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             }
 
             // Owner decision, 2026-09-27 ("same checks always"): a live connection to this PC used to waive
-            // battery consistency for one candidate (D6). It no longer does; the same checks run every time,
+            // battery consistency for one candidate. It no longer does; the same checks run every time,
             // whether or not this PC renders to the AirPods, so there is nothing here to read from Core Audio
             // and no sender tag to track across messages any more.
             var input = new OwnershipInput(

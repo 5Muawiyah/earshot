@@ -56,7 +56,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     // claimThreshold defaults to matching SampleClaim's fixed -70 dBm, so a test can drive ClaimAsync to an
-    // actual Claimed outcome (M7) without WidgetDefaults.SignalThresholdDbm ever holding anything but null.
+    // actual Claimed outcome without WidgetDefaults.SignalThresholdDbm ever holding anything but null.
     private WidgetStatusService NewService(ClaimStore store, ProximityDecodeTable? table = null, sbyte? claimThreshold = -70)
     {
         var service = new WidgetStatusService(
@@ -89,9 +89,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
     private AdvertisementSample Owned(byte batteryA = 0x00, byte batteryB = 0x00, byte status = 0x00, byte lid = 0x00, sbyte rssi = -60) =>
         new(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(status: status, batteryA: batteryA, batteryB: batteryB, lid: lid), rssi, _clock.GetUtcNow(), SenderTag: 1);
 
-    // M4, acceptance 17: the production constructor must read ProximityDecodeTable.Current itself, not
-    // accept an arbitrary table, so nothing composing this service can wire up anything but phase 0's own
-    // proved shape (which ships Unproved, so only the case nibble is ever decoded).
+    // The production constructor must read ProximityDecodeTable.Current itself, not accept an arbitrary
+    // table, so nothing composing this service can wire up anything but phase 0's own proved shape (which
+    // ships Unproved, so only the case nibble is ever decoded).
     [TestMethod]
     public void TheProductionConstructorReadsProximityDecodeTableCurrentItself()
     {

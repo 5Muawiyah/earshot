@@ -21,7 +21,7 @@ internal sealed class AutoPause
     private bool? _lastRightInEar;
 
     // Production entry point: always reads phase 0's gate from WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc
-    // itself, so nothing composing this class can accidentally wire up a different value (M4).
+    // itself, so nothing composing this class can accidentally wire up a different value.
     public AutoPause(IMediaSessions sessions, Func<bool> autoPauseEnabled, ILog log)
         : this(sessions, static () => WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc, autoPauseEnabled, log)
     {
