@@ -14,6 +14,12 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
 
     public int DisposeCalls { get; private set; }
 
+    // M3: lets a test make Start or Stop report a failure, the way a real watcher's step can, so the
+    // service's logging of that step (Warn when not ok) can be exercised without a real watcher.
+    public Func<StepOutcome>? StartResult { get; set; }
+
+    public Func<StepOutcome>? StopResult { get; set; }
+
     public event EventHandler<AdvertisementSample>? Received;
 
     public event EventHandler<AdvertisementSourceStopped>? Stopped;
@@ -21,6 +27,13 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
     public StepOutcome Start()
     {
         StartCalls++;
+        if (StartResult is { } result)
+        {
+            StepOutcome step = result();
+            State = step.Ok ? AdvertisementSourceState.Started : AdvertisementSourceState.Aborted;
+            return step;
+        }
+
         State = AdvertisementSourceState.Started;
         return StepOutcomes.FromHResult("fake-start", 0);
     }
@@ -29,6 +42,11 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
     {
         StopCalls++;
         State = AdvertisementSourceState.Stopped;
+        if (StopResult is { } result)
+        {
+            return result();
+        }
+
         return StepOutcomes.FromHResult("fake-stop", 0);
     }
 

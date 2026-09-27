@@ -360,6 +360,47 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, _caseOpenedEvents.Count);
     }
 
+    // M3: Suspend's own Stop() call discarded the step outcome. A failing stop must be logged, at Warn.
+    [TestMethod]
+    public void SuspendLogsAFailingStopStepAtWarn()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        _source.StopResult = () => StepOutcomes.FromHResult("fake-stop", 5, detail: "ACCESS_DENIED", ok: false);
+
+        service.Suspend();
+
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "ACCESS_DENIED"), "A failing stop step must be logged at Warn with its detail.");
+    }
+
+    // M3: StopSourceLocked's Stop() call (reached through Close) discarded the step outcome the same way.
+    [TestMethod]
+    public void ClosingWithAFailingStopStepLogsItAtWarn()
+    {
+        var store = NewClaimStore();
+        var service = NewService(store);
+        service.Start();
+        _source.StopResult = () => StepOutcomes.FromHResult("fake-stop", 5, detail: "ACCESS_DENIED", ok: false);
+
+        service.Close();
+
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "ACCESS_DENIED"), "A failing stop step must be logged at Warn with its detail.");
+    }
+
+    // M3: a failing start step must be logged at Warn too, not always at Info as if it had succeeded.
+    [TestMethod]
+    public void AFailingStartStepIsLoggedAtWarn()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => StepOutcomes.FromHResult("fake-start", 5, detail: "ACCESS_DENIED", ok: false);
+
+        service.Start();
+
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "ACCESS_DENIED"), "A failing start step must be logged at Warn with its detail.");
+    }
+
     [TestMethod]
     public void TheStoppedEventIsLoggedWithItsErrorAndShownInTheSnapshot()
     {

@@ -152,7 +152,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             _stopRequested = true;
             CancelRetryLocked();
-            _source.Stop();
+            StepOutcome step = _source.Stop();
+            ApplyStopStepLocked(step);
             _watcherState = WidgetWatcherState.Stopped;
         }
 
@@ -265,7 +266,25 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _watcherState = _source!.State == AdvertisementSourceState.Started ? WidgetWatcherState.Started : WidgetWatcherState.Stopped;
         _watcherErrorCode = null;
         _watcherErrorName = null;
-        _log.Info("Widget watcher start: " + step.Step + " " + step.CodeName + ".");
+        LogStepLocked("start", step);
+    }
+
+    // M3: every Stop step is logged with its code and detail too, not just Start's; at Warn when not ok, so
+    // a stop that failed (rather than simply never having been started) is visible in the log.
+    private void ApplyStopStepLocked(StepOutcome step) => LogStepLocked("stop", step);
+
+    private void LogStepLocked(string verb, StepOutcome step)
+    {
+        string message = "Widget watcher " + verb + ": " + step.Step + " " + step.CodeName +
+            (step.Detail is string detail ? " (" + detail + ")" : string.Empty) + ".";
+        if (step.Ok)
+        {
+            _log.Info(message);
+        }
+        else
+        {
+            _log.Warn(message);
+        }
     }
 
     private void StopSourceLocked(bool disposeSource)
@@ -277,7 +296,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         _stopRequested = true;
         CancelRetryLocked();
-        _source.Stop();
+        StepOutcome stopStep = _source.Stop();
+        ApplyStopStepLocked(stopStep);
         _source.Received -= OnReceived;
         _source.Stopped -= OnStopped;
         if (disposeSource)
