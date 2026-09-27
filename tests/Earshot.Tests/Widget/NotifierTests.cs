@@ -150,9 +150,9 @@ public sealed class NotifierTests
         Assert.AreEqual(installed, writer.Calls[0].TargetPath);
     }
 
-    // M8 / CLAUDE.md ("for every helper a test fakes, keep one execution of the real one"): the real
-    // RealShellLinkWriter, run against a shortcut in a temp folder, never the owner's Start menu, deleted
-    // afterwards. Inconclusive, not failed, when this build of Windows has no shell link support to check.
+    // For every helper a test fakes, one execution of the real one: the real RealShellLinkWriter, run
+    // against a shortcut in a temp folder, never the owner's Start menu, deleted afterwards. Inconclusive,
+    // not failed, when this build of Windows has no shell link support to check.
     [TestMethod]
     public void TheRealShellLinkWriterWritesAndReadsBackTheAppUserModelId()
     {

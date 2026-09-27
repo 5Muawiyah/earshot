@@ -4,10 +4,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// M8 / CLAUDE.md: for every helper a test fakes (FakeMediaSessions stands in for this everywhere else),
-// keep one execution of the real one. Read-only, as the safety rules for this work require: this class only
-// ever calls ReadAsync, never TryPauseAsync or TryPlayAsync, so nothing on the machine running it is ever
-// paused or played.
+// For every helper a test fakes (FakeMediaSessions stands in for this everywhere else), one execution of the
+// real one. Read-only, as the safety rules for this work require: this class only ever calls ReadAsync,
+// never TryPauseAsync or TryPlayAsync, so nothing on the machine running it is ever paused or played.
 [TestClass]
 public sealed class WindowsMediaSessionsTests
 {
