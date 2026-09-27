@@ -28,15 +28,23 @@ public sealed class WidgetFixtureHygieneTests
 
     // 0x followed by 12 or more hex digits: a 48-bit Bluetooth address packed into a ulong needs exactly 12,
     // so this starts above the width of an ordinary 8-digit HRESULT or CONFIGRET literal (0x80004005 and
-    // the like are routine in this codebase and are not addresses).
+    // the like are routine in this codebase and are not addresses). An optional UL/LU-style C# integer
+    // literal suffix is consumed too: \b does not sit between two word characters, so "...ABUL" would
+    // otherwise never reach a boundary right after the hex digits and the literal would go uncaught.
     private static readonly Regex UlongHexLiteral = new(
-        @"\b0x[0-9A-Fa-f]{12,}\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        @"\b0x[0-9A-Fa-f]{12,}(?:[uU][lL]?|[lL][uU]?)?\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     // 16 or more hex byte literals in a row (a captured payload's shape) ignoring the punctuation a byte
     // array initialiser uses, or 32 or more bare hex digits in a row: applied to the whole file so a run a
     // formatter split across lines is still one match, not sixteen separate two-digit non-matches.
     private static readonly Regex LongHexRun = new(
         @"(?:0x[0-9A-Fa-f]{2}[,\s]*){16,}|[0-9A-Fa-f]{32,}",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.Singleline);
+
+    // 16 or more decimal byte values (0-255) in a row, comma- or whitespace-separated: the same captured-
+    // payload shape as LongHexRun, written in decimal instead of hex.
+    private static readonly Regex LongDecimalByteRun = new(
+        @"(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){15,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.Singleline);
 
     // The only byte runs a fixture may hold: the two 16-byte fillers WidgetFixtures.cs builds
@@ -81,10 +89,39 @@ public sealed class WidgetFixtureHygieneTests
         Assert.AreEqual(0, found.Count, "A fixture looks like it came from a real device:" + Environment.NewLine + string.Join(Environment.NewLine, found));
     }
 
-    private static void ScanFile(string file, List<string> found)
+    // Round 2, three planted examples the prior version of this test missed:
+    [TestMethod]
+    public void AUlongHexLiteralWithATrailingULSuffixIsCaught()
     {
-        string name = Path.GetFileName(file);
-        string[] lines = File.ReadAllLines(file);
+        Assert.IsTrue(UlongHexLiteral.IsMatch("0x1234567890ABUL"), "A 0x...UL ulong literal must be caught.");
+    }
+
+    [TestMethod]
+    public void ARealShapedHeaderPrependedToTheAllowedFillerIsNotWavedThrough()
+    {
+        string headerPlusFiller = "0107013344" + "101112131415161718191A1B1C1D1E1F";
+        Assert.IsFalse(IsAllowedRun(headerPlusFiller), "A real-shaped header before the filler must not be allowed.");
+    }
+
+    [TestMethod]
+    public void ADecimalByteArrayShapedLikeASixteenBytePayloadIsCaught()
+    {
+        string text = "var payload = new byte[] { 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 };";
+        var found = new List<string>();
+
+        ScanText("Plant.cs", text, found);
+
+        Assert.IsTrue(found.Count > 0, "A decimal byte array shaped like a 16-byte payload must be caught.");
+    }
+
+    private static void ScanFile(string file, List<string> found) =>
+        ScanText(Path.GetFileName(file), File.ReadAllText(file), found);
+
+    // Pure (no file I/O), so a planted example can be run through it directly rather than only ever through
+    // a file on disk under src\Earshot\Widget or tests\Earshot.Tests\Widget.
+    internal static void ScanText(string name, string text, List<string> found)
+    {
+        string[] lines = text.Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
             string line = lines[i];
@@ -112,7 +149,6 @@ public sealed class WidgetFixtureHygieneTests
             }
         }
 
-        string text = File.ReadAllText(file);
         foreach (Match m in LongHexRun.Matches(text))
         {
             if (IsAllowedRun(m.Value))
@@ -122,6 +158,12 @@ public sealed class WidgetFixtureHygieneTests
 
             int lineNumber = CountLines(text, m.Index);
             found.Add(name + ":" + lineNumber + ": a hex run of 16 bytes or more: " + Truncate(m.Value));
+        }
+
+        foreach (Match m in LongDecimalByteRun.Matches(text))
+        {
+            int lineNumber = CountLines(text, m.Index);
+            found.Add(name + ":" + lineNumber + ": a decimal byte run of 16 bytes or more: " + Truncate(m.Value));
         }
     }
 
@@ -139,18 +181,13 @@ public sealed class WidgetFixtureHygieneTests
         return lines;
     }
 
+    // Exact match only, not Contains: a real-shaped header concatenated directly onto one of these fillers
+    // would otherwise be waved through just because the filler's own digits appear somewhere inside the
+    // combined run, hiding exactly the kind of real capture this test exists to catch.
     private static bool IsAllowedRun(string match)
     {
         string normalized = new string(match.Where(Uri.IsHexDigit).ToArray()).ToUpperInvariant();
-        foreach (string allowed in AllowedSyntheticRuns)
-        {
-            if (normalized.Contains(allowed, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return AllowedSyntheticRuns.Contains(normalized, StringComparer.Ordinal);
     }
 
     private static string Truncate(string value) => value.Length > 60 ? value[..60] + "..." : value;

@@ -32,11 +32,19 @@ public sealed class WinRtAdvertisementSourceBindingTests
         {
             AdvertisementSourceStopped? stopped = stoppedTcs.Task.IsCompleted ? stoppedTcs.Task.Result : null;
 
-            // Inconclusive only when the reason is that no radio is present; anything else is a failure,
-            // not something to wave through as "could not tell on this machine".
+            // Inconclusive only when the reason is that no radio (or no watcher support at all on this build)
+            // is present; anything else, including a Start that failed synchronously with no Stopped event at
+            // all (access denied, for instance), is a failure, not something to wave through as "could not
+            // tell on this machine".
             if (stopped is not null && stopped.ErrorName != "RadioNotAvailable")
             {
                 Assert.Fail("The watcher failed to start with an error other than RadioNotAvailable: " + stopped.ErrorName + ".");
+            }
+
+            if (stopped is null && !startStep.Ok && startStep.Code != Earshot.Contracts.NativeCodes.NotAvailable)
+            {
+                Assert.Fail("Start failed with no Stopped event and a reason other than no watcher support: " +
+                    startStep.CodeName + (startStep.Detail is null ? "." : " (" + startStep.Detail + ")."));
             }
 
             Assert.Inconclusive("The watcher did not start on this machine (" + startStep.CodeName + ")" +
@@ -82,6 +90,14 @@ public sealed class WinRtAdvertisementSourceBindingTests
         bool started = await WaitForStartedAsync(source);
         if (!started)
         {
+            // Inconclusive only for genuinely no watcher support on this build; anything else is a real
+            // failure Stop cannot be meaningfully exercised against either, but for its own, different reason.
+            if (!startStep.Ok && startStep.Code != Earshot.Contracts.NativeCodes.NotAvailable)
+            {
+                Assert.Fail("Start failed with a reason other than no watcher support: " + startStep.CodeName +
+                    (startStep.Detail is null ? "." : " (" + startStep.Detail + ")."));
+            }
+
             Assert.Inconclusive("The watcher did not start on this machine (" + startStep.CodeName + "), so Stop cannot be exercised meaningfully.");
             return;
         }

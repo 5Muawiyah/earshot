@@ -865,8 +865,16 @@ public sealed class WidgetStatusServiceTests : IDisposable
     // English word that happens to spell five hex letters in a row (RadioNotAvailable... Unreadable has
     // "eadab": e, a, d, a, b are all valid hex digits).
     private static readonly Regex ForbiddenByteRun = new(
-        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\-]){2,}[0-9A-F]{2}|\b\d{12}\b",
+        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b",
         RegexOptions.CultureInvariant);
+
+    // Round 2: the regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own
+    // separator swapped for a space is a common enough shape to plant deliberately here).
+    [TestMethod]
+    public void ForbiddenByteRunCatchesSpaceSeparatedHex()
+    {
+        Assert.IsTrue(ForbiddenByteRun.IsMatch("payload AA BB CC DD read"), "Space-separated hex bytes must be caught.");
+    }
 
     [TestMethod]
     public void LogLinesCarryCountsAndNeverBytes()
