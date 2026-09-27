@@ -46,6 +46,16 @@ public sealed class GaugeWindowTests
     // pass even if SWP_NOACTIVATE were removed from GaugeWindow.ShowAt and it started stealing activation.
     // The window's own activation state (GetActiveWindow, the calling thread's active window) is real on a
     // private desktop and does discriminate, proved below by toggling the flag under test.
+    //
+    // The background window is shown but never made active by any real activation primitive (not
+    // Form.Activate(), not SetActiveWindow either): a real activation transition on a private desktop in
+    // this process was found to leave the NEXT CardDesktop.Run's own desktop permanently ERROR_BUSY at
+    // CloseDesktop, regardless of which real activation primitive performs it or which desktop performs it
+    // first - reproduced with GaugeWindowTests run before ConnectCardTests' own (deliberately real)
+    // activation test, 5/5, and confirmed down to SetActiveWindow alone with no Form.Activate() and no
+    // GaugeWindow involved at all. With nothing ever really activated, GetActiveWindow() starts at 0 and
+    // must stay 0 (never the gauge's handle) after a genuinely NOACTIVATE show, which still discriminates:
+    // proved below by toggling the flag under test.
     [TestMethod]
     public void ShowAtDoesNotChangeTheActiveWindowAndRendersAVisibleBitmap()
     {
@@ -60,11 +70,11 @@ public sealed class GaugeWindowTests
                 ShowInTaskbar = false,
                 BackColor = Color.Black,
             };
-            background.Show();
-            background.Activate();
+            nint backgroundHandle = background.Handle;
+            NativeMethods.SetWindowPos(backgroundHandle, 0, 0, 0, 0, 0,
+                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER);
             Application.DoEvents();
             nint activeBefore = Earshot.Tests.Phase5.TestWindows.GetActiveWindow();
-            Assert.AreEqual(background.Handle, activeBefore, "The background window must be active before the gauge is shown.");
 
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
@@ -73,7 +83,9 @@ public sealed class GaugeWindowTests
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
             Application.DoEvents();
 
-            Assert.AreEqual(activeBefore, Earshot.Tests.Phase5.TestWindows.GetActiveWindow(), "A NOACTIVATE show must not change the thread's active window.");
+            nint activeAfter = Earshot.Tests.Phase5.TestWindows.GetActiveWindow();
+            Assert.AreEqual(activeBefore, activeAfter, "A NOACTIVATE show must not change the thread's active window.");
+            Assert.AreNotEqual(gauge.Handle, activeAfter, "The gauge must never become the active window.");
 
             WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
             {
