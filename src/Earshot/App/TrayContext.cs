@@ -395,6 +395,11 @@ internal sealed partial class TrayContext : ApplicationContext
     }
 
     // The NotifyIcon.MouseClick handler. Internal so tests can raise each button.
+    //
+    // A left click follows Widget.LeftClickConnects, the same setting GaugeController.OnLeftClicked reads
+    // for the gauge itself: off (the default) opens a card rather than connecting or disconnecting straight
+    // away. The widget's own three-column card is used when it is wired up; otherwise (the widget off, or
+    // not yet built) the icon falls back to the ordinary status card, the same one a second launch shows.
     internal void OnIconMouseClick(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left)
@@ -402,7 +407,20 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        StartToggle();
+        if (_registry.Settings.Current.Widget.LeftClickConnects)
+        {
+            StartToggle();
+            return;
+        }
+
+        if (_widgetCardPresenter is not null)
+        {
+            OnWidgetCardRequested(this, EventArgs.Empty);
+        }
+        else
+        {
+            ShowStatusCard();
+        }
     }
 
     protected override void ExitThreadCore()
