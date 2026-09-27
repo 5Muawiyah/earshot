@@ -39,7 +39,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
-    private ClaimStore NewClaimStore() => new(_temp.File("claim.json"), _log);
+    // SampleClaim below always carries threshold -70; the injectable overload matches it so Save's own
+    // reload does not invalidate the claim these tests just wrote (M1: a stored threshold is usable only
+    // when it equals the current one, and WidgetDefaults.SignalThresholdDbm ships null).
+    private ClaimStore NewClaimStore() => new(_temp.File("claim.json"), _log, static () => (sbyte)-70);
 
     private WidgetStatusService NewService(ClaimStore store, ProximityDecodeTable? table = null)
     {

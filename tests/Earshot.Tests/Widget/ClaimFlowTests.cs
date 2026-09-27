@@ -31,7 +31,9 @@ public sealed class ClaimFlowTests
     {
         using var temp = new TempFolder();
         var log = new CapturingLog();
-        var store = new ClaimStore(temp.File("claim.json"), log);
+        // Matches the fixed -70 threshold the claim below is made at, so the store's own reload after Save
+        // does not invalidate it (M1: a stored threshold is usable only when it matches the current one).
+        var store = new ClaimStore(temp.File("claim.json"), log, static () => (sbyte)-70);
         var flow = new ClaimFlow(store, log);
         var source = new FakeAdvertisementSource { State = AdvertisementSourceState.Started };
         var clock = new TestTimeProvider();
