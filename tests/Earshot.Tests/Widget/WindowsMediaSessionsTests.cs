@@ -36,4 +36,40 @@ public sealed class WindowsMediaSessionsTests
         // throws and never controls anything, proved by PauseCalls/PlayCalls not existing on the real type.
         Assert.IsNotNull(views);
     }
+
+    // SourceAppUserModelId is the only session identifier the real API gives, and two sessions from the same
+    // app (two tabs of one browser) share it. PickSessionIndex is the pure disambiguation rule FindSession
+    // hands the real WinRT session list to, so it is testable without any WinRT type at all.
+    [TestMethod]
+    public void PickSessionIndexPrefersTheSessionAlreadyInTheExpectedState()
+    {
+        var sessions = new (string AppId, MediaPlaybackState Status)[]
+        {
+            ("app.exe", MediaPlaybackState.Paused),
+            ("app.exe", MediaPlaybackState.Playing),
+        };
+
+        Assert.AreEqual(1, WindowsMediaSessions.PickSessionIndex(sessions, "app.exe", pause: true), "A pause must act on the Playing one.");
+        Assert.AreEqual(0, WindowsMediaSessions.PickSessionIndex(sessions, "app.exe", pause: false), "A play must act on the Paused one.");
+    }
+
+    [TestMethod]
+    public void PickSessionIndexFallsBackToTheFirstMatchWhenNoneIsInTheExpectedState()
+    {
+        var sessions = new (string AppId, MediaPlaybackState Status)[]
+        {
+            ("app.exe", MediaPlaybackState.Stopped),
+            ("app.exe", MediaPlaybackState.Closed),
+        };
+
+        Assert.AreEqual(0, WindowsMediaSessions.PickSessionIndex(sessions, "app.exe", pause: true));
+    }
+
+    [TestMethod]
+    public void PickSessionIndexReturnsNullWhenNothingMatchesTheAppId()
+    {
+        var sessions = new (string AppId, MediaPlaybackState Status)[] { ("other.exe", MediaPlaybackState.Playing) };
+
+        Assert.IsNull(WindowsMediaSessions.PickSessionIndex(sessions, "app.exe", pause: true));
+    }
 }

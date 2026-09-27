@@ -88,7 +88,7 @@ internal sealed class WindowsMediaSessions : IMediaSessions
         {
             GlobalSystemMediaTransportControlsSessionManager manager =
                 await GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask(ct).ConfigureAwait(false);
-            GlobalSystemMediaTransportControlsSession? session = FindSession(manager, sessionId);
+            GlobalSystemMediaTransportControlsSession? session = FindSession(manager, sessionId, pause);
             if (session is null)
             {
                 _log.Warn("Media session " + sessionId + " was not found to control.");
@@ -105,18 +105,55 @@ internal sealed class WindowsMediaSessions : IMediaSessions
         }
     }
 
+    // SourceAppUserModelId is the only identifier this API gives (the comment on ViewOf below), so it is
+    // used as the session id, but two sessions from the same app (two tabs of one browser) share it: picking
+    // the first one found could act on the wrong one. The candidates are read once, then handed to the pure,
+    // testable PickSessionIndex, so the disambiguation rule itself is exercised without any WinRT type.
     [SupportedOSPlatform("windows10.0.17763.0")]
-    private static GlobalSystemMediaTransportControlsSession? FindSession(GlobalSystemMediaTransportControlsSessionManager manager, string sessionId)
+    private static GlobalSystemMediaTransportControlsSession? FindSession(GlobalSystemMediaTransportControlsSessionManager manager, string sessionId, bool pause)
     {
-        foreach (GlobalSystemMediaTransportControlsSession session in manager.GetSessions())
+        IReadOnlyList<GlobalSystemMediaTransportControlsSession> sessions = manager.GetSessions();
+        var candidates = new (string AppId, MediaPlaybackState Status)[sessions.Count];
+        for (int i = 0; i < sessions.Count; i++)
         {
-            if (string.Equals(session.SourceAppUserModelId, sessionId, StringComparison.Ordinal))
+            candidates[i] = (sessions[i].SourceAppUserModelId, StatusOf(sessions[i].GetPlaybackInfo().PlaybackStatus));
+        }
+
+        int? index = PickSessionIndex(candidates, sessionId, pause);
+        return index is int i2 ? sessions[i2] : null;
+    }
+
+    // Pure and testable without any WinRT type: among the sessions sharing the target app id, prefers
+    // whichever is already in the state this action expects to leave (Playing for a pause, Paused for a
+    // play), so pausing one same-app session never silently acts on a different one that happens to share
+    // its app id. Falls back to the first match sharing the id when none is in that state, and to null when
+    // none matches at all.
+    internal static int? PickSessionIndex(IReadOnlyList<(string AppId, MediaPlaybackState Status)> sessions, string targetAppId, bool pause)
+    {
+        ArgumentNullException.ThrowIfNull(sessions);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetAppId);
+
+        MediaPlaybackState wanted = pause ? MediaPlaybackState.Playing : MediaPlaybackState.Paused;
+        int firstMatch = -1;
+        for (int i = 0; i < sessions.Count; i++)
+        {
+            if (!string.Equals(sessions[i].AppId, targetAppId, StringComparison.Ordinal))
             {
-                return session;
+                continue;
+            }
+
+            if (sessions[i].Status == wanted)
+            {
+                return i;
+            }
+
+            if (firstMatch < 0)
+            {
+                firstMatch = i;
             }
         }
 
-        return null;
+        return firstMatch >= 0 ? firstMatch : null;
     }
 
     // The session's SourceAppUserModelId doubles as its id: the API gives no other stable identifier.
