@@ -31,7 +31,7 @@ internal static class UiAutomation
     // vtable slot, so it must still match the header rather than the first available enumerator value.
     internal const int AutomationElementMode_Full = 1;
 
-    // Property ids (F7).
+    // Property ids (UIAutomationClient.h).
     internal const int UIA_BoundingRectanglePropertyId = 30001;
     internal const int UIA_ControlTypePropertyId = 30003;
     internal const int UIA_NamePropertyId = 30005;

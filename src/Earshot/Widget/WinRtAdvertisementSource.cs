@@ -51,7 +51,7 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
         }
     }
 
-    // Read-only: proves the real watcher is Passive (M5), rather than trusting the constant Start() sets.
+    // Read-only: proves the real watcher is Passive, rather than trusting the constant Start() sets.
     // Null before Start() has constructed the watcher, or when this build has no BLE watcher to check.
     public BluetoothLEScanningMode? ScanningMode
     {

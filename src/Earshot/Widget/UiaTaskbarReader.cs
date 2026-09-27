@@ -5,11 +5,11 @@ using Earshot.Popup;
 
 namespace Earshot.Widget;
 
-// The real ITaskbarReader: UI Automation over Shell_TrayWnd for the occupied rectangles (D2), plus the
-// appbar rectangle, DPI, notification state, and the two WindowFromPoint checks (covered, gauge centre).
+// The real ITaskbarReader: UI Automation over Shell_TrayWnd for the occupied rectangles, plus the appbar
+// rectangle, DPI, notification state, and the two WindowFromPoint checks (covered, gauge centre).
 // Read-only throughout; never touches a device. Runs on the UIA worker thread only (TaskbarWatcher owns
 // it): the IUIAutomation object is created once, the first time Read is called on that thread, and never
-// touched from anywhere else (F6).
+// touched from anywhere else.
 internal sealed class UiaTaskbarReader : ITaskbarReader
 {
     private const string ShellTrayWndClass = "Shell_TrayWnd";
@@ -74,8 +74,8 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
         return ITaskbarReader.Result.Ok(layout);
     }
 
-    // Internal so a real-execution test (12.3) can exercise the COM path against a window of its own,
-    // without going through Shell_TrayWnd.
+    // Internal so UiaTaskbarReaderTests's real-execution test can call this directly against the real
+    // Shell_TrayWnd, without going through Read's other steps (the appbar rectangle, notification state).
     internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
     {
         occupied = [];
@@ -277,7 +277,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
         return Rectangle.FromLTRB(info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right, info.rcMonitor.bottom);
     }
 
-    // A point inside the taskbar, used only to ask what window is on top there (2.4). The taskbar's own
+    // A point inside the taskbar, used only to ask what window is on top there. The taskbar's own
     // centre, not the gauge's candidate run: the reader does not know the placement yet (GaugePlacement
     // runs afterwards, on the layout this produces), so this is a general "is the bar covered" probe
     // rather than the exact free-run point the design narrative describes.
