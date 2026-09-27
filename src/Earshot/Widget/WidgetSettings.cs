@@ -6,8 +6,8 @@ namespace Earshot.Widget;
 
 // v1.1: the AirPods widget's data side. Nested in EarshotSettings as Widget and persisted with it through
 // Earshot.Infra.SettingsJsonContext, which reaches it through EarshotSettings the way it reaches Streaming.
-// An older settings file with no Widget member reads as Default, so nothing about the widget switches on
-// by itself for a file an earlier build saved.
+// An older settings file with no Widget member reads as Default, and Default.Enabled is true: the watcher
+// starts for a file an earlier build saved, exactly as it would for a settings file this build wrote itself.
 //
 // Setters, not init accessors, for the reason StreamingSettings records: the source-generated reader
 // builds a type with init-only members through one initialiser that sets every member, so a member the

@@ -8,8 +8,9 @@ namespace Earshot.Composition;
 // The services one run of Earshot uses. Built by CompositionRoot.Build; each feature's
 // Configure hook replaces the null object it owns.
 //
-// In safe mode every assignment to Connection, Block or Protection is wrapped in its Safe
-// decorator, so no code path can install a live controller around the switch.
+// In safe mode every assignment to Connection, Block, Protection or MediaSessions is wrapped in its Safe
+// decorator, so no code path can install a live controller (or a live media-sessions source) around the
+// switch.
 internal sealed class ServiceRegistry
 {
     private IConnectionController _connection = new NullConnectionController();

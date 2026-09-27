@@ -5,9 +5,10 @@ using Windows.Media.Audio;
 
 namespace Earshot.Streaming;
 
-// The only file that calls WinRT. "Represents a connection that allows a remote device to stream audio to a
-// Windows device." Introduced in 10.0.19041.0, agile, and usable from any thread (MarshalingType.Agile,
-// ThreadingModel.Both), so nothing here needs or asks for a UI thread.
+// The only file in Earshot.Streaming that calls WinRT (the widget calls it too, from its own Widget files).
+// "Represents a connection that allows a remote device to stream audio to a Windows device." Introduced in
+// 10.0.19041.0, agile, and usable from any thread (MarshalingType.Agile, ThreadingModel.Both), so nothing
+// here needs or asks for a UI thread.
 // https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnection
 //
 // What it never does: pair anything (a desktop app cannot: DeviceInformationPairing.PairAsync is listed as

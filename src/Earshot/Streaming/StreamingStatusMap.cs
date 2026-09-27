@@ -4,9 +4,10 @@ using Windows.Media.Audio;
 namespace Earshot.Streaming;
 
 // The two WinRT enums, mapped onto Earshot's own. Apart from WindowsStreamingPlatform this is the only file
-// that names a Windows.* type, and it names these two so the mapping is checked against the real values
-// rather than a copy of them. Both maps have a default arm that returns the unknown member instead of
-// throwing, because a later Windows build may add a member.
+// in Earshot.Streaming that names a Windows.* type (the widget's own files name several, for its own WinRT
+// calls), and it names these two so the mapping is checked against the real values rather than a copy of
+// them. Both maps have a default arm that returns the unknown member instead of throwing, because a later
+// Windows build may add a member.
 // https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnectionopenresultstatus
 // https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnectionstate
 [SupportedOSPlatform("windows10.0.19041.0")]

@@ -41,6 +41,7 @@ public sealed class WidgetSettingsTests : IDisposable
 
         Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
         Assert.AreEqual(WidgetSettings.Default, store.Current.Widget);
+        Assert.IsTrue(store.Current.Widget.Enabled, "An older file starts the watcher: Default.Enabled is true.");
     }
 
     [TestMethod]
