@@ -458,18 +458,46 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ChangedAndCaseOpenedAreRaisedThroughUiPost()
     {
+        // M5: the prior version only checked that some post happened and some event happened, never that
+        // the SAME event was raised from inside a uiPost call, so it could not have failed had the code
+        // raised Changed or CaseOpened directly on the caller's thread instead. This tracks, at the instant
+        // each handler runs, whether execution is inside the uiPost action.
         var table = ProximityDecodeTable.Unproved with { LidOpenBit = 0 };
         var store = NewClaimStore();
         store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store, table);
+        bool insideUiPost = false;
+        var changedInsideUiPost = new List<bool>();
+        var caseOpenedInsideUiPost = new List<bool>();
+
+        var service = new WidgetStatusService(
+            () => _source, store, _settings, _deviceMonitor, () => null, _log,
+            action =>
+            {
+                Interlocked.Increment(ref _posts);
+                insideUiPost = true;
+                try
+                {
+                    action();
+                }
+                finally
+                {
+                    insideUiPost = false;
+                }
+            },
+            _clock, () => table);
+        service.Changed += (sender, e) => changedInsideUiPost.Add(insideUiPost);
+        service.CaseOpened += (sender, e) => caseOpenedInsideUiPost.Add(insideUiPost);
         service.Start();
         int postsBefore = _posts;
 
         _source.Raise(Owned(lid: 0x01));
 
         Assert.IsTrue(_posts > postsBefore);
-        Assert.IsTrue(_changedEvents.Count > 0);
-        Assert.AreEqual(1, _caseOpenedEvents.Count);
+        Assert.IsTrue(changedInsideUiPost.Count > 0, "Changed must have been raised.");
+        Assert.IsTrue(changedInsideUiPost.All(v => v), "Changed must be raised only from inside the uiPost action.");
+        Assert.AreEqual(1, caseOpenedInsideUiPost.Count);
+        Assert.IsTrue(caseOpenedInsideUiPost.All(v => v), "CaseOpened must be raised only from inside the uiPost action.");
+        service.Dispose();
     }
 
     // M3: Suspend's own Stop() call discarded the step outcome. A failing stop must be logged, at Warn.
