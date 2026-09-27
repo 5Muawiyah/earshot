@@ -81,6 +81,14 @@ internal sealed class TaskbarWatcher : IDisposable
         }
     }
 
+    // Signals the worker thread to stop and waits briefly, but never disposes _poke or _stop itself: the
+    // worker thread still owns them until its own Loop actually returns, which can be later than this
+    // call's 500 ms budget when a read is still in flight (UI Automation gives no way to cancel one). The
+    // old code disposed both handles here unconditionally, so a read that outlived the budget went on to
+    // have the worker thread wait on a handle this call had already disposed, throwing
+    // ObjectDisposedException on a background thread with nothing to catch it and taking the process down.
+    // Loop's own finally block disposes them instead, after the thread is certain never to touch them
+    // again, so only one thread ever calls Dispose on either handle.
     public void Dispose()
     {
         if (_disposed)
@@ -95,41 +103,52 @@ internal sealed class TaskbarWatcher : IDisposable
         {
             _thread.Join(TimeSpan.FromMilliseconds(500));
         }
-
-        _poke.Dispose();
-        _stop.Dispose();
+        else
+        {
+            // The thread never started, so nothing else will ever dispose these.
+            _poke.Dispose();
+            _stop.Dispose();
+        }
     }
 
     private void Loop()
     {
-        var handles = new WaitHandle[] { _poke, _stop.WaitHandle };
-        while (true)
+        try
         {
-            WaitHandle.WaitAny(handles, _pollIntervalMs);
-            if (_stop.IsSet)
+            var handles = new WaitHandle[] { _poke, _stop.WaitHandle };
+            while (true)
             {
-                return;
-            }
+                WaitHandle.WaitAny(handles, _pollIntervalMs);
+                if (_stop.IsSet)
+                {
+                    return;
+                }
 
-            ITaskbarReader.Result result;
-            long started = _time.GetTimestamp();
-            try
-            {
-                result = _reader.Read(_shownGauge());
-            }
-            catch (Exception ex)
-            {
-                // A crash here must never reach the UI thread with the process still believing the gauge
-                // is attached: the widget has no reference to anything that can touch a device, so the
-                // worst outcome is a gauge stuck hidden with the tray icon shown.
-                _log.Error("Taskbar watcher: the read threw.", ex);
-                result = ITaskbarReader.Result.Fail(new TaskbarReadFailure(
-                    TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromHResult("taskbar-watcher:read", NativeCodes.NotAvailable, ex.Message)));
-            }
+                ITaskbarReader.Result result;
+                long started = _time.GetTimestamp();
+                try
+                {
+                    result = _reader.Read(_shownGauge());
+                }
+                catch (Exception ex)
+                {
+                    // A crash here must never reach the UI thread with the process still believing the
+                    // gauge is attached: the widget has no reference to anything that can touch a device,
+                    // so the worst outcome is a gauge stuck hidden with the tray icon shown.
+                    _log.Error("Taskbar watcher: the read threw.", ex);
+                    result = ITaskbarReader.Result.Fail(new TaskbarReadFailure(
+                        TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromHResult("taskbar-watcher:read", NativeCodes.NotAvailable, ex.Message)));
+                }
 
-            RecordDuration(_time.GetElapsedTime(started));
-            ITaskbarReader.Result captured = result;
-            _uiPost(() => _onResult(captured));
+                RecordDuration(_time.GetElapsedTime(started));
+                ITaskbarReader.Result captured = result;
+                _uiPost(() => _onResult(captured));
+            }
+        }
+        finally
+        {
+            _poke.Dispose();
+            _stop.Dispose();
         }
     }
 

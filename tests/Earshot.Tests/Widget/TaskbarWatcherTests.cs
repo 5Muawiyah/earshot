@@ -8,6 +8,21 @@ internal sealed class FakeTaskbarReader : ITaskbarReader
     private readonly Lock _gate = new();
     private ITaskbarReader.Result _next = ITaskbarReader.Result.Fail(new TaskbarReadFailure(TaskbarReadFailureStep.NoTaskbar, new Earshot.Contracts.StepOutcome("fake", false, 0, "S_OK", null)));
 
+    // Optional: lets a test hold a read open, e.g. to dispose the watcher while one is still in flight.
+    // Null (the default) never blocks, matching every existing test's expectations.
+    private readonly ManualResetEventSlim? _readStarted;
+    private readonly ManualResetEventSlim? _releaseRead;
+
+    public FakeTaskbarReader()
+    {
+    }
+
+    public FakeTaskbarReader(ManualResetEventSlim readStarted, ManualResetEventSlim releaseRead)
+    {
+        _readStarted = readStarted;
+        _releaseRead = releaseRead;
+    }
+
     public int ReadCount { get; private set; }
 
     public ShownGauge? LastShownGauge { get; private set; }
@@ -22,6 +37,9 @@ internal sealed class FakeTaskbarReader : ITaskbarReader
 
     public ITaskbarReader.Result Read(ShownGauge? shownGauge)
     {
+        _readStarted?.Set();
+        _releaseRead?.Wait();
+
         lock (_gate)
         {
             ReadCount++;
@@ -121,6 +139,59 @@ public sealed class TaskbarWatcherTests
         Assert.AreEqual(countAfterDispose, reader.ReadCount, "No read happens after Dispose.");
 
         // A second Dispose must not throw or hang.
+        watcher.Dispose();
+    }
+
+    // Dispose joins the worker thread for at most 500 ms then, on the old code, disposed the poke and stop
+    // wait handles regardless of whether the thread had actually exited. A read still in flight past that
+    // budget meant the worker thread went on to wait on a handle Dispose had already disposed, throwing
+    // ObjectDisposedException on a background thread with nothing to catch it: on the old code this crashes
+    // the process it runs in, which is exactly what a security review reported happening to a test host.
+    // The fix moves disposal of the handles onto the worker thread itself (a finally block at the end of
+    // Loop), so the UI thread's Dispose call never races the worker for them.
+    [TestMethod]
+    public void DisposeDuringAReadStillInFlightDoesNotThrow()
+    {
+        using var readStarted = new ManualResetEventSlim(false);
+        using var releaseRead = new ManualResetEventSlim(false);
+        var reader = new FakeTaskbarReader(readStarted, releaseRead);
+        var log = new CapturingLog();
+        var watcher = new TaskbarWatcher(reader, () => null, _ => { }, ImmediateUiPost, log, TimeProvider.System)
+        {
+            PollIntervalMs = 20,
+        };
+
+        watcher.Start();
+        Assert.IsTrue(readStarted.Wait(TimeSpan.FromSeconds(5)), "The fake read never started.");
+
+        // Dispose runs on its own thread so the read can still be released from here once Dispose's 500 ms
+        // join budget has had time to elapse (the read is still blocked at that point).
+        Exception? disposeThrew = null;
+        var disposeThread = new Thread(() =>
+        {
+            try
+            {
+                watcher.Dispose();
+            }
+            catch (Exception ex)
+            {
+                disposeThrew = ex;
+            }
+        });
+        disposeThread.Start();
+        Assert.IsTrue(disposeThread.Join(TimeSpan.FromSeconds(5)), "Dispose must return even while a read is still in flight.");
+        Assert.IsNull(disposeThrew, "Dispose itself must not throw.");
+
+        // Only now does the blocked read return, deep inside the worker thread's loop, exactly where the
+        // old code would go on to touch a wait handle Dispose had already disposed.
+        releaseRead.Set();
+
+        // If the worker thread throws an unhandled exception here, it takes the whole test process down;
+        // reaching this line at all is part of the proof. A short wait lets the worker actually finish its
+        // final iteration and dispose its own handles before the test ends.
+        Thread.Sleep(200);
+
+        // Safe, and still no throw, whether or not the worker had already finished.
         watcher.Dispose();
     }
 }
