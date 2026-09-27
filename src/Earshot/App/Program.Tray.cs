@@ -1,9 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using Earshot.App;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Interop;
 using Earshot.Tray;
+using Earshot.Widget.Alert;
 
 namespace Earshot;
 
@@ -234,6 +237,23 @@ internal static partial class Program
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon));
+
+                // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
+                // constructed below): the toast route's AppUserModelID must be set before a window or a toast
+                // exists. A failure here must not stop the tray; it is logged and the widget's low battery
+                // alert simply falls back to the card, as ToastNotifier itself already does for any failure.
+                int amuidHr = Shell.SetCurrentProcessExplicitAppUserModelID(NotificationRegistration.AppUserModelId);
+                log.Write(
+                    amuidHr >= 0 ? LogLevel.Info : LogLevel.Warn,
+                    "SetCurrentProcessExplicitAppUserModelID: 0x" + amuidHr.ToString("X8", CultureInfo.InvariantCulture) + ".");
+
+                // Run once at tray start, idempotent: writes or repairs the per-user Start menu shortcut the
+                // toast route needs. Never in safe mode or against a redirected data root (WritesBlocked).
+                var notificationRegistration = new NotificationRegistration(
+                    new RealShellLinkWriter(), log, paths.IsSafeMode, paths.IsRedirected,
+                    Environment.GetFolderPath(Environment.SpecialFolder.Programs), Environment.ProcessPath, paths.InstalledExe);
+                notificationRegistration.Register();
+
                 context = new TrayContext(registry, coordinator, new TrayStartOptions(
                     FirstRun: settings.LastLoadStatus == SettingsLoadStatus.CreatedDefaults,
                     SettingsStatus: settings.LastLoadStatus,
