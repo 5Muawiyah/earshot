@@ -17,6 +17,15 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
 
     private IUIAutomation? _automation;
 
+    // Test seam only: counts real constructions so WidgetRealSurfaceGuardTests can prove a test harness
+    // never builds this class in place of a fake. Never read or reset in production.
+    internal static int ConstructionCount;
+
+    public UiaTaskbarReader()
+    {
+        Interlocked.Increment(ref ConstructionCount);
+    }
+
     public ITaskbarReader.Result Read(ShownGauge? shownGauge)
     {
         nint trayHandle = NativeMethods.FindWindowW(ShellTrayWndClass, null);

@@ -21,10 +21,15 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     private bool _tracking;
     private bool _shown;
 
+    // Test seam only: counts real constructions so WidgetRealSurfaceGuardTests can prove a test harness
+    // never builds this class in place of a fake. Never read or reset in production.
+    internal static int ConstructionCount;
+
     public GaugeWindow(ILog log)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
+        Interlocked.Increment(ref ConstructionCount);
 
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;

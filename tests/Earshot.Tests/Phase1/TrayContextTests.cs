@@ -1396,6 +1396,13 @@ internal sealed class TrayHarness : IDisposable
         {
             s.PinnedContainerId = AirPodsContainer;
             s.PinnedAddress = AirPodsAddress;
+            // The widget defaults to off here, unlike EarshotSettings.Default: WireWidget calls
+            // CompositionRoot.BuildWidget unconditionally from the TrayContext constructor, and with the
+            // widget on that builds a real BLE watcher, a real UI Automation taskbar reader and (once a
+            // layout places it) a real topmost gauge window. A harness-built TrayContext is not a named
+            // live test, so it stays off unless a test asks for it through the settings callback below,
+            // the same way a test asks for anything else non-default.
+            s.Widget = s.Widget with { Enabled = false };
             settings?.Invoke(s);
         });
 
