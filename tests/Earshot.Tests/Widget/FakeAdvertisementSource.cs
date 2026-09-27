@@ -6,7 +6,17 @@ namespace Earshot.Tests.Widget;
 // No Core Bluetooth behind it. A test drives State directly and raises Received/Stopped by hand.
 internal sealed class FakeAdvertisementSource : IAdvertisementSource
 {
-    public AdvertisementSourceState State { get; set; } = AdvertisementSourceState.Created;
+    private AdvertisementSourceState _state = AdvertisementSourceState.Created;
+
+    // Lets a test make a state read throw, the way a real watcher's Status getter reading a COM property
+    // could, so a timer callback's own exception boundary can be exercised without a real watcher.
+    public Func<AdvertisementSourceState>? StateOverride { get; set; }
+
+    public AdvertisementSourceState State
+    {
+        get => StateOverride is { } f ? f() : _state;
+        set => _state = value;
+    }
 
     public int StartCalls { get; private set; }
 

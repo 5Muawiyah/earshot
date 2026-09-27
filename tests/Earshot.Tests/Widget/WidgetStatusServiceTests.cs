@@ -812,6 +812,25 @@ public sealed class WidgetStatusServiceTests : IDisposable
         }
     }
 
+    // An exception from a state read (a COM property on the real watcher) on a real timer thread must never
+    // escape and end the process: every timer callback catches, logs with the code, and carries on as though
+    // this attempt simply failed.
+    [TestMethod]
+    public void ARetryTimerCallbackThatThrowsIsCaughtAndLoggedNotLeftToEscape()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
+        _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay);
+
+        Assert.IsTrue(
+            _log.Entries.Any(e => e.Level == Earshot.Contracts.LogLevel.Error && e.Message.Contains("0x80070005", StringComparison.OrdinalIgnoreCase)),
+            "The exception's own code must be logged.");
+    }
+
     [TestMethod]
     public void RefreshTriesOnceAtOnce()
     {

@@ -681,27 +681,39 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _retryTimer = _timeProvider.CreateTimer(static state => ((WidgetStatusService)state!).OnRetryDue(), this, _retryDelay, Timeout.InfiniteTimeSpan);
     }
 
+    // Runs on a real timer thread when the real advertisement source is live: an unhandled exception there
+    // (a COM property on the watcher throwing, for instance) would otherwise end the whole process, so the
+    // entire attempt is caught. The raw code is logged, never swallowed, and the retry is left armed at its
+    // current delay so the doubling schedule simply tries again rather than stopping forever.
     private void OnRetryDue()
     {
-        lock (_gate)
+        try
         {
-            if (_source is null)
+            lock (_gate)
             {
-                return;
-            }
+                if (_source is null)
+                {
+                    return;
+                }
 
-            StepOutcome step = _source.Start();
-            ApplyStartStepLocked(step);
-            if (_watcherState == WidgetWatcherState.Started)
-            {
-                _retryDelay = TimeSpan.Zero;
-                CancelRetryLocked();
+                StepOutcome step = _source.Start();
+                ApplyStartStepLocked(step);
+                if (_watcherState == WidgetWatcherState.Started)
+                {
+                    _retryDelay = TimeSpan.Zero;
+                    CancelRetryLocked();
+                }
+                else
+                {
+                    _retryDelay = Min(_retryDelay * 2, WidgetTiming.WatcherRetryLimit);
+                    ArmRetryTimerLocked();
+                }
             }
-            else
-            {
-                _retryDelay = Min(_retryDelay * 2, WidgetTiming.WatcherRetryLimit);
-                ArmRetryTimerLocked();
-            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Widget watcher retry failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+            return;
         }
 
         PublishAndNotify();
@@ -878,24 +890,33 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // unknown-form shapes as prefix and length (never the bytes themselves), and the watcher state. Compared
     // field by field rather than with WidgetCounters' own record equality, since UnknownForms is a fresh
     // array on every read and would never compare equal to itself by reference.
+    // Also runs on a real timer thread: the same boundary as OnRetryDue, so nothing here can end the process
+    // either.
     private void OnCountersLogDue()
     {
-        WidgetCounters current;
-        WidgetWatcherState watcherState;
-        lock (_gate)
+        try
         {
-            current = BuildCountersLocked();
-            watcherState = _watcherState;
-            if (_lastLoggedCounters is WidgetCounters last && watcherState == _lastLoggedWatcherState && CountersEqual(current, last))
+            WidgetCounters current;
+            WidgetWatcherState watcherState;
+            lock (_gate)
             {
-                return;
+                current = BuildCountersLocked();
+                watcherState = _watcherState;
+                if (_lastLoggedCounters is WidgetCounters last && watcherState == _lastLoggedWatcherState && CountersEqual(current, last))
+                {
+                    return;
+                }
+
+                _lastLoggedCounters = current;
+                _lastLoggedWatcherState = watcherState;
             }
 
-            _lastLoggedCounters = current;
-            _lastLoggedWatcherState = watcherState;
+            _log.Info(FormatCountersLine(current, watcherState));
         }
-
-        _log.Info(FormatCountersLine(current, watcherState));
+        catch (Exception ex)
+        {
+            _log.Error("Widget counters logging failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+        }
     }
 
     private static bool CountersEqual(WidgetCounters a, WidgetCounters b) =>
