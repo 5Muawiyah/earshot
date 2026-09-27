@@ -112,16 +112,22 @@ internal sealed class ClaimFlow
         return new ClaimOutcome(ClaimOutcomeStatus.Claimed, "AirPods claimed.", claim);
     }
 
-    // Once the paper's claim about the case nibble is proved, a candidate also needs a readable case
-    // nibble, since the owner was told to open the lid: a closed stranger then cannot be claimed.
+    // A candidate with every nibble unknown carries nothing to claim from at all: never claimed, whatever
+    // the table proves. Once the paper's claim about the case nibble is proved, a candidate also needs a
+    // readable case nibble, since the owner was told to open the lid: a closed stranger then cannot be
+    // claimed either.
     private static bool Qualifies(ProximityMessage message, ProximityDecodeTable table)
     {
-        if (table.CaseNibbleReadsOnlyWithLidOpen != true)
+        bool caseKnown = BatteryNibble.ToPercent(message.BatteryB & 0x0F) is not null;
+        bool aBudIsKnown = BatteryNibble.ToPercent((message.BatteryA >> 4) & 0x0F) is not null ||
+            BatteryNibble.ToPercent(message.BatteryA & 0x0F) is not null;
+
+        if (!caseKnown && !aBudIsKnown)
         {
-            return true;
+            return false;
         }
 
-        return BatteryNibble.ToPercent(message.BatteryB & 0x0F) is not null;
+        return table.CaseNibbleReadsOnlyWithLidOpen != true || caseKnown;
     }
 
     private ClaimOutcome Refuse(ClaimOutcomeStatus status, string message)

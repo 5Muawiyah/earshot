@@ -115,6 +115,29 @@ public sealed class ClaimFlowTests
         Assert.AreEqual(ClaimOutcomeStatus.NoSender, outcome.Status);
     }
 
+    // A candidate with every nibble unknown (0xF, or 11 to 14) carries nothing usable to claim from: it must
+    // be refused rather than claimed with an empty battery reference.
+    [TestMethod]
+    public async Task AMessageWithEveryNibbleUnknownCannotBeClaimedFrom()
+    {
+        using var temp = new TempFolder();
+        var log = new CapturingLog();
+        var store = new ClaimStore(temp.File("claim.json"), log);
+        var flow = new ClaimFlow(store, log);
+        var source = new FakeAdvertisementSource { State = AdvertisementSourceState.Started };
+        var clock = new TestTimeProvider();
+
+        Task<ClaimOutcome> task = flow.RunAsync(
+            source, clock, WidgetTiming.ClaimWindow, signalThresholdDbm: (sbyte)-70, ProximityDecodeTable.Unproved, CancellationToken.None);
+        source.Raise(new AdvertisementSample(
+            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryA: 0xFF, batteryB: 0x0F), Rssi: -60, clock.GetUtcNow(), SenderTag: 1));
+        clock.Advance(WidgetTiming.ClaimWindow);
+        ClaimOutcome outcome = await task;
+        await store.IdleAsync();
+
+        Assert.AreEqual(ClaimOutcomeStatus.NoSender, outcome.Status);
+    }
+
     [TestMethod]
     public async Task WithTheLidRuleProvedAClosedCaseCannotBeClaimed()
     {
