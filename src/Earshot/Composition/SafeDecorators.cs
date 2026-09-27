@@ -1,4 +1,5 @@
 using Earshot.Contracts;
+using Earshot.Widget.EarPause;
 
 namespace Earshot.Composition;
 
@@ -23,6 +24,9 @@ internal static class SafeDecorators
 
     public static IAudioProtectionController Wrap(IAudioProtectionController inner, ILog log) =>
         inner as SafeAudioProtectionController ?? new SafeAudioProtectionController(inner, log);
+
+    public static IMediaSessions Wrap(IMediaSessions inner, ILog log) =>
+        inner as SafeMediaSessions ?? new SafeMediaSessions(inner, log);
 
     // No native call was made, so the step carries NativeCodes.NotAttempted rather than 0 (S_OK).
     internal static StepOutcome RefusedStep(string action) =>

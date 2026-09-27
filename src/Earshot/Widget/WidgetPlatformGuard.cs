@@ -15,4 +15,9 @@ internal static class WidgetPlatformGuard
 
     [SupportedOSPlatformGuard("windows10.0.19041.0")]
     internal static bool HasToastNotifications { get; } = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041);
+
+    // GlobalSystemMediaTransportControlsSessionManager needs Windows 10, version 1809 (10.0.17763.0).
+    // https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessionmanager
+    [SupportedOSPlatformGuard("windows10.0.17763.0")]
+    internal static bool HasMediaSessions { get; } = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763);
 }

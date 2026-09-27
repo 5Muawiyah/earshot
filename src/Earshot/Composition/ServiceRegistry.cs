@@ -1,5 +1,7 @@
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
+using Earshot.Widget;
+using Earshot.Widget.EarPause;
 
 namespace Earshot.Composition;
 
@@ -89,4 +91,17 @@ internal sealed class ServiceRegistry
     public IBatteryProvider Battery { get; set; } = new NoBatterySource();
 
     public ICardPresenter Cards { get; set; }
+
+    private IMediaSessions? _mediaSessions;
+
+    // Auto-pause's media sessions. Null until the widget's composition wires one in; wrapped in safe mode
+    // the way Connection, Block and Protection are, so no code path installs a live one around the switch.
+    public IMediaSessions? MediaSessions
+    {
+        get => _mediaSessions;
+        set => _mediaSessions = value is null ? null : SafeMode ? SafeDecorators.Wrap(value, Log) : value;
+    }
+
+    // The widget's state model. Null until the widget's composition wires one in.
+    public IWidgetStatus? WidgetStatus { get; set; }
 }
