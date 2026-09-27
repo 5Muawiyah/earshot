@@ -577,20 +577,35 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AStoppedSourceIsStartedAgainAfterTheRetryDelayDoubling()
     {
+        // M5: the prior version made the fake "succeed" on the very first retry (State reset to Started
+        // unconditionally), so it proved only that one retry happens at 30 s and never exercised the
+        // doubling or the cap at all. The fake here keeps failing every attempt, so every step of
+        // 30, 60, 120, 240, 480, then the 15-minute cap repeating, is actually driven and checked.
         var store = NewClaimStore();
         using WidgetStatusService service = NewService(store);
         service.Start();
 
-        _source.State = AdvertisementSourceState.Aborted; // the next Start() will still "succeed" per the fake
+        _source.StartResult = () => StepOutcomes.FromHResult("fake-start", 1, ok: false);
         _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
-        int startsAfterStop = _source.StartCalls;
+        int expectedStarts = _source.StartCalls;
 
-        _clock.Advance(WidgetTiming.WatcherRetryDelay - TimeSpan.FromSeconds(1));
-        Assert.AreEqual(startsAfterStop, _source.StartCalls, "Too early: the first retry must not have run yet.");
+        TimeSpan[] expectedDelays =
+        {
+            TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(120),
+            TimeSpan.FromSeconds(240), TimeSpan.FromSeconds(480),
+            WidgetTiming.WatcherRetryLimit, WidgetTiming.WatcherRetryLimit,
+        };
 
-        _clock.Advance(TimeSpan.FromSeconds(2));
-        Assert.AreEqual(startsAfterStop + 1, _source.StartCalls);
-        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+        foreach (TimeSpan delay in expectedDelays)
+        {
+            _clock.Advance(delay - TimeSpan.FromSeconds(1));
+            Assert.AreEqual(expectedStarts, _source.StartCalls, "Too early for the next retry (delay " + delay + ").");
+
+            _clock.Advance(TimeSpan.FromSeconds(1));
+            expectedStarts++;
+            Assert.AreEqual(expectedStarts, _source.StartCalls, "The retry due at " + delay + " did not run.");
+            Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher, "Every retry keeps failing, so the watcher must stay Stopped.");
+        }
     }
 
     [TestMethod]
