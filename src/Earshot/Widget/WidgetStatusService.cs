@@ -486,6 +486,16 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool caseOpenedEdge = false;
         DateTimeOffset caseOpenedAt = at;
 
+        // 11 to 14 are a shape neither permitted source describes at all (unlike the documented 0xF
+        // "unknown"), so it is logged as the form drifting rather than treated the same as ordinary unknown.
+        // Never the nibble value itself: only that one was out of range.
+        if (BatteryNibble.IsOutOfRange((message.BatteryA >> 4) & 0x0F) ||
+            BatteryNibble.IsOutOfRange(message.BatteryA & 0x0F) ||
+            BatteryNibble.IsOutOfRange(message.BatteryB & 0x0F))
+        {
+            _log.Warn("Widget: a battery nibble read 11 to 14, a shape the documented form does not describe: the form may have drifted.");
+        }
+
         lock (_gate)
         {
             // A live connection to this PC is read from Core Audio alone. Because addresses rotate, the

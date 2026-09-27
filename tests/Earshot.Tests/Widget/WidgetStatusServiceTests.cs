@@ -241,6 +241,21 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(30, service.Current.Right.Percent);
     }
 
+    // BatteryNibble.IsOutOfRange (11 to 14) needed a caller: a nibble that shape is logged as the form
+    // drifting, never as an ordinary unknown (0xF) and never with the nibble value itself in the line.
+    [TestMethod]
+    public void AnOutOfRangeNibbleLogsThatTheFormDrifted()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+
+        _source.Raise(Owned(batteryA: 0x0B)); // low nibble 0xB (11): out of range, not the documented 0xF
+
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "form may have drifted"));
+    }
+
     [TestMethod]
     public void BatteryKeepsItsReadTimeAndNeverExpires()
     {
