@@ -6,7 +6,7 @@ public enum LatchState { Armed, Fired }
 // once; Fired and a known percent at least one 10% step above the threshold re-arms; an unknown percent
 // changes nothing. A threshold change arms every latch, so the next reading at or below the new threshold
 // fires once and a value already above it re-arms by the ordinary rule. Only owned readings feed this: the
-// caller passes a decoded reading only after the ownership rule reads Owned or OwnedByLiveConnection.
+// caller passes a decoded reading only after the ownership rule reads Owned.
 internal sealed class LowBatteryLatch
 {
     public const int DefaultThresholdPercent = 20;

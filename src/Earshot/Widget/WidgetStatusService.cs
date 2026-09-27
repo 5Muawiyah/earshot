@@ -44,11 +44,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private long _cachedUnknownFormsVersion = -1;
     private IReadOnlyList<(byte? Prefix, int Length, long Count)> _cachedUnknownForms = Array.Empty<(byte?, int, long)>();
 
-    // Distinct sender tags, matching the current claim's model and colour and clearing its signal threshold,
-    // seen within WidgetTiming.LiveCandidateWindow. Used only to decide whether a live connection to this PC
-    // confirms exactly one candidate (D6): two senders clearing the threshold in the window make it ambiguous.
-    private readonly Dictionary<uint, DateTimeOffset> _liveCandidates = new();
-
     private IAdvertisementSource? _source;
     private bool _stopRequested;
     private bool _settingsHooked;
@@ -62,8 +57,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     private long _allSections, _appleSections, _otherCompanySections, _proximityItems;
     private long _okForm, _truncated, _unknownForm;
-    private long _owned, _ownedByLiveConnection, _noClaim, _modelOrColourMismatch;
-    private long _signalBelowThreshold, _batteryUnreadable, _batteryInconsistent, _ambiguousCandidates;
+    private long _owned, _noClaim, _modelOrColourMismatch;
+    private long _signalBelowThreshold, _batteryUnreadable, _batteryInconsistent;
 
     // Everything below is read and written only while holding _gate, so a ClaimAsync/ForgetClaim call (from
     // whatever thread the owner's UI runs on) and a Received/Stopped callback never race each other.
@@ -287,7 +282,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 if (!closed)
                 {
                     _claim = outcome.Claim;
-                    _liveCandidates.Clear();
                     ResetReadingsLocked();
                 }
             }
@@ -312,7 +306,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             _claimStore.ForgetClaim();
             _claim = null;
-            _liveCandidates.Clear();
             ResetReadingsLocked();
         }
 
@@ -491,8 +484,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         DateTimeOffset at = sample.Timestamp;
-        uint senderTag = sample.SenderTag;
-        _uiPost(() => HandleParsedOnUiThread(parse, sample.Rssi, senderTag, at));
+        _uiPost(() => HandleParsedOnUiThread(parse, sample.Rssi, at));
     }
 
     private void RecordUnknownForm(byte? prefix, int length)
@@ -513,17 +505,17 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    private void HandleParsedOnUiThread(ProximityParse parse, sbyte rssi, uint senderTag, DateTimeOffset at)
+    private void HandleParsedOnUiThread(ProximityParse parse, sbyte rssi, DateTimeOffset at)
     {
         if (parse.Status == ProximityParseStatus.Ok && parse.Message is ProximityMessage message)
         {
-            ApplyOwnedMessage(message, rssi, senderTag, at);
+            ApplyOwnedMessage(message, rssi, at);
         }
 
         PublishAndNotify();
     }
 
-    private void ApplyOwnedMessage(ProximityMessage message, sbyte rssi, uint senderTag, DateTimeOffset at)
+    private void ApplyOwnedMessage(ProximityMessage message, sbyte rssi, DateTimeOffset at)
     {
         ProximityDecodeTable table = _decodeTable();
         bool caseOpenedEdge = false;
@@ -546,24 +538,19 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 return; // nothing after Close saves the claim or raises CaseOpened
             }
 
-            // A live connection to this PC is read from Core Audio alone. Because addresses rotate, the
-            // owner's own set can briefly appear under two sender tags; the live waiver applies only when
-            // exactly one distinct sender matching the claim has cleared the threshold within the candidate
-            // window (D6, B1), so that count is tracked here rather than assumed to be one.
-            bool live = _thisPcActive;
-            int candidatesClearingThreshold = UpdateLiveCandidatesLocked(message, rssi, senderTag, at);
+            // Owner decision, 2026-09-27 ("same checks always"): a live connection to this PC used to waive
+            // battery consistency for one candidate (D6). It no longer does; the same checks run every time,
+            // whether or not this PC renders to the AirPods, so there is nothing here to read from Core Audio
+            // and no sender tag to track across messages any more.
             var input = new OwnershipInput(
                 new ProximityParse(ProximityParseStatus.Ok, message, null, null, 1, Array.Empty<byte>()),
-                rssi, _claim, table, live, candidatesClearingThreshold, at);
+                rssi, _claim, table, at);
             OwnershipResult result = OwnershipRule.Evaluate(input);
 
             switch (result.Verdict)
             {
                 case OwnershipVerdict.Owned:
                     Interlocked.Increment(ref _owned);
-                    break;
-                case OwnershipVerdict.OwnedByLiveConnection:
-                    Interlocked.Increment(ref _ownedByLiveConnection);
                     break;
                 case OwnershipVerdict.NoClaim:
                     Interlocked.Increment(ref _noClaim);
@@ -579,9 +566,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                     return;
                 case OwnershipVerdict.BatteryInconsistent:
                     Interlocked.Increment(ref _batteryInconsistent);
-                    return;
-                case OwnershipVerdict.AmbiguousCandidates:
-                    Interlocked.Increment(ref _ambiguousCandidates);
                     return;
                 default:
                     return;
@@ -601,38 +585,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             _uiPost(() => CaseOpened?.Invoke(this, new CaseOpenedEventArgs(caseOpenedAt)));
         }
-    }
-
-    // Must be called holding _gate. Prunes sender tags last seen outside WidgetTiming.LiveCandidateWindow,
-    // then, when this message matches the current claim's model and colour and clears its threshold, records
-    // its sender tag as a candidate. Returns the resulting distinct-candidate count.
-    private int UpdateLiveCandidatesLocked(ProximityMessage message, sbyte rssi, uint senderTag, DateTimeOffset at)
-    {
-        List<uint>? stale = null;
-        foreach (KeyValuePair<uint, DateTimeOffset> entry in _liveCandidates)
-        {
-            if (at - entry.Value > WidgetTiming.LiveCandidateWindow)
-            {
-                (stale ??= new List<uint>()).Add(entry.Key);
-            }
-        }
-
-        if (stale is not null)
-        {
-            foreach (uint key in stale)
-            {
-                _liveCandidates.Remove(key);
-            }
-        }
-
-        if (_claim is WidgetClaim claim &&
-            message.ModelHigh == claim.ModelHigh && message.ModelLow == claim.ModelLow && message.Colour == claim.Colour &&
-            rssi >= claim.SignalThresholdDbm)
-        {
-            _liveCandidates[senderTag] = at;
-        }
-
-        return _liveCandidates.Count;
     }
 
     // Must be called holding _gate. Returns true when this reading raised the lid's rising edge or a new
@@ -903,13 +855,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Interlocked.Read(ref _truncated),
             Interlocked.Read(ref _unknownForm),
             Interlocked.Read(ref _owned),
-            Interlocked.Read(ref _ownedByLiveConnection),
             Interlocked.Read(ref _noClaim),
             Interlocked.Read(ref _modelOrColourMismatch),
             Interlocked.Read(ref _signalBelowThreshold),
             Interlocked.Read(ref _batteryUnreadable),
             Interlocked.Read(ref _batteryInconsistent),
-            Interlocked.Read(ref _ambiguousCandidates),
             _cachedUnknownForms);
     }
 
@@ -946,13 +896,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         a.Truncated == b.Truncated &&
         a.UnknownForm == b.UnknownForm &&
         a.Owned == b.Owned &&
-        a.OwnedByLiveConnection == b.OwnedByLiveConnection &&
         a.NoClaim == b.NoClaim &&
         a.ModelOrColourMismatch == b.ModelOrColourMismatch &&
         a.SignalBelowThreshold == b.SignalBelowThreshold &&
         a.BatteryUnreadable == b.BatteryUnreadable &&
         a.BatteryInconsistent == b.BatteryInconsistent &&
-        a.AmbiguousCandidates == b.AmbiguousCandidates &&
         a.UnknownForms.SequenceEqual(b.UnknownForms);
 
     // Numbers and shapes only: prefix and length describe an unknown form's shape, never its bytes.
@@ -971,13 +919,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             " truncated=" + c.Truncated +
             " unknownForm=" + c.UnknownForm +
             " owned=" + c.Owned +
-            " ownedByLiveConnection=" + c.OwnedByLiveConnection +
             " noClaim=" + c.NoClaim +
             " modelOrColourMismatch=" + c.ModelOrColourMismatch +
             " signalBelowThreshold=" + c.SignalBelowThreshold +
             " batteryUnreadable=" + c.BatteryUnreadable +
             " batteryInconsistent=" + c.BatteryInconsistent +
-            " ambiguousCandidates=" + c.AmbiguousCandidates +
             " unknownFormShapes=[" + shapes + "]";
     }
 }

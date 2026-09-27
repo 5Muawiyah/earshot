@@ -54,7 +54,7 @@ internal sealed class AutoPause
         Guid watchedContainerId,
         CancellationToken ct)
     {
-        bool owned = verdict is OwnershipVerdict.Owned or OwnershipVerdict.OwnedByLiveConnection;
+        bool owned = verdict is OwnershipVerdict.Owned;
 
         // A bud's proved bit going true to false since the last OWNED reading. A stranger's reading never
         // updates the last-known state, so it can neither cause nor hide an edge.

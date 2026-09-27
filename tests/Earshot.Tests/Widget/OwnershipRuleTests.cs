@@ -26,9 +26,8 @@ public sealed class OwnershipRuleTests
         Last: last ?? new OwnedBattery(null, null, null, ClaimedAt));
 
     private static OwnershipInput Input(
-        ProximityParse parse, WidgetClaim? claim, ProximityDecodeTable? table = null, sbyte rssi = -50,
-        bool live = false, int candidates = 0) =>
-        new(parse, rssi, claim, table ?? ProximityDecodeTable.Unproved, live, candidates, Now);
+        ProximityParse parse, WidgetClaim? claim, ProximityDecodeTable? table = null, sbyte rssi = -50) =>
+        new(parse, rssi, claim, table ?? ProximityDecodeTable.Unproved, Now);
 
     [TestMethod]
     public void WithoutAClaimNothingIsOwnedAndTheCountSaysNoClaim()
@@ -168,28 +167,32 @@ public sealed class OwnershipRuleTests
         Assert.IsNull(result.UpdatedLast);
     }
 
+    // Round 2, owner decision 2026-09-27 ("same checks always"): a live connection used to waive this exact
+    // jump. There is no live concept left in OwnershipInput at all; the same message now simply fails the
+    // ordinary consistency check, like any other reading would.
     [TestMethod]
-    public void ALiveConnectionConfirmsOneCandidateAndReSyncsTheLastReading()
+    public void ABatteryJumpTheOldLiveWaiverWouldHaveAcceptedIsNowInconsistent()
     {
         WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
-        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x09); // a jump that would otherwise be inconsistent
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x09); // case 5 -> 9, no charging bit proved
 
-        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50, live: true, candidates: 1));
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
 
-        Assert.AreEqual(OwnershipVerdict.OwnedByLiveConnection, result.Verdict);
-        Assert.AreEqual(9, result.UpdatedLast!.Case);
+        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
+        Assert.IsNull(result.UpdatedLast);
     }
 
+    // Round 2, owner decision 2026-09-27: candidate counting went with the waiver, so there is nothing left
+    // to make "two candidates" ambiguous. A consistent reading is Owned by the ordinary checks alone.
     [TestMethod]
-    public void ALiveConnectionConfirmsNothingWhenTwoCandidatesClearTheThreshold()
+    public void AConsistentReadingIsOwnedWithNoCandidateCountToConsult()
     {
         WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
-        ProximityMessage m = Message();
+        ProximityMessage m = Message(); // case 0, consistent (lower than last 5)
 
-        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50, live: true, candidates: 2));
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
 
-        Assert.AreEqual(OwnershipVerdict.AmbiguousCandidates, result.Verdict);
-        Assert.IsNull(result.UpdatedLast);
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
     }
 
     [TestMethod]

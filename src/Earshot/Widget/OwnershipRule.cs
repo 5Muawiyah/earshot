@@ -1,24 +1,26 @@
 namespace Earshot.Widget;
 
-// The owner's rule, applied exactly: his only if model and colour match the claim, the signal clears the
-// threshold, and the battery is consistent with his last reading; a live connection to this PC confirms
-// outright; short of that, fail closed; unmatched devices are counted and nothing else.
+// The owner's rule, applied exactly, the same way every time: his only if model and colour match the
+// claim, the signal clears the threshold, and the battery is consistent with his last reading; short of
+// that, fail closed; unmatched devices are counted and nothing else.
+//
+// Owner decision, 2026-09-27 ("same checks always"): a live connection to this PC used to waive the
+// battery-consistency check for exactly one candidate. It no longer does. A live connection confirms
+// nothing here; the way to re-sync after a jump this rule refuses is to redo the claim by opening the
+// case next to the PC. There is deliberately no field on OwnershipInput for it any more.
 public enum OwnershipVerdict
 {
     Owned,                    // every check passed
-    OwnedByLiveConnection,    // model, colour and signal passed; battery waived by a live connection to this PC
     NoClaim,
     NotEvaluated,             // the parse was not Ok (truncated, wrong type, unknown form)
     ModelOrColourMismatch,
     SignalBelowThreshold,
-    BatteryUnreadable,        // every nibble unknown and no live connection
-    BatteryInconsistent,
-    AmbiguousCandidates       // live connection, but two senders clear the threshold
+    BatteryUnreadable,        // every nibble unknown
+    BatteryInconsistent
 }
 
 public sealed record OwnershipInput(
-    ProximityParse Parse, sbyte Rssi, WidgetClaim? Claim, ProximityDecodeTable Table,
-    bool LiveConnectionToThisPc, int CandidatesClearingThreshold, DateTimeOffset AtUtc);
+    ProximityParse Parse, sbyte Rssi, WidgetClaim? Claim, ProximityDecodeTable Table, DateTimeOffset AtUtc);
 
 public sealed record OwnershipResult(OwnershipVerdict Verdict, OwnedBattery? UpdatedLast);
 
@@ -55,17 +57,6 @@ public static class OwnershipRule
         int? currentLeft = budsProved ? PercentToNibble(reading.Left.Percent) : null;
         int? currentRight = budsProved ? PercentToNibble(reading.Right.Percent) : null;
         int? currentCase = PercentToNibble(reading.Case.Percent);
-
-        if (input.LiveConnectionToThisPc)
-        {
-            if (input.CandidatesClearingThreshold > 1)
-            {
-                return new OwnershipResult(OwnershipVerdict.AmbiguousCandidates, null);
-            }
-
-            OwnedBattery reSynced = OwnedBattery.FromMessage(message, input.Table, claim.Last, input.AtUtc);
-            return new OwnershipResult(OwnershipVerdict.OwnedByLiveConnection, reSynced);
-        }
 
         bool anyBudKnown = budsProved ? currentLeft is not null || currentRight is not null : wireHigh is not null || wireLow is not null;
         if (!anyBudKnown && currentCase is null)
