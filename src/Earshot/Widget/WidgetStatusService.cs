@@ -52,6 +52,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private IAdvertisementSource? _source;
     private bool _stopRequested;
     private bool _settingsHooked;
+    private bool _started;
+    private bool _closed;
     private ITimer? _retryTimer;
     private TimeSpan _retryDelay;
     private ITimer? _countersLogTimer;
@@ -154,11 +156,19 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     }
 
     // Constructed and started only while the setting is on; hooks the device monitor and settings change
-    // regardless, so turning the setting on later (TurningTheSettingOnStartsOne) still works.
+    // regardless, so turning the setting on later (TurningTheSettingOnStartsOne) still works. Idempotent: a
+    // second call does nothing, rather than double-subscribing the device monitor and settings events and
+    // constructing a second advertisement source over the first, still-running one.
     public void Start()
     {
         lock (_gate)
         {
+            if (_started || _closed)
+            {
+                return;
+            }
+
+            _started = true;
             RecomputeThisPcLocked(_deviceMonitor.Current);
             _deviceMonitor.SnapshotChanged += OnDeviceSnapshotChanged;
 
@@ -188,7 +198,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         lock (_gate)
         {
-            if (_source is null)
+            if (_source is null || _closed)
             {
                 return;
             }
@@ -207,7 +217,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         lock (_gate)
         {
-            if (_source is null || !_settings.Current.Widget.Enabled)
+            if (_source is null || !_settings.Current.Widget.Enabled || _closed)
             {
                 return;
             }
@@ -220,10 +230,20 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         PublishAndNotify();
     }
 
+    // Idempotent, and final: once closed, nothing on this service saves the claim or raises Changed or
+    // CaseOpened again, whatever calls it (or an in-flight callback that was already dispatched before this
+    // ran) tries next.
     public void Close()
     {
         lock (_gate)
         {
+            if (_closed)
+            {
+                return;
+            }
+
+            _closed = true;
+
             if (_settingsHooked)
             {
                 _settings.Changed -= OnSettingsChanged;
@@ -260,14 +280,22 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             source, _timeProvider, WidgetTiming.ClaimWindow, _claimThreshold(), _decodeTable(), ct).ConfigureAwait(false);
         if (outcome.Status == ClaimOutcomeStatus.Claimed)
         {
+            bool closed;
             lock (_gate)
             {
-                _claim = outcome.Claim;
-                _liveCandidates.Clear();
-                ResetReadingsLocked();
+                closed = _closed;
+                if (!closed)
+                {
+                    _claim = outcome.Claim;
+                    _liveCandidates.Clear();
+                    ResetReadingsLocked();
+                }
             }
 
-            PublishAndNotify();
+            if (!closed)
+            {
+                PublishAndNotify();
+            }
         }
 
         return outcome;
@@ -277,6 +305,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         lock (_gate)
         {
+            if (_closed)
+            {
+                return;
+            }
+
             _claimStore.ForgetClaim();
             _claim = null;
             _liveCandidates.Clear();
@@ -309,7 +342,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool tryStart;
         lock (_gate)
         {
-            tryStart = _source is not null && _source.State != AdvertisementSourceState.Started;
+            tryStart = !_closed && _source is not null && _source.State != AdvertisementSourceState.Started;
         }
 
         if (tryStart)
@@ -508,6 +541,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         lock (_gate)
         {
+            if (_closed)
+            {
+                return; // nothing after Close saves the claim or raises CaseOpened
+            }
+
             // A live connection to this PC is read from Core Audio alone. Because addresses rotate, the
             // owner's own set can briefly appear under two sender tags; the live waiver applies only when
             // exactly one distinct sender matching the claim has cleared the threshold within the candidate
@@ -742,6 +780,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool changed;
         lock (_gate)
         {
+            if (_closed)
+            {
+                return; // nothing after Close raises Changed, whatever called this
+            }
+
             snapshot = BuildSnapshotLocked(_timeProvider.GetUtcNow());
             changed = SnapshotChangedIgnoringCounters(_lastPublished, snapshot);
             _lastPublished = snapshot;

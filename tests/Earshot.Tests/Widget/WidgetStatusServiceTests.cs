@@ -629,6 +629,49 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(2, _source.StartCalls);
     }
 
+    // A second Start must not double-subscribe the device monitor, the settings store or the source's own
+    // Received event: the last of those would otherwise process every advertisement twice.
+    [TestMethod]
+    public void StartIsIdempotent()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store);
+
+        service.Start();
+        service.Start();
+
+        Assert.AreEqual(1, _source.StartCalls, "A second Start must not start a second source.");
+
+        _source.Raise(Owned(batteryB: 0x05));
+
+        Assert.AreEqual(1, service.Current.Counters.AllSections, "A second Start must not double-subscribe Received.");
+    }
+
+    // Close is final: a claim flow already under way when Close runs must not be applied to the service, or
+    // raise Changed, once it completes afterwards.
+    [TestMethod]
+    public async Task AClaimCompletingAfterCloseDoesNotApplyOrRaiseChanged()
+    {
+        var store = NewClaimStore();
+        var service = NewService(store);
+        service.Start();
+
+        Task<ClaimOutcome> claimTask = service.ClaimAsync(CancellationToken.None);
+        _source.Raise(new AdvertisementSample(
+            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(), -60, _clock.GetUtcNow(), SenderTag: 1));
+
+        service.Close(); // closes while the claim window is still open
+        int changedBeforeCompletion = _changedEvents.Count;
+
+        _clock.Advance(WidgetTiming.ClaimWindow);
+        ClaimOutcome outcome = await claimTask;
+
+        Assert.AreEqual(ClaimOutcomeStatus.Claimed, outcome.Status, "The claim flow itself still completes and still writes claim.json.");
+        Assert.IsFalse(service.Current.ClaimExists, "A claim completing after Close must not be applied to the closed service.");
+        Assert.AreEqual(changedBeforeCompletion, _changedEvents.Count, "Nothing after Close raises Changed.");
+    }
+
     [TestMethod]
     public void AStoppedSourceIsStartedAgainAfterTheRetryDelayDoubling()
     {
