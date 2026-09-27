@@ -1,6 +1,8 @@
+using System.Runtime.Versioning;
 using Earshot.Contracts;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Windows.Devices.Bluetooth.Advertisement;
 
 namespace Earshot.Tests.Widget;
 
@@ -15,6 +17,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
     private static readonly TimeSpan Guard = TimeSpan.FromSeconds(10);
 
     [TestMethod]
+    [SupportedOSPlatform("windows10.0.19041.0")]
     public async Task TheWatcherIsPassiveAndStartsOrSaysWhy()
     {
         using var source = new WinRtAdvertisementSource();
@@ -28,13 +31,36 @@ public sealed class WinRtAdvertisementSourceBindingTests
         if (!await WaitForStartedAsync(source))
         {
             AdvertisementSourceStopped? stopped = stoppedTcs.Task.IsCompleted ? stoppedTcs.Task.Result : null;
+
+            // M5: inconclusive only when the reason is that no radio is present; anything else is a failure,
+            // not something to wave through as "could not tell on this machine".
+            if (stopped is not null && stopped.ErrorName != "RadioNotAvailable")
+            {
+                Assert.Fail("The watcher failed to start with an error other than RadioNotAvailable: " + stopped.ErrorName + ".");
+            }
+
             Assert.Inconclusive("The watcher did not start on this machine (" + startStep.CodeName + ")" +
                 (stopped is null ? "." : ", Stopped carried " + stopped.ErrorName + "."));
             return;
         }
 
+        // M5: the real watcher, not the constant Start() sets, must actually be Passive.
+        Assert.AreEqual(BluetoothLEScanningMode.Passive, source.ScanningMode, "The real watcher must be Passive: no scan request packets.");
+
         Task first = await Task.WhenAny(receivedTcs.Task, stoppedTcs.Task, Task.Delay(Guard));
-        if (first != receivedTcs.Task && first != stoppedTcs.Task)
+        if (first == stoppedTcs.Task)
+        {
+            AdvertisementSourceStopped stopped = stoppedTcs.Task.Result;
+            if (stopped.ErrorName != "RadioNotAvailable")
+            {
+                Assert.Fail("The watcher stopped on its own with an error other than RadioNotAvailable: " + stopped.ErrorName + ".");
+            }
+
+            Assert.Inconclusive("The radio became unavailable while waiting: " + stopped.ErrorName + ".");
+            return;
+        }
+
+        if (first != receivedTcs.Task)
         {
             // Nothing arrived within the guard. On a machine with no nearby BLE traffic and a passive,
             // unfiltered watcher this is a plausible quiet ten seconds, not proof the watcher is broken.
@@ -62,10 +88,12 @@ public sealed class WinRtAdvertisementSourceBindingTests
 
         source.Stop();
 
+        // M5: once actually started, a Stop must raise Stopped deterministically; "inconclusive" is reserved
+        // for the earlier no-radio case, not for Stop itself going quiet.
         Task first = await Task.WhenAny(stoppedTcs.Task, Task.Delay(Guard));
         if (first != stoppedTcs.Task)
         {
-            Assert.Inconclusive("Stop did not raise Stopped within " + Guard + " on this machine.");
+            Assert.Fail("Stop did not raise Stopped within " + Guard + " on this machine.");
             return;
         }
 

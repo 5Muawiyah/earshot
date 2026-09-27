@@ -42,6 +42,24 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
         }
     }
 
+    // Read-only: proves the real watcher is Passive (M5), rather than trusting the constant Start() sets.
+    // Null before Start() has constructed the watcher, or when this build has no BLE watcher to check.
+    public BluetoothLEScanningMode? ScanningMode
+    {
+        get
+        {
+            if (!WidgetPlatformGuard.HasBleWatcher)
+            {
+                return null;
+            }
+
+            lock (_gate)
+            {
+                return _watcher?.ScanningMode;
+            }
+        }
+    }
+
     // Passive is the documented default and sends no scan request packets; Active does. No
     // AdvertisementFilter and no SignalStrengthFilter: the positive control needs every advertisement
     // counted, and a signal filter would turn the -127 out-of-range sentinel on. AllowExtendedAdvertisements
