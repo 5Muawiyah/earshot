@@ -41,8 +41,13 @@ public sealed class GaugeWindowTests
         });
     }
 
+    // A private desktop has no foreground-window concept the way the input desktop does: GetForegroundWindow
+    // returns 0 both before and after activating a form there, so comparing it before and after ShowAt would
+    // pass even if SWP_NOACTIVATE were removed from GaugeWindow.ShowAt and it started stealing activation.
+    // The window's own activation state (GetActiveWindow, the calling thread's active window) is real on a
+    // private desktop and does discriminate, proved below by toggling the flag under test.
     [TestMethod]
-    public void ShowAtDoesNotChangeTheForegroundWindowAndRendersAVisibleBitmap()
+    public void ShowAtDoesNotChangeTheActiveWindowAndRendersAVisibleBitmap()
     {
         Earshot.Tests.Phase5.CardDesktop.Run(() =>
         {
@@ -58,7 +63,8 @@ public sealed class GaugeWindowTests
             background.Show();
             background.Activate();
             Application.DoEvents();
-            nint foregroundBefore = GetForegroundWindow();
+            nint activeBefore = Earshot.Tests.Phase5.TestWindows.GetActiveWindow();
+            Assert.AreEqual(background.Handle, activeBefore, "The background window must be active before the gauge is shown.");
 
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
@@ -67,7 +73,7 @@ public sealed class GaugeWindowTests
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
             Application.DoEvents();
 
-            Assert.AreEqual(foregroundBefore, GetForegroundWindow(), "A NOACTIVATE show must not steal the foreground.");
+            Assert.AreEqual(activeBefore, Earshot.Tests.Phase5.TestWindows.GetActiveWindow(), "A NOACTIVATE show must not change the thread's active window.");
 
             WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
             {
@@ -126,9 +132,6 @@ public sealed class GaugeWindowTests
             Assert.IsTrue(clicked, "A down followed by an up on the same window is a click.");
         });
     }
-
-    [DllImport("user32.dll")]
-    private static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(Point point);
