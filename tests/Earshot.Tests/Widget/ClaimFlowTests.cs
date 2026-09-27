@@ -51,6 +51,7 @@ public sealed class ClaimFlowTests
         Assert.AreEqual(WidgetFixtures.Colour, outcome.Claim.Colour);
         Assert.AreEqual((sbyte)-70, outcome.Claim.SignalThresholdDbm);
         Assert.AreEqual(outcome.Claim, store.Current);
+        await store.IdleAsync(); // M2: let the queued write finish before the temp folder is torn down
     }
 
     [TestMethod]
@@ -151,6 +152,7 @@ public sealed class ClaimFlowTests
         source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(), Rssi: -60, clock.GetUtcNow(), SenderTag: 1));
         clock.Advance(WidgetTiming.ClaimWindow);
         await task;
+        await store.IdleAsync(); // M2: the write is now queued on a background thread
 
         string json = File.ReadAllText(path);
         foreach (string member in new[]

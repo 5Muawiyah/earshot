@@ -13,7 +13,10 @@ internal sealed class ClaimStore
     private readonly ILog _log;
     private readonly Func<sbyte?> _currentSignalThreshold;
     private readonly Lock _gate = new();
+    private readonly object _writeGate = new();
     private WidgetClaim? _current;
+    private Task _pendingWrite = Task.CompletedTask;
+    private int _diskWriteCount;
 
     public ClaimStore(string path, ILog log)
         : this(path, log, static () => WidgetDefaults.SignalThresholdDbm)
@@ -49,13 +52,89 @@ internal sealed class ClaimStore
         }
     }
 
+    // M2: updates the in-memory claim immediately (so a reader never blocks on disk I/O and always sees what
+    // was just decided), then queues the actual write on a background thread, serialised with any other
+    // write this store has pending, so neither the UI thread (the service's callback) nor ClaimFlow's own
+    // caller ever waits on file I/O here. Saving is skipped outright, with nothing queued, when the claim
+    // carries an older generation (ClaimedAtUtc) or an older reading (Last.AtUtc within the same generation)
+    // than what is already current, or when nothing about it actually differs from what is current.
     public void Save(WidgetClaim claim)
     {
         ArgumentNullException.ThrowIfNull(claim);
         lock (_gate)
         {
+            if (_current is WidgetClaim existing)
+            {
+                if (claim.ClaimedAtUtc < existing.ClaimedAtUtc ||
+                    (claim.ClaimedAtUtc == existing.ClaimedAtUtc && claim.Last.AtUtc < existing.Last.AtUtc))
+                {
+                    return;
+                }
+
+                if (existing.Equals(claim))
+                {
+                    return;
+                }
+            }
+
+            _current = claim;
+        }
+
+        QueueWrite(claim);
+    }
+
+    // Test-only: lets a test wait for every write Save has queued so far to finish, so it can assert on the
+    // file or the log without racing the background writer.
+    internal Task IdleAsync()
+    {
+        lock (_writeGate)
+        {
+            return _pendingWrite;
+        }
+    }
+
+    // Test-only: how many times WriteAtomic actually ran, to prove that repeated saves of an unchanged
+    // reading write the file once, not once per advertisement.
+    internal int DiskWriteCount => Volatile.Read(ref _diskWriteCount);
+
+    private void QueueWrite(WidgetClaim claim)
+    {
+        lock (_writeGate)
+        {
+            // Chained onto whatever write is already pending, so this store's writes are always serialised
+            // to one at a time in the order Save queued them, however many threads call Save concurrently.
+            _pendingWrite = _pendingWrite.ContinueWith(
+                _ => WriteOne(claim), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        }
+    }
+
+    private void WriteOne(WidgetClaim claim)
+    {
+        lock (_gate)
+        {
+            // A later Save or a ForgetClaim already moved _current past this write's claim: nothing to do.
+            if (!claim.Equals(_current))
+            {
+                return;
+            }
+        }
+
+        Interlocked.Increment(ref _diskWriteCount);
+        try
+        {
             WriteAtomic(claim);
-            _current = Load();
+        }
+        catch (IOException ex)
+        {
+            _log.Warn(
+                "The widget claim could not be saved, so only the in-memory value is current (0x" +
+                ex.HResult.ToString("X8") + "): " + _path);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn(
+                "The widget claim could not be saved, so only the in-memory value is current (0x" +
+                ex.HResult.ToString("X8") + "): " + _path);
         }
     }
 

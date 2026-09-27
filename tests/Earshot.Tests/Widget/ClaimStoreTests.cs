@@ -47,7 +47,7 @@ public sealed class ClaimStoreTests
     private static ClaimStore NewStore(string path, ILog log) => new(path, log, static () => (sbyte)-70);
 
     [TestMethod]
-    public void SaveIsAtomicAndReadable()
+    public async Task SaveIsAtomicAndReadable()
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
@@ -55,21 +55,23 @@ public sealed class ClaimStoreTests
         WidgetClaim claim = SampleClaim();
 
         store.Save(claim);
+        Assert.AreEqual(claim, store.Current, "The in-memory claim updates synchronously, before the disk write.");
+        await store.IdleAsync();
 
         Assert.IsFalse(File.Exists(path + ".tmp"), "The temporary file must not be left behind.");
-        Assert.AreEqual(claim, store.Current);
 
         var reloaded = NewStore(path, new CapturingLog());
         Assert.AreEqual(claim, reloaded.Current);
     }
 
     [TestMethod]
-    public void ForgetDeletesTheFile()
+    public async Task ForgetDeletesTheFile()
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
         var store = NewStore(path, new CapturingLog());
         store.Save(SampleClaim());
+        await store.IdleAsync();
         Assert.IsTrue(File.Exists(path));
 
         store.ForgetClaim();
@@ -79,13 +81,14 @@ public sealed class ClaimStoreTests
     }
 
     [TestMethod]
-    public void ThePathIsUnderTheLocalFolderAndFollowsTheDataRoot()
+    public async Task ThePathIsUnderTheLocalFolderAndFollowsTheDataRoot()
     {
         using var temp = new TempFolder();
         Paths paths = Paths.FromEnvironment(name => name == Paths.DataRootVariable ? temp.Path : null);
         var store = NewStore(paths.WidgetClaimFile, new CapturingLog());
 
         store.Save(SampleClaim());
+        await store.IdleAsync();
 
         Assert.IsTrue(File.Exists(paths.WidgetClaimFile));
         Assert.IsTrue(
@@ -96,12 +99,13 @@ public sealed class ClaimStoreTests
     // M1, reviewer probes 2 and 3: a claim whose stored threshold no longer matches phase 0's current one
     // (here, the production default, which ships null) is unusable, whatever else in the file is valid.
     [TestMethod]
-    public void AClaimWhoseThresholdNoLongerMatchesTheCurrentOneIsNoClaimAndLogged()
+    public async Task AClaimWhoseThresholdNoLongerMatchesTheCurrentOneIsNoClaimAndLogged()
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
         var writer = NewStore(path, new CapturingLog());
         writer.Save(SampleClaim());
+        await writer.IdleAsync();
         var log = new CapturingLog();
 
         var store = new ClaimStore(path, log); // the real, un-overridden default: WidgetDefaults.SignalThresholdDbm, null
@@ -147,6 +151,86 @@ public sealed class ClaimStoreTests
 
         Assert.IsNull(store.Current);
         Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "last"));
+    }
+
+    // M2: repeated saves of a reading that has not actually changed must not hit the disk each time.
+    [TestMethod]
+    public async Task TwentyIdenticalSavesWriteTheFileOnce()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var store = NewStore(path, new CapturingLog());
+        WidgetClaim claim = SampleClaim();
+
+        for (int i = 0; i < 20; i++)
+        {
+            store.Save(claim);
+        }
+
+        await store.IdleAsync();
+
+        Assert.AreEqual(1, store.DiskWriteCount);
+    }
+
+    // M2: a write that fails (here, a read-only file) must not throw out of Save, must keep the in-memory
+    // claim as current, and must log exactly once, not repeat the failure into a second line.
+    [TestMethod]
+    public async Task ASaveToAReadOnlyFileDoesNotThrowAndLogsOnce()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var writer = NewStore(path, new CapturingLog());
+        writer.Save(SampleClaim());
+        await writer.IdleAsync();
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+        var log = new CapturingLog();
+        var store = new ClaimStore(path, log, static () => (sbyte)-70);
+        WidgetClaim updated = SampleClaim() with { Last = new OwnedBattery(5, 6, 8, new DateTimeOffset(2026, 9, 27, 1, 0, 0, TimeSpan.Zero)) };
+
+        try
+        {
+            store.Save(updated);
+            await store.IdleAsync();
+
+            Assert.AreEqual(updated, store.Current, "The in-memory claim must stay current even though the disk write failed.");
+            Assert.AreEqual(1, log.Entries.Count(e => e.Level == Earshot.Contracts.LogLevel.Warn), "Exactly one line for the failed save.");
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+    }
+
+    // M2, the reviewer's race: a reading decided against an old claim (ClaimFlow having already redone the
+    // claim underneath it) must not overwrite the newer claim once it lands.
+    [TestMethod]
+    public async Task AnOlderGenerationReadingArrivingAfterARedoneClaimDoesNotOverwriteIt()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var store = NewStore(path, new CapturingLog());
+        WidgetClaim originalClaim = SampleClaim();
+        store.Save(originalClaim);
+        await store.IdleAsync();
+
+        // The redone claim: a brand new claim, a later ClaimedAtUtc, as ClaimFlow makes on a successful redo.
+        WidgetClaim redoneClaim = originalClaim with
+        {
+            ClaimedAtUtc = originalClaim.ClaimedAtUtc + TimeSpan.FromMinutes(1),
+            Last = new OwnedBattery(9, 9, 9, originalClaim.ClaimedAtUtc + TimeSpan.FromMinutes(1)),
+        };
+        store.Save(redoneClaim);
+
+        // A stale reading, decided against the original claim before the redo reached the service, arriving
+        // after the redo already landed in the store.
+        WidgetClaim staleMerge = originalClaim with { Last = new OwnedBattery(1, 1, 1, originalClaim.ClaimedAtUtc + TimeSpan.FromSeconds(1)) };
+        store.Save(staleMerge);
+        await store.IdleAsync();
+
+        Assert.AreEqual(redoneClaim, store.Current, "The redone claim must stand; the stale reading must not overwrite it.");
+
+        var reloaded = NewStore(path, new CapturingLog());
+        Assert.AreEqual(redoneClaim, reloaded.Current, "The redone claim, not the stale one, must be what is on disk.");
     }
 
     // M1's "plus a read-only file": an invalid claim must be recognised, logged and left in place even when

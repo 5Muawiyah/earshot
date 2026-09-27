@@ -22,6 +22,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     private int _posts;
     private List<EventArgs> _changedEvents = null!;
     private List<CaseOpenedEventArgs> _caseOpenedEvents = null!;
+    private ClaimStore? _claimStore;
 
     [TestInitialize]
     public void Setup()
@@ -37,12 +38,22 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _caseOpenedEvents = new List<CaseOpenedEventArgs>();
     }
 
-    public void Dispose() => _temp.Dispose();
+    // M2: Save now queues its disk write on a background thread. Wait for anything still pending before the
+    // temp folder is torn down, or its own claim.json.tmp can still be open when Directory.Delete runs.
+    public void Dispose()
+    {
+        _claimStore?.IdleAsync().GetAwaiter().GetResult();
+        _temp.Dispose();
+    }
 
     // SampleClaim below always carries threshold -70; the injectable overload matches it so Save's own
     // reload does not invalidate the claim these tests just wrote (M1: a stored threshold is usable only
     // when it equals the current one, and WidgetDefaults.SignalThresholdDbm ships null).
-    private ClaimStore NewClaimStore() => new(_temp.File("claim.json"), _log, static () => (sbyte)-70);
+    private ClaimStore NewClaimStore()
+    {
+        _claimStore = new ClaimStore(_temp.File("claim.json"), _log, static () => (sbyte)-70);
+        return _claimStore;
+    }
 
     private WidgetStatusService NewService(ClaimStore store, ProximityDecodeTable? table = null)
     {
