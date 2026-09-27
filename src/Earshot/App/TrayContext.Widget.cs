@@ -1,6 +1,7 @@
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Icons;
+using Earshot.Popup;
 using Earshot.Tray;
 using Earshot.Widget;
 
@@ -26,6 +27,7 @@ internal sealed partial class TrayContext
     private ThemeReader? _widgetTheme;
     private GaugeWindow? _gaugeWindow;
     private WidgetCardPresenter? _widgetCardPresenter;
+    private CaseOpenCardPresenter? _caseOpenCardPresenter;
     private int _widgetLayoutDpi = CardPlacement96;
     private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
 
@@ -77,6 +79,7 @@ internal sealed partial class TrayContext
             }
 
             _widgetStatus.Changed += OnWidgetStatusChanged;
+            _widgetStatus.CaseOpened += OnCaseOpened;
             _widgetSnapshotCache = _widgetStatus.Current;
             _widgetStatus.Start();
         }
@@ -108,6 +111,14 @@ internal sealed partial class TrayContext
                 SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
                     "pause when a bud comes out (widget)", s => s.Widget = s.Widget with { AutoPause = on }, place));
             _widgetCardPresenter = new WidgetCardPresenter(() => new WidgetCard(_log), callbacks, _registry.UiPost, _time, _log);
+
+            var caseOpenGate = new CaseOpenCardGate(
+                Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
+                Closing: () => _closing,
+                HandBackInProgress: () => _coordinator.HandBackInProgress,
+                SessionEndInProgress: () => _coordinator.SessionEndInProgress);
+            _caseOpenCardPresenter = new CaseOpenCardPresenter(
+                () => new WidgetCard(_log, notice: true), callbacks, caseOpenGate, new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
         }
 
         if (_taskbarWatcher is null)
@@ -216,15 +227,27 @@ internal sealed partial class TrayContext
             return;
         }
 
-        if (_gaugeWindow is { IsDisposed: false } window && window.IsHandleCreated)
+        if (GaugeBoundsIfShown() is { } bounds)
         {
-            presenter.RequestShow(window.Bounds, window.Bounds.Location);
+            presenter.RequestShow(bounds, bounds.Location);
         }
         else
         {
             presenter.RequestShow(gaugeBounds: null, _cursorPosition());
         }
     }
+
+    // IWidgetStatus.CaseOpened, documented as already raised on the UI thread. The presenter itself runs
+    // every gate in spec 7.6 (the setting, closing, already open, the notification state, hand-back or a
+    // session end) before it shows anything; this only supplies where the gauge is, the same rectangle
+    // OnWidgetCardRequested already uses for "above the gauge".
+    private void OnCaseOpened(object? sender, CaseOpenedEventArgs e) => _caseOpenCardPresenter?.RequestShow(GaugeBoundsIfShown());
+
+    // The gauge's own bounds when it is actually on screen with a handle, or null (the case-open card falls
+    // back to NearTray; the widget card's own click path falls back to the cursor instead, since that path
+    // only runs from a click that already has one).
+    private Rectangle? GaugeBoundsIfShown() =>
+        _gaugeWindow is { IsDisposed: false } window && window.IsHandleCreated ? window.Bounds : null;
 
     // Suspends the widget's BLE watcher. Called only once a shut-down or sleep hand-back has finished
     // (TrayContext.OnSessionEnding, OnPowerChanged): never before it, never concurrently with it.
@@ -281,6 +304,8 @@ internal sealed partial class TrayContext
     {
         _widgetCardPresenter?.Dispose();
         _widgetCardPresenter = null;
+        _caseOpenCardPresenter?.Dispose();
+        _caseOpenCardPresenter = null;
         _taskbarWatcher?.Dispose();
         _taskbarWatcher = null;
         _gaugeController?.Dispose();
@@ -298,6 +323,7 @@ internal sealed partial class TrayContext
         if (_widgetStatus is { } status)
         {
             status.Changed -= OnWidgetStatusChanged;
+            status.CaseOpened -= OnCaseOpened;
             try
             {
                 status.Close();

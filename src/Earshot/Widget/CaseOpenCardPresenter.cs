@@ -1,0 +1,278 @@
+using System.Globalization;
+using System.Runtime.InteropServices;
+using Earshot.App;
+using Earshot.Contracts;
+using Earshot.Interop;
+using Earshot.Popup;
+using Earshot.Tray;
+
+namespace Earshot.Widget;
+
+// The gates a CaseOpened event must clear before the notice card shows, checked in the order spec 7.6
+// gives them. Every Func is read fresh on each request: none of these are cached, since the very point is
+// that a hand-back, a closing tray or a settings change can flip one between two CaseOpened events.
+internal sealed record CaseOpenCardGate(
+    Func<bool> Enabled,               // Settings.Widget.CaseOpenCard
+    Func<bool> Closing,               // TrayContext._closing
+    Func<bool> HandBackInProgress,    // BlockCoordinator.HandBackInProgress
+    Func<bool> SessionEndInProgress); // BlockCoordinator.SessionEndInProgress
+
+// SystemParametersInfoW(SPI_GETMESSAGEDURATION) as it returned: the raw Win32 result, read fresh at each
+// show so a machine's own accessibility setting is honoured every time, not just once at start-up.
+internal readonly record struct DismissDurationReading(bool Ok, uint Seconds, int Win32Error);
+
+// The case-open notice (spec 7.6): a separate presenter from WidgetCardPresenter, owning its own
+// WidgetCard(notice: true) instance, never the gauge-anchored card. Separate because the two can never
+// share one live window (WS_EX_NOACTIVATE is set once in CreateParams; a style set at creation is not
+// toggled at run time without recreating the handle) and because they are shown from different triggers -
+// a gauge click, IWidgetStatus.CaseOpened - that must never contend for the same window. Model-building is
+// shared through WidgetCardPresenter.BuildModel (same snapshot, same callbacks); the two cards render
+// identically bar the Where line, which WidgetCard itself always overrides to "Case open" for a notice-mode
+// instance, regardless of what model it was last given.
+//
+// It never connects. The only path from a CaseOpened event to WidgetCardPresenterCallbacks.RequestToggle is
+// the owner's own click on this card's Connect button while it is open (WidgetCard.ToggleRequested, wired
+// exactly as WidgetCardPresenter wires it); there is no timer and no other code path here that calls it.
+//
+// UI thread only from the outside; every public method posts through uiPost, matching WidgetCardPresenter.
+internal sealed class CaseOpenCardPresenter : IDisposable
+{
+    internal static readonly TimeSpan DefaultDismissDuration = TimeSpan.FromSeconds(5);
+
+    private readonly Func<WidgetCard> _createCard;
+    private readonly WidgetCardPresenterCallbacks _callbacks;
+    private readonly CaseOpenCardGate _gate;
+    private readonly ICardEnvironment _environment;
+    private readonly Func<DismissDurationReading> _readDismissDuration;
+    private readonly Action<Action> _uiPost;
+    private readonly TimeProvider _time;
+    private readonly ILog _log;
+
+    private WidgetCard? _card;
+    private ITimer? _dismissTimer;
+    private string? _lastDurationProblem;
+    private bool _disposed;
+
+    public CaseOpenCardPresenter(
+        Func<WidgetCard> createCard,
+        WidgetCardPresenterCallbacks callbacks,
+        CaseOpenCardGate gate,
+        ICardEnvironment environment,
+        Action<Action> uiPost,
+        TimeProvider time,
+        ILog log,
+        Func<DismissDurationReading>? readDismissDuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(createCard);
+        ArgumentNullException.ThrowIfNull(callbacks);
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(uiPost);
+        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(log);
+        _createCard = createCard;
+        _callbacks = callbacks;
+        _gate = gate;
+        _environment = environment;
+        _uiPost = uiPost;
+        _time = time;
+        _log = log;
+        _readDismissDuration = readDismissDuration ?? ReadRealDismissDuration;
+    }
+
+    // True while the card is on screen. For tests; the UI thread only.
+    internal bool IsShown => _card is { IsDisposed: false, Visible: true };
+
+    // IWidgetStatus.CaseOpened, already posted to the UI thread by the data side, but this still posts
+    // itself so a test or a future caller on another thread is safe too, matching WidgetCardPresenter.
+    public void RequestShow(Rectangle? gaugeBounds) => _uiPost(() => RequestShowOnUiThread(gaugeBounds));
+
+    // Forces the card to hide: a settings change turning the card off while one is on screen, or the tray
+    // closing.
+    public void Hide() => _uiPost(HideOnUiThread);
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        StopDismissTimer();
+        if (_card is not null)
+        {
+            _card.CloseRequested -= OnCardClosed;
+            _card.ToggleRequested -= OnToggleRequested;
+            _card.AutoPauseChanged -= OnAutoPauseChanged;
+            _card.Dispose();
+            _card = null;
+        }
+    }
+
+    // The gate, in the order spec 7.6 gives it: the setting, not closing, not already open, the
+    // notification state, then hand-back/session-end. Each refusal beyond "the setting is off" is logged,
+    // matching CardPresenter.NotificationsAccepted's own logging for the notification-state leg.
+    private void RequestShowOnUiThread(Rectangle? gaugeBounds)
+    {
+        if (_disposed || !_gate.Enabled())
+        {
+            return;
+        }
+
+        if (_gate.Closing())
+        {
+            _log.Write(LogLevel.Debug, "Case-open card: not shown, Earshot is closing.");
+            return;
+        }
+
+        if (_card is { IsDisposed: false, Visible: true })
+        {
+            // Idempotent: a second CaseOpened while one is already showing does not stack a second window.
+            _log.Write(LogLevel.Debug, "Case-open card: already open, a second case-open notice is ignored.");
+            return;
+        }
+
+        if (!NotificationsAccepted())
+        {
+            return;
+        }
+
+        if (_gate.HandBackInProgress() || _gate.SessionEndInProgress())
+        {
+            _log.Write(LogLevel.Debug, "Case-open card: not shown, " +
+                (_gate.SessionEndInProgress() ? "the session is ending" : "a hand-back is running") + ".");
+            return;
+        }
+
+        WidgetCard card = EnsureCard();
+        WidgetCardModel model = WidgetCardPresenter.BuildModel(_callbacks, _time);
+        card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
+        card.Render(model, _callbacks.Dpi());
+
+        card.Bounds = PlaceCard(gaugeBounds, card.ClientSize);
+        card.Show();
+        StartDismissTimer();
+    }
+
+    private void HideOnUiThread()
+    {
+        if (_card is { IsDisposed: false, Visible: true } card)
+        {
+            card.Hide();
+        }
+
+        StopDismissTimer();
+    }
+
+    // Above the gauge when gaugeBounds is given (the exact maths WidgetCardPresenter uses for its own
+    // card), otherwise the NearTray corner CardPlacement already computes for every other card nobody
+    // clicked for.
+    private Rectangle PlaceCard(Rectangle? gaugeBounds, Size cardSize)
+    {
+        if (gaugeBounds is { } gauge)
+        {
+            Rectangle workArea = Screen.FromPoint(gauge.Location).WorkingArea;
+            return WidgetCardPlacement.Above(gauge, cardSize, workArea, _callbacks.Dpi());
+        }
+
+        PlacementScene scene = _environment.ReadScene();
+        CardTarget target = CardPlacement.TargetFor(CardAnchor.NearTray, scene);
+        int dpi = _environment.DpiFor(target.Display);
+        return CardPlacement.Place(CardAnchor.NearTray, scene, target, cardSize, dpi);
+    }
+
+    // The same rule and logging CardPresenter.NotificationsAccepted uses: a failed read refuses the card
+    // (fail closed), and a state that does not accept an unrequested card is logged and refused too.
+    private bool NotificationsAccepted()
+    {
+        NotificationStateReading reading = _environment.QueryNotificationState();
+        if (reading.HResult < 0)
+        {
+            StepOutcome step = StepOutcomes.FromHResult("sh-query-user-notification-state:case-open-card", reading.HResult);
+            _log.Warn("Case-open card not shown, the notification state could not be read. " + TrayReport.DescribeStep(step));
+            return false;
+        }
+
+        if (CardPresenter.AcceptsUnrequestedCard(reading.State))
+        {
+            return true;
+        }
+
+        _log.Info("Case-open card not shown, Windows is not taking notifications now (" +
+            CardPresenter.NotificationStateName(reading.State) + ").");
+        return false;
+    }
+
+    private WidgetCard EnsureCard()
+    {
+        if (_card is { IsDisposed: false } card)
+        {
+            return card;
+        }
+
+        if (_card is not null)
+        {
+            _card.CloseRequested -= OnCardClosed;
+            _card.ToggleRequested -= OnToggleRequested;
+            _card.AutoPauseChanged -= OnAutoPauseChanged;
+        }
+
+        _card = _createCard();
+        _card.CloseRequested += OnCardClosed;
+        _card.ToggleRequested += OnToggleRequested;
+        _card.AutoPauseChanged += OnAutoPauseChanged;
+        return _card;
+    }
+
+    // The owner's own act: a click on this card's Connect button. Placed NearTray, since this card was
+    // never anchored to a click of the owner's own.
+    private void OnToggleRequested(object? sender, EventArgs e) => _callbacks.RequestToggle(CardPlace.NearTray);
+
+    private void OnAutoPauseChanged(object? sender, bool on) => _callbacks.SetAutoPause(on, CardPlace.NearTray);
+
+    private void OnCardClosed(object? sender, WidgetCardCloseReason reason) => StopDismissTimer();
+
+    private void StartDismissTimer()
+    {
+        StopDismissTimer();
+        TimeSpan duration = ReadDismissDuration();
+        _dismissTimer = _time.CreateTimer(_ => _uiPost(HideOnUiThread), null, duration, Timeout.InfiniteTimeSpan);
+    }
+
+    private void StopDismissTimer()
+    {
+        _dismissTimer?.Dispose();
+        _dismissTimer = null;
+    }
+
+    // SPI_GETMESSAGEDURATION, read at each show; failure or a nonsensical 0 falls back to 5 s, logged once
+    // per distinct problem (spec 7.6: "failure -> 5 s with the Win32 code logged once").
+    private TimeSpan ReadDismissDuration()
+    {
+        DismissDurationReading reading = _readDismissDuration();
+        if (reading.Ok && reading.Seconds >= 1)
+        {
+            return TimeSpan.FromSeconds(reading.Seconds);
+        }
+
+        string problem = reading.Ok
+            ? "SystemParametersInfoW(SPI_GETMESSAGEDURATION) returned 0 seconds"
+            : "SystemParametersInfoW(SPI_GETMESSAGEDURATION) failed, Win32 error " +
+                reading.Win32Error.ToString(CultureInfo.InvariantCulture);
+        if (problem != _lastDurationProblem)
+        {
+            _lastDurationProblem = problem;
+            _log.Warn("Case-open card: " + problem + ", so the default of 5 s is used.");
+        }
+
+        return DefaultDismissDuration;
+    }
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
+    private static DismissDurationReading ReadRealDismissDuration()
+    {
+        bool ok = Shell.SystemParametersInfoForMessageDuration(Shell.SPI_GETMESSAGEDURATION, 0, out uint seconds, 0);
+        return new DismissDurationReading(ok, seconds, ok ? 0 : Marshal.GetLastPInvokeError());
+    }
+}
