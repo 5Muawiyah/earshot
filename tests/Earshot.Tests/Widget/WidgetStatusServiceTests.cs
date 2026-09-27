@@ -247,6 +247,54 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     [TestMethod]
+    public void ASingleSenderWhileConnectedStillConfirms()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
+        using WidgetStatusService service = NewService(store);
+        PinContainer();
+        service.Start();
+        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
+
+        var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 1);
+        _source.Raise(reading);
+
+        Assert.AreEqual(90, service.Current.Case.Percent);
+        Assert.AreEqual(1, service.Current.Counters.OwnedByLiveConnection);
+        Assert.AreEqual(9, store.Current!.Last.Case);
+    }
+
+    // Reviewer probe P1: connected, a second sender of the claimed model and colour clears the threshold
+    // within the candidate window. The live waiver applies only when exactly one candidate cleared it, so
+    // this second reading must be ambiguous: nothing about it is shown, the claim is not resynced from it,
+    // and no CaseOpened is raised for it.
+    [TestMethod]
+    public void ASecondSenderClearingTheThresholdWhileConnectedIsAmbiguousAndShowsNothing()
+    {
+        var table = ProximityDecodeTable.Unproved with { LidOpenBit = 0 };
+        var store = NewClaimStore();
+        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
+        using WidgetStatusService service = NewService(store, table);
+        PinContainer();
+        service.Start();
+        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
+
+        var first = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 1);
+        _source.Raise(first);
+        Assert.AreEqual(90, service.Current.Case.Percent);
+        Assert.AreEqual(1, service.Current.Counters.OwnedByLiveConnection);
+
+        var second = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x21, lid: 0x01), -60, _clock.GetUtcNow(), SenderTag: 2);
+        _source.Raise(second);
+
+        Assert.AreEqual(90, service.Current.Case.Percent, "A second sender clearing the threshold must not overwrite the first candidate's battery.");
+        Assert.AreEqual(1, service.Current.Counters.OwnedByLiveConnection, "The ambiguous second reading must not count as another live-connection owning.");
+        Assert.AreEqual(1, service.Current.Counters.AmbiguousCandidates);
+        Assert.AreEqual(9, store.Current!.Last.Case, "claim.json must not be resynced from the ambiguous reading.");
+        Assert.AreEqual(0, _caseOpenedEvents.Count, "No CaseOpened for a reading that was not confirmed as owned.");
+    }
+
+    [TestMethod]
     public void CaseOpenedIsRaisedOnlyForAnOwnedAdvertisement()
     {
         var table = ProximityDecodeTable.Unproved with { LidOpenBit = 0 };

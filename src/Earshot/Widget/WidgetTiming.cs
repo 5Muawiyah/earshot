@@ -16,4 +16,10 @@ public static class WidgetTiming
 
     // How long a bud has to return to the ear for auto-pause's second stage to resume what it paused.
     public static readonly TimeSpan ResumeWindow = TimeSpan.FromSeconds(60);
+
+    // The rolling window over which distinct senders matching the claim's model and colour and clearing the
+    // signal threshold are counted, to decide whether a live connection to this PC confirms exactly one
+    // candidate (OwnershipVerdict.OwnedByLiveConnection) or is ambiguous. A design choice made here, not a
+    // measurement; phase 0 may revise it once the address rotation interval is observed.
+    public static readonly TimeSpan LiveCandidateWindow = TimeSpan.FromSeconds(20);
 }

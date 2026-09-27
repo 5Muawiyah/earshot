@@ -31,6 +31,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
 
+    // Distinct sender tags, matching the current claim's model and colour and clearing its signal threshold,
+    // seen within WidgetTiming.LiveCandidateWindow. Used only to decide whether a live connection to this PC
+    // confirms exactly one candidate (D6): two senders clearing the threshold in the window make it ambiguous.
+    private readonly Dictionary<uint, DateTimeOffset> _liveCandidates = new();
+
     private IAdvertisementSource? _source;
     private bool _stopRequested;
     private bool _settingsHooked;
@@ -207,6 +212,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             lock (_gate)
             {
                 _claim = outcome.Claim;
+                _liveCandidates.Clear();
             }
 
             PublishAndNotify();
@@ -221,6 +227,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             _claimStore.ForgetClaim();
             _claim = null;
+            _liveCandidates.Clear();
         }
 
         PublishAndNotify();
@@ -361,7 +368,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         DateTimeOffset at = sample.Timestamp;
-        _uiPost(() => HandleParsedOnUiThread(parse, sample.Rssi, at));
+        uint senderTag = sample.SenderTag;
+        _uiPost(() => HandleParsedOnUiThread(parse, sample.Rssi, senderTag, at));
     }
 
     private void RecordUnknownForm(byte? prefix, int length)
@@ -380,17 +388,17 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    private void HandleParsedOnUiThread(ProximityParse parse, sbyte rssi, DateTimeOffset at)
+    private void HandleParsedOnUiThread(ProximityParse parse, sbyte rssi, uint senderTag, DateTimeOffset at)
     {
         if (parse.Status == ProximityParseStatus.Ok && parse.Message is ProximityMessage message)
         {
-            ApplyOwnedMessage(message, rssi, at);
+            ApplyOwnedMessage(message, rssi, senderTag, at);
         }
 
         PublishAndNotify();
     }
 
-    private void ApplyOwnedMessage(ProximityMessage message, sbyte rssi, DateTimeOffset at)
+    private void ApplyOwnedMessage(ProximityMessage message, sbyte rssi, uint senderTag, DateTimeOffset at)
     {
         ProximityDecodeTable table = _decodeTable();
         bool caseOpenedEdge = false;
@@ -398,12 +406,15 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         lock (_gate)
         {
-            // A live connection to this PC is read from Core Audio alone; the widget only ever tracks one
-            // claimed device, so it never has more than one candidate to disambiguate.
+            // A live connection to this PC is read from Core Audio alone. Because addresses rotate, the
+            // owner's own set can briefly appear under two sender tags; the live waiver applies only when
+            // exactly one distinct sender matching the claim has cleared the threshold within the candidate
+            // window (D6, B1), so that count is tracked here rather than assumed to be one.
             bool live = _thisPcActive;
+            int candidatesClearingThreshold = UpdateLiveCandidatesLocked(message, rssi, senderTag, at);
             var input = new OwnershipInput(
                 new ProximityParse(ProximityParseStatus.Ok, message, null, null, 1, Array.Empty<byte>()),
-                rssi, _claim, table, live, live ? 1 : 0, at);
+                rssi, _claim, table, live, candidatesClearingThreshold, at);
             OwnershipResult result = OwnershipRule.Evaluate(input);
 
             switch (result.Verdict)
@@ -450,6 +461,38 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             _uiPost(() => CaseOpened?.Invoke(this, new CaseOpenedEventArgs(caseOpenedAt)));
         }
+    }
+
+    // Must be called holding _gate. Prunes sender tags last seen outside WidgetTiming.LiveCandidateWindow,
+    // then, when this message matches the current claim's model and colour and clears its threshold, records
+    // its sender tag as a candidate. Returns the resulting distinct-candidate count.
+    private int UpdateLiveCandidatesLocked(ProximityMessage message, sbyte rssi, uint senderTag, DateTimeOffset at)
+    {
+        List<uint>? stale = null;
+        foreach (KeyValuePair<uint, DateTimeOffset> entry in _liveCandidates)
+        {
+            if (at - entry.Value > WidgetTiming.LiveCandidateWindow)
+            {
+                (stale ??= new List<uint>()).Add(entry.Key);
+            }
+        }
+
+        if (stale is not null)
+        {
+            foreach (uint key in stale)
+            {
+                _liveCandidates.Remove(key);
+            }
+        }
+
+        if (_claim is WidgetClaim claim &&
+            message.ModelHigh == claim.ModelHigh && message.ModelLow == claim.ModelLow && message.Colour == claim.Colour &&
+            rssi >= claim.SignalThresholdDbm)
+        {
+            _liveCandidates[senderTag] = at;
+        }
+
+        return _liveCandidates.Count;
     }
 
     // Must be called holding _gate. Returns true when this reading raised the lid's rising edge or a new
