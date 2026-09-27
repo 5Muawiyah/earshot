@@ -344,7 +344,7 @@ internal sealed partial class TrayContext : ApplicationContext
         ApplyHotkeys();
         ApplyVoiceOver();
         ApplyStreaming();
-        WireWidget(options);
+        WireWidget();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }

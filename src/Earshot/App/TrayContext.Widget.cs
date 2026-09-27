@@ -54,48 +54,68 @@ internal sealed partial class TrayContext
     }
 
     // Called once from the constructor, after the menu, the tray icon and the hidden window all exist,
-    // since the click routing below reaches into all three.
-    private void WireWidget(TrayStartOptions options)
+    // since the click routing below reaches into all three, and again from ApplyWidget whenever Enabled
+    // flips from off to on after startup. Idempotent in two independent stages, each guarded on its own
+    // field, so a call that finds one or both stages already wired does nothing to them:
+    //   - the data pipeline (_widgetStatus), which stays built for the rest of the process once
+    //     CompositionRoot.BuildWidget first succeeds: WidgetStatusService already starts and stops its own
+    //     BLE source in response to the same Enabled setting changing later, so it is never torn down here;
+    //   - the UI/gauge pipeline (_gaugeController, _widgetCardPresenter, _taskbarWatcher), which ApplyWidget
+    //     tears down (bar the controller and presenter, cheap to keep) when the owner turns the widget off,
+    //     so a disabled widget leaves no UI Automation polling thread running, and rebuilds when turned back
+    //     on - including from a start where the widget began disabled and neither stage was ever wired.
+    private void WireWidget()
     {
-        _widgetStatus = CompositionRoot.BuildWidget(_registry, () => _coordinator.BlockStatus, options.Time);
         if (_widgetStatus is null)
         {
-            return;
+            _widgetStatus = CompositionRoot.BuildWidget(_registry, () => _coordinator.BlockStatus, _time);
+            if (_widgetStatus is null)
+            {
+                // Still disabled: nothing to wire yet. A later ApplyWidget call re-enters this method once
+                // the owner turns the setting on.
+                return;
+            }
+
+            _widgetStatus.Changed += OnWidgetStatusChanged;
+            _widgetSnapshotCache = _widgetStatus.Current;
+            _widgetStatus.Start();
         }
 
-        _widgetStatus.Changed += OnWidgetStatusChanged;
-        _widgetSnapshotCache = _widgetStatus.Current;
-        _widgetStatus.Start();
+        if (_gaugeController is null)
+        {
+            _widgetTheme = new ThemeReader(_log);
+            var controller = new GaugeController(
+                CreateGaugeSurface,
+                new NotifyIconVisibility(_notifyIcon),
+                ReadGaugeControllerSettings,
+                _log,
+                _time);
+            controller.CardRequested += OnWidgetCardRequested;
+            controller.ToggleRequested += (_, _) => StartToggle();
+            controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
+            _gaugeController = controller;
 
-        _widgetTheme = new ThemeReader(_log);
-        var controller = new GaugeController(
-            CreateGaugeSurface,
-            new NotifyIconVisibility(_notifyIcon),
-            ReadGaugeControllerSettings,
-            _log,
-            options.Time);
-        controller.CardRequested += OnWidgetCardRequested;
-        controller.ToggleRequested += (_, _) => StartToggle();
-        controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
-        _gaugeController = controller;
+            var callbacks = new WidgetCardPresenterCallbacks(
+                CurrentSnapshot: () => _widgetSnapshotCache,
+                AutoPauseOn: () => _registry.Settings.Current.Widget.AutoPause,
+                CurrentIntent: () => TrayStatus.Intent(_snapshot, _registry.Settings.Current),
+                IsBusy: () => IsBusy,
+                Dpi: () => _widgetLayoutDpi,
+                Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
+                HighContrast: () => SystemInformation.HighContrast,
+                OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
+                RequestToggle: StartToggleFromWidget,
+                SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
+                    "pause when a bud comes out (widget)", s => s.Widget = s.Widget with { AutoPause = on }, place));
+            _widgetCardPresenter = new WidgetCardPresenter(() => new WidgetCard(_log), callbacks, _registry.UiPost, _time, _log);
+        }
 
-        _taskbarWatcher = new TaskbarWatcher(new UiaTaskbarReader(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, options.Time);
-        _taskbarWatcher.Start();
-        _taskbarWatcher.Poke();
-
-        var callbacks = new WidgetCardPresenterCallbacks(
-            CurrentSnapshot: () => _widgetSnapshotCache,
-            AutoPauseOn: () => _registry.Settings.Current.Widget.AutoPause,
-            CurrentIntent: () => TrayStatus.Intent(_snapshot, _registry.Settings.Current),
-            IsBusy: () => IsBusy,
-            Dpi: () => _widgetLayoutDpi,
-            Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
-            HighContrast: () => SystemInformation.HighContrast,
-            OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
-            RequestToggle: StartToggleFromWidget,
-            SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
-                "pause when a bud comes out (widget)", s => s.Widget = s.Widget with { AutoPause = on }, place));
-        _widgetCardPresenter = new WidgetCardPresenter(() => new WidgetCard(_log), callbacks, _registry.UiPost, options.Time, _log);
+        if (_taskbarWatcher is null)
+        {
+            _taskbarWatcher = new TaskbarWatcher(new UiaTaskbarReader(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time);
+            _taskbarWatcher.Start();
+            _taskbarWatcher.Poke();
+        }
     }
 
     // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
@@ -289,10 +309,28 @@ internal sealed partial class TrayContext
         }
     }
 
-    // A settings change may have turned the gauge on or off, or changed LeftClickConnects: the controller
-    // reads Settings.Current itself on every OnLayout, so the one thing needed here is an immediate
-    // re-check, so a newly-off gauge disappears within one poll rather than up to two seconds later.
-    private void ApplyWidget() => _taskbarWatcher?.Poke();
+    // A settings change may have turned the widget on or off, or changed LeftClickConnects. LeftClickConnects
+    // and an already-running widget being turned off need only the controller's own Settings.Current re-check
+    // (an immediate poke, so a newly-off gauge disappears within one poll rather than up to two seconds
+    // later); Enabled turning off must also stop the UI Automation polling thread itself (WireWidget's
+    // construction logic is otherwise never re-run, so a widget that started disabled would have no watcher
+    // or controller for a later "turn it on" to act on); Enabled turning on - including for the first time,
+    // from a start where the widget began disabled - re-runs WireWidget, which is idempotent per field.
+    private void ApplyWidget()
+    {
+        if (_registry.Settings.Current.Widget.Enabled)
+        {
+            WireWidget();
+            _taskbarWatcher?.Poke();
+        }
+        else if (_taskbarWatcher is not null)
+        {
+            _gaugeController?.TurnOff();
+            _taskbarWatcher.Dispose();
+            _taskbarWatcher = null;
+            _shownGaugeForWorker = null;
+        }
+    }
 }
 
 // An immutable holder for a ShownGauge, so TrayContext's _shownGaugeForWorker field can be volatile:
