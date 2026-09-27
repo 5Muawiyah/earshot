@@ -1,18 +1,30 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
 using Earshot.Contracts;
 using Earshot.Interop;
 
 namespace Earshot.Widget.Alert;
 
-// Writes (or leaves alone) the per-user Start menu shortcut the toast route's AppUserModelID needs. Real:
-// CoCreateInstance(CLSID_ShellLink), the way Interop\CoreAudio.cs creates the Core Audio enumerator; a test
-// fake stands in for it so no test ever writes a real shortcut.
+// What an existing shortcut currently targets and carries, read back before NotificationRegistration
+// decides whether to touch it.
+internal readonly record struct ExistingShortcut(string TargetPath, string? AppUserModelId);
+
+// Writes the per-user Start menu shortcut the toast route's AppUserModelID needs, and reads one back so the
+// caller can decide whether it already needs no change. Real: CoCreateInstance(CLSID_ShellLink), the way
+// Interop\CoreAudio.cs creates the Core Audio enumerator; a test fake stands in for it so no test ever
+// writes or reads a real shortcut.
 internal interface IShellLinkWriter
 {
-    // Writes the shortcut so it targets targetPath and carries appUserModelId, or leaves it alone when it
-    // already does both. Never throws for anything Windows did.
+    // Writes the shortcut so it targets targetPath and carries appUserModelId. Never throws for anything
+    // Windows did. The caller (NotificationRegistration) decides whether to call this at all: it reads the
+    // existing shortcut first and leaves an already-correct one alone.
     StepOutcome WriteShortcut(string shortcutPath, string targetPath, string appUserModelId);
+
+    // What shortcutPath currently targets and carries, or null when the file does not exist or could not be
+    // read (including a shortcut this build's shell link support cannot read). Never throws for anything
+    // Windows did.
+    ExistingShortcut? ReadShortcut(string shortcutPath);
 }
 
 internal sealed class RealShellLinkWriter : IShellLinkWriter
@@ -89,11 +101,65 @@ internal sealed class RealShellLinkWriter : IShellLinkWriter
             Marshal.ReleaseComObject(link);
         }
     }
+
+    public ExistingShortcut? ReadShortcut(string shortcutPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shortcutPath);
+
+        if (!WidgetPlatformGuard.HasToastNotifications || !File.Exists(shortcutPath))
+        {
+            return null;
+        }
+
+        return ReadGuarded(shortcutPath);
+    }
+
+    [SupportedOSPlatform("windows10.0.19041.0")]
+    private static ExistingShortcut? ReadGuarded(string shortcutPath)
+    {
+        int hr = ComActivation.Create(ShellLinkCom.CLSID_ShellLink, ComActivation.CLSCTX_INPROC_SERVER, out IShellLinkW? link);
+        if (hr < 0 || link is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (link is not IPersistFile file || file.Load(shortcutPath, ShellLinkCom.STGM_READ) < 0)
+            {
+                return null;
+            }
+
+            var pathBuilder = new StringBuilder(ShellLinkCom.MAX_PATH);
+            if (link.GetPath(pathBuilder, ShellLinkCom.MAX_PATH, 0, 0) < 0)
+            {
+                return null;
+            }
+
+            string? appUserModelId = null;
+            if (link is IPropertyStore store)
+            {
+                var read = PropVariantInterop.ReadString(store, ShellLinkCom.PKEY_AppUserModel_ID);
+                if (read.HasValue)
+                {
+                    appUserModelId = read.Value;
+                }
+            }
+
+            return new ExistingShortcut(pathBuilder.ToString(), appUserModelId);
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(link);
+        }
+    }
 }
 
 // The shortcut's own path, its target and its AppUserModelID, and when it must not be touched. Run once at
-// tray start, idempotent: an existing shortcut with the same target and id is left alone by the writer, one
-// with a different target is rewritten.
+// tray start, idempotent: an existing shortcut is read first; one that already targets the right exe and
+// carries the right AppUserModelID is left alone; one that targets a different path this run itself knows as
+// Earshot's (a stale install location) is rewritten; one whose target is neither is left alone and logged,
+// since it is not this application's shortcut to overwrite.
 internal sealed class NotificationRegistration
 {
     // CompanyName.ProductName, no spaces, under 128 characters, no version part so an upgrade keeps it.
@@ -166,6 +232,23 @@ internal sealed class NotificationRegistration
             return StepOutcomes.NotAttempted("shortcut-write", NoExePathMessage);
         }
 
+        ExistingShortcut? existing = _writer.ReadShortcut(ShortcutPath);
+        if (existing is ExistingShortcut current)
+        {
+            if (PathsEqual(current.TargetPath, exePath) && current.AppUserModelId == AppUserModelId)
+            {
+                _log.Info("Notification shortcut already targets " + exePath + " with the right id: left alone.");
+                return StepOutcomes.FromHResult("shortcut-write", 0, detail: "Already correct: left alone.");
+            }
+
+            if (!IsOurs(current.TargetPath))
+            {
+                _log.Warn(
+                    "Earshot.lnk already exists and targets " + current.TargetPath + ", not Earshot: left alone.");
+                return StepOutcomes.NotAttempted("shortcut-write", "An existing shortcut with a different target was left alone.");
+            }
+        }
+
         StepOutcome step = _writer.WriteShortcut(ShortcutPath, exePath, AppUserModelId);
         if (step.Ok)
         {
@@ -179,4 +262,13 @@ internal sealed class NotificationRegistration
 
         return step;
     }
+
+    // M8: "ours" means the existing shortcut's target is a path this run itself knows as Earshot's, whether
+    // or not it is today's preferred one (installed over running), so a stale-but-still-Earshot target is
+    // still safe to rewrite; anything else is never overwritten.
+    private bool IsOurs(string existingTarget) =>
+        PathsEqual(existingTarget, _runningExePath) || PathsEqual(existingTarget, _installedExePath);
+
+    private static bool PathsEqual(string? a, string? b) =>
+        !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 }

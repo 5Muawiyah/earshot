@@ -1,4 +1,5 @@
 using Earshot.Contracts;
+using Earshot.Widget;
 using Earshot.Widget.Alert;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -14,11 +15,15 @@ public sealed class NotifierTests
 
         public StepOutcome Result { get; set; } = StepOutcomes.FromHResult("fake-shortcut", 0);
 
+        public ExistingShortcut? Existing { get; set; }
+
         public StepOutcome WriteShortcut(string shortcutPath, string targetPath, string appUserModelId)
         {
             Calls.Add((shortcutPath, targetPath, appUserModelId));
             return Result;
         }
+
+        public ExistingShortcut? ReadShortcut(string shortcutPath) => Existing;
     }
 
     [TestMethod]
@@ -89,6 +94,96 @@ public sealed class NotifierTests
         string message = ToastNotifier.DescribeFailure(ex);
         StringAssert.Contains(message, nameof(InvalidOperationException));
         StringAssert.Contains(message, "0x");
+    }
+
+    // M8: the "left alone" comments must match the code. An existing shortcut that already targets the
+    // right exe and carries the right AppUserModelID must not be rewritten at all.
+    [TestMethod]
+    public void AnAlreadyCorrectShortcutIsLeftAlone()
+    {
+        const string exePath = @"C:\Earshot\Earshot.exe";
+        var writer = new FakeShellLinkWriter { Existing = new ExistingShortcut(exePath, NotificationRegistration.AppUserModelId) };
+        var log = new CapturingLog();
+        var registration = new NotificationRegistration(
+            writer, log, safeMode: false, redirected: false, shortcutFolder: @"C:\folder", runningExePath: exePath);
+
+        StepOutcome step = registration.Register();
+
+        Assert.IsTrue(step.Ok);
+        Assert.AreEqual(0, writer.Calls.Count, "An already-correct shortcut must not be rewritten.");
+        Assert.IsTrue(log.Has(LogLevel.Info, "left alone"));
+    }
+
+    // M8: never overwrite an Earshot.lnk whose target is not this exe (a foreign target this run does not
+    // recognise as either its running or its installed copy).
+    [TestMethod]
+    public void AShortcutTargetingSomethingElseIsNeverOverwritten()
+    {
+        var writer = new FakeShellLinkWriter { Existing = new ExistingShortcut(@"C:\SomeOtherApp\SomeOtherApp.exe", "SomeOtherApp") };
+        var log = new CapturingLog();
+        var registration = new NotificationRegistration(
+            writer, log, safeMode: false, redirected: false, shortcutFolder: @"C:\folder", runningExePath: @"C:\Earshot\Earshot.exe");
+
+        StepOutcome step = registration.Register();
+
+        Assert.IsFalse(step.Ok);
+        Assert.AreEqual(0, writer.Calls.Count, "A shortcut pointing at something else must never be overwritten.");
+        Assert.IsTrue(log.Has(LogLevel.Warn, "not Earshot"));
+    }
+
+    // A target that is stale but still one of this run's own exe paths (an old install location) is safe to
+    // rewrite, distinct from a genuinely foreign target.
+    [TestMethod]
+    public void AStaleButStillOwnTargetIsRewritten()
+    {
+        const string running = @"C:\running\Earshot.exe";
+        const string installed = @"C:\installed\Earshot.exe";
+        var writer = new FakeShellLinkWriter { Existing = new ExistingShortcut(running, NotificationRegistration.AppUserModelId) };
+        var log = new CapturingLog();
+        var registration = new NotificationRegistration(
+            writer, log, safeMode: false, redirected: false, shortcutFolder: @"C:\folder",
+            runningExePath: running, installedExePath: installed, fileExists: path => path == installed);
+
+        StepOutcome step = registration.Register();
+
+        Assert.AreEqual(1, writer.Calls.Count, "A stale but still-Earshot target must be rewritten.");
+        Assert.AreEqual(installed, writer.Calls[0].TargetPath);
+    }
+
+    // M8 / CLAUDE.md ("for every helper a test fakes, keep one execution of the real one"): the real
+    // RealShellLinkWriter, run against a shortcut in a temp folder, never the owner's Start menu, deleted
+    // afterwards. Inconclusive, not failed, when this build of Windows has no shell link support to check.
+    [TestMethod]
+    public void TheRealShellLinkWriterWritesAndReadsBackTheAppUserModelId()
+    {
+        if (!WidgetPlatformGuard.HasToastNotifications)
+        {
+            Assert.Inconclusive("This build of Windows has no shell link support to check.");
+            return;
+        }
+
+        using var temp = new TempFolder();
+        string shortcutPath = temp.File("Earshot.lnk");
+        string targetPath = Environment.ProcessPath ?? Path.Combine(Environment.SystemDirectory, "notepad.exe");
+        var writer = new RealShellLinkWriter();
+
+        try
+        {
+            StepOutcome writeStep = writer.WriteShortcut(shortcutPath, targetPath, NotificationRegistration.AppUserModelId);
+            Assert.IsTrue(writeStep.Ok, "The real writer must succeed writing into a temp folder: " + writeStep.CodeName);
+            Assert.IsTrue(File.Exists(shortcutPath));
+
+            ExistingShortcut? readBack = writer.ReadShortcut(shortcutPath);
+            Assert.IsNotNull(readBack, "The real writer must be able to read back what it just wrote.");
+            Assert.AreEqual(NotificationRegistration.AppUserModelId, readBack!.Value.AppUserModelId);
+            Assert.AreEqual(targetPath, readBack.Value.TargetPath, ignoreCase: true);
+        }
+        finally
+        {
+            File.Delete(shortcutPath);
+        }
+
+        Assert.IsFalse(File.Exists(shortcutPath));
     }
 
     [TestMethod]

@@ -20,6 +20,10 @@ internal static class ShellLinkCom
     // https://learn.microsoft.com/en-us/windows/win32/api/objbase/ne-objbase-stgm
     internal const uint STGM_READWRITE = 0x00000002;
 
+    // STGM_READ, for IPersistFile.Load when only reading an existing shortcut back.
+    // https://learn.microsoft.com/en-us/windows/win32/api/objbase/ne-objbase-stgm
+    internal const uint STGM_READ = 0x00000000;
+
     // PKEY_AppUserModel_ID, VT_LPWSTR, read from the property page rather than from memory.
     // https://learn.microsoft.com/en-us/windows/win32/properties/props-system-appusermodel-id
     internal static readonly PROPERTYKEY PKEY_AppUserModel_ID =
