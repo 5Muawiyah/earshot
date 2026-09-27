@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -129,43 +130,78 @@ internal static class CardDesktop
             // The thread has ended, so nothing of ours is attached to the desktop any more, except
             // possibly a COM RCW (a UI Automation client, say) still waiting for the GC to finalize it, or
             // Windows' own last-active-window bookkeeping for a desktop a test showed and activated a
-            // window on. Both were observed here as CloseDesktop returning ERROR_BUSY (170), reproducibly
-            // under a full test-suite run (thousands of tests, real system load) but never once in
-            // isolation: a local probe, recorded rather than assumed away. Forcing a collection and
-            // retrying for several seconds clears it in every case tried; if it ever does not, this is
-            // pure test teardown with nothing but its own resources at stake (the desktop's own unique,
-            // never-reused GUID name means nothing else in the process can collide with it), so it is
-            // logged rather than failing the test whose real assertions already ran and passed above.
+            // window on. Both were originally assumed to clear within the retry budget below, and were
+            // observed here as CloseDesktop returning ERROR_BUSY (170), reproducibly under a full
+            // test-suite run but never in isolation. A later probe found that assumption wrong: once any
+            // test in the process has activated a window on one private desktop, a later test's own,
+            // differently named desktop can reliably fail to close afterwards, and neither a much larger
+            // retry budget (2000 attempts, 100 s) nor an extra GC.Collect/WaitForPendingFinalizers pass
+            // partway through the retries ever clears it - this is not a slow race that more waiting wins,
+            // it is a real stuck condition (see RetryCloseDesktop's own comment, and the report, for the
+            // full finding). It is therefore no longer logged and swallowed: RetryCloseDesktop fails the
+            // test instead.
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
-            uint lastError = 0;
-            bool closed = false;
-            for (int attempt = 0; attempt < 200 && !closed; attempt++)
-            {
-                closed = CloseDesktop(desktop);
-                if (!closed)
+            RetryCloseDesktop(
+                () =>
                 {
-                    lastError = unchecked((uint)Marshal.GetLastPInvokeError());
-                    if (lastError != 170)
-                    {
-                        break;
-                    }
-
-                    Thread.Sleep(50);
-                }
-            }
-
-            if (!closed)
-            {
-                Console.Error.WriteLine(
-                    "CardDesktop.Run: CloseDesktop did not succeed within its retry budget (last Win32 error " +
-                    lastError.ToString(System.Globalization.CultureInfo.InvariantCulture) +
-                    "); leaked one private desktop object with a unique name, nothing else. Not failing the test over it.");
-            }
+                    bool closed = CloseDesktop(desktop);
+                    return (closed, closed ? 0u : unchecked((uint)Marshal.GetLastPInvokeError()));
+                },
+                maxAttempts: 200,
+                retryDelay: TimeSpan.FromMilliseconds(50),
+                sleep: Thread.Sleep);
         }
 
         failure?.Throw();
+    }
+
+    internal const uint ErrorBusy = 170;
+
+    // The CloseDesktop retry policy, extracted so its rules can be proven without a real desktop or real
+    // timing: tolerate only ERROR_BUSY and keep retrying; anything else fails immediately; exhausting the
+    // budget fails too, rather than being logged and swallowed as a security review found this doing
+    // before. `attempt` performs one close attempt and reports whether it closed and, if not, the last
+    // Win32 error; `sleep` runs between busy retries (Thread.Sleep in production, a no-op in tests).
+    //
+    // Windows documents CloseDesktop failing only when a thread in this process is still using the handle
+    // (https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-closedesktop): it does not
+    // document a distinct error code for that case versus any other reason the handle might still be busy
+    // (a COM RCW not yet finalized, say), so this cannot tell "a thread is still bound to this desktop" -
+    // the real defect a review asked to be caught - apart from the benign race by error code alone. Both
+    // present as ERROR_BUSY. Exhausting the retry budget while still seeing ERROR_BUSY is therefore treated
+    // as a failure rather than assumed benign: a genuinely still-bound thread is exactly what that outcome
+    // would also look like, so it is not swallowed either.
+    internal static void RetryCloseDesktop(Func<(bool Closed, uint LastError)> attempt, int maxAttempts, TimeSpan retryDelay, Action<TimeSpan> sleep)
+    {
+        uint lastError = 0;
+        bool closed = false;
+        for (int i = 0; i < maxAttempts && !closed; i++)
+        {
+            (closed, lastError) = attempt();
+            if (!closed)
+            {
+                if (lastError != ErrorBusy)
+                {
+                    throw new AssertFailedException(
+                        "CloseDesktop failed with Win32 error " + lastError.ToString(CultureInfo.InvariantCulture) +
+                        ", not ERROR_BUSY (" + ErrorBusy.ToString(CultureInfo.InvariantCulture) +
+                        "). Not retried: a code other than ERROR_BUSY is not the documented desktop-still-in-use " +
+                        "race this retry budget exists for.");
+                }
+
+                sleep(retryDelay);
+            }
+        }
+
+        if (!closed)
+        {
+            throw new AssertFailedException(
+                "CloseDesktop did not succeed within its retry budget (last Win32 error " +
+                lastError.ToString(CultureInfo.InvariantCulture) + "). See RetryCloseDesktop's own comment for " +
+                "why exhausting the budget is not treated as a benign teardown race.");
+        }
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -181,6 +217,70 @@ internal static class CardDesktop
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseDesktop(nint hDesktop);
+}
+
+// CardDesktop.RetryCloseDesktop's own policy, proven without a real desktop: a fake attempt() sequence
+// drives it through the busy-then-succeeds, non-busy-error, and budget-exhausted paths.
+[TestClass]
+public sealed class CardDesktopRetryPolicyTests
+{
+    [TestMethod]
+    public void SucceedsAfterRetryingOnlyOnErrorBusy()
+    {
+        var attempts = new Queue<(bool, uint)>([(false, CardDesktop.ErrorBusy), (false, CardDesktop.ErrorBusy), (true, 0u)]);
+        int sleeps = 0;
+
+        CardDesktop.RetryCloseDesktop(() => attempts.Dequeue(), maxAttempts: 10, retryDelay: TimeSpan.FromMilliseconds(50), sleep: _ => sleeps++);
+
+        Assert.AreEqual(2, sleeps, "One sleep per busy retry before the attempt that succeeds.");
+    }
+
+    [TestMethod]
+    public void AnErrorOtherThanBusyFailsImmediatelyWithoutRetrying()
+    {
+        const uint AccessDenied = 5;
+        int attemptCount = 0;
+        int sleeps = 0;
+
+        var ex = Assert.ThrowsExactly<AssertFailedException>(() =>
+            CardDesktop.RetryCloseDesktop(
+                () =>
+                {
+                    attemptCount++;
+                    return (false, AccessDenied);
+                },
+                maxAttempts: 10,
+                retryDelay: TimeSpan.FromMilliseconds(50),
+                sleep: _ => sleeps++));
+
+        Assert.AreEqual(1, attemptCount, "A non-ERROR_BUSY code must not be retried.");
+        Assert.AreEqual(0, sleeps);
+        StringAssert.Contains(ex.Message, "5");
+    }
+
+    // The defect a security review found: exhausting the retry budget while every attempt reports
+    // ERROR_BUSY used to be logged and swallowed, which also swallowed a genuinely still-bound thread
+    // (indistinguishable from the benign race by error code alone). It must now fail the test.
+    [TestMethod]
+    public void ExhaustingTheBudgetOnPersistentErrorBusyFailsRatherThanSwallowing()
+    {
+        int attemptCount = 0;
+        int sleeps = 0;
+
+        Assert.ThrowsExactly<AssertFailedException>(() =>
+            CardDesktop.RetryCloseDesktop(
+                () =>
+                {
+                    attemptCount++;
+                    return (false, CardDesktop.ErrorBusy);
+                },
+                maxAttempts: 5,
+                retryDelay: TimeSpan.FromMilliseconds(50),
+                sleep: _ => sleeps++));
+
+        Assert.AreEqual(5, attemptCount);
+        Assert.AreEqual(5, sleeps);
+    }
 }
 
 // Read-only window queries for the card tests. Nothing here changes a window other than the test's own.
