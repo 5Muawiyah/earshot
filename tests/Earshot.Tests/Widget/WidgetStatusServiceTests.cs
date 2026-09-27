@@ -616,48 +616,56 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, _caseOpenedEvents.Count);
     }
 
+    // Round 2: a boolean "are we currently inside some uiPost action" cannot tell a genuine post apart from
+    // code that simply runs synchronously nested inside an already-posted action, so it passed even when the
+    // reviewer raised both events directly. This fake queues every posted action instead of running it
+    // immediately, and records how many previously queued actions had FULLY finished (been dequeued and
+    // returned) by the moment each event fires. A raise made through its own, separate uiPost call only runs
+    // after the action that led to it has completed, so it fires with a completed-count of at least one; a
+    // direct raise nested inside that same still-running action fires while the count is still what it was
+    // before that action started.
     [TestMethod]
     public void ChangedAndCaseOpenedAreRaisedThroughUiPost()
     {
-        // The prior version only checked that some post happened and some event happened, never that
-        // the SAME event was raised from inside a uiPost call, so it could not have failed had the code
-        // raised Changed or CaseOpened directly on the caller's thread instead. This tracks, at the instant
-        // each handler runs, whether execution is inside the uiPost action.
         var table = ProximityDecodeTable.Unproved with { LidOpenBit = 0 };
         var store = NewClaimStore();
         store.Save(SampleClaim());
-        bool insideUiPost = false;
-        var changedInsideUiPost = new List<bool>();
-        var caseOpenedInsideUiPost = new List<bool>();
+        var queue = new Queue<Action>();
+        int itemsCompleted = 0;
+        var changedCompletedCountAtFire = new List<int>();
+        var caseOpenedCompletedCountAtFire = new List<int>();
 
         var service = new WidgetStatusService(
             () => _source, store, _settings, _deviceMonitor, () => null, _log,
             action =>
             {
                 Interlocked.Increment(ref _posts);
-                insideUiPost = true;
-                try
-                {
-                    action();
-                }
-                finally
-                {
-                    insideUiPost = false;
-                }
+                queue.Enqueue(action);
             },
             _clock, () => table);
-        service.Changed += (sender, e) => changedInsideUiPost.Add(insideUiPost);
-        service.CaseOpened += (sender, e) => caseOpenedInsideUiPost.Add(insideUiPost);
+        service.Changed += (sender, e) => changedCompletedCountAtFire.Add(itemsCompleted);
+        service.CaseOpened += (sender, e) => caseOpenedCompletedCountAtFire.Add(itemsCompleted);
         service.Start();
         int postsBefore = _posts;
 
         _source.Raise(Owned(lid: 0x01));
 
+        while (queue.Count > 0)
+        {
+            Action item = queue.Dequeue();
+            item();
+            itemsCompleted++;
+        }
+
         Assert.IsTrue(_posts > postsBefore);
-        Assert.IsTrue(changedInsideUiPost.Count > 0, "Changed must have been raised.");
-        Assert.IsTrue(changedInsideUiPost.All(v => v), "Changed must be raised only from inside the uiPost action.");
-        Assert.AreEqual(1, caseOpenedInsideUiPost.Count);
-        Assert.IsTrue(caseOpenedInsideUiPost.All(v => v), "CaseOpened must be raised only from inside the uiPost action.");
+        Assert.IsTrue(changedCompletedCountAtFire.Count > 0, "Changed must have been raised.");
+        Assert.IsTrue(
+            changedCompletedCountAtFire.All(v => v >= 1),
+            "Changed must be raised from its own uiPost action, not nested inside the action that led to it.");
+        Assert.AreEqual(1, caseOpenedCompletedCountAtFire.Count);
+        Assert.IsTrue(
+            caseOpenedCompletedCountAtFire.All(v => v >= 1),
+            "CaseOpened must be raised from its own uiPost action, not nested inside the action that led to it.");
         service.Dispose();
     }
 
