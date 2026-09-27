@@ -10,6 +10,15 @@ namespace Earshot.Widget.Alert;
 // decides whether to touch it.
 internal readonly record struct ExistingShortcut(string TargetPath, string? AppUserModelId);
 
+// NotFound: no shortcut is there yet, safe to write one. Ok: read cleanly, Existing is set. Unreadable: the
+// file is there but a COM call failed partway through reading it; Failure carries the raw HRESULT. NotFound
+// and Unreadable are deliberately different outcomes: only NotFound may be overwritten without a second
+// thought, since a shortcut that exists but could not be parsed might still be someone else's file this
+// build simply failed to read.
+internal enum ShortcutReadStatus { NotFound, Ok, Unreadable }
+
+internal readonly record struct ShortcutRead(ShortcutReadStatus Status, ExistingShortcut? Existing, StepOutcome? Failure);
+
 // Writes the per-user Start menu shortcut the toast route's AppUserModelID needs, and reads one back so the
 // caller can decide whether it already needs no change. Real: CoCreateInstance(CLSID_ShellLink), the way
 // Interop\CoreAudio.cs creates the Core Audio enumerator; a test fake stands in for it so no test ever
@@ -18,13 +27,12 @@ internal interface IShellLinkWriter
 {
     // Writes the shortcut so it targets targetPath and carries appUserModelId. Never throws for anything
     // Windows did. The caller (NotificationRegistration) decides whether to call this at all: it reads the
-    // existing shortcut first and leaves an already-correct one alone.
+    // existing shortcut first and leaves an already-correct one, or one it could not read, alone.
     StepOutcome WriteShortcut(string shortcutPath, string targetPath, string appUserModelId);
 
-    // What shortcutPath currently targets and carries, or null when the file does not exist or could not be
-    // read (including a shortcut this build's shell link support cannot read). Never throws for anything
-    // Windows did.
-    ExistingShortcut? ReadShortcut(string shortcutPath);
+    // What shortcutPath currently targets and carries. Never throws for anything Windows did; every failure
+    // to read an existing file is reported through Unreadable and its HRESULT, never folded into NotFound.
+    ShortcutRead ReadShortcut(string shortcutPath);
 }
 
 internal sealed class RealShellLinkWriter : IShellLinkWriter
@@ -102,38 +110,50 @@ internal sealed class RealShellLinkWriter : IShellLinkWriter
         }
     }
 
-    public ExistingShortcut? ReadShortcut(string shortcutPath)
+    private static readonly ShortcutRead NotFound = new(ShortcutReadStatus.NotFound, null, null);
+
+    public ShortcutRead ReadShortcut(string shortcutPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(shortcutPath);
 
         if (!WidgetPlatformGuard.HasToastNotifications || !File.Exists(shortcutPath))
         {
-            return null;
+            return NotFound;
         }
 
         return ReadGuarded(shortcutPath);
     }
 
+    private static ShortcutRead Unreadable(string step, int hr) =>
+        new(ShortcutReadStatus.Unreadable, null, StepOutcomes.FromHResult(step, hr, ok: false));
+
     [SupportedOSPlatform("windows10.0.19041.0")]
-    private static ExistingShortcut? ReadGuarded(string shortcutPath)
+    private static ShortcutRead ReadGuarded(string shortcutPath)
     {
         int hr = ComActivation.Create(ShellLinkCom.CLSID_ShellLink, ComActivation.CLSCTX_INPROC_SERVER, out IShellLinkW? link);
         if (hr < 0 || link is null)
         {
-            return null;
+            return Unreadable("shortcut-read-create", hr);
         }
 
         try
         {
-            if (link is not IPersistFile file || file.Load(shortcutPath, ShellLinkCom.STGM_READ) < 0)
+            if (link is not IPersistFile file)
             {
-                return null;
+                return Unreadable("shortcut-read-persist-file", CoreAudio.E_NOINTERFACE);
+            }
+
+            int loadHr = file.Load(shortcutPath, ShellLinkCom.STGM_READ);
+            if (loadHr < 0)
+            {
+                return Unreadable("shortcut-read-load", loadHr);
             }
 
             var pathBuilder = new StringBuilder(ShellLinkCom.MAX_PATH);
-            if (link.GetPath(pathBuilder, ShellLinkCom.MAX_PATH, 0, 0) < 0)
+            int getPathHr = link.GetPath(pathBuilder, ShellLinkCom.MAX_PATH, 0, 0);
+            if (getPathHr < 0)
             {
-                return null;
+                return Unreadable("shortcut-read-getpath", getPathHr);
             }
 
             string? appUserModelId = null;
@@ -146,7 +166,7 @@ internal sealed class RealShellLinkWriter : IShellLinkWriter
                 }
             }
 
-            return new ExistingShortcut(pathBuilder.ToString(), appUserModelId);
+            return new ShortcutRead(ShortcutReadStatus.Ok, new ExistingShortcut(pathBuilder.ToString(), appUserModelId), null);
         }
         finally
         {
@@ -232,9 +252,19 @@ internal sealed class NotificationRegistration
             return StepOutcomes.NotAttempted("shortcut-write", NoExePathMessage);
         }
 
-        ExistingShortcut? existing = _writer.ReadShortcut(ShortcutPath);
-        if (existing is ExistingShortcut current)
+        ShortcutRead existing = _writer.ReadShortcut(ShortcutPath);
+        if (existing.Status == ShortcutReadStatus.Unreadable)
         {
+            StepOutcome failure = existing.Failure!;
+            _log.Warn(
+                "Earshot.lnk exists but could not be read (" + failure.CodeName + ", 0x" + failure.Code.ToString("X8") +
+                "): left alone, registration skipped.");
+            return StepOutcomes.NotAttempted("shortcut-write", "An existing shortcut could not be read and was left alone.");
+        }
+
+        if (existing.Status == ShortcutReadStatus.Ok)
+        {
+            ExistingShortcut current = existing.Existing!.Value;
             if (PathsEqual(current.TargetPath, exePath) && current.AppUserModelId == AppUserModelId)
             {
                 _log.Info("Notification shortcut already targets " + exePath + " with the right id: left alone.");

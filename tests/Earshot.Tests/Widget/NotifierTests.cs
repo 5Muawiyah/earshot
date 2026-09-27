@@ -17,13 +17,22 @@ public sealed class NotifierTests
 
         public ExistingShortcut? Existing { get; set; }
 
+        // Set to make ReadShortcut report the file existing but unreadable, the way a real shortcut a COM
+        // call could not parse would.
+        public StepOutcome? UnreadableFailure { get; set; }
+
         public StepOutcome WriteShortcut(string shortcutPath, string targetPath, string appUserModelId)
         {
             Calls.Add((shortcutPath, targetPath, appUserModelId));
             return Result;
         }
 
-        public ExistingShortcut? ReadShortcut(string shortcutPath) => Existing;
+        public ShortcutRead ReadShortcut(string shortcutPath) =>
+            UnreadableFailure is StepOutcome failure
+                ? new ShortcutRead(ShortcutReadStatus.Unreadable, null, failure)
+                : Existing is ExistingShortcut existing
+                    ? new ShortcutRead(ShortcutReadStatus.Ok, existing, null)
+                    : new ShortcutRead(ShortcutReadStatus.NotFound, null, null);
     }
 
     [TestMethod]
@@ -131,6 +140,27 @@ public sealed class NotifierTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "not Earshot"));
     }
 
+    // An Earshot.lnk that exists but could not be read (a COM failure partway through, not "file missing")
+    // must never be overwritten: the HRESULT that made it unreadable is logged and registration is skipped,
+    // rather than the read failure being silently treated the same as "no shortcut yet" and rewritten over.
+    [TestMethod]
+    public void AnUnreadableExistingShortcutIsLeftAloneAndTheHResultIsLogged()
+    {
+        var writer = new FakeShellLinkWriter
+        {
+            UnreadableFailure = StepOutcomes.FromHResult("shortcut-read", unchecked((int)0x80070005), ok: false),
+        };
+        var log = new CapturingLog();
+        var registration = new NotificationRegistration(
+            writer, log, safeMode: false, redirected: false, shortcutFolder: @"C:\folder", runningExePath: @"C:\Earshot\Earshot.exe");
+
+        StepOutcome step = registration.Register();
+
+        Assert.IsFalse(step.Ok);
+        Assert.AreEqual(0, writer.Calls.Count, "An unreadable existing shortcut must never be overwritten.");
+        Assert.IsTrue(log.Has(LogLevel.Warn, "80070005"), "The HRESULT that made it unreadable must be logged.");
+    }
+
     // A target that is stale but still one of this run's own exe paths (an old install location) is safe to
     // rewrite, distinct from a genuinely foreign target.
     [TestMethod]
@@ -173,10 +203,10 @@ public sealed class NotifierTests
             Assert.IsTrue(writeStep.Ok, "The real writer must succeed writing into a temp folder: " + writeStep.CodeName);
             Assert.IsTrue(File.Exists(shortcutPath));
 
-            ExistingShortcut? readBack = writer.ReadShortcut(shortcutPath);
-            Assert.IsNotNull(readBack, "The real writer must be able to read back what it just wrote.");
-            Assert.AreEqual(NotificationRegistration.AppUserModelId, readBack!.Value.AppUserModelId);
-            Assert.AreEqual(targetPath, readBack.Value.TargetPath, ignoreCase: true);
+            ShortcutRead readBack = writer.ReadShortcut(shortcutPath);
+            Assert.AreEqual(ShortcutReadStatus.Ok, readBack.Status, "The real writer must be able to read back what it just wrote.");
+            Assert.AreEqual(NotificationRegistration.AppUserModelId, readBack.Existing!.Value.AppUserModelId);
+            Assert.AreEqual(targetPath, readBack.Existing.Value.TargetPath, ignoreCase: true);
         }
         finally
         {
