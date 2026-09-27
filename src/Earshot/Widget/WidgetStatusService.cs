@@ -36,6 +36,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
 
+    // Rebuilding the shapes list is skipped unless _unknownForms actually changed since the last build: most
+    // adverts never touch it at all, so re-allocating it on every one of them would be pointless churn, and
+    // (record equality being reference equality for a list) would also make WidgetCounters differ on every
+    // publish even when nothing about the unknown-form shapes did.
+    private long _unknownFormsVersion;
+    private long _cachedUnknownFormsVersion = -1;
+    private IReadOnlyList<(byte? Prefix, int Length, long Count)> _cachedUnknownForms = Array.Empty<(byte?, int, long)>();
+
     // Distinct sender tags, matching the current claim's model and colour and clearing its signal threshold,
     // seen within WidgetTiming.LiveCandidateWindow. Used only to decide whether a live connection to this PC
     // confirms exactly one candidate (D6): two senders clearing the threshold in the window make it ambiguous.
@@ -462,10 +470,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             if (_unknownForms.TryGetValue(key, out long count))
             {
                 _unknownForms[key] = count + 1;
+                _unknownFormsVersion++;
             }
             else if (_unknownForms.Count < WidgetCounters.MaxUnknownFormShapes)
             {
                 _unknownForms[key] = 1;
+                _unknownFormsVersion++;
             }
         }
     }
@@ -620,7 +630,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
         else if (table.LidCounterMask is not null && reading.LidCounter is int counter)
         {
-            caseOpenedEdge = _lastLidCounter is null || _lastLidCounter.Value != counter;
+            // Unlike the lid-bit path (an assumed-false baseline, so a true first reading is a genuine rising
+            // edge), there is no "previous" counter value to compare on the very first owned reading: it only
+            // establishes the baseline, and never raises CaseOpened by itself.
+            caseOpenedEdge = _lastLidCounter is int last && last != counter;
             _lastLidCounter = counter;
         }
 
@@ -730,7 +743,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         lock (_gate)
         {
             snapshot = BuildSnapshotLocked(_timeProvider.GetUtcNow());
-            changed = !Equals(snapshot, _lastPublished);
+            changed = SnapshotChangedIgnoringCounters(_lastPublished, snapshot);
             _lastPublished = snapshot;
         }
 
@@ -738,6 +751,33 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             _uiPost(() => Changed?.Invoke(this, EventArgs.Empty));
         }
+    }
+
+    // Counters tick on almost every advertisement (a section counted, an owned reading, ...), so comparing
+    // the whole snapshot by record equality (which is what WidgetCounters, and Counters.UnknownForms as a
+    // reference-equality list, would fall back to) would raise Changed constantly even when nothing the UI
+    // shows moved. Everything the UI actually displays is compared; Counters is deliberately left out, since
+    // it is behind the test window's own technical-details toggle and follows the counters log line's own
+    // once-a-minute cadence, not every advert.
+    private static bool SnapshotChangedIgnoringCounters(WidgetSnapshot? previous, WidgetSnapshot current)
+    {
+        if (previous is null)
+        {
+            return true;
+        }
+
+        return previous.Where != current.Where ||
+            previous.Left != current.Left ||
+            previous.Right != current.Right ||
+            previous.Case != current.Case ||
+            previous.BatteryReadAt != current.BatteryReadAt ||
+            previous.EarReadAt != current.EarReadAt ||
+            previous.LidOpen != current.LidOpen ||
+            previous.Watcher != current.Watcher ||
+            previous.WatcherErrorCode != current.WatcherErrorCode ||
+            previous.WatcherErrorName != current.WatcherErrorName ||
+            previous.ClaimExists != current.ClaimExists ||
+            previous.AutoPauseAvailable != current.AutoPauseAvailable;
     }
 
     private bool IsFreshLocked(DateTimeOffset now) =>
@@ -798,11 +838,17 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     private WidgetCounters BuildCountersLocked()
     {
-        var shapes = new (byte? Prefix, int Length, long Count)[_unknownForms.Count];
-        int i = 0;
-        foreach (KeyValuePair<(byte? Prefix, int Length), long> entry in _unknownForms)
+        if (_cachedUnknownFormsVersion != _unknownFormsVersion)
         {
-            shapes[i++] = (entry.Key.Prefix, entry.Key.Length, entry.Value);
+            var shapes = new (byte? Prefix, int Length, long Count)[_unknownForms.Count];
+            int i = 0;
+            foreach (KeyValuePair<(byte? Prefix, int Length), long> entry in _unknownForms)
+            {
+                shapes[i++] = (entry.Key.Prefix, entry.Key.Length, entry.Value);
+            }
+
+            _cachedUnknownForms = shapes;
+            _cachedUnknownFormsVersion = _unknownFormsVersion;
         }
 
         return new WidgetCounters(
@@ -821,7 +867,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Interlocked.Read(ref _batteryUnreadable),
             Interlocked.Read(ref _batteryInconsistent),
             Interlocked.Read(ref _ambiguousCandidates),
-            shapes);
+            _cachedUnknownForms);
     }
 
     // Once a minute while anything changed since the last one, logs the counters as numbers, the

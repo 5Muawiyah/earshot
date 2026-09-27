@@ -312,6 +312,25 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(50, service.Current.Case.Percent, "An unknown percent must not overwrite the last known one.");
     }
 
+    // Counters tick on almost every advertisement, so comparing the whole snapshot (WidgetCounters included)
+    // to decide whether to raise Changed would fire it constantly even when nothing the UI shows moved.
+    [TestMethod]
+    public void CounterChangesAloneDoNotRaiseChanged()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+
+        _source.Raise(Owned(batteryB: 0x05));
+        int changedAfterFirst = _changedEvents.Count;
+        Assert.IsTrue(changedAfterFirst > 0, "The first reading must raise Changed.");
+
+        _source.Raise(Owned(batteryB: 0x05)); // identical reading: counters tick, nothing UI-visible moves
+
+        Assert.AreEqual(changedAfterFirst, _changedEvents.Count, "A counter-only change must not raise Changed again.");
+    }
+
     // M7, reviewer probe P4: forgetting a claim must not leave the old battery or ear state around to be
     // shown, or compared for consistency, against whatever the owner claims next.
     [TestMethod]
@@ -468,6 +487,27 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _source.Raise(Owned(lid: 0x01)); // opens again: a second edge
 
         Assert.AreEqual(2, _caseOpenedEvents.Count);
+    }
+
+    // The lid-counter path (unlike the lid-bit path, where the assumed-false baseline making a true first
+    // reading a rising edge is deliberate) has no real "previous" value on the very first owned reading: it
+    // must only record a baseline, not treat "nothing to compare yet" as a change.
+    [TestMethod]
+    public void CaseOpenedIsNotRaisedByTheFirstReadingWithTheLidCounterBaseline()
+    {
+        var table = ProximityDecodeTable.Unproved with { LidCounterMask = 0xFF };
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store, table);
+        service.Start();
+
+        _source.Raise(Owned(lid: 0x03)); // the very first owned reading: establishes the baseline only
+
+        Assert.AreEqual(0, _caseOpenedEvents.Count, "The first reading must only establish the lid counter baseline.");
+
+        _source.Raise(Owned(lid: 0x04)); // a genuine change from the baseline
+
+        Assert.AreEqual(1, _caseOpenedEvents.Count);
     }
 
     [TestMethod]
