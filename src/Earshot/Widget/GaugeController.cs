@@ -7,9 +7,10 @@ namespace Earshot.Widget;
 // paths rather than giving each its own fast path ahead of a read: an auto-hidden bar that has slid
 // away is expressed by GaugePlacement returning null (NoFreeSpace) once the on-screen part of the bar
 // is thinner than its own thickness, and a full-screen application is not wired to a fast appbar
-// notification in this build (see the report). Both still end up Hidden with the icon shown, which is
-// the observable behaviour that matters: a control on the bar when it should not be there, or missing
-// when it should be shown.
+// notification in this build (see the report). Both still end up Hidden with the icon shown: every
+// transition into Hidden calls IGaugeSurface.HideWindow on the existing surface, so the window itself
+// disappears rather than merely leaving the tray icon to say so; a transition into Off goes further
+// and disposes the surface outright.
 internal enum HiddenReason { NoTaskbar, ReadFailed, NoFreeSpace, Covered, NotificationState, WindowFailed }
 
 // The controller's state.
@@ -240,6 +241,8 @@ internal sealed class GaugeController : IDisposable
         {
             _trayIcon!.Visible = true;
         }
+
+        _surface?.HideWindow();
     }
 
     private void TransitionOff()
