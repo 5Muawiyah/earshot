@@ -233,6 +233,20 @@ public sealed class OwnershipRuleTests
         Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
     }
 
+    // M5: the test above only ever exercised the case where the unordered check must return true (the same
+    // set, rotated); it could not have failed had that check always returned true regardless of input. This
+    // pins the other side: a pair that matches neither last value, in either position, even unordered.
+    [TestMethod]
+    public void WithTheOrderUnprovedAnInconsistentPairFailsEvenUnordered()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(5, 3, 0, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x91, batteryB: 0x00); // wire high 9, wire low 1: matches neither 5 nor 3, unordered or not
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
+    }
+
     [TestMethod]
     public void WithTheOrderProvedTheBudsAreComparedByName()
     {
