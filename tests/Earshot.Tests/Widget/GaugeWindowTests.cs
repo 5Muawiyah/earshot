@@ -90,6 +90,43 @@ public sealed class GaugeWindowTests
         });
     }
 
+    // A drag that started outside the window and released inside it delivers WM_LBUTTONUP with no
+    // preceding WM_LBUTTONDOWN on this window: it must not be counted as a click.
+    [TestMethod]
+    public void ALeftButtonUpWithNoPrecedingDownIsNotAClick()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            nint handle = gauge.Handle;
+            bool clicked = false;
+            gauge.LeftClicked += (_, _) => clicked = true;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_LBUTTONUP);
+
+            Assert.IsFalse(clicked, "An up with no preceding down on this window must not raise LeftClicked.");
+        });
+    }
+
+    [TestMethod]
+    public void ALeftButtonDownThenUpOnTheSameWindowIsAClick()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            nint handle = gauge.Handle;
+            bool clicked = false;
+            gauge.LeftClicked += (_, _) => clicked = true;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_LBUTTONDOWN);
+            Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_LBUTTONUP);
+
+            Assert.IsTrue(clicked, "A down followed by an up on the same window is a click.");
+        });
+    }
+
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
 
