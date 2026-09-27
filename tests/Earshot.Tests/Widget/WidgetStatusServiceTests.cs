@@ -580,24 +580,44 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
     }
 
+    // M5: the prior version filtered _log.Entries to messages containing the literal, capitalised substring
+    // "Widget", so a line from any widget-adjacent class that does not happen to spell it that way (or any
+    // deliberately injected leak) was invisible to the byte check regardless of what it carried. Every log
+    // entry produced during the run is scanned now, with a pattern that also catches dash- and
+    // colon-separated byte runs (BitConverter.ToString's own format, and a MAC-style address) and a bare
+    // 12-digit address, not only a long contiguous run of hex digits.
+    // Upper-case only: every hex byte this codebase ever formats (BitConverter.ToString, an HResult's "X8"/
+    // "X2") comes out upper-case, and restricting to that avoids a false positive on an ordinary lower-case
+    // English word that happens to spell five hex letters in a row (RadioNotAvailable... Unreadable has
+    // "eadab": e, a, d, a, b are all valid hex digits).
+    private static readonly Regex ForbiddenByteRun = new(
+        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\-]){2,}[0-9A-F]{2}|\b\d{12}\b",
+        RegexOptions.CultureInvariant);
+
     [TestMethod]
     public void LogLinesCarryCountsAndNeverBytes()
     {
         var store = NewClaimStore();
         store.Save(SampleClaim());
         using WidgetStatusService service = NewService(store);
+        int baseline = _log.Entries.Count; // excludes Setup's own JsonSettingsStore bootstrap logging
         service.Start();
 
         _source.Raise(Owned(batteryB: 0x05));
         _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
+        _clock.Advance(WidgetTiming.CountersLogInterval);
 
-        var longHexRun = new Regex("[0-9a-fA-F]{5,}", RegexOptions.CultureInvariant);
-        List<LogEntry> widgetEntries = _log.Entries.Where(e => e.Message.Contains("Widget", StringComparison.Ordinal)).ToList();
+        List<LogEntry> widgetEntries = _log.Entries.Skip(baseline).ToList();
         Assert.IsTrue(widgetEntries.Count > 0, "The widget must have logged something to check.");
         foreach (LogEntry entry in widgetEntries)
         {
-            Assert.IsFalse(longHexRun.IsMatch(entry.Message), "A log line carried something that looks like raw bytes: " + entry.Message);
+            Assert.IsFalse(ForbiddenByteRun.IsMatch(entry.Message), "A log line carried something that looks like raw bytes: " + entry.Message);
         }
+
+        // Section 5.4: once a minute while anything changed, the counters line itself, counts only.
+        Assert.IsTrue(
+            widgetEntries.Any(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal) && e.Message.Contains("ok=1", StringComparison.Ordinal)),
+            "The once-a-minute counters line was not logged.");
     }
 
     [TestMethod]

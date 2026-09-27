@@ -22,4 +22,8 @@ public static class WidgetTiming
     // candidate (OwnershipVerdict.OwnedByLiveConnection) or is ambiguous. A design choice made here, not a
     // measurement; phase 0 may revise it once the address rotation interval is observed.
     public static readonly TimeSpan LiveCandidateWindow = TimeSpan.FromSeconds(20);
+
+    // How often the counters line (section 5.4: counts, unknown-form shapes and the watcher state, never a
+    // byte) is logged while anything has changed since the last one.
+    public static readonly TimeSpan CountersLogInterval = TimeSpan.FromMinutes(1);
 }

@@ -46,6 +46,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private bool _settingsHooked;
     private ITimer? _retryTimer;
     private TimeSpan _retryDelay;
+    private ITimer? _countersLogTimer;
+    private WidgetCounters? _lastLoggedCounters;
+    private WidgetWatcherState? _lastLoggedWatcherState;
 
     private long _allAdvertisements, _appleSections, _otherCompanySections, _proximityItems;
     private long _okForm, _truncated, _unknownForm;
@@ -165,6 +168,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             {
                 _watcherState = WidgetWatcherState.Off;
             }
+
+            // Section 5.4: once a minute while anything changed, never on a fixed schedule regardless.
+            _countersLogTimer ??= _timeProvider.CreateTimer(
+                static state => ((WidgetStatusService)state!).OnCountersLogDue(), this,
+                WidgetTiming.CountersLogInterval, WidgetTiming.CountersLogInterval);
         }
     }
 
@@ -213,6 +221,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 _settings.Changed -= OnSettingsChanged;
                 _settingsHooked = false;
             }
+
+            _countersLogTimer?.Dispose();
+            _countersLogTimer = null;
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             StopSourceLocked(disposeSource: true);
@@ -800,5 +811,73 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Interlocked.Read(ref _batteryInconsistent),
             Interlocked.Read(ref _ambiguousCandidates),
             shapes);
+    }
+
+    // Section 5.4: once a minute while anything changed since the last one, the counters as numbers, the
+    // unknown-form shapes as prefix and length (never the bytes themselves), and the watcher state. Compared
+    // field by field rather than with WidgetCounters' own record equality, since UnknownForms is a fresh
+    // array on every read and would never compare equal to itself by reference.
+    private void OnCountersLogDue()
+    {
+        WidgetCounters current;
+        WidgetWatcherState watcherState;
+        lock (_gate)
+        {
+            current = BuildCountersLocked();
+            watcherState = _watcherState;
+            if (_lastLoggedCounters is WidgetCounters last && watcherState == _lastLoggedWatcherState && CountersEqual(current, last))
+            {
+                return;
+            }
+
+            _lastLoggedCounters = current;
+            _lastLoggedWatcherState = watcherState;
+        }
+
+        _log.Info(FormatCountersLine(current, watcherState));
+    }
+
+    private static bool CountersEqual(WidgetCounters a, WidgetCounters b) =>
+        a.AllAdvertisements == b.AllAdvertisements &&
+        a.AppleSections == b.AppleSections &&
+        a.OtherCompanySections == b.OtherCompanySections &&
+        a.ProximityItems == b.ProximityItems &&
+        a.OkForm == b.OkForm &&
+        a.Truncated == b.Truncated &&
+        a.UnknownForm == b.UnknownForm &&
+        a.Owned == b.Owned &&
+        a.OwnedByLiveConnection == b.OwnedByLiveConnection &&
+        a.NoClaim == b.NoClaim &&
+        a.ModelOrColourMismatch == b.ModelOrColourMismatch &&
+        a.SignalBelowThreshold == b.SignalBelowThreshold &&
+        a.BatteryUnreadable == b.BatteryUnreadable &&
+        a.BatteryInconsistent == b.BatteryInconsistent &&
+        a.AmbiguousCandidates == b.AmbiguousCandidates &&
+        a.UnknownForms.SequenceEqual(b.UnknownForms);
+
+    // Numbers and shapes only: prefix and length describe an unknown form's shape, never its bytes.
+    private static string FormatCountersLine(WidgetCounters c, WidgetWatcherState watcherState)
+    {
+        string shapes = string.Join(
+            ",",
+            c.UnknownForms.Select(s => "(prefix=" + (s.Prefix?.ToString("X2") ?? "none") + " length=" + s.Length + " count=" + s.Count + ")"));
+
+        return "Widget counters: watcher=" + watcherState +
+            " all=" + c.AllAdvertisements +
+            " apple=" + c.AppleSections +
+            " other=" + c.OtherCompanySections +
+            " items=" + c.ProximityItems +
+            " ok=" + c.OkForm +
+            " truncated=" + c.Truncated +
+            " unknownForm=" + c.UnknownForm +
+            " owned=" + c.Owned +
+            " ownedByLiveConnection=" + c.OwnedByLiveConnection +
+            " noClaim=" + c.NoClaim +
+            " modelOrColourMismatch=" + c.ModelOrColourMismatch +
+            " signalBelowThreshold=" + c.SignalBelowThreshold +
+            " batteryUnreadable=" + c.BatteryUnreadable +
+            " batteryInconsistent=" + c.BatteryInconsistent +
+            " ambiguousCandidates=" + c.AmbiguousCandidates +
+            " unknownFormShapes=[" + shapes + "]";
     }
 }
