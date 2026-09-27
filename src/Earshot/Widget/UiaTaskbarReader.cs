@@ -144,7 +144,19 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             return false;
         }
 
-        hr = found.get_Length(out int count);
+        return TryReadElements(found, containerRect, out occupied, out startButton, out failure);
+    }
+
+    // Split out from TryReadOccupants so a test can drive the per-element logic against a fake
+    // IUIAutomationElementArray/IUIAutomationElement, without a real Shell_TrayWnd or a way to make the
+    // real COM pipeline fail partway through an enumeration on demand.
+    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
+    {
+        occupied = [];
+        startButton = null;
+        failure = null;
+
+        int hr = found.get_Length(out int count);
         if (hr < 0)
         {
             failure = StepOutcomes.FromHResult("uia:get-length", hr);
@@ -153,15 +165,36 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
 
         for (int i = 0; i < count; i++)
         {
-            if (found.GetElement(i, out IUIAutomationElement? element) < 0 || element is null)
+            hr = found.GetElement(i, out IUIAutomationElement? element);
+            if (hr < 0)
             {
-                continue;
+                // Fails the whole read rather than skipping this element: an element whose properties
+                // cannot be read is not known to be free space, so a gauge must not be placed as though it
+                // were. Silently continuing here (the old behaviour) failed open.
+                failure = StepOutcomes.FromHResult("uia:get-element", hr);
+                return false;
             }
 
-            if (element.GetCachedPropertyValue(UiAutomation.UIA_BoundingRectanglePropertyId, out object? rectValue) < 0 ||
-                rectValue is not double[] { Length: 4 } bounds)
+            if (element is null)
             {
-                // VT_EMPTY: the element is not currently displaying UI (F7). Not an occupant.
+                // A success code with no element is not documented to happen; treated as a failure for the
+                // same fail-closed reason, rather than silently skipping a slot this occupant list cannot
+                // account for.
+                failure = StepOutcomes.FromHResult("uia:get-element:null-element", 0, "GetElement returned S_OK with a null element.", ok: false);
+                return false;
+            }
+
+            hr = element.GetCachedPropertyValue(UiAutomation.UIA_BoundingRectanglePropertyId, out object? rectValue);
+            if (hr < 0)
+            {
+                failure = StepOutcomes.FromHResult("uia:get-cached-property:bounding-rectangle", hr);
+                return false;
+            }
+
+            if (rectValue is not double[] { Length: 4 } bounds)
+            {
+                // VT_EMPTY on a successful read: the element is not currently displaying UI (documented
+                // behaviour of the BoundingRectangle property, not a failure). Not an occupant.
                 continue;
             }
 
@@ -175,16 +208,28 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                 continue;
             }
 
-            if (element.GetCachedPropertyValue(UiAutomation.UIA_IsOffscreenPropertyId, out object? offscreenValue) >= 0 &&
-                offscreenValue is bool { } offscreen && offscreen)
+            hr = element.GetCachedPropertyValue(UiAutomation.UIA_IsOffscreenPropertyId, out object? offscreenValue);
+            if (hr < 0)
+            {
+                failure = StepOutcomes.FromHResult("uia:get-cached-property:is-offscreen", hr);
+                return false;
+            }
+
+            if (offscreenValue is bool { } offscreen && offscreen)
             {
                 continue;
             }
 
             occupied.Add(rect);
 
-            if (element.GetCachedPropertyValue(UiAutomation.UIA_AutomationIdPropertyId, out object? idValue) >= 0 &&
-                idValue is string id && string.Equals(id, StartButtonAutomationId, StringComparison.Ordinal))
+            hr = element.GetCachedPropertyValue(UiAutomation.UIA_AutomationIdPropertyId, out object? idValue);
+            if (hr < 0)
+            {
+                failure = StepOutcomes.FromHResult("uia:get-cached-property:automation-id", hr);
+                return false;
+            }
+
+            if (idValue is string id && string.Equals(id, StartButtonAutomationId, StringComparison.Ordinal))
             {
                 startButton = rect;
             }
