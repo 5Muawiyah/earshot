@@ -37,6 +37,11 @@ internal sealed class LowBatteryLatch
 
     public void SetThreshold(int thresholdPercent)
     {
+        if (thresholdPercent == ThresholdPercent)
+        {
+            return; // nothing about the threshold changed: an already-fired latch must not re-arm
+        }
+
         ThresholdPercent = thresholdPercent;
         _left = LatchState.Armed;
         _right = LatchState.Armed;

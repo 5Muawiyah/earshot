@@ -99,6 +99,20 @@ public sealed class LowBatteryLatchTests
         Assert.AreEqual(10, latch.ThresholdPercent);
     }
 
+    // Setting the threshold to the value it already holds must not re-arm a Fired latch: nothing about the
+    // threshold changed, so the alert must not be able to fire again for the same low reading.
+    [TestMethod]
+    public void SetThresholdWithTheSameValueReArmsNothing()
+    {
+        var latch = new LowBatteryLatch(20);
+        latch.ApplyLeft(20);
+        Assert.AreEqual(LatchState.Fired, latch.Left);
+
+        latch.SetThreshold(20);
+
+        Assert.AreEqual(LatchState.Fired, latch.Left, "An unchanged threshold must not re-arm an already-fired latch.");
+    }
+
     [TestMethod]
     public void TheDefaultThresholdIsTwenty()
     {
