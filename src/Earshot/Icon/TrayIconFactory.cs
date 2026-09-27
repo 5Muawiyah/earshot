@@ -91,7 +91,7 @@ internal sealed class TrayIconFactory
 
     public int IconSize()
     {
-        uint dpi = TaskbarDpi(out string? problem);
+        uint dpi = TaskbarDpi.Read(out string? problem);
         int metric = Shell.GetSystemMetricsForDpi(Shell.SM_CXSMICON, dpi);
         if (metric <= 0)
         {
@@ -118,34 +118,5 @@ internal sealed class TrayIconFactory
             ? metric
             : (int)Math.Round(16.0 * (dpi == 0 ? 96 : dpi) / 96.0, MidpointRounding.AwayFromZero);
         return Math.Clamp(size, EarbudGlyph.MinSize, EarbudGlyph.MaxSize);
-    }
-
-    private static uint TaskbarDpi(out string? problem)
-    {
-        problem = null;
-        var bar = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>() };
-        if (Shell.SHAppBarMessage(Shell.ABM_GETTASKBARPOS, ref bar) == 0)
-        {
-            // No taskbar, for example while Explorer restarts.
-            problem = "SHAppBarMessage(ABM_GETTASKBARPOS) failed, so the system DPI is used";
-            return Shell.GetDpiForSystem();
-        }
-
-        nint monitor = Shell.MonitorFromRect(in bar.rc, Shell.MONITOR_DEFAULTTONEAREST);
-        if (monitor == 0)
-        {
-            problem = "MonitorFromRect found no monitor for the taskbar, so the system DPI is used";
-            return Shell.GetDpiForSystem();
-        }
-
-        int hr = Shell.GetDpiForMonitor(monitor, Shell.MDT_EFFECTIVE_DPI, out uint dpiX, out _);
-        if (hr < 0 || dpiX == 0)
-        {
-            StepOutcome step = StepOutcomes.FromHResult("get-dpi-for-monitor", hr);
-            problem = "GetDpiForMonitor returned " + step.CodeName + ", so the system DPI is used";
-            return Shell.GetDpiForSystem();
-        }
-
-        return dpiX;
     }
 }

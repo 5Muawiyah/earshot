@@ -12,8 +12,24 @@ internal static unsafe partial class Shell
     // SHAppBarMessage messages (shellapi.h). ABM_GETTASKBARPOS needs only cbSize and fills rc in screen
     // coordinates. uEdge is not documented as an output of it: derive the edge from rc.
     // https://learn.microsoft.com/en-us/windows/win32/shell/abm-gettaskbarpos
+    internal const uint ABM_NEW = 0x00000000;
+    internal const uint ABM_REMOVE = 0x00000001;
     internal const uint ABM_GETSTATE = 0x00000004;
     internal const uint ABM_GETTASKBARPOS = 0x00000005;
+
+    // Appbar notifications, delivered to the callback message ABM_NEW registers (widget-ui.md F5, section
+    // 16). lParam of ABN_FULLSCREENAPP is TRUE while a full-screen application is opening, FALSE while it
+    // is closing.
+    // https://learn.microsoft.com/en-us/windows/win32/shell/application-desktop-toolbars
+    internal const int ABN_STATECHANGE = 0;
+    internal const int ABN_POSCHANGED = 1;
+    internal const int ABN_FULLSCREENAPP = 2;
+    internal const int ABN_WINDOWARRANGE = 3;
+
+    // SystemParametersInfo actions used by the widget. SPI_GETMESSAGEDURATION's pvParam is a ULONG*
+    // receiving the notification pop-up duration in seconds (widget-ui.md 2.5).
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
+    internal const uint SPI_GETMESSAGEDURATION = 0x2016;
 
     // ABM_GETSTATE result bits.
     // https://learn.microsoft.com/en-us/windows/win32/shell/abm-getstate
@@ -114,6 +130,13 @@ internal static unsafe partial class Shell
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerwindowmessagew
     [LibraryImport(User32, EntryPoint = "RegisterWindowMessageW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     internal static partial uint RegisterWindowMessage(string lpString);
+
+    // With uiAction = SPI_GETMESSAGEDURATION, pvParam is a ULONG* receiving the duration in seconds;
+    // uiParam and fWinIni are both 0 for this action.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
+    [LibraryImport(User32, EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SystemParametersInfoForMessageDuration(uint uiAction, uint uiParam, out uint pvParam, uint fWinIni);
 }
 
 // APPBARDATA, 48 bytes on x64.
