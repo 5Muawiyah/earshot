@@ -24,6 +24,11 @@ internal static partial class Program
 
     internal const string ProbeIconTarget = "icon";
 
+    // probe widget --out <folder>: renders the gauge (and, once built, the card) from a fixed synthetic
+    // snapshot, the same as probe icon renders the tray glyph. No IWidgetStatus, no device, no window
+    // shown; safe under EARSHOT_SAFE_MODE=1 with EARSHOT_DATA_ROOT pointed at a temp folder.
+    internal const string ProbeWidgetTarget = "widget";
+
     internal static readonly IReadOnlyList<string> ProbeTargets =
         ["audio", "topology", "nodes", "services", "task", "battery"];
 
@@ -41,7 +46,7 @@ internal static partial class Program
         }
 
         // probe icon's --out names the folder for its images; its report goes to the console.
-        string? reportPath = IsIconProbe(request) ? null : request.OutPath;
+        string? reportPath = IsIconProbe(request) || IsWidgetProbe(request) ? null : request.OutPath;
         if (!CommandOutput.TryOpen(reportPath, out CommandOutput? output, out string? outputProblem))
         {
             log.Error("probe: " + outputProblem);
@@ -97,7 +102,7 @@ internal static partial class Program
 
                 outPath = args[++i];
             }
-            else if (a == "all" || a == ProbeIconTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
+            else if (a == "all" || a == ProbeIconTarget || a == ProbeWidgetTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
             {
                 if (target is not null)
                 {
@@ -120,6 +125,12 @@ internal static partial class Program
             return false;
         }
 
+        if (target == ProbeWidgetTarget && outPath is null)
+        {
+            error = "probe widget needs --out <folder>.";
+            return false;
+        }
+
         IReadOnlyList<string> targets = target is null or "all" ? ProbeTargets : [target];
         request = new ProbeRequest(targets, json, outPath);
         error = null;
@@ -130,6 +141,12 @@ internal static partial class Program
     {
         ArgumentNullException.ThrowIfNull(request);
         return request.Targets.Count == 1 && request.Targets[0] == ProbeIconTarget;
+    }
+
+    internal static bool IsWidgetProbe(ProbeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Targets.Count == 1 && request.Targets[0] == ProbeWidgetTarget;
     }
 
     // Runs each requested target and returns the first non-zero exit code, or 0.
@@ -202,6 +219,7 @@ internal static partial class Program
             case "task":     ProbeTask(ctx); break;
             case "battery":  ProbeBattery(ctx); break;
             case ProbeIconTarget: ProbeIcon(ctx, outPath); break;
+            case ProbeWidgetTarget: ProbeWidget(ctx, outPath); break;
             default:         break;
         }
     }
@@ -215,6 +233,9 @@ internal static partial class Program
 
     // folder: where the images go (probe icon's --out).
     static partial void ProbeIcon(ProbeContext ctx, string? folder);
+
+    // folder: where the images go (probe widget's --out).
+    static partial void ProbeWidget(ProbeContext ctx, string? folder);
 
     private static void WriteProbeNotAvailable(ProbeContext ctx)
     {
