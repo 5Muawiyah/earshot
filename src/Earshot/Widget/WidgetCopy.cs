@@ -2,9 +2,9 @@ using System.Globalization;
 
 namespace Earshot.Widget;
 
-// Every string the widget shows or reads aloud. British English, plain, short, no em-dashes.
-// widget-ui.md 7.1, 7.6, 8. Not reviewed by a separate prose pass in this change (see the report); kept
-// to the same plain style as the rest of the tray copy.
+// Every string the widget shows or reads aloud. British English, plain, short, no em-dashes. Not
+// reviewed by a separate prose pass in this change (see the report); kept to the same plain style as the
+// rest of the tray copy.
 internal static class WidgetCopy
 {
     public const string NoReading = "No reading";
@@ -37,7 +37,7 @@ internal static class WidgetCopy
         _ => NotSeenYet,
     };
 
-    // "Battery read <n> s|min|h ago", never "live" (widget-ui.md 7.1 row 3).
+    // "Battery read <n> s|min|h ago", never "live".
     public static string BatteryReadLine(DateTimeOffset? readAt, DateTimeOffset now)
     {
         if (readAt is not { } at)

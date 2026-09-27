@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// GaugeRenderer pixel checks, widget-ui.md section 6 and 12.1.
+// GaugeRenderer pixel checks.
 [TestClass]
 public sealed class GaugeRendererTests
 {

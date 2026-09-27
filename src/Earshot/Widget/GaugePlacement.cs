@@ -2,7 +2,7 @@ using Earshot.Popup;
 
 namespace Earshot.Widget;
 
-// Pure placement maths for the taskbar gauge. No window, no native call. widget-ui.md section 5.
+// Pure placement maths for the taskbar gauge. No window, no native call.
 //
 // Along the long axis (x for a Bottom or Top taskbar, y for Left or Right):
 //   1. Project every occupant onto the axis, sort, merge overlaps.

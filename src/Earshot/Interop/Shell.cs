@@ -17,9 +17,8 @@ internal static unsafe partial class Shell
     internal const uint ABM_GETSTATE = 0x00000004;
     internal const uint ABM_GETTASKBARPOS = 0x00000005;
 
-    // Appbar notifications, delivered to the callback message ABM_NEW registers (widget-ui.md F5, section
-    // 16). lParam of ABN_FULLSCREENAPP is TRUE while a full-screen application is opening, FALSE while it
-    // is closing.
+    // Appbar notifications, delivered to the callback message ABM_NEW registers. lParam of
+    // ABN_FULLSCREENAPP is TRUE while a full-screen application is opening, FALSE while it is closing.
     // https://learn.microsoft.com/en-us/windows/win32/shell/application-desktop-toolbars
     internal const int ABN_STATECHANGE = 0;
     internal const int ABN_POSCHANGED = 1;
@@ -27,7 +26,7 @@ internal static unsafe partial class Shell
     internal const int ABN_WINDOWARRANGE = 3;
 
     // SystemParametersInfo actions used by the widget. SPI_GETMESSAGEDURATION's pvParam is a ULONG*
-    // receiving the notification pop-up duration in seconds (widget-ui.md 2.5).
+    // receiving the notification pop-up duration in seconds.
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
     internal const uint SPI_GETMESSAGEDURATION = 0x2016;
 
@@ -95,6 +94,13 @@ internal static unsafe partial class Shell
 
     [LibraryImport(User32)]
     internal static partial nint MonitorFromRect(in RECT lprc, uint dwFlags);
+
+    // The monitor's own bounds (rcMonitor) and work area (rcWork), physical pixels. cbSize must be set
+    // before the call.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmonitorinfow
+    [LibraryImport(User32, EntryPoint = "GetMonitorInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetMonitorInfo(nint hMonitor, ref MONITORINFO lpmi);
 
     // Per-display DPI for a per-monitor-aware caller. Returns an HRESULT.
     // https://learn.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-getdpiformonitor
@@ -176,4 +182,14 @@ internal struct SIZE
 {
     public int cx;
     public int cy;
+}
+
+// https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-monitorinfo
+[StructLayout(LayoutKind.Sequential)]
+internal struct MONITORINFO
+{
+    public uint cbSize;
+    public RECT rcMonitor;
+    public RECT rcWork;
+    public uint dwFlags;
 }

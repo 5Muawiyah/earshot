@@ -70,7 +70,23 @@ internal static class CardDesktop
     // https://learn.microsoft.com/en-us/windows/win32/winstation/desktop-security-and-access-rights
     private const uint DesktopAccess = 0x0001 | 0x0002 | 0x0004 | 0x0080;
 
-    public static void Run(Action work)
+    public static void Run(Action work) => Run(_ => work());
+
+    // Binds the calling thread to desktop, for a second thread that needs to see the same windows as the
+    // one CardDesktop.Run started: UI Automation documents that its worker thread must own no window, so
+    // it cannot be the thread Run itself binds.
+    public static void BindCurrentThread(nint desktop)
+    {
+        if (!SetThreadDesktop(desktop))
+        {
+            throw new AssertFailedException("SetThreadDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+        }
+    }
+
+    // Hands the created desktop's handle to work, so a second thread can SetThreadDesktop(sameDesktop)
+    // and read UI Automation elements on that desktop too: the UIA worker thread must own no window, so
+    // it cannot be the thread CardDesktop.Run already binds to the desktop.
+    public static void Run(Action<nint> work)
     {
         ExceptionDispatchInfo? failure = null;
         nint desktop = CreateDesktopW("EarshotCardTest-" + Guid.NewGuid().ToString("N"), 0, 0, 0, DesktopAccess, 0);
@@ -91,7 +107,7 @@ internal static class CardDesktop
                     }
 
                     Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
-                    work();
+                    work(desktop);
                 }
                 catch (Exception ex)
                 {

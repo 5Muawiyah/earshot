@@ -116,10 +116,10 @@ public sealed class ComVtableOrderTests
 
     private static readonly string[] BootTrigger = [.. Trigger, "get_Delay", "put_Delay"];
 
-    // IUIAutomation up to CreateTrueCondition (widget-ui.md section 16, UIAutomationCore.idl). Every
-    // method up to the last one Earshot uses is pinned, the same convention TaskSchedulerCom's largely
-    // unused interfaces already follow. IUIAutomationCondition has no methods beyond IUnknown, so it
-    // carries no slots to pin and is not in this list.
+    // IUIAutomation up to CreateTrueCondition (UIAutomationCore.idl). Every method up to the last one
+    // Earshot uses is pinned, the same convention TaskSchedulerCom's largely unused interfaces already
+    // follow. IUIAutomationCondition has no methods beyond IUnknown, so it carries no slots to pin and is
+    // not in this list.
     private static readonly string[] UIAutomation =
     [
         "CompareElements", "CompareRuntimeIds", "GetRootElement", "ElementFromHandle", "ElementFromPoint", "GetFocusedElement",

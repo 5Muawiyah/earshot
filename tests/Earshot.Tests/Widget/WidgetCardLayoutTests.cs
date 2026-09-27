@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// WidgetCardLayout pure row layout, widget-ui.md section 7.1 and 12.1.
+// WidgetCardLayout pure row layout.
 [TestClass]
 public sealed class WidgetCardLayoutTests
 {

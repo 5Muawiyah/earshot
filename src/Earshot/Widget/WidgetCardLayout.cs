@@ -2,7 +2,7 @@ using Earshot.Popup;
 
 namespace Earshot.Widget;
 
-// Pure row layout for the widget card. No window, no drawing. widget-ui.md section 7.1, 12.1.
+// Pure row layout for the widget card. No window, no drawing.
 //
 // Width 320 at 96 DPI, padding 16: three columns (Left, Right, Case), the where line, the read line,
 // then the Connect/Disconnect button and, only when the snapshot says auto-pause is available, the

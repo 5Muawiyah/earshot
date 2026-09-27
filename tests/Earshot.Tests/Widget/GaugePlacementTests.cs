@@ -6,9 +6,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// GaugePlacement pure maths, widget-ui.md section 5 and 12.1. Fixtures mirror the machine the spec was
-// written against: Start 762..807, task buttons 44 px wide from 807, the notification area from 1678,
-// bar 0,1032,1920,48 at 96 DPI.
+// GaugePlacement pure maths. Fixtures mirror a real Windows 11 taskbar layout: Start 762..807, task
+// buttons 44 px wide from 807, the notification area from 1678, bar 0,1032,1920,48 at 96 DPI.
 [TestClass]
 public sealed class GaugePlacementTests
 {

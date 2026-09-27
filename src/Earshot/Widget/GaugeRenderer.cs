@@ -8,7 +8,7 @@ namespace Earshot.Widget;
 
 // Draws the gauge bitmap: the earbud mark, the lower bud's battery as a bar and a number, a charging
 // bolt, and a hover pill behind the whole gauge (the taskbar's own hover look). Pure drawing, used by
-// GaugeWindow, the tests and the screenshot probe. widget-ui.md section 6.
+// GaugeWindow, the tests and the screenshot probe.
 //
 // GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit): GDI text (TextRenderer) writes alpha
 // 0 and would vanish on a layered window (research.json F10).
@@ -21,7 +21,7 @@ internal static class GaugeRenderer
     public const int BarWidthAt96 = 24;
     public const int BarHeightAt96 = 6;
     public const int GapAfterBarAt96 = 4;
-    public const int NumberWidthAt96 = 18; // 88 total: 8 + 20 + 6 + 24 + 4 + 18 + 8 (widget-ui.md section 6)
+    public const int NumberWidthAt96 = 18; // 88 total: 8 + 20 + 6 + 24 + 4 + 18 + 8
     public const int BoltWidthAt96 = 6;
     public const int BoltHeightAt96 = 10;
     public const float NumberPoints = 9f;

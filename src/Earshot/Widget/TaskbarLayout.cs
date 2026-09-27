@@ -7,7 +7,7 @@ namespace Earshot.Widget;
 // screen pixels. Occupied excludes the frame containers themselves (Shell_TrayWnd, the input site,
 // TaskbarFrame): only leaf elements with a non-empty, on-screen rectangle. StartButton is the Start
 // element's own rectangle when it was found; null when it was not (GaugePlacement then falls back to
-// the first merged interval, widget-ui.md section 5).
+// the first merged interval).
 internal sealed record TaskbarLayout(
     nint TaskbarHandle,
     Rectangle Taskbar,

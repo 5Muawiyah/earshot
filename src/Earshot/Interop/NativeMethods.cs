@@ -74,7 +74,7 @@ internal static partial class NativeMethods
     // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-hotkey
     internal const int WM_HOTKEY = 0x0312;
 
-    // The widget's window messages (research.json, widget-ui.md section 16).
+    // The widget's window messages.
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-activate
     internal const int WM_ACTIVATE = 0x0006;
     internal const int WA_INACTIVE = 0;
@@ -178,6 +178,12 @@ internal static partial class NativeMethods
     [LibraryImport(User32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    // The top-level window with the given class name, or 0 when none exists. The reader calls this on
+    // every read (never a cached handle), so a taskbar recreated by an Explorer restart is found again.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-findwindoww
+    [LibraryImport(User32, EntryPoint = "FindWindowW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial nint FindWindowW(string? lpClassName, string? lpWindowName);
 
     // The window (any process) at a screen point, or 0 when the point is over no window. Used for the
     // covered check (2.4) and the click-through proof (F10): coordinates are physical screen pixels.

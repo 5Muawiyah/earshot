@@ -2,19 +2,20 @@ using System.Runtime.InteropServices;
 
 namespace Earshot.Interop;
 
-// The native UI Automation COM surface the widget's taskbar reader uses to find free space on the bar
-// (widget-ui.md D2, section 16). [ComImport] early-bound interfaces in the exact vtable order of
-// UIAutomationCore.idl (Windows SDK 10.0.26100.0), the same approach TaskSchedulerCom.cs and CoreAudio.cs
-// already take: every method keeps its HRESULT ([PreserveSig]), the slot order is pinned by
-// ComVtableOrderTests, and the managed UIAutomationClient.dll (the WPF-profile managed client) is never
-// referenced (widget-ui.md D2, F11).
+// The native UI Automation COM surface the widget's taskbar reader uses to find free space on the bar.
+// [ComImport] early-bound interfaces in the exact vtable order of UIAutomationCore.idl (Windows SDK
+// 10.0.26100.0), the same approach TaskSchedulerCom.cs and CoreAudio.cs already take: every method keeps
+// its HRESULT ([PreserveSig]), the slot order is pinned by ComVtableOrderTests, and the managed
+// UIAutomationClient.dll (the WPF-profile managed client, hundreds of extra files in a self-contained
+// publish) is never referenced.
 //
 // Declared, not all called: every method up to the last one Earshot uses (CreateTrueCondition, slot 21 on
 // IUIAutomation) is declared with a real signature, as the house convention already does for
 // TaskSchedulerCom's largely-unused interfaces, so the slot order holds regardless of which members a
 // caller reaches.
 //
-// Threading: created once per UiaTaskbarReader worker thread (an MTA thread, F6), never on the UI thread.
+// Threading: created once per UiaTaskbarReader worker thread (a dedicated MTA thread), never on the UI
+// thread: UI Automation documents that its calls must come from a thread that owns no window.
 internal static class UiAutomation
 {
     // CLSID_CUIAutomation.
@@ -132,7 +133,10 @@ internal interface IUIAutomationElement
     [PreserveSig]
     int FindFirstBuildCache(int scope, IUIAutomationCondition? condition, IUIAutomationCacheRequest? cacheRequest, out IUIAutomationElement? found);
 
-    // Every occupant under the taskbar, cached in one cross-process round trip (widget-ui.md section 5).
+    // Declared for the vtable order and for a future caller: on this machine, GetCachedPropertyValue on
+    // elements this returns fails (E_INVALIDARG), so UiaTaskbarReader reads every occupant with the plain
+    // FindAll below plus a live GetCurrentPropertyValue per element instead (see UiaTaskbarReader.cs and
+    // the report for the probe evidence).
     // https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-findallbuildcache
     [PreserveSig]
     int FindAllBuildCache(int scope, IUIAutomationCondition? condition, IUIAutomationCacheRequest? cacheRequest, out IUIAutomationElementArray? found);
@@ -146,7 +150,8 @@ internal interface IUIAutomationElement
     [PreserveSig]
     int GetCurrentPropertyValueEx(int propertyId, [MarshalAs(UnmanagedType.Bool)] bool ignoreDefaultValue, out object? value);
 
-    // Reads a property that was named in the cache request (widget-ui.md section 5, F7).
+    // Declared for the vtable order: reads a property that was named in the cache request, but returns
+    // E_INVALIDARG on this machine for elements from FindAllBuildCache above, so it is not called.
     // https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-getcachedpropertyvalue
     [PreserveSig]
     int GetCachedPropertyValue(int propertyId, out object? value);

@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 namespace Earshot.Interop;
 
 // The primary taskbar's own DPI: SHAppBarMessage(ABM_GETTASKBARPOS), MonitorFromRect and
-// GetDpiForMonitor, falling back to GetDpiForSystem. Moved out of TrayIconFactory (widget-ui.md section
-// 4.6) so the gauge and the card use exactly the same route the tray icon already did.
+// GetDpiForMonitor, falling back to GetDpiForSystem. Moved out of TrayIconFactory so the gauge and the
+// card use exactly the same route the tray icon already did.
 internal static class TaskbarDpi
 {
     // The taskbar's effective DPI, or the system DPI with problem set to why.

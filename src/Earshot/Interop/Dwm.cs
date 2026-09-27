@@ -13,8 +13,8 @@ internal static partial class Dwm
     internal const uint DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
     // "Enables or disables the use of the alpha channel in the window's redirection bitmap ... supported
-    // starting with Windows 11 Build 26100." Refused with E_INVALIDARG on build 26200.9457
-    // (widget-ui.md 2.7.3); recorded here, not used.
+    // starting with Windows 11 Build 26100." A local probe found this refused with E_INVALIDARG on build
+    // 26200.9457; recorded here, not used.
     internal const uint DWMWA_REDIRECTIONBITMAP_ALPHA = 26;
     internal const uint DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     internal const uint DWMWA_BORDER_COLOR = 34;
@@ -49,8 +49,8 @@ internal static partial class Dwm
     internal static partial int DwmSetWindowAttribute(nint hwnd, uint dwAttribute, in int pvAttribute, uint cbAttribute);
 
     // Extends the window's frame (here, the system backdrop material) into the client area. -1 on every
-    // margin extends across the whole client, which is what widget-ui.md 2.7.3 found makes the backdrop
-    // material fill the window when the client itself is painted with alpha 0. Returns an HRESULT.
+    // margin extends across the whole client, which a local probe found makes the backdrop material fill
+    // the window when the client itself is painted with alpha 0. Returns an HRESULT.
     // https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmextendframeintoclientarea
     [LibraryImport(Dll)]
     internal static partial int DwmExtendFrameIntoClientArea(nint hwnd, in MARGINS pMarInset);
@@ -65,7 +65,6 @@ internal struct MARGINS
     public int cyTopHeight;
     public int cyBottomHeight;
 
-    // Every margin -1: the recipe widget-ui.md 2.7.3 and 7.2 use to extend the backdrop across the whole
-    // client area.
+    // Every margin -1: the recipe that extends the backdrop across the whole client area.
     public static readonly MARGINS Full = new() { cxLeftWidth = -1, cxRightWidth = -1, cyTopHeight = -1, cyBottomHeight = -1 };
 }
