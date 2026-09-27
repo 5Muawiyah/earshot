@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- TargetFramework and SupportedOSPlatformVersion come from Directory.Build.props. -->
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Earshot.AdvertProbe</AssemblyName>
+    <RootNamespace>Earshot.AdvertProbe</RootNamespace>
+    <!-- A read-only capture tool for the owner's phase 0 sitting, never part of the release.
+         tools\build-release.ps1 publishes src\Earshot\Earshot.csproj by path; the flag also keeps a
+         plain "dotnet publish" on the solution from shipping it. -->
+    <IsPublishable>false</IsPublishable>
+  </PropertyGroup>
+</Project>
