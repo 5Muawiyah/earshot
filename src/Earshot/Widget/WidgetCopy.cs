@@ -1,0 +1,77 @@
+using System.Globalization;
+
+namespace Earshot.Widget;
+
+// Every string the widget shows or reads aloud. British English, plain, short, no em-dashes.
+// widget-ui.md 7.1, 7.6, 8. Not reviewed by a separate prose pass in this change (see the report); kept
+// to the same plain style as the rest of the tray copy.
+internal static class WidgetCopy
+{
+    public const string NoReading = "No reading";
+    public const string DefaultOtherDeviceLabel = "On another device";
+    public const string NotSeenYet = "Not seen yet";
+    public const string OnThisPc = "On this PC";
+    public const string NotInUse = "Not in use";
+    public const string BatteryNotReadYet = "Battery not read yet";
+    public const string Connect = "Connect";
+    public const string Disconnect = "Disconnect";
+    public const string AutoPauseSwitch = "Pause when a bud comes out";
+    public const string CaseOpen = "Case open";
+
+    public const string ShowOnTaskbar = "Show on the taskbar";
+    public const string LeftClickConnects = "Left click connects straight away";
+    public const string CardWhenCaseOpens = "Card when the case opens";
+    public const string NameOtherDevice = "Name your other device...";
+    public const string OtherDeviceCaption = "This is your own label for \"in use, not on this PC\". The AirPods do not report a device name.";
+
+    // "On your <name>" when a label is set, "On another device" when it is empty.
+    public static string OnElsewhere(string otherDeviceLabel) =>
+        string.IsNullOrWhiteSpace(otherDeviceLabel) ? DefaultOtherDeviceLabel : "On your " + otherDeviceLabel.Trim();
+
+    // The where line for the card and the tooltip.
+    public static string Where(AirPodsWhere where, string otherDeviceLabel) => where switch
+    {
+        AirPodsWhere.ThisPc => OnThisPc,
+        AirPodsWhere.Elsewhere => OnElsewhere(otherDeviceLabel),
+        AirPodsWhere.NotInUse => NotInUse,
+        _ => NotSeenYet,
+    };
+
+    // "Battery read <n> s|min|h ago", never "live" (widget-ui.md 7.1 row 3).
+    public static string BatteryReadLine(DateTimeOffset? readAt, DateTimeOffset now)
+    {
+        if (readAt is not { } at)
+        {
+            return BatteryNotReadYet;
+        }
+
+        TimeSpan age = now - at;
+        if (age < TimeSpan.Zero)
+        {
+            age = TimeSpan.Zero;
+        }
+
+        string amount = age.TotalHours >= 1
+            ? Round(age.TotalHours) + " h"
+            : age.TotalMinutes >= 1
+                ? Round(age.TotalMinutes) + " min"
+                : Round(Math.Max(0, age.TotalSeconds)) + " s";
+        return "Battery read " + amount + " ago";
+    }
+
+    // The percent for one part, or NoReading when it has not been proved.
+    public static string Percent(int? percent) =>
+        percent is { } value ? value.ToString(CultureInfo.InvariantCulture) + "%" : NoReading;
+
+    // The tooltip's one battery line, capped like the tray's own tooltip.
+    public static string TooltipLine(WidgetSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        string left = Percent(snapshot.Left.Percent);
+        string right = Percent(snapshot.Right.Percent);
+        string box = Percent(snapshot.Case.Percent);
+        return "L " + left + "  R " + right + "  Case " + box;
+    }
+
+    private static string Round(double value) => Math.Max(0, Math.Round(value)).ToString(CultureInfo.InvariantCulture);
+}
