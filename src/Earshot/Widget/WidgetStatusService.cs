@@ -169,7 +169,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 _watcherState = WidgetWatcherState.Off;
             }
 
-            // Section 5.4: once a minute while anything changed, never on a fixed schedule regardless.
+            // The counters line: once a minute while anything changed, never on a fixed schedule regardless.
             _countersLogTimer ??= _timeProvider.CreateTimer(
                 static state => ((WidgetStatusService)state!).OnCountersLogDue(), this,
                 WidgetTiming.CountersLogInterval, WidgetTiming.CountersLogInterval);
@@ -278,7 +278,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         PublishAndNotify();
     }
 
-    // M7: a redone claim is a different set of AirPods as far as the widget knows (the owner was told to
+    // A redone claim is a different set of AirPods as far as the widget knows (the owner was told to
     // open his case for it), and forgetting a claim starts over; neither may keep the old battery, ear or
     // lid state around to be shown against, or compared for consistency by, whatever is claimed next.
     private void ResetReadingsLocked()
@@ -330,7 +330,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         LogStepLocked("start", step);
     }
 
-    // M3: every Stop step is logged with its code and detail too, not just Start's; at Warn when not ok, so
+    // Every Stop step is logged with its code and detail too, not just Start's; at Warn when not ok, so
     // a stop that failed (rather than simply never having been started) is visible in the log.
     private void ApplyStopStepLocked(StepOutcome step) => LogStepLocked("stop", step);
 
@@ -414,9 +414,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _thisPcActive = CoordinatorRules.RenderOf(snapshot, watched) == RenderState.Active;
     }
 
-    // Runs on whatever thread the source calls back on (D8 in the widget's own design notes: parse here,
-    // publish through uiPost). Every Apple 0x07 section, however it parsed, is posted on; anything else
-    // (a different company, or Apple data with no 0x07 item at all) ends here.
+    // Runs on whatever thread the source calls back on: the parse happens here, and every state change the
+    // UI can observe is then posted through uiPost onto the UI thread. Every Apple 0x07 section, however it
+    // parsed, is posted on; anything else (a different company, or Apple data with no 0x07 item at all) ends
+    // here.
     private void OnReceived(object? sender, AdvertisementSample sample)
     {
         Interlocked.Increment(ref _allAdvertisements);
@@ -759,7 +760,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool autoPauseAvailable = WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc == true &&
             (table.LeftInEarBit is not null || table.RightInEarBit is not null);
 
-        // M6: per-bud InEar is only as good as the reading it came from. Battery never expires, so Percent,
+        // Per-bud InEar is only as good as the reading it came from. Battery never expires, so Percent,
         // Charging and ReadAt stand whatever the age; InEar is cleared once the reading is no longer fresh,
         // whatever the table proves, so a stale reading never keeps reporting a bud as in or out of the ear.
         PartReading left = fresh ? _left : _left with { InEar = null };
@@ -813,7 +814,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             shapes);
     }
 
-    // Section 5.4: once a minute while anything changed since the last one, the counters as numbers, the
+    // Once a minute while anything changed since the last one, logs the counters as numbers, the
     // unknown-form shapes as prefix and length (never the bytes themselves), and the watcher state. Compared
     // field by field rather than with WidgetCounters' own record equality, since UnknownForms is a fresh
     // array on every read and would never compare equal to itself by reference.

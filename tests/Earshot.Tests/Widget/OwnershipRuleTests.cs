@@ -233,7 +233,7 @@ public sealed class OwnershipRuleTests
         Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
     }
 
-    // M5: the test above only ever exercised the case where the unordered check must return true (the same
+    // The test above only ever exercised the case where the unordered check must return true (the same
     // set, rotated); it could not have failed had that check always returned true regardless of input. This
     // pins the other side: a pair that matches neither last value, in either position, even unordered.
     [TestMethod]

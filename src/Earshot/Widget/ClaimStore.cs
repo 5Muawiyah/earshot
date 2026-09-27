@@ -52,7 +52,7 @@ internal sealed class ClaimStore
         }
     }
 
-    // M2: updates the in-memory claim immediately (so a reader never blocks on disk I/O and always sees what
+    // Updates the in-memory claim immediately (so a reader never blocks on disk I/O and always sees what
     // was just decided), then queues the actual write on a background thread, serialised with any other
     // write this store has pending, so neither the UI thread (the service's callback) nor ClaimFlow's own
     // caller ever waits on file I/O here. Saving is skipped outright, with nothing queued, when the claim
@@ -206,7 +206,7 @@ internal sealed class ClaimStore
         return Validate(claim) ? claim : null;
     }
 
-    // M1: the file is trusted only after every one of these holds. Anything that fails leaves the claim
+    // The file is trusted only after every one of these holds. Anything that fails leaves the claim
     // unusable (read as "no claim") and the file exactly as it was; nothing here ever rewrites or deletes it.
     private bool Validate(WidgetClaim claim)
     {

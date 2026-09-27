@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// M5: fixtures, and the code that reads them, are synthetic only. Scans every .cs file under
+// Fixtures, and the code that reads them, are synthetic only. Scans every .cs file under
 // src\Earshot\Widget and tests\Earshot.Tests\Widget (including WidgetFixtures.cs itself, unlike the prior
 // version of this test) for anything shaped like a real device: a six-group colon- or dash-separated
 // Bluetooth address, any shorter colon/dash-separated hex run, a bare 12-hex-digit address with no
@@ -39,9 +39,10 @@ public sealed class WidgetFixtureHygieneTests
         @"(?:0x[0-9A-Fa-f]{2}[,\s]*){16,}|[0-9A-Fa-f]{32,}",
         RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.Singleline);
 
-    // widget-data.md section 10: the only byte runs a fixture may hold. Compared against the run's hex
-    // digits alone (punctuation stripped), so it catches the sequence whether written as a byte-array
-    // initialiser or a bare hex string.
+    // The only byte runs a fixture may hold: the two 16-byte fillers WidgetFixtures.cs builds
+    // (ProximityValue's encrypted-payload run and UnknownSeventeenByteForm's run). Compared against the
+    // run's hex digits alone (punctuation stripped), so it catches the sequence whether written as a
+    // byte-array initialiser or a bare hex string.
     private static readonly string[] AllowedSyntheticRuns =
     {
         "101112131415161718191A1B1C1D1E1F", // WidgetFixtures.Proximity's encrypted-payload filler

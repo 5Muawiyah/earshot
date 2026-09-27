@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.Widget;
 
 // Stage 1 only (a bud leaving the ear pauses the one session playing to the AirPods). Stage 2 (resuming
-// what was paused) is not built; the spec for this allows leaving it out without touching stage 1.
+// what was paused) is not built yet, and leaving it out does not touch stage 1's own behaviour.
 [TestClass]
 public sealed class AutoPauseTests
 {
@@ -179,7 +179,7 @@ public sealed class AutoPauseTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "could not pause"));
     }
 
-    // M4: the public constructor must read WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc itself,
+    // The public constructor must read WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc itself,
     // not accept an arbitrary gate, so nothing composing this class can wire up anything but phase 0's own
     // proved value (which ships null, so this stays held off).
     [TestMethod]

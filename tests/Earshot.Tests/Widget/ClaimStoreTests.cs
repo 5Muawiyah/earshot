@@ -43,7 +43,7 @@ public sealed class ClaimStoreTests
 
     // SampleClaim's threshold is fixed at -70; every test below that saves it supplies a matching
     // currentSignalThreshold so the store's own post-save reload does not invalidate what it just wrote
-    // (M1: a stored threshold is usable only when it equals the current one).
+    // a stored threshold is usable only when it equals the current one.
     private static ClaimStore NewStore(string path, ILog log) => new(path, log, static () => (sbyte)-70);
 
     [TestMethod]
@@ -153,7 +153,7 @@ public sealed class ClaimStoreTests
         Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "last"));
     }
 
-    // M2: repeated saves of a reading that has not actually changed must not hit the disk each time.
+    // Repeated saves of a reading that has not actually changed must not hit the disk each time.
     [TestMethod]
     public async Task TwentyIdenticalSavesWriteTheFileOnce()
     {
@@ -172,7 +172,7 @@ public sealed class ClaimStoreTests
         Assert.AreEqual(1, store.DiskWriteCount);
     }
 
-    // M2: a write that fails (here, a read-only file) must not throw out of Save, must keep the in-memory
+    // A write that fails (here, a read-only file) must not throw out of Save, must keep the in-memory
     // claim as current, and must log exactly once, not repeat the failure into a second line.
     [TestMethod]
     public async Task ASaveToAReadOnlyFileDoesNotThrowAndLogsOnce()
@@ -233,8 +233,8 @@ public sealed class ClaimStoreTests
         Assert.AreEqual(redoneClaim, reloaded.Current, "The redone claim, not the stale one, must be what is on disk.");
     }
 
-    // M1's "plus a read-only file": an invalid claim must be recognised, logged and left in place even when
-    // the file cannot be written back to, proving nothing here ever attempts to rewrite or quarantine it.
+    // An invalid claim must be recognised, logged and left in place even when the file cannot be written
+    // back to, proving nothing here ever attempts to rewrite or quarantine it.
     [TestMethod]
     public void AnInvalidClaimOnAReadOnlyFileIsLeftInPlaceAndLogged()
     {

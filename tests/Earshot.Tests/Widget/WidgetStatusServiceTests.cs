@@ -38,7 +38,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _caseOpenedEvents = new List<CaseOpenedEventArgs>();
     }
 
-    // M2: Save now queues its disk write on a background thread. Wait for anything still pending before the
+    // Save now queues its disk write on a background thread. Wait for anything still pending before the
     // temp folder is torn down, or its own claim.json.tmp can still be open when Directory.Delete runs.
     public void Dispose()
     {
@@ -47,7 +47,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     // SampleClaim below always carries threshold -70; the injectable overload matches it so Save's own
-    // reload does not invalidate the claim these tests just wrote (M1: a stored threshold is usable only
+    // reload does not invalidate the claim these tests just wrote (a stored threshold is usable only
     // when it equals the current one, and WidgetDefaults.SignalThresholdDbm ships null).
     private ClaimStore NewClaimStore()
     {
@@ -458,7 +458,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ChangedAndCaseOpenedAreRaisedThroughUiPost()
     {
-        // M5: the prior version only checked that some post happened and some event happened, never that
+        // The prior version only checked that some post happened and some event happened, never that
         // the SAME event was raised from inside a uiPost call, so it could not have failed had the code
         // raised Changed or CaseOpened directly on the caller's thread instead. This tracks, at the instant
         // each handler runs, whether execution is inside the uiPost action.
@@ -500,7 +500,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.Dispose();
     }
 
-    // M3: Suspend's own Stop() call discarded the step outcome. A failing stop must be logged, at Warn.
+    // Suspend's own Stop() call discarded the step outcome. A failing stop must be logged, at Warn.
     [TestMethod]
     public void SuspendLogsAFailingStopStepAtWarn()
     {
@@ -514,7 +514,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsTrue(_log.Has(LogLevel.Warn, "ACCESS_DENIED"), "A failing stop step must be logged at Warn with its detail.");
     }
 
-    // M3: StopSourceLocked's Stop() call (reached through Close) discarded the step outcome the same way.
+    // StopSourceLocked's Stop() call (reached through Close) discarded the step outcome the same way.
     [TestMethod]
     public void ClosingWithAFailingStopStepLogsItAtWarn()
     {
@@ -528,7 +528,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsTrue(_log.Has(LogLevel.Warn, "ACCESS_DENIED"), "A failing stop step must be logged at Warn with its detail.");
     }
 
-    // M3: a failing start step must be logged at Warn too, not always at Info as if it had succeeded.
+    // A failing start step must be logged at Warn too, not always at Info as if it had succeeded.
     [TestMethod]
     public void AFailingStartStepIsLoggedAtWarn()
     {
@@ -577,7 +577,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AStoppedSourceIsStartedAgainAfterTheRetryDelayDoubling()
     {
-        // M5: the prior version made the fake "succeed" on the very first retry (State reset to Started
+        // The prior version made the fake "succeed" on the very first retry (State reset to Started
         // unconditionally), so it proved only that one retry happens at 30 s and never exercised the
         // doubling or the cap at all. The fake here keeps failing every attempt, so every step of
         // 30, 60, 120, 240, 480, then the 15-minute cap repeating, is actually driven and checked.
@@ -623,7 +623,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
     }
 
-    // M5: the prior version filtered _log.Entries to messages containing the literal, capitalised substring
+    // The prior version filtered _log.Entries to messages containing the literal, capitalised substring
     // "Widget", so a line from any widget-adjacent class that does not happen to spell it that way (or any
     // deliberately injected leak) was invisible to the byte check regardless of what it carried. Every log
     // entry produced during the run is scanned now, with a pattern that also catches dash- and
@@ -657,7 +657,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
             Assert.IsFalse(ForbiddenByteRun.IsMatch(entry.Message), "A log line carried something that looks like raw bytes: " + entry.Message);
         }
 
-        // Section 5.4: once a minute while anything changed, the counters line itself, counts only.
+        // Once a minute while anything changed, the counters line itself, counts only.
         Assert.IsTrue(
             widgetEntries.Any(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal) && e.Message.Contains("ok=1", StringComparison.Ordinal)),
             "The once-a-minute counters line was not logged.");

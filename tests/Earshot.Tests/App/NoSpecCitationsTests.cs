@@ -19,19 +19,23 @@ public sealed class NoSpecCitationsTests
     // The label shape used across every review round so far, B1, B2, M1 to M6, m1 to m12, S1 to S8 (the
     // live-test samples), T1 to T15, D2 to D8 (design-document decisions) and L6, L17 (design addenda): one
     // of those letters immediately followed by one or two digits, then either a colon, a possessive ("D2's
-    // order", "S8's own acceptance line"), or "says" ("D8 says nothing about this site may be faked"). The
-    // letter set is the project's own label alphabet, not every letter, so this never flags an architecture
-    // reference such as "on x64:" (BluetoothApis.cs), and the trailing anchor is what keeps it from
-    // flagging a .NET format string such as ("D2", CultureInfo.InvariantCulture): the characters right
-    // after "D2" there are a closing quote and a comma, never one of the three this looks for. "section N"
-    // and "N.N" cover a design document's own numbering; "review round" and the two project slugs cover
-    // the documents by name.
+    // order", "S8's own acceptance line"), "says" ("D8 says nothing about this site may be faked"), or "in"
+    // ("D8 in the widget's own design notes": the widget-data review's own escape, the label pointing
+    // straight at the document that holds it without a colon or a possessive). The letter set is the
+    // project's own label alphabet, not every letter, so this never flags an architecture reference such as
+    // "on x64:" (BluetoothApis.cs), and the trailing anchor is what keeps it from flagging a .NET format
+    // string such as ("D2", CultureInfo.InvariantCulture): the characters right after "D2" there are a
+    // closing quote and a comma, never one of the anchors this looks for. "section N" and "N.N" cover a
+    // design document's own numbering; "review round" and the two project slugs cover the documents by name.
+    // "the spec" is deliberately not one of these: it is also the generic term other, unrelated test suites
+    // in this repository use for their own external acceptance specifications (Hotkeys, Voice), and banning
+    // it here would flag those, not a widget-data.md citation.
     // Case-insensitive: "Section 9" at the start of a sentence is exactly as much a citation as "section 9".
     // The PascalCase lookahead is the one part kept case-sensitive on purpose ((?-i:...)): under IgnoreCase,
     // [A-Z][a-z] would stop meaning "an upper-case letter starting a new word" and start meaning "any two
     // letters", turning every hex GUID's own run of letters and digits (B3AB, and worse) into a false hit.
     private static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b| names\b| the other half\b)|\b[BDHLMmST][0-9]{1,2}(?=(?-i:[A-Z][a-z]))|review round|handback-on-shutdown-and-sleep|handback-review",
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b| names\b| the other half\b| in\b)|\b[BDHLMmST][0-9]{1,2}(?=(?-i:[A-Z][a-z]))|review round|handback-on-shutdown-and-sleep|handback-review",
         RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly string[] OwnedFolders =

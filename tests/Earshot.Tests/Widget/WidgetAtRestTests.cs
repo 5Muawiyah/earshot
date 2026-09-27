@@ -9,7 +9,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// B2: the at-rest invariant, checked over the built assembly rather than trusted from reading the source.
+// The at-rest invariant, checked over the built assembly rather than trusted from reading the source.
 // Every type under Earshot.Widget (including nested and compiler-generated types: async state machines,
 // lambda closures) is scanned for a field, property, constructor parameter, method parameter, return type
 // or generic argument (at any depth) that is, or reaches, a device controller or its concrete

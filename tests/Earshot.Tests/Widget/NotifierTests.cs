@@ -96,7 +96,7 @@ public sealed class NotifierTests
         StringAssert.Contains(message, "0x");
     }
 
-    // M8: the "left alone" comments must match the code. An existing shortcut that already targets the
+    // The "left alone" comments must match the code. An existing shortcut that already targets the
     // right exe and carries the right AppUserModelID must not be rewritten at all.
     [TestMethod]
     public void AnAlreadyCorrectShortcutIsLeftAlone()
@@ -114,7 +114,7 @@ public sealed class NotifierTests
         Assert.IsTrue(log.Has(LogLevel.Info, "left alone"));
     }
 
-    // M8: never overwrite an Earshot.lnk whose target is not this exe (a foreign target this run does not
+    // Never overwrite an Earshot.lnk whose target is not this exe (a foreign target this run does not
     // recognise as either its running or its installed copy).
     [TestMethod]
     public void AShortcutTargetingSomethingElseIsNeverOverwritten()

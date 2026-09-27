@@ -263,7 +263,7 @@ internal sealed class NotificationRegistration
         return step;
     }
 
-    // M8: "ours" means the existing shortcut's target is a path this run itself knows as Earshot's, whether
+    // "Ours" means the existing shortcut's target is a path this run itself knows as Earshot's, whether
     // or not it is today's preferred one (installed over running), so a stale-but-still-Earshot target is
     // still safe to rewrite; anything else is never overwritten.
     private bool IsOurs(string existingTarget) =>

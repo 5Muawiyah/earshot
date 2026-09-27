@@ -84,7 +84,7 @@ public sealed class WidgetSettingsTests : IDisposable
         Assert.IsTrue(notes.Any(n => n.Step == "clamp:OtherDeviceLabel"));
     }
 
-    // M5: the prior version only checked that each expected member's name appeared somewhere in the file
+    // The prior version only checked that each expected member's name appeared somewhere in the file
     // (Assert.IsTrue(json.Contains(...))), so it could not have failed had the Widget block also carried
     // some other, unwanted member (an address, a tag, anything device-derived) alongside the expected ones.
     // Parses the file and compares the Widget object's own property names as a set, not a substring search.

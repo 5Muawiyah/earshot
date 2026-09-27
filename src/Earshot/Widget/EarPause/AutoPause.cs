@@ -4,7 +4,7 @@ namespace Earshot.Widget.EarPause;
 
 // Stage 1 only: a bud leaving the ear pauses the one session playing to the AirPods. Stage 2 (resuming what
 // was paused) is not built; the seam (IMediaSessions.PlaybackInfoChanged, ITryPlayAsync) is ready for it,
-// and leaving it out changes nothing about stage 1, the way the spec for this allows.
+// and leaving it out for now changes nothing about how stage 1 behaves.
 //
 // Fed one owned-or-not reading at a time by whatever owns the widget's pipeline (out of scope here): the
 // ownership verdict, the two in-ear bits (null when unproved), when the reading was taken, and the facts

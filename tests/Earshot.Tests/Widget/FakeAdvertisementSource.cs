@@ -14,7 +14,7 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
 
     public int DisposeCalls { get; private set; }
 
-    // M3: lets a test make Start or Stop report a failure, the way a real watcher's step can, so the
+    // Lets a test make Start or Stop report a failure, the way a real watcher's step can, so the
     // service's logging of that step (Warn when not ok) can be exercised without a real watcher.
     public Func<StepOutcome>? StartResult { get; set; }
 

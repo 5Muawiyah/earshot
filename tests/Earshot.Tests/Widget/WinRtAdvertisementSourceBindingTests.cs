@@ -32,7 +32,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
         {
             AdvertisementSourceStopped? stopped = stoppedTcs.Task.IsCompleted ? stoppedTcs.Task.Result : null;
 
-            // M5: inconclusive only when the reason is that no radio is present; anything else is a failure,
+            // Inconclusive only when the reason is that no radio is present; anything else is a failure,
             // not something to wave through as "could not tell on this machine".
             if (stopped is not null && stopped.ErrorName != "RadioNotAvailable")
             {
@@ -44,7 +44,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
             return;
         }
 
-        // M5: the real watcher, not the constant Start() sets, must actually be Passive.
+        // The real watcher, not the constant Start() sets, must actually be Passive.
         Assert.AreEqual(BluetoothLEScanningMode.Passive, source.ScanningMode, "The real watcher must be Passive: no scan request packets.");
 
         Task first = await Task.WhenAny(receivedTcs.Task, stoppedTcs.Task, Task.Delay(Guard));
@@ -88,7 +88,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
 
         source.Stop();
 
-        // M5: once actually started, a Stop must raise Stopped deterministically; "inconclusive" is reserved
+        // Once actually started, a Stop must raise Stopped deterministically; "inconclusive" is reserved
         // for the earlier no-radio case, not for Stop itself going quiet.
         Task first = await Task.WhenAny(stoppedTcs.Task, Task.Delay(Guard));
         if (first != stoppedTcs.Task)

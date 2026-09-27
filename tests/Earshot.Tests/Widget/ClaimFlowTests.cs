@@ -33,7 +33,7 @@ public sealed class ClaimFlowTests
         using var temp = new TempFolder();
         var log = new CapturingLog();
         // Matches the fixed -70 threshold the claim below is made at, so the store's own reload after Save
-        // does not invalidate it (M1: a stored threshold is usable only when it matches the current one).
+        // does not invalidate it: a stored threshold is usable only when it matches the current one.
         var store = new ClaimStore(temp.File("claim.json"), log, static () => (sbyte)-70);
         var flow = new ClaimFlow(store, log);
         var source = new FakeAdvertisementSource { State = AdvertisementSourceState.Started };
@@ -52,7 +52,7 @@ public sealed class ClaimFlowTests
         Assert.AreEqual(WidgetFixtures.Colour, outcome.Claim.Colour);
         Assert.AreEqual((sbyte)-70, outcome.Claim.SignalThresholdDbm);
         Assert.AreEqual(outcome.Claim, store.Current);
-        await store.IdleAsync(); // M2: let the queued write finish before the temp folder is torn down
+        await store.IdleAsync(); // let the queued write finish before the temp folder is torn down
     }
 
     [TestMethod]
@@ -137,7 +137,7 @@ public sealed class ClaimFlowTests
         Assert.AreEqual(ClaimOutcomeStatus.NoSender, outcome.Status);
     }
 
-    // M5: the prior version only checked that each expected member's name appeared somewhere in the file
+    // The prior version only checked that each expected member's name appeared somewhere in the file
     // (StringAssert.Contains), so it could not have failed had the file also carried an extra, unwanted
     // member (an address, a per-run tag, a payload byte) alongside the expected ones. Parses the file and
     // compares both the top-level and the nested Last object's property names as exact sets.
@@ -157,7 +157,7 @@ public sealed class ClaimFlowTests
         source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(), Rssi: -60, clock.GetUtcNow(), SenderTag: 1));
         clock.Advance(WidgetTiming.ClaimWindow);
         await task;
-        await store.IdleAsync(); // M2: the write is now queued on a background thread
+        await store.IdleAsync(); // the write is now queued on a background thread
 
         string json = File.ReadAllText(path);
         using JsonDocument document = JsonDocument.Parse(json);
