@@ -9,6 +9,7 @@ using Earshot.Infra;
 using Earshot.Streaming;
 using Earshot.Tray;
 using Earshot.Voice;
+using Earshot.Widget;
 
 namespace Earshot.App;
 
@@ -316,6 +317,17 @@ internal sealed partial class TrayContext : ApplicationContext
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
         _menu.OpenOnStartupClicked += (_, _) => OnOpenOnStartupClicked();
         _menu.SpeakStatusClicked += (_, _) => OnSpeakStatusClicked();
+        _menu.ShowOnTaskbarClicked += (_, _) => OnShowOnTaskbarClicked();
+        _menu.LeftClickConnectsClicked += (_, _) => OnLeftClickConnectsClicked();
+        _menu.CaseOpenCardClicked += (_, _) => OnCaseOpenCardClicked();
+        _menu.LowBatteryAlertClicked += (_, _) => OnLowBatteryAlertClicked();
+        _menu.LowBatteryThresholdItemClicked += OnLowBatteryThresholdItemClicked;
+        // The click point is read now, before the menu closes and the form opens, exactly as ChooseDeviceClicked below.
+        _menu.NameOtherDeviceClicked += (_, _) =>
+        {
+            CardPlace place = ClickPlace();
+            _registry.UiPost(() => OnNameOtherDeviceClicked(place));
+        };
         // The click point is read now, before the menu closes and the picker opens.
         _menu.ChooseDeviceClicked += (_, _) =>
         {
@@ -1990,6 +2002,98 @@ internal sealed partial class TrayContext : ApplicationContext
 
         Report("open-on-startup", _startup.Apply(openOnStartup), place);
         _startupState = _startup.Read();
+    }
+
+    // The taskbar widget's own settings menu: each writes through TryUpdateSettings, the same path every
+    // other toggle above uses. Settings.Update raises Changed before it returns, and OnSettingsChanged's own
+    // ApplyWidget call (widget Enabled) or the presenters' own Refresh (the rest) picks the new value up
+    // from there, so nothing here calls into the widget directly.
+    private void OnShowOnTaskbarClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool enabled = !_registry.Settings.Current.Widget.Enabled;
+        TryUpdateSettings("show on the taskbar", s => s.Widget = s.Widget with { Enabled = enabled }, place);
+    }
+
+    private void OnLeftClickConnectsClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool leftClickConnects = !_registry.Settings.Current.Widget.LeftClickConnects;
+        TryUpdateSettings("left click connects straight away", s => s.Widget = s.Widget with { LeftClickConnects = leftClickConnects }, place);
+    }
+
+    private void OnCaseOpenCardClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool caseOpenCard = !_registry.Settings.Current.Widget.CaseOpenCard;
+        TryUpdateSettings("card when the case opens", s => s.Widget = s.Widget with { CaseOpenCard = caseOpenCard }, place);
+    }
+
+    private void OnLowBatteryAlertClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool lowBatteryAlert = !_registry.Settings.Current.Widget.LowBatteryAlert;
+        TryUpdateSettings("low battery alert", s => s.Widget = s.Widget with { LowBatteryAlert = lowBatteryAlert }, place);
+    }
+
+    // A submenu entry sets the threshold outright, rather than toggling it. MenuModel disables every entry
+    // while the alert itself is off, so a click here always means the alert is already on.
+    private void OnLowBatteryThresholdItemClicked(object? sender, LowBatteryThresholdMenuItemEventArgs e)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        int percent = e.Item.Percent;
+        TryUpdateSettings("low battery threshold", s => s.Widget = s.Widget with { LowBatteryThresholdPercent = percent }, place);
+    }
+
+    // Opens the picker-style modal for the owner's own device label. No device list to load here, unlike
+    // ChooseDeviceAsync, so this runs straight through rather than as an async Task.
+    private void OnNameOtherDeviceClicked(CardPlace place)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        string current = _registry.Settings.Current.Widget.OtherDeviceLabel;
+        DialogResult result;
+        string label;
+        using (var form = new OtherDeviceNameForm(current))
+        {
+            result = form.ShowDialog();
+            label = form.Label();
+        }
+
+        if (result != DialogResult.OK || _closing)
+        {
+            return;
+        }
+
+        TryUpdateSettings("other device label", s => s.Widget = s.Widget with { OtherDeviceLabel = label }, place);
     }
 
     // First run: apply the default (on). In safe mode, and against a test data folder, StartupRegistration
