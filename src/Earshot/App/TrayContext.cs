@@ -126,7 +126,7 @@ internal sealed record TrayStartOptions(
 // closing is in flight; "Blocking" is shown only once the coordinator is about to send the block. What the user should
 // know as Earshot closes (it closed while the AirPods were in use, before a change finished, or that block
 // did not take) is shown at the Exit click and kept up for ExitNoticeTime.
-internal sealed class TrayContext : ApplicationContext
+internal sealed partial class TrayContext : ApplicationContext
 {
     public const string SomethingWentWrongMessage = "Something went wrong. See the log.";
     public const string SettingsNotSavedMessage = "Settings could not be saved.";
@@ -344,6 +344,7 @@ internal sealed class TrayContext : ApplicationContext
         ApplyHotkeys();
         ApplyVoiceOver();
         ApplyStreaming();
+        WireWidget(options);
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -459,6 +460,7 @@ internal sealed class TrayContext : ApplicationContext
         _lifetime.Cancel();
         _registry.Cards.Hide();
         _notifyIcon.Visible = false;
+        CloseWidget();
 
         // Every orderly exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
         // registered after one of those. This runs on the UI thread, which owns the window. It does not
@@ -825,6 +827,11 @@ internal sealed class TrayContext : ApplicationContext
                 // has the same line for the same reason. One source, HandBackText.Off, for both.
                 _log.Info(HandBackText.Off(HandBackTrigger.SessionEnd));
             }
+
+            // Only after the hand-back above has finished (HoldReply already returned, or there was
+            // nothing to wait for): the widget's passive BLE watcher must never keep scanning while the
+            // disconnect-and-block sequence is still in flight, and must never race it either.
+            SuspendWidget();
         }
     }
 
@@ -901,12 +908,16 @@ internal sealed class TrayContext : ApplicationContext
                     _log.Info(HandBackText.Off(HandBackTrigger.Suspend));
                 }
 
+                // Only after the sleep hand-back above has finished: the same ordering OnSessionEnding
+                // keeps for a shut-down hand-back.
+                SuspendWidget();
                 break;
 
             case PowerEventKind.ResumeAutomatic:
                 // Not held: resume is not a race against a Windows-imposed budget, and _handingBack has already
                 // cleared by the time this arrives (the suspend handler above has returned).
                 _ = _coordinator.ResumeCheckAsync();
+                ResumeWidget();
                 break;
 
             case PowerEventKind.ResumeSuspend:
@@ -943,6 +954,7 @@ internal sealed class TrayContext : ApplicationContext
                 ApplyHotkeys();
                 ApplyVoiceOver();
                 ApplyStreaming();
+                ApplyWidget();
             }
         });
 

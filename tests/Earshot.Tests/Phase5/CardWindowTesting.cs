@@ -126,11 +126,35 @@ internal static class CardDesktop
         }
         finally
         {
-            // The thread has ended, so nothing is attached to the desktop any more.
-            if (!CloseDesktop(desktop))
+            // The thread has ended, so nothing of ours is attached to the desktop any more, except
+            // possibly a COM RCW (a UI Automation client, say) still waiting for the GC to finalize it,
+            // which a test that bound a second thread to this desktop can leave behind. Forcing a
+            // collection here, plus a short retry on ERROR_BUSY (170), clears that before treating a
+            // failure to close as real.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            uint lastError = 0;
+            bool closed = false;
+            for (int attempt = 0; attempt < 100 && !closed; attempt++)
+            {
+                closed = CloseDesktop(desktop);
+                if (!closed)
+                {
+                    lastError = unchecked((uint)Marshal.GetLastPInvokeError());
+                    if (lastError != 170)
+                    {
+                        break;
+                    }
+
+                    Thread.Sleep(25);
+                }
+            }
+
+            if (!closed)
             {
                 failure ??= ExceptionDispatchInfo.Capture(new AssertFailedException(
-                    "CloseDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + "."));
+                    "CloseDesktop failed with Win32 error " + lastError.ToString(System.Globalization.CultureInfo.InvariantCulture) + "."));
             }
         }
 
