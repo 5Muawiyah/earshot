@@ -1,6 +1,7 @@
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Widget;
+using Earshot.Widget.Alert;
 using Earshot.Widget.EarPause;
 
 namespace Earshot.Composition;
@@ -58,5 +59,21 @@ internal static partial class CompositionRoot
             time);
         r.WidgetStatus = status;
         return status;
+    }
+
+    // The low battery alert's real notifier chain: a toast, falling back to the card the tray already shows
+    // its other one-off notices through; in safe mode or with a redirected data root the whole notifier is
+    // that card alone, so a test run or a safe-mode run never writes a Start menu shortcut or shows a real
+    // toast (the same safe-mode/redirected-root facts BuildWidget itself and NotificationRegistration read).
+    internal static LowBatteryAlertService BuildLowBatteryAlertService(ServiceRegistry r, IWidgetStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        ArgumentNullException.ThrowIfNull(status);
+
+        INotifier notifier = r.SafeMode || Paths.Current.IsRedirected
+            ? new CardNotifier(r.Cards)
+            : new ToastNotifier(NotificationRegistration.AppUserModelId, new CardNotifier(r.Cards), r.Log);
+
+        return new LowBatteryAlertService(status, r.Settings, notifier);
     }
 }
