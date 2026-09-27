@@ -165,6 +165,16 @@ internal sealed class TaskbarWatcher : IDisposable
                 }
 
                 RecordDuration(_time.GetElapsedTime(started));
+
+                // A read UI Automation gives no way to cancel can still be in flight when Dispose is called,
+                // and can go on to complete after Dispose has already returned to its caller: checked again
+                // here, right before posting, so a result from a read that started before Dispose never
+                // reaches uiPost once the watcher is considered gone.
+                if (_stop.IsSet)
+                {
+                    return;
+                }
+
                 ITaskbarReader.Result captured = result;
                 _uiPost(() => _onResult(captured));
             }

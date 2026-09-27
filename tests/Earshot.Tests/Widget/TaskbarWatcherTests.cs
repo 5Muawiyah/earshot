@@ -220,6 +220,52 @@ public sealed class TaskbarWatcherTests
         watcher.Dispose();
     }
 
+    // A read already in flight when Dispose is called is not interrupted (UI Automation gives no way to
+    // cancel one, per Dispose's own comment): it goes on to complete, deep inside Loop, possibly well after
+    // Dispose has already returned to its caller. The old code still posted that stale result to the UI
+    // thread regardless, which OnTaskbarLayout would then apply to state the same Dispose call may already
+    // be tearing down. Loop must check the stop signal again right before posting, and skip the post
+    // entirely once it is set.
+    [TestMethod]
+    public void NoResultIsPostedToTheUiThreadOnceDisposeHasBeenCalled()
+    {
+        using var readStarted = new ManualResetEventSlim(false);
+        using var releaseRead = new ManualResetEventSlim(false);
+        var reader = new FakeTaskbarReader(readStarted, releaseRead);
+        var log = new CapturingLog();
+        int postCallsAfterDispose = 0;
+        bool disposed = false;
+        var watcher = new TaskbarWatcher(reader, () => null, _ => { },
+            action =>
+            {
+                if (disposed)
+                {
+                    Interlocked.Increment(ref postCallsAfterDispose);
+                }
+
+                action();
+            },
+            log, TimeProvider.System)
+        {
+            PollIntervalMs = 20,
+        };
+
+        watcher.Start();
+        Assert.IsTrue(readStarted.Wait(TimeSpan.FromSeconds(5)), "The fake read never started.");
+
+        var disposeThread = new Thread(() => watcher.Dispose());
+        disposeThread.Start();
+        Assert.IsTrue(disposeThread.Join(TimeSpan.FromSeconds(5)), "Dispose must return even while a read is still in flight.");
+        disposed = true;
+
+        // Only now does the blocked read return, deep inside the worker thread's loop, after Dispose has
+        // already returned: exactly the window the old code posted a stale result through regardless.
+        releaseRead.Set();
+        Thread.Sleep(200);
+
+        Assert.AreEqual(0, postCallsAfterDispose, "No result may reach uiPost once Dispose has been called.");
+    }
+
     // PollIntervalMs's own doc comment already says it is "reset after a poke source such as
     // TaskbarCreated, WM_SETTINGCHANGE or WM_DISPLAYCHANGE": TrayContext wires exactly that, but nothing
     // ever exercised the reset itself until now. A poll interval doubled by a real run of slow reads is
