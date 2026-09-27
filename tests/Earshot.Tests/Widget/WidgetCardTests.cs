@@ -1,0 +1,382 @@
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+using Earshot.Interop;
+using Earshot.Widget;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace Earshot.Tests.Widget;
+
+// WidgetCard: the dedicated three-column card. Pure checks create the card on the STA test thread, never
+// shown, and render it from a synthetic snapshot with DrawToBitmap; the real executions are shown only on
+// a private desktop (Earshot.Tests.Phase5.CardDesktop.Run), never the input desktop.
+[TestClass]
+public sealed class WidgetCardTests
+{
+    private const int WM_KEYDOWN = 0x0100;
+
+    [TestMethod]
+    public void ANullPercentDrawsTheGlyphOnlyNoBarAndNoDigits()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(left: new PartReading(null, null, null))), 96);
+            using Bitmap bitmap = Render(card);
+
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            Color background = bitmap.GetPixel(0, 0);
+            Assert.IsFalse(HasInk(bitmap, layout.Left.Bar, background), "No bar for a null percent.");
+            Assert.IsFalse(HasInk(bitmap, layout.Left.Percent, background), "No percent text for a null percent.");
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Glyph, background), "The glyph itself is still drawn.");
+        });
+    }
+
+    [TestMethod]
+    public void APercentDrawsTheBarAndTheDigits()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(left: new PartReading(70, false, false))), 96);
+            using Bitmap bitmap = Render(card);
+
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            Color background = bitmap.GetPixel(0, 0);
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Bar, background), "The bar is drawn for a known percent.");
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Percent, background), "The percent text is drawn.");
+        });
+    }
+
+    [TestMethod]
+    public void AChargingMarkAppearsOnlyWhenCharging()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var notCharging = new WidgetCard(new CapturingLog());
+            notCharging.SetTheme(Color.Black, highContrast: false);
+            notCharging.Render(Model(Snapshot(left: new PartReading(70, false, false))), 96);
+            using Bitmap bitmapOff = Render(notCharging);
+
+            using var charging = new WidgetCard(new CapturingLog());
+            charging.SetTheme(Color.Black, highContrast: false);
+            charging.Render(Model(Snapshot(left: new PartReading(70, true, false))), 96);
+            using Bitmap bitmapOn = Render(charging);
+
+            // Both cards draw the same glyph, bar, percent text, where line and read line (only Charging
+            // differs), so any extra ink anywhere on the card is the bolt.
+            Color background = bitmapOff.GetPixel(0, 0);
+            var whole = new Rectangle(0, 0, bitmapOff.Width, bitmapOff.Height);
+            int off = CountInk(bitmapOff, whole, background);
+            int on = CountInk(bitmapOn, whole, background);
+            Assert.IsGreaterThan(off, on, "A bolt is drawn while charging, adding ink the non-charging card does not have.");
+        });
+    }
+
+    [TestMethod]
+    public void AnInEarMarkAppearsOnlyWhenInEar()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var outOfEar = new WidgetCard(new CapturingLog());
+            outOfEar.SetTheme(Color.Black, highContrast: false);
+            outOfEar.Render(Model(Snapshot(left: new PartReading(70, false, false))), 96);
+            using Bitmap bitmapOff = Render(outOfEar);
+
+            using var inEar = new WidgetCard(new CapturingLog());
+            inEar.SetTheme(Color.Black, highContrast: false);
+            inEar.Render(Model(Snapshot(left: new PartReading(70, false, true))), 96);
+            using Bitmap bitmapOn = Render(inEar);
+
+            Color background = bitmapOff.GetPixel(0, 0);
+            int off = CountInk(bitmapOff, new Rectangle(0, 0, bitmapOff.Width, bitmapOff.Height), background);
+            int on = CountInk(bitmapOn, new Rectangle(0, 0, bitmapOn.Width, bitmapOn.Height), background);
+            Assert.IsGreaterThan(off, on, "The in-ear mark adds ink somewhere on the card.");
+        });
+    }
+
+    [TestMethod]
+    public void TheSwitchRowIsDrawnOnlyWhenAutoPauseIsAvailable()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var without = new WidgetCard(new CapturingLog());
+            without.SetTheme(Color.Black, highContrast: false);
+            without.Render(Model(Snapshot(autoPauseAvailable: false)), 96);
+            using Bitmap bitmapWithout = Render(without);
+
+            using var with = new WidgetCard(new CapturingLog());
+            with.SetTheme(Color.Black, highContrast: false);
+            with.Render(Model(Snapshot(autoPauseAvailable: true), showSwitch: true), 96);
+            using Bitmap bitmapWith = Render(with);
+
+            WidgetCardLayout.Layout layoutWith = WidgetCardLayout.Compute(96, showSwitch: true);
+            Assert.IsTrue(HasInk(bitmapWith, layoutWith.Switch, bitmapWith.GetPixel(0, 0)), "The switch row is drawn when available.");
+            Assert.IsGreaterThan(bitmapWithout.Height, bitmapWith.Height, "The card is taller with the switch row.");
+        });
+    }
+
+    [TestMethod]
+    public void StylesAreToolWindowAndTopmostWithoutNoActivateInNormalMode()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            nint handle = card.Handle;
+            long style = Phase5.TestWindows.ExtendedStyle(handle);
+            Assert.AreEqual((long)NativeMethods.WS_EX_TOOLWINDOW, style & NativeMethods.WS_EX_TOOLWINDOW);
+            Assert.AreEqual((long)NativeMethods.WS_EX_TOPMOST, style & NativeMethods.WS_EX_TOPMOST);
+            Assert.AreEqual(0L, style & NativeMethods.WS_EX_NOACTIVATE, "The normal card takes focus and activation.");
+        });
+    }
+
+    [TestMethod]
+    public void NoticeModeAddsNoActivateAndAnswersMouseActivateWithNoActivate()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            nint handle = card.Handle;
+            long style = Phase5.TestWindows.ExtendedStyle(handle);
+            Assert.AreEqual((long)NativeMethods.WS_EX_NOACTIVATE, style & NativeMethods.WS_EX_NOACTIVATE);
+            Assert.AreEqual((nint)NativeMethods.MA_NOACTIVATE, Phase5.TestWindows.Send(handle, NativeMethods.WM_MOUSEACTIVATE));
+        });
+    }
+
+    [TestMethod]
+    public void ShownWithShowThenActivateBecomesTheForegroundWindow()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            Assert.AreEqual(card.Handle, Phase5.TestWindows.GetActiveWindow(), "Show()+Activate() makes the card the active window.");
+        });
+    }
+
+    [TestMethod]
+    public void NoticeModeNeverBecomesTheForegroundWindow()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var background = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(0, 0), ClientSize = new Size(50, 50), ShowInTaskbar = false };
+            background.Show();
+            background.Activate();
+            Application.DoEvents();
+            nint before = Phase5.TestWindows.GetActiveWindow();
+
+            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            card.Location = new Point(200, 50);
+            card.Show();
+            Application.DoEvents();
+
+            Assert.AreEqual(before, Phase5.TestWindows.GetActiveWindow(), "A notice-mode card must not steal the foreground.");
+        });
+    }
+
+    [TestMethod]
+    public void DeactivatingTheCardClosesItAndRaisesTheDeactivatedReason()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+            Assert.IsTrue(card.Visible);
+
+            WidgetCardCloseReason? reason = null;
+            card.CloseRequested += (_, r) => reason = r;
+
+            using var other = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(400, 50), ClientSize = new Size(50, 50), ShowInTaskbar = false };
+            other.Show();
+            other.Activate();
+            Application.DoEvents();
+
+            Assert.IsFalse(card.Visible, "Losing activation hides the card.");
+            Assert.AreEqual(WidgetCardCloseReason.Deactivated, reason);
+        });
+    }
+
+    [TestMethod]
+    public void TabMovesFocusBetweenTheButtonAndTheSwitchAndWrapsBack()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(autoPauseAvailable: true), showSwitch: true, autoPauseOn: false), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "The button has the focus first.");
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Switch, card.FocusTarget);
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
+        });
+    }
+
+    [TestMethod]
+    public void EnterOnTheFocusedButtonRaisesExactlyOneToggleRequestAndCloses()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            int toggles = 0;
+            card.ToggleRequested += (_, _) => toggles++;
+            SendKey(card.Handle, Keys.Enter);
+
+            Assert.AreEqual(1, toggles);
+            Assert.IsFalse(card.Visible, "Pressing Connect/Disconnect closes the card.");
+        });
+    }
+
+    [TestMethod]
+    public void SpaceOnTheFocusedSwitchRaisesAutoPauseChangedAndDoesNotClose()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(autoPauseAvailable: true), showSwitch: true, autoPauseOn: false), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Switch, card.FocusTarget);
+
+            bool? newValue = null;
+            card.AutoPauseChanged += (_, on) => newValue = on;
+            SendKey(card.Handle, Keys.Space);
+
+            Assert.AreEqual(true, newValue, "The switch was off, so activating it asks to turn it on.");
+            Assert.IsTrue(card.Visible, "The switch never closes the card.");
+        });
+    }
+
+    [TestMethod]
+    public void EscapeClosesTheCard()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            WidgetCardCloseReason? reason = null;
+            card.CloseRequested += (_, r) => reason = r;
+            SendKey(card.Handle, Keys.Escape);
+
+            Assert.IsFalse(card.Visible);
+            Assert.AreEqual(WidgetCardCloseReason.Escape, reason);
+        });
+    }
+
+    [TestMethod]
+    public void RoundedCornersSucceedOnThisBuildOrAreSkippedBelowWindows11()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            _ = card.Handle;
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+            {
+                Assert.IsTrue(card.CornersApplied, "DWMWCP_ROUND is expected to succeed on Windows 11.");
+            }
+            else
+            {
+                Assert.IsFalse(card.CornersApplied, "Below build 22000 the corner preference is never asked for.");
+            }
+        });
+    }
+
+    private static void SendKey(nint handle, Keys key) => Phase5.TestWindows.Send(handle, WM_KEYDOWN, (nint)key, 0);
+
+    private static Bitmap Render(WidgetCard card)
+    {
+        Size size = card.ClientSize;
+        var bitmap = new Bitmap(Math.Max(1, size.Width), Math.Max(1, size.Height), PixelFormat.Format32bppArgb);
+        card.DrawToBitmap(bitmap, new Rectangle(Point.Empty, size));
+        return bitmap;
+    }
+
+    private static bool HasInk(Bitmap bitmap, Rectangle rect, Color background) => CountInk(bitmap, rect, background) > 0;
+
+    private static int CountInk(Bitmap bitmap, Rectangle rect, Color background)
+    {
+        Rectangle bounds = Rectangle.Intersect(rect, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+        int count = 0;
+        for (int y = bounds.Top; y < bounds.Bottom; y++)
+        {
+            for (int x = bounds.Left; x < bounds.Right; x++)
+            {
+                if (bitmap.GetPixel(x, y) != background)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static WidgetSnapshot Snapshot(
+        AirPodsWhere where = AirPodsWhere.ThisPc,
+        PartReading? left = null,
+        PartReading? right = null,
+        PartReading? box = null,
+        bool autoPauseAvailable = false,
+        DateTimeOffset? readAt = null) =>
+        new(
+            where,
+            left ?? PartReading.Unknown,
+            right ?? PartReading.Unknown,
+            box ?? PartReading.Unknown,
+            BatteryReadAt: readAt,
+            EarReadAt: null,
+            LidOpen: null,
+            WidgetWatcherState.Started,
+            WatcherErrorCode: null,
+            WatcherErrorName: null,
+            ClaimExists: true,
+            AutoPauseAvailable: autoPauseAvailable,
+            WidgetCounters.Empty);
+
+    private static WidgetCardModel Model(
+        WidgetSnapshot snapshot,
+        bool showSwitch = false,
+        bool autoPauseOn = false,
+        bool connectIntent = true,
+        bool buttonEnabled = true,
+        string otherDeviceLabel = "") =>
+        new(snapshot, autoPauseOn, showSwitch, connectIntent, buttonEnabled, otherDeviceLabel, DateTimeOffset.UtcNow);
+}

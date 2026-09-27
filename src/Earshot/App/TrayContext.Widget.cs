@@ -1,6 +1,7 @@
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Icons;
+using Earshot.Tray;
 using Earshot.Widget;
 
 namespace Earshot.App;
@@ -24,6 +25,7 @@ internal sealed partial class TrayContext
     private TaskbarWatcher? _taskbarWatcher;
     private ThemeReader? _widgetTheme;
     private GaugeWindow? _gaugeWindow;
+    private WidgetCardPresenter? _widgetCardPresenter;
     private int _widgetLayoutDpi = CardPlacement96;
     private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
 
@@ -71,7 +73,36 @@ internal sealed partial class TrayContext
         _taskbarWatcher = new TaskbarWatcher(new UiaTaskbarReader(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, options.Time);
         _taskbarWatcher.Start();
         _taskbarWatcher.Poke();
+
+        var callbacks = new WidgetCardPresenterCallbacks(
+            CurrentSnapshot: () => _widgetSnapshotCache,
+            AutoPauseOn: () => _registry.Settings.Current.Widget.AutoPause,
+            CurrentIntent: () => TrayStatus.Intent(_snapshot, _registry.Settings.Current),
+            IsBusy: () => IsBusy,
+            Dpi: () => _widgetLayoutDpi,
+            Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
+            HighContrast: () => SystemInformation.HighContrast,
+            OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
+            RequestToggle: StartToggleFromWidget,
+            SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
+                "pause when a bud comes out (widget)", s => s.Widget = s.Widget with { AutoPause = on }, place));
+        _widgetCardPresenter = new WidgetCardPresenter(() => new WidgetCard(_log), callbacks, _registry.UiPost, options.Time, _log);
     }
+
+    // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
+    // left click and the menu's toggle item already use (Launch -> ToggleAsync -> BlockCoordinator), just
+    // with the card placed above the gauge instead of at the cursor. Safe mode is unchanged: ToggleAsync's
+    // own Safe decorators answer this call exactly as they do the tray icon's.
+    internal void StartToggleFromWidget(CardPlace place)
+    {
+        long clickedAt = _tickCount();
+        Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey: false), place);
+    }
+
+    // The switch writes through TryUpdateSettings, the same settings-write path every menu item already
+    // uses, so a save failure is reported on a card exactly as it is for them.
+    internal bool TryUpdateSettingsFromWidget(string what, Action<EarshotSettings> mutate, CardPlace place) =>
+        TryUpdateSettings(what, mutate, place);
 
     private GaugeControllerSettings ReadGaugeControllerSettings()
     {
@@ -119,6 +150,7 @@ internal sealed partial class TrayContext
 
         _widgetSnapshotCache = _widgetStatus.Current;
         RenderGaugeIfShown();
+        _widgetCardPresenter?.Refresh();
     }
 
     private void RenderGaugeIfShown()
@@ -135,20 +167,24 @@ internal sealed partial class TrayContext
         return font?.Name ?? FontFamily.GenericSansSerif.Name;
     }
 
-    // A left click on the gauge, LeftClickConnects off (the default): the tray's existing card
-    // infrastructure shows where the AirPods are and when the battery was last read. Not the dedicated
-    // three-column card the design describes (see the report): this reuses ConnectCard/CardPresenter,
-    // already built and tested, rather than a new window class this pass did not have time to finish.
+    // A left click on the gauge, LeftClickConnects off (the default): opens the dedicated three-column
+    // card, above the gauge when it is shown, or near the cursor when the click came from the tray icon
+    // fallback instead.
     private void OnWidgetCardRequested(object? sender, EventArgs e)
     {
-        Point place = _gaugeWindow is { IsDisposed: false } window && window.IsHandleCreated
-            ? new Point(window.Bounds.X + (window.Bounds.Width / 2), window.Bounds.Y)
-            : _cursorPosition();
-        WidgetSnapshot snapshot = _widgetSnapshotCache;
-        string otherDeviceLabel = _registry.Settings.Current.Widget.OtherDeviceLabel;
-        string status = WidgetCopy.Where(snapshot.Where, otherDeviceLabel) + ". " +
-            WidgetCopy.BatteryReadLine(snapshot.BatteryReadAt, DateTimeOffset.UtcNow);
-        ShowCard("AirPods", status, CardPlace.AtClick(place));
+        if (_widgetCardPresenter is not { } presenter)
+        {
+            return;
+        }
+
+        if (_gaugeWindow is { IsDisposed: false } window && window.IsHandleCreated)
+        {
+            presenter.RequestShow(window.Bounds, window.Bounds.Location);
+        }
+        else
+        {
+            presenter.RequestShow(gaugeBounds: null, _cursorPosition());
+        }
     }
 
     // Suspends the widget's BLE watcher. Called only once a shut-down or sleep hand-back has finished
@@ -204,6 +240,8 @@ internal sealed partial class TrayContext
     // TrayContext.Close, on the UI thread.
     private void CloseWidget()
     {
+        _widgetCardPresenter?.Dispose();
+        _widgetCardPresenter = null;
         _taskbarWatcher?.Dispose();
         _taskbarWatcher = null;
         _gaugeController?.Dispose();
