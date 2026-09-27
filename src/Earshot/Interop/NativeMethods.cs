@@ -74,6 +74,24 @@ internal static partial class NativeMethods
     // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-hotkey
     internal const int WM_HOTKEY = 0x0312;
 
+    // The widget's window messages.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-activate
+    internal const int WM_ACTIVATE = 0x0006;
+    internal const int WA_INACTIVE = 0;
+
+    // https://learn.microsoft.com/en-us/windows/win32/inputmsg/wm-mousemove
+    internal const int WM_MOUSEMOVE = 0x0200;
+    internal const int WM_LBUTTONDOWN = 0x0201;
+    internal const int WM_LBUTTONUP = 0x0202;
+    internal const int WM_RBUTTONDOWN = 0x0204;
+    internal const int WM_RBUTTONUP = 0x0205;
+    internal const int WM_MOUSELEAVE = 0x02A3;
+
+    // The first message id an application may define; the appbar callback message registers one of its
+    // own here so it is never confused with a documented message.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-user
+    internal const int WM_USER = 0x0400;
+
     // WM_QUERYENDSESSION / WM_ENDSESSION lParam bits. 0 means shutdown or restart.
     internal const uint ENDSESSION_CLOSEAPP = 0x00000001;
     internal const uint ENDSESSION_CRITICAL = 0x40000000;
@@ -109,7 +127,12 @@ internal static partial class NativeMethods
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles
     internal const int WS_EX_TOPMOST = 0x00000008;
     internal const int WS_EX_TOOLWINDOW = 0x00000080;
+    internal const int WS_EX_LAYERED = 0x00080000;
     internal const int WS_EX_NOACTIVATE = 0x08000000;
+
+    // GetAncestor flag: the root owner window.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getancestor
+    internal const uint GA_ROOT = 2;
 
     // ShowWindow command that shows without activating.
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow
@@ -155,6 +178,36 @@ internal static partial class NativeMethods
     [LibraryImport(User32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    // The top-level window with the given class name, or 0 when none exists. The reader calls this on
+    // every read (never a cached handle), so a taskbar recreated by an Explorer restart is found again.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-findwindoww
+    [LibraryImport(User32, EntryPoint = "FindWindowW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial nint FindWindowW(string? lpClassName, string? lpWindowName);
+
+    // The window (any process) at a screen point, or 0 when the point is over no window. Used for the
+    // covered check (2.4) and the click-through proof (F10): coordinates are physical screen pixels.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-windowfrompoint
+    [LibraryImport(User32)]
+    internal static partial nint WindowFromPoint(POINT point);
+
+    // The root owner of a window (GA_ROOT): the outermost window in its owner chain.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getancestor
+    [LibraryImport(User32)]
+    internal static partial nint GetAncestor(nint hWnd, uint gaFlags);
+
+    // The window's rectangle in physical screen pixels.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowrect
+    [LibraryImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetWindowRect(nint hWnd, out RECT rect);
+
+    // Posts a message to a window's queue and returns at once. Used for the appbar callback and for
+    // exercising TaskbarCreated on the widget's own hidden window (never HWND_BROADCAST).
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew
+    [LibraryImport(User32, EntryPoint = "PostMessageW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool PostMessageW(nint hWnd, uint msg, nuint wParam, nint lParam);
 
     // fsModifiers is one of HotkeyModifiers combined with MOD_NOREPEAT (0x4000); vk is a virtual-key
     // code. id must stay in 0x0000 to 0xBFFF: 0xC000 and above is reserved for shared DLLs, which take

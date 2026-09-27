@@ -11,6 +11,11 @@ internal static partial class Dwm
     // DWMWINDOWATTRIBUTE values (dwmapi.h).
     // https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
     internal const uint DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+    // "Enables or disables the use of the alpha channel in the window's redirection bitmap ... supported
+    // starting with Windows 11 Build 26100." A local probe found this refused with E_INVALIDARG on build
+    // 26200.9457; recorded here, not used.
+    internal const uint DWMWA_REDIRECTIONBITMAP_ALPHA = 26;
     internal const uint DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     internal const uint DWMWA_BORDER_COLOR = 34;
     internal const uint DWMWA_CAPTION_COLOR = 35;
@@ -42,4 +47,24 @@ internal static partial class Dwm
     // https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmsetwindowattribute
     [LibraryImport(Dll)]
     internal static partial int DwmSetWindowAttribute(nint hwnd, uint dwAttribute, in int pvAttribute, uint cbAttribute);
+
+    // Extends the window's frame (here, the system backdrop material) into the client area. -1 on every
+    // margin extends across the whole client, which a local probe found makes the backdrop material fill
+    // the window when the client itself is painted with alpha 0. Returns an HRESULT.
+    // https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmextendframeintoclientarea
+    [LibraryImport(Dll)]
+    internal static partial int DwmExtendFrameIntoClientArea(nint hwnd, in MARGINS pMarInset);
+}
+
+// https://learn.microsoft.com/en-us/windows/win32/api/uxtheme/ns-uxtheme-margins
+[StructLayout(LayoutKind.Sequential)]
+internal struct MARGINS
+{
+    public int cxLeftWidth;
+    public int cxRightWidth;
+    public int cyTopHeight;
+    public int cyBottomHeight;
+
+    // Every margin -1: the recipe that extends the backdrop across the whole client area.
+    public static readonly MARGINS Full = new() { cxLeftWidth = -1, cxRightWidth = -1, cyTopHeight = -1, cyBottomHeight = -1 };
 }

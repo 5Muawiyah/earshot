@@ -116,6 +116,32 @@ public sealed class ComVtableOrderTests
 
     private static readonly string[] BootTrigger = [.. Trigger, "get_Delay", "put_Delay"];
 
+    // IUIAutomation up to CreateTrueCondition (UIAutomationCore.idl). Every method up to the last one
+    // Earshot uses is pinned, the same convention TaskSchedulerCom's largely unused interfaces already
+    // follow. IUIAutomationCondition has no methods beyond IUnknown, so it carries no slots to pin and is
+    // not in this list.
+    private static readonly string[] UIAutomation =
+    [
+        "CompareElements", "CompareRuntimeIds", "GetRootElement", "ElementFromHandle", "ElementFromPoint", "GetFocusedElement",
+        "GetRootElementBuildCache", "ElementFromHandleBuildCache", "ElementFromPointBuildCache", "GetFocusedElementBuildCache",
+        "CreateTreeWalker", "get_ControlViewWalker", "get_ContentViewWalker", "get_RawViewWalker", "get_RawViewCondition",
+        "get_ControlViewCondition", "get_ContentViewCondition", "CreateCacheRequest", "CreateTrueCondition",
+    ];
+
+    private static readonly string[] UIAutomationElement =
+    [
+        "SetFocus", "GetRuntimeId", "FindFirst", "FindAll", "FindFirstBuildCache", "FindAllBuildCache", "BuildUpdatedCache",
+        "GetCurrentPropertyValue", "GetCurrentPropertyValueEx", "GetCachedPropertyValue",
+    ];
+
+    private static readonly string[] UIAutomationElementArray = ["get_Length", "GetElement"];
+
+    private static readonly string[] UIAutomationCacheRequest =
+    [
+        "AddProperty", "AddPattern", "Clone", "get_TreeScope", "put_TreeScope", "get_TreeFilter", "put_TreeFilter",
+        "get_AutomationElementMode", "put_AutomationElementMode",
+    ];
+
     public static IEnumerable<object[]> Interfaces =>
     [
         [typeof(IMMDeviceEnumerator), IUnknownSlots, MMDeviceEnumerator],
@@ -144,6 +170,10 @@ public sealed class ComVtableOrderTests
         [typeof(ITriggerCollection), IDispatchSlots, TriggerCollection],
         [typeof(ITrigger), IDispatchSlots, Trigger],
         [typeof(IBootTrigger), IDispatchSlots, BootTrigger],
+        [typeof(IUIAutomation), IUnknownSlots, UIAutomation],
+        [typeof(IUIAutomationElement), IUnknownSlots, UIAutomationElement],
+        [typeof(IUIAutomationElementArray), IUnknownSlots, UIAutomationElementArray],
+        [typeof(IUIAutomationCacheRequest), IUnknownSlots, UIAutomationCacheRequest],
     ];
 
     public static string InterfaceName(MethodInfo method, object[] data) => ((Type)data[0]).Name;
