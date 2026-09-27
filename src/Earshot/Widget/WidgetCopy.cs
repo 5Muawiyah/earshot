@@ -26,6 +26,21 @@ internal static class WidgetCopy
     public const string LowBatteryAlert = "Low battery alert";
     public const string OtherDeviceNameTitle = "Name your other device";
 
+    private const string LeftAirPodLabel = "Left AirPod";
+    private const string RightAirPodLabel = "Right AirPod";
+    private const string CaseLabel = "Case";
+
+    // "Left AirPod at 20%" and so on: the low battery alert's one line, from the literal percent the reading
+    // carried, never rounded or interpolated (there is no other figure to show).
+    public static string LowBatteryLeftText(int percent) => LowBatteryText(LeftAirPodLabel, percent);
+
+    public static string LowBatteryRightText(int percent) => LowBatteryText(RightAirPodLabel, percent);
+
+    public static string LowBatteryCaseText(int percent) => LowBatteryText(CaseLabel, percent);
+
+    private static string LowBatteryText(string partLabel, int percent) =>
+        partLabel + " at " + percent.ToString(CultureInfo.InvariantCulture) + "%";
+
     // "On your <name>" when a label is set, "On another device" when it is empty.
     public static string OnElsewhere(string otherDeviceLabel) =>
         string.IsNullOrWhiteSpace(otherDeviceLabel) ? DefaultOtherDeviceLabel : "On your " + otherDeviceLabel.Trim();
