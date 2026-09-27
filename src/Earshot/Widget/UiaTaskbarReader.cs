@@ -39,7 +39,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             return Fail(TaskbarReadFailureStep.TaskbarRect, rectFailure!);
         }
 
-        if (!TryReadOccupants(trayHandle, taskbar, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? occupantsFailure))
+        if (!TryReadOccupants(trayHandle, taskbar, Earshot.Audio.ComRelease.Rcw, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? occupantsFailure))
         {
             return Fail(TaskbarReadFailureStep.Occupants, occupantsFailure!);
         }
@@ -76,8 +76,16 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
 
     // Internal so UiaTaskbarReaderTests's real-execution test can call this directly against the real
     // Shell_TrayWnd, without going through Read's other steps (the appbar rectangle, notification state).
-    internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
+    // release frees every per-read COM object created below (root, trueCondition, cacheRequest, found, and
+    // each per-element IUIAutomationElement inside TryReadElements) before this method returns, on every
+    // path: production passes Earshot.Audio.ComRelease.Rcw (Marshal.ReleaseComObject), the same shared
+    // helper CoreAudioEndpointSource and TopologyWalk already use for exactly this reason (their own
+    // comment: their managed test doubles are not real COM objects, and Marshal.ReleaseComObject throws
+    // ArgumentException against one). The cached _automation field above is the only UIA object this reader
+    // keeps alive across reads, so it is never passed to release.
+    internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
     {
+        ArgumentNullException.ThrowIfNull(release);
         occupied = [];
         startButton = null;
         failure = null;
@@ -102,56 +110,86 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             return false;
         }
 
-        hr = automationRef.CreateTrueCondition(out IUIAutomationCondition? trueCondition);
-        if (hr < 0 || trueCondition is null)
+        try
         {
-            failure = StepOutcomes.FromHResult("uia:create-true-condition", hr);
-            return false;
-        }
+            hr = automationRef.CreateTrueCondition(out IUIAutomationCondition? trueCondition);
+            if (hr < 0 || trueCondition is null)
+            {
+                failure = StepOutcomes.FromHResult("uia:create-true-condition", hr);
+                return false;
+            }
 
-        hr = automationRef.CreateCacheRequest(out IUIAutomationCacheRequest? cacheRequest);
-        if (hr < 0 || cacheRequest is null)
+            try
+            {
+                hr = automationRef.CreateCacheRequest(out IUIAutomationCacheRequest? cacheRequest);
+                if (hr < 0 || cacheRequest is null)
+                {
+                    failure = StepOutcomes.FromHResult("uia:create-cache-request", hr);
+                    return false;
+                }
+
+                try
+                {
+                    hr = cacheRequest.AddProperty(UiAutomation.UIA_BoundingRectanglePropertyId);
+                    if (hr >= 0)
+                    {
+                        hr = cacheRequest.AddProperty(UiAutomation.UIA_IsOffscreenPropertyId);
+                    }
+
+                    if (hr >= 0)
+                    {
+                        hr = cacheRequest.AddProperty(UiAutomation.UIA_AutomationIdPropertyId);
+                    }
+
+                    if (hr < 0)
+                    {
+                        failure = StepOutcomes.FromHResult("uia:add-property", hr);
+                        return false;
+                    }
+
+                    // TreeScope_Descendants is FindAllBuildCache's own scope parameter here, not
+                    // cacheRequest.put_TreeScope: see that method's declaration in UiAutomation.cs for why. A
+                    // local probe against the real Shell_TrayWnd confirmed every occupant's three cached
+                    // properties below come back S_OK read this way.
+                    hr = root.FindAllBuildCache(UiAutomation.TreeScope_Descendants, trueCondition, cacheRequest, out IUIAutomationElementArray? found);
+                    if (hr < 0 || found is null)
+                    {
+                        failure = StepOutcomes.FromHResult("uia:find-all-build-cache", hr);
+                        return false;
+                    }
+
+                    try
+                    {
+                        return TryReadElements(found, containerRect, release, out occupied, out startButton, out failure);
+                    }
+                    finally
+                    {
+                        release(found);
+                    }
+                }
+                finally
+                {
+                    release(cacheRequest);
+                }
+            }
+            finally
+            {
+                release(trueCondition);
+            }
+        }
+        finally
         {
-            failure = StepOutcomes.FromHResult("uia:create-cache-request", hr);
-            return false;
+            release(root);
         }
-
-        hr = cacheRequest.AddProperty(UiAutomation.UIA_BoundingRectanglePropertyId);
-        if (hr >= 0)
-        {
-            hr = cacheRequest.AddProperty(UiAutomation.UIA_IsOffscreenPropertyId);
-        }
-
-        if (hr >= 0)
-        {
-            hr = cacheRequest.AddProperty(UiAutomation.UIA_AutomationIdPropertyId);
-        }
-
-        if (hr < 0)
-        {
-            failure = StepOutcomes.FromHResult("uia:add-property", hr);
-            return false;
-        }
-
-        // TreeScope_Descendants is FindAllBuildCache's own scope parameter here, not
-        // cacheRequest.put_TreeScope: see that method's declaration in UiAutomation.cs for why. A local
-        // probe against the real Shell_TrayWnd confirmed every occupant's three cached properties below
-        // come back S_OK read this way.
-        hr = root.FindAllBuildCache(UiAutomation.TreeScope_Descendants, trueCondition, cacheRequest, out IUIAutomationElementArray? found);
-        if (hr < 0 || found is null)
-        {
-            failure = StepOutcomes.FromHResult("uia:find-all-build-cache", hr);
-            return false;
-        }
-
-        return TryReadElements(found, containerRect, out occupied, out startButton, out failure);
     }
 
     // Split out from TryReadOccupants so a test can drive the per-element logic against a fake
     // IUIAutomationElementArray/IUIAutomationElement, without a real Shell_TrayWnd or a way to make the
-    // real COM pipeline fail partway through an enumeration on demand.
-    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
+    // real COM pipeline fail partway through an enumeration on demand. release frees each per-element
+    // IUIAutomationElement GetElement returns, the same delegate TryReadOccupants passes through.
+    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
     {
+        ArgumentNullException.ThrowIfNull(release);
         occupied = [];
         startButton = null;
         failure = null;
@@ -184,54 +222,61 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                 return false;
             }
 
-            hr = element.GetCachedPropertyValue(UiAutomation.UIA_BoundingRectanglePropertyId, out object? rectValue);
-            if (hr < 0)
+            try
             {
-                failure = StepOutcomes.FromHResult("uia:get-cached-property:bounding-rectangle", hr);
-                return false;
+                hr = element.GetCachedPropertyValue(UiAutomation.UIA_BoundingRectanglePropertyId, out object? rectValue);
+                if (hr < 0)
+                {
+                    failure = StepOutcomes.FromHResult("uia:get-cached-property:bounding-rectangle", hr);
+                    return false;
+                }
+
+                if (rectValue is not double[] { Length: 4 } bounds)
+                {
+                    // VT_EMPTY on a successful read: the element is not currently displaying UI (documented
+                    // behaviour of the BoundingRectangle property, not a failure). Not an occupant.
+                    continue;
+                }
+
+                var rect = new Rectangle(
+                    (int)Math.Round(bounds[0]), (int)Math.Round(bounds[1]),
+                    (int)Math.Round(bounds[2]), (int)Math.Round(bounds[3]));
+                if (rect.Width <= 0 || rect.Height <= 0 || rect == containerRect)
+                {
+                    // A frame container (Shell_TrayWnd, the input site, TaskbarFrame) whose rectangle equals
+                    // the taskbar's own: not an occupant.
+                    continue;
+                }
+
+                hr = element.GetCachedPropertyValue(UiAutomation.UIA_IsOffscreenPropertyId, out object? offscreenValue);
+                if (hr < 0)
+                {
+                    failure = StepOutcomes.FromHResult("uia:get-cached-property:is-offscreen", hr);
+                    return false;
+                }
+
+                if (offscreenValue is bool { } offscreen && offscreen)
+                {
+                    continue;
+                }
+
+                occupied.Add(rect);
+
+                hr = element.GetCachedPropertyValue(UiAutomation.UIA_AutomationIdPropertyId, out object? idValue);
+                if (hr < 0)
+                {
+                    failure = StepOutcomes.FromHResult("uia:get-cached-property:automation-id", hr);
+                    return false;
+                }
+
+                if (idValue is string id && string.Equals(id, StartButtonAutomationId, StringComparison.Ordinal))
+                {
+                    startButton = rect;
+                }
             }
-
-            if (rectValue is not double[] { Length: 4 } bounds)
+            finally
             {
-                // VT_EMPTY on a successful read: the element is not currently displaying UI (documented
-                // behaviour of the BoundingRectangle property, not a failure). Not an occupant.
-                continue;
-            }
-
-            var rect = new Rectangle(
-                (int)Math.Round(bounds[0]), (int)Math.Round(bounds[1]),
-                (int)Math.Round(bounds[2]), (int)Math.Round(bounds[3]));
-            if (rect.Width <= 0 || rect.Height <= 0 || rect == containerRect)
-            {
-                // A frame container (Shell_TrayWnd, the input site, TaskbarFrame) whose rectangle equals
-                // the taskbar's own: not an occupant.
-                continue;
-            }
-
-            hr = element.GetCachedPropertyValue(UiAutomation.UIA_IsOffscreenPropertyId, out object? offscreenValue);
-            if (hr < 0)
-            {
-                failure = StepOutcomes.FromHResult("uia:get-cached-property:is-offscreen", hr);
-                return false;
-            }
-
-            if (offscreenValue is bool { } offscreen && offscreen)
-            {
-                continue;
-            }
-
-            occupied.Add(rect);
-
-            hr = element.GetCachedPropertyValue(UiAutomation.UIA_AutomationIdPropertyId, out object? idValue);
-            if (hr < 0)
-            {
-                failure = StepOutcomes.FromHResult("uia:get-cached-property:automation-id", hr);
-                return false;
-            }
-
-            if (idValue is string id && string.Equals(id, StartButtonAutomationId, StringComparison.Ordinal))
-            {
-                startButton = rect;
+                release(element);
             }
         }
 

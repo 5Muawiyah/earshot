@@ -123,6 +123,11 @@ public sealed class UiaTaskbarReaderTests
 {
     private const string ShellTrayWndClass = "Shell_TrayWnd";
 
+    // FakeUiaElement/FakeUiaElementArray below are plain C# classes, not real COM objects:
+    // Marshal.ReleaseComObject throws ArgumentException against one, so every TryReadElements call driven
+    // by a fake passes this no-op instead of Earshot.Audio.ComRelease.Rcw.
+    private static readonly Action<object> NoRelease = static _ => { };
+
     [TestMethod]
     public void RealUiaTaskbarReaderReadsTheRealTaskbarReadOnly()
     {
@@ -146,12 +151,16 @@ public sealed class UiaTaskbarReaderTests
             {
                 var reader = new UiaTaskbarReader();
 
+                // The real release, not a no-op: this is the one execution kept of Marshal.ReleaseComObject
+                // actually running against the real COM objects a live Shell_TrayWnd read creates (the class
+                // hygiene rule for a helper a self-test fakes elsewhere).
+                //
                 // A warm-up read first: a local probe found the first UIA call on this machine costs far
                 // more than later ones, so the timed read below measures the steady-state cost.
-                reader.TryReadOccupants(trayHandle, Rectangle.Empty, out _, out _, out _);
+                reader.TryReadOccupants(trayHandle, Rectangle.Empty, Earshot.Audio.ComRelease.Rcw, out _, out _, out _);
 
                 stopwatch.Start();
-                ok = reader.TryReadOccupants(trayHandle, Rectangle.Empty, out occupied, out startButton, out failure);
+                ok = reader.TryReadOccupants(trayHandle, Rectangle.Empty, Earshot.Audio.ComRelease.Rcw, out occupied, out startButton, out failure);
                 stopwatch.Stop();
             }
             catch (Exception ex)
@@ -206,7 +215,7 @@ public sealed class UiaTaskbarReaderTests
         var okElement = new FakeUiaElement(new Rectangle(10, 10, 20, 20));
         var array = new FakeUiaElementArray([okElement, null, okElement], failAtIndex: 1, failureHResult: EFail);
 
-        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure);
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, NoRelease, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure);
 
         Assert.IsFalse(ok, "A read failure partway through element enumeration must fail the whole read, not silently skip the element.");
         Assert.IsNotNull(failure);
@@ -226,7 +235,7 @@ public sealed class UiaTaskbarReaderTests
         var failingElement = new FakeUiaElement(bounds: null, boundingRectangleHResult: EFail);
         var array = new FakeUiaElementArray([failingElement]);
 
-        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, out List<Rectangle> occupied, out _, out StepOutcome? failure);
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, NoRelease, out List<Rectangle> occupied, out _, out StepOutcome? failure);
 
         Assert.IsFalse(ok, "A negative HRESULT reading the bounding rectangle must fail the whole read, not silently skip the element.");
         Assert.IsNotNull(failure);
@@ -243,7 +252,7 @@ public sealed class UiaTaskbarReaderTests
         var notDisplayingUi = new FakeUiaElement(bounds: null);
         var array = new FakeUiaElementArray([notDisplayingUi]);
 
-        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, out List<Rectangle> occupied, out _, out StepOutcome? failure);
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, NoRelease, out List<Rectangle> occupied, out _, out StepOutcome? failure);
 
         Assert.IsTrue(ok);
         Assert.IsNull(failure);
@@ -260,12 +269,100 @@ public sealed class UiaTaskbarReaderTests
         var offscreen = new FakeUiaElement(new Rectangle(100, 0, 10, 10), offscreen: true);
         var array = new FakeUiaElementArray([plain, start, offscreen]);
 
-        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure);
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, NoRelease, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure);
 
         Assert.IsTrue(ok);
         Assert.IsNull(failure);
         Assert.HasCount(2, occupied, "The offscreen element must not be counted as an occupant.");
         Assert.AreEqual(new Rectangle(50, 0, 45, 48), startButton);
+    }
+
+    // A security review found that UiaTaskbarReader never released a single COM object it obtained during a
+    // read: not the per-element IUIAutomationElement (here), and not IUIAutomationElement (root),
+    // IUIAutomationElementArray, IUIAutomationCacheRequest or IUIAutomationCondition in TryReadOccupants
+    // (RealReleasesEveryPerReadComObjectAtLeastFour, below). Over the life of TaskbarWatcher's polling loop
+    // (once a second while the widget runs) this is an unbounded RCW/native reference leak. Every element
+    // GetElement returns must be released exactly once, regardless of which branch (occupant, offscreen,
+    // VT_EMPTY, or a mid-enumeration failure) handles it.
+    [TestMethod]
+    public void EveryElementGetElementReturnsIsReleasedExactlyOnce()
+    {
+        var plain = new FakeUiaElement(new Rectangle(0, 0, 44, 48));
+        var start = new FakeUiaElement(new Rectangle(50, 0, 45, 48), automationId: "StartButton");
+        var offscreen = new FakeUiaElement(new Rectangle(100, 0, 10, 10), offscreen: true);
+        var emptyBounds = new FakeUiaElement(bounds: null);
+        var array = new FakeUiaElementArray([plain, start, offscreen, emptyBounds]);
+        var released = new List<object>();
+
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, released.Add, out _, out _, out _);
+
+        Assert.IsTrue(ok);
+        Assert.AreEqual(4, released.Count, "Every one of the 4 elements GetElement returned must be released exactly once.");
+        CollectionAssert.AreEquivalent(new object[] { plain, start, offscreen, emptyBounds }, released);
+    }
+
+    // A mid-enumeration failure must still release the element GetElement did successfully hand back before
+    // the failing call: TryReadElements returns false straight away (see
+    // AGetElementFailurePartwayThroughFailsTheWholeReadInsteadOfSkippingIt), but the element it already
+    // holds must not leak just because the whole read then fails.
+    [TestMethod]
+    public void AnElementIsReleasedEvenWhenItsOwnPropertyReadFails()
+    {
+        const int EFail = unchecked((int)0x80004005);
+        var failingElement = new FakeUiaElement(bounds: null, boundingRectangleHResult: EFail);
+        var array = new FakeUiaElementArray([failingElement]);
+        var released = new List<object>();
+
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, released.Add, out _, out _, out _);
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(1, released.Count, "The element must still be released even though reading its bounding rectangle failed.");
+        Assert.AreSame(failingElement, released[0]);
+    }
+
+    // The real execution for the top-level COM objects TryReadOccupants itself creates (root,
+    // trueCondition, cacheRequest, found): against the real Shell_TrayWnd, so this proves
+    // Marshal.ReleaseComObject (wrapped here only to count the calls, still the real release underneath)
+    // neither throws nor is skipped for any of the four, not just that a fake tolerates being asked.
+    [TestMethod]
+    public void RealReleasesEveryPerReadComObjectAtLeastFour()
+    {
+        nint trayHandle = FindWindowW(ShellTrayWndClass, null);
+        if (trayHandle == 0)
+        {
+            Assert.Inconclusive("No Shell_TrayWnd on this machine (a hosted runner with no taskbar): skipped, as the design allows.");
+            return;
+        }
+
+        int releaseCalls = 0;
+        Action<object> countingRelease = comObject =>
+        {
+            Interlocked.Increment(ref releaseCalls);
+            Earshot.Audio.ComRelease.Rcw(comObject);
+        };
+
+        ExceptionDispatchInfo? readerFailure = null;
+        var readerThread = new Thread(() =>
+        {
+            try
+            {
+                var reader = new UiaTaskbarReader();
+                reader.TryReadOccupants(trayHandle, Rectangle.Empty, countingRelease, out _, out _, out _);
+            }
+            catch (Exception ex)
+            {
+                readerFailure = ExceptionDispatchInfo.Capture(ex);
+            }
+        });
+        readerThread.SetApartmentState(ApartmentState.MTA);
+        readerThread.Start();
+        Assert.IsTrue(readerThread.Join(TimeSpan.FromSeconds(10)), "The reader thread did not finish within 10 s.");
+        readerFailure?.Throw();
+
+        // root, trueCondition, cacheRequest, found: the four TryReadOccupants itself always creates on a
+        // successful read, before any per-element releases TryReadElements adds on top.
+        Assert.IsGreaterThanOrEqualTo(4, releaseCalls,
+            "TryReadOccupants must release every one of its own four per-read COM objects, not just tolerate a fake tolerating zero.");
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
