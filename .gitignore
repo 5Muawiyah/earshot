@@ -17,6 +17,8 @@ FINISH_PROMPT.md
 PROMPTING_RESPONSES.md
 PROMPTING_LESSONS.md
 BUILD_PROMPT.md
+*_PROMPT.md
+TASKS.md
 .claude/
 .worktrees/
 scratch/
