@@ -49,6 +49,31 @@ internal sealed class FakeTaskbarReader : ITaskbarReader
     }
 }
 
+// A reader slow enough to trip TaskbarWatcher's own slow-read back-off (mean of the last 20 reads over
+// 20 ms) until GoFast() is called, for ResetBackoffReturnsTheDoubledIntervalToTheShownBaseline.
+internal sealed class SlowThenFastTaskbarReader : ITaskbarReader
+{
+    private static readonly ITaskbarReader.Result Failure =
+        ITaskbarReader.Result.Fail(new TaskbarReadFailure(TaskbarReadFailureStep.NoTaskbar, new Earshot.Contracts.StepOutcome("fake", false, 0, "S_OK", null)));
+
+    private readonly TimeSpan _delay;
+    private volatile bool _slow = true;
+
+    public SlowThenFastTaskbarReader(TimeSpan delay) => _delay = delay;
+
+    public void GoFast() => _slow = false;
+
+    public ITaskbarReader.Result Read(ShownGauge? shownGauge)
+    {
+        if (_slow)
+        {
+            Thread.Sleep(_delay);
+        }
+
+        return Failure;
+    }
+}
+
 // TaskbarWatcher's real thread lifecycle: this is the one execution kept of the real background loop
 // (the controller's own tests drive OnLayout synchronously instead). Every test disposes the watcher
 // before returning, so nothing outlives the test.
@@ -193,5 +218,38 @@ public sealed class TaskbarWatcherTests
 
         // Safe, and still no throw, whether or not the worker had already finished.
         watcher.Dispose();
+    }
+
+    // PollIntervalMs's own doc comment already says it is "reset after a poke source such as
+    // TaskbarCreated, WM_SETTINGCHANGE or WM_DISPLAYCHANGE": TrayContext wires exactly that, but nothing
+    // ever exercised the reset itself until now. A poll interval doubled by a real run of slow reads is
+    // stale once Explorer (and its taskbar) is new, so ResetBackoff must clear it back to the baseline
+    // rather than leaving the gauge polling twice as slowly as production ever intended after that.
+    [TestMethod]
+    public void ResetBackoffReturnsTheDoubledIntervalToTheShownBaseline()
+    {
+        var reader = new SlowThenFastTaskbarReader(TimeSpan.FromMilliseconds(25));
+        var log = new CapturingLog();
+        using var watcher = new TaskbarWatcher(reader, () => null, _ => { }, ImmediateUiPost, log, TimeProvider.System)
+        {
+            PollIntervalMs = 1,
+        };
+
+        // Started at 1 ms (not ShownPollIntervalMs) so the 20 reads doubling needs happen fast: doubling
+        // multiplies whatever the interval currently is, so watch for it changing away from 1, not for it
+        // exceeding the baseline.
+        watcher.Start();
+        Assert.IsTrue(SpinWait.SpinUntil(() => watcher.PollIntervalMs != 1, TimeSpan.FromSeconds(5)),
+            "Sanity: enough slow reads must double the poll interval.");
+
+        // Fast from here on, so nothing but the reset itself can explain the interval going back down.
+        reader.GoFast();
+        watcher.ResetBackoff();
+
+        Assert.IsTrue(SpinWait.SpinUntil(() => watcher.PollIntervalMs == TaskbarWatcher.ShownPollIntervalMs, TimeSpan.FromSeconds(5)),
+            "ResetBackoff must return the poll interval to the shown baseline.");
+
+        Thread.Sleep(200);
+        Assert.AreEqual(TaskbarWatcher.ShownPollIntervalMs, watcher.PollIntervalMs, "Fast reads must not double it again.");
     }
 }

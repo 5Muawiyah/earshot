@@ -31,6 +31,7 @@ internal sealed class TaskbarWatcher : IDisposable
     private bool _started;
     private bool _disposed;
     private volatile int _pollIntervalMs = ShownPollIntervalMs;
+    private volatile bool _backoffResetRequested;
 
     public TaskbarWatcher(ITaskbarReader reader, Func<ShownGauge?> shownGauge, Action<ITaskbarReader.Result> onResult, Action<Action> uiPost, ILog log, TimeProvider time)
     {
@@ -81,6 +82,21 @@ internal sealed class TaskbarWatcher : IDisposable
         }
     }
 
+    // Resets the slow-read back-off (the poll interval and the measurement window that doubled it) to the
+    // shown baseline. Called after a poke source that makes the old measurement stale: TaskbarCreated means
+    // a new Explorer and a new taskbar, so a doubled interval measured against the old one no longer means
+    // anything. The actual field writes happen on the worker thread (Loop), the only thread that otherwise
+    // touches _recentDurationsMs and _intervalDoubled, via the same volatile-flag-plus-poke pattern Dispose
+    // and Poke already use to cross from any caller's thread to the worker thread safely.
+    public void ResetBackoff()
+    {
+        if (!_disposed)
+        {
+            _backoffResetRequested = true;
+            _poke.Set();
+        }
+    }
+
     // Signals the worker thread to stop and waits briefly, but never disposes _poke or _stop itself: the
     // worker thread still owns them until its own Loop actually returns, which can be later than this
     // call's 500 ms budget when a read is still in flight (UI Automation gives no way to cancel one). The
@@ -122,6 +138,14 @@ internal sealed class TaskbarWatcher : IDisposable
                 if (_stop.IsSet)
                 {
                     return;
+                }
+
+                if (_backoffResetRequested)
+                {
+                    _backoffResetRequested = false;
+                    _pollIntervalMs = ShownPollIntervalMs;
+                    _intervalDoubled = false;
+                    _recentDurationsMs.Clear();
                 }
 
                 ITaskbarReader.Result result;

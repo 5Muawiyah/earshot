@@ -279,6 +279,17 @@ internal sealed partial class TrayContext : ApplicationContext
         _window.SessionEnding += OnSessionEnding;
         _window.PowerChanged += OnPowerChanged;
 
+        // The widget's own listeners on the same three shell signals: a null _taskbarWatcher (the widget is
+        // off, or not yet wired) makes each of these a no-op, exactly like ApplyWidget's own Poke() calls.
+        // TaskbarCreated means Explorer (and its taskbar) is new, so any poll-interval back-off measured
+        // against the old one is stale and is reset before the poke; WM_SETTINGCHANGE and WM_DISPLAYCHANGE
+        // ask only for an immediate re-measure. AppBarRegistration exists in this codebase but is not wired
+        // anywhere yet (not here, not in CompositionRoot.Widget.cs): re-registering it on TaskbarCreated is
+        // still owed, not built here.
+        _window.TaskbarCreated += (_, _) => { _taskbarWatcher?.ResetBackoff(); _taskbarWatcher?.Poke(); };
+        _window.SettingChanged += (_, _) => _taskbarWatcher?.Poke();
+        _window.DisplayChanged += (_, _) => _taskbarWatcher?.Poke();
+
         // WM_CLOSE asks Earshot to close, so it takes the same orderly path as Exit on the menu, the block before
         // closing included. There is no click to place a card by.
         _window.CloseRequested += (_, _) => _ = ExitAsync(CardPlace.NearTray, "Windows asked Earshot to close (WM_CLOSE).");
