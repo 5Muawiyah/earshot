@@ -14,7 +14,11 @@ internal enum WidgetCardFocus { Button, Switch }
 // Why the card asked to be hidden. WidgetCardPresenter uses Deactivated to run the toggle-close rule: a
 // second gauge click within SystemInformation.DoubleClickTime of a deactivate-close does not reopen it, the
 // same gesture as a second click on the volume flyout's own icon. The other reasons it simply hides for.
-internal enum WidgetCardCloseReason { Deactivated, Escape, Action }
+//
+// ClickOutside is notice mode only: a click that landed on the card but missed both the button and the
+// switch. A notice-mode card is never activated (WS_EX_NOACTIVATE), so it never deactivates either; this
+// is its only way to notice "the owner clicked past it".
+internal enum WidgetCardCloseReason { Deactivated, Escape, Action, ClickOutside }
 
 // Everything the card draws, handed in by WidgetCardPresenter on every show and every refresh. Immutable,
 // so a paint never races a concurrent update.
@@ -50,10 +54,14 @@ internal sealed record WidgetCardModel(
 // volume flyout), so CreateParams omits WS_EX_NOACTIVATE and ControlStyles.Selectable is left at its
 // default (true) rather than turned off.
 //
-// notice: false for every use in this step. A future case-open notice card is the same Form in notice
-// mode, but its WS_EX_NOACTIVATE and "answer MA_NOACTIVATE" requirement is wired into CreateParams and
-// WndProc now, so that step only has to construct the form with notice: true and add its own trigger and
-// dismiss timer, not touch this class again.
+// notice: true is the case-open card (CaseOpenCardPresenter), its own instance, never shared with the
+// gauge-anchored card: WS_EX_NOACTIVATE is set once in CreateParams and a style set at creation is not
+// toggled at run time, so the two modes cannot be the same live window. Everything notice mode needs beyond
+// CreateParams/WndProc/ShowWithoutActivation (already wired for it before this) is guarded on the _notice
+// field directly, in place: the Where line reads "Case open" always (OnPaint), Enter/Escape/Tab do nothing
+// (OnKeyDown), no focus rectangle is ever painted (DrawButton/DrawSwitch), and a click that misses both the
+// button and the switch closes it (OnMouseUp) since a notice-mode card is never activated and so never
+// deactivates either.
 internal sealed class WidgetCard : Form
 {
     // Design choice, not a measurement: a system-ish accent for the Connect state, not a read of any
@@ -127,6 +135,10 @@ internal sealed class WidgetCard : Form
     internal WidgetCardModel Model => _model;
 
     internal WidgetCardFocus FocusTarget => _focus;
+
+    // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for a
+    // notice-mode instance regardless of what the model's own Snapshot.Where says (spec 7.6). For tests.
+    internal string WhereLineText => _notice ? WidgetCopy.CaseOpen : WidgetCopy.Where(_model.Snapshot.Where, _model.OtherDeviceLabel);
 
     // True once DWM accepted the translucent backdrop and DwmExtendFrameIntoClientArea for this window's
     // life; false means the opaque palette paint is used instead.
@@ -216,6 +228,14 @@ internal sealed class WidgetCard : Form
     protected override void OnKeyDown(KeyEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
+        if (_notice)
+        {
+            // Spec 7.6: "No focus, no focus rectangle, keyboard does nothing (nothing has focus)." A
+            // notice-mode card is never activated, so it should never receive a key in practice; this
+            // guard makes that true even if a key event ever reached it regardless.
+            return;
+        }
+
         switch (e.KeyCode)
         {
             case Keys.Tab:
@@ -251,6 +271,12 @@ internal sealed class WidgetCard : Form
             _focus = WidgetCardFocus.Switch;
             ActivateFocused();
         }
+        else if (_notice)
+        {
+            // Spec 7.6: "dismissed by a click outside the two buttons." Only reachable in notice mode: the
+            // normal card already closes on deactivation for a click anywhere else.
+            RequestClose(WidgetCardCloseReason.ClickOutside);
+        }
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -271,7 +297,7 @@ internal sealed class WidgetCard : Form
         DrawEarbudColumn(g, layout.Right, _model.Snapshot.Right, mirror: true);
         DrawCaseColumn(g, layout.Case, _model.Snapshot.Case);
 
-        DrawLine(g, layout.WhereLine, WidgetCopy.Where(_model.Snapshot.Where, _model.OtherDeviceLabel), _palette.Status);
+        DrawLine(g, layout.WhereLine, WhereLineText, _palette.Status);
         DrawLine(g, layout.ReadLine, WidgetCopy.BatteryReadLine(_model.Snapshot.BatteryReadAt, _model.Now), _palette.Status);
         DrawButton(g, layout.Button);
         if (layout.ShowSwitch)
@@ -580,7 +606,7 @@ internal sealed class WidgetCard : Form
             g.DrawString(connect ? WidgetCopy.Connect : WidgetCopy.Disconnect, font, textBrush, rect, format);
         }
 
-        if (_focus == WidgetCardFocus.Button && ContainsFocus)
+        if (!_notice && _focus == WidgetCardFocus.Button && ContainsFocus)
         {
             DrawFocusRectangle(g, rect);
         }
@@ -610,7 +636,7 @@ internal sealed class WidgetCard : Form
             g.FillEllipse(knobBrush, knobX, track.Y + 2, knobDiameter, knobDiameter);
         }
 
-        if (_focus == WidgetCardFocus.Switch && ContainsFocus)
+        if (!_notice && _focus == WidgetCardFocus.Switch && ContainsFocus)
         {
             DrawFocusRectangle(g, rect);
         }

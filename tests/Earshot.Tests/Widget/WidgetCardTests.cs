@@ -147,6 +147,32 @@ public sealed class WidgetCardTests
     }
 
     [TestMethod]
+    public void NoticeModeAlwaysShowsCaseOpenRegardlessOfTheSnapshotsWhere()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(where: AirPodsWhere.Elsewhere), otherDeviceLabel: "iPhone"), 96);
+
+            Assert.AreEqual(WidgetCopy.CaseOpen, card.WhereLineText, "Notice mode never shows a live Where reading.");
+        });
+    }
+
+    [TestMethod]
+    public void NormalModeShowsTheLiveWhereReading()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(where: AirPodsWhere.Elsewhere), otherDeviceLabel: "iPhone"), 96);
+
+            Assert.AreEqual(WidgetCopy.Where(AirPodsWhere.Elsewhere, "iPhone"), card.WhereLineText);
+        });
+    }
+
+    [TestMethod]
     public void ShownWithShowThenActivateBecomesTheForegroundWindow()
     {
         Phase5.CardDesktop.Run(() =>
@@ -300,6 +326,83 @@ public sealed class WidgetCardTests
             Assert.AreEqual(WidgetCardCloseReason.Escape, reason);
         });
     }
+
+    [TestMethod]
+    public void NoticeModeKeyboardDoesNothing()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            Application.DoEvents();
+
+            int toggles = 0;
+            WidgetCardCloseReason? reason = null;
+            card.ToggleRequested += (_, _) => toggles++;
+            card.CloseRequested += (_, r) => reason = r;
+
+            SendKey(card.Handle, Keys.Tab);
+            SendKey(card.Handle, Keys.Enter);
+            SendKey(card.Handle, Keys.Space);
+            SendKey(card.Handle, Keys.Escape);
+
+            Assert.AreEqual(0, toggles, "Enter never activates the button in notice mode.");
+            Assert.IsNull(reason, "Escape never closes a notice-mode card.");
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab never moves focus in notice mode.");
+            Assert.IsTrue(card.Visible);
+        });
+    }
+
+    [TestMethod]
+    public void NoticeModeDismissesOnAClickOutsideBothTheButtonAndTheSwitch()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            Application.DoEvents();
+
+            WidgetCardCloseReason? reason = null;
+            card.CloseRequested += (_, r) => reason = r;
+
+            // The top-left corner: inside the card, outside the button (and there is no switch here).
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(2, 2));
+
+            Assert.IsFalse(card.Visible);
+            Assert.AreEqual(WidgetCardCloseReason.ClickOutside, reason);
+        });
+    }
+
+    [TestMethod]
+    public void NormalModeDoesNotDismissOnAClickOutsideBothButtons()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            WidgetCardCloseReason? reason = null;
+            card.CloseRequested += (_, r) => reason = r;
+
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(2, 2));
+
+            Assert.IsTrue(card.Visible, "The normal card only closes on deactivation or an explicit action, not an inside-window miss click.");
+            Assert.IsNull(reason);
+        });
+    }
+
+    private static nint MakeLParam(int x, int y) => (nint)(((y & 0xFFFF) << 16) | (x & 0xFFFF));
 
     [TestMethod]
     public void RoundedCornersSucceedOnThisBuildOrAreSkippedBelowWindows11()

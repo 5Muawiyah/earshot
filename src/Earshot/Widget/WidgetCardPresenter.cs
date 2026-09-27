@@ -156,19 +156,24 @@ internal sealed class WidgetCardPresenter : IDisposable
         card.Render(BuildModel(), _callbacks.Dpi());
     }
 
-    private WidgetCardModel BuildModel()
+    private WidgetCardModel BuildModel() => BuildModel(_callbacks, _time);
+
+    // Shared with CaseOpenCardPresenter, which renders the exact same three columns from the exact same
+    // callbacks for its own WidgetCard(notice: true) instance; only the Where line differs, and WidgetCard
+    // itself overrides that for any notice-mode instance regardless of what this model carries.
+    internal static WidgetCardModel BuildModel(WidgetCardPresenterCallbacks callbacks, TimeProvider time)
     {
-        WidgetSnapshot snapshot = _callbacks.CurrentSnapshot();
-        ToggleIntent? intent = _callbacks.CurrentIntent();
-        bool busy = _callbacks.IsBusy();
+        WidgetSnapshot snapshot = callbacks.CurrentSnapshot();
+        ToggleIntent? intent = callbacks.CurrentIntent();
+        bool busy = callbacks.IsBusy();
         return new WidgetCardModel(
             snapshot,
-            AutoPauseOn: _callbacks.AutoPauseOn(),
+            AutoPauseOn: callbacks.AutoPauseOn(),
             ShowSwitch: snapshot.AutoPauseAvailable,
             ConnectIntent: intent?.Connect ?? true,
             ButtonEnabled: !busy && intent is not null,
-            OtherDeviceLabel: _callbacks.OtherDeviceLabel(),
-            Now: _time.GetUtcNow());
+            OtherDeviceLabel: callbacks.OtherDeviceLabel(),
+            Now: time.GetUtcNow());
     }
 
     private WidgetCard EnsureCard()
