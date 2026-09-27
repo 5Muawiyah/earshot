@@ -103,9 +103,9 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
         // Deviation from the documented FindAllBuildCache/GetCachedPropertyValue pairing: on this machine
         // GetCachedPropertyValue on elements from FindAllBuildCache returns E_INVALIDARG,
         // and GetCurrentPropertyValue on the same elements returns E_FAIL, although GetCurrentPropertyValue
-        // on elements from a plain FindAll works. A local probe beats a citation (AGENTS.md): FindAll plus
+        // on elements from a plain FindAll works. A local probe beats a citation: FindAll plus
         // a live GetCurrentPropertyValue per element is the path actually used, at the cost of the
-        // documented one-round-trip saving BuildCache is meant to buy. Recorded in research.json.
+        // documented one-round-trip saving BuildCache is meant to buy.
         hr = root.FindAll(UiAutomation.TreeScope_Descendants, trueCondition, out IUIAutomationElementArray? found);
         if (hr < 0 || found is null)
         {

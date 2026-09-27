@@ -8,7 +8,7 @@ namespace Earshot.Widget;
 // The layered overlay gauge: an owned, topmost tool window over free taskbar space, never parented into
 // Shell_TrayWnd. Paints nothing itself through WinForms; content comes from GaugeRenderer as a
 // premultiplied bitmap pushed with UpdateLayeredWindow, whose alpha-0 pixels let a click pass through to
-// the taskbar underneath (research.json F10). Never sets Form.Opacity or Form.TransparencyKey (both call
+// the taskbar underneath (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows). Never sets Form.Opacity or Form.TransparencyKey (both call
 // SetLayeredWindowAttributes, after which UpdateLayeredWindow fails until the style bit is cleared and
 // set again) and never WS_EX_TRANSPARENT (which would pass every click through, the gauge's own
 // included). UI thread only.

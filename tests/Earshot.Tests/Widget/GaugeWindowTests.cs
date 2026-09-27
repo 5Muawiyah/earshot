@@ -79,7 +79,7 @@ public sealed class GaugeWindowTests
 
             // The pill covers the whole gauge at at least alpha 1, so its centre must now show the gauge
             // itself when queried by point, and a corner outside the rounded pill must show what is
-            // beneath it (the click-through proof, research.json F10).
+            // beneath it (the click-through proof, https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
             Point centre = new(bounds.X + (bounds.Width / 2), bounds.Y + (bounds.Height / 2));
             nint atCentre = WindowFromPoint(centre);
             Assert.AreEqual(gauge.Handle, atCentre, "The pill pixel must belong to the gauge.");

@@ -11,7 +11,7 @@ namespace Earshot.Widget;
 // GaugeWindow, the tests and the screenshot probe.
 //
 // GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit): GDI text (TextRenderer) writes alpha
-// 0 and would vanish on a layered window (research.json F10).
+// 0 and would vanish on a layered window (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
 internal static class GaugeRenderer
 {
     // Layout at 96 DPI: | 8 | mark 20 | 6 | bar 24 x 6 | 4 | number (room for three digits, 9 pt) | 8 |
@@ -183,7 +183,7 @@ internal static class GaugeRenderer
 
     // A stadium (fully rounded ends) covering bounds, or a plain rectangle when it is too short to
     // round. The whole gauge is one clickable target: layered-window hit testing follows the painted
-    // pixels (research.json F10), so nothing outside this shape ever answers a click.
+    // pixels (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows), so nothing outside this shape ever answers a click.
     private static GraphicsPath Pill(Rectangle bounds)
     {
         var path = new GraphicsPath();
