@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Earshot.Tests.Streaming;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -136,13 +137,17 @@ public sealed class ClaimFlowTests
         Assert.AreEqual(ClaimOutcomeStatus.NoSender, outcome.Status);
     }
 
+    // M5: the prior version only checked that each expected member's name appeared somewhere in the file
+    // (StringAssert.Contains), so it could not have failed had the file also carried an extra, unwanted
+    // member (an address, a per-run tag, a payload byte) alongside the expected ones. Parses the file and
+    // compares both the top-level and the nested Last object's property names as exact sets.
     [TestMethod]
     public async Task TheClaimFileHoldsTheFieldsAndNothingElse()
     {
         using var temp = new TempFolder();
         var log = new CapturingLog();
         string path = temp.File("claim.json");
-        var store = new ClaimStore(path, log);
+        var store = new ClaimStore(path, log, static () => (sbyte)-70);
         var flow = new ClaimFlow(store, log);
         var source = new FakeAdvertisementSource { State = AdvertisementSourceState.Started };
         var clock = new TestTimeProvider();
@@ -155,13 +160,17 @@ public sealed class ClaimFlowTests
         await store.IdleAsync(); // M2: the write is now queued on a background thread
 
         string json = File.ReadAllText(path);
-        foreach (string member in new[]
-                 {
-                     "SchemaVersion", "ModelHigh", "ModelLow", "Colour", "SignalThresholdDbm", "ClaimedAtUtc", "Last",
-                     "NibbleHigh", "NibbleLow", "Case", "AtUtc",
-                 })
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        var topLevelMembers = root.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var expectedTopLevel = new HashSet<string>(StringComparer.Ordinal)
         {
-            StringAssert.Contains(json, member);
-        }
+            "SchemaVersion", "ModelHigh", "ModelLow", "Colour", "SignalThresholdDbm", "ClaimedAtUtc", "Last",
+        };
+        CollectionAssert.AreEquivalent(expectedTopLevel.ToList(), topLevelMembers.ToList(), "Top level: " + json);
+
+        var lastMembers = root.GetProperty("Last").EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var expectedLast = new HashSet<string>(StringComparer.Ordinal) { "NibbleHigh", "NibbleLow", "Case", "AtUtc" };
+        CollectionAssert.AreEquivalent(expectedLast.ToList(), lastMembers.ToList(), "Last: " + json);
     }
 }

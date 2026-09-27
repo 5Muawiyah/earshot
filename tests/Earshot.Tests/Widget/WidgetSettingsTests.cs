@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Widget;
@@ -83,6 +84,10 @@ public sealed class WidgetSettingsTests : IDisposable
         Assert.IsTrue(notes.Any(n => n.Step == "clamp:OtherDeviceLabel"));
     }
 
+    // M5: the prior version only checked that each expected member's name appeared somewhere in the file
+    // (Assert.IsTrue(json.Contains(...))), so it could not have failed had the Widget block also carried
+    // some other, unwanted member (an address, a tag, anything device-derived) alongside the expected ones.
+    // Parses the file and compares the Widget object's own property names as a set, not a substring search.
     [TestMethod]
     public void TheMemberNamesAreExactlyThese()
     {
@@ -90,15 +95,19 @@ public sealed class WidgetSettingsTests : IDisposable
         store.Update(s => s.Widget = s.Widget with { Enabled = false });
 
         string json = File.ReadAllText(SettingsPath);
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement widget = document.RootElement.GetProperty("Widget");
+        var actualMembers = widget.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
 
-        foreach (string member in new[]
-                 {
-                     "\"Widget\"", "\"Enabled\"", "\"OtherDeviceLabel\"", "\"AutoPause\"", "\"LowBatteryAlert\"",
-                     "\"LowBatteryThresholdPercent\"", "\"CaseOpenCard\"", "\"LeftClickConnects\"",
-                 })
+        var expectedMembers = new HashSet<string>(StringComparer.Ordinal)
         {
-            Assert.IsTrue(json.Contains(member, StringComparison.Ordinal), member + " is not in the JSON the shipped build wrote: " + json);
-        }
+            "Enabled", "OtherDeviceLabel", "AutoPause", "LowBatteryAlert",
+            "LowBatteryThresholdPercent", "CaseOpenCard", "LeftClickConnects",
+        };
+
+        CollectionAssert.AreEquivalent(
+            expectedMembers.ToList(), actualMembers.ToList(),
+            "The Widget block's members must be exactly the documented set: " + json);
 
         var reread = new JsonSettingsStore(SettingsPath, _log);
         Assert.IsFalse(reread.Current.Widget.Enabled);
