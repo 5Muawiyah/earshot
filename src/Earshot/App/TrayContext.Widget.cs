@@ -29,6 +29,15 @@ internal sealed partial class TrayContext
     private int _widgetLayoutDpi = CardPlacement96;
     private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
 
+    // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
+    // (RefreshShownGaugeForWorker, called after every OnTaskbarLayout, the only place the real window's
+    // position or existence changes), read by the worker thread through ReadShownGauge. A plain field, not
+    // the GaugeWindow itself: TaskbarWatcher must never touch Control.Bounds or Control.Handle off the UI
+    // thread, and a stale read here costs one taskbar poll, nothing more. Boxed in a small immutable class
+    // (ShownGauge is a struct, which cannot itself be volatile) so the worker thread's read is a single
+    // reference load, never a torn read of the struct's own fields.
+    private volatile ShownGaugeBox? _shownGaugeForWorker;
+
     private const int CardPlacement96 = 96;
 
     // Test seam: WidgetHandBackOrderTests substitutes these to prove the hand-back-first ordering without
@@ -110,10 +119,19 @@ internal sealed partial class TrayContext
         return new GaugeControllerSettings(widget.Enabled, widget.LeftClickConnects);
     }
 
-    private ShownGauge? ReadShownGauge() =>
-        _gaugeWindow is { IsDisposed: false } window && window.IsHandleCreated
-            ? new ShownGauge(window.Bounds, window.Handle)
+    // Called from TaskbarWatcher's own worker thread (the Func<ShownGauge?> its constructor takes). Reads
+    // only the plain field RefreshShownGaugeForWorker maintains; never the GaugeWindow itself.
+    private ShownGauge? ReadShownGauge() => _shownGaugeForWorker?.Value;
+
+    // UI thread only. Recomputes the field the worker thread reads through ReadShownGauge, from the real
+    // window's current Bounds and Handle: the only safe place to read either is here, since this runs on
+    // the UI thread.
+    private void RefreshShownGaugeForWorker()
+    {
+        _shownGaugeForWorker = _gaugeWindow is { IsDisposed: false } window && window.IsHandleCreated
+            ? new ShownGaugeBox(new ShownGauge(window.Bounds, window.Handle))
             : null;
+    }
 
     private GaugeWindow CreateGaugeSurface()
     {
@@ -136,6 +154,7 @@ internal sealed partial class TrayContext
         }
 
         controller.OnLayout(result);
+        RefreshShownGaugeForWorker();
         RenderGaugeIfShown();
     }
 
@@ -248,6 +267,7 @@ internal sealed partial class TrayContext
         _gaugeController = null;
         _gaugeWindow?.Dispose();
         _gaugeWindow = null;
+        _shownGaugeForWorker = null;
 
         if (_widgetCloseForTest is { } hook)
         {
@@ -273,6 +293,15 @@ internal sealed partial class TrayContext
     // reads Settings.Current itself on every OnLayout, so the one thing needed here is an immediate
     // re-check, so a newly-off gauge disappears within one poll rather than up to two seconds later.
     private void ApplyWidget() => _taskbarWatcher?.Poke();
+}
+
+// An immutable holder for a ShownGauge, so TrayContext's _shownGaugeForWorker field can be volatile:
+// ShownGauge is a readonly record struct, and a struct field cannot itself be declared volatile, but a
+// reference to one small immutable object can be, and a reference assignment is what actually needs to be
+// safe to publish from the UI thread to TaskbarWatcher's worker thread.
+internal sealed class ShownGaugeBox(ShownGauge value)
+{
+    public ShownGauge Value { get; } = value;
 }
 
 // Adapts the tray's own NotifyIcon to ITrayIconVisibility, so GaugeController depends only on the
