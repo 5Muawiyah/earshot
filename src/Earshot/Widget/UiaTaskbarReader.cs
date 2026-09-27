@@ -109,16 +109,38 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             return false;
         }
 
-        // Deviation from the documented FindAllBuildCache/GetCachedPropertyValue pairing: on this machine
-        // GetCachedPropertyValue on elements from FindAllBuildCache returns E_INVALIDARG,
-        // and GetCurrentPropertyValue on the same elements returns E_FAIL, although GetCurrentPropertyValue
-        // on elements from a plain FindAll works. A local probe beats a citation: FindAll plus
-        // a live GetCurrentPropertyValue per element is the path actually used, at the cost of the
-        // documented one-round-trip saving BuildCache is meant to buy.
-        hr = root.FindAll(UiAutomation.TreeScope_Descendants, trueCondition, out IUIAutomationElementArray? found);
+        hr = automationRef.CreateCacheRequest(out IUIAutomationCacheRequest? cacheRequest);
+        if (hr < 0 || cacheRequest is null)
+        {
+            failure = StepOutcomes.FromHResult("uia:create-cache-request", hr);
+            return false;
+        }
+
+        hr = cacheRequest.AddProperty(UiAutomation.UIA_BoundingRectanglePropertyId);
+        if (hr >= 0)
+        {
+            hr = cacheRequest.AddProperty(UiAutomation.UIA_IsOffscreenPropertyId);
+        }
+
+        if (hr >= 0)
+        {
+            hr = cacheRequest.AddProperty(UiAutomation.UIA_AutomationIdPropertyId);
+        }
+
+        if (hr < 0)
+        {
+            failure = StepOutcomes.FromHResult("uia:add-property", hr);
+            return false;
+        }
+
+        // TreeScope_Descendants is FindAllBuildCache's own scope parameter here, not
+        // cacheRequest.put_TreeScope: see that method's declaration in UiAutomation.cs for why. A local
+        // probe against the real Shell_TrayWnd confirmed every occupant's three cached properties below
+        // come back S_OK read this way.
+        hr = root.FindAllBuildCache(UiAutomation.TreeScope_Descendants, trueCondition, cacheRequest, out IUIAutomationElementArray? found);
         if (hr < 0 || found is null)
         {
-            failure = StepOutcomes.FromHResult("uia:find-all", hr);
+            failure = StepOutcomes.FromHResult("uia:find-all-build-cache", hr);
             return false;
         }
 
@@ -136,7 +158,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                 continue;
             }
 
-            if (element.GetCurrentPropertyValue(UiAutomation.UIA_BoundingRectanglePropertyId, out object? rectValue) < 0 ||
+            if (element.GetCachedPropertyValue(UiAutomation.UIA_BoundingRectanglePropertyId, out object? rectValue) < 0 ||
                 rectValue is not double[] { Length: 4 } bounds)
             {
                 // VT_EMPTY: the element is not currently displaying UI (F7). Not an occupant.
@@ -153,7 +175,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                 continue;
             }
 
-            if (element.GetCurrentPropertyValue(UiAutomation.UIA_IsOffscreenPropertyId, out object? offscreenValue) >= 0 &&
+            if (element.GetCachedPropertyValue(UiAutomation.UIA_IsOffscreenPropertyId, out object? offscreenValue) >= 0 &&
                 offscreenValue is bool { } offscreen && offscreen)
             {
                 continue;
@@ -161,7 +183,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
 
             occupied.Add(rect);
 
-            if (element.GetCurrentPropertyValue(UiAutomation.UIA_AutomationIdPropertyId, out object? idValue) >= 0 &&
+            if (element.GetCachedPropertyValue(UiAutomation.UIA_AutomationIdPropertyId, out object? idValue) >= 0 &&
                 idValue is string id && string.Equals(id, StartButtonAutomationId, StringComparison.Ordinal))
             {
                 startButton = rect;

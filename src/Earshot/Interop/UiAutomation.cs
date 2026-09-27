@@ -26,9 +26,10 @@ internal static class UiAutomation
     internal const int TreeScope_Children = 0x2;
     internal const int TreeScope_Descendants = 0x4;
 
-    // AutomationElementMode: full elements (the default) versus id-only. Earshot never sets this; the
-    // default is used.
-    internal const int AutomationElementMode_Full = 0;
+    // AutomationElementMode (UIAutomationClient.h): AutomationElementMode_None = 0, Full = 1. Earshot never
+    // sets this (the default, Full, is used), but the value is declared for put_AutomationElementMode's
+    // vtable slot, so it must still match the header rather than the first available enumerator value.
+    internal const int AutomationElementMode_Full = 1;
 
     // Property ids (F7).
     internal const int UIA_BoundingRectanglePropertyId = 30001;
@@ -133,10 +134,12 @@ internal interface IUIAutomationElement
     [PreserveSig]
     int FindFirstBuildCache(int scope, IUIAutomationCondition? condition, IUIAutomationCacheRequest? cacheRequest, out IUIAutomationElement? found);
 
-    // Declared for the vtable order and for a future caller: on this machine, GetCachedPropertyValue on
-    // elements this returns fails (E_INVALIDARG), so UiaTaskbarReader reads every occupant with the plain
-    // FindAll below plus a live GetCurrentPropertyValue per element instead (see UiaTaskbarReader.cs and
-    // the report for the probe evidence).
+    // UiaTaskbarReader.TryReadOccupants calls this with TreeScope_Descendants passed as the scope
+    // parameter here, not through the cache request's own put_TreeScope: a local probe on a real
+    // Shell_TrayWnd found put_TreeScope(Descendants) on the cache request is what makes
+    // GetCachedPropertyValue return E_INVALIDARG afterwards, while the documented pairing (this method's
+    // own scope parameter, cache request left at its default tree scope) reads every occupant's cached
+    // properties without error.
     // https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-findallbuildcache
     [PreserveSig]
     int FindAllBuildCache(int scope, IUIAutomationCondition? condition, IUIAutomationCacheRequest? cacheRequest, out IUIAutomationElementArray? found);
@@ -150,8 +153,8 @@ internal interface IUIAutomationElement
     [PreserveSig]
     int GetCurrentPropertyValueEx(int propertyId, [MarshalAs(UnmanagedType.Bool)] bool ignoreDefaultValue, out object? value);
 
-    // Declared for the vtable order: reads a property that was named in the cache request, but returns
-    // E_INVALIDARG on this machine for elements from FindAllBuildCache above, so it is not called.
+    // Reads a property named in the cache request that built this element (FindAllBuildCache above). See
+    // that method's own comment for the tree-scope detail a real read needed to get this to work.
     // https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-getcachedpropertyvalue
     [PreserveSig]
     int GetCachedPropertyValue(int propertyId, out object? value);

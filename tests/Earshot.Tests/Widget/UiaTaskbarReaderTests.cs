@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Earshot.Contracts;
@@ -72,6 +73,23 @@ public sealed class UiaTaskbarReaderTests
         // mean the reader found nothing at all, which is the failure this test exists to catch.
         Assert.IsGreaterThan(0, occupied!.Count, "The real taskbar must report at least one occupant.");
         Assert.IsLessThan(5000, stopwatch.ElapsedMilliseconds, "A sanity bound on the real UIA read, not a figure the product uses.");
+    }
+
+    // Earshot.Interop.UiAutomation.AutomationElementMode_Full is declared for put_AutomationElementMode's
+    // vtable slot, even though nothing calls it (Earshot always leaves the mode at IUIAutomation's own
+    // default): UIAutomationClient.h's AutomationElementMode enum is AutomationElementMode_None = 0,
+    // AutomationElementMode_Full = 1, so a wrong value here would silently mean something else entirely
+    // the day a caller actually sets it.
+    //
+    // Read through reflection, not compared directly: both sides of a plain Assert.AreEqual(1,
+    // UiAutomation.AutomationElementMode_Full) are compile-time constants, so MSTEST0025 flags the
+    // assertion once it is known at compile time to always fail (which it must, on the wrong value, to be
+    // the red half of this fix).
+    [TestMethod]
+    public void AutomationElementModeFullMatchesTheHeaderValue()
+    {
+        FieldInfo field = typeof(Earshot.Interop.UiAutomation).GetField("AutomationElementMode_Full", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Assert.AreEqual(1, field.GetRawConstantValue());
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
