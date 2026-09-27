@@ -40,6 +40,13 @@ internal static partial class CompositionRoot
         r.MediaSessions = new WindowsMediaSessions(r.Log);
 
         var claimStore = new ClaimStore(Paths.Current.WidgetClaimFile, r.Log);
+
+        // The public constructor, not the internal one that takes decodeTable/claimThreshold directly: that
+        // overload exists only so a test can exercise the proved paths without ProximityDecodeTable.Current
+        // or WidgetDefaults.SignalThresholdDbm ever holding anything but their shipped defaults (see its own
+        // header comment). Production must read those two constants itself, through WidgetStatusService's
+        // own public entry point, rather than have a caller hand them in - a caller that could, in principle,
+        // hand in something else.
         var status = new WidgetStatusService(
             static () => new WinRtAdvertisementSource(),
             claimStore,
@@ -48,8 +55,7 @@ internal static partial class CompositionRoot
             blockStatus,
             r.Log,
             r.UiPost,
-            time,
-            static () => ProximityDecodeTable.Current);
+            time);
         r.WidgetStatus = status;
         return status;
     }
