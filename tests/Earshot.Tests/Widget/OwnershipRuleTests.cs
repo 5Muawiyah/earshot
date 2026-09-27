@@ -1,0 +1,261 @@
+using Earshot.Widget;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace Earshot.Tests.Widget;
+
+[TestClass]
+public sealed class OwnershipRuleTests
+{
+    private static readonly DateTimeOffset ClaimedAt = new(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = new(2026, 9, 27, 1, 0, 0, TimeSpan.Zero);
+
+    private static ProximityMessage Message(
+        byte modelHigh = WidgetFixtures.ModelHigh, byte modelLow = WidgetFixtures.ModelLow, byte colour = WidgetFixtures.Colour,
+        byte status = 0x00, byte batteryA = 0x00, byte batteryB = 0x00, byte lid = 0x00) =>
+        new(modelHigh, modelLow, status, batteryA, batteryB, lid, colour, Reserved: 0x00);
+
+    private static ProximityParse Ok(ProximityMessage m) => new(ProximityParseStatus.Ok, m, null, null, 1, Array.Empty<byte>());
+
+    private static WidgetClaim Claim(sbyte threshold = -70, OwnedBattery? last = null) => new(
+        SchemaVersion: 1,
+        ModelHigh: WidgetFixtures.ModelHigh,
+        ModelLow: WidgetFixtures.ModelLow,
+        Colour: WidgetFixtures.Colour,
+        SignalThresholdDbm: threshold,
+        ClaimedAtUtc: ClaimedAt,
+        Last: last ?? new OwnedBattery(null, null, null, ClaimedAt));
+
+    private static OwnershipInput Input(
+        ProximityParse parse, WidgetClaim? claim, ProximityDecodeTable? table = null, sbyte rssi = -50,
+        bool live = false, int candidates = 0) =>
+        new(parse, rssi, claim, table ?? ProximityDecodeTable.Unproved, live, candidates, Now);
+
+    [TestMethod]
+    public void WithoutAClaimNothingIsOwnedAndTheCountSaysNoClaim()
+    {
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(Message()), claim: null));
+
+        Assert.AreEqual(OwnershipVerdict.NoClaim, result.Verdict);
+        Assert.IsNull(result.UpdatedLast);
+    }
+
+    [TestMethod]
+    public void AMatchingMessageAtTheThresholdWithConsistentBatteryIsOwned()
+    {
+        WidgetClaim claim = Claim(threshold: -70, last: new OwnedBattery(0, 0, 0, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x00);
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -70));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+        Assert.IsNotNull(result.UpdatedLast);
+    }
+
+    [TestMethod]
+    public void ASameModelStrangerAtWeakerSignalIsNotOwned()
+    {
+        WidgetClaim claim = Claim(threshold: -70);
+        ProximityMessage m = Message();
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -80));
+
+        Assert.AreEqual(OwnershipVerdict.SignalBelowThreshold, result.Verdict);
+    }
+
+    [TestMethod]
+    public void ASameModelStrangerAtStrongSignalWithInconsistentBatteryIsNotOwned()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 2, ClaimedAt));
+        ProximityMessage m = Message(batteryB: 0x09); // case jumps from 2 to 9, not charging
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
+    }
+
+    [TestMethod]
+    public void ADifferentColourAtStrongSignalIsNotOwned()
+    {
+        WidgetClaim claim = Claim();
+        ProximityMessage m = Message(colour: WidgetFixtures.StrangerColour);
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.ModelOrColourMismatch, result.Verdict);
+    }
+
+    [TestMethod]
+    public void ADifferentModelIsNotOwned()
+    {
+        WidgetClaim claim = Claim();
+        ProximityMessage m = Message(modelLow: WidgetFixtures.StrangerModelLow);
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.ModelOrColourMismatch, result.Verdict);
+    }
+
+    [TestMethod]
+    [DataRow((byte)5, (byte)5)] // equal
+    [DataRow((byte)5, (byte)4)] // lower
+    [DataRow((byte)5, (byte)6)] // one step higher
+    public void EqualLowerOrOneStepHigherIsConsistent(byte lastCase, byte newCase)
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, lastCase, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: newCase);
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+    }
+
+    [TestMethod]
+    public void HigherByMoreThanOneStepFailsWithTheChargingBitUnproved()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x07); // case 5 -> 7, no charging bit proved
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
+    }
+
+    [TestMethod]
+    public void HigherByMoreThanOneStepPassesOnlyWhileThatPartChargesWithTheBitProved()
+    {
+        var table = ProximityDecodeTable.Unproved with { CaseChargingBit = 4 };
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0b0001_0111); // case nibble 7, bit 4 (charging) set
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, table: table, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+    }
+
+    [TestMethod]
+    public void TheUnknownValueNeitherConfirmsNorDeniesAndNeverOverwritesTheLastReading()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x0F); // case nibble 0xF: unknown
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+        Assert.AreEqual(5, result.UpdatedLast!.Case);
+    }
+
+    [TestMethod]
+    public void AValueAboveTenIsUnknownToo()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x0B); // case nibble 11: out of range, unknown
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+        Assert.AreEqual(5, result.UpdatedLast!.Case);
+    }
+
+    [TestMethod]
+    public void AMessageWithEveryNibbleUnknownIsNotOwnedWithoutALiveConnection()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0xFF, batteryB: 0x0F); // both bud nibbles and the case nibble unknown
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.BatteryUnreadable, result.Verdict);
+        Assert.IsNull(result.UpdatedLast);
+    }
+
+    [TestMethod]
+    public void ALiveConnectionConfirmsOneCandidateAndReSyncsTheLastReading()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x09); // a jump that would otherwise be inconsistent
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50, live: true, candidates: 1));
+
+        Assert.AreEqual(OwnershipVerdict.OwnedByLiveConnection, result.Verdict);
+        Assert.AreEqual(9, result.UpdatedLast!.Case);
+    }
+
+    [TestMethod]
+    public void ALiveConnectionConfirmsNothingWhenTwoCandidatesClearTheThreshold()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message();
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50, live: true, candidates: 2));
+
+        Assert.AreEqual(OwnershipVerdict.AmbiguousCandidates, result.Verdict);
+        Assert.IsNull(result.UpdatedLast);
+    }
+
+    [TestMethod]
+    public void ATruncatedPayloadIsNotEvaluated()
+    {
+        var parse = new ProximityParse(ProximityParseStatus.Truncated, null, 0x01, 10, 1, Array.Empty<byte>());
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(parse, Claim(), rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.NotEvaluated, result.Verdict);
+    }
+
+    [TestMethod]
+    public void AWrongMessageTypeIsNotEvaluated()
+    {
+        var parse = new ProximityParse(ProximityParseStatus.WrongType, null, null, null, 0, Array.Empty<byte>());
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(parse, Claim(), rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.NotEvaluated, result.Verdict);
+    }
+
+    [TestMethod]
+    public void AnUnknownFormIsNotEvaluated()
+    {
+        var parse = new ProximityParse(ProximityParseStatus.UnknownForm, null, 0x06, 17, 1, Array.Empty<byte>());
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(parse, Claim(), rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.NotEvaluated, result.Verdict);
+    }
+
+    [TestMethod]
+    public void WithTheOrderUnprovedTheBudPairIsComparedUnordered()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(8, 6, 0, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x68, batteryB: 0x00); // wire high 6, wire low 8: the set {8,6} again
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+    }
+
+    [TestMethod]
+    public void WithTheOrderProvedTheBudsAreComparedByName()
+    {
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        WidgetClaim claim = Claim(last: new OwnedBattery(NibbleHigh: 6, NibbleLow: 8, Case: 0, ClaimedAt)); // Right 6, Left 8
+        ProximityMessage m = Message(batteryA: 0x86, batteryB: 0x00); // wire high (Right) 8, wire low (Left) 6
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, table: table, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
+    }
+
+    [TestMethod]
+    public void AnOwnedReadingUpdatesOnlyTheKnownParts()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
+        ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x1F); // case unknown (0xF), buds known and equal to last
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+        Assert.AreEqual(5, result.UpdatedLast!.Case);
+        Assert.AreEqual(0, result.UpdatedLast!.NibbleHigh);
+        Assert.AreEqual(0, result.UpdatedLast!.NibbleLow);
+    }
+}
