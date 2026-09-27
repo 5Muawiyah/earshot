@@ -24,6 +24,10 @@ internal sealed class FakeEndpointSource : IEndpointSource
     // When set, Enumerate waits for it before reading (the wait runs on the worker thread).
     public ManualResetEventSlim? EnumerateGate { get; set; }
 
+    // Handed back as the enumeration's DefaultRenderContainerId; a test changes it between Notify and the
+    // next Enumerate to simulate the default render device changing.
+    public Guid DefaultRenderContainerId { get; set; }
+
     public IReadOnlyList<string> Calls
     {
         get { lock (_gate) { return _calls.ToArray(); } }
@@ -102,7 +106,7 @@ internal sealed class FakeEndpointSource : IEndpointSource
                 return EndpointEnumeration.Failed(failure);
             }
 
-            return new EndpointEnumeration(true, _readings.ToList(), _steps.ToList());
+            return new EndpointEnumeration(true, _readings.ToList(), _steps.ToList(), DefaultRenderContainerId);
         }
     }
 

@@ -126,6 +126,13 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
 
     public event EventHandler<DeviceSnapshotEventArgs>? SnapshotChanged;
 
+    // Raised through the UI post, separately from SnapshotChanged, whenever the default render endpoint's
+    // container changes: AreEquivalent does not compare DefaultRenderContainerId (a default-device-only
+    // change must never send BlockCoordinator a new SnapshotChanged), so nothing else here would ever tell
+    // a caller that field moved. The widget's own auto-pause wiring is what needs this; not raised on the
+    // first enumeration, since Guid.Empty to a real container id there is a reading, not a change.
+    public event EventHandler<Guid>? DefaultRenderContainerChanged;
+
     public DeviceSnapshot Current => Volatile.Read(ref _current);
 
     // How the last enumeration went: Current.ReadStatus.
@@ -338,11 +345,21 @@ internal sealed class CoreAudioDeviceMonitor : IDeviceMonitor
             return new MonitorRefresh(kept, false, _lastReadings ?? Array.Empty<EndpointReading>(), steps, kept.Resolution);
         }
 
+        bool hadPriorEnumeration = _lastSequence > 0;
+        Guid previousDefaultRenderContainerId = _lastDefaultRenderContainerId;
+
         _lastEnumerationFailed = false;
         _lastReadings = enumeration.Readings;
         _lastDefaultRenderContainerId = enumeration.DefaultRenderContainerId;
         _lastSequence++;
         _lastTakenUtc = _utcNow();
+
+        if (hadPriorEnumeration && previousDefaultRenderContainerId != _lastDefaultRenderContainerId && !IsDisposed)
+        {
+            Guid changedTo = _lastDefaultRenderContainerId;
+            _uiPost(() => DefaultRenderContainerChanged?.Invoke(this, changedTo));
+        }
+
         return PublishOnWorker(enumeration.Readings, steps, reason);
     }
 

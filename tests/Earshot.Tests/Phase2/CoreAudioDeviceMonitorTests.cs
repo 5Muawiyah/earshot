@@ -275,6 +275,43 @@ public sealed class CoreAudioDeviceMonitorTests : IAsyncDisposable
         Assert.AreEqual(1, _monitor.NotificationCount);
     }
 
+    // AreEquivalent does not compare DefaultRenderContainerId on purpose (widget-data's own decision): a
+    // default-device-only change must never send BlockCoordinator a new SnapshotChanged, since nothing about
+    // the devices it cares about (target, groups, read status, resolution) moved.
+    [TestMethod]
+    public async Task ADefaultDeviceChangeAloneDoesNotRaiseSnapshotChanged()
+    {
+        await StartAndSettle();
+        _source.DefaultRenderContainerId = Guid.NewGuid();
+
+        _source.Notify(new EndpointNotification(EndpointNotificationKind.DefaultChanged, AirPodsRenderId, 0, CoreAudio.eRender, CoreAudio.eConsole, Guid.Empty, 0));
+        await Eventually.True(() => _delay.Requests == 1, "a refresh queued for the default device change");
+        _delay.ReleaseAll();
+        await Eventually.True(() => _source.EnumerateCalls == 2, "the refresh for the default device change");
+        await Task.Delay(50);
+
+        Assert.AreEqual(1, Raised, "A default-only change must not raise SnapshotChanged: the coordinator's events stay as they were.");
+    }
+
+    // The widget still needs to learn of a default-device change even though SnapshotChanged deliberately
+    // stays silent for it: DefaultRenderContainerChanged, raised through the same uiPost, is that seam.
+    [TestMethod]
+    public async Task ADefaultDeviceChangeRaisesTheWidgetsOwnNotification()
+    {
+        await StartAndSettle();
+        Guid newDefault = Guid.NewGuid();
+        _source.DefaultRenderContainerId = newDefault;
+        var raisedDefaults = new List<Guid>();
+        _monitor.DefaultRenderContainerChanged += (sender, containerId) => raisedDefaults.Add(containerId);
+
+        _source.Notify(new EndpointNotification(EndpointNotificationKind.DefaultChanged, AirPodsRenderId, 0, CoreAudio.eRender, CoreAudio.eConsole, Guid.Empty, 0));
+        await Eventually.True(() => _delay.Requests == 1, "a refresh queued for the default device change");
+        _delay.ReleaseAll();
+        await Eventually.True(() => raisedDefaults.Count == 1, "the widget's own notification");
+
+        Assert.AreEqual(newDefault, raisedDefaults[0]);
+    }
+
     [TestMethod]
     public async Task ANameChangeNotificationRefreshes()
     {
