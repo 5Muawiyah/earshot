@@ -55,12 +55,14 @@ public sealed class WidgetStatusServiceTests : IDisposable
         return _claimStore;
     }
 
-    private WidgetStatusService NewService(ClaimStore store, ProximityDecodeTable? table = null)
+    // claimThreshold defaults to matching SampleClaim's fixed -70 dBm, so a test can drive ClaimAsync to an
+    // actual Claimed outcome (M7) without WidgetDefaults.SignalThresholdDbm ever holding anything but null.
+    private WidgetStatusService NewService(ClaimStore store, ProximityDecodeTable? table = null, sbyte? claimThreshold = -70)
     {
         var service = new WidgetStatusService(
             () => _source, store, _settings, _deviceMonitor, () => null, _log,
             action => { Interlocked.Increment(ref _posts); action(); }, _clock,
-            () => table ?? ProximityDecodeTable.Unproved);
+            () => table ?? ProximityDecodeTable.Unproved, () => claimThreshold);
         service.Changed += (sender, e) => { lock (_changedEvents) { _changedEvents.Add(e); } };
         service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
         return service;
@@ -293,6 +295,62 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _source.Raise(Owned(batteryB: 0x0F)); // case now unknown (0xF)
 
         Assert.AreEqual(50, service.Current.Case.Percent, "An unknown percent must not overwrite the last known one.");
+    }
+
+    // M7, reviewer probe P4: forgetting a claim must not leave the old battery or ear state around to be
+    // shown, or compared for consistency, against whatever the owner claims next.
+    [TestMethod]
+    public void ForgetClaimClearsEveryReadingAndEarState()
+    {
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store, table);
+        service.Start();
+        _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05)); // both buds in ear, battery known
+        Assert.AreEqual(50, service.Current.Case.Percent);
+        Assert.IsNotNull(service.Current.Left.InEar);
+
+        service.ForgetClaim();
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.IsNull(snapshot.Left.Percent, "ForgetClaim must not keep the old battery.");
+        Assert.IsNull(snapshot.Right.Percent);
+        Assert.IsNull(snapshot.Case.Percent);
+        Assert.IsNull(snapshot.Left.InEar, "ForgetClaim must not keep the old ear state.");
+        Assert.IsNull(snapshot.Right.InEar);
+        Assert.IsNull(snapshot.EarReadAt);
+        Assert.IsNull(snapshot.BatteryReadAt);
+    }
+
+    // M7, reviewer probe P4: a redone claim (a different set of AirPods, as far as the widget knows) must
+    // not keep the previous claim's battery or ear state either.
+    [TestMethod]
+    public async Task ARedoneClaimClearsTheOldBatteryAndEarState()
+    {
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store, table);
+        service.Start();
+        _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05));
+        Assert.AreEqual(50, service.Current.Case.Percent);
+        Assert.IsNotNull(service.Current.Left.InEar);
+
+        Task<ClaimOutcome> claimTask = service.ClaimAsync(CancellationToken.None);
+        _source.Raise(new AdvertisementSample(
+            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x02), -60, _clock.GetUtcNow(), SenderTag: 999));
+        _clock.Advance(WidgetTiming.ClaimWindow);
+        ClaimOutcome outcome = await claimTask;
+        Assert.AreEqual(ClaimOutcomeStatus.Claimed, outcome.Status);
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.IsNull(snapshot.Left.Percent, "A redone claim must not keep the old battery.");
+        Assert.IsNull(snapshot.Right.Percent);
+        Assert.IsNull(snapshot.Case.Percent);
+        Assert.IsNull(snapshot.Left.InEar, "A redone claim must not keep the old ear state.");
+        Assert.IsNull(snapshot.Right.InEar);
+        Assert.IsNull(snapshot.EarReadAt);
     }
 
     [TestMethod]

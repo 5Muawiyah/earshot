@@ -28,6 +28,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // that static ever holding anything but its shipped default.
     private readonly Func<ProximityDecodeTable> _decodeTable;
 
+    // Reads phase 0's proved signal threshold for ClaimAsync. In production this is
+    // () => WidgetDefaults.SignalThresholdDbm, which stays null until phase 0 edits it, so a claim can never
+    // be made from a guessed threshold; tests supply a fixed value so a claim can actually be exercised.
+    private readonly Func<sbyte?> _claimThreshold;
+
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
 
@@ -77,12 +82,15 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         ILog log,
         Action<Action> uiPost,
         TimeProvider timeProvider)
-        : this(sourceFactory, claimStore, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, static () => ProximityDecodeTable.Current)
+        : this(
+            sourceFactory, claimStore, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider,
+            static () => ProximityDecodeTable.Current, static () => WidgetDefaults.SignalThresholdDbm)
     {
     }
 
-    // Test-only: supplies the decode table directly, so a test can exercise the proved paths without
-    // ProximityDecodeTable.Current ever holding anything but its shipped Unproved default.
+    // Test-only: supplies the decode table and the claim threshold directly, so a test can exercise the
+    // proved paths, and can actually make a claim, without ProximityDecodeTable.Current or
+    // WidgetDefaults.SignalThresholdDbm ever holding anything but their shipped Unproved/null defaults.
     internal WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ClaimStore claimStore,
@@ -92,7 +100,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         ILog log,
         Action<Action> uiPost,
         TimeProvider timeProvider,
-        Func<ProximityDecodeTable> decodeTable)
+        Func<ProximityDecodeTable> decodeTable,
+        Func<sbyte?>? claimThreshold = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFactory);
         ArgumentNullException.ThrowIfNull(claimStore);
@@ -107,6 +116,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _sourceFactory = sourceFactory;
         _claimStore = claimStore;
         _claimFlow = new ClaimFlow(claimStore, log);
+        _claimThreshold = claimThreshold ?? (static () => WidgetDefaults.SignalThresholdDbm);
         _settings = settings;
         _deviceMonitor = deviceMonitor;
         _blockStatus = blockStatus;
@@ -224,13 +234,18 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             return new ClaimOutcome(ClaimOutcomeStatus.WatcherNotStarted, "Bluetooth is off or the watcher stopped: see the log.", null);
         }
 
-        ClaimOutcome outcome = await _claimFlow.RunAsync(source, _timeProvider, WidgetTiming.ClaimWindow, ct).ConfigureAwait(false);
+        // The internal overload, with the threshold and table read through the same injectable seams as the
+        // rest of the service (M4/M7), so a test can actually drive a claim through without either static
+        // default ever holding anything but what it ships with.
+        ClaimOutcome outcome = await _claimFlow.RunAsync(
+            source, _timeProvider, WidgetTiming.ClaimWindow, _claimThreshold(), _decodeTable(), ct).ConfigureAwait(false);
         if (outcome.Status == ClaimOutcomeStatus.Claimed)
         {
             lock (_gate)
             {
                 _claim = outcome.Claim;
                 _liveCandidates.Clear();
+                ResetReadingsLocked();
             }
 
             PublishAndNotify();
@@ -246,9 +261,27 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _claimStore.ForgetClaim();
             _claim = null;
             _liveCandidates.Clear();
+            ResetReadingsLocked();
         }
 
         PublishAndNotify();
+    }
+
+    // M7: a redone claim is a different set of AirPods as far as the widget knows (the owner was told to
+    // open his case for it), and forgetting a claim starts over; neither may keep the old battery, ear or
+    // lid state around to be shown against, or compared for consistency by, whatever is claimed next.
+    private void ResetReadingsLocked()
+    {
+        _left = PartReading.Unknown;
+        _right = PartReading.Unknown;
+        _case = PartReading.Unknown;
+        _lastLeftInEar = null;
+        _lastRightInEar = null;
+        _earReadAt = null;
+        _lastOwnedAt = null;
+        _lidOpenBitSeen = false;
+        _lastLidOpenState = false;
+        _lastLidCounter = null;
     }
 
     // One immediate retry when the watcher is not running; the doubling timer keeps trying regardless.
