@@ -35,6 +35,10 @@ public sealed class WidgetAtRestTests
         List<string> found = Scanner.Scan(widgetTypes);
 
         Assert.AreEqual(0, found.Count, "A widget type reaches a forbidden device path:" + Environment.NewLine + string.Join(Environment.NewLine, found));
+        Assert.AreEqual(
+            0,
+            Scanner.UnresolvedTokens,
+            "A body token could not be resolved at all: the scanner cannot vouch for a widget method it gave up reading partway through.");
     }
 
     // The reviewers' five escapes, reproduced here so the scanner itself is proved against them, plus a
@@ -49,6 +53,8 @@ public sealed class WidgetAtRestTests
         AssertFlags(typeof(EscapeInjectedConnectFunc), "an injected Func<Task<ConnectResult>>");
         AssertFlags(typeof(EscapeCallsCfgMgr32), "a body calling CfgMgr32.CM_Disable_DevNode");
         AssertFlags(typeof(EscapeInterfaceSubclass), "a subclass of a forbidden interface");
+        AssertFlags(typeof(EscapeTrayContextFieldCallingOnIconMouseClick), "a TrayContext field calling OnIconMouseClick");
+        AssertFlags(typeof(EscapeWidgetLocalDllImport), "a widget-local DllImport of CM_Disable_DevNode");
     }
 
     private static void AssertFlags(Type escapeType, string what)
@@ -117,6 +123,25 @@ public sealed class WidgetAtRestTests
         public Task<ConnectResult> DisconnectAsync(Guid containerId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
+    // Round 2 residual: a field of the tray's own context, reaching OnIconMouseClick (which itself calls the
+    // private StartToggle) the way TrayContext.cs actually wires its notify icon's click handler.
+    private sealed class EscapeTrayContextFieldCallingOnIconMouseClick
+    {
+        private readonly Earshot.App.TrayContext _tray = null!;
+
+        public void Touch() => _tray.OnIconMouseClick(null, default!);
+    }
+
+    // Round 2 residual: a P/Invoke declared directly on a type the scanner is asked to check (standing in for
+    // a widget type), rather than calling the vetted CfgMgr32.CM_Disable_DevNode through Interop.
+    private static class EscapeWidgetLocalDllImport
+    {
+        [System.Runtime.InteropServices.DllImport("cfgmgr32.dll")]
+        private static extern uint CM_Disable_DevNode(uint dnDevInst, uint ulFlags);
+
+        public static void Touch() => _ = CM_Disable_DevNode(0, 0);
+    }
+
     // The scanner itself: reusable so both the real assembly scan and the escape-fixture proof run the same
     // logic, and the positive result actually means what it claims.
     private static class Scanner
@@ -128,6 +153,10 @@ public sealed class WidgetAtRestTests
             typeof(NullConnectionController), typeof(NullBlockController), typeof(NullAudioProtectionController),
             typeof(ServiceRegistry), typeof(Earshot.App.BlockCoordinator),
             typeof(IKsControl), typeof(CfgMgr32), typeof(BluetoothApis), typeof(KsControl), typeof(TaskSchedulerCom),
+            // The tray's own context: a field, a return, a parameter, or a call to any of its methods
+            // (including OnIconMouseClick and the private StartToggle it calls) is forbidden, since reaching
+            // either is reaching the tray's connect/disconnect toggle.
+            typeof(Earshot.App.TrayContext),
         };
 
         // "Anything in Earshot.Boot, Earshot.Protection [the AudioProtection namespace], Audio.Connect (KS
@@ -142,8 +171,15 @@ public sealed class WidgetAtRestTests
 
         private static readonly Dictionary<int, OpCode> OpCodesByValue = BuildOpCodeTable();
 
+        // A body token this resolver could not walk at all: counted rather than silently dropped, since a
+        // real one means IL that had something forbidden to say and the scanner simply gave up hearing it.
+        // (Unlike GetMethodBody itself failing, which is the ordinary, expected shape of a P/Invoke stub or
+        // an abstract member with no body to read in the first place.)
+        public static int UnresolvedTokens { get; private set; }
+
         public static List<string> Scan(IEnumerable<Type> types)
         {
+            UnresolvedTokens = 0;
             var found = new List<string>();
 
             foreach (Type type in types)
@@ -203,6 +239,14 @@ public sealed class WidgetAtRestTests
                         {
                             found.Add(type.FullName + "." + method.Name + " parameter " + p.Name + ": " + Describe(p.ParameterType));
                         }
+                    }
+
+                    // A native call declared directly on the type under scan, whether written as [DllImport]
+                    // or generated from [LibraryImport]: both compile to a method carrying the runtime's own
+                    // PInvokeImpl flag, so this catches either attribute without needing to name it.
+                    if ((method.Attributes & MethodAttributes.PinvokeImpl) != 0)
+                    {
+                        found.Add(type.FullName + "." + method.Name + " is a native call (DllImport/LibraryImport) declared directly on this type.");
                     }
 
                     ScanBody(method, type, found);
@@ -322,7 +366,11 @@ public sealed class WidgetAtRestTests
             }
             catch (Exception)
             {
-                return; // a token this resolver cannot walk (a stand-alone signature, an unresolvable ref) is not a member to check
+                // Counted, not silently dropped: a genuinely unresolvable token (a stand-alone signature) is
+                // plausible, but the count is asserted at the call site so a real widget body full of these
+                // cannot quietly stop being checked at all.
+                UnresolvedTokens++;
+                return;
             }
 
             if (member is null)
