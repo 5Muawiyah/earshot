@@ -100,6 +100,18 @@ public sealed class PathsTests
     }
 
     [TestMethod]
+    public void TheClaimFileIsUnderTheLocalFolderAndFollowsTheDataRoot()
+    {
+        Paths real = Paths.FromEnvironment(Env());
+        Assert.AreEqual(Path.Combine(real.LocalFolder, "widget", "claim.json"), real.WidgetClaimFile);
+
+        using var temp = new TempFolder();
+        Paths redirected = Paths.FromEnvironment(Env(dataRoot: temp.Path));
+        Assert.AreEqual(Path.Combine(temp.Path, "Local", "Earshot", "widget", "claim.json"), redirected.WidgetClaimFile);
+        Assert.IsTrue(redirected.WidgetClaimFile.StartsWith(temp.Path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
     public void StatusFileNeedsAValidNonce()
     {
         using var temp = new TempFolder();

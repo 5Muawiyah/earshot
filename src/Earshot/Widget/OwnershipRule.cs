@@ -63,7 +63,7 @@ public static class OwnershipRule
                 return new OwnershipResult(OwnershipVerdict.AmbiguousCandidates, null);
             }
 
-            OwnedBattery reSynced = BuildUpdatedLast(budsProved, wireHigh, wireLow, currentLeft, currentRight, currentCase, claim.Last, input.AtUtc);
+            OwnedBattery reSynced = OwnedBattery.FromMessage(message, input.Table, claim.Last, input.AtUtc);
             return new OwnershipResult(OwnershipVerdict.OwnedByLiveConnection, reSynced);
         }
 
@@ -85,7 +85,7 @@ public static class OwnershipRule
             return new OwnershipResult(OwnershipVerdict.BatteryInconsistent, null);
         }
 
-        OwnedBattery updated = BuildUpdatedLast(budsProved, wireHigh, wireLow, currentLeft, currentRight, currentCase, claim.Last, input.AtUtc);
+        OwnedBattery updated = OwnedBattery.FromMessage(message, input.Table, claim.Last, input.AtUtc);
         return new OwnershipResult(OwnershipVerdict.Owned, updated);
     }
 
@@ -137,15 +137,6 @@ public static class OwnershipRule
         int lastBig = Math.Max(lastHigh.Value, lastLow.Value);
         int lastSmall = Math.Min(lastHigh.Value, lastLow.Value);
         return PartConsistent(newBig, lastBig, charging: false) && PartConsistent(newSmall, lastSmall, charging: false);
-    }
-
-    private static OwnedBattery BuildUpdatedLast(
-        bool budsProved, int? wireHigh, int? wireLow, int? left, int? right, int? currentCase, OwnedBattery previous, DateTimeOffset at)
-    {
-        int? high = budsProved ? right ?? previous.NibbleHigh : wireHigh ?? previous.NibbleHigh;
-        int? low = budsProved ? left ?? previous.NibbleLow : wireLow ?? previous.NibbleLow;
-        int? updatedCase = currentCase ?? previous.Case;
-        return new OwnedBattery(high, low, updatedCase, at);
     }
 
     private static int? PercentToNibble(int? percent) => percent is int p ? p / 10 : null;
