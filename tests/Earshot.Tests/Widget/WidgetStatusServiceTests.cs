@@ -128,7 +128,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, snapshot.Watcher);
         Assert.IsFalse(snapshot.ClaimExists);
         Assert.IsFalse(snapshot.AutoPauseAvailable);
-        Assert.AreEqual(0, snapshot.Counters.AllAdvertisements);
+        Assert.AreEqual(0, snapshot.Counters.AllSections);
     }
 
     [TestMethod]

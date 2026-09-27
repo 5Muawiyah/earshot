@@ -50,7 +50,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private WidgetCounters? _lastLoggedCounters;
     private WidgetWatcherState? _lastLoggedWatcherState;
 
-    private long _allAdvertisements, _appleSections, _otherCompanySections, _proximityItems;
+    private long _allSections, _appleSections, _otherCompanySections, _proximityItems;
     private long _okForm, _truncated, _unknownForm;
     private long _owned, _ownedByLiveConnection, _noClaim, _modelOrColourMismatch;
     private long _signalBelowThreshold, _batteryUnreadable, _batteryInconsistent, _ambiguousCandidates;
@@ -420,7 +420,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // here.
     private void OnReceived(object? sender, AdvertisementSample sample)
     {
-        Interlocked.Increment(ref _allAdvertisements);
+        Interlocked.Increment(ref _allSections);
         if (sample.CompanyId != ProximityParser.AppleCompanyId)
         {
             Interlocked.Increment(ref _otherCompanySections);
@@ -806,7 +806,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         return new WidgetCounters(
-            Interlocked.Read(ref _allAdvertisements),
+            Interlocked.Read(ref _allSections),
             Interlocked.Read(ref _appleSections),
             Interlocked.Read(ref _otherCompanySections),
             Interlocked.Read(ref _proximityItems),
@@ -849,7 +849,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     }
 
     private static bool CountersEqual(WidgetCounters a, WidgetCounters b) =>
-        a.AllAdvertisements == b.AllAdvertisements &&
+        a.AllSections == b.AllSections &&
         a.AppleSections == b.AppleSections &&
         a.OtherCompanySections == b.OtherCompanySections &&
         a.ProximityItems == b.ProximityItems &&
@@ -874,7 +874,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             c.UnknownForms.Select(s => "(prefix=" + (s.Prefix?.ToString("X2") ?? "none") + " length=" + s.Length + " count=" + s.Count + ")"));
 
         return "Widget counters: watcher=" + watcherState +
-            " all=" + c.AllAdvertisements +
+            " allSections=" + c.AllSections +
             " apple=" + c.AppleSections +
             " other=" + c.OtherCompanySections +
             " items=" + c.ProximityItems +
