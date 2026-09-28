@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Tray;
 
 namespace Earshot.Widget;
 
@@ -78,7 +79,12 @@ internal sealed class AppBarRegistration : IDisposable
         _disposed = true;
         if (_registered)
         {
-            RemoveCore();
+            // Reregister's own two outcomes reach the caller to log (TrayContext.Widget.cs's
+            // LogAppBarOutcome); this one has no caller left to hand it to; once Dispose returns there is
+            // nothing further for a failure here to affect (the hidden window is on its way down with it),
+            // but a failed ABM_REMOVE is still a real outcome worth a line, not silence.
+            StepOutcome removed = RemoveCore();
+            _log.Write(removed.Ok ? LogLevel.Debug : LogLevel.Warn, "AppBar: " + TrayReport.DescribeStep(removed));
         }
     }
 

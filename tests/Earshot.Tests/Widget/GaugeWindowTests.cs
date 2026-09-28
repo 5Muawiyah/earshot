@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -151,6 +152,33 @@ public sealed class GaugeWindowTests
             Point corner = new(bounds.X, bounds.Y);
             nint atCorner = WindowFromPoint(corner);
             Assert.AreEqual(background.Handle, atCorner, "Outside the pill, the click must reach the window beneath.");
+        });
+    }
+
+    // Before the fix, HideWindow's own SetWindowPos result was discarded outright: a real failure (the
+    // window handle already gone, say) left nothing in the log to explain why the gauge never actually
+    // disappeared. Proved here the same way AppBarRegistrationTests proves ABM_REMOVE's own outcome now
+    // reaches the log: a real ShowAt then HideWindow, both against the real window, with the log checked
+    // for the line HideWindow's own SetWindowPos step must now leave behind.
+    [TestMethod]
+    public void HideWindowRecordsItsOwnOutcomeInTheLog()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+
+            Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
+            Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
+            Application.DoEvents();
+
+            gauge.HideWindow();
+
+            Assert.IsTrue(log.Has(LogLevel.Debug, "Gauge: set-window-pos:hide-gauge"),
+                "HideWindow's own SetWindowPos outcome must reach the log: " +
+                string.Join(" | ", log.Entries.Select(e => e.Level + ":" + e.Message)));
         });
     }
 
