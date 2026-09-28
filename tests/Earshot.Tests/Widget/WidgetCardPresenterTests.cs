@@ -37,8 +37,61 @@ public sealed class WidgetCardPresenterTests
         });
     }
 
+    // M2 (widget-review-3): GaugeWindow answers WM_MOUSEACTIVATE with MA_NOACTIVATE
+    // (GaugeWindowTests.MouseActivateAnswersNoActivate), so a real gauge click never deactivates this card;
+    // WidgetCard.OnDeactivate cannot be what a second gauge click relies on. This drives the real gauge
+    // click path twice in a row (RequestShow with the same gauge bounds, exactly what
+    // TrayContext.OnWidgetCardRequested calls on every left click of the gauge), not a second Form standing
+    // in for lost focus.
     [TestMethod]
-    public void AGaugeClickWithinTheDoubleClickWindowOfADeactivateCloseDoesNotReopen()
+    public void ASecondGaugeClickWhileTheCardIsShownClosesIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var time = new Streaming.TestTimeProvider();
+            var log = new CapturingLog();
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, time, log);
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            Assert.IsTrue(presenter.IsShown, "The first gauge click opens the card.");
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            Assert.IsFalse(presenter.IsShown, "A second gauge click while the card is shown must close it.");
+        });
+    }
+
+    // The direct gauge-click close above is a fresh toggle, not the deactivate-close double-click window:
+    // a third click right after must reopen it, the same as any ordinary first click would.
+    [TestMethod]
+    public void AThirdGaugeClickRightAfterTheDirectCloseOpensItAgain()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var time = new Streaming.TestTimeProvider();
+            var log = new CapturingLog();
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, time, log);
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            Assert.IsFalse(presenter.IsShown, "Sanity: the second click already closed it.");
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            Assert.IsTrue(presenter.IsShown, "A third click, right after the direct close, is an ordinary open, not suppressed.");
+        });
+    }
+
+    // The other, distinct trigger for the same "does not reopen" wording: a genuine deactivation from
+    // losing focus to some other real window (not the gauge, which cannot cause this), followed by a click
+    // on the gauge within the double-click window.
+    [TestMethod]
+    public void AGaugeClickWithinTheDoubleClickWindowOfALostFocusDeactivateCloseDoesNotReopen()
     {
         Phase5.CardDesktop.Run(() =>
         {
@@ -55,7 +108,7 @@ public sealed class WidgetCardPresenterTests
             other.Show();
             other.Activate();
             Application.DoEvents();
-            Assert.IsFalse(presenter.IsShown, "Losing activation closes the card.");
+            Assert.IsFalse(presenter.IsShown, "Losing activation to another real window closes the card.");
 
             presenter.RequestShow(Gauge, Gauge.Location);
             Application.DoEvents();

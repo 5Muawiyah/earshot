@@ -24,9 +24,13 @@ internal sealed record WidgetCardPresenterCallbacks(
 
 // Owns the WidgetCard instance's lifecycle: creates it lazily, places it above the gauge (or a fallback
 // point when the gauge is hidden), shows it activated, re-renders on IWidgetStatus.Changed, refreshes the
-// read line every 30 s while open, and implements the toggle-close rule: a left click on the gauge within
-// SystemInformation.DoubleClickTime of the card closing through deactivation closes it and does not reopen
-// it, the same gesture as a second click on the volume flyout's own icon.
+// read line every 30 s while open, and implements two related but distinct toggle-close rules. A gauge
+// click while the card is already shown closes it directly (RequestShowOnUiThread's own IsShown check):
+// the gauge answers WM_MOUSEACTIVATE with MA_NOACTIVATE, so it never deactivates the card, and this is the
+// only way a second gauge click can close it at all. Separately, a left click on the gauge within
+// SystemInformation.DoubleClickTime of the card closing through a genuine deactivation (losing focus to some
+// other real window) does not reopen it, so dismissing the card by clicking elsewhere and then happening to
+// also click the gauge does not immediately flicker it back open.
 //
 // UI thread only from the outside; every public method posts through uiPost so a caller on any thread is
 // safe, matching CardPresenter's own contract.
@@ -105,6 +109,18 @@ internal sealed class WidgetCardPresenter : IDisposable
     {
         if (_disposed)
         {
+            return;
+        }
+
+        if (_card is { IsDisposed: false, Visible: true })
+        {
+            // The gauge answers WM_MOUSEACTIVATE with MA_NOACTIVATE (GaugeWindow), so a click on it never
+            // deactivates this card - WidgetCard.OnDeactivate, the only other way it closes itself, never
+            // fires from a gauge click. A second gauge click while the card is already shown is the owner
+            // asking to close it, the same gesture as a second click on the volume flyout's own icon: closed
+            // directly, not through the deactivate-close double-click window below, which is for a different
+            // trigger entirely (losing focus to some other real window, then clicking the gauge again).
+            HideOnUiThread();
             return;
         }
 
