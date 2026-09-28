@@ -79,11 +79,11 @@ public sealed class WidgetRuntimeToggleTests
     // whether the card ended up visible: unlike the gauge-anchored card (whose click-driven gate skips the
     // notification check outright for CardAnchor.NearCursor), the case-open notice's own gate always calls
     // the real SHQueryUserNotificationState, and it reports QUNS_BUSY on this machine's private test
-    // desktop - a real, current fact about this environment, recorded here rather than forced around with a
-    // fake, since CaseOpenCardPresenter's environment is constructed directly in WireWidget
-    // (new SystemCardEnvironment(_log)) with no seam for a test to substitute. The log line still proves
-    // what this test is actually for: OnCaseOpened reached RequestShowOnUiThread and ran its gate for real,
-    // rather than the subscription being missing or the body doing nothing.
+    // desktop - a real, current fact about this environment, recorded here rather than forced around. A
+    // fake ICardEnvironment can now be substituted (TrayHarness's own cardEnvironmentFactory parameter,
+    // added for the two tests below that need the notice genuinely visible); this one is left as it stands,
+    // since the log line already proves what it is actually for: OnCaseOpened reached RequestShowOnUiThread
+    // and ran its gate for real, rather than the subscription being missing or the body doing nothing.
     [TestMethod]
     public void RaisingCaseOpenedReachesThePresentersOwnGate()
     {
@@ -102,6 +102,74 @@ public sealed class WidgetRuntimeToggleTests
                 tray.Log.Has(LogLevel.Info, "Case-open card"),
                 "OnCaseOpened must actually reach the presenter's own gate, not merely a wired but inert " +
                 "presenter. Log: " + string.Join(" | ", tray.Log.Entries.Select(e => e.Level + ":" + e.Message)));
+        });
+    }
+
+    // Before the fix, a left click on the gauge while the case-open notice was already showing left the
+    // notice sitting there: CaseOpenCardGate.OwnCardOpen already refuses to show a fresh notice over the
+    // owner's own card, but nothing closed the reverse, so a click opened a second Earshot window stacked
+    // on the first rather than replacing it. A fake ICardEnvironment (TrayHarness's own
+    // cardEnvironmentFactory, defaulting to QUNS_ACCEPTS_NOTIFICATIONS) lets the notice genuinely reach
+    // screen here, unlike RaisingCaseOpenedReachesThePresentersOwnGate above.
+    [TestMethod]
+    public void ClickingTheGaugeWhileTheNoticeIsShowingHidesItThenOpensTheCard()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = true, CaseOpenCard = true, LeftClickConnects = false }).WithWatcherRecomputed(),
+                cardEnvironmentFactory: () => new Phase5.FakeCardEnvironment());
+            tray.PumpUntilIdle();
+
+            tray.Context.RaiseCaseOpenedForTest();
+            tray.PumpUntilIdle();
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardIsShownForTest, "Sanity: the notice must actually be open before the gauge is clicked.");
+            Assert.IsFalse(tray.Context.WidgetCardIsShownForTest, "Sanity: the gauge-anchored card must not be open yet.");
+
+            tray.Context.RequestWidgetCardForTest();
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Context.WidgetCaseOpenCardIsShownForTest, "The notice must be hidden once the gauge-anchored card opens, not left stacked underneath it.");
+            Assert.IsTrue(tray.Context.WidgetCardIsShownForTest, "The gauge-anchored card must actually open.");
+        });
+    }
+
+    // Before the fix, a notice already open when a connect or disconnect started anywhere else (the tray
+    // icon here, but the menu or a hotkey read the same IsBusy) kept showing the button it last rendered,
+    // exactly the staleness TheOpenCardsButtonDisablesTheMomentAnyToggleStartsAndReEnablesWhenItEnds already
+    // proves is fixed for the gauge-anchored card: CaseOpenCardPresenter had no Refresh() at all, so nothing
+    // ever re-rendered the notice's button once it was up. Mirrors that test's own technique exactly, for
+    // the notice instead of the card.
+    [TestMethod]
+    public void TheNoticesOwnButtonDisablesTheMomentAnyToggleStartsAndReEnablesWhenItEnds()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var connect = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, LeftClickConnects = true }).WithWatcherRecomputed(),
+                cardEnvironmentFactory: () => new Phase5.FakeCardEnvironment());
+            tray.Connection.OnConnect = _ => connect.Task;
+            tray.PumpUntilIdle();
+
+            tray.Context.RaiseCaseOpenedForTest();
+            tray.PumpUntilIdle();
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardIsShownForTest, "Sanity: the notice must actually be open before the toggle starts.");
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardButtonEnabledForTest, "Sanity: the button starts enabled with nothing in flight.");
+
+            // No PumpUntilIdle here: the click runs synchronously up to the coordinator's own await, which
+            // never completes until connect.SetResult below, matching
+            // TheOpenCardsButtonDisablesTheMomentAnyToggleStartsAndReEnablesWhenItEnds's own reasoning.
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+
+            Assert.IsTrue(tray.Context.IsBusy, "Sanity: the click must have started a toggle still in flight.");
+            TrayHarness.PumpUntil(() => tray.Context.WidgetCaseOpenCardButtonEnabledForTest == false,
+                "The notice's own button must disable the moment any toggle starts, the same as the gauge-anchored card's.");
+
+            connect.SetResult(Confirmed("Connected"));
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardButtonEnabledForTest, "...and re-enable once that toggle ends.");
         });
     }
 

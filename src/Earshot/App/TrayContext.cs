@@ -6,6 +6,7 @@ using Earshot.Contracts;
 using Earshot.Hotkeys;
 using Earshot.Icons;
 using Earshot.Infra;
+using Earshot.Popup;
 using Earshot.Streaming;
 using Earshot.Tray;
 using Earshot.Voice;
@@ -94,6 +95,13 @@ internal sealed record TrayStartOptions(
     // (TransitionOff and TransitionHiddenNoLog both set Visible=true unconditionally, by design) never makes
     // the real tray icon visible, overriding ShowIcon=false.
     public Func<ITrayIconVisibility>? TrayIconVisibilityFactory { get; init; }
+
+    // Builds the ICardEnvironment the case-open notice reads its placement, DPI, palette and
+    // SHQueryUserNotificationState reading from. Null (the default) means "the real desktop"
+    // (SystemCardEnvironment), the production behaviour; a test that needs the notice to actually reach
+    // screen injects a fake instead, since the real notification-state check refuses outright on a private
+    // test desktop (recorded where it is exercised).
+    public Func<ICardEnvironment>? CardEnvironmentFactory { get; init; }
 
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
@@ -345,6 +353,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _taskbarReaderFactory = options.TaskbarReaderFactory;
         _taskbarWatcherPollIntervalMs = options.TaskbarWatcherPollIntervalMs;
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
+        _cardEnvironmentFactory = options.CardEnvironmentFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;
@@ -1832,8 +1841,10 @@ internal sealed partial class TrayContext : ApplicationContext
         // a call here): without this, a card already open when a connect or disconnect started anywhere
         // (the tray icon, the menu, a hotkey, not just the card's own button) kept showing the button it
         // last rendered until the next IWidgetStatus.Changed happened to arrive. Refresh is a no-op when no
-        // card is open.
+        // card is open. The case-open notice's own button reads the same IsBusy through the same callbacks,
+        // so it needs exactly the same refresh; Refresh is a no-op there too when no notice is open.
         _widgetCardPresenter?.Refresh();
+        _caseOpenCardPresenter?.Refresh();
 
         // The tray's own busy flags change only beside a call to this method, and the block coordinator's Changed
         // event ends here too, so this is where the copy of the busy state that the streaming coordinator reads is

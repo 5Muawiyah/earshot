@@ -87,6 +87,11 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // True while the card is on screen. For tests; the UI thread only.
     internal bool IsShown => _card is { IsDisposed: false, Visible: true };
 
+    // The open notice's own last-rendered model, for tests: null when no notice is open. Matches
+    // WidgetCardPresenter.CurrentModelForTest exactly, so a test can prove Refresh() actually reached the
+    // real card and re-rendered it, not only that Refresh() itself was called.
+    internal WidgetCardModel? CurrentModelForTest => _card?.Model;
+
     // The gate's own two hand-back legs, read straight through rather than through RequestShow's whole
     // chain: the real notification-state check (SHQueryUserNotificationState) sits ahead of both of these
     // in RequestShowOnUiThread's own order, so a test proving which of the coordinator's own two flags each
@@ -102,6 +107,15 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // Forces the card to hide: a settings change turning the card off while one is on screen, or the tray
     // closing.
     public void Hide() => _uiPost(HideOnUiThread);
+
+    // Re-renders the notice with the latest model, if it is on screen: matches WidgetCardPresenter.Refresh
+    // exactly, since the notice's own Connect/Disconnect button reads the same callbacks.IsBusy() the
+    // gauge-anchored card's button does. Before this existed, a notice already open when a connect or
+    // disconnect started anywhere else (the tray icon, the menu, a hotkey) kept showing the button it last
+    // rendered until the notice's own dismiss timer cleared it, the exact staleness
+    // TrayContext.UpdatePresentation's own comment already describes fixing for the other card. A no-op
+    // when no notice is open.
+    public void Refresh() => _uiPost(RefreshOnUiThread);
 
     public void Dispose()
     {
@@ -174,6 +188,16 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         card.Bounds = PlaceCard(gaugeBounds, card.ClientSize);
         card.Show();
         StartDismissTimer();
+    }
+
+    private void RefreshOnUiThread()
+    {
+        if (_card is not { IsDisposed: false, Visible: true } card)
+        {
+            return;
+        }
+
+        card.Render(WidgetCardPresenter.BuildModel(_callbacks, _time), _callbacks.Dpi());
     }
 
     private void HideOnUiThread()

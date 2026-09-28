@@ -1394,7 +1394,8 @@ internal sealed class TrayHarness : IDisposable
         TimeSpan? disconnectHandBackWait = null,
         TimeProvider? time = null,
         int? taskbarWatcherPollIntervalMs = null,
-        bool showIcon = false)
+        bool showIcon = false,
+        Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null)
     {
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
@@ -1505,6 +1506,7 @@ internal sealed class TrayHarness : IDisposable
                 return reader;
             },
             TrayIconVisibilityFactory = () => new FakeTrayIcon(),
+            CardEnvironmentFactory = cardEnvironmentFactory,
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
         };
         if (handBackBudget is { } hb)

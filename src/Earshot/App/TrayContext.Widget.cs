@@ -45,6 +45,7 @@ internal sealed partial class TrayContext
     private readonly Func<ITaskbarReader> _taskbarReaderFactory;
     private readonly int _taskbarWatcherPollIntervalMs;
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
+    private readonly Func<ICardEnvironment>? _cardEnvironmentFactory;
 
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
     // (RefreshShownGaugeForWorker, called after every OnTaskbarLayout, the only place the real window's
@@ -136,7 +137,8 @@ internal sealed partial class TrayContext
                 SessionEndInProgress: () => _coordinator.SessionEndInProgress,
                 OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
             _caseOpenCardPresenter = new CaseOpenCardPresenter(
-                () => new WidgetCard(_log, notice: true), _widgetCardCallbacks, caseOpenGate, new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
+                () => new WidgetCard(_log, notice: true), _widgetCardCallbacks, caseOpenGate,
+                _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
         }
 
         if (_registry.Settings.Current.Widget.ShowOnTaskbar)
@@ -255,6 +257,13 @@ internal sealed partial class TrayContext
     // Drives the same path a real IWidgetStatus.CaseOpened event does, without a real case-open advert.
     internal void RaiseCaseOpenedForTest() => OnCaseOpened(this, new CaseOpenedEventArgs(_time.GetUtcNow()));
 
+    // Whether the case-open notice is currently open, for tests: the same IsShown a real CaseOpened event,
+    // a gauge click closing it or the tray closing would change.
+    internal bool WidgetCaseOpenCardIsShownForTest => _caseOpenCardPresenter?.IsShown ?? false;
+
+    // The open notice's own last-rendered ButtonEnabled, for tests: null when no notice is open.
+    internal bool? WidgetCaseOpenCardButtonEnabledForTest => _caseOpenCardPresenter?.CurrentModelForTest?.ButtonEnabled;
+
     // The case-open card's own gate, read straight through: which of the coordinator's own HandBackInProgress
     // and SessionEndInProgress each of the gate's two matching legs actually reads. False (not null) when
     // nothing is wired yet, since "not in progress" and "nothing to ask" read the same to a caller here.
@@ -361,12 +370,20 @@ internal sealed partial class TrayContext
     // A left click on the gauge, LeftClickConnects off (the default): opens the dedicated three-column
     // card, above the gauge when it is shown, or near the cursor when the click came from the tray icon
     // fallback instead.
+    //
+    // The case-open notice's own gate already refuses to show itself over the owner's own card
+    // (CaseOpenCardGate.OwnCardOpen), but nothing closed the reverse: a click on the gauge while the notice
+    // was already open left it sitting there, one Earshot window stacked on another, until its own dismiss
+    // timer eventually cleared it. Hide is a no-op when nothing is open, so this runs unconditionally
+    // rather than only when the notice happens to be showing.
     private void OnWidgetCardRequested(object? sender, EventArgs e)
     {
         if (_widgetCardPresenter is not { } presenter)
         {
             return;
         }
+
+        _caseOpenCardPresenter?.Hide();
 
         if (GaugeBoundsIfShown() is { } bounds)
         {
