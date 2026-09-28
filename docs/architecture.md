@@ -171,6 +171,129 @@ drivers. If the protection cannot be put back, the card says "Connected, but
 audio quality protection did not apply." and the microphone stays available
 until a later connect puts it back.
 
+## The AirPods widget
+
+For what the widget shows and its plain-English limits, see
+[overview.md](overview.md#the-airpods-widget). This section is the
+mechanism behind it.
+
+**Reading the AirPods without connecting.** The widget never pairs or
+connects to read battery, charging, lid or in-ear state: it runs a passive
+[`BluetoothLEAdvertisementWatcher`](https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.advertisement.bluetoothleadvertisementwatcher),
+keeps only advertisements carrying Apple's manufacturer company ID (0x004C),
+and looks for the proximity-pairing message AirPods and other Apple
+accessories broadcast in the clear. The message's documented layout, not its
+bit-level meaning, is described by the furiousMAC Continuity project's notes
+(github.com/furiousMAC/continuity, messages/proximity_pairing.md) and by
+Celosia and Cunche, "Discontinued Privacy", PETS 2020
+(petsymposium.org/popets/2020/popets-2020-0003.pdf). Nothing from either
+source is copied into this repository; both are cited by URL only. The
+watcher is read-only throughout: nothing it does ever writes to a Bluetooth
+device, and it is stopped and restarted around sleep.
+
+**Phase 0.** Before the widget can trust any of that message's fields, one
+capture has to prove what this hardware actually sends: a short, one-time
+recording, taken with the owner's AirPods and his phone's own battery
+reading side by side, so the decoded fields can be checked against a known
+answer. That recording has not been made yet. Until it has, the message's
+battery, charging and lid fields are held as unproved, and the widget shows
+nothing derived from them: see
+[overview.md](overview.md#the-honest-state-today).
+
+**Whose AirPods it shows.** A room can hold several sets of the same model.
+`OwnershipRule` decides, on every advertisement, whether it is the owner's:
+model and colour bytes must match a one-time claim made when he opens his
+own case by the PC; the signal must clear the strength recorded at that
+claim; and the battery must be consistent with the last reading held for
+him, where "consistent" means the same, lower, or exactly one 10% step
+higher, and higher by more than that only while the matching charging bit is
+set. A live connection to this PC does not shortcut any of these checks; the
+same rule runs every time. Anything that fails is counted and nothing else
+is recorded about it. This is an owner decision, not an oversight: a
+same-model stranger with a lower battery reading than the owner's last one
+can pass the rule, and he chose to accept that risk rather than tighten it
+and risk the widget missing his own AirPods.
+
+**The taskbar gauge.** Windows 11 removed the deskband API that used to let
+a program dock a control into the taskbar, and has no replacement for it, so
+there is no supported way to do this. The gauge is an owned, topmost,
+layered overlay window positioned over free taskbar space, which it finds by
+reading the taskbar's own button layout through UI Automation and polling it
+for changes; the window's alpha-zero pixels let a click reach the taskbar
+underneath rather than the gauge
+(https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
+If there is no free space, or reading the taskbar fails, or the window
+cannot be shown, the gauge hides itself and the ordinary tray icon takes
+over automatically. It re-measures and re-attaches after Explorer restarts,
+on the documented `TaskbarCreated` broadcast
+(https://learn.microsoft.com/en-us/windows/win32/shell/taskbar). Because
+this is unofficial, a Windows update to the taskbar's own layout could break
+it; the tray icon fallback is what keeps the widget usable if that happens.
+
+**The card and the case-open card.** A borderless window with rounded
+corners and Windows' own translucent card backdrop, applied through the
+documented DWM extended-frame call
+(https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmextendframeintoclientarea),
+following the system's light or dark theme; on a Windows build too old for
+that call, or if it fails, the card falls back to an opaque colour instead
+of the translucent one. It opens above the gauge, closes
+when it loses focus, and works from the keyboard. The case-open card is the
+same window in a separate, unfocused instance: Windows' own case-open event
+shows it, it reads its own dismiss time from
+[`SystemParametersInfoW(SPI_GETMESSAGEDURATION)`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow)
+so it follows the owner's own accessibility setting, and its Connect or
+Disconnect button only ever fires on a genuine click on that button; nothing
+else in its code path can press it.
+
+**Probe target.** `Earshot.exe probe widget --out <folder>` renders the
+gauge, the card and the case-open card from fixed, synthetic snapshots, at
+three DPIs and in both taskbar inks, straight to PNG files, the same
+drawing and layout code the real widget uses. No device, no window shown on
+screen, and no `IWidgetStatus` connection: see
+[docs/overview.md](overview.md#the-airpods-widget) for what the pictures
+made this way actually show and do not show.
+
+### What still needs a kernel driver
+
+Not built, and not close to being built, on Windows without one:
+
+- Noise control (active noise cancellation, transparency, adaptive audio).
+- Conversational awareness.
+- Battery read to the nearest 1%, rather than the 10% steps the
+  advertisement carries.
+- The AirPods' own press-and-hold button settings.
+- Personalised volume.
+- Renaming the AirPods.
+- The hearing features.
+- Real-time in-ear detection, if phase 0 shows the advertisement cannot
+  give it while playing from this PC; that is still an open question.
+
+**Why.** These all go through Apple's own accessory protocol, carried over a
+Bluetooth L2CAP channel at a fixed PSM (0x1001), not through anything in the
+advertisement the widget already reads. Microsoft's own documentation for
+opening an L2CAP connection to a remote device,
+["Creating a L2CAP Client Connection to a Remote Device"](https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/creating-a-l2cap-client-connection-to-a-remote-device),
+is written for a kernel-mode Bluetooth profile driver, not for an ordinary
+Windows program; nothing in the Windows SDK opens this kind of channel from
+user mode.
+
+**What building one would cost.** An unsigned kernel driver only loads once
+Windows' test-signing boot option is turned on
+(https://learn.microsoft.com/en-us/windows-hardware/drivers/install/the-testsigning-boot-configuration-option),
+commonly called Test Mode, which weakens the system's own code-integrity
+guarantees and is why kernel-level anti-cheat such as FACEIT refuses to run
+at all while it is on. Getting a driver trusted without Test Mode means
+signing it through Microsoft's own driver programme: since the April 2026
+Windows update, Windows no longer trusts a kernel driver signed only through
+the older cross-signing route by default
+(https://techcommunity.microsoft.com/blog/windows-itpro-blog/advancing-windows-driver-security-removing-trust-for-the-cross-signed-driver-pro/4504818).
+
+**On top of the cost, one more limit.** No application reviewed for this
+project, on any platform, shows the name of the device the AirPods are
+actually connected to when that device is not the one asking; the widget's
+"On your iPhone" is the owner's own label, never a name read off the
+AirPods, for the reason above.
+
 ## The safety model
 
 - **Setup asks for one administrator prompt and does the rest itself.** It
@@ -260,6 +383,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe` | The tray application. `--startup` is the same thing, and is what the startup value passes. |
 | `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer described in [requirements.md](requirements.md). It changes nothing. On a machine where Earshot is not set up and no device is pinned it still writes a full report, and exits 78 to say so: the nodes and services targets had no device to read. So read the report rather than the exit code. |
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
+| `Earshot.exe probe widget --out <folder>` | Writes the taskbar gauge, the card and the case-open card to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. See [The AirPods widget](#the-airpods-widget). |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
 | `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep and `gate status` change the state of the device**; those two only read. They exist for the live tests in `tools\live-tests` and are not part of normal use. |

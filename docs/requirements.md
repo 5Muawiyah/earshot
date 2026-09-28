@@ -32,19 +32,23 @@ against a stand-in.
 
 ## What it does not do
 
-- **Show a battery level.** There is no battery element in the tray at all.
-  Three read-only checks on 15 September 2026, with the AirPods connected to
-  this PC, found no battery value Windows exposes for them: the PnP battery
-  query returned nothing, a dump of every property on the AirPods' device
-  nodes held no battery key, and WinRT returned the standard battery key
-  empty for the AirPods' audio endpoint. Each check carried a positive
-  control in the same read, so a broken query could not be mistaken for a
-  missing value. The same check with the AirPods disconnected has not been
-  run yet; it is Test 11 in the live tests, and it cannot change the
-  outcome, because a value would only be expected while connected.
-  Per-earbud battery and the noise control modes ride on Apple's own
-  protocol over a channel Windows does not open to ordinary programs, which
-  needs a kernel driver and is out of scope here.
+- **Show a battery level Windows itself exposes for the device.** It does
+  not expose one at all. Three read-only checks on 15 September 2026, with
+  the AirPods connected to this PC, found no battery value Windows exposes
+  for them: the PnP battery query returned nothing, a dump of every
+  property on the AirPods' device nodes held no battery key, and WinRT
+  returned the standard battery key empty for the AirPods' audio endpoint.
+  Each check carried a positive control in the same read, so a broken query
+  could not be mistaken for a missing value. The same check with the
+  AirPods disconnected has not been run yet; it is Test 11 in the live
+  tests, and it cannot change the outcome, because a value would only be
+  expected while connected. The AirPods widget reads battery a different
+  way, from the AirPods' own Bluetooth broadcast rather than from Windows;
+  see [overview.md](overview.md#the-airpods-widget) for what it can show
+  and its limits. Noise control and battery read to the nearest 1% ride on
+  Apple's own protocol over a channel Windows does not open to ordinary
+  programs, which needs a kernel driver and is out of scope here; see
+  [architecture.md](architecture.md#what-still-needs-a-kernel-driver).
 - **Disable a device node that is not present.** Connect the AirPods to this
   PC once from Windows Bluetooth settings before blocking; Earshot reports
   this rather than silently doing nothing.
