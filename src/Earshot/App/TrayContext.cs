@@ -82,6 +82,12 @@ internal sealed record TrayStartOptions(
     // through it.
     public Func<ITaskbarReader> TaskbarReaderFactory { get; init; } = static () => new UiaTaskbarReader();
 
+    // TaskbarWatcher's own baseline poll interval (ShownPollIntervalMs, 1 s, by default): the value its
+    // backoff reset returns to as well as the value it starts at. A test that needs to tell a poke's own
+    // read apart from a scheduled one, deterministically, sets this far longer than anything the test
+    // itself runs for, rather than racing a real timing window against a scheduled read.
+    public int TaskbarWatcherPollIntervalMs { get; init; } = TaskbarWatcher.ShownPollIntervalMs;
+
     // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
     // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
     // widget-enabled tray-level test injects a fake instead, so GaugeController's own fallback logic
@@ -329,6 +335,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _streamingPlatformFactory = options.StreamingPlatformFactory;
         _advertisementSourceFactory = options.AdvertisementSourceFactory;
         _taskbarReaderFactory = options.TaskbarReaderFactory;
+        _taskbarWatcherPollIntervalMs = options.TaskbarWatcherPollIntervalMs;
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;

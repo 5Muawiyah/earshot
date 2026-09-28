@@ -1392,7 +1392,8 @@ internal sealed class TrayHarness : IDisposable
         Queue<Earshot.Tests.Streaming.FakeStreamingPlatform>? streamingPlatforms = null,
         TimeSpan? handBackBudget = null,
         TimeSpan? disconnectHandBackWait = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        int? taskbarWatcherPollIntervalMs = null)
     {
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
@@ -1503,6 +1504,7 @@ internal sealed class TrayHarness : IDisposable
                 return reader;
             },
             TrayIconVisibilityFactory = () => new FakeTrayIcon(),
+            TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
         };
         if (handBackBudget is { } hb)
         {

@@ -30,7 +30,8 @@ internal sealed class TaskbarWatcher : IDisposable
     private bool _intervalDoubled;
     private bool _started;
     private bool _disposed;
-    private volatile int _pollIntervalMs = ShownPollIntervalMs;
+    private readonly int _baselinePollIntervalMs;
+    private volatile int _pollIntervalMs;
     private volatile bool _backoffResetRequested;
 
     // Guards _poke and _stop against a call to Set() racing their disposal. Loop's own finally block is the
@@ -43,7 +44,13 @@ internal sealed class TaskbarWatcher : IDisposable
     private readonly Lock _handleGate = new();
     private bool _handlesDisposed;
 
-    public TaskbarWatcher(ITaskbarReader reader, Func<ShownGauge?> shownGauge, Action<ITaskbarReader.Result> onResult, Action<Action> uiPost, ILog log, TimeProvider time)
+    // baselinePollIntervalMs: the value the first wait, and every backoff reset (Loop's own handling of
+    // _backoffResetRequested), use. ShownPollIntervalMs by default; a caller that needs a poke's own read
+    // told apart from a scheduled one deterministically, without a real-time race, sets this far longer
+    // than anything it runs for instead (TrayStartOptions.TaskbarWatcherPollIntervalMs is that seam).
+    public TaskbarWatcher(
+        ITaskbarReader reader, Func<ShownGauge?> shownGauge, Action<ITaskbarReader.Result> onResult, Action<Action> uiPost, ILog log, TimeProvider time,
+        int baselinePollIntervalMs = ShownPollIntervalMs)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(shownGauge);
@@ -57,6 +64,8 @@ internal sealed class TaskbarWatcher : IDisposable
         _uiPost = uiPost;
         _log = log;
         _time = time;
+        _baselinePollIntervalMs = Math.Max(1, baselinePollIntervalMs);
+        _pollIntervalMs = _baselinePollIntervalMs;
 
         _thread = new Thread(Loop) { IsBackground = true, Name = "Earshot taskbar watcher" };
         _thread.SetApartmentState(ApartmentState.MTA);
@@ -174,7 +183,7 @@ internal sealed class TaskbarWatcher : IDisposable
                 if (_backoffResetRequested)
                 {
                     _backoffResetRequested = false;
-                    _pollIntervalMs = ShownPollIntervalMs;
+                    _pollIntervalMs = _baselinePollIntervalMs;
                     _intervalDoubled = false;
                     _recentDurationsMs.Clear();
                 }

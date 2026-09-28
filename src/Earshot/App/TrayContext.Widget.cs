@@ -43,6 +43,7 @@ internal sealed partial class TrayContext
     // taskbar with UI Automation. See WidgetRealSurfaceGuardTests.
     private readonly Func<IAdvertisementSource>? _advertisementSourceFactory;
     private readonly Func<ITaskbarReader> _taskbarReaderFactory;
+    private readonly int _taskbarWatcherPollIntervalMs;
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
 
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
@@ -176,7 +177,7 @@ internal sealed partial class TrayContext
             _appBarRegistration = new AppBarRegistration(_window.Handle, _log);
             LogAppBarOutcome(_appBarRegistration.Register());
 
-            _taskbarWatcher = new TaskbarWatcher(_taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time);
+            _taskbarWatcher = new TaskbarWatcher(_taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time, _taskbarWatcherPollIntervalMs);
             _taskbarWatcher.Start();
             _taskbarWatcher.Poke();
         }

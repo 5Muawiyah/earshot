@@ -26,16 +26,27 @@ namespace Earshot.Tests.Widget;
 // (ABM_NEW) alongside the watcher, and a private desktop is where that call is refused rather than reaching
 // the owner's real Explorer (AppBarRegistrationTests's own header).
 //
-// TaskbarWatcher's own natural poll cadence is 1 s (ShownPollIntervalMs): a naive "does a read happen within
-// 5 s of dispatching" assertion would pass even with the wiring removed, since the watcher would read again
-// on its own schedule regardless. Each test therefore first proves a short window (ControlWindow, well under
-// the 1 s cadence) sees no read on its own - the control - before dispatching and requiring one within that
-// same short window, so only an actual poke from the dispatched message can explain a pass.
+// TaskbarWatcher's own natural poll cadence is 1 s in production (ShownPollIntervalMs), which is not a
+// safe margin to race against under full-suite load: a fixed "no read in the next 350 ms, the control"
+// check used to run here, on the theory that 350 ms sits well under a 1 s cadence, but PumpUntilIdle and
+// the rest of this test's own setup can themselves eat into that margin before the control's own sleep
+// even starts, so a read the watcher was always going to make on schedule could land inside the supposed
+// control window and fail it - not this wiring, just wall-clock arithmetic losing to machine load. The
+// harness instead gives TaskbarWatcher a poll interval far longer than any of these tests run for
+// (LongPollIntervalMs, via TrayStartOptions.TaskbarWatcherPollIntervalMs), so the watcher's own schedule
+// cannot produce a second read within the test's lifetime at all: any read after the first one can only be
+// the poke this test dispatched, with no timing race and no control step needed to tell the two apart.
 [TestClass]
 public sealed class WidgetShellSignalTests
 {
     private const string ReadLogFragment = "Taskbar read took";
-    private static readonly TimeSpan ControlWindow = TimeSpan.FromMilliseconds(350);
+
+    // Far longer than any of these tests run for (each finishes in well under a second of real wiring
+    // work), so the watcher's own schedule can never produce a second read on its own within a run: a read
+    // seen after the first one is only ever the poke under test, whatever the machine's own load is doing.
+    private const int LongPollIntervalMs = 10 * 60 * 1000;
+
+    private static readonly TimeSpan PokeGuard = TimeSpan.FromSeconds(5);
 
     [TestMethod]
     public void SettingChangedPokesTheTaskbarWatcher() =>
@@ -99,23 +110,18 @@ public sealed class WidgetShellSignalTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true },
+                taskbarWatcherPollIntervalMs: LongPollIntervalMs);
             tray.PumpUntilIdle();
             Assert.IsTrue(SpinWait.SpinUntil(() => ReadCount(tray) >= 1, TimeSpan.FromSeconds(5)),
                 "Sanity: WireWidget's own initial Poke must already have produced a read.");
 
-            int beforeControl = ReadCount(tray);
-            Thread.Sleep(ControlWindow);
-            tray.PumpUntilIdle();
-            Assert.AreEqual(beforeControl, ReadCount(tray),
-                "Control: " + ControlWindow.TotalMilliseconds + " ms must be well under the watcher's own 1 s cadence, " +
-                "or a read here would not distinguish the watcher's own schedule from an actual poke.");
-
+            int beforeDispatch = ReadCount(tray);
             dispatch(tray);
             tray.PumpUntilIdle();
 
-            Assert.IsTrue(SpinWait.SpinUntil(() => ReadCount(tray) > beforeControl, ControlWindow),
-                signalName + " must poke the taskbar watcher for an immediate re-measure, well within the control window.");
+            Assert.IsTrue(SpinWait.SpinUntil(() => ReadCount(tray) > beforeDispatch, PokeGuard),
+                signalName + " must poke the taskbar watcher for an immediate re-measure.");
         });
     }
 
