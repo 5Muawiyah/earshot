@@ -10,8 +10,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// CaseOpenCardPresenter: spec 7.6, its own WidgetCard(notice: true) instance, never the gauge-anchored
-// card. The gate tests (setting off, closing, QUNS refusal, a failed notification-state read, hand-back,
+// CaseOpenCardPresenter: the case-open notice, its own WidgetCard(notice: true) instance, never the
+// gauge-anchored card. The gate tests (setting off, closing, QUNS refusal, a failed notification-state read, hand-back,
 // session end) never let a card be created at all: createCard throws, so a passing test proves no window
 // was ever built, not just that one happened to stay hidden. Everything that actually shows a card runs on
 // a private desktop (Earshot.Tests.Phase5.CardDesktop.Run), never the input desktop.
@@ -93,6 +93,24 @@ public sealed class CaseOpenCardTests
 
         Assert.IsFalse(presenter.IsShown);
         Assert.IsTrue(log.Has(LogLevel.Debug, "hand-back is running"));
+    }
+
+    // The case-open notice must never show over the owner's own gauge-anchored card, not just over a
+    // second instance of itself (ThrowingFactory proves no card is even built, the same proof the gate's
+    // other refusals already use).
+    [TestMethod]
+    public void TheOwnersOwnCardAlreadyOpenRefusesTheCard()
+    {
+        var callbacks = new FakeCallbacks();
+        var gate = Gate(ownCardOpen: true);
+        var environment = new Earshot.Tests.Phase5.FakeCardEnvironment();
+        var log = new CapturingLog();
+        using var presenter = new CaseOpenCardPresenter(ThrowingFactory, callbacks.Build(), gate, environment, Inline, new Streaming.TestTimeProvider(), log);
+
+        presenter.RequestShow(gaugeBounds: null);
+
+        Assert.IsFalse(presenter.IsShown);
+        Assert.IsTrue(log.Has(LogLevel.Debug, "the owner's own card is already open"));
     }
 
     [TestMethod]
@@ -316,10 +334,12 @@ public sealed class CaseOpenCardTests
         });
     }
 
-    // Spec 7.6 says Escape dismisses "if the owner clicks it first, which activates nothing": since a
-    // notice-mode card is never activated (WS_EX_NOACTIVATE) it never receives real keyboard focus, so this
-    // sends the key message directly at the guard in WidgetCard.OnKeyDown rather than proving the OS would
-    // ever deliver it there. See the report for why this is a spec tension, not a gap in this test.
+    // Escape is meant to dismiss the card only if the owner clicks it first, which activates nothing: since
+    // a notice-mode card is never activated (WS_EX_NOACTIVATE) it never receives real keyboard focus, so
+    // this sends the key message directly at the guard in WidgetCard.OnKeyDown rather than proving the OS
+    // would ever deliver it there. That gap between the intended behaviour and what a real key press could
+    // ever trigger is inherent to a never-activated window, not something a differently written test could
+    // close.
     [TestMethod]
     public void KeyboardNeverActsOnANoticeModeCardEvenIfAKeyMessageArrivedAnyway()
     {
@@ -349,13 +369,20 @@ public sealed class CaseOpenCardTests
     private static WidgetCard ThrowingFactory() =>
         throw new AssertFailedException("No WidgetCard should be created: the gate must refuse before a card is ever built.");
 
-    private static void ClickAt(nint handle, Point point) =>
-        Phase5.TestWindows.Send(handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(point.X, point.Y));
+    // A left down then a left up at the same point: WidgetCard.OnMouseUp now requires a matching left down
+    // on the same control before it activates anything, so an up alone no longer reaches the Connect
+    // button or the switch.
+    private static void ClickAt(nint handle, Point point)
+    {
+        nint lParam = MakeLParam(point.X, point.Y);
+        Phase5.TestWindows.Send(handle, Phase5.TestWindows.WM_LBUTTONDOWN, 0, lParam);
+        Phase5.TestWindows.Send(handle, Phase5.TestWindows.WM_LBUTTONUP, 0, lParam);
+    }
 
     private static nint MakeLParam(int x, int y) => (nint)(((y & 0xFFFF) << 16) | (x & 0xFFFF));
 
-    private static CaseOpenCardGate Gate(bool enabled = true, bool closing = false, bool handBack = false, bool sessionEnd = false) =>
-        new(Enabled: () => enabled, Closing: () => closing, HandBackInProgress: () => handBack, SessionEndInProgress: () => sessionEnd);
+    private static CaseOpenCardGate Gate(bool enabled = true, bool closing = false, bool handBack = false, bool sessionEnd = false, bool ownCardOpen = false) =>
+        new(Enabled: () => enabled, Closing: () => closing, HandBackInProgress: () => handBack, SessionEndInProgress: () => sessionEnd, OwnCardOpen: () => ownCardOpen);
 
     private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false) =>
         new(

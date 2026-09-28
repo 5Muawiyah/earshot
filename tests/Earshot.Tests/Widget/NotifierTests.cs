@@ -52,6 +52,38 @@ public sealed class NotifierTests
         Assert.AreEqual(System.IO.Path.Combine(@"C:\some\folder", "Earshot.lnk"), registration.ShortcutPath);
     }
 
+    // Environment.GetFolderPath(SpecialFolder.Programs) returns "" rather than throwing when the folder does
+    // not exist; the plain constructor still throws on that (a real bug for any other caller), so the one
+    // call site fed straight from GetFolderPath (Program.Tray.cs) must go through TryCreate instead. Before
+    // the fix, that call site used the constructor directly, and its own catch-all around the whole tray
+    // start turned this one missing folder into the tray never starting at all.
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow("")]
+    [DataRow("   ")]
+    public void TryCreateSkipsAndLogsRatherThanThrowingWhenTheFolderIsMissing(string? shortcutFolder)
+    {
+        var log = new CapturingLog();
+
+        NotificationRegistration? registration = NotificationRegistration.TryCreate(
+            new FakeShellLinkWriter(), log, safeMode: false, redirected: false,
+            shortcutFolder, runningExePath: @"C:\some\Earshot.exe");
+
+        Assert.IsNull(registration, "A missing Programs folder must not produce a registration to call Register() on.");
+        Assert.IsTrue(log.Has(LogLevel.Warn, NotificationRegistration.NoProgramsFolderMessage));
+    }
+
+    [TestMethod]
+    public void TryCreateBuildsARealRegistrationWhenTheFolderIsPresent()
+    {
+        NotificationRegistration? registration = NotificationRegistration.TryCreate(
+            new FakeShellLinkWriter(), new CapturingLog(), safeMode: false, redirected: false,
+            shortcutFolder: @"C:\some\folder", runningExePath: @"C:\some\Earshot.exe");
+
+        Assert.IsNotNull(registration, "A real Programs folder must still produce a usable registration.");
+        Assert.AreEqual(System.IO.Path.Combine(@"C:\some\folder", "Earshot.lnk"), registration.ShortcutPath);
+    }
+
     [TestMethod]
     public void RegistrationIsSkippedInSafeMode()
     {

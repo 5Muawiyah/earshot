@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -11,6 +12,10 @@ namespace Earshot.Tests.Widget;
 // the foreground window unchanged after ShowAt, and the click-through proof (WindowFromPoint at a pill
 // pixel is the gauge, at a pixel outside it is the window beneath). All on a private desktop
 // (CardDesktop.Run): the gauge is genuinely shown, so it must never touch the owner's real screen.
+//
+// Each real GaugeWindow constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(), so the
+// assembly-wide guard can tell these named, private-desktop executions apart from an unnoticed real
+// construction anywhere else in the suite.
 [TestClass]
 public sealed class GaugeWindowTests
 {
@@ -21,6 +26,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
             nint handle = gauge.Handle;
             long exStyle = Earshot.Tests.Phase5.TestWindows.ExtendedStyle(handle);
             const long Expected = NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_LAYERED;
@@ -35,9 +41,49 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
             nint handle = gauge.Handle;
             nint result = Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_MOUSEACTIVATE);
             Assert.AreEqual((nint)NativeMethods.MA_NOACTIVATE, result);
+        });
+    }
+
+    // WinForms' base.WndProc calls SetCapture on both button-downs; before the fix neither up handler ever
+    // released it, so the gauge kept capture after every click and a click on the card, the menu or the
+    // case-open card that followed never reached them until something else released it.
+    [TestMethod]
+    public void CaptureIsReleasedAfterALeftButtonDownAndUp()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            nint handle = gauge.Handle;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_LBUTTONDOWN);
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_LBUTTONUP);
+
+            Assert.AreEqual((nint)0, Earshot.Tests.Phase5.TestWindows.GetCapture(),
+                "GetCapture() must read 0 after a left down/up pair on the gauge.");
+        });
+    }
+
+    [TestMethod]
+    public void CaptureIsReleasedAfterARightButtonDownAndUp()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            nint handle = gauge.Handle;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_RBUTTONDOWN);
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_RBUTTONUP);
+
+            Assert.AreEqual((nint)0, Earshot.Tests.Phase5.TestWindows.GetCapture(),
+                "GetCapture() must read 0 after a right down/up pair on the gauge.");
         });
     }
 
@@ -48,14 +94,19 @@ public sealed class GaugeWindowTests
     // private desktop and does discriminate, proved below by toggling the flag under test.
     //
     // The background window is shown but never made active by any real activation primitive (not
-    // Form.Activate(), not SetActiveWindow either): a real activation transition on a private desktop in
-    // this process was found to leave the NEXT CardDesktop.Run's own desktop permanently ERROR_BUSY at
-    // CloseDesktop, regardless of which real activation primitive performs it or which desktop performs it
-    // first - reproduced with GaugeWindowTests run before ConnectCardTests' own (deliberately real)
-    // activation test, 5/5, and confirmed down to SetActiveWindow alone with no Form.Activate() and no
-    // GaugeWindow involved at all. With nothing ever really activated, GetActiveWindow() starts at 0 and
-    // must stay 0 (never the gauge's handle) after a genuinely NOACTIVATE show, which still discriminates:
-    // proved below by toggling the flag under test.
+    // Form.Activate(), not SetActiveWindow either): the cause found here was never "activation" as such but
+    // the Text Services Framework's own process-wide worker threads, which activating a window with the IME
+    // enabled starts from the activating thread, binding that thread's desktop to them for the life of the
+    // process and leaving the NEXT CardDesktop.Run's own desktop permanently ERROR_BUSY at CloseDesktop
+    // (CardDesktopTextServicesTests has the full account and the two Microsoft doc URLs) - reproduced with
+    // GaugeWindowTests run before ConnectCardTests' own (deliberately real) activation test, 5/5, and
+    // confirmed down to SetActiveWindow alone with no Form.Activate() and no GaugeWindow involved at all:
+    // what mattered was the IME being enabled on the activating thread, not which activation primitive ran
+    // or which desktop went first. CardDesktop.Run's own thread now disables its IME before its first
+    // window for exactly this reason, but this test still never activates anything for real, so a change to
+    // that thread-level fix cannot silently bring the failure back here. With nothing ever really activated,
+    // GetActiveWindow() starts at 0 and must stay 0 (never the gauge's handle) after a genuinely NOACTIVATE
+    // show, which still discriminates: proved below by toggling the flag under test.
     [TestMethod]
     public void ShowAtDoesNotChangeTheActiveWindowAndRendersAVisibleBitmap()
     {
@@ -78,6 +129,7 @@ public sealed class GaugeWindowTests
 
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
             var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
@@ -108,6 +160,33 @@ public sealed class GaugeWindowTests
         });
     }
 
+    // Before the fix, HideWindow's own SetWindowPos result was discarded outright: a real failure (the
+    // window handle already gone, say) left nothing in the log to explain why the gauge never actually
+    // disappeared. Proved here the same way AppBarRegistrationTests proves ABM_REMOVE's own outcome now
+    // reaches the log: a real ShowAt then HideWindow, both against the real window, with the log checked
+    // for the line HideWindow's own SetWindowPos step must now leave behind.
+    [TestMethod]
+    public void HideWindowRecordsItsOwnOutcomeInTheLog()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+
+            Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
+            Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
+            Application.DoEvents();
+
+            gauge.HideWindow();
+
+            Assert.IsTrue(log.Has(LogLevel.Debug, "Gauge: set-window-pos:hide-gauge"),
+                "HideWindow's own SetWindowPos outcome must reach the log: " +
+                string.Join(" | ", log.Entries.Select(e => e.Level + ":" + e.Message)));
+        });
+    }
+
     // A drag that started outside the window and released inside it delivers WM_LBUTTONUP with no
     // preceding WM_LBUTTONDOWN on this window: it must not be counted as a click.
     [TestMethod]
@@ -117,6 +196,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
             nint handle = gauge.Handle;
             bool clicked = false;
             gauge.LeftClicked += (_, _) => clicked = true;
@@ -134,6 +214,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
             nint handle = gauge.Handle;
             bool clicked = false;
             gauge.LeftClicked += (_, _) => clicked = true;
@@ -158,6 +239,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
             var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);

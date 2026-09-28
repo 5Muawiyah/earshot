@@ -249,10 +249,14 @@ internal static partial class Program
 
                 // Run once at tray start, idempotent: writes or repairs the per-user Start menu shortcut the
                 // toast route needs. Never in safe mode or against a redirected data root (WritesBlocked).
-                var notificationRegistration = new NotificationRegistration(
+                // TryCreate, not the constructor directly: GetFolderPath returns an empty string rather than
+                // throwing when the Programs folder does not exist, and a missing shortcut folder must not
+                // stop the tray starting any more than SetCurrentProcessExplicitAppUserModelID's own failure
+                // above does.
+                NotificationRegistration.TryCreate(
                     new RealShellLinkWriter(), log, paths.IsSafeMode, paths.IsRedirected,
-                    Environment.GetFolderPath(Environment.SpecialFolder.Programs), Environment.ProcessPath, paths.InstalledExe);
-                notificationRegistration.Register();
+                    Environment.GetFolderPath(Environment.SpecialFolder.Programs), Environment.ProcessPath, paths.InstalledExe)
+                    ?.Register();
 
                 context = new TrayContext(registry, coordinator, new TrayStartOptions(
                     FirstRun: settings.LastLoadStatus == SettingsLoadStatus.CreatedDefaults,

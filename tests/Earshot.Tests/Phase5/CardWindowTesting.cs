@@ -427,6 +427,7 @@ internal static class TestWindows
     public const int WM_LBUTTONUP = 0x0202;
     public const int WM_RBUTTONDOWN = 0x0204;
     public const int WM_RBUTTONUP = 0x0205;
+    public const int WM_MBUTTONUP = 0x0208;
 
     public static long ExtendedStyle(nint hwnd) => GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 
@@ -461,4 +462,10 @@ internal static class TestWindows
     [DllImport("user32.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern nint SendMessageW(nint hWnd, uint msg, nint wParam, nint lParam);
+
+    // The window that currently holds mouse capture, or 0 when none does.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcapture
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    public static extern nint GetCapture();
 }

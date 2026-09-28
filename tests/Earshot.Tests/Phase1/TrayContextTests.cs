@@ -8,6 +8,8 @@ using Earshot.Infra;
 using Earshot.Tray;
 using Earshot.Tests.Hotkeys;
 using Earshot.Tests.Integration.Coordinator;
+using Earshot.Tests.Widget;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
 
@@ -1423,16 +1425,29 @@ internal sealed class TrayHarness : IDisposable
             s.PinnedAddress = AirPodsAddress;
             // The widget defaults to off here, unlike EarshotSettings.Default: WireWidget calls
             // CompositionRoot.BuildWidget unconditionally from the TrayContext constructor, and with the
-            // widget on that builds a real BLE watcher, a real UI Automation taskbar reader and (once a
-            // layout places it) a real topmost gauge window. A harness-built TrayContext is not a named
-            // live test, so it stays off unless a test asks for it through the settings callback below,
-            // the same way a test asks for anything else non-default.
+            // watcher on that builds a real BLE watcher; ShowOnTaskbar on top of that would also build a real
+            // UI Automation taskbar reader and (once a layout places it) a real topmost gauge window. A
+            // harness-built TrayContext is not a named live test, so every one of the four consumers Enabled
+            // is the OR of (WidgetSettings.WithWatcherRecomputed: ShowOnTaskbar, LowBatteryAlert,
+            // CaseOpenCard, AutoPause) stays off here, unlike WidgetSettings.Default where all four default
+            // to true, unless a test asks for one through the settings callback below - otherwise a test
+            // that only meant to turn the gauge on, say, would find the watcher already running (and
+            // Enabled already true) because the low battery alert or auto-pause was still on by default,
+            // and a later "turn it back off" would find Enabled staying true for the same reason.
             //
             // LeftClickConnects defaults to true here, unlike WidgetSettings.Default (false): almost every
             // test in this file drives a connect or disconnect through a tray icon left click, a behaviour
             // that is now conditional on this setting (OnIconMouseClick). A test of the card-instead-of-
             // toggle behaviour itself sets it back to false through the settings callback below.
-            s.Widget = s.Widget with { Enabled = false, LeftClickConnects = true };
+            s.Widget = s.Widget with
+            {
+                Enabled = false,
+                ShowOnTaskbar = false,
+                LowBatteryAlert = false,
+                CaseOpenCard = false,
+                AutoPause = false,
+                LeftClickConnects = true,
+            };
             settings?.Invoke(s);
         });
 
@@ -1472,6 +1487,22 @@ internal sealed class TrayHarness : IDisposable
             // The same clock as the coordinator's by default, so a hand-back test can drive both with one
             // Advance; a test that wants HoldReply to pump against real time can pass TimeProvider.System.
             Time = time ?? Time,
+            // Fakes, never the real WinRtAdvertisementSource, UiaTaskbarReader or the real NotifyIcon (through
+            // GaugeController's own ITrayIconVisibility): a widget-enabled TrayContext test must never start a
+            // real Bluetooth watcher, poll the real taskbar with UI Automation, or make the real tray icon
+            // visible - GaugeController.TransitionOff/TransitionHiddenNoLog do that unconditionally by design,
+            // which would otherwise override ShowIcon=false (WidgetRealSurfaceGuardTests). TaskbarReaderFactoryCalls
+            // counts the factory's own invocations, the fake-backed replacement for the old
+            // UiaTaskbarReader.ConstructionCount proof of a rebuild.
+            AdvertisementSourceFactory = () => new FakeAdvertisementSource(),
+            TaskbarReaderFactory = () =>
+            {
+                TaskbarReaderFactoryCalls++;
+                var reader = new FakeTaskbarReader();
+                LastTaskbarReader = reader;
+                return reader;
+            },
+            TrayIconVisibilityFactory = () => new FakeTrayIcon(),
         };
         if (handBackBudget is { } hb)
         {
@@ -1532,6 +1563,15 @@ internal sealed class TrayHarness : IDisposable
 
     // How many times the tray asked for a streaming platform. None, while Play from a phone is off.
     public int StreamingPlatformsBuilt { get; private set; }
+
+    // How many times the tray asked for a widget taskbar reader: the fake-backed replacement for
+    // UiaTaskbarReader.ConstructionCount, which a widget-enabled TrayContext test must never touch for real.
+    public int TaskbarReaderFactoryCalls { get; private set; }
+
+    // The most recently built fake taskbar reader, so a test can feed it a real layout and force a fresh
+    // read to pick it up (Poke, through any settings change ApplyWidget reacts to), rather than being stuck
+    // with the constructor-time default of Fail(NoTaskbar) for the whole test.
+    public FakeTaskbarReader? LastTaskbarReader { get; private set; }
 
     public ServiceRegistry Registry { get; }
 

@@ -16,6 +16,25 @@ namespace Earshot;
 // Activate(), so nothing ever reaches the input desktop). Safe under EARSHOT_SAFE_MODE=1 with
 // EARSHOT_DATA_ROOT pointed at a temp folder: the card's own log writes land under that redirected folder
 // too, the same FileLog(Paths.Current.LogFolder) every other probe target already uses.
+//
+// Every fixture rendered here is synthetic: the battery percentages, the read time and the where-state are
+// all made up for layout purposes, not read from a device. In particular, the left and right bud
+// percentages (70% and 60%) are values production cannot actually produce yet: ProximityDecodeTable.Current
+// ships Unproved until a live capture proves the bud nibble order, so a real snapshot's Left.Percent and
+// Right.Percent are always null today (WidgetCopy.Percent(null), "No reading") - only the case nibble
+// decodes without that table. These captures preview the finished layout ahead of that proof, not a claim
+// about what the widget currently shows on the owner's own hardware.
+//
+// The card is drawn on an unshown Form, so DwmExtendFrameIntoClientArea's translucent Mica backdrop is
+// never actually composited by the desktop: WidgetCard.OnPaint clears to fully transparent whenever
+// _dwmBackdropOk reads true regardless, which it does even off-screen, and DrawToBitmap's own GDI-backed
+// paint bakes that straight to opaque black with no alpha left to recover afterwards (filling the
+// destination bitmap first, or compositing onto it after, both still come back opaque black: DrawToBitmap
+// overwrites the whole client area itself). RenderProbeWidgetCard below instead sets the card's own
+// OverrideBackgroundForCaptureOnly before calling Render, so OnPaint clears to a solid colour directly, in
+// the same colour DWM's own transient material measures at (measured locally, not a citation): #545454 for
+// the dark theme, #D3D3D3 for the light one, so a light-theme capture is not just pale content on what
+// would otherwise be an opaque black square.
 internal static partial class Program
 {
     internal static readonly IReadOnlyList<uint> ProbeWidgetDpis = [96, 120, 144];
@@ -25,6 +44,13 @@ internal static partial class Program
         ("dark-taskbar-white-ink", Color.White),
         ("light-taskbar-black-ink", Color.Black),
     ];
+
+    // The transient material colour DWM actually measures at, sampled locally rather than assumed: dark
+    // theme's Mica/Acrylic backdrop reads #545454, light theme's reads #D3D3D3. Used only to give an
+    // offscreen, never-composited card capture a readable, theme-appropriate background; never drawn by
+    // the real, on-screen card, which gets the real translucent backdrop DWM itself composites.
+    internal static readonly Color DarkThemeBackdrop = Color.FromArgb(0x54, 0x54, 0x54);
+    internal static readonly Color LightThemeBackdrop = Color.FromArgb(0xD3, 0xD3, 0xD3);
 
     internal sealed record ProbeWidgetFile(string Snapshot, uint Dpi, string Ink, string Path, int Bytes, string? Problem);
 
@@ -118,9 +144,9 @@ internal static partial class Program
             }
         }
 
-        // spec 7.6: the case-open card's Where line always reads "Case open" regardless of the snapshot's
-        // Where, so which fixture backs it barely matters; the "this-pc" card model (already built above)
-        // is reused rather than building a second one.
+        // WidgetCard always overrides the Where line to "Case open" for a notice-mode instance regardless
+        // of what the model's own snapshot says, so which fixture backs it barely matters; the "this-pc"
+        // card model (already built above) is reused rather than building a second one.
         (string noticeVariant, WidgetCardModel noticeModel) = cardVariants[0];
         foreach (uint dpi in ProbeWidgetDpis)
         {
@@ -187,6 +213,13 @@ internal static partial class Program
         {
             using var card = new WidgetCard(log, notice);
             card.SetTheme(ink, highContrast: false);
+            // The card is never actually composited by DWM here (the Form is never shown), so its own
+            // translucent-backdrop clear leaves nothing for DrawToBitmap to capture but opaque black
+            // (Control.DrawToBitmap cannot preserve real per-pixel alpha; GDI's own text and fill calls
+            // force it to 255 as they go). Overriding the clear colour outright, to the measured transient
+            // material DWM's own backdrop actually reads at, is what a probe capture needs instead.
+            bool dark = ink.GetBrightness() >= 0.5f;
+            card.OverrideBackgroundForCaptureOnly = dark ? DarkThemeBackdrop : LightThemeBackdrop;
             card.Render(model, (int)dpi);
 
             Size size = card.ClientSize;

@@ -69,6 +69,26 @@ internal sealed record TrayStartOptions(
     // Called from ApplyStreaming only when settings ask for the feature, which by default they do not.
     public Func<ILog, IStreamingPlatform> StreamingPlatformFactory { get; init; } = static log => new WindowsStreamingPlatform(log);
 
+    // Builds the widget's BLE advertisement source, passed straight through to CompositionRoot.BuildWidget.
+    // Null (the default) means "let BuildWidget use its own real default", the same convention
+    // SetWidgetLifecycleForTest already uses for the widget's other test seams: a widget-enabled tray-level
+    // test must inject a fake here (TrayHarness does, by default) or it starts a real Bluetooth watcher the
+    // moment WireWidget runs.
+    public Func<IAdvertisementSource>? AdvertisementSourceFactory { get; init; }
+
+    // Builds the widget's taskbar reader, injected the same way as the two factories above: the real one
+    // (UiaTaskbarReader) by default, a fake in tests, so a widget-enabled tray-level test never polls the
+    // owner's real taskbar with UI Automation and never reaches a real GaugeWindow or the real tray icon
+    // through it.
+    public Func<ITaskbarReader> TaskbarReaderFactory { get; init; } = static () => new UiaTaskbarReader();
+
+    // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
+    // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
+    // widget-enabled tray-level test injects a fake instead, so GaugeController's own fallback logic
+    // (TransitionOff and TransitionHiddenNoLog both set Visible=true unconditionally, by design) never makes
+    // the real tray icon visible, overriding ShowIcon=false.
+    public Func<ITrayIconVisibility>? TrayIconVisibilityFactory { get; init; }
+
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
 
@@ -307,6 +327,9 @@ internal sealed partial class TrayContext : ApplicationContext
         _hotkeys.Activated += OnHotkeyActivated;
         _voiceEngineFactory = options.VoiceEngineFactory;
         _streamingPlatformFactory = options.StreamingPlatformFactory;
+        _advertisementSourceFactory = options.AdvertisementSourceFactory;
+        _taskbarReaderFactory = options.TaskbarReaderFactory;
+        _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;
@@ -1785,6 +1808,14 @@ internal sealed partial class TrayContext : ApplicationContext
 
         RefreshIcon(remeasure: forceIcon, force: forceIcon);
 
+        // The widget card's own Connect/Disconnect button reads the same IsBusy this method is called
+        // beside every change of (StartToggle's own set-true and its finally's set-false, both followed by
+        // a call here): without this, a card already open when a connect or disconnect started anywhere
+        // (the tray icon, the menu, a hotkey, not just the card's own button) kept showing the button it
+        // last rendered until the next IWidgetStatus.Changed happened to arrive. Refresh is a no-op when no
+        // card is open.
+        _widgetCardPresenter?.Refresh();
+
         // The tray's own busy flags change only beside a call to this method, and the block coordinator's Changed
         // event ends here too, so this is where the copy of the busy state that the streaming coordinator reads is
         // refreshed. It is a copy: written here on the UI thread, read later on a pool thread, and so possibly a
@@ -2021,8 +2052,9 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         CardPlace place = ClickPlace();
-        bool enabled = !_registry.Settings.Current.Widget.Enabled;
-        TryUpdateSettings("show on the taskbar", s => s.Widget = s.Widget with { Enabled = enabled }, place);
+        bool showOnTaskbar = !_registry.Settings.Current.Widget.ShowOnTaskbar;
+        TryUpdateSettings("show on the taskbar",
+            s => s.Widget = (s.Widget with { ShowOnTaskbar = showOnTaskbar }).WithWatcherRecomputed(), place);
     }
 
     private void OnLeftClickConnectsClicked()
@@ -2046,7 +2078,8 @@ internal sealed partial class TrayContext : ApplicationContext
 
         CardPlace place = ClickPlace();
         bool caseOpenCard = !_registry.Settings.Current.Widget.CaseOpenCard;
-        TryUpdateSettings("card when the case opens", s => s.Widget = s.Widget with { CaseOpenCard = caseOpenCard }, place);
+        TryUpdateSettings("card when the case opens",
+            s => s.Widget = (s.Widget with { CaseOpenCard = caseOpenCard }).WithWatcherRecomputed(), place);
     }
 
     private void OnLowBatteryAlertClicked()
@@ -2058,7 +2091,8 @@ internal sealed partial class TrayContext : ApplicationContext
 
         CardPlace place = ClickPlace();
         bool lowBatteryAlert = !_registry.Settings.Current.Widget.LowBatteryAlert;
-        TryUpdateSettings("low battery alert", s => s.Widget = s.Widget with { LowBatteryAlert = lowBatteryAlert }, place);
+        TryUpdateSettings("low battery alert",
+            s => s.Widget = (s.Widget with { LowBatteryAlert = lowBatteryAlert }).WithWatcherRecomputed(), place);
     }
 
     // A submenu entry sets the threshold outright, rather than toggling it. MenuModel disables every entry

@@ -85,6 +85,7 @@ internal sealed class JsonSettingsStore : ISettingsStore
         lock (_gate)
         {
             LoadLocked();
+            ClampWidgetLocked();
         }
     }
 
@@ -141,6 +142,12 @@ internal sealed class JsonSettingsStore : ISettingsStore
 
             EarshotSettings next = Clone(_current);
             mutate(next);
+            next.Widget = next.Widget.Clamped(out IReadOnlyList<StepOutcome> widgetNotes);
+            foreach (StepOutcome note in widgetNotes)
+            {
+                _log.Write(LogLevel.Debug, "Widget " + note.Step + ": " + note.Detail);
+            }
+
             string? problem = Validate(next);
             if (problem is not null)
             {
@@ -190,6 +197,24 @@ internal sealed class JsonSettingsStore : ISettingsStore
             _current = before;
             _log.Warn("Settings still cannot be read or moved aside, so the values already in memory are kept: " + FilePath);
         }
+
+        ClampWidgetLocked();
+    }
+
+    // Widget settings a stale or hand-edited settings.json could carry (control characters, a bidi
+    // override, an unbounded label, a threshold off the menu's own list) must never reach the card or the
+    // watcher: clamped here, in memory, right after every load, and again in Update below before every
+    // save, so the file itself is corrected the next time anything is saved even though a load alone does
+    // not force a write.
+    private void ClampWidgetLocked()
+    {
+        Earshot.Widget.WidgetSettings clamped = _current.Widget.Clamped(out IReadOnlyList<StepOutcome> notes);
+        foreach (StepOutcome note in notes)
+        {
+            _log.Write(LogLevel.Debug, "Widget " + note.Step + ": " + note.Detail);
+        }
+
+        _current.Widget = clamped;
     }
 
     // Returns why the settings cannot be used, or null when they can.

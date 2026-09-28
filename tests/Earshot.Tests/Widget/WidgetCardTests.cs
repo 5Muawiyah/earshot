@@ -16,8 +16,25 @@ public sealed class WidgetCardTests
 {
     private const int WM_KEYDOWN = 0x0100;
 
+    // Control.AccessibleName's own default falls back to Text, which is only ever "Earshot" (TrayStatus.
+    // AppName): a screen reader could not tell this card apart from the gauge, the tray icon or any other
+    // Earshot window by name alone. The ordinary card and the case-open notice get their own distinct names.
     [TestMethod]
-    public void ANullPercentDrawsTheGlyphOnlyNoBarAndNoDigits()
+    public void TheOrdinaryCardAndTheNoticeCardHaveTheirOwnDistinctAccessibleNames()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var ordinary = new WidgetCard(new CapturingLog());
+            using var notice = new WidgetCard(new CapturingLog(), notice: true);
+
+            Assert.AreEqual("Earshot: AirPods", ordinary.AccessibleName);
+            Assert.AreEqual("Earshot: " + WidgetCopy.CaseOpen, notice.AccessibleName);
+            Assert.AreNotEqual(ordinary.AccessibleName, notice.AccessibleName);
+        });
+    }
+
+    [TestMethod]
+    public void ANullPercentDrawsTheGlyphAndNoReadingNeverABarOrDigits()
     {
         Phase5.CardSta.Run(() =>
         {
@@ -29,8 +46,82 @@ public sealed class WidgetCardTests
             WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
             Color background = bitmap.GetPixel(0, 0);
             Assert.IsFalse(HasInk(bitmap, layout.Left.Bar, background), "No bar for a null percent.");
-            Assert.IsFalse(HasInk(bitmap, layout.Left.Percent, background), "No percent text for a null percent.");
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Percent, background), "\"No reading\" takes the percent line's own place.");
             Assert.IsTrue(HasInk(bitmap, layout.Left.Glyph, background), "The glyph itself is still drawn.");
+        });
+    }
+
+    // The head (an ellipse) and the stem (a rounded rectangle) overlap where the stem meets the head:
+    // FillMode.Alternate (the GraphicsPath default) XORs that overlap into a hole instead of filling it
+    // solid, which FillMode.Winding fixes.
+    [TestMethod]
+    public void TheBudGlyphHasNoHoleWhereTheHeadAndStemMeet()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            using Bitmap bitmap = Render(card);
+
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            Rectangle bounds = layout.Left.Glyph;
+            float headSize = bounds.Width * 0.6f;
+            float stemCentreX = bounds.X + (headSize * 0.70f); // BudGlyphPath's own formula, mirror: false
+            int x = (int)Math.Round(stemCentreX);
+            int y = (int)Math.Round(bounds.Y + (headSize * 0.60f)); // just inside the head, at the stem's own top
+
+            Color background = bitmap.GetPixel(0, 0);
+            Color pixel = bitmap.GetPixel(x, y);
+            Assert.AreNotEqual(background, pixel, "The head/stem junction must be filled solid, not a hole.");
+        });
+    }
+
+    // The same light-mode blue the dark theme uses reads as too pale against a light background: light mode
+    // gets a darker accent than dark mode, matching the mockup (#005FB8 against #3A96DD).
+    [TestMethod]
+    public void TheConnectButtonUsesADarkerAccentInLightModeThanInDarkMode()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            // One button-height in from the left edge (past the rounded cap) and clear of the centred
+            // "Connect" text, so this samples the fill colour rather than the white text drawn over it.
+            Point centre = new(layout.Button.X + layout.Button.Height, layout.Button.Y + (layout.Button.Height / 2));
+
+            using var lightCard = new WidgetCard(new CapturingLog());
+            lightCard.SetTheme(Color.Black, highContrast: false); // dark ink => light background
+            lightCard.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            using Bitmap lightBitmap = Render(lightCard);
+
+            using var darkCard = new WidgetCard(new CapturingLog());
+            darkCard.SetTheme(Color.White, highContrast: false); // light ink => dark background
+            darkCard.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            using Bitmap darkBitmap = Render(darkCard);
+
+            Assert.AreEqual(WidgetCard.AccentLight, lightBitmap.GetPixel(centre.X, centre.Y), "Light mode must use the darker accent.");
+            Assert.AreEqual(WidgetCard.AccentDark, darkBitmap.GetPixel(centre.X, centre.Y), "Dark mode must use the lighter accent.");
+            Assert.AreNotEqual(WidgetCard.AccentLight, WidgetCard.AccentDark, "Sanity: the two accents must actually differ.");
+        });
+    }
+
+    // L, R and Case labels above the three columns, matching the mockup: WidgetCardLayoutTests proves the
+    // layout puts Label above Glyph; this proves something is actually painted there.
+    [TestMethod]
+    public void TheThreeColumnsEachShowTheirOwnLabel()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            using Bitmap bitmap = Render(card);
+
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            Color background = bitmap.GetPixel(0, 0);
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Label, background), "The L label must be drawn.");
+            Assert.IsTrue(HasInk(bitmap, layout.Right.Label, background), "The R label must be drawn.");
+            Assert.IsTrue(HasInk(bitmap, layout.Case.Label, background), "The Case label must be drawn.");
         });
     }
 
@@ -278,6 +369,68 @@ public sealed class WidgetCardTests
 
             Assert.AreEqual(1, toggles);
             Assert.IsFalse(card.Visible, "Pressing Connect/Disconnect closes the card.");
+        });
+    }
+
+    // OnMouseUp used to raise ToggleRequested for any button's up over Connect with no matching press on
+    // the card at all - a drag that started elsewhere and released there, or a right or middle click, none
+    // of them a genuine left click. This plants each of those shapes and requires none of them to activate
+    // the button.
+    [TestMethod]
+    [DataRow(MouseButtons.Right)]
+    [DataRow(MouseButtons.Middle)]
+    public void AnUpFromAnyButtonOtherThanLeftNeverActivatesTheButton(MouseButtons button)
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            int toggles = 0;
+            card.ToggleRequested += (_, _) => toggles++;
+
+            Rectangle buttonRect = WidgetCardLayout.Compute(96, showSwitch: false).Button;
+            Point centre = new(buttonRect.X + (buttonRect.Width / 2), buttonRect.Y + (buttonRect.Height / 2));
+            int message = button switch
+            {
+                MouseButtons.Right => Phase5.TestWindows.WM_RBUTTONUP,
+                MouseButtons.Middle => Phase5.TestWindows.WM_MBUTTONUP,
+                _ => throw new ArgumentOutOfRangeException(nameof(button)),
+            };
+            Phase5.TestWindows.Send(card.Handle, message, 0, MakeLParam(centre.X, centre.Y));
+
+            Assert.AreEqual(0, toggles, button + " up alone must never activate the Connect button.");
+        });
+    }
+
+    // A left up over the button with no preceding left down on it (a drag that started elsewhere and
+    // released over the button) must not activate it either.
+    [TestMethod]
+    public void ALeftUpWithNoMatchingLeftDownNeverActivatesTheButton()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            int toggles = 0;
+            card.ToggleRequested += (_, _) => toggles++;
+
+            Rectangle buttonRect = WidgetCardLayout.Compute(96, showSwitch: false).Button;
+            Point centre = new(buttonRect.X + (buttonRect.Width / 2), buttonRect.Y + (buttonRect.Height / 2));
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(centre.X, centre.Y));
+
+            Assert.AreEqual(0, toggles, "A left up with no matching left down must never activate the Connect button.");
         });
     }
 

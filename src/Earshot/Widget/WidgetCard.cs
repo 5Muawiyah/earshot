@@ -39,9 +39,9 @@ internal sealed record WidgetCardModel(
 
 // The dedicated three-column card: Left, Right, Case battery, where the AirPods are, when the battery was
 // last read, and a Connect/Disconnect button, plus the auto-pause switch when the snapshot says it is
-// available. Built for the gauge's left click with LeftClickConnects off (the default). See the report on
-// TrayContext.Widget.OnWidgetCardRequested for why an earlier pass reused ConnectCard/CardPresenter (a
-// one-line card) instead of this.
+// available. Built for the gauge's left click with LeftClickConnects off (the default): ConnectCard/
+// CardPresenter, the tray's existing one-line card, has no room for three battery columns, a where-line and
+// an auto-pause switch together, so the gauge gets its own card rather than reusing that one.
 //
 // Owner-painted, no child controls, one Form: OnPaintBackground is empty, OnPaint starts with
 // Graphics.Clear and draws everything else with GDI+ FillPath/DrawString, never TextRenderer: GDI text
@@ -65,8 +65,12 @@ internal sealed record WidgetCardModel(
 internal sealed class WidgetCard : Form
 {
     // Design choice, not a measurement: a system-ish accent for the Connect state, not a read of any
-    // Windows API or system accent colour.
-    internal static readonly Color AccentBlue = Color.FromArgb(0x60, 0xCD, 0xFF);
+    // Windows API or system accent colour. Darker in light mode, lighter in dark mode, matching the
+    // mockup: the same light-mode blue the dark theme uses reads as too pale against a light background.
+    // The text drawn over either fill is white in both themes (AccentInk).
+    internal static readonly Color AccentLight = Color.FromArgb(0x00, 0x5F, 0xB8);
+    internal static readonly Color AccentDark = Color.FromArgb(0x3A, 0x96, 0xDD);
+    internal static readonly Color AccentInk = Color.White;
 
     private readonly ILog _log;
     private readonly bool _notice;
@@ -79,6 +83,8 @@ internal sealed class WidgetCard : Form
     private bool _cornersApplied;
     private WidgetCardFocus _focus = WidgetCardFocus.Button;
     private string? _lastFrameProblem;
+    private bool _leftButtonDownOnButton;
+    private bool _leftButtonDownOnSwitch;
 
     public WidgetCard(ILog log, bool notice = false)
     {
@@ -92,6 +98,12 @@ internal sealed class WidgetCard : Form
         }
 
         Text = TrayStatus.AppName;
+        // AccessibleName was never set (null, confirmed by reading it directly rather than assuming a
+        // fallback to Text): a screen reader had nothing here to tell this card apart from the gauge, the
+        // tray icon or any other Earshot window. GaugeWindow already sets its own explicit name for the
+        // same reason; this card gets one that also tells the ordinary card and the case-open notice apart.
+        AccessibleName = TrayStatus.AppName + ": " + (notice ? WidgetCopy.CaseOpen : "AirPods");
+        AccessibleRole = AccessibleRole.Window;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
@@ -137,12 +149,21 @@ internal sealed class WidgetCard : Form
     internal WidgetCardFocus FocusTarget => _focus;
 
     // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for a
-    // notice-mode instance regardless of what the model's own Snapshot.Where says (spec 7.6). For tests.
+    // notice-mode instance regardless of what the model's own Snapshot.Where says. For tests.
     internal string WhereLineText => _notice ? WidgetCopy.CaseOpen : WidgetCopy.Where(_model.Snapshot.Where, _model.OtherDeviceLabel);
 
     // True once DWM accepted the translucent backdrop and DwmExtendFrameIntoClientArea for this window's
     // life; false means the opaque palette paint is used instead.
     internal bool HasTranslucentBackdrop => _dwmBackdropOk;
+
+    // Set only by the probe widget capture path: DWM's own translucent backdrop is never actually
+    // composited for a Form that is never shown, and Control.DrawToBitmap cannot recover or preserve real
+    // per-pixel alpha from OnPaint's own transparent clear (it bakes straight to opaque black, GDI's own
+    // text and fill calls forcing alpha to 255 as they go). Overriding the clear colour outright, before
+    // any capture, is the only way a probe image ends up with a deliberate, readable background instead.
+    // Never set in the running tray: HasTranslucentBackdrop still reports what DWM itself did.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Color? OverrideBackgroundForCaptureOnly { get; set; }
 
     // True once DWMWA_WINDOW_CORNER_PREFERENCE succeeded for this window. False either because the OS is
     // below build 22000 (never asked) or because DWM refused it.
@@ -230,9 +251,9 @@ internal sealed class WidgetCard : Form
         ArgumentNullException.ThrowIfNull(e);
         if (_notice)
         {
-            // Spec 7.6: "No focus, no focus rectangle, keyboard does nothing (nothing has focus)." A
-            // notice-mode card is never activated, so it should never receive a key in practice; this
-            // guard makes that true even if a key event ever reached it regardless.
+            // No focus, no focus rectangle, keyboard does nothing: a notice-mode card is never activated
+            // (WS_EX_NOACTIVATE), so it should never receive a key in practice; this guard makes that true
+            // even if a key event ever reached it regardless.
             return;
         }
 
@@ -256,25 +277,47 @@ internal sealed class WidgetCard : Form
         base.OnKeyDown(e);
     }
 
+    // Tracks where a left button-down landed, so OnMouseUp below can require the up to land on the same
+    // control before it activates anything: any other button (right, middle) never sets either flag, so
+    // its own up can never activate the button or the switch either.
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        ArgumentNullException.ThrowIfNull(e);
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
+        _leftButtonDownOnButton = e.Button == MouseButtons.Left && layout.Button.Contains(e.Location);
+        _leftButtonDownOnSwitch = e.Button == MouseButtons.Left && layout.ShowSwitch && layout.Switch.Contains(e.Location);
+    }
+
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         ArgumentNullException.ThrowIfNull(e);
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
-        if (layout.Button.Contains(e.Location))
+
+        // A left up activates a control only when the matching left down already landed on that same
+        // control: a drag that started outside the button or the switch and released inside it, or any
+        // up from a button other than left (right, middle), must not count as pressing it, the same rule
+        // GaugeWindow's own left-click handling already applies.
+        bool activatesButton = e.Button == MouseButtons.Left && _leftButtonDownOnButton && layout.Button.Contains(e.Location);
+        bool activatesSwitch = e.Button == MouseButtons.Left && _leftButtonDownOnSwitch && layout.ShowSwitch && layout.Switch.Contains(e.Location);
+        _leftButtonDownOnButton = false;
+        _leftButtonDownOnSwitch = false;
+
+        if (activatesButton)
         {
             _focus = WidgetCardFocus.Button;
             ActivateFocused();
         }
-        else if (layout.ShowSwitch && layout.Switch.Contains(e.Location))
+        else if (activatesSwitch)
         {
             _focus = WidgetCardFocus.Switch;
             ActivateFocused();
         }
         else if (_notice)
         {
-            // Spec 7.6: "dismissed by a click outside the two buttons." Only reachable in notice mode: the
-            // normal card already closes on deactivation for a click anywhere else.
+            // A notice-mode card is dismissed by a click outside the two buttons: only reachable in notice
+            // mode, since the normal card already closes on deactivation for a click anywhere else.
             RequestClose(WidgetCardCloseReason.ClickOutside);
         }
     }
@@ -290,9 +333,12 @@ internal sealed class WidgetCard : Form
         Graphics g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        g.Clear(_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background);
+        g.Clear(OverrideBackgroundForCaptureOnly ?? (_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background));
 
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
+        DrawColumnLabel(g, layout.Left.Label, WidgetCopy.LeftLabel);
+        DrawColumnLabel(g, layout.Right.Label, WidgetCopy.RightLabel);
+        DrawColumnLabel(g, layout.Case.Label, WidgetCopy.CaseLabel);
         DrawEarbudColumn(g, layout.Left, _model.Snapshot.Left, mirror: false);
         DrawEarbudColumn(g, layout.Right, _model.Snapshot.Right, mirror: true);
         DrawCaseColumn(g, layout.Case, _model.Snapshot.Case);
@@ -417,12 +463,15 @@ internal sealed class WidgetCard : Form
 
     // A single earbud (a round head over a short stem) in bounds, mirrored horizontally for the right ear.
     // Adapted from the head/stem proportions Icon\EarbudGlyph.cs uses for the tray icon's pair; here one bud
-    // is filled directly with GDI+ FillPath, matching 7.3's painting model, rather than composited through
-    // EarbudGlyph's alpha buffer (built for the layered gauge's UpdateLayeredWindow, not an owner-painted
-    // Form).
+    // is filled directly with GDI+ FillPath, matching this card's own owner-painted model (OnPaint fills
+    // the whole client area itself), rather than composited through EarbudGlyph's alpha buffer (built for
+    // the layered gauge's UpdateLayeredWindow, not an owner-painted Form).
     private static GraphicsPath BudGlyphPath(Rectangle bounds, bool mirror)
     {
-        var path = new GraphicsPath();
+        // Winding, not the default Alternate: the head (an ellipse) and the stem (a rounded rectangle)
+        // overlap where the stem meets the head, and Alternate XORs that overlap into a hole instead of
+        // filling it solid.
+        var path = new GraphicsPath { FillMode = FillMode.Winding };
         float w = bounds.Width;
         float h = bounds.Height;
         float headSize = w * 0.6f;
@@ -479,6 +528,15 @@ internal sealed class WidgetCard : Form
         path.CloseFigure();
     }
 
+    // "L", "R" or "Case" above the glyph, centred, in the same status ink the where/read lines use.
+    private void DrawColumnLabel(Graphics g, Rectangle bounds, string text)
+    {
+        using var font = new Font(_fontFamily, bounds.Height * 0.75f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(_palette.Status);
+        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near };
+        g.DrawString(text, font, brush, bounds, format);
+    }
+
     private void DrawEarbudColumn(Graphics g, WidgetCardLayout.ColumnLayout column, PartReading part, bool mirror)
     {
         using GraphicsPath glyph = BudGlyphPath(column.Glyph, mirror);
@@ -509,13 +567,14 @@ internal sealed class WidgetCard : Form
         DrawBatteryPart(g, column, part);
     }
 
-    // The bar, percent text and charging bolt: absent entirely (not even the percent text) when Percent is
-    // null, so the column shows the glyph only. No dash, no placeholder number ever stands in for a
-    // reading that was never taken.
+    // The bar and the charging bolt are absent entirely when Percent is null: there is nothing to show a
+    // bar or a bolt for. The words "No reading" take the percent line's own place instead (the owner's own
+    // instruction): never a number, never a dash standing in for a reading that was never taken.
     private void DrawBatteryPart(Graphics g, WidgetCardLayout.ColumnLayout column, PartReading part)
     {
         if (part.Percent is not { } percent)
         {
+            DrawLine(g, column.Percent, WidgetCopy.Percent(null), _palette.Status);
             return;
         }
 
@@ -584,14 +643,14 @@ internal sealed class WidgetCard : Form
     {
         bool connect = _model.ConnectIntent;
         Color fill = connect
-            ? AccentBlue
+            ? (_dark ? AccentDark : AccentLight)
             : (_dark ? Color.FromArgb(0x3A, 0x3A, 0x3A) : Color.FromArgb(0xE4, 0xE4, 0xE4));
         if (!_model.ButtonEnabled)
         {
             fill = Color.FromArgb(120, fill);
         }
 
-        Color text = connect ? Color.Black : _palette.Title;
+        Color text = connect ? AccentInk : _palette.Title;
         using var path = new GraphicsPath();
         AddRoundedRect(path, rect, rect.Height / 2f);
         using (var brush = new SolidBrush(fill))
@@ -623,7 +682,7 @@ internal sealed class WidgetCard : Form
         {
             AddRoundedRect(trackPath, track, track.Height / 2f);
             Color trackColour = _model.AutoPauseOn
-                ? AccentBlue
+                ? (_dark ? AccentDark : AccentLight)
                 : (_dark ? Color.FromArgb(0x55, 0x55, 0x55) : Color.FromArgb(0xC8, 0xC8, 0xC8));
             using var trackBrush = new SolidBrush(trackColour);
             g.FillPath(trackBrush, trackPath);

@@ -24,7 +24,13 @@ internal static partial class CompositionRoot
     // Returns the concrete service, not just IWidgetStatus: Start, Suspend, Resume and Close are not on
     // that interface (WidgetStatusService's own header explains why), and TrayContext needs them for the
     // widget's lifecycle. registry.WidgetStatus is also set, to the same instance, for the UI side.
-    internal static WidgetStatusService? BuildWidget(ServiceRegistry r, Func<BootBlockStatus?> blockStatus, TimeProvider time)
+    //
+    // advertisementSourceFactory: null (every production caller) means the real WinRtAdvertisementSource;
+    // TrayStartOptions.AdvertisementSourceFactory is how a widget-enabled tray-level test supplies a fake
+    // instead, so building the widget's data pipeline in a test never starts a real Bluetooth watcher
+    // (WidgetRealSurfaceGuardTests).
+    internal static WidgetStatusService? BuildWidget(
+        ServiceRegistry r, Func<BootBlockStatus?> blockStatus, TimeProvider time, Func<IAdvertisementSource>? advertisementSourceFactory = null)
     {
         ArgumentNullException.ThrowIfNull(r);
         ArgumentNullException.ThrowIfNull(blockStatus);
@@ -48,7 +54,7 @@ internal static partial class CompositionRoot
         // own public entry point, rather than have a caller hand them in - a caller that could, in principle,
         // hand in something else.
         var status = new WidgetStatusService(
-            static () => new WinRtAdvertisementSource(),
+            advertisementSourceFactory ?? (static () => new WinRtAdvertisementSource()),
             claimStore,
             r.Settings,
             r.Monitor,

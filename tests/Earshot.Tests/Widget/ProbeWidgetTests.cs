@@ -1,3 +1,4 @@
+using System.Drawing;
 using Earshot;
 using Earshot.Infra;
 using Earshot.Widget;
@@ -84,6 +85,37 @@ public sealed class ProbeWidgetTests
             f.Path.Contains("dark-taskbar-white-ink", StringComparison.Ordinal));
         Assert.IsTrue(cardEntry.Bytes > 0);
         Assert.IsNull(cardEntry.Problem);
+    }
+
+    // The Form behind a card capture is never shown, so DWM never actually composites its translucent
+    // backdrop onto it, and Control.DrawToBitmap cannot recover or preserve real per-pixel alpha from
+    // OnPaint's own transparent clear (GDI's own text and fill calls force it to opaque as they go): a
+    // corner pixel with no fix reads straight back as opaque black, not the intended backdrop. Reading the
+    // corner pixel of an actual saved file is the only proof the override reaches the saved bitmap.
+    [TestMethod]
+    public void ACardCaptureIsCompositedOntoTheMeasuredBackdropForItsInk()
+    {
+        using var temp = new TempFolder();
+
+        IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
+
+        Program.ProbeWidgetFile darkInkEntry = files.Single(f =>
+            f.Path.Contains("card-this-pc-96dpi", StringComparison.Ordinal) &&
+            f.Path.Contains("dark-taskbar-white-ink", StringComparison.Ordinal));
+        Program.ProbeWidgetFile lightInkEntry = files.Single(f =>
+            f.Path.Contains("card-this-pc-96dpi", StringComparison.Ordinal) &&
+            f.Path.Contains("light-taskbar-black-ink", StringComparison.Ordinal));
+
+        Assert.AreEqual(Program.DarkThemeBackdrop.ToArgb(), CornerPixel(darkInkEntry.Path),
+            "White ink means the taskbar is dark, so the capture should sit on the dark backdrop.");
+        Assert.AreEqual(Program.LightThemeBackdrop.ToArgb(), CornerPixel(lightInkEntry.Path),
+            "Black ink means the taskbar is light, so the capture should sit on the light backdrop.");
+    }
+
+    private static int CornerPixel(string path)
+    {
+        using var bitmap = new Bitmap(path);
+        return bitmap.GetPixel(0, 0).ToArgb();
     }
 
     [TestMethod]

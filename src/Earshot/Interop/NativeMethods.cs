@@ -87,6 +87,12 @@ internal static partial class NativeMethods
     internal const int WM_RBUTTONUP = 0x0205;
     internal const int WM_MOUSELEAVE = 0x02A3;
 
+    // Sent to the window that is losing mouse capture, whether that is because it (or another window)
+    // called ReleaseCapture, or another window called SetCapture instead. The documented contract for a
+    // window handling this message is that it must not call ReleaseCapture itself: capture has already
+    // moved on. https://learn.microsoft.com/en-us/windows/win32/inputmsg/wm-capturechanged
+    internal const int WM_CAPTURECHANGED = 0x0215;
+
     // The first message id an application may define; the appbar callback message registers one of its
     // own here so it is never confused with a documented message.
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-user
@@ -178,6 +184,15 @@ internal static partial class NativeMethods
     [LibraryImport(User32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    // Releases mouse capture from whatever window in the calling thread holds it. Safe to call even when
+    // this window does not hold capture (or nothing does): the return value is only ever consulted by a
+    // caller that wants to know, never by this codebase, which calls it unconditionally on a button-up the
+    // matching button-down already answered through base.WndProc (WinForms' own SetCapture).
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-releasecapture
+    [LibraryImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool ReleaseCapture();
 
     // The top-level window with the given class name, or 0 when none exists. The reader calls this on
     // every read (never a cached handle), so a taskbar recreated by an Explorer restart is found again.

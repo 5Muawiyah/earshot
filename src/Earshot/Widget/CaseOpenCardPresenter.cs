@@ -8,20 +8,22 @@ using Earshot.Tray;
 
 namespace Earshot.Widget;
 
-// The gates a CaseOpened event must clear before the notice card shows, checked in the order spec 7.6
-// gives them. Every Func is read fresh on each request: none of these are cached, since the very point is
-// that a hand-back, a closing tray or a settings change can flip one between two CaseOpened events.
+// The gates a CaseOpened event must clear before the notice card shows, checked in this order: the setting,
+// not closing, no card of ours already open, the notification state, then hand-back or a session end. Every
+// Func is read fresh on each request: none of these are cached, since the very point is that a hand-back, a
+// closing tray or a settings change can flip one between two CaseOpened events.
 internal sealed record CaseOpenCardGate(
     Func<bool> Enabled,               // Settings.Widget.CaseOpenCard
     Func<bool> Closing,               // TrayContext._closing
     Func<bool> HandBackInProgress,    // BlockCoordinator.HandBackInProgress
-    Func<bool> SessionEndInProgress); // BlockCoordinator.SessionEndInProgress
+    Func<bool> SessionEndInProgress,  // BlockCoordinator.SessionEndInProgress
+    Func<bool> OwnCardOpen);          // WidgetCardPresenter.IsShown: the gauge-anchored card, not this one
 
 // SystemParametersInfoW(SPI_GETMESSAGEDURATION) as it returned: the raw Win32 result, read fresh at each
 // show so a machine's own accessibility setting is honoured every time, not just once at start-up.
 internal readonly record struct DismissDurationReading(bool Ok, uint Seconds, int Win32Error);
 
-// The case-open notice (spec 7.6): a separate presenter from WidgetCardPresenter, owning its own
+// The case-open notice: a separate presenter from WidgetCardPresenter, owning its own
 // WidgetCard(notice: true) instance, never the gauge-anchored card. Separate because the two can never
 // share one live window (WS_EX_NOACTIVATE is set once in CreateParams; a style set at creation is not
 // toggled at run time without recreating the handle) and because they are shown from different triggers -
@@ -30,9 +32,10 @@ internal readonly record struct DismissDurationReading(bool Ok, uint Seconds, in
 // identically bar the Where line, which WidgetCard itself always overrides to "Case open" for a notice-mode
 // instance, regardless of what model it was last given.
 //
-// It never connects. The only path from a CaseOpened event to WidgetCardPresenterCallbacks.RequestToggle is
-// the owner's own click on this card's Connect button while it is open (WidgetCard.ToggleRequested, wired
-// exactly as WidgetCardPresenter wires it); there is no timer and no other code path here that calls it.
+// It never connects on its own. The only path from a CaseOpened event to
+// WidgetCardPresenterCallbacks.RequestToggle is a genuine left click on this card's Connect button while it
+// is open (WidgetCard.ToggleRequested, wired exactly as WidgetCardPresenter wires it: a left down and a left
+// up on the button, not any button's up alone); there is no timer and no other code path here that calls it.
 //
 // UI thread only from the outside; every public method posts through uiPost, matching WidgetCardPresenter.
 internal sealed class CaseOpenCardPresenter : IDisposable
@@ -110,7 +113,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         }
     }
 
-    // The gate, in the order spec 7.6 gives it: the setting, not closing, not already open, the
+    // The gate, in this order: the setting, not closing, no card of ours already open, the
     // notification state, then hand-back/session-end. Each refusal beyond "the setting is off" is logged,
     // matching CardPresenter.NotificationsAccepted's own logging for the notification-state leg.
     private void RequestShowOnUiThread(Rectangle? gaugeBounds)
@@ -130,6 +133,14 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         {
             // Idempotent: a second CaseOpened while one is already showing does not stack a second window.
             _log.Write(LogLevel.Debug, "Case-open card: already open, a second case-open notice is ignored.");
+            return;
+        }
+
+        if (_gate.OwnCardOpen())
+        {
+            // The owner's own gauge-anchored card is a card of ours too: showing the notice over it would
+            // stack one Earshot window on another, and the owner already has what he opened in front of him.
+            _log.Write(LogLevel.Debug, "Case-open card: not shown, the owner's own card is already open.");
             return;
         }
 
@@ -246,8 +257,8 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         _dismissTimer = null;
     }
 
-    // SPI_GETMESSAGEDURATION, read at each show; failure or a nonsensical 0 falls back to 5 s, logged once
-    // per distinct problem (spec 7.6: "failure -> 5 s with the Win32 code logged once").
+    // SPI_GETMESSAGEDURATION, read at each show; failure or a nonsensical 0 falls back to 5 s, with the
+    // Win32 code logged once per distinct problem rather than on every show.
     private TimeSpan ReadDismissDuration()
     {
         DismissDurationReading reading = _readDismissDuration();

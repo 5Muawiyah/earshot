@@ -19,7 +19,7 @@ public sealed class TrayMenuTests
         "Connect", "-",
         "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
         "Speak status", "-",
-        "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Name your other device...", "-",
+        "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold", "Name your other device...", "-",
         "Choose device...", "Set up Earshot...", "-",
         "Exit",
     ];
@@ -157,6 +157,29 @@ public sealed class TrayMenuTests
             using var menu = new TrayMenu(() => State(settings: settings));
 
             Assert.IsTrue(menu.LowBatteryThresholdItems.All(i => !i.Enabled));
+            ToolStripMenuItem opener = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Threshold");
+            Assert.IsFalse(opener.Enabled, "The submenu's own opener row disables together with its children.");
+        });
+    }
+
+    // The alert toggle and its threshold submenu are two separate rows, never one item doing both jobs: a
+    // click on the toggle's own row must never be mistaken for opening the submenu, and the submenu's own
+    // opener carries no checkmark of its own to click.
+    [TestMethod]
+    public void TheLowBatteryAlertToggleAndItsThresholdSubmenuAreSeparateRows()
+    {
+        StaThread.Run(() =>
+        {
+            EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = true });
+            using var menu = new TrayMenu(() => State(settings: settings));
+
+            ToolStripMenuItem toggle = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Low battery alert");
+            ToolStripMenuItem opener = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Threshold");
+
+            Assert.AreNotSame(toggle, opener);
+            Assert.IsEmpty(toggle.DropDownItems.Cast<ToolStripItem>().ToArray(),
+                "The toggle itself must carry no dropdown: a checkable item and a submenu parent are never the same row.");
+            Assert.HasCount(9, opener.DropDownItems.Cast<ToolStripItem>().ToArray());
         });
     }
 

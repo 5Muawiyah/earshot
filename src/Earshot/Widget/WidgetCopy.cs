@@ -2,9 +2,8 @@ using System.Globalization;
 
 namespace Earshot.Widget;
 
-// Every string the widget shows or reads aloud. British English, plain, short, no em-dashes. Not
-// reviewed by a separate prose pass in this change (see the report); kept to the same plain style as the
-// rest of the tray copy.
+// Every string the widget shows or reads aloud. British English, plain, short, no em-dashes, kept to the
+// same plain style as the rest of the tray copy.
 internal static class WidgetCopy
 {
     public const string NoReading = "No reading";
@@ -18,17 +17,23 @@ internal static class WidgetCopy
     public const string AutoPauseSwitch = "Pause when a bud comes out";
     public const string CaseOpen = "Case open";
 
+    // The three column labels on the widget card, matching the mockup exactly (Case, not "Case column" or
+    // similar).
+    public const string LeftLabel = "L";
+    public const string RightLabel = "R";
+    public const string CaseLabel = "Case";
+
     public const string ShowOnTaskbar = "Show on the taskbar";
     public const string LeftClickConnects = "Left click connects straight away";
     public const string CardWhenCaseOpens = "Card when the case opens";
     public const string NameOtherDevice = "Name your other device...";
     public const string OtherDeviceCaption = "This is your own label for \"in use, not on this PC\". The AirPods do not report a device name.";
     public const string LowBatteryAlert = "Low battery alert";
+    public const string LowBatteryThreshold = "Threshold";
     public const string OtherDeviceNameTitle = "Name your other device";
 
     private const string LeftAirPodLabel = "Left AirPod";
     private const string RightAirPodLabel = "Right AirPod";
-    private const string CaseLabel = "Case";
 
     // "Left AirPod at 20%" and so on: the low battery alert's one line, from the literal percent the reading
     // carried, never rounded or interpolated (there is no other figure to show).
@@ -79,16 +84,6 @@ internal static class WidgetCopy
     // The percent for one part, or NoReading when it has not been proved.
     public static string Percent(int? percent) =>
         percent is { } value ? value.ToString(CultureInfo.InvariantCulture) + "%" : NoReading;
-
-    // The tooltip's one battery line, capped like the tray's own tooltip.
-    public static string TooltipLine(WidgetSnapshot snapshot)
-    {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        string left = Percent(snapshot.Left.Percent);
-        string right = Percent(snapshot.Right.Percent);
-        string box = Percent(snapshot.Case.Percent);
-        return "L " + left + "  R " + right + "  Case " + box;
-    }
 
     private static string Round(double value) => Math.Max(0, Math.Round(value)).ToString(CultureInfo.InvariantCulture);
 }

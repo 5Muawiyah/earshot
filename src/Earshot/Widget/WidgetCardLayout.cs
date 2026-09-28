@@ -18,13 +18,16 @@ internal static class WidgetCardLayout
     public const int ColumnBarHeightAt96 = 6;
     public const int ColumnGapToBarAt96 = 4;
     public const int TextLineHeightAt96 = 18;
+    public const int ColumnLabelHeightAt96 = 14;
+    public const int ColumnGapToLabelAt96 = 2;
     public const int ButtonHeightAt96 = 32;
     public const int SwitchRowHeightAt96 = 24;
 
     public static int WidthFor(int dpi) => CardPlacement.Scale(WidthAt96, dpi);
 
-    // One column's parts, in client pixels.
-    internal readonly record struct ColumnLayout(Rectangle Glyph, Rectangle Bar, Rectangle Percent);
+    // One column's parts, in client pixels. Label ("L", "R" or "Case") sits above the glyph, matching the
+    // mockup.
+    internal readonly record struct ColumnLayout(Rectangle Label, Rectangle Glyph, Rectangle Bar, Rectangle Percent);
 
     // The whole card, in client pixels. Switch is Rectangle.Empty when ShowSwitch is false; nothing
     // reads it then.
@@ -51,6 +54,8 @@ internal static class WidgetCardLayout
         int barHeight = CardPlacement.Scale(ColumnBarHeightAt96, dpi);
         int gapToBar = CardPlacement.Scale(ColumnGapToBarAt96, dpi);
         int lineHeight = CardPlacement.Scale(TextLineHeightAt96, dpi);
+        int labelHeight = CardPlacement.Scale(ColumnLabelHeightAt96, dpi);
+        int gapToLabel = CardPlacement.Scale(ColumnGapToLabelAt96, dpi);
         int buttonHeight = CardPlacement.Scale(ButtonHeightAt96, dpi);
         int switchHeight = CardPlacement.Scale(SwitchRowHeightAt96, dpi);
 
@@ -62,9 +67,9 @@ internal static class WidgetCardLayout
         int midX = leftX + colWidth + colGap;
         int rightX = midX + colWidth + colGap;
 
-        ColumnLayout left = Column(leftX, y, colWidth, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
-        ColumnLayout right = Column(midX, y, colWidth, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
-        ColumnLayout box = Column(rightX, y, colWidth, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
+        ColumnLayout left = Column(leftX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
+        ColumnLayout right = Column(midX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
+        ColumnLayout box = Column(rightX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
 
         int rowsBottom = left.Percent.Bottom;
         int whereY = rowsBottom + rowGap;
@@ -85,11 +90,12 @@ internal static class WidgetCardLayout
         return new Layout(width, bottom, left, right, box, whereLine, readLine, button, showSwitch, switchRect);
     }
 
-    private static ColumnLayout Column(int x, int y, int colWidth, int glyphSize, int barWidth, int barHeight, int gapToBar, int lineHeight)
+    private static ColumnLayout Column(int x, int y, int colWidth, int labelHeight, int gapToLabel, int glyphSize, int barWidth, int barHeight, int gapToBar, int lineHeight)
     {
-        var glyph = new Rectangle(x + ((colWidth - glyphSize) / 2), y, glyphSize, glyphSize);
+        var label = new Rectangle(x, y, colWidth, labelHeight);
+        var glyph = new Rectangle(x + ((colWidth - glyphSize) / 2), label.Bottom + gapToLabel, glyphSize, glyphSize);
         var bar = new Rectangle(x + ((colWidth - barWidth) / 2), glyph.Bottom + gapToBar, barWidth, barHeight);
         var percent = new Rectangle(x, bar.Bottom + gapToBar, colWidth, lineHeight);
-        return new ColumnLayout(glyph, bar, percent);
+        return new ColumnLayout(label, glyph, bar, percent);
     }
 }

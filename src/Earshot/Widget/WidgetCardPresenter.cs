@@ -24,9 +24,13 @@ internal sealed record WidgetCardPresenterCallbacks(
 
 // Owns the WidgetCard instance's lifecycle: creates it lazily, places it above the gauge (or a fallback
 // point when the gauge is hidden), shows it activated, re-renders on IWidgetStatus.Changed, refreshes the
-// read line every 30 s while open, and implements the toggle-close rule: a left click on the gauge within
-// SystemInformation.DoubleClickTime of the card closing through deactivation closes it and does not reopen
-// it, the same gesture as a second click on the volume flyout's own icon.
+// read line every 30 s while open, and implements two related but distinct toggle-close rules. A gauge
+// click while the card is already shown closes it directly (RequestShowOnUiThread's own IsShown check):
+// the gauge answers WM_MOUSEACTIVATE with MA_NOACTIVATE, so it never deactivates the card, and this is the
+// only way a second gauge click can close it at all. Separately, a left click on the gauge within
+// SystemInformation.DoubleClickTime of the card closing through a genuine deactivation (losing focus to some
+// other real window) does not reopen it, so dismissing the card by clicking elsewhere and then happening to
+// also click the gauge does not immediately flicker it back open.
 //
 // UI thread only from the outside; every public method posts through uiPost so a caller on any thread is
 // safe, matching CardPresenter's own contract.
@@ -63,14 +67,19 @@ internal sealed class WidgetCardPresenter : IDisposable
     // True while the card is on screen. For tests; the UI thread only.
     internal bool IsShown => _card is { IsDisposed: false, Visible: true };
 
+    // The card's own last-rendered model, for tests: proving a Refresh() actually reached the real card
+    // Render drew, rather than only that Refresh() itself was called.
+    internal WidgetCardModel? CurrentModelForTest => _card?.Model;
+
     // For tests: the reason WidgetCardPresenter believes the card last closed for, or null.
     internal bool HasPendingToggleCloseWindow => _closedByDeactivateAtTimestamp is not null;
 
     // Shows the card above gaugeBounds, or above a zero-size rectangle at fallbackPoint when the gauge is
-    // hidden and the click came from the tray icon fallback instead (see the report for why this is a
-    // simpler fallback than the gauge case, not the full click-anchor rule the tray's other cards use). A
-    // click within SystemInformation.DoubleClickTime of the card's last close-through-deactivation is the
-    // second half of that gesture: it closes, it does not reopen.
+    // hidden and the click came from the tray icon fallback instead: a simpler fallback than the gauge
+    // case, since the tray icon has no free taskbar rectangle of its own to anchor above, unlike the full
+    // click-anchor rule the tray's other cards use. A click within SystemInformation.DoubleClickTime of the
+    // card's last close-through-deactivation is the second half of that gesture: it closes, it does not
+    // reopen.
     public void RequestShow(Rectangle? gaugeBounds, Point fallbackPoint) =>
         _uiPost(() => RequestShowOnUiThread(gaugeBounds, fallbackPoint));
 
@@ -105,6 +114,18 @@ internal sealed class WidgetCardPresenter : IDisposable
     {
         if (_disposed)
         {
+            return;
+        }
+
+        if (_card is { IsDisposed: false, Visible: true })
+        {
+            // The gauge answers WM_MOUSEACTIVATE with MA_NOACTIVATE (GaugeWindow), so a click on it never
+            // deactivates this card - WidgetCard.OnDeactivate, the only other way it closes itself, never
+            // fires from a gauge click. A second gauge click while the card is already shown is the owner
+            // asking to close it, the same gesture as a second click on the volume flyout's own icon: closed
+            // directly, not through the deactivate-close double-click window below, which is for a different
+            // trigger entirely (losing focus to some other real window, then clicking the gauge again).
+            HideOnUiThread();
             return;
         }
 

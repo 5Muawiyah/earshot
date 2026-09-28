@@ -50,8 +50,14 @@ public sealed class NoSpecCitationsTests
     // same way and dropped again: "(1.5)" is also exactly how an ordinary TimeSpan.FromSeconds argument
     // reads, and nothing about the text alone tells the two apart. Those two exact citations are removed by
     // hand instead, in every file this document owns.
+    // Third return of this class: "spec 7.6" and "7.3's" cite a design document's own section numbering
+    // directly, with no letter prefix at all, so none of the letter-code alternatives above ever had a
+    // chance of matching either shape; "(see the report)" and "the design narrative" are literal phrases
+    // pointing at a document outside this repository rather than a label, so they need their own literal
+    // alternatives too. "spec" alone stays unbanned (the class comment on the first version of this field
+    // explains why), so only "spec" directly followed by a number is new here.
     private static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b| names\b| the other half\b| in\b)|\b[BDHLMmST][0-9]{1,2}(?=(?-i:[A-Z][a-z]))|\((?-i:[BDFHLMST])[0-9]{1,2}\b|review round|handback-on-shutdown-and-sleep|handback-review",
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b| names\b| the other half\b| in\b)|\b[BDHLMmST][0-9]{1,2}(?=(?-i:[A-Z][a-z]))|\((?-i:[BDFHLMST])[0-9]{1,2}\b|review round|handback-on-shutdown-and-sleep|handback-review|\bspec [0-9]+(\.[0-9]+)?\b|\b[0-9]+\.[0-9]+'s\b|\(see the report\)|the design narrative",
         RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly string[] OwnedFolders =
@@ -77,6 +83,21 @@ public sealed class NoSpecCitationsTests
     [DataRow("for one candidate (D6, B1). It no longer does")]
     [DataRow("the real watcher is Passive (M5), rather than")]
     public void CitationCatchesEveryLabelShapeTheReviewListed(string plantedLine)
+    {
+        Assert.IsTrue(Citation.IsMatch(plantedLine), "Missed: " + plantedLine);
+    }
+
+    // Third return of this class: these four shapes were live in the tree at the head this round started
+    // from (CaseOpenCardPresenter.cs, WidgetCard.cs, WidgetCardPresenter.cs, WidgetCardPlacement.cs,
+    // WidgetCopy.cs, TrayContext.Widget.cs, GaugeController.cs, UiaTaskbarReader.cs, ProbeWidget.cs and
+    // CaseOpenCardTests.cs all carried at least one), and none of them matched the regex as it stood then:
+    // a bare section number with no letter prefix, or a phrase pointing at a document rather than a label.
+    [TestMethod]
+    [DataRow("checked in the order spec 7.6 gives them")]
+    [DataRow("matching 7.3's painting model, rather than")]
+    [DataRow("a larger change than this step's scope (see the report). This gives")]
+    [DataRow("rather than the exact free-run point the design narrative describes.")]
+    public void CitationCatchesEveryShapeMissedByTheThirdReviewRound(string plantedLine)
     {
         Assert.IsTrue(Citation.IsMatch(plantedLine), "Missed: " + plantedLine);
     }

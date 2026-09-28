@@ -195,15 +195,15 @@ try
         }
 
         Write-Section -Run $run -Title 'Left click, end to end'
-        Write-Line -Run $run -Text 'The last part is the headline feature: one left click on the tray icon, from blocked nodes, with'
-        Write-Line -Run $run -Text 'no administrator prompt. Earshot allows the nodes, sends the reconnect and confirms from the'
-        Write-Line -Run $run -Text 'notifications before the icon changes.'
-        Wait-Owner -Run $run -Text 'Start Earshot if it is not running, then left-click its tray icon once and watch what happens.'
-        $connected = Read-Answer -Run $run -Question 'Did the AirPods connect to this PC after that single click?'
-        $prompted = Read-Answer -Run $run -Question 'Did any administrator prompt appear during that click?'
+        Write-Line -Run $run -Text 'The last part is the headline feature: left-click the Earshot icon, then Connect on the card, from'
+        Write-Line -Run $run -Text 'blocked nodes, with no administrator prompt. Earshot allows the nodes, sends the reconnect and'
+        Write-Line -Run $run -Text 'confirms from the notifications before the icon changes.'
+        Wait-Owner -Run $run -Text 'Start Earshot if it is not running, then left-click the Earshot icon and click Connect on the card that opens.'
+        $connected = Read-Answer -Run $run -Question 'Did the AirPods connect to this PC after that?'
+        $prompted = Read-Answer -Run $run -Question 'Did any administrator prompt appear while connecting?'
         $cardText = Read-Note -Run $run -Question 'What did the card near the tray say, word for word?'
 
-        Add-Criterion -Run $run -Id 'left-click-connects' -Criterion 'One left click connects the AirPods from blocked nodes.' `
+        Add-Criterion -Run $run -Id 'left-click-connects' -Criterion 'Left-click the Earshot icon, then Connect on the card, connects the AirPods from blocked nodes.' `
             -Outcome $(if ($connected -eq 'yes') { 'pass' } elseif ($connected -eq 'no') { 'fail' } else { 'inconclusive' }) `
             -Detail ('You answered ' + $connected + '. The card said: ' + $cardText)
         Add-Criterion -Run $run -Id 'no-admin-prompt' -Criterion 'No administrator prompt appears for a connect.' `
@@ -219,17 +219,18 @@ try
             -Detail ('You said connected: ' + $connected + '; the render endpoint reads ' + $statesAfterClick.Render + '.')
 
         Write-Section -Run $run -Title 'Left click again, to disconnect'
-        Write-Line -Run $run -Text 'The click is a toggle, so the other half of it has to be asked as well: a second click hands the'
-        Write-Line -Run $run -Text 'AirPods back. Earshot disconnects and then blocks the nodes straight away, without waiting for the'
-        Write-Line -Run $run -Text 'idle rule, so the nodes should read Blocked again within a few seconds and still no prompt.'
+        Write-Line -Run $run -Text 'The card is a toggle, so the other half of it has to be asked as well: left-click the Earshot icon'
+        Write-Line -Run $run -Text 'again and click Disconnect on the card, and Earshot hands the AirPods back. Earshot disconnects'
+        Write-Line -Run $run -Text 'and then blocks the nodes straight away, without waiting for the idle rule, so the nodes should'
+        Write-Line -Run $run -Text 'read Blocked again within a few seconds and still no prompt.'
         if ($statesAfterClick.Render -eq 'Active')
         {
-            Wait-Owner -Run $run -Text 'Left-click the tray icon once more, and watch the AirPods go back to the phone.'
-            $disconnected = Read-Answer -Run $run -Question 'Did the AirPods disconnect from this PC after that single click?'
-            $promptedOff = Read-Answer -Run $run -Question 'Did any administrator prompt appear during that second click?'
+            Wait-Owner -Run $run -Text 'Left-click the Earshot icon once more and click Disconnect on the card, and watch the AirPods go back to the phone.'
+            $disconnected = Read-Answer -Run $run -Question 'Did the AirPods disconnect from this PC after that?'
+            $promptedOff = Read-Answer -Run $run -Question 'Did any administrator prompt appear while disconnecting?'
             $offCardText = Read-Note -Run $run -Question 'What did the card say that time, word for word?'
 
-            Add-Criterion -Run $run -Id 'left-click-disconnects' -Criterion 'A second left click disconnects the AirPods.' `
+            Add-Criterion -Run $run -Id 'left-click-disconnects' -Criterion 'Left-click the Earshot icon, then Disconnect on the card, disconnects the AirPods.' `
                 -Outcome $(if ($disconnected -eq 'yes') { 'pass' } elseif ($disconnected -eq 'no') { 'fail' } else { 'inconclusive' }) `
                 -Detail ('You answered ' + $disconnected + '. The card said: ' + $offCardText)
             Add-Criterion -Run $run -Id 'no-admin-prompt-disconnect' -Criterion 'No administrator prompt appears for a disconnect either.' `
@@ -257,9 +258,9 @@ try
         {
             foreach ($id in @('left-click-disconnects', 'no-admin-prompt-disconnect', 'disconnect-agrees-with-endpoints', 'blocked-again-after-click'))
             {
-                Add-Criterion -Run $run -Id $id -Criterion 'A second left click disconnects the AirPods, with no prompt, and blocks the nodes again.' `
+                Add-Criterion -Run $run -Id $id -Criterion 'Left-click the Earshot icon, then Disconnect on the card, disconnects the AirPods, with no prompt, and blocks the nodes again.' `
                     -Outcome 'inconclusive' `
-                    -Detail ('The first click did not connect them (the render endpoint reads ' + $statesAfterClick.Render + '), so there was nothing to disconnect.')
+                    -Detail ('Connecting did not work (the render endpoint reads ' + $statesAfterClick.Render + '), so there was nothing to disconnect.')
             }
         }
 

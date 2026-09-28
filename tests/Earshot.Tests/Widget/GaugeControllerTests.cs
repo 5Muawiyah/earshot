@@ -109,6 +109,41 @@ public sealed class GaugeControllerTests
         Assert.IsFalse(icon.Visible, "After 2 s continuously shown, the icon hides.");
     }
 
+    // Before the fix, GaugeCentreIsGauge (the reader's own WindowFromPoint check at the shown gauge's
+    // centre) was computed and threaded all the way into TaskbarLayout, then read nowhere: an identical
+    // layout always fell into ShowOrMove's own "nothing changed" branch and returned without calling
+    // anything on the surface, even when the reader had just found some other window sitting on top of the
+    // gauge's own last-shown position (a full screen state ending, or a flyout closing, are the two
+    // ordinary causes). A MoveTo to the same rectangle would have been a SetWindowPos no-op anyway, so only
+    // a Raise can bring it back on top.
+    [TestMethod]
+    public void TheGaugeIsReRaisedWhenSomethingElseCoversItsOwnLastShownPosition()
+    {
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        Assert.IsFalse(surface.Calls.Contains("Raise"), "Sanity: the first show never raises.");
+
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout() with { GaugeCentreIsGauge = false }));
+
+        CollectionAssert.Contains(surface.Calls, "Raise");
+        Assert.IsFalse(surface.Calls.Contains("MoveTo " + new Rectangle(1183, 1032, 88, 48).ToString()),
+            "The rectangle is unchanged, so this must be a Raise, never a MoveTo.");
+    }
+
+    // The read confirming the gauge is still on top at its own centre (the ordinary case, and the only one
+    // that survives a full read cycle unbroken) must not raise it again and again for no reason.
+    [TestMethod]
+    public void TheGaugeIsNotReRaisedWhenTheReadConfirmsItIsStillOnTop()
+    {
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout() with { GaugeCentreIsGauge = true }));
+
+        Assert.IsFalse(surface.Calls.Contains("Raise"));
+    }
+
     [TestMethod]
     public void OneMoreButtonMovesTheGaugeRatherThanShowingItAgain()
     {

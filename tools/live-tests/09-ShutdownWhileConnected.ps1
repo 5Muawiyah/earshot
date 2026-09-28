@@ -63,7 +63,7 @@ try
             'Block at boot is on.',
             'The AirPods are paired with this PC and available to connect.'
         ) -PhysicalActions @(
-            'Connect the AirPods to this PC with a left click on the tray icon and keep audio playing from this PC.',
+            'Connect the AirPods to this PC by left-clicking the Earshot icon and clicking Connect on the card, and keep audio playing from this PC.',
             'Shut down at once, while they are still connected and playing. Do not wait for the icon to change back.',
             'Wait about ten seconds with the machine off, start it again, log in, and run the command this half prints.'
         )
@@ -77,7 +77,7 @@ try
                 'the case it exists to catch, showing whether the session-end backstop or the boot task blocks them again.'
 
             Write-Section -Run $run -Title 'Connect and confirm'
-            Wait-Owner -Run $run -Text 'Left-click the tray icon to connect the AirPods to this PC, and play something so they stay in use.'
+            Wait-Owner -Run $run -Text 'Left-click the Earshot icon, then Connect on the card, to connect the AirPods to this PC, and play something so they stay in use.'
             $audio = Get-AudioState -Run $run -Label 'audio-connected'
             $states = Get-TargetEndpointStates -AudioJson $audio
             $nodes = Get-NodeState -Run $run -Label 'nodes-connected'

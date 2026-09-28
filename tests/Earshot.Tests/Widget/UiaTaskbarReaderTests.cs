@@ -118,6 +118,11 @@ internal sealed class FakeUiaElementArray : IUIAutomationElementArray
 // ship a test whose own cleanup is unreliable, this uses the fallback the design allows for: the same
 // real UIA read, read-only, against Shell_TrayWnd on the default desktop. Nothing here shows a window,
 // clicks anything, or touches a device; it only asks UI Automation what is on the real taskbar.
+//
+// Each real UiaTaskbarReader constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(), so
+// the assembly-wide guard can tell these two named, read-only real executions apart from an unnoticed real
+// construction anywhere else in the suite: every TrayContext test now gets a fake reader instead
+// (TrayContextTests.TrayHarness).
 [TestClass]
 public sealed class UiaTaskbarReaderTests
 {
@@ -150,6 +155,7 @@ public sealed class UiaTaskbarReaderTests
             try
             {
                 var reader = new UiaTaskbarReader();
+                WidgetRealSurfaceGuardTests.AllowRealConstruction();
 
                 // The real release, not a no-op: this is the one execution kept of Marshal.ReleaseComObject
                 // actually running against the real COM objects a live Shell_TrayWnd read creates (the class
@@ -347,6 +353,7 @@ public sealed class UiaTaskbarReaderTests
             try
             {
                 var reader = new UiaTaskbarReader();
+                WidgetRealSurfaceGuardTests.AllowRealConstruction();
                 reader.TryReadOccupants(trayHandle, Rectangle.Empty, countingRelease, out _, out _, out _);
             }
             catch (Exception ex)

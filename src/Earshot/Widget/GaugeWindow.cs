@@ -2,6 +2,7 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Tray;
 
 namespace Earshot.Widget;
 
@@ -25,6 +26,11 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     // Test seam only: counts real constructions so WidgetRealSurfaceGuardTests can prove a test harness
     // never builds this class in place of a fake. Never read or reset in production.
     internal static int ConstructionCount;
+
+    // True from a successful ShowAt until HideWindow (or a fresh, unshown instance): both go through
+    // SetWindowPos directly rather than Form.Show/Hide, so Control.Visible never reflects this on its own
+    // and IsHandleCreated stays true even once hidden (the handle is never destroyed by either call).
+    internal bool IsShown => _shown;
 
     public GaugeWindow(ILog log)
     {
@@ -124,8 +130,16 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         }
 
         _shown = false;
-        NativeMethods.SetWindowPos(Handle, 0, 0, 0, 0, 0,
+        bool ok = NativeMethods.SetWindowPos(Handle, 0, 0, 0, 0, 0,
             NativeMethods.SWP_HIDEWINDOW | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER);
+        // _shown still moves to false either way: the caller (GaugeController's own Hidden/Off transitions)
+        // has already decided the gauge must not be treated as shown any more regardless of whether the
+        // window itself actually disappeared, the same way ShowAt and Raise above record their own raw code
+        // rather than staying silent about one (AppBarRegistration.Dispose's own ABM_REMOVE fix uses the
+        // same Debug-on-success, Warn-on-failure split for exactly the same reason).
+        StepOutcome outcome = StepOutcomes.FromWin32("set-window-pos:hide-gauge",
+            ok ? 0 : unchecked((uint)Marshal.GetLastPInvokeError()), ok: ok);
+        _log.Write(ok ? LogLevel.Debug : LogLevel.Warn, "Gauge: " + TrayReport.DescribeStep(outcome));
     }
 
     protected override void WndProc(ref Message m)
@@ -146,8 +160,19 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                 base.WndProc(ref m);
                 return;
 
+            // WinForms' own base.WndProc calls SetCapture on both button-downs (the default Control
+            // handling for WM_LBUTTONDOWN/WM_RBUTTONDOWN), so this window keeps receiving the matching
+            // move/up messages even if the pointer leaves it before the button is released. Both up
+            // handlers below release that capture in turn: left before this fix never did, so the gauge
+            // kept capture after every click and a following click on the card, the menu or the case-open
+            // card - all separate windows - never reached them until the gauge's own capture was released
+            // by something else. https://learn.microsoft.com/en-us/windows/win32/inputdev/about-mouse-input#mouse-capture
             case NativeMethods.WM_LBUTTONDOWN:
                 _leftButtonDown = true;
+                base.WndProc(ref m);
+                return;
+
+            case NativeMethods.WM_RBUTTONDOWN:
                 base.WndProc(ref m);
                 return;
 
@@ -161,6 +186,7 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                     LeftClicked?.Invoke(this, EventArgs.Empty);
                 }
 
+                NativeMethods.ReleaseCapture();
                 return;
 
             case NativeMethods.WM_RBUTTONUP:
@@ -170,8 +196,20 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                 Point client = new(x, y);
                 Point screen = PointToScreen(client);
                 RightClicked?.Invoke(this, screen);
+                NativeMethods.ReleaseCapture();
                 return;
             }
+
+            // Capture has already moved on by the time this arrives (to another window, or released
+            // outright): the documented contract is that a window handling it must not call ReleaseCapture
+            // itself. Only the down-tracking flag needs resetting, so a capture lost mid-press (the pointer
+            // grabbed by another window, Alt+Tab, or any other cancel path) never leaves _leftButtonDown
+            // stuck true for a later, unrelated up to answer as a click.
+            // https://learn.microsoft.com/en-us/windows/win32/inputmsg/wm-capturechanged
+            case NativeMethods.WM_CAPTURECHANGED:
+                _leftButtonDown = false;
+                base.WndProc(ref m);
+                return;
 
             default:
                 base.WndProc(ref m);

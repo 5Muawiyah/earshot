@@ -149,7 +149,7 @@ try
             '"Hand back at shut down and sleep" is ticked in the menu.',
             'The AirPods are paired with this PC and available to connect.'
         ) -PhysicalActions @(
-            'Connect the AirPods to this PC with a left click on the tray icon and keep audio playing from this PC.',
+            'Connect the AirPods to this PC by left-clicking the Earshot icon and clicking Connect on the card, and keep audio playing from this PC.',
             'Shut down from the Start menu (not Restart), straight away, while they are still connected and playing.',
             'Listen: notice whether the AirPods go back to your phone as the screen goes dark, or just after.',
             'Wait about ten seconds with the machine off, start it again, sign in, and run the command this half prints.'
@@ -163,7 +163,7 @@ try
                 'is the case the hand-back exists to catch, in order, inside the budget Windows gives it.'
 
             Write-Section -Run $run -Title 'Connect and confirm'
-            Wait-Owner -Run $run -Text 'Left-click the tray icon to connect the AirPods to this PC, and play something so they stay in use.'
+            Wait-Owner -Run $run -Text 'Left-click the Earshot icon, then Connect on the card, to connect the AirPods to this PC, and play something so they stay in use.'
             $audio = Get-AudioState -Run $run -Label 'audio-connected'
             $states = Get-TargetEndpointStates -AudioJson $audio
             $nodes = Get-NodeState -Run $run -Label 'nodes-connected'

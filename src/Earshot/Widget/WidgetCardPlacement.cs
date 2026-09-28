@@ -9,10 +9,10 @@ namespace Earshot.Widget;
 // The card is meant to land above the gauge the way a click-anchored popup lands above its anchor.
 // CardPlacement.TargetFor(NearCursor) does the equivalent job for the tray's other cards, with the cursor as
 // the anchor, but doing the same here would need CardTarget's taskbar-band exclusion rectangle to be the
-// gauge's own rectangle, which CardPlacement does not expose a seam for today; wiring one in is a larger
-// change than this step's scope (see the report). This gives the same visible result (above the anchor,
-// clamped to the work area) with its own small, directly testable function, reusing CardPlacement.Scale and
-// CardPlacement.Clamp rather than duplicating them.
+// gauge's own rectangle, which CardPlacement does not expose a seam for today; wiring one in would be a
+// larger change to CardPlacement's own contract than this card needs. This gives the same visible result
+// (above the anchor, clamped to the work area) with its own small, directly testable function, reusing
+// CardPlacement.Scale and CardPlacement.Clamp rather than duplicating them.
 internal static class WidgetCardPlacement
 {
     // Gap between the card and the rectangle it is placed above, in pixels at 96 DPI. A layout choice, not

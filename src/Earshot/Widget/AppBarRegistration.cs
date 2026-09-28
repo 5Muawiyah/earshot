@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Tray;
 
 namespace Earshot.Widget;
 
@@ -13,6 +14,17 @@ internal sealed class AppBarRegistration : IDisposable
     // The first application-defined message id: a private appbar callback message, never seen outside
     // this class's own SHAppBarMessage registration.
     public const uint CallbackMessage = NativeMethods.WM_USER + 1;
+
+    // A test-only proof. Unlike GaugeWindow/UiaTaskbarReader/WinRtAdvertisementSource, constructing this
+    // class does nothing by itself (SHAppBarMessage is not called until Register runs), and a local probe
+    // (ProbeAppBarOnPrivateDesktopTests) found ABM_NEW itself refused for a window on a
+    // CreateDesktopW private desktop - SHAppBarMessage's own Shell_TrayWnd lookup is scoped to the calling
+    // thread's current desktop, the same way FindWindow and EnumWindows are, so it never finds the owner's
+    // real taskbar from there and never reaches it. So the proof that matters is not construction but a
+    // successful ABM_NEW: only that means this call actually reached and was accepted by the real Explorer.
+    // WidgetRealSurfaceGuardTests uses this to tell "a named allow-listed execution reached the real
+    // Explorer" from "something else did", across the whole assembly.
+    internal static int RealRegistrationCount;
 
     private readonly nint _hwnd;
     private readonly ILog _log;
@@ -40,6 +52,11 @@ internal sealed class AppBarRegistration : IDisposable
         var data = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>(), hWnd = _hwnd, uCallbackMessage = CallbackMessage };
         nuint result = Shell.SHAppBarMessage(Shell.ABM_NEW, ref data);
         _registered = result != 0;
+        if (_registered)
+        {
+            Interlocked.Increment(ref RealRegistrationCount);
+        }
+
         return StepOutcomes.FromWin32("sh-app-bar-message:abm-new", 0, _registered ? null : "ABM_NEW returned FALSE.", ok: _registered);
     }
 
@@ -62,7 +79,12 @@ internal sealed class AppBarRegistration : IDisposable
         _disposed = true;
         if (_registered)
         {
-            RemoveCore();
+            // Reregister's own two outcomes reach the caller to log (TrayContext.Widget.cs's
+            // LogAppBarOutcome); this one has no caller left to hand it to; once Dispose returns there is
+            // nothing further for a failure here to affect (the hidden window is on its way down with it),
+            // but a failed ABM_REMOVE is still a real outcome worth a line, not silence.
+            StepOutcome removed = RemoveCore();
+            _log.Write(removed.Ok ? LogLevel.Debug : LogLevel.Warn, "AppBar: " + TrayReport.DescribeStep(removed));
         }
     }
 
