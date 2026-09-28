@@ -923,8 +923,12 @@ public sealed class WidgetStatusServiceTests : IDisposable
     // "X2") comes out upper-case, and restricting to that avoids a false positive on an ordinary lower-case
     // English word that happens to spell five hex letters in a row (RadioNotAvailable... Unreadable has
     // "eadab": e, a, d, a, b are all valid hex digits).
+    //
+    // The hex-only shapes above never covered a decimal dump of a section (a comma-separated run of byte
+    // values, 0-255, five or more in a row - the same width as the hex run above, since a raw section is at
+    // least 5 bytes here).
     private static readonly Regex ForbiddenByteRun = new(
-        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b",
+        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b|(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){4,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b",
         RegexOptions.CultureInvariant);
 
     // Round 2: the regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own
@@ -933,6 +937,12 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public void ForbiddenByteRunCatchesSpaceSeparatedHex()
     {
         Assert.IsTrue(ForbiddenByteRun.IsMatch("payload AA BB CC DD read"), "Space-separated hex bytes must be caught.");
+    }
+
+    [TestMethod]
+    public void ForbiddenByteRunCatchesADecimalDumpOfASection()
+    {
+        Assert.IsTrue(ForbiddenByteRun.IsMatch("section 6, 32, 33, 34, 35, 36 read"), "A decimal dump of a section must be caught.");
     }
 
     [TestMethod]
@@ -959,6 +969,32 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsTrue(
             widgetEntries.Any(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal) && e.Message.Contains("ok=1", StringComparison.Ordinal)),
             "The once-a-minute counters line was not logged.");
+    }
+
+    // LogLinesCarryCountsAndNeverBytes above only ever raises a recognised Proximity message and a Stopped
+    // event: the unknown-form path (RecordUnknownForm, reached when ProximityParser itself returns
+    // UnknownForm) never ran under any byte check at all. WidgetFixtures.UnknownSeventeenByteForm is proved
+    // elsewhere (ProximityParserTests) to produce exactly that status; this raises it through the real
+    // service and checks every resulting log line, the "Widget counters:" summary (which reports the
+    // unknown form's prefix and length, per RecordUnknownForm's own design) included.
+    [TestMethod]
+    public void LogLinesNeverCarryBytesOnTheUnknownFormPath()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim());
+        using WidgetStatusService service = NewService(store);
+        int baseline = _log.Entries.Count;
+        service.Start();
+
+        _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), Rssi: -60, _clock.GetUtcNow(), SenderTag: 1));
+        _clock.Advance(WidgetTiming.CountersLogInterval);
+
+        List<LogEntry> widgetEntries = _log.Entries.Skip(baseline).ToList();
+        Assert.IsTrue(widgetEntries.Count > 0, "The widget must have logged something to check.");
+        foreach (LogEntry entry in widgetEntries)
+        {
+            Assert.IsFalse(ForbiddenByteRun.IsMatch(entry.Message), "A log line on the unknown-form path carried something that looks like raw bytes: " + entry.Message);
+        }
     }
 
     [TestMethod]
