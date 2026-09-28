@@ -24,6 +24,16 @@ public sealed class WidgetMenuTests
     // proof - the menu click actually wires the widget, not just flips the setting - reads the fake
     // factory's own call count instead. The menu item now writes ShowOnTaskbar, not Enabled directly;
     // Enabled follows it (WithWatcherRecomputed) since nothing else here asks for the watcher independently.
+    //
+    // The tray.Context.Menu.Refresh() plus tray.MenuItem(...).Checked pair below matches
+    // AFirstRunTurnsOpenOnStartupOn's own precedent (TrayContextTests.cs): checking only
+    // tray.Settings.Current.Widget.ShowOnTaskbar proves the click wrote the setting, never that the real
+    // tray menu's own checkbox was ever told to reflect it. ContextMenu.Apply's Set(_showOnTaskbar, ...)
+    // call could vanish entirely - the menu item left showing whatever it showed before, the owner's own
+    // tickmark silently lying about the state of the gauge - with every assertion this test had before
+    // this addition, and PerformClick's own Enabled/Available sanity check inside ClickMenu, still green:
+    // Set assigns Enabled and Available together with Checked, so only the click into a disabled or
+    // unavailable item is caught that way, never a Checked value stuck on the wrong side of a real click.
     [TestMethod]
     public void ClickingShowOnTheTaskbarFlipsShowOnTaskbarThroughTheRealSettingsWritePath()
     {
@@ -40,11 +50,17 @@ public sealed class WidgetMenuTests
             Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "Turning the gauge on must also turn the watcher on for it.");
             Assert.AreEqual(1, tray.TaskbarReaderFactoryCalls,
                 "Turning it on through the menu must actually wire the gauge (WireGauge), not just flip the flag.");
+            tray.Context.Menu.Refresh();
+            Assert.IsTrue(tray.MenuItem(WidgetCopy.ShowOnTaskbar).Checked,
+                "The real menu item's own tickmark must actually turn on, not just the setting behind it.");
 
             tray.ClickMenu(WidgetCopy.ShowOnTaskbar);
             tray.PumpUntilIdle();
 
             Assert.IsFalse(tray.Settings.Current.Widget.ShowOnTaskbar);
+            tray.Context.Menu.Refresh();
+            Assert.IsFalse(tray.MenuItem(WidgetCopy.ShowOnTaskbar).Checked,
+                "The real menu item's own tickmark must actually turn off again too.");
             Assert.IsFalse(tray.Settings.Current.Widget.Enabled,
                 "Turning the gauge back off must also turn the watcher off, since nothing else here wants it.");
         });
