@@ -56,9 +56,12 @@ public sealed record WidgetSettings
     public WidgetSettings WithWatcherRecomputed() =>
         this with { Enabled = ShowOnTaskbar || LowBatteryAlert || CaseOpenCard || AutoPause };
 
-    // A threshold that is not a multiple of 10 or is outside 10 to 90 becomes the default and is recorded;
-    // the label is trimmed, has its control characters removed, is cut at 40 characters, and is recorded
-    // when any of that changed it. Nothing here makes JsonSettingsStore.Validate fail.
+    // A threshold that is not a multiple of 10 or is outside 10 to 90 (the same list the menu itself
+    // offers) becomes the default and is recorded; the label has its control characters and bidi override
+    // characters removed, is trimmed, is cut at MaxOtherDeviceLabelLength, and is recorded when any of that
+    // changed it. Nothing here makes JsonSettingsStore.Validate fail: a bad value is corrected in place,
+    // never rejected outright, since a settings write must never fail just because the label field carried
+    // something odd.
     public WidgetSettings Clamped(out IReadOnlyList<StepOutcome> notes)
     {
         var list = new List<StepOutcome>();
@@ -82,13 +85,19 @@ public sealed record WidgetSettings
         return result;
     }
 
+    // The Unicode bidirectional formatting characters that can make a label read as something other than
+    // its own text (a right-to-left override made to disguise a file extension is the classic example):
+    // LRE, RLE, PDF, LRO, RLO (U+202A-U+202E) and the newer isolates LRI, RLI, FSI, PDI (U+2066-U+2069).
+    // https://www.unicode.org/reports/tr9/#Explicit_Directional_Formatting_Characters
+    private static bool IsBidiOverride(char c) => c is (>= '‪' and <= '‮') or (>= '⁦' and <= '⁩');
+
     private static string CleanLabel(string label, List<StepOutcome> notes)
     {
         string original = label ?? "";
         var builder = new StringBuilder(original.Length);
         foreach (char c in original)
         {
-            if (!char.IsControl(c))
+            if (!char.IsControl(c) && !IsBidiOverride(c))
             {
                 builder.Append(c);
             }

@@ -130,6 +130,56 @@ public sealed class WidgetSettingsTests : IDisposable
         Assert.IsTrue(notes.Any(n => n.Step == "clamp:OtherDeviceLabel"));
     }
 
+    // A right-to-left override (U+202E) made to disguise the label's own text, the classic bidi-spoofing
+    // shape: char.IsControl alone does not catch it (bidi formatting characters are Unicode category Cf,
+    // not Cc), so this needs its own filter.
+    [TestMethod]
+    public void TheLabelRemovesARightToLeftOverride()
+    {
+        var settings = WidgetSettings.Default with { OtherDeviceLabel = "Sam‮enohp s'" };
+
+        WidgetSettings clamped = settings.Clamped(out IReadOnlyList<StepOutcome> notes);
+
+        Assert.IsFalse(clamped.OtherDeviceLabel.Contains('‮'));
+        Assert.AreEqual("Samenohp s'", clamped.OtherDeviceLabel);
+        Assert.IsTrue(notes.Any(n => n.Step == "clamp:OtherDeviceLabel"));
+    }
+
+    // WidgetSettings.Clamped had no caller in production before this fix: a settings.json a stale build or
+    // a hand edit left with a control character, a bidi override, an over-length label or an off-list
+    // threshold loaded exactly as written and reached the card unchanged.
+    [TestMethod]
+    public void LoadingClampsTheWidgetBlock()
+    {
+        File.WriteAllText(
+            SettingsPath,
+            "{ \"SchemaVersion\": 1, \"Widget\": { \"OtherDeviceLabel\": \"Sam\\u0007's phone\", \"LowBatteryThresholdPercent\": 37 } }");
+
+        var store = new JsonSettingsStore(SettingsPath, _log);
+
+        Assert.AreEqual("Sam's phone", store.Current.Widget.OtherDeviceLabel);
+        Assert.AreEqual(WidgetSettings.DefaultLowBatteryThresholdPercent, store.Current.Widget.LowBatteryThresholdPercent);
+    }
+
+    // The clamp runs on every write too, so a bad value never reaches the file a caller's own mutate
+    // delegate did not think to clean up (OtherDeviceNameForm, the only production writer of the label,
+    // does its own cleanup on the form itself, but the store must not depend on every future caller doing
+    // the same).
+    [TestMethod]
+    public void SavingClampsTheWidgetBlockAndThatIsWhatIsPersisted()
+    {
+        var store = new JsonSettingsStore(SettingsPath, _log);
+
+        store.Update(s => s.Widget = s.Widget with { OtherDeviceLabel = "Sam‮'s phone", LowBatteryThresholdPercent = 145 });
+
+        Assert.AreEqual("Sam's phone", store.Current.Widget.OtherDeviceLabel);
+        Assert.AreEqual(WidgetSettings.DefaultLowBatteryThresholdPercent, store.Current.Widget.LowBatteryThresholdPercent);
+
+        var reread = new JsonSettingsStore(SettingsPath, _log);
+        Assert.AreEqual("Sam's phone", reread.Current.Widget.OtherDeviceLabel, "The clamped value, not the raw one, must be what reaches the file.");
+        Assert.AreEqual(WidgetSettings.DefaultLowBatteryThresholdPercent, reread.Current.Widget.LowBatteryThresholdPercent);
+    }
+
     // The prior version only checked that each expected member's name appeared somewhere in the file
     // (Assert.IsTrue(json.Contains(...))), so it could not have failed had the Widget block also carried
     // some other, unwanted member (an address, a tag, anything device-derived) alongside the expected ones.
