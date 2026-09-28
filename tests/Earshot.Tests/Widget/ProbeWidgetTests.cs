@@ -1,4 +1,5 @@
 using Earshot;
+using Earshot.Infra;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -6,6 +7,12 @@ namespace Earshot.Tests.Widget;
 
 // probe widget --out <folder>: RenderProbeWidgets is the function Program.ProbeWidget calls; this drives
 // it directly, the same way ProbeTests.cs drives RenderProbeIcons. No IWidgetStatus, no device.
+//
+// RenderProbeWidgets now builds a WidgetCard, which logs through Paths.Current (FileLog under
+// Paths.Current.LogFolder), so every call here runs under EARSHOT_SAFE_MODE and a redirected
+// EARSHOT_DATA_ROOT (RenderUnderSafeMode), the same way CompositionRootWidgetTests and PathsTests
+// redirect it, so a test run never reaches the real %LOCALAPPDATA%\Earshot even if a DWM call ever
+// fails and the card logs a warning.
 [TestClass]
 public sealed class ProbeWidgetTests
 {
@@ -14,7 +21,7 @@ public sealed class ProbeWidgetTests
     {
         using var temp = new TempFolder();
 
-        IReadOnlyList<Program.ProbeWidgetFile> files = Program.RenderProbeWidgets(temp.Path);
+        IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
         // Gauge: 2 snapshots x 3 DPIs x 2 inks = 12. Card: 3 variants (this-pc, elsewhere,
         // auto-pause-preview) x 3 DPIs x 2 inks = 18. Case-open card: 3 DPIs x 2 inks = 6. 12+18+6 = 36.
@@ -62,7 +69,7 @@ public sealed class ProbeWidgetTests
     {
         using var temp = new TempFolder();
 
-        IReadOnlyList<Program.ProbeWidgetFile> files = Program.RenderProbeWidgets(temp.Path);
+        IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
         string[] cardFiles = Directory.GetFiles(temp.Path, "card-*.png");
         Assert.HasCount(18, cardFiles, "3 variants x 3 DPIs x 2 inks.");
@@ -84,7 +91,7 @@ public sealed class ProbeWidgetTests
     {
         using var temp = new TempFolder();
 
-        Program.RenderProbeWidgets(temp.Path);
+        RenderUnderSafeMode(temp.Path);
 
         string[] caseOpenFiles = Directory.GetFiles(temp.Path, "case-open-card-*.png");
         Assert.HasCount(6, caseOpenFiles, "3 DPIs x 2 inks.");
@@ -101,7 +108,7 @@ public sealed class ProbeWidgetTests
     public void EveryNewVariantIsInTheListTheJsonAndTextWriterBothSerialise()
     {
         using var temp = new TempFolder();
-        IReadOnlyList<Program.ProbeWidgetFile> files = Program.RenderProbeWidgets(temp.Path);
+        IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-this-pc-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-elsewhere-", StringComparison.Ordinal)));
@@ -114,12 +121,33 @@ public sealed class ProbeWidgetTests
     {
         using var temp = new TempFolder();
 
-        IReadOnlyList<Program.ProbeWidgetFile> files = Program.RenderProbeWidgets(temp.Path);
+        IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
         Assert.HasCount(36, files);
         Assert.IsTrue(files.All(f => f.Bytes > 0));
         Assert.IsTrue(Directory.Exists(temp.Path));
         // TempFolder's own Dispose (below, via `using`) deletes temp.Path once this test ends, so no
         // scratch output from this test is left on disk.
+    }
+
+    // Runs RenderProbeWidgets under EARSHOT_SAFE_MODE=1 and a redirected EARSHOT_DATA_ROOT of its own
+    // (deleted again once the call returns), so the card's own FileLog(Paths.Current.LogFolder) never
+    // reaches the real %LOCALAPPDATA%\Earshot, whatever this machine's DWM support turns out to be.
+    private static IReadOnlyList<Program.ProbeWidgetFile> RenderUnderSafeMode(string outFolder)
+    {
+        string dataRoot = Path.Combine(Path.GetTempPath(), "earshot-tests", "probe-widget-data-" + Guid.NewGuid().ToString("N"));
+        using var safeMode = new EnvironmentVariableScope(Paths.SafeModeVariable, "1");
+        using var root = new EnvironmentVariableScope(Paths.DataRootVariable, dataRoot);
+        try
+        {
+            return Program.RenderProbeWidgets(outFolder);
+        }
+        finally
+        {
+            if (Directory.Exists(dataRoot))
+            {
+                Directory.Delete(dataRoot, recursive: true);
+            }
+        }
     }
 }
