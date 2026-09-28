@@ -65,8 +65,12 @@ internal sealed record WidgetCardModel(
 internal sealed class WidgetCard : Form
 {
     // Design choice, not a measurement: a system-ish accent for the Connect state, not a read of any
-    // Windows API or system accent colour.
-    internal static readonly Color AccentBlue = Color.FromArgb(0x60, 0xCD, 0xFF);
+    // Windows API or system accent colour. Darker in light mode, lighter in dark mode, matching the
+    // mockup: the same light-mode blue the dark theme uses reads as too pale against a light background.
+    // The text drawn over either fill is white in both themes (AccentInk).
+    internal static readonly Color AccentLight = Color.FromArgb(0x00, 0x5F, 0xB8);
+    internal static readonly Color AccentDark = Color.FromArgb(0x3A, 0x96, 0xDD);
+    internal static readonly Color AccentInk = Color.White;
 
     private readonly ILog _log;
     private readonly bool _notice;
@@ -612,14 +616,14 @@ internal sealed class WidgetCard : Form
     {
         bool connect = _model.ConnectIntent;
         Color fill = connect
-            ? AccentBlue
+            ? (_dark ? AccentDark : AccentLight)
             : (_dark ? Color.FromArgb(0x3A, 0x3A, 0x3A) : Color.FromArgb(0xE4, 0xE4, 0xE4));
         if (!_model.ButtonEnabled)
         {
             fill = Color.FromArgb(120, fill);
         }
 
-        Color text = connect ? Color.Black : _palette.Title;
+        Color text = connect ? AccentInk : _palette.Title;
         using var path = new GraphicsPath();
         AddRoundedRect(path, rect, rect.Height / 2f);
         using (var brush = new SolidBrush(fill))
@@ -651,7 +655,7 @@ internal sealed class WidgetCard : Form
         {
             AddRoundedRect(trackPath, track, track.Height / 2f);
             Color trackColour = _model.AutoPauseOn
-                ? AccentBlue
+                ? (_dark ? AccentDark : AccentLight)
                 : (_dark ? Color.FromArgb(0x55, 0x55, 0x55) : Color.FromArgb(0xC8, 0xC8, 0xC8));
             using var trackBrush = new SolidBrush(trackColour);
             g.FillPath(trackBrush, trackPath);

@@ -60,6 +60,34 @@ public sealed class WidgetCardTests
         });
     }
 
+    // The same light-mode blue the dark theme uses reads as too pale against a light background: light mode
+    // gets a darker accent than dark mode, matching the mockup (#005FB8 against #3A96DD).
+    [TestMethod]
+    public void TheConnectButtonUsesADarkerAccentInLightModeThanInDarkMode()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            // One button-height in from the left edge (past the rounded cap) and clear of the centred
+            // "Connect" text, so this samples the fill colour rather than the white text drawn over it.
+            Point centre = new(layout.Button.X + layout.Button.Height, layout.Button.Y + (layout.Button.Height / 2));
+
+            using var lightCard = new WidgetCard(new CapturingLog());
+            lightCard.SetTheme(Color.Black, highContrast: false); // dark ink => light background
+            lightCard.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            using Bitmap lightBitmap = Render(lightCard);
+
+            using var darkCard = new WidgetCard(new CapturingLog());
+            darkCard.SetTheme(Color.White, highContrast: false); // light ink => dark background
+            darkCard.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            using Bitmap darkBitmap = Render(darkCard);
+
+            Assert.AreEqual(WidgetCard.AccentLight, lightBitmap.GetPixel(centre.X, centre.Y), "Light mode must use the darker accent.");
+            Assert.AreEqual(WidgetCard.AccentDark, darkBitmap.GetPixel(centre.X, centre.Y), "Dark mode must use the lighter accent.");
+            Assert.AreNotEqual(WidgetCard.AccentLight, WidgetCard.AccentDark, "Sanity: the two accents must actually differ.");
+        });
+    }
+
     [TestMethod]
     public void APercentDrawsTheBarAndTheDigits()
     {
