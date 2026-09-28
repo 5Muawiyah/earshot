@@ -153,7 +153,7 @@ internal sealed class GaugeController : IDisposable
             return;
         }
 
-        ShowOrMove(bounds);
+        ShowOrMove(bounds, layout.GaugeCentreIsGauge);
         CheckIconDebounce();
     }
 
@@ -191,7 +191,7 @@ internal sealed class GaugeController : IDisposable
         DisposeSurface();
     }
 
-    private void ShowOrMove(Rectangle bounds)
+    private void ShowOrMove(Rectangle bounds, bool? gaugeCentreIsGauge)
     {
         IGaugeSurface surface = EnsureSurface();
         bool wasShown = _state is GaugeState.Shown;
@@ -206,12 +206,22 @@ internal sealed class GaugeController : IDisposable
         {
             outcome = surface.MoveTo(bounds);
         }
+        else if (gaugeCentreIsGauge == false)
+        {
+            // Nothing moved, but the read's own WindowFromPoint check at the gauge's own centre (the
+            // reader's GaugeCentreIsGauge) found something else there instead of the gauge itself: the
+            // shell (or some other topmost window) has been drawn over it since the read that last
+            // confirmed it was on top - a full screen state ending, or a flyout closing, are the two
+            // ordinary causes. A MoveTo to the same rectangle is a SetWindowPos no-op that would leave the
+            // gauge invisible under whatever now sits there; Raise puts it back on top without moving or
+            // resizing it. False, not just "not true": a genuinely unreadable point (no gauge was shown for
+            // this read to check) is null, never treated as covered.
+            outcome = surface.Raise();
+        }
         else
         {
-            // Nothing changed. A future refinement re-raises the window here once, for the case where the
-            // shell has raised the taskbar above the topmost band since the gauge was last shown (a full
-            // screen state ending, or a flyout closing), which would otherwise leave the gauge invisible
-            // under the bar until the next move. Not implemented in this build: left for a future change.
+            // Nothing changed, and the read confirms the gauge is still the topmost window at its own
+            // centre (or there was no shown gauge yet for this read to check in the first place).
             return;
         }
 
