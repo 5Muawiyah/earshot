@@ -29,6 +29,7 @@ internal static class WidgetCopy
     public const string NameOtherDevice = "Name your other device...";
     public const string OtherDeviceCaption = "This is your own label for \"in use, not on this PC\". The AirPods do not report a device name.";
     public const string LowBatteryAlert = "Low battery alert";
+    public const string LowBatteryThreshold = "Threshold";
     public const string OtherDeviceNameTitle = "Name your other device";
 
     private const string LeftAirPodLabel = "Left AirPod";

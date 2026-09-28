@@ -39,6 +39,7 @@ internal sealed record MenuState(
     MenuItemState LeftClickConnectsItem,
     MenuItemState CaseOpenCardItem,
     MenuItemState LowBatteryAlert,
+    MenuItemState LowBatteryThreshold,
     IReadOnlyList<LowBatteryThresholdMenuItem> LowBatteryThresholdItems,
     MenuItemState NameOtherDeviceItem,
     MenuItemState ChooseDevice,
@@ -130,6 +131,9 @@ internal static class MenuModel
             LeftClickConnectsItem: new MenuItemState(WidgetCopy.LeftClickConnects, Checked: settings.Widget.LeftClickConnects, Enabled: !busy, Visible: true),
             CaseOpenCardItem: new MenuItemState(WidgetCopy.CardWhenCaseOpens, Checked: settings.Widget.CaseOpenCard, Enabled: !busy, Visible: true),
             LowBatteryAlert: new MenuItemState(WidgetCopy.LowBatteryAlert, Checked: settings.Widget.LowBatteryAlert, Enabled: !busy, Visible: true),
+            // A plain submenu opener, never checkable itself: the alert's own on/off state lives on
+            // LowBatteryAlert above, not here, so one menu row is never both a toggle and a dropdown parent.
+            LowBatteryThreshold: new MenuItemState(WidgetCopy.LowBatteryThreshold, Checked: false, Enabled: !busy && settings.Widget.LowBatteryAlert, Visible: true),
             LowBatteryThresholdItems: LowBatteryThresholdItems(settings.Widget, busy),
             NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
@@ -137,7 +141,7 @@ internal static class MenuModel
             Exit: new MenuItemState(Exit, Checked: false, Enabled: true, Visible: true));
     }
 
-    // The ten percentages the threshold can be set to, checked against the saved value and disabled
+    // The nine percentages the threshold can be set to, checked against the saved value and disabled
     // together while the alert itself is off: a submenu with nothing to choose from would confuse a
     // reader more than it helps them.
     private static List<LowBatteryThresholdMenuItem> LowBatteryThresholdItems(WidgetSettings widget, bool busy)

@@ -33,6 +33,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _leftClickConnects = new();
     private readonly ToolStripMenuItem _caseOpenCard = new();
     private readonly ToolStripMenuItem _lowBatteryAlert = new();
+    private readonly ToolStripMenuItem _lowBatteryThreshold = new();
     private readonly ToolStripMenuItem _nameOtherDevice = new();
     private readonly ToolStripMenuItem _chooseDevice = new();
     private readonly ToolStripMenuItem _setUp = new();
@@ -61,6 +62,7 @@ internal sealed class TrayMenu : IDisposable
             _leftClickConnects,
             _caseOpenCard,
             _lowBatteryAlert,
+            _lowBatteryThreshold,
             _nameOtherDevice,
             new ToolStripSeparator(),
             _chooseDevice,
@@ -131,7 +133,7 @@ internal sealed class TrayMenu : IDisposable
     internal IReadOnlyList<ToolStripMenuItem> PlayFromPhoneItems => _playFromPhone.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
 
     // The low battery threshold submenu in display order, for tests.
-    internal IReadOnlyList<ToolStripMenuItem> LowBatteryThresholdItems => _lowBatteryAlert.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
+    internal IReadOnlyList<ToolStripMenuItem> LowBatteryThresholdItems => _lowBatteryThreshold.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
 
     internal void Apply(MenuState state)
     {
@@ -150,6 +152,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_leftClickConnects, state.LeftClickConnectsItem);
         Set(_caseOpenCard, state.CaseOpenCardItem);
         Set(_lowBatteryAlert, state.LowBatteryAlert);
+        Set(_lowBatteryThreshold, state.LowBatteryThreshold);
         SetLowBatteryThresholdItems(state.LowBatteryThresholdItems);
         Set(_nameOtherDevice, state.NameOtherDeviceItem);
         Set(_chooseDevice, state.ChooseDevice);
@@ -201,12 +204,14 @@ internal sealed class TrayMenu : IDisposable
         }
     }
 
-    // The submenu is rebuilt each time, exactly as SetPlayFromPhoneItems is: ten fixed percentages, so
-    // there is never a stale entry left over from an earlier threshold.
+    // The submenu is rebuilt each time, exactly as SetPlayFromPhoneItems is: nine fixed percentages, so
+    // there is never a stale entry left over from an earlier threshold. Lives under its own
+    // _lowBatteryThreshold parent, never under _lowBatteryAlert: that item is a plain checkable toggle, not
+    // a dropdown, so a click on it always means "turn the alert on or off", never "open a submenu".
     private void SetLowBatteryThresholdItems(IReadOnlyList<LowBatteryThresholdMenuItem> items)
     {
-        ToolStripItem[] old = _lowBatteryAlert.DropDownItems.Cast<ToolStripItem>().ToArray();
-        _lowBatteryAlert.DropDownItems.Clear();
+        ToolStripItem[] old = _lowBatteryThreshold.DropDownItems.Cast<ToolStripItem>().ToArray();
+        _lowBatteryThreshold.DropDownItems.Clear();
         foreach (ToolStripItem item in old)
         {
             item.Click -= OnLowBatteryThresholdItemClick;
@@ -223,7 +228,7 @@ internal sealed class TrayMenu : IDisposable
                 Tag = item,
             };
             child.Click += OnLowBatteryThresholdItemClick;
-            _lowBatteryAlert.DropDownItems.Add(child);
+            _lowBatteryThreshold.DropDownItems.Add(child);
         }
     }
 

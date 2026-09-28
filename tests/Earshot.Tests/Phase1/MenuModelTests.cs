@@ -80,7 +80,7 @@ public sealed class MenuModelTests
         MenuItemState[] items =
             [state.Toggle, state.BlockAtBoot, state.HandBack, state.ProtectAudio, state.ProtectCaveat,
              state.OpenOnStartup, state.ShowOnTaskbar, state.LeftClickConnectsItem, state.CaseOpenCardItem,
-             state.LowBatteryAlert, state.NameOtherDeviceItem, state.ChooseDevice, state.SetUp, state.Exit];
+             state.LowBatteryAlert, state.LowBatteryThreshold, state.NameOtherDeviceItem, state.ChooseDevice, state.SetUp, state.Exit];
 
         foreach (MenuItemState item in items)
         {
@@ -118,6 +118,9 @@ public sealed class MenuModelTests
         Assert.IsFalse(state.CaseOpenCardItem.Checked);
         Assert.AreEqual(WidgetCopy.LowBatteryAlert, state.LowBatteryAlert.Text);
         Assert.IsFalse(state.LowBatteryAlert.Checked);
+        Assert.AreEqual(WidgetCopy.LowBatteryThreshold, state.LowBatteryThreshold.Text);
+        Assert.IsFalse(state.LowBatteryThreshold.Checked, "The threshold row is a plain submenu opener, never itself checkable.");
+        Assert.IsFalse(state.LowBatteryThreshold.Enabled, "The alert itself is off in this setup, so its threshold submenu stays disabled too.");
         Assert.AreEqual(WidgetCopy.NameOtherDevice, state.NameOtherDeviceItem.Text);
         Assert.IsTrue(state.NameOtherDeviceItem.Visible);
 
@@ -136,19 +139,26 @@ public sealed class MenuModelTests
         Assert.IsFalse(busy.LeftClickConnectsItem.Enabled);
         Assert.IsFalse(busy.CaseOpenCardItem.Enabled);
         Assert.IsFalse(busy.LowBatteryAlert.Enabled);
+        Assert.IsFalse(busy.LowBatteryThreshold.Enabled);
         Assert.IsFalse(busy.NameOtherDeviceItem.Enabled);
     }
 
-    // The threshold submenu: ten fixed percentages, the saved one checked, and every entry disabled
-    // together whenever the alert itself is off, since there is nothing useful to choose from then.
+    // The threshold submenu: nine fixed percentages, the saved one checked, and every entry (and the
+    // submenu's own opener row) disabled together whenever the alert itself is off, since there is nothing
+    // useful to choose from then. The opener is never checkable itself, and never the same row as the
+    // alert's own on/off toggle: LowBatteryAlert and LowBatteryThreshold are two separate menu rows.
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
-    public void LowBatteryThresholdItemsShowTenPercentagesWithTheSavedOneChecked(bool alertOn)
+    public void LowBatteryThresholdItemsShowNinePercentagesWithTheSavedOneChecked(bool alertOn)
     {
         EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = alertOn, LowBatteryThresholdPercent = 40 });
 
         MenuState state = Build(settings: settings);
+
+        Assert.AreEqual(WidgetCopy.LowBatteryThreshold, state.LowBatteryThreshold.Text);
+        Assert.IsFalse(state.LowBatteryThreshold.Checked);
+        Assert.AreEqual(alertOn, state.LowBatteryThreshold.Enabled);
 
         Assert.AreEqual(9, state.LowBatteryThresholdItems.Count);
         CollectionAssert.AreEqual(ExpectedThresholdPercents, state.LowBatteryThresholdItems.Select(i => i.Percent).ToArray());
@@ -172,6 +182,7 @@ public sealed class MenuModelTests
 
         MenuState state = Build(settings: settings, busy: true);
 
+        Assert.IsFalse(state.LowBatteryThreshold.Enabled);
         Assert.IsTrue(state.LowBatteryThresholdItems.All(i => !i.Enabled));
     }
 
@@ -373,6 +384,7 @@ public sealed class MenuModelTests
         Assert.IsTrue(safe.LeftClickConnectsItem.Enabled);
         Assert.IsTrue(safe.CaseOpenCardItem.Enabled);
         Assert.IsTrue(safe.LowBatteryAlert.Enabled);
+        Assert.IsTrue(safe.LowBatteryThreshold.Enabled);
         Assert.IsTrue(safe.NameOtherDeviceItem.Enabled);
     }
 
