@@ -446,7 +446,10 @@ internal sealed class WidgetCard : Form
     // the layered gauge's UpdateLayeredWindow, not an owner-painted Form).
     private static GraphicsPath BudGlyphPath(Rectangle bounds, bool mirror)
     {
-        var path = new GraphicsPath();
+        // Winding, not the default Alternate: the head (an ellipse) and the stem (a rounded rectangle)
+        // overlap where the stem meets the head, and Alternate XORs that overlap into a hole instead of
+        // filling it solid.
+        var path = new GraphicsPath { FillMode = FillMode.Winding };
         float w = bounds.Width;
         float h = bounds.Height;
         float headSize = w * 0.6f;

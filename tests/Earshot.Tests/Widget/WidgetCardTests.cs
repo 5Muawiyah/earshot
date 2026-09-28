@@ -34,6 +34,32 @@ public sealed class WidgetCardTests
         });
     }
 
+    // The head (an ellipse) and the stem (a rounded rectangle) overlap where the stem meets the head:
+    // FillMode.Alternate (the GraphicsPath default) XORs that overlap into a hole instead of filling it
+    // solid, which FillMode.Winding fixes.
+    [TestMethod]
+    public void TheBudGlyphHasNoHoleWhereTheHeadAndStemMeet()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            using Bitmap bitmap = Render(card);
+
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            Rectangle bounds = layout.Left.Glyph;
+            float headSize = bounds.Width * 0.6f;
+            float stemCentreX = bounds.X + (headSize * 0.70f); // BudGlyphPath's own formula, mirror: false
+            int x = (int)Math.Round(stemCentreX);
+            int y = (int)Math.Round(bounds.Y + (headSize * 0.60f)); // just inside the head, at the stem's own top
+
+            Color background = bitmap.GetPixel(0, 0);
+            Color pixel = bitmap.GetPixel(x, y);
+            Assert.AreNotEqual(background, pixel, "The head/stem junction must be filled solid, not a hole.");
+        });
+    }
+
     [TestMethod]
     public void APercentDrawsTheBarAndTheDigits()
     {
