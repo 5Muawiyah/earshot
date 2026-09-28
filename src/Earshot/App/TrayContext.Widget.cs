@@ -255,6 +255,12 @@ internal sealed partial class TrayContext
     // Drives the same path a real IWidgetStatus.CaseOpened event does, without a real case-open advert.
     internal void RaiseCaseOpenedForTest() => OnCaseOpened(this, new CaseOpenedEventArgs(_time.GetUtcNow()));
 
+    // The case-open card's own gate, read straight through: which of the coordinator's own HandBackInProgress
+    // and SessionEndInProgress each of the gate's two matching legs actually reads. False (not null) when
+    // nothing is wired yet, since "not in progress" and "nothing to ask" read the same to a caller here.
+    internal bool WidgetCaseOpenGateHandBackInProgressForTest => _caseOpenCardPresenter?.HandBackInProgressForTest ?? false;
+    internal bool WidgetCaseOpenGateSessionEndInProgressForTest => _caseOpenCardPresenter?.SessionEndInProgressForTest ?? false;
+
     // Drives the same path a real left click on the gauge does, LeftClickConnects off, without simulating
     // an actual click on the real GaugeWindow this pipeline builds.
     internal void RequestWidgetCardForTest() => OnWidgetCardRequested(this, EventArgs.Empty);

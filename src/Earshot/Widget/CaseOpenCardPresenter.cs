@@ -87,6 +87,14 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // True while the card is on screen. For tests; the UI thread only.
     internal bool IsShown => _card is { IsDisposed: false, Visible: true };
 
+    // The gate's own two hand-back legs, read straight through rather than through RequestShow's whole
+    // chain: the real notification-state check (SHQueryUserNotificationState) sits ahead of both of these
+    // in RequestShowOnUiThread's own order, so a test proving which of the coordinator's own two flags each
+    // one actually reads cannot get there by raising a real CaseOpened event on a desktop where that earlier
+    // check already refuses (as this codebase's own private test desktops do). For tests only.
+    internal bool HandBackInProgressForTest => _gate.HandBackInProgress();
+    internal bool SessionEndInProgressForTest => _gate.SessionEndInProgress();
+
     // IWidgetStatus.CaseOpened, already posted to the UI thread by the data side, but this still posts
     // itself so a test or a future caller on another thread is safe too, matching WidgetCardPresenter.
     public void RequestShow(Rectangle? gaugeBounds) => _uiPost(() => RequestShowOnUiThread(gaugeBounds));
