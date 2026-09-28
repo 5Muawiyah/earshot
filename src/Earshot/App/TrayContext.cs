@@ -1808,6 +1808,14 @@ internal sealed partial class TrayContext : ApplicationContext
 
         RefreshIcon(remeasure: forceIcon, force: forceIcon);
 
+        // The widget card's own Connect/Disconnect button reads the same IsBusy this method is called
+        // beside every change of (StartToggle's own set-true and its finally's set-false, both followed by
+        // a call here): without this, a card already open when a connect or disconnect started anywhere
+        // (the tray icon, the menu, a hotkey, not just the card's own button) kept showing the button it
+        // last rendered until the next IWidgetStatus.Changed happened to arrive. Refresh is a no-op when no
+        // card is open.
+        _widgetCardPresenter?.Refresh();
+
         // The tray's own busy flags change only beside a call to this method, and the block coordinator's Changed
         // event ends here too, so this is where the copy of the busy state that the streaming coordinator reads is
         // refreshed. It is a copy: written here on the UI thread, read later on a pool thread, and so possibly a

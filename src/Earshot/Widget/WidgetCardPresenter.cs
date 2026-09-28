@@ -67,6 +67,10 @@ internal sealed class WidgetCardPresenter : IDisposable
     // True while the card is on screen. For tests; the UI thread only.
     internal bool IsShown => _card is { IsDisposed: false, Visible: true };
 
+    // The card's own last-rendered model, for tests: proving a Refresh() actually reached the real card
+    // Render drew, rather than only that Refresh() itself was called.
+    internal WidgetCardModel? CurrentModelForTest => _card?.Model;
+
     // For tests: the reason WidgetCardPresenter believes the card last closed for, or null.
     internal bool HasPendingToggleCloseWindow => _closedByDeactivateAtTimestamp is not null;
 

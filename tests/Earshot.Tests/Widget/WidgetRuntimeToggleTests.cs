@@ -160,4 +160,49 @@ public sealed class WidgetRuntimeToggleTests
                 "A hidden gauge's old bounds must not be handed out as though the gauge were still on screen.");
         });
     }
+
+    // Before the fix, UpdatePresentation refreshed the icon and the tooltip on every busy-state change
+    // (StartToggle's own set-true, and its finally's set-false) but never the widget card, so a card left
+    // open while a toggle started anywhere else - the tray icon here, but the menu or a hotkey read the
+    // same IsBusy - kept showing whatever button state it was last rendered with until the connection
+    // itself actually changed and IWidgetStatus.Changed happened to fire.
+    [TestMethod]
+    public void TheOpenCardsButtonDisablesTheMomentAnyToggleStartsAndReEnablesWhenItEnds()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var connect = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true, LeftClickConnects = true });
+            tray.Connection.OnConnect = _ => connect.Task;
+            tray.PumpUntilIdle();
+
+            // LeftClickConnects on routes the tray icon's own left click (and a gauge click) straight to a
+            // toggle, so RequestWidgetCardForTest is the only way left to open the card itself for this test.
+            tray.Context.RequestWidgetCardForTest();
+            tray.PumpUntilIdle();
+            Assert.IsTrue(tray.Context.WidgetCardIsShownForTest, "Sanity: the card must be open before the toggle starts.");
+            Assert.IsTrue(tray.Context.WidgetCardButtonEnabledForTest, "Sanity: the button starts enabled with nothing in flight.");
+
+            // No PumpUntilIdle here: the click runs synchronously up to the coordinator's own await, which
+            // never completes until connect.SetResult below, so pumping until idle would just time out
+            // waiting for a toggle this test is deliberately holding open. UpdatePresentation's own
+            // Refresh() call only posts the card's re-render; PumpUntil (not a single DoEvents) waits for
+            // that posted work to actually run, the same way PumpUntilIdle would if it could.
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+
+            Assert.IsTrue(tray.Context.IsBusy, "Sanity: the click must have started a toggle still in flight.");
+            TrayHarness.PumpUntil(() => tray.Context.WidgetCardButtonEnabledForTest == false,
+                "An open card's button must disable the moment any toggle starts, not only one started from the card's own button.");
+
+            connect.SetResult(Confirmed("Connected"));
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(tray.Context.WidgetCardButtonEnabledForTest, "...and re-enable once that toggle ends.");
+        });
+    }
+
+    private static MouseEventArgs Press(MouseButtons button) => new(button, clicks: 1, x: 0, y: 0, delta: 0);
+
+    private static ConnectResult Confirmed(string message) => new(ConnectOutcome.Confirmed, message, []);
 }
