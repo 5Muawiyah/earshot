@@ -12,7 +12,7 @@ For a pair of AirPods that is usually the wrong moment: they get pulled off a
 phone mid-call or mid-podcast, with nothing on the PC actually wanting them
 yet. Earshot stops that by switching the AirPods off at the Windows level
 while nobody is using them on this PC, and switches them straight back on
-with one click when someone is.
+with a click on the card when someone is.
 
 It also stops something quieter: Windows can drop a Bluetooth headset from
 its normal stereo sound down to a narrow, phone-call-quality channel the
@@ -23,8 +23,9 @@ microphone on this PC.
 
 ## The tray icon
 
-A left click connects or disconnects the AirPods, whichever they are not
-already doing. The icon itself shows which of four states they are in:
+Left-click the icon to open a card, then click Connect or Disconnect on it,
+whichever they are not already doing. The icon itself shows which of four
+states they are in:
 
 | Icon | Meaning |
 |---|---|
@@ -49,7 +50,7 @@ Top to bottom, with the exact wording:
 | Item | What it does |
 |---|---|
 | `Safe mode: no device actions` | A caption, not a command. Shown only when Earshot is running in a mode that turns every device action off, used for testing. |
-| `Connect`, or `Disconnect` when connected | The same as a left click. Greyed out while a change is already under way. |
+| `Connect`, or `Disconnect` when connected | The same as clicking the button on the card the tray icon opens. Greyed out while a change is already under way. |
 | `Play from a phone` | Shown only once this v1.1 setting is turned on. Opens a submenu listing the phones paired in Windows that can send audio to this PC, with `Refresh the list` and, once one is open, `Stop playing from <name>`. Greyed out before Windows 10 version 2004 (build 19041). |
 | `Block at boot` | A tick. Keeps the AirPods' device nodes disabled while they are not in use. Turning it on before setup has run starts setup. The tick shows what is in force; when the setting cannot be read it shows neither state. |
 | `Hand back at shut down and sleep` | A tick, on by default. Releases the AirPods and blocks the device nodes again when you shut down, restart or put the computer to sleep, so it does not grab them straight back. See [below](#handing-the-airpods-back). |

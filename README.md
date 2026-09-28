@@ -10,15 +10,15 @@
 
 <p align="center"><img src="docs/images/hero.png" alt="Earshot's icon in the tray, with its card above it saying Connected" width="100%"></p>
 
-<p align="center"><i>Earshot in the tray: one click, and a small card says what happened.</i></p>
+<p align="center"><i>Earshot in the tray: click the icon, then Connect on the card, and it says what happened.</i></p>
 
 Muawiyah Jahanzaib built Earshot because Windows pages every paired Bluetooth
 device when the PC powers on, including AirPods that were left on a phone in
 the middle of something, and there is no per-device setting to stop it. Earshot
 disables the AirPods' own Bluetooth device nodes while they are not in use on
 the PC, so Windows has nothing to page at boot; connects and disconnects them
-with one click; and blocks the Hands-Free profile so a browser tab or a game
-cannot drop them to call quality.
+from a click on the tray icon's card; and blocks the Hands-Free profile so a
+browser tab or a game cannot drop them to call quality.
 
 | Document | What it covers |
 |---|---|
@@ -42,13 +42,14 @@ https://learn.microsoft.com/en-us/answers/questions/4093792/how-to-prevent-windo
 Earshot takes the other route. It disables the AirPods' own Bluetooth device
 nodes while you are not using them on the PC. A disabled node stays disabled
 across a restart, so Windows never pages them at boot. The pairing is
-untouched, so enabling the nodes again is quick, and one left click on the
-tray icon does it.
+untouched, so enabling the nodes again is quick: left-click the Earshot icon,
+then Connect on the card.
 
 ## What it does
 
 - **Stops Windows paging the AirPods at boot**, with Block at boot turned on.
-- **Connects and disconnects the AirPods** with one left click on the tray icon.
+- **Connects and disconnects the AirPods**: left-click the Earshot icon, then
+  Connect or Disconnect on the card.
 - **Blocks the Hands-Free profile**, on by default, so a browser tab or a game
   cannot drop the AirPods to a narrow voice channel. This turns off the
   AirPods microphone on this PC while it is on.

@@ -112,7 +112,7 @@ try
         'The AirPods are paired with this PC and available to connect.',
         'This PC can sleep (this half records what it finds; it does not refuse on this alone).'
     ) -PhysicalActions @(
-        'Connect the AirPods to this PC with a left click on the tray icon and play something so they stay in use.',
+        'Connect the AirPods to this PC by left-clicking the Earshot icon and clicking Connect on the card, and play something so they stay in use.',
         'Choose Start, then Power, then Sleep.',
         'Wait at least thirty seconds, then wake this PC.',
         'Press Enter here once you have signed back in.'
@@ -121,7 +121,7 @@ try
     if ($ready)
     {
         Write-Section -Run $run -Title 'Connect and confirm'
-        Wait-Owner -Run $run -Text 'Left-click the tray icon to connect the AirPods to this PC, and play something so they stay in use.'
+        Wait-Owner -Run $run -Text 'Left-click the Earshot icon, then Connect on the card, to connect the AirPods to this PC, and play something so they stay in use.'
         $audioBefore = Get-AudioState -Run $run -Label 'audio-connected'
         $statesBefore = Get-TargetEndpointStates -AudioJson $audioBefore
         Write-Line -Run $run -Text ('Render ' + $statesBefore.Render + ' before sleep.')
