@@ -187,6 +187,35 @@ public sealed class GaugeWindowTests
         });
     }
 
+    // The log check above proves HideWindow reports its own outcome, but SetWindowPos would report exactly
+    // the same success whether or not SWP_HIDEWINDOW itself was among the flags passed - a mutant that
+    // dropped that one flag while leaving NOACTIVATE, NOMOVE, NOSIZE and NOZORDER in place would still make
+    // the call, still get TRUE back, still log the same Debug line, and the window would stay on screen. The
+    // only thing that actually proves the window disappeared is asking Windows whether it is still visible.
+    [TestMethod]
+    public void HideWindowActuallyMakesTheRealWindowInvisible()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+
+            Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
+            Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
+            Application.DoEvents();
+            Assert.IsTrue(Earshot.Tests.Phase5.TestWindows.IsWindowVisible(gauge.Handle),
+                "Sanity: the gauge must actually be visible after ShowAt for HideWindow's own effect to mean anything.");
+
+            gauge.HideWindow();
+            Application.DoEvents();
+
+            Assert.IsFalse(Earshot.Tests.Phase5.TestWindows.IsWindowVisible(gauge.Handle),
+                "HideWindow must make the real window invisible, not merely report success.");
+        });
+    }
+
     // A drag that started outside the window and released inside it delivers WM_LBUTTONUP with no
     // preceding WM_LBUTTONDOWN on this window: it must not be counted as a click.
     [TestMethod]

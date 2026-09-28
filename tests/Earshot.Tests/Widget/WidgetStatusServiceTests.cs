@@ -116,6 +116,25 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.Dispose();
     }
 
+    // Close, and turning the setting off, both call RunStopOutsideLock with disposeSource true: the source
+    // is meant to actually be released, not just forgotten. Every test elsewhere in this file that ends with
+    // service.Dispose() would read exactly the same whether or not that Dispose call ever reached the
+    // source: nothing in the service's own public state (Current, the events, _source becoming null from
+    // the outside) tells the two apart, since _source is private. Only asking the fake itself whether its
+    // own Dispose ran proves the source is actually let go, not merely dropped.
+    [TestMethod]
+    public void CloseActuallyDisposesTheSourceNotJustTheServicesOwnReferenceToIt()
+    {
+        var store = NewClaimStore();
+        WidgetStatusService service = NewService(store);
+        service.Start();
+        Assert.AreEqual(0, _source.DisposeCalls, "Sanity: nothing has disposed the source yet.");
+
+        service.Close();
+
+        Assert.AreEqual(1, _source.DisposeCalls, "Close must dispose the source it stopped, not merely stop tracking it.");
+    }
+
     [TestMethod]
     public void BeforeAnyReadingEverythingIsUnknown()
     {
