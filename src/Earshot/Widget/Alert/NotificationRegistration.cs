@@ -190,6 +190,7 @@ internal sealed class NotificationRegistration
     public const string SafeModeMessage = "Safe mode: the notification shortcut was not written.";
     public const string TestFolderMessage = "Test data folder: the notification shortcut was not written.";
     public const string NoExePathMessage = "Earshot could not find its own program file.";
+    public const string NoProgramsFolderMessage = "The Start menu Programs folder was not found; the notification shortcut was not written.";
 
     private readonly IShellLinkWriter _writer;
     private readonly ILog _log;
@@ -221,6 +222,32 @@ internal sealed class NotificationRegistration
         _installedExePath = installedExePath;
         _fileExists = fileExists ?? File.Exists;
         ShortcutPath = Path.Combine(shortcutFolder, ShortcutFileName);
+    }
+
+    // Environment.GetFolderPath(SpecialFolder.Programs) returns an empty string, rather than throwing, when
+    // the folder does not exist and no SpecialFolderOption asked it to be created
+    // (https://learn.microsoft.com/en-us/dotnet/api/system.environment.getfolderpath): the constructor
+    // above still rejects that outright (ArgumentException.ThrowIfNullOrWhiteSpace), a real programming
+    // error for any other caller, but the one call site that feeds it straight from GetFolderPath must not
+    // let a missing folder abort the whole tray. Returns null, and logs, instead of constructing.
+    public static NotificationRegistration? TryCreate(
+        IShellLinkWriter writer,
+        ILog log,
+        bool safeMode,
+        bool redirected,
+        string? shortcutFolder,
+        string? runningExePath,
+        string? installedExePath = null,
+        Func<string, bool>? fileExists = null)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        if (string.IsNullOrWhiteSpace(shortcutFolder))
+        {
+            log.Warn(NoProgramsFolderMessage);
+            return null;
+        }
+
+        return new NotificationRegistration(writer, log, safeMode, redirected, shortcutFolder, runningExePath, installedExePath, fileExists);
     }
 
     public string ShortcutPath { get; }
