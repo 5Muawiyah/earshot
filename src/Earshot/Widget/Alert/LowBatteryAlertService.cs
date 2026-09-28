@@ -6,11 +6,16 @@ namespace Earshot.Widget.Alert;
 // Wires IWidgetStatus.OwnedReadingApplied into LowBatteryLatch and, when a latch fires, into INotifier.
 //
 // The latch is fed on every owned reading regardless of WidgetSettings.LowBatteryAlert: only the actual
-// notification call is gated on the setting. The alternative (skip feeding the latch while the setting is
-// off) would leave a part that has been low the whole time silent the instant the owner turns the alert
-// back on, since the latch would still read Armed and need a fresh 10% step to fire; feeding it always keeps
-// its Armed/Fired bookkeeping exactly in step with the real battery, so the owner sees the state the setting
-// controls, nothing about the latch itself.
+// notification call is gated on the setting. Feeding it always, rather than only while the alert is on, is
+// not what protects a part that crossed while the alert was off: LowBatteryLatch.Apply fires from Armed the
+// moment a reading is at or below the threshold, no 10% margin needed for that, so skipping the latch while
+// the alert is off and feeding it again once the owner turns it back on would still catch that on the very
+// next reading. What feeding it always actually buys is closer to the opposite: a part that fires while the
+// alert is off does so silently (Fired, no notification), and Fired needs a reading at least 10% back above
+// the threshold before it can fire again - so a part that has stayed low the whole time the alert was off
+// does not, by itself, produce a notification the moment the owner turns the alert back on. Kept this way
+// anyway, so the latch's own Armed/Fired bookkeeping always matches the real battery independent of the
+// setting; the owner sees whatever state the setting controls, nothing about the latch's own history.
 internal sealed class LowBatteryAlertService : IDisposable
 {
     private readonly IWidgetStatus _status;

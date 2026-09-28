@@ -94,14 +94,19 @@ public sealed class GaugeWindowTests
     // private desktop and does discriminate, proved below by toggling the flag under test.
     //
     // The background window is shown but never made active by any real activation primitive (not
-    // Form.Activate(), not SetActiveWindow either): a real activation transition on a private desktop in
-    // this process was found to leave the NEXT CardDesktop.Run's own desktop permanently ERROR_BUSY at
-    // CloseDesktop, regardless of which real activation primitive performs it or which desktop performs it
-    // first - reproduced with GaugeWindowTests run before ConnectCardTests' own (deliberately real)
-    // activation test, 5/5, and confirmed down to SetActiveWindow alone with no Form.Activate() and no
-    // GaugeWindow involved at all. With nothing ever really activated, GetActiveWindow() starts at 0 and
-    // must stay 0 (never the gauge's handle) after a genuinely NOACTIVATE show, which still discriminates:
-    // proved below by toggling the flag under test.
+    // Form.Activate(), not SetActiveWindow either): the cause found here was never "activation" as such but
+    // the Text Services Framework's own process-wide worker threads, which activating a window with the IME
+    // enabled starts from the activating thread, binding that thread's desktop to them for the life of the
+    // process and leaving the NEXT CardDesktop.Run's own desktop permanently ERROR_BUSY at CloseDesktop
+    // (CardDesktopTextServicesTests has the full account and the two Microsoft doc URLs) - reproduced with
+    // GaugeWindowTests run before ConnectCardTests' own (deliberately real) activation test, 5/5, and
+    // confirmed down to SetActiveWindow alone with no Form.Activate() and no GaugeWindow involved at all:
+    // what mattered was the IME being enabled on the activating thread, not which activation primitive ran
+    // or which desktop went first. CardDesktop.Run's own thread now disables its IME before its first
+    // window for exactly this reason, but this test still never activates anything for real, so a change to
+    // that thread-level fix cannot silently bring the failure back here. With nothing ever really activated,
+    // GetActiveWindow() starts at 0 and must stay 0 (never the gauge's handle) after a genuinely NOACTIVATE
+    // show, which still discriminates: proved below by toggling the flag under test.
     [TestMethod]
     public void ShowAtDoesNotChangeTheActiveWindowAndRendersAVisibleBitmap()
     {
