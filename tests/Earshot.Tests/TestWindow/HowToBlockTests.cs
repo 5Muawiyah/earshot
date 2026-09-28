@@ -94,8 +94,9 @@ public sealed class HowToBlockTests
         // how many, checked in so a future pass narrowing the gap updates this number on purpose).
         // Test 19 added 38 instruction-shaped entries, 5 with a how-to block (display scaling,
         // light and dark mode, and the three "find the icon or gauge" instructions), so 33 more
-        // with none: 139 + 33 = 172.
-        const int expectedMissingCount = 172;
+        // with none: 139 + 33 = 172. The claim trigger question was later split into two (whether
+        // it is there, then whether it reads disabled), one more with no how-to block: 173.
+        const int expectedMissingCount = 173;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +

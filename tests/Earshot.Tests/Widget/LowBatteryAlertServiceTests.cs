@@ -15,6 +15,8 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
     {
         public WidgetSnapshot Current => WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true);
 
+        public bool ClaimAvailable => false;
+
         public event EventHandler? Changed;
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;

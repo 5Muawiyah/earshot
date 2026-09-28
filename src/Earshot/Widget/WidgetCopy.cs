@@ -32,6 +32,13 @@ internal static class WidgetCopy
     public const string LowBatteryThreshold = "Threshold";
     public const string OtherDeviceNameTitle = "Name your other device";
 
+    // The claim trigger: open the case next to the PC, then choose this. Disabled with a one-line reason
+    // while nothing has proved a signal threshold to claim against, never enabled on a guess. The reason
+    // reads as the same fact ClaimFlow's own refusal message states, worded to sit in parentheses after
+    // the item's own text.
+    public const string MakeTheseMyAirPods = "Make these my AirPods";
+    public const string MakeTheseMyAirPodsDisabledReason = "no signal threshold set up yet";
+
     private const string LeftAirPodLabel = "Left AirPod";
     private const string RightAirPodLabel = "Right AirPod";
 

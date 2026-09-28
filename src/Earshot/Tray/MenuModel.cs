@@ -41,6 +41,7 @@ internal sealed record MenuState(
     MenuItemState LowBatteryAlert,
     MenuItemState LowBatteryThreshold,
     IReadOnlyList<LowBatteryThresholdMenuItem> LowBatteryThresholdItems,
+    MenuItemState ClaimAirPodsItem,
     MenuItemState NameOtherDeviceItem,
     MenuItemState ChooseDevice,
     MenuItemState SetUp,
@@ -91,7 +92,8 @@ internal static class MenuModel
         StartupState startup,
         bool safeMode = false,
         bool voiceKnownMissing = false,
-        StreamingMenuModel? streaming = null)
+        StreamingMenuModel? streaming = null,
+        bool claimAvailable = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -135,6 +137,15 @@ internal static class MenuModel
             // LowBatteryAlert above, not here, so one menu row is never both a toggle and a dropdown parent.
             LowBatteryThreshold: new MenuItemState(WidgetCopy.LowBatteryThreshold, Checked: false, Enabled: !busy && settings.Widget.LowBatteryAlert, Visible: true),
             LowBatteryThresholdItems: LowBatteryThresholdItems(settings.Widget, busy),
+            // Never enabled on a guess: disabled, with the plain reason in its own text, until phase 0 has
+            // proved a signal threshold to claim against. busy still gates it the same as every other action
+            // here, once it is otherwise available, so a claim cannot start while something else is already
+            // in flight.
+            ClaimAirPodsItem: new MenuItemState(
+                claimAvailable ? WidgetCopy.MakeTheseMyAirPods : WidgetCopy.MakeTheseMyAirPods + " (" + WidgetCopy.MakeTheseMyAirPodsDisabledReason + ")",
+                Checked: false,
+                Enabled: claimAvailable && !busy,
+                Visible: true),
             NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
             SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.NeedsSetUp(block)),

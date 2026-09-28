@@ -595,10 +595,11 @@
     # notification-shortcut-exists is 'fail' in every case: the sandbox redirects APPDATA under
     # itself, and nothing here writes Earshot.lnk into it, so the real Test-Path this criterion
     # runs is honestly answering "not found" on a machine where that is correct, exactly as it
-    # would on a real machine Earshot has never started on. claim-flow-reachable and
-    # low-battery-alert-fires are always 'inconclusive': the fake owner answers 'no' to "is there
-    # a claim button" (matching this build, which has none), and the alert can never be fed an
-    # owned reading without one, whatever the case. explorer-restart-reattach and
+    # would on a real machine Earshot has never started on. claim-flow-reachable is always 'pass':
+    # the fake owner answers 'yes' to both claim-trigger questions (the item is there, and it reads
+    # disabled), matching this build, where the trigger exists but phase 0 has not proved a signal
+    # threshold. low-battery-alert-fires stays 'inconclusive' in every case: the alert can never be
+    # fed an owned reading without a claim, whatever the case. explorer-restart-reattach and
     # positive-control-counters need at least one matching log line to pass; case-open-no-auto-
     # connect needs zero, so it is the one criterion that flips the other way as the case grows.
     # atRest: render never reads Active at the close (the last owner action before it is the
@@ -609,13 +610,13 @@
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
                 'gauge-follows-autohide' = 'pass'; 'gauge-hidden-fullscreen' = 'pass'; 'explorer-restart-reattach' = 'fail'
                 'gauge-card-dpi' = 'pass'; 'gauge-card-theme' = 'pass'; 'gauge-click-behaviour' = 'pass'
-                'positive-control-counters' = 'inconclusive'; 'claim-flow-reachable' = 'inconclusive'
+                'positive-control-counters' = 'inconclusive'; 'claim-flow-reachable' = 'pass'
                 'battery-honestly-not-shown' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'pass'; 'bluetooth-off-then-on' = 'inconclusive'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive' }
             FindingsInclude = @{
-                'claimFileExistsAtStart' = 'no'; 'claimFlowWiredToUi' = 'no'; 'claimFileExistsAfterCheck' = 'no'
+                'claimFileExistsAtStart' = 'no'; 'claimFlowWiredToUi' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
                 'widgetAllSectionsSeen' = $null; 'widgetAppleSectionsSeen' = $null; 'widgetProximityItemsSeen' = $null
                 'caseOpenToggleLinesSeen' = 0; 'widgetWatcherStoppedLine' = $null; 'leftAtRest' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
@@ -623,13 +624,13 @@
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
                 'gauge-follows-autohide' = 'pass'; 'gauge-hidden-fullscreen' = 'pass'; 'explorer-restart-reattach' = 'pass'
                 'gauge-card-dpi' = 'pass'; 'gauge-card-theme' = 'pass'; 'gauge-click-behaviour' = 'pass'
-                'positive-control-counters' = 'pass'; 'claim-flow-reachable' = 'inconclusive'
+                'positive-control-counters' = 'pass'; 'claim-flow-reachable' = 'pass'
                 'battery-honestly-not-shown' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive' }
             FindingsInclude = @{
-                'claimFileExistsAtStart' = 'no'; 'claimFlowWiredToUi' = 'no'; 'claimFileExistsAfterCheck' = 'no'
+                'claimFileExistsAtStart' = 'no'; 'claimFlowWiredToUi' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
                 'caseOpenToggleLinesSeen' = 1; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
@@ -637,13 +638,13 @@
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
                 'gauge-follows-autohide' = 'pass'; 'gauge-hidden-fullscreen' = 'pass'; 'explorer-restart-reattach' = 'pass'
                 'gauge-card-dpi' = 'pass'; 'gauge-card-theme' = 'pass'; 'gauge-click-behaviour' = 'pass'
-                'positive-control-counters' = 'pass'; 'claim-flow-reachable' = 'inconclusive'
+                'positive-control-counters' = 'pass'; 'claim-flow-reachable' = 'pass'
                 'battery-honestly-not-shown' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive' }
             FindingsInclude = @{
-                'claimFileExistsAtStart' = 'no'; 'claimFlowWiredToUi' = 'no'; 'claimFileExistsAfterCheck' = 'no'
+                'claimFileExistsAtStart' = 'no'; 'claimFlowWiredToUi' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
                 'caseOpenToggleLinesSeen' = 2; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }

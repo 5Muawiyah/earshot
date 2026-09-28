@@ -168,6 +168,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
+    // Reads the same seam ClaimAsync itself reads from (_claimThreshold: WidgetDefaults.SignalThresholdDbm
+    // in production, ships null until phase 0 edits it), so the UI's own idea of whether a claim can be
+    // made can never drift from what ClaimAsync would actually do. No lock needed: _claimThreshold is a
+    // plain injected read, exactly as ClaimAsync already calls it outside the lock.
+    public bool ClaimAvailable => _claimThreshold() is not null;
+
     // Constructed and started only while the setting is on; hooks the device monitor and settings change
     // regardless, so turning the setting on later (TurningTheSettingOnStartsOne) still works. Idempotent: a
     // second call does nothing, rather than double-subscribing the device monitor and settings events and

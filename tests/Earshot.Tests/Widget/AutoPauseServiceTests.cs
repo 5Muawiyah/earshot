@@ -21,6 +21,8 @@ public sealed class AutoPauseServiceTests : IDisposable
     {
         public WidgetSnapshot Current { get; set; } = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true);
 
+        public bool ClaimAvailable => false;
+
         public event EventHandler? Changed;
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;

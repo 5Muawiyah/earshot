@@ -394,6 +394,20 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNull(snapshot.EarReadAt);
     }
 
+    // The claim trigger's own gate: reads the same seam ClaimAsync itself refuses on
+    // (ClaimOutcomeStatus.NoThreshold), so the UI's idea of whether a claim can be made can never drift
+    // from what actually attempting one would do.
+    [TestMethod]
+    public void ClaimAvailableFollowsWhetherAThresholdIsSupplied()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService withThreshold = NewService(store, claimThreshold: -70);
+        using WidgetStatusService withoutThreshold = NewService(store, claimThreshold: null);
+
+        Assert.IsTrue(withThreshold.ClaimAvailable);
+        Assert.IsFalse(withoutThreshold.ClaimAvailable);
+    }
+
     [TestMethod]
     public void AStrangerChangesNothingButTheCount()
     {

@@ -95,6 +95,29 @@ public sealed class WidgetMenuTests
         });
     }
 
+    // No live run has ever proved a signal threshold on this machine (phase 0 stays unset), so the trigger
+    // reads disabled here exactly as it would in production: WidgetStatusService.ClaimAvailable reads the
+    // same WidgetDefaults.SignalThresholdDbm the real claim flow refuses on, with no test-only override
+    // reachable through TrayContext's own composition (CompositionRoot.BuildWidget's own header explains
+    // why). ToolStripMenuItem.PerformClick is a no-op on a disabled item, the same as Button.PerformClick
+    // elsewhere in this suite, so a click cannot be driven through it here: the wiring from a click to
+    // WidgetStatusService.ClaimAsync is proved instead where the item can genuinely be enabled
+    // (MenuModelTests, TrayMenuTests) and where ClaimAsync itself can be driven to every outcome
+    // (WidgetStatusServiceTests, ClaimFlowTests).
+    [TestMethod]
+    public void MakeTheseMyAirPodsReadsDisabledWithNoSignalThresholdEverProved()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(settings: s => s.Widget = s.Widget with { Enabled = true });
+            tray.Context.Menu.Refresh();
+
+            ToolStripMenuItem item = tray.MenuItem("Make these my AirPods (no signal threshold set up yet)");
+
+            Assert.IsFalse(item.Enabled, "No signal threshold has ever been proved on this build.");
+        });
+    }
+
     // The threshold submenu sits under the top-level item, so it is reached through Context.Menu directly
     // rather than ClickMenu (which only looks at the menu's own top-level items).
     [TestMethod]
