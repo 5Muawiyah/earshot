@@ -47,6 +47,45 @@ public sealed class GaugeWindowTests
         });
     }
 
+    // WinForms' base.WndProc calls SetCapture on both button-downs; before the fix neither up handler ever
+    // released it, so the gauge kept capture after every click and a click on the card, the menu or the
+    // case-open card that followed never reached them until something else released it.
+    [TestMethod]
+    public void CaptureIsReleasedAfterALeftButtonDownAndUp()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            nint handle = gauge.Handle;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_LBUTTONDOWN);
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_LBUTTONUP);
+
+            Assert.AreEqual((nint)0, Earshot.Tests.Phase5.TestWindows.GetCapture(),
+                "GetCapture() must read 0 after a left down/up pair on the gauge.");
+        });
+    }
+
+    [TestMethod]
+    public void CaptureIsReleasedAfterARightButtonDownAndUp()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            nint handle = gauge.Handle;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_RBUTTONDOWN);
+            Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_RBUTTONUP);
+
+            Assert.AreEqual((nint)0, Earshot.Tests.Phase5.TestWindows.GetCapture(),
+                "GetCapture() must read 0 after a right down/up pair on the gauge.");
+        });
+    }
+
     // A private desktop has no foreground-window concept the way the input desktop does: GetForegroundWindow
     // returns 0 both before and after activating a form there, so comparing it before and after ShowAt would
     // pass even if SWP_NOACTIVATE were removed from GaugeWindow.ShowAt and it started stealing activation.

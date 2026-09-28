@@ -461,4 +461,10 @@ internal static class TestWindows
     [DllImport("user32.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern nint SendMessageW(nint hWnd, uint msg, nint wParam, nint lParam);
+
+    // The window that currently holds mouse capture, or 0 when none does.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcapture
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    public static extern nint GetCapture();
 }

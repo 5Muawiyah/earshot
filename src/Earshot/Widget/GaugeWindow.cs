@@ -146,8 +146,19 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                 base.WndProc(ref m);
                 return;
 
+            // WinForms' own base.WndProc calls SetCapture on both button-downs (the default Control
+            // handling for WM_LBUTTONDOWN/WM_RBUTTONDOWN), so this window keeps receiving the matching
+            // move/up messages even if the pointer leaves it before the button is released. Both up
+            // handlers below release that capture in turn: left before this fix never did, so the gauge
+            // kept capture after every click and a following click on the card, the menu or the case-open
+            // card - all separate windows - never reached them until the gauge's own capture was released
+            // by something else. https://learn.microsoft.com/en-us/windows/win32/inputdev/about-mouse-input#mouse-capture
             case NativeMethods.WM_LBUTTONDOWN:
                 _leftButtonDown = true;
+                base.WndProc(ref m);
+                return;
+
+            case NativeMethods.WM_RBUTTONDOWN:
                 base.WndProc(ref m);
                 return;
 
@@ -161,6 +172,7 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                     LeftClicked?.Invoke(this, EventArgs.Empty);
                 }
 
+                NativeMethods.ReleaseCapture();
                 return;
 
             case NativeMethods.WM_RBUTTONUP:
@@ -170,8 +182,20 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                 Point client = new(x, y);
                 Point screen = PointToScreen(client);
                 RightClicked?.Invoke(this, screen);
+                NativeMethods.ReleaseCapture();
                 return;
             }
+
+            // Capture has already moved on by the time this arrives (to another window, or released
+            // outright): the documented contract is that a window handling it must not call ReleaseCapture
+            // itself. Only the down-tracking flag needs resetting, so a capture lost mid-press (the pointer
+            // grabbed by another window, Alt+Tab, or any other cancel path) never leaves _leftButtonDown
+            // stuck true for a later, unrelated up to answer as a click.
+            // https://learn.microsoft.com/en-us/windows/win32/inputmsg/wm-capturechanged
+            case NativeMethods.WM_CAPTURECHANGED:
+                _leftButtonDown = false;
+                base.WndProc(ref m);
+                return;
 
             default:
                 base.WndProc(ref m);
