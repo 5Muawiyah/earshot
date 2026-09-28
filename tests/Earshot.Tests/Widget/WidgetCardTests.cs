@@ -9,8 +9,11 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.Widget;
 
 // WidgetCard: the dedicated three-column card. Pure checks create the card on the STA test thread, never
-// shown, and render it from a synthetic snapshot with DrawToBitmap; the real executions are shown only on
-// a private desktop (Earshot.Tests.Phase5.CardDesktop.Run), never the input desktop.
+// shown, and render it from a synthetic snapshot with WidgetCard.RenderContent straight into a bitmap's
+// own Graphics, never Control.DrawToBitmap (which was found to make the window briefly visible, and a
+// normal-mode card briefly take the foreground, on whatever desktop the calling thread is attached to);
+// the real executions are shown only on a private desktop (Earshot.Tests.Phase5.CardDesktop.Run), never
+// the input desktop.
 [TestClass]
 public sealed class WidgetCardTests
 {
@@ -211,6 +214,27 @@ public sealed class WidgetCardTests
     }
 
     [TestMethod]
+    public void TheClaimLinkIsDrawnOnlyWhenShowClaimLinkIsTrue()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var without = new WidgetCard(new CapturingLog());
+            without.SetTheme(Color.Black, highContrast: false);
+            without.Render(Model(Snapshot(), showClaimLink: false), 96);
+            using Bitmap bitmapWithout = Render(without);
+
+            using var with = new WidgetCard(new CapturingLog());
+            with.SetTheme(Color.Black, highContrast: false);
+            with.Render(Model(Snapshot(), showClaimLink: true, claimAvailable: true), 96);
+            using Bitmap bitmapWith = Render(with);
+
+            WidgetCardLayout.Layout layoutWith = WidgetCardLayout.Compute(96, showSwitch: false, showClaimLink: true);
+            Assert.IsTrue(HasInk(bitmapWith, layoutWith.ClaimLink, bitmapWith.GetPixel(0, 0)), "The claim link is drawn when shown.");
+            Assert.IsGreaterThan(bitmapWithout.Height, bitmapWith.Height, "The card is taller with the claim link row.");
+        });
+    }
+
+    [TestMethod]
     public void StylesAreToolWindowAndTopmostWithoutNoActivateInNormalMode()
     {
         Phase5.CardSta.Run(() =>
@@ -347,6 +371,182 @@ public sealed class WidgetCardTests
             Assert.AreEqual(WidgetCardFocus.Switch, card.FocusTarget);
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
+        });
+    }
+
+    // The three rows draw in the same order top to bottom (Button, Switch, ClaimLink), and Tab must follow
+    // that same order: a reader tabbing through must never jump past a row that is actually above the one
+    // focus lands on next.
+    [TestMethod]
+    public void TabCyclesThroughTheButtonTheSwitchAndTheClaimLinkAndWrapsBack()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(autoPauseAvailable: true), showSwitch: true, autoPauseOn: false,
+                showClaimLink: true, claimAvailable: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "The button has the focus first.");
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Switch, card.FocusTarget);
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.ClaimLink, card.FocusTarget);
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
+        });
+    }
+
+    // With no switch row at all, Tab must still reach the claim link directly from the button (MoveFocus's
+    // own "when" arms skip a row that is not shown, rather than getting stuck on it).
+    [TestMethod]
+    public void TabReachesTheClaimLinkDirectlyFromTheButtonWhenTheSwitchIsNotShown()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), showSwitch: false, showClaimLink: true, claimAvailable: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.ClaimLink, card.FocusTarget);
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
+        });
+    }
+
+    [TestMethod]
+    public void EnterOnTheFocusedClaimLinkRaisesClaimRequestedAndCloses()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), showClaimLink: true, claimAvailable: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.ClaimLink, card.FocusTarget);
+
+            int claims = 0;
+            card.ClaimRequested += (_, _) => claims++;
+            SendKey(card.Handle, Keys.Enter);
+
+            Assert.AreEqual(1, claims);
+            Assert.IsFalse(card.Visible, "Activating the claim link closes the card.");
+        });
+    }
+
+    // Never enabled on a guess: a disabled claim link must not raise ClaimRequested, whatever activates it.
+    [TestMethod]
+    public void EnterOnTheFocusedClaimLinkDoesNothingWhileItIsDisabled()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), showClaimLink: true, claimAvailable: false), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.ClaimLink, card.FocusTarget);
+
+            int claims = 0;
+            card.ClaimRequested += (_, _) => claims++;
+            SendKey(card.Handle, Keys.Enter);
+
+            Assert.AreEqual(0, claims, "Never enabled on a guess: Enter on a disabled claim link must do nothing.");
+            Assert.IsTrue(card.Visible, "A disabled claim link must not close the card either.");
+        });
+    }
+
+    [TestMethod]
+    public void AGenuineClickOnTheClaimLinkRaisesClaimRequested()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), showClaimLink: true, claimAvailable: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            int claims = 0;
+            card.ClaimRequested += (_, _) => claims++;
+
+            Rectangle claimRect = WidgetCardLayout.Compute(96, showSwitch: false, showClaimLink: true).ClaimLink;
+            Point centre = new(claimRect.X + (claimRect.Width / 2), claimRect.Y + (claimRect.Height / 2));
+            nint lParam = MakeLParam(centre.X, centre.Y);
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONDOWN, 0, lParam);
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, lParam);
+
+            Assert.AreEqual(1, claims);
+            Assert.AreEqual(WidgetCardFocus.ClaimLink, card.FocusTarget, "A click on the claim link also moves focus to it.");
+        });
+    }
+
+    // Mirrors ALeftUpWithNoMatchingLeftDownNeverActivatesTheButton: a left up over the claim link with no
+    // preceding left down on it must not activate it either.
+    [TestMethod]
+    public void ALeftUpWithNoMatchingLeftDownNeverActivatesTheClaimLink()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), showClaimLink: true, claimAvailable: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            int claims = 0;
+            card.ClaimRequested += (_, _) => claims++;
+
+            Rectangle claimRect = WidgetCardLayout.Compute(96, showSwitch: false, showClaimLink: true).ClaimLink;
+            Point centre = new(claimRect.X + (claimRect.Width / 2), claimRect.Y + (claimRect.Height / 2));
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(centre.X, centre.Y));
+
+            Assert.AreEqual(0, claims, "A left up with no matching left down must never activate the claim link.");
+        });
+    }
+
+    // Render's own defensive reset (mirroring the switch's): a claim made elsewhere (the tray menu, say)
+    // between two renders removes this row, so focus already on it must move back to the button rather
+    // than stay pointed at a row that no longer draws.
+    [TestMethod]
+    public void FocusMovesBackToTheButtonWhenTheClaimLinkDisappearsUnderIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), showClaimLink: true, claimAvailable: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.ClaimLink, card.FocusTarget);
+
+            card.Render(Model(Snapshot(), showClaimLink: false), 96);
+
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget,
+                "A claim made elsewhere must not leave focus pointed at a row that no longer draws.");
         });
     }
 
@@ -577,11 +777,20 @@ public sealed class WidgetCardTests
 
     private static void SendKey(nint handle, Keys key) => Phase5.TestWindows.Send(handle, WM_KEYDOWN, (nint)key, 0);
 
+    // RenderContent, never Control.DrawToBitmap: a top-level, activatable Form like WidgetCard in its
+    // normal (non-notice) mode was found to make the window briefly visible, and briefly take the
+    // foreground, on whatever desktop the calling thread is attached to when DrawToBitmap does its own
+    // internal layout. This card is never shown or activated, never has a handle at all, and never reaches
+    // any desktop: RenderContent paints straight into the bitmap's own Graphics.
     private static Bitmap Render(WidgetCard card)
     {
         Size size = card.ClientSize;
         var bitmap = new Bitmap(Math.Max(1, size.Width), Math.Max(1, size.Height), PixelFormat.Format32bppArgb);
-        card.DrawToBitmap(bitmap, new Rectangle(Point.Empty, size));
+        using (Graphics g = Graphics.FromImage(bitmap))
+        {
+            card.RenderContent(g);
+        }
+
         return bitmap;
     }
 
@@ -633,6 +842,8 @@ public sealed class WidgetCardTests
         bool autoPauseOn = false,
         bool connectIntent = true,
         bool buttonEnabled = true,
-        string otherDeviceLabel = "") =>
-        new(snapshot, autoPauseOn, showSwitch, connectIntent, buttonEnabled, otherDeviceLabel, DateTimeOffset.UtcNow);
+        string otherDeviceLabel = "",
+        bool showClaimLink = false,
+        bool claimAvailable = false) =>
+        new(snapshot, autoPauseOn, showSwitch, connectIntent, buttonEnabled, otherDeviceLabel, DateTimeOffset.UtcNow, showClaimLink, claimAvailable);
 }

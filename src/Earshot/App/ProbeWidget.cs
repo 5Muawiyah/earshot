@@ -10,10 +10,16 @@ namespace Earshot;
 
 // probe widget --out <folder>: renders the taskbar gauge, the dedicated three-column card and the
 // case-open notice card from fixed synthetic snapshots at three DPIs and two ink colours, and writes each
-// as a PNG. No IWidgetStatus, no device, no window shown: GaugeRenderer draws straight to a bitmap, the
-// same GDI+ path GaugeWindow pushes through UpdateLayeredWindow, and WidgetCard is drawn with
-// DrawToBitmap on an unshown Form, the same pattern WidgetCardTests' own pure checks use (never Show() or
-// Activate(), so nothing ever reaches the input desktop). Safe under EARSHOT_SAFE_MODE=1 with
+// as a PNG. No IWidgetStatus, no device, no window ever shown: GaugeRenderer draws straight to a bitmap,
+// the same GDI+ path GaugeWindow pushes through UpdateLayeredWindow, and WidgetCard is drawn with its own
+// RenderContent(Graphics) straight into an off-screen bitmap's Graphics, with no Form handle, no
+// Show()/Activate() and no Control.DrawToBitmap call anywhere in the path. An earlier version of this file
+// used DrawToBitmap instead, on the documented assumption that an unshown Form reaches nothing on the
+// input desktop; a live run found that claim false; the probe wins. Control.DrawToBitmap on a top-level,
+// activatable Form (WidgetCard in its normal, non-notice mode has no WS_EX_NOACTIVATE, since it takes real
+// keyboard focus when actually shown) briefly makes the window visible, and briefly takes the foreground,
+// on whatever desktop this process is attached to, to do its own internal layout - the owner's own desktop
+// for a command line tool with no private one of its own. Safe under EARSHOT_SAFE_MODE=1 with
 // EARSHOT_DATA_ROOT pointed at a temp folder: the card's own log writes land under that redirected folder
 // too, the same FileLog(Paths.Current.LogFolder) every other probe target already uses.
 //
@@ -25,14 +31,14 @@ namespace Earshot;
 // decodes without that table. These captures preview the finished layout ahead of that proof, not a claim
 // about what the widget currently shows on the owner's own hardware.
 //
-// The card is drawn on an unshown Form, so DwmExtendFrameIntoClientArea's translucent Mica backdrop is
-// never actually composited by the desktop: WidgetCard.OnPaint clears to fully transparent whenever
-// _dwmBackdropOk reads true regardless, which it does even off-screen, and DrawToBitmap's own GDI-backed
-// paint bakes that straight to opaque black with no alpha left to recover afterwards (filling the
-// destination bitmap first, or compositing onto it after, both still come back opaque black: DrawToBitmap
-// overwrites the whole client area itself). RenderProbeWidgetCard below instead sets the card's own
-// OverrideBackgroundForCaptureOnly before calling Render, so OnPaint clears to a solid colour directly, in
-// the same colour DWM's own transient material measures at (measured locally, not a citation): #545454 for
+// The card's window handle, if RenderContent's caller ever created one at all, is never shown, so
+// DwmExtendFrameIntoClientArea's translucent Mica backdrop is never actually composited by the desktop:
+// WidgetCard.RenderContent clears to fully transparent whenever _dwmBackdropOk reads true regardless,
+// which it does even without a handle, and painting straight onto an already-opaque destination bitmap
+// bakes that to opaque black with no alpha left to recover afterwards. RenderProbeWidgetCard below instead
+// sets the card's own OverrideBackgroundForCaptureOnly before calling Render, so RenderContent clears to a
+// solid colour directly, in the same colour DWM's own transient material measures at (measured locally,
+// not a citation): #545454 for
 // the dark theme, #D3D3D3 for the light one, so a light-theme capture is not just pale content on what
 // would otherwise be an opaque black square.
 internal static partial class Program
@@ -178,32 +184,43 @@ internal static partial class Program
     // The card variants the widget card probe renders, from the same two fixed synthetic snapshots the
     // gauge already uses. "this-pc" and "elsewhere" are the shipped card as production actually renders it
     // today (AutoPauseAvailable false in both, matching every real snapshot until a device proves the
-    // in-ear bits, so ShowSwitch is false and the switch row never appears). "auto-pause-preview" is
-    // clearly not that: production never sets AutoPauseAvailable true today, so this third variant exists
-    // only to preview the switch row's look, from a snapshot no real device produces yet, not as a claim
-    // about current shipped behaviour.
+    // in-ear bits, so ShowSwitch is false and the switch row never appears; ClaimExists true in both, so
+    // the claim link never appears either, matching the only claimed shape a device can currently reach).
+    // "auto-pause-preview" is clearly not that: production never sets AutoPauseAvailable true today, so
+    // this variant exists only to preview the switch row's look, from a snapshot no real device produces
+    // yet, not as a claim about current shipped behaviour. "claim-link-preview" and
+    // "claim-link-disabled-preview" are the same kind of preview for the claim link: an unclaimed snapshot,
+    // enabled and disabled, since phase 0 has never run on this build and so never actually produces the
+    // enabled state for real either.
     internal static IReadOnlyList<(string Variant, WidgetCardModel Model)> ProbeWidgetCardVariants(DateTimeOffset now)
     {
         IReadOnlyList<(string Name, WidgetSnapshot Snapshot)> snapshots = ProbeWidgetSnapshots(now);
         WidgetSnapshot thisPc = snapshots[0].Snapshot;
         WidgetSnapshot elsewhere = snapshots[1].Snapshot;
+        WidgetSnapshot unclaimed = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: false);
 
         return
         [
             ("this-pc", new WidgetCardModel(thisPc, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
-                ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowClaimLink: false, ClaimAvailable: false)),
             ("elsewhere", new WidgetCardModel(elsewhere, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
-                ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now)),
+                ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now, ShowClaimLink: false, ClaimAvailable: false)),
             ("auto-pause-preview", new WidgetCardModel(thisPc with { AutoPauseAvailable = true },
                 AutoPauseOn: false, ShowSwitch: true, ConnectIntent: false, ButtonEnabled: true,
-                OtherDeviceLabel: "", Now: now)),
+                OtherDeviceLabel: "", Now: now, ShowClaimLink: false, ClaimAvailable: false)),
+            ("claim-link-preview", new WidgetCardModel(unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowClaimLink: true, ClaimAvailable: true)),
+            ("claim-link-disabled-preview", new WidgetCardModel(unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowClaimLink: true, ClaimAvailable: false)),
         ];
     }
 
-    // Renders one WidgetCard(notice) to a bitmap with DrawToBitmap, exactly the pattern
-    // WidgetCardTests' own private Render(WidgetCard) helper uses (never Show() or Activate()), and saves
-    // it as a PNG named "{namePrefix}-{dpi}dpi-{w}x{h}-{ink}.png" where w x h is the card's own ClientSize
-    // after Render, since the card's height comes from its content, not a fixed constant.
+    // Renders one WidgetCard(notice) straight into an off-screen bitmap's Graphics (WidgetCard.RenderContent),
+    // never Control.DrawToBitmap: that call was found to make a top-level, activatable Form like this one
+    // briefly visible, and a normal-mode card briefly take the foreground, on whatever desktop this process
+    // runs on to do its own internal layout - the owner's real desktop for this command line tool. Saved as
+    // a PNG named "{namePrefix}-{dpi}dpi-{w}x{h}-{ink}.png" where w x h is the card's own ClientSize after
+    // Render, since the card's height comes from its content, not a fixed constant.
     private static ProbeWidgetFile RenderProbeWidgetCard(
         ILog log, string namePrefix, string variant, WidgetCardModel model, uint dpi, string inkName, Color ink, bool notice, string folder)
     {
@@ -213,10 +230,9 @@ internal static partial class Program
         {
             using var card = new WidgetCard(log, notice);
             card.SetTheme(ink, highContrast: false);
-            // The card is never actually composited by DWM here (the Form is never shown), so its own
-            // translucent-backdrop clear leaves nothing for DrawToBitmap to capture but opaque black
-            // (Control.DrawToBitmap cannot preserve real per-pixel alpha; GDI's own text and fill calls
-            // force it to 255 as they go). Overriding the clear colour outright, to the measured transient
+            // The card is never actually composited by DWM here (the window handle, if it exists at all,
+            // is never shown), so its own translucent-backdrop clear leaves nothing for the capture to
+            // preserve but opaque black. Overriding the clear colour outright, to the measured transient
             // material DWM's own backdrop actually reads at, is what a probe capture needs instead.
             bool dark = ink.GetBrightness() >= 0.5f;
             card.OverrideBackgroundForCaptureOnly = dark ? DarkThemeBackdrop : LightThemeBackdrop;
@@ -224,7 +240,10 @@ internal static partial class Program
 
             Size size = card.ClientSize;
             using var bitmap = new Bitmap(Math.Max(1, size.Width), Math.Max(1, size.Height), PixelFormat.Format32bppArgb);
-            card.DrawToBitmap(bitmap, new Rectangle(Point.Empty, size));
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                card.RenderContent(g);
+            }
 
             string name = string.Create(CultureInfo.InvariantCulture,
                 $"{namePrefix}-{dpi}dpi-{size.Width}x{size.Height}-{inkName}.png");

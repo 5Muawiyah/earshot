@@ -76,7 +76,10 @@ public sealed class DocumentationSceneImageTests
             using var card = new ConnectCard(new CapturingLog());
             Size size = card.Prepare(new CardContent(DocumentationCardImageTests.DeviceName, TrayStatus.CardConnected), 192, CardTheme.Dark, WideEnough);
             using var cardBitmap = new Bitmap(size.Width, size.Height, PixelFormat.Format24bppRgb);
-            card.DrawToBitmap(cardBitmap, new Rectangle(Point.Empty, size));
+            using (Graphics g = Graphics.FromImage(cardBitmap))
+            {
+                card.RenderContent(g);
+            }
             CollectionAssert.AreEqual(
                 new[] { DocumentationCardImageTests.DeviceName, TrayStatus.CardConnected },
                 card.LastPaintedText().ToArray());

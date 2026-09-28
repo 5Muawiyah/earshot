@@ -56,6 +56,11 @@ public sealed class WidgetRealSurfaceGuardTests
         AppBarRegistration.RealRegistrationCount = 0;
         NotifyIconVisibility.RealVisibleTrueCount = 0;
         _allowedRealConstructions = 0;
+
+        // TopLevelWindowVisibilityGuard: armed before the first test runs, for the same reason the counters
+        // above are zeroed here rather than per-test - one process-wide proof over the whole run, not one
+        // harness build. See its own header for what it watches and why a per-class counter is not enough.
+        TopLevelWindowVisibilityGuard.Start();
     }
 
     [TestMethod]
@@ -134,5 +139,11 @@ public sealed class WidgetRealSurfaceGuardTests
             ", allowed=" + _allowedRealConstructions.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
         Assert.AreEqual(0, NotifyIconVisibility.RealVisibleTrueCount,
             "A test set the real tray icon (NotifyIcon.Visible) to true: no execution is ever allowed to do that for real.");
+
+        IReadOnlyList<TopLevelWindowViolation> windowViolations = TopLevelWindowVisibilityGuard.Violations;
+        TopLevelWindowVisibilityGuard.Stop();
+        Assert.AreEqual(0, windowViolations.Count,
+            "A top-level window belonging to this process was shown, or took the foreground, outside a private test desktop:" +
+            Environment.NewLine + string.Join(Environment.NewLine, windowViolations));
     }
 }

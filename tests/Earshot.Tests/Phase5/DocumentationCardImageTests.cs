@@ -37,7 +37,10 @@ public sealed class DocumentationCardImageTests
             Size size = card.Prepare(content, Dpi, CardTheme.Dark, WideEnough);
 
             using var rendered = new Bitmap(size.Width, size.Height, PixelFormat.Format24bppRgb);
-            card.DrawToBitmap(rendered, new Rectangle(Point.Empty, size));
+            using (Graphics g = Graphics.FromImage(rendered))
+            {
+                card.RenderContent(g);
+            }
 
             CollectionAssert.AreEqual(
                 new[] { DeviceName, status },

@@ -15,9 +15,15 @@ internal static class TestDesktop
 
     private const int UoiName = 2;
 
-    public static string CurrentName()
+    public static string CurrentName() => NameForThread(GetCurrentThreadId());
+
+    // The name of the desktop that owns the thread threadId is: any thread this process created,
+    // including one that created a top-level window, not only the caller. Used by
+    // TopLevelWindowVisibilityGuard to tell which desktop a window a WinEvent hook just saw belongs to,
+    // without needing the window's own thread to be the one asking.
+    public static string NameForThread(uint threadId)
     {
-        nint desktop = GetThreadDesktop(GetCurrentThreadId());
+        nint desktop = GetThreadDesktop(threadId);
         if (desktop == 0)
         {
             throw new InvalidOperationException("GetThreadDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
@@ -32,7 +38,15 @@ internal static class TestDesktop
         return Encoding.Unicode.GetString(buffer, 0, Math.Max(0, needed - 2));
     }
 
-    public static bool IsOwnersDesktop() => string.Equals(CurrentName(), OwnersDesktopName, StringComparison.OrdinalIgnoreCase);
+    // An allow-list, not a deny-list: MainForm.ForceControlCreationForTests refuses to show a real form
+    // unless this reads false, so it must read true for anything that is not a confirmed-safe desktop,
+    // never only for the one name "Default" happens to be. A deny-list version of this (comparing only
+    // against "Default") passed on Default, failed correctly under CardDesktop.Run's own private
+    // desktops, and then quietly showed the real form for real on a third kind of desktop neither name
+    // covers - an external test-isolation tool's own desktop, say - since it recognised that desktop as
+    // "not Default" and let the form through. Fail closed instead: safe only on a desktop this suite
+    // itself created and can vouch for (Phase5.CardDesktop.Run's own "EarshotCardTest-" prefix).
+    public static bool IsOwnersDesktop() => !CurrentName().StartsWith(Earshot.Tests.Phase5.CardDesktop.PrivateDesktopNamePrefix, StringComparison.OrdinalIgnoreCase);
 
     [DllImport("kernel32.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

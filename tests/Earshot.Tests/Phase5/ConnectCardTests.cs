@@ -294,11 +294,18 @@ public sealed class ConnectCardTests
         });
     }
 
+    // RenderContent, never Control.DrawToBitmap: found elsewhere in this codebase (WidgetCard) to make a
+    // top-level Form briefly visible on whatever desktop the calling thread is attached to. This card is
+    // never shown here at all, so nothing about that risk needs to apply to it either.
     private static Bitmap Render(ConnectCard card, Size size)
     {
         Assert.AreEqual(size, card.ClientSize);
         var bitmap = new Bitmap(size.Width, size.Height, PixelFormat.Format24bppRgb);
-        card.DrawToBitmap(bitmap, new Rectangle(Point.Empty, size));
+        using (Graphics g = Graphics.FromImage(bitmap))
+        {
+            card.RenderContent(g);
+        }
+
         return bitmap;
     }
 

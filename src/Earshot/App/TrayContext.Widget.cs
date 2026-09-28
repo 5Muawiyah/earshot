@@ -123,9 +123,11 @@ internal sealed partial class TrayContext
                 Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
                 HighContrast: () => SystemInformation.HighContrast,
                 OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
+                ClaimAvailable: () => _widgetStatus?.ClaimAvailable ?? false,
                 RequestToggle: StartToggleFromWidget,
                 SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
-                    "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place));
+                    "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place),
+                RequestClaim: RequestClaimFromWidget);
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
@@ -268,6 +270,11 @@ internal sealed partial class TrayContext
     // uses, so a save failure is reported on a card exactly as it is for them.
     internal bool TryUpdateSettingsFromWidget(string what, Action<EarshotSettings> mutate, CardPlace place) =>
         TryUpdateSettings(what, mutate, place);
+
+    // The claim link on either card goes through the exact same ClaimAsync call the tray menu's own claim
+    // item makes (ClaimAirPodsAsync, TrayContext.cs), just placed above the gauge or NearTray instead of at
+    // the menu's own click point.
+    internal void RequestClaimFromWidget(CardPlace place) => Launch("claim the AirPods", () => ClaimAirPodsAsync(place), place);
 
     private GaugeControllerSettings ReadGaugeControllerSettings()
     {

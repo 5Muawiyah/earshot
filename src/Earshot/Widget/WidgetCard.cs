@@ -7,9 +7,9 @@ using Earshot.Tray;
 
 namespace Earshot.Widget;
 
-// Which of the card's two focusable items has the keyboard focus. There are no child controls, so focus is
+// Which of the card's focusable items has the keyboard focus. There are no child controls, so focus is
 // tracked here and painted as the system focus rectangle.
-internal enum WidgetCardFocus { Button, Switch }
+internal enum WidgetCardFocus { Button, Switch, ClaimLink }
 
 // Why the card asked to be hidden. WidgetCardPresenter uses Deactivated to run the toggle-close rule: a
 // second gauge click within SystemInformation.DoubleClickTime of a deactivate-close does not reopen it, the
@@ -29,12 +29,14 @@ internal sealed record WidgetCardModel(
     bool ConnectIntent,     // true: the button reads Connect; false: Disconnect
     bool ButtonEnabled,     // false while TrayContext.IsBusy or the link is changing
     string OtherDeviceLabel,
-    DateTimeOffset Now)
+    DateTimeOffset Now,
+    bool ShowClaimLink,     // true while no claim exists yet (Snapshot.ClaimExists is false)
+    bool ClaimAvailable)    // WidgetStatusService.ClaimAvailable: phase 0 has proved a signal threshold
 {
     public static WidgetCardModel Empty { get; } = new(
         WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false),
         AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true, ButtonEnabled: true,
-        OtherDeviceLabel: "", Now: DateTimeOffset.UtcNow);
+        OtherDeviceLabel: "", Now: DateTimeOffset.UtcNow, ShowClaimLink: false, ClaimAvailable: false);
 }
 
 // The dedicated three-column card: Left, Right, Case battery, where the AirPods are, when the battery was
@@ -85,6 +87,7 @@ internal sealed class WidgetCard : Form
     private string? _lastFrameProblem;
     private bool _leftButtonDownOnButton;
     private bool _leftButtonDownOnSwitch;
+    private bool _leftButtonDownOnClaimLink;
 
     public WidgetCard(ILog log, bool notice = false)
     {
@@ -121,6 +124,9 @@ internal sealed class WidgetCard : Form
 
     // The user toggled the switch (Enter, Space or a mouse click on it), to the new value.
     public event EventHandler<bool>? AutoPauseChanged;
+
+    // The user activated the claim link (Enter, Space or a mouse click on it) while it was enabled.
+    public event EventHandler? ClaimRequested;
 
     // The card wants to be hidden. WidgetCardPresenter hides it (it may already be hidden by the time this
     // is observed: the card hides itself first, see RequestClose) and does its own bookkeeping.
@@ -191,11 +197,18 @@ internal sealed class WidgetCard : Form
         ArgumentNullException.ThrowIfNull(model);
         _model = model;
         _dpi = dpi > 0 ? dpi : CardPlacement.BaseDpi;
-        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, model.ShowSwitch);
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, model.ShowSwitch, model.ShowClaimLink);
         if (_focus == WidgetCardFocus.Switch && !model.ShowSwitch)
         {
             // The switch just disappeared under the focus; move it back to the button rather than leave
             // focus pointed at a row that no longer draws.
+            _focus = WidgetCardFocus.Button;
+        }
+
+        if (_focus == WidgetCardFocus.ClaimLink && !model.ShowClaimLink)
+        {
+            // Same rule for the claim link: a claim made elsewhere (the tray menu, say) between two
+            // renders removes this row, so focus must not stay pointed at it.
             _focus = WidgetCardFocus.Button;
         }
 
@@ -278,31 +291,34 @@ internal sealed class WidgetCard : Form
     }
 
     // Tracks where a left button-down landed, so OnMouseUp below can require the up to land on the same
-    // control before it activates anything: any other button (right, middle) never sets either flag, so
-    // its own up can never activate the button or the switch either.
+    // control before it activates anything: any other button (right, middle) never sets any of the three
+    // flags, so its own up can never activate the button, the switch or the claim link either.
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         ArgumentNullException.ThrowIfNull(e);
-        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch, _model.ShowClaimLink);
         _leftButtonDownOnButton = e.Button == MouseButtons.Left && layout.Button.Contains(e.Location);
         _leftButtonDownOnSwitch = e.Button == MouseButtons.Left && layout.ShowSwitch && layout.Switch.Contains(e.Location);
+        _leftButtonDownOnClaimLink = e.Button == MouseButtons.Left && layout.ShowClaimLink && layout.ClaimLink.Contains(e.Location);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         ArgumentNullException.ThrowIfNull(e);
-        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch, _model.ShowClaimLink);
 
         // A left up activates a control only when the matching left down already landed on that same
-        // control: a drag that started outside the button or the switch and released inside it, or any
-        // up from a button other than left (right, middle), must not count as pressing it, the same rule
-        // GaugeWindow's own left-click handling already applies.
+        // control: a drag that started outside the button, the switch or the claim link and released
+        // inside it, or any up from a button other than left (right, middle), must not count as pressing
+        // it, the same rule GaugeWindow's own left-click handling already applies.
         bool activatesButton = e.Button == MouseButtons.Left && _leftButtonDownOnButton && layout.Button.Contains(e.Location);
         bool activatesSwitch = e.Button == MouseButtons.Left && _leftButtonDownOnSwitch && layout.ShowSwitch && layout.Switch.Contains(e.Location);
+        bool activatesClaimLink = e.Button == MouseButtons.Left && _leftButtonDownOnClaimLink && layout.ShowClaimLink && layout.ClaimLink.Contains(e.Location);
         _leftButtonDownOnButton = false;
         _leftButtonDownOnSwitch = false;
+        _leftButtonDownOnClaimLink = false;
 
         if (activatesButton)
         {
@@ -314,10 +330,16 @@ internal sealed class WidgetCard : Form
             _focus = WidgetCardFocus.Switch;
             ActivateFocused();
         }
+        else if (activatesClaimLink)
+        {
+            _focus = WidgetCardFocus.ClaimLink;
+            ActivateFocused();
+        }
         else if (_notice)
         {
-            // A notice-mode card is dismissed by a click outside the two buttons: only reachable in notice
-            // mode, since the normal card already closes on deactivation for a click anywhere else.
+            // A notice-mode card is dismissed by a click outside the button, the switch and the claim
+            // link: only reachable in notice mode, since the normal card already closes on deactivation
+            // for a click anywhere else.
             RequestClose(WidgetCardCloseReason.ClickOutside);
         }
     }
@@ -330,12 +352,25 @@ internal sealed class WidgetCard : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
-        Graphics g = e.Graphics;
+        RenderContent(e.Graphics);
+    }
+
+    // The card's whole content, factored out of OnPaint so a capture path can paint it straight into an
+    // off-screen Bitmap's Graphics with no Form, no window handle and no Show/DrawToBitmap call ever
+    // involved. Control.DrawToBitmap on a top-level, activatable Form like this one (normal mode has no
+    // WS_EX_NOACTIVATE, since it takes real keyboard focus) was found to make the window briefly visible,
+    // and normal mode briefly take the foreground, on whatever desktop the calling thread is attached to,
+    // to do its own internal layout - the owner's real desktop for a thread never given a private one. This
+    // never touches Handle, so nothing here can do that: WidgetCardTests' own pure checks and Earshot.exe
+    // probe widget (ProbeWidget.cs) both call this directly instead.
+    internal void RenderContent(Graphics g)
+    {
+        ArgumentNullException.ThrowIfNull(g);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(OverrideBackgroundForCaptureOnly ?? (_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background));
 
-        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch, _model.ShowClaimLink);
         DrawColumnLabel(g, layout.Left.Label, WidgetCopy.LeftLabel);
         DrawColumnLabel(g, layout.Right.Label, WidgetCopy.RightLabel);
         DrawColumnLabel(g, layout.Case.Label, WidgetCopy.CaseLabel);
@@ -350,11 +385,24 @@ internal sealed class WidgetCard : Form
         {
             DrawSwitch(g, layout.Switch);
         }
+
+        if (layout.ShowClaimLink)
+        {
+            DrawClaimLink(g, layout.ClaimLink);
+        }
     }
 
+    // Cycles Button, Switch (when shown), ClaimLink (when shown), back to Button: the same order the three
+    // rows draw in top to bottom, so Tab always moves focus the way it reads on screen.
     private void MoveFocus()
     {
-        _focus = _model.ShowSwitch && _focus == WidgetCardFocus.Button ? WidgetCardFocus.Switch : WidgetCardFocus.Button;
+        _focus = _focus switch
+        {
+            WidgetCardFocus.Button when _model.ShowSwitch => WidgetCardFocus.Switch,
+            WidgetCardFocus.Button when _model.ShowClaimLink => WidgetCardFocus.ClaimLink,
+            WidgetCardFocus.Switch when _model.ShowClaimLink => WidgetCardFocus.ClaimLink,
+            _ => WidgetCardFocus.Button,
+        };
         Invalidate();
     }
 
@@ -368,6 +416,16 @@ internal sealed class WidgetCard : Form
             }
 
             ToggleRequested?.Invoke(this, EventArgs.Empty);
+            RequestClose(WidgetCardCloseReason.Action);
+        }
+        else if (_focus == WidgetCardFocus.ClaimLink)
+        {
+            if (!_model.ShowClaimLink || !_model.ClaimAvailable)
+            {
+                return;
+            }
+
+            ClaimRequested?.Invoke(this, EventArgs.Empty);
             RequestClose(WidgetCardCloseReason.Action);
         }
         else if (_model.ShowSwitch)
@@ -696,6 +754,25 @@ internal sealed class WidgetCard : Form
         }
 
         if (!_notice && _focus == WidgetCardFocus.Switch && ContainsFocus)
+        {
+            DrawFocusRectangle(g, rect);
+        }
+    }
+
+    // Plain text, not a filled button: the claim trigger is one line, not a primary action, matching how
+    // little room the card has left once the three columns, the two status lines and the Connect/Disconnect
+    // button are already drawn. The accent colour when it can be clicked reads as a link; the ordinary
+    // status colour, dimmer against the background, when phase 0 has not proved a signal threshold yet
+    // reads as inert, the same visual language DrawButton's own disabled fill already uses for "not now".
+    private void DrawClaimLink(Graphics g, Rectangle rect)
+    {
+        string text = _model.ClaimAvailable
+            ? WidgetCopy.MakeTheseMyAirPods
+            : WidgetCopy.MakeTheseMyAirPods + " (" + WidgetCopy.MakeTheseMyAirPodsDisabledReason + ")";
+        Color colour = _model.ClaimAvailable ? (_dark ? AccentDark : AccentLight) : _palette.Status;
+        DrawLine(g, rect, text, colour);
+
+        if (!_notice && _focus == WidgetCardFocus.ClaimLink && ContainsFocus)
         {
             DrawFocusRectangle(g, rect);
         }

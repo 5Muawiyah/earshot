@@ -22,6 +22,7 @@ internal static class WidgetCardLayout
     public const int ColumnGapToLabelAt96 = 2;
     public const int ButtonHeightAt96 = 32;
     public const int SwitchRowHeightAt96 = 24;
+    public const int ClaimLinkHeightAt96 = 18;
 
     public static int WidthFor(int dpi) => CardPlacement.Scale(WidthAt96, dpi);
 
@@ -29,8 +30,10 @@ internal static class WidgetCardLayout
     // mockup.
     internal readonly record struct ColumnLayout(Rectangle Label, Rectangle Glyph, Rectangle Bar, Rectangle Percent);
 
-    // The whole card, in client pixels. Switch is Rectangle.Empty when ShowSwitch is false; nothing
-    // reads it then.
+    // The whole card, in client pixels. Switch and ClaimLink are Rectangle.Empty when their own ShowX is
+    // false; nothing reads either then. ClaimLink sits below Switch when both show, or below Button when
+    // only ClaimLink does: the claim trigger is the least central of the three, so it never displaces the
+    // battery columns or Connect/Disconnect from their usual place.
     internal sealed record Layout(
         int Width,
         int Height,
@@ -41,9 +44,11 @@ internal static class WidgetCardLayout
         Rectangle ReadLine,
         Rectangle Button,
         bool ShowSwitch,
-        Rectangle Switch);
+        Rectangle Switch,
+        bool ShowClaimLink,
+        Rectangle ClaimLink);
 
-    public static Layout Compute(int dpi, bool showSwitch)
+    public static Layout Compute(int dpi, bool showSwitch, bool showClaimLink = false)
     {
         int width = WidthFor(dpi);
         int pad = CardPlacement.Scale(PaddingAt96, dpi);
@@ -58,6 +63,7 @@ internal static class WidgetCardLayout
         int gapToLabel = CardPlacement.Scale(ColumnGapToLabelAt96, dpi);
         int buttonHeight = CardPlacement.Scale(ButtonHeightAt96, dpi);
         int switchHeight = CardPlacement.Scale(SwitchRowHeightAt96, dpi);
+        int claimLinkHeight = CardPlacement.Scale(ClaimLinkHeightAt96, dpi);
 
         int contentWidth = Math.Max(1, width - (2 * pad));
         int colWidth = Math.Max(1, (contentWidth - (2 * colGap)) / 3);
@@ -80,14 +86,23 @@ internal static class WidgetCardLayout
         var button = new Rectangle(pad, buttonY, contentWidth, buttonHeight);
 
         Rectangle switchRect = Rectangle.Empty;
+        int afterButtonY = button.Bottom;
         int bottom = button.Bottom + pad;
         if (showSwitch)
         {
             switchRect = new Rectangle(pad, button.Bottom + rowGap, contentWidth, switchHeight);
+            afterButtonY = switchRect.Bottom;
             bottom = switchRect.Bottom + pad;
         }
 
-        return new Layout(width, bottom, left, right, box, whereLine, readLine, button, showSwitch, switchRect);
+        Rectangle claimLinkRect = Rectangle.Empty;
+        if (showClaimLink)
+        {
+            claimLinkRect = new Rectangle(pad, afterButtonY + rowGap, contentWidth, claimLinkHeight);
+            bottom = claimLinkRect.Bottom + pad;
+        }
+
+        return new Layout(width, bottom, left, right, box, whereLine, readLine, button, showSwitch, switchRect, showClaimLink, claimLinkRect);
     }
 
     private static ColumnLayout Column(int x, int y, int colWidth, int labelHeight, int gapToLabel, int glyphSize, int barWidth, int barHeight, int gapToBar, int lineHeight)

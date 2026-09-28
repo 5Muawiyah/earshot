@@ -24,9 +24,10 @@ public sealed class ProbeWidgetTests
 
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
-        // Gauge: 2 snapshots x 3 DPIs x 2 inks = 12. Card: 3 variants (this-pc, elsewhere,
-        // auto-pause-preview) x 3 DPIs x 2 inks = 18. Case-open card: 3 DPIs x 2 inks = 6. 12+18+6 = 36.
-        Assert.HasCount(36, files);
+        // Gauge: 2 snapshots x 3 DPIs x 2 inks = 12. Card: 5 variants (this-pc, elsewhere,
+        // auto-pause-preview, claim-link-preview, claim-link-disabled-preview) x 3 DPIs x 2 inks = 30.
+        // Case-open card: 3 DPIs x 2 inks = 6. 12+30+6 = 48.
+        Assert.HasCount(48, files);
         foreach (Program.ProbeWidgetFile file in files)
         {
             Assert.IsTrue(file.Bytes > 0, file.Snapshot + " " + file.Dpi + " " + file.Ink + ": " + file.Problem);
@@ -47,22 +48,34 @@ public sealed class ProbeWidgetTests
     }
 
     [TestMethod]
-    public void TheCardVariantsAreThisPcElsewhereAndAnAutoPausePreview()
+    public void TheCardVariantsAreThisPcElsewhereAnAutoPausePreviewAndTwoClaimLinkPreviews()
     {
         var variants = Program.ProbeWidgetCardVariants(DateTimeOffset.UtcNow);
 
-        Assert.HasCount(3, variants);
+        Assert.HasCount(5, variants);
         Assert.AreEqual("this-pc", variants[0].Variant);
         Assert.IsFalse(variants[0].Model.ConnectIntent, "On this PC, connected, so the button reads Disconnect.");
         Assert.IsFalse(variants[0].Model.ShowSwitch, "Production never has AutoPauseAvailable true today.");
+        Assert.IsFalse(variants[0].Model.ShowClaimLink, "Both fixed snapshots are already claimed.");
 
         Assert.AreEqual("elsewhere", variants[1].Variant);
         Assert.IsTrue(variants[1].Model.ConnectIntent, "Elsewhere, not connected here, so the button reads Connect.");
         Assert.IsFalse(variants[1].Model.ShowSwitch);
+        Assert.IsFalse(variants[1].Model.ShowClaimLink);
 
         Assert.AreEqual("auto-pause-preview", variants[2].Variant);
         Assert.IsTrue(variants[2].Model.ShowSwitch, "The preview variant exists to show the switch row.");
         Assert.IsTrue(variants[2].Model.Snapshot.AutoPauseAvailable);
+        Assert.IsFalse(variants[2].Model.ShowClaimLink);
+
+        Assert.AreEqual("claim-link-preview", variants[3].Variant);
+        Assert.IsTrue(variants[3].Model.ShowClaimLink, "The preview variant exists to show the claim link.");
+        Assert.IsTrue(variants[3].Model.ClaimAvailable, "This variant previews the enabled state.");
+        Assert.IsFalse(variants[3].Model.Snapshot.ClaimExists, "The claim link only ever shows before a claim exists.");
+
+        Assert.AreEqual("claim-link-disabled-preview", variants[4].Variant);
+        Assert.IsTrue(variants[4].Model.ShowClaimLink);
+        Assert.IsFalse(variants[4].Model.ClaimAvailable, "This variant previews the disabled state: no threshold, matching every real build before phase 0.");
     }
 
     [TestMethod]
@@ -73,8 +86,8 @@ public sealed class ProbeWidgetTests
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
         string[] cardFiles = Directory.GetFiles(temp.Path, "card-*.png");
-        Assert.HasCount(18, cardFiles, "3 variants x 3 DPIs x 2 inks.");
-        foreach (string variant in new[] { "this-pc", "elsewhere", "auto-pause-preview" })
+        Assert.HasCount(30, cardFiles, "5 variants x 3 DPIs x 2 inks.");
+        foreach (string variant in new[] { "this-pc", "elsewhere", "auto-pause-preview", "claim-link-preview", "claim-link-disabled-preview" })
         {
             Assert.HasCount(6, Directory.GetFiles(temp.Path, "card-" + variant + "-*.png"),
                 variant + ": 3 DPIs x 2 inks.");
@@ -144,6 +157,8 @@ public sealed class ProbeWidgetTests
 
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-this-pc-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-elsewhere-", StringComparison.Ordinal)));
+        Assert.IsTrue(files.Any(f => f.Path.Contains("card-claim-link-preview-", StringComparison.Ordinal)));
+        Assert.IsTrue(files.Any(f => f.Path.Contains("card-claim-link-disabled-preview-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-auto-pause-preview-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("case-open-card-", StringComparison.Ordinal)));
     }
@@ -155,7 +170,7 @@ public sealed class ProbeWidgetTests
 
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
-        Assert.HasCount(36, files);
+        Assert.HasCount(48, files);
         Assert.IsTrue(files.All(f => f.Bytes > 0));
         Assert.IsTrue(Directory.Exists(temp.Path));
         // TempFolder's own Dispose (below, via `using`) deletes temp.Path once this test ends, so no
