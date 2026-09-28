@@ -155,8 +155,11 @@ public sealed class OwnershipRuleTests
         Assert.AreEqual(5, result.UpdatedLast!.Case);
     }
 
+    // The name once distinguished this from a live-connection waiver; owner decision 2026-09-27 ("same
+    // checks always") removed that concept from OwnershipInput entirely, so there is no other case left to
+    // tell it apart from.
     [TestMethod]
-    public void AMessageWithEveryNibbleUnknownIsNotOwnedWithoutALiveConnection()
+    public void AMessageWithEveryNibbleUnknownIsNotOwned()
     {
         WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
         ProximityMessage m = Message(batteryA: 0xFF, batteryB: 0x0F); // both bud nibbles and the case nibble unknown
