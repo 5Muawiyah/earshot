@@ -26,6 +26,11 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     // never builds this class in place of a fake. Never read or reset in production.
     internal static int ConstructionCount;
 
+    // True from a successful ShowAt until HideWindow (or a fresh, unshown instance): both go through
+    // SetWindowPos directly rather than Form.Show/Hide, so Control.Visible never reflects this on its own
+    // and IsHandleCreated stays true even once hidden (the handle is never destroyed by either call).
+    internal bool IsShown => _shown;
+
     public GaugeWindow(ILog log)
     {
         ArgumentNullException.ThrowIfNull(log);

@@ -366,9 +366,16 @@ internal sealed partial class TrayContext
 
     // The gauge's own bounds when it is actually on screen with a handle, or null (the case-open card falls
     // back to NearTray; the widget card's own click path falls back to the cursor instead, since that path
-    // only runs from a click that already has one).
+    // only runs from a click that already has one). IsShown, not just IsHandleCreated: TransitionHidden
+    // (GaugeController) hides the surface with SetWindowPos rather than disposing it, so a covered or
+    // full-screen-hidden gauge still has a live handle and its last-shown Bounds, which is exactly the
+    // stale rectangle a caller here must not anchor a new card on.
     private Rectangle? GaugeBoundsIfShown() =>
-        _gaugeWindow is { IsDisposed: false } window && window.IsHandleCreated ? window.Bounds : null;
+        _gaugeWindow is { IsDisposed: false, IsShown: true } window && window.IsHandleCreated ? window.Bounds : null;
+
+    // For tests: the same answer OnWidgetCardRequested and OnCaseOpened get, without a card's own placement
+    // math standing between the assertion and the fact being proved.
+    internal Rectangle? GaugeBoundsIfShownForTest => GaugeBoundsIfShown();
 
     // Suspends the widget's BLE watcher. Called only once a shut-down or sleep hand-back has finished
     // (TrayContext.OnSessionEnding, OnPowerChanged): never before it, never concurrently with it.

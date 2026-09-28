@@ -1498,7 +1498,9 @@ internal sealed class TrayHarness : IDisposable
             TaskbarReaderFactory = () =>
             {
                 TaskbarReaderFactoryCalls++;
-                return new FakeTaskbarReader();
+                var reader = new FakeTaskbarReader();
+                LastTaskbarReader = reader;
+                return reader;
             },
             TrayIconVisibilityFactory = () => new FakeTrayIcon(),
         };
@@ -1565,6 +1567,11 @@ internal sealed class TrayHarness : IDisposable
     // How many times the tray asked for a widget taskbar reader: the fake-backed replacement for
     // UiaTaskbarReader.ConstructionCount, which a widget-enabled TrayContext test must never touch for real.
     public int TaskbarReaderFactoryCalls { get; private set; }
+
+    // The most recently built fake taskbar reader, so a test can feed it a real layout and force a fresh
+    // read to pick it up (Poke, through any settings change ApplyWidget reacts to), rather than being stuck
+    // with the constructor-time default of Fail(NoTaskbar) for the whole test.
+    public FakeTaskbarReader? LastTaskbarReader { get; private set; }
 
     public ServiceRegistry Registry { get; }
 

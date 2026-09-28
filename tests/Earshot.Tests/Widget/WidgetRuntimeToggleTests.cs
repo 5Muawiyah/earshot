@@ -1,4 +1,8 @@
+using System.Drawing;
+using System.Windows.Forms;
 using Earshot.Contracts;
+using Earshot.Interop;
+using Earshot.Popup;
 using Earshot.Tests.Phase1;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -107,6 +111,53 @@ public sealed class WidgetRuntimeToggleTests
 
             Assert.IsFalse(tray.Context.WidgetCardIsShownForTest,
                 "Turning the gauge off must close any card anchored to it, not leave it open with nothing left to anchor to.");
+        });
+    }
+
+    // Before the fix, GaugeBoundsIfShown checked only IsDisposed and IsHandleCreated: TransitionHidden
+    // (GaugeController, e.g. the ABN_FULLSCREENAPP fast path below) hides the surface with SetWindowPos
+    // rather than disposing it, so the real handle and the gauge's last-shown Bounds both survived, and a
+    // caller asking "is the gauge on screen right now" got back a stale rectangle for a gauge nobody could
+    // actually see. Proving it needs the gauge genuinely Shown at least once, which every other test in
+    // this file stops short of (the fake taskbar reader's own constructor-time default, Fail(NoTaskbar),
+    // never clears): this one feeds it a real free-space layout instead, so it also calls
+    // WidgetRealSurfaceGuardTests.AllowRealConstruction() for the one real GaugeWindow that puts on screen,
+    // on the same private desktop GaugeWindowTests itself always runs on.
+    [TestMethod]
+    public void GaugeBoundsIfShownIsNullOnceAFullScreenAppHidesTheGauge()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
+            tray.PumpUntilIdle();
+
+            // The same shape GaugeControllerTests' own FreeSpaceLayout uses: a taskbar with the Start
+            // button, eight pinned buttons and the tray icons rectangle, leaving a gap between the last
+            // button and the tray wide enough for the gauge.
+            var bar = new Rectangle(0, 1032, 1920, 48);
+            var start = new Rectangle(762, 1032, 45, 48);
+            List<Rectangle> buttons = Enumerable.Range(0, 8).Select(i => new Rectangle(807 + (i * 44), 1032, 44, 48)).ToList();
+            var layout = new TaskbarLayout(0, bar, TaskbarEdge.Bottom, AutoHide: false,
+                new Rectangle(0, 0, 1920, 1080), [start, .. buttons, new Rectangle(1678, 1032, 242, 48)], start,
+                Dpi: 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null);
+            tray.LastTaskbarReader!.SetNextResult(ITaskbarReader.Result.Ok(layout));
+            // LeftClickConnects itself is irrelevant here: flipping it is only a way to make ApplyWidget
+            // poke the watcher again, now that the fake reader has a real, free-space layout queued for the
+            // next read to pick up (the harness's own first poke ran before this test set it, and saw only
+            // the fake's constructor-time default of Fail(NoTaskbar)).
+            tray.Settings.Update(s => s.Widget = s.Widget with { LeftClickConnects = true });
+            TrayHarness.PumpUntil(() => tray.Context.WidgetGaugeStateForTest is GaugeState.Shown,
+                "Sanity: a free-space layout must show the gauge.");
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            Assert.IsNotNull(tray.Context.GaugeBoundsIfShownForTest, "Sanity: a shown gauge must report its bounds.");
+
+            var message = Message.Create(tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 1);
+            tray.Context.Window.Dispatch(ref message);
+
+            Assert.IsInstanceOfType<GaugeState.Hidden>(tray.Context.WidgetGaugeStateForTest, "Sanity: opening a full-screen app hides the gauge.");
+            Assert.IsNull(tray.Context.GaugeBoundsIfShownForTest,
+                "A hidden gauge's old bounds must not be handed out as though the gauge were still on screen.");
         });
     }
 }
