@@ -25,8 +25,15 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
         var settings = new JsonSettingsStore(temp.File("settings.json"), log);
         var deviceMonitor = new FakeDeviceMonitor(TimeProvider.System);
         var claimStore = new ClaimStore(temp.File("claim.json"), log);
+        // A named real execution: each real source the service builds is declared to the assembly-wide
+        // guard as it is built (a passive watcher, no window, nothing sent to any device).
         using var service = new WidgetStatusService(
-            () => new WinRtAdvertisementSource(), claimStore, settings, deviceMonitor, () => null, log,
+            () =>
+            {
+                WidgetRealSurfaceGuardTests.AllowRealConstruction();
+                return new WinRtAdvertisementSource();
+            },
+            claimStore, settings, deviceMonitor, () => null, log,
             action => action(), TimeProvider.System);
 
         service.Start();

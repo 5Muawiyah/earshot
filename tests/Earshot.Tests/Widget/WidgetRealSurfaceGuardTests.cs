@@ -31,8 +31,8 @@ namespace Earshot.Tests.Widget;
 // [AssemblyInitialize] zeroes every counter before the first test runs, and an [AssemblyCleanup] sums them
 // after the last one, checked against a running total of the real constructions a short, explicit allow-list
 // of named read-only real executions recorded for themselves as they ran (AllowRealConstruction, called from
-// AppBarRegistrationTests, GaugeWindowTests, UiaTaskbarReaderTests, WinRtAdvertisementSourceBindingTests and
-// one WidgetRuntimeToggleTests case that feeds the real TrayContext pipeline a genuine free-space layout to
+// AppBarRegistrationTests, GaugeWindowTests, UiaTaskbarReaderTests, WinRtAdvertisementSourceBindingTests,
+// WidgetStatusServiceRealWatcherBindingTests and one WidgetRuntimeToggleTests case that feeds the real TrayContext pipeline a genuine free-space layout to
 // prove a since-fixed stale-bounds defect against the real gauge it shows; see each file's own header for
 // why it is kept real and never shows anything on the default desktop). A mismatch means something outside
 // that named list constructed one of the four for real.
@@ -126,7 +126,7 @@ public sealed class WidgetRealSurfaceGuardTests
             GaugeWindow.ConstructionCount + AppBarRegistration.RealRegistrationCount;
         Assert.AreEqual(_allowedRealConstructions, total,
             "A test outside the named allow-list (AppBarRegistrationTests, GaugeWindowTests, UiaTaskbarReaderTests, " +
-            "WinRtAdvertisementSourceBindingTests, WidgetRuntimeToggleTests) constructed a real widget surface: advertisement-source=" +
+            "WinRtAdvertisementSourceBindingTests, WidgetStatusServiceRealWatcherBindingTests, WidgetRuntimeToggleTests) constructed a real widget surface: advertisement-source=" +
             WinRtAdvertisementSource.ConstructionCount.ToString(System.Globalization.CultureInfo.InvariantCulture) +
             ", taskbar-reader=" + UiaTaskbarReader.ConstructionCount.ToString(System.Globalization.CultureInfo.InvariantCulture) +
             ", gauge-window=" + GaugeWindow.ConstructionCount.ToString(System.Globalization.CultureInfo.InvariantCulture) +
