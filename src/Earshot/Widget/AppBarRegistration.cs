@@ -16,7 +16,7 @@ internal sealed class AppBarRegistration : IDisposable
 
     // A test-only proof. Unlike GaugeWindow/UiaTaskbarReader/WinRtAdvertisementSource, constructing this
     // class does nothing by itself (SHAppBarMessage is not called until Register runs), and a local probe
-    // (ProbeAppBarOnPrivateDesktopTests, widget-review-3) found ABM_NEW itself refused for a window on a
+    // (ProbeAppBarOnPrivateDesktopTests) found ABM_NEW itself refused for a window on a
     // CreateDesktopW private desktop - SHAppBarMessage's own Shell_TrayWnd lookup is scoped to the calling
     // thread's current desktop, the same way FindWindow and EnumWindows are, so it never finds the owner's
     // real taskbar from there and never reaches it. So the proof that matters is not construction but a

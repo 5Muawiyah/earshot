@@ -1425,16 +1425,29 @@ internal sealed class TrayHarness : IDisposable
             s.PinnedAddress = AirPodsAddress;
             // The widget defaults to off here, unlike EarshotSettings.Default: WireWidget calls
             // CompositionRoot.BuildWidget unconditionally from the TrayContext constructor, and with the
-            // widget on that builds a real BLE watcher, a real UI Automation taskbar reader and (once a
-            // layout places it) a real topmost gauge window. A harness-built TrayContext is not a named
-            // live test, so it stays off unless a test asks for it through the settings callback below,
-            // the same way a test asks for anything else non-default.
+            // watcher on that builds a real BLE watcher; ShowOnTaskbar on top of that would also build a real
+            // UI Automation taskbar reader and (once a layout places it) a real topmost gauge window. A
+            // harness-built TrayContext is not a named live test, so every one of the four consumers Enabled
+            // is the OR of (WidgetSettings.WithWatcherRecomputed: ShowOnTaskbar, LowBatteryAlert,
+            // CaseOpenCard, AutoPause) stays off here, unlike WidgetSettings.Default where all four default
+            // to true, unless a test asks for one through the settings callback below - otherwise a test
+            // that only meant to turn the gauge on, say, would find the watcher already running (and
+            // Enabled already true) because the low battery alert or auto-pause was still on by default,
+            // and a later "turn it back off" would find Enabled staying true for the same reason.
             //
             // LeftClickConnects defaults to true here, unlike WidgetSettings.Default (false): almost every
             // test in this file drives a connect or disconnect through a tray icon left click, a behaviour
             // that is now conditional on this setting (OnIconMouseClick). A test of the card-instead-of-
             // toggle behaviour itself sets it back to false through the settings callback below.
-            s.Widget = s.Widget with { Enabled = false, LeftClickConnects = true };
+            s.Widget = s.Widget with
+            {
+                Enabled = false,
+                ShowOnTaskbar = false,
+                LowBatteryAlert = false,
+                CaseOpenCard = false,
+                AutoPause = false,
+                LeftClickConnects = true,
+            };
             settings?.Invoke(s);
         });
 

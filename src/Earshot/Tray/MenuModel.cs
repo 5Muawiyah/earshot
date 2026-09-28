@@ -126,7 +126,7 @@ internal static class MenuModel
                 Checked: settings.VoiceOver.Enabled,
                 Enabled: !busy && !voiceKnownMissing,
                 Visible: true),
-            ShowOnTaskbar: new MenuItemState(WidgetCopy.ShowOnTaskbar, Checked: settings.Widget.Enabled, Enabled: !busy, Visible: true),
+            ShowOnTaskbar: new MenuItemState(WidgetCopy.ShowOnTaskbar, Checked: settings.Widget.ShowOnTaskbar, Enabled: !busy, Visible: true),
             LeftClickConnectsItem: new MenuItemState(WidgetCopy.LeftClickConnects, Checked: settings.Widget.LeftClickConnects, Enabled: !busy, Visible: true),
             CaseOpenCardItem: new MenuItemState(WidgetCopy.CardWhenCaseOpens, Checked: settings.Widget.CaseOpenCard, Enabled: !busy, Visible: true),
             LowBatteryAlert: new MenuItemState(WidgetCopy.LowBatteryAlert, Checked: settings.Widget.LowBatteryAlert, Enabled: !busy, Visible: true),

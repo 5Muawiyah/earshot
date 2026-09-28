@@ -101,7 +101,7 @@ public sealed class MenuModelTests
     {
         EarshotSettings settings = Settings(s => s.Widget = s.Widget with
         {
-            Enabled = false,
+            ShowOnTaskbar = false,
             LeftClickConnects = true,
             CaseOpenCard = false,
             LowBatteryAlert = false,

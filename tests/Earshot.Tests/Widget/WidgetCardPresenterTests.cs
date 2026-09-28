@@ -37,7 +37,7 @@ public sealed class WidgetCardPresenterTests
         });
     }
 
-    // M2 (widget-review-3): GaugeWindow answers WM_MOUSEACTIVATE with MA_NOACTIVATE
+    // GaugeWindow answers WM_MOUSEACTIVATE with MA_NOACTIVATE
     // (GaugeWindowTests.MouseActivateAnswersNoActivate), so a real gauge click never deactivates this card;
     // WidgetCard.OnDeactivate cannot be what a second gauge click relies on. This drives the real gauge
     // click path twice in a row (RequestShow with the same gauge bounds, exactly what

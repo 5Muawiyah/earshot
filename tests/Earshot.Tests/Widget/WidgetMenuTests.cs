@@ -19,29 +19,34 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class WidgetMenuTests
 {
-    // Round 3: this used to check UiaTaskbarReader.ConstructionCount, which meant constructing the real
-    // class. TrayHarness now always injects a fake reader (TrayContextTests.TaskbarReaderFactoryCalls), so
-    // the same proof - the menu click actually wires the widget, not just flips the setting - reads the
-    // fake factory's own call count instead.
+    // This used to check UiaTaskbarReader.ConstructionCount, which meant constructing the real class.
+    // TrayHarness now always injects a fake reader (TrayContextTests.TaskbarReaderFactoryCalls), so the same
+    // proof - the menu click actually wires the widget, not just flips the setting - reads the fake
+    // factory's own call count instead. The menu item now writes ShowOnTaskbar, not Enabled directly;
+    // Enabled follows it (WithWatcherRecomputed) since nothing else here asks for the watcher independently.
     [TestMethod]
-    public void ClickingShowOnTheTaskbarFlipsWidgetEnabledThroughTheRealSettingsWritePath()
+    public void ClickingShowOnTheTaskbarFlipsShowOnTaskbarThroughTheRealSettingsWritePath()
     {
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness();
-            Assert.IsFalse(tray.Settings.Current.Widget.Enabled, "The harness starts the widget off (see TrayHarness).");
+            Assert.IsFalse(tray.Settings.Current.Widget.ShowOnTaskbar, "The harness starts the gauge off (see TrayHarness).");
+            Assert.IsFalse(tray.Settings.Current.Widget.Enabled, "The harness starts the watcher off (see TrayHarness).");
 
             tray.ClickMenu(WidgetCopy.ShowOnTaskbar);
             tray.PumpUntilIdle();
 
-            Assert.IsTrue(tray.Settings.Current.Widget.Enabled);
+            Assert.IsTrue(tray.Settings.Current.Widget.ShowOnTaskbar);
+            Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "Turning the gauge on must also turn the watcher on for it.");
             Assert.AreEqual(1, tray.TaskbarReaderFactoryCalls,
-                "Turning it on through the menu must actually wire the widget (WireWidget), not just flip the flag.");
+                "Turning it on through the menu must actually wire the gauge (WireGauge), not just flip the flag.");
 
             tray.ClickMenu(WidgetCopy.ShowOnTaskbar);
             tray.PumpUntilIdle();
 
-            Assert.IsFalse(tray.Settings.Current.Widget.Enabled);
+            Assert.IsFalse(tray.Settings.Current.Widget.ShowOnTaskbar);
+            Assert.IsFalse(tray.Settings.Current.Widget.Enabled,
+                "Turning the gauge back off must also turn the watcher off, since nothing else here wants it.");
         });
     }
 

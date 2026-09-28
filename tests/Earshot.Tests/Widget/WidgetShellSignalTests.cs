@@ -99,7 +99,7 @@ public sealed class WidgetShellSignalTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { Enabled = true });
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
             Assert.IsTrue(SpinWait.SpinUntil(() => ReadCount(tray) >= 1, TimeSpan.FromSeconds(5)),
                 "Sanity: WireWidget's own initial Poke must already have produced a read.");

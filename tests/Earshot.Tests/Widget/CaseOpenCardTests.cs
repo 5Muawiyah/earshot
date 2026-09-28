@@ -95,9 +95,9 @@ public sealed class CaseOpenCardTests
         Assert.IsTrue(log.Has(LogLevel.Debug, "hand-back is running"));
     }
 
-    // M3 (widget-review-3): the case-open notice must never show over the owner's own gauge-anchored card,
-    // not just over a second instance of itself (ThrowingFactory proves no card is even built, the same
-    // proof the gate's other refusals already use).
+    // The case-open notice must never show over the owner's own gauge-anchored card, not just over a
+    // second instance of itself (ThrowingFactory proves no card is even built, the same proof the gate's
+    // other refusals already use).
     [TestMethod]
     public void TheOwnersOwnCardAlreadyOpenRefusesTheCard()
     {
@@ -368,8 +368,8 @@ public sealed class CaseOpenCardTests
         throw new AssertFailedException("No WidgetCard should be created: the gate must refuse before a card is ever built.");
 
     // A left down then a left up at the same point: WidgetCard.OnMouseUp now requires a matching left down
-    // on the same control before it activates anything (M1, widget-review-3), so an up alone no longer
-    // reaches the Connect button or the switch.
+    // on the same control before it activates anything, so an up alone no longer reaches the Connect
+    // button or the switch.
     private static void ClickAt(nint handle, Point point)
     {
         nint lParam = MakeLParam(point.X, point.Y);

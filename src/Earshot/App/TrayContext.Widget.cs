@@ -34,6 +34,7 @@ internal sealed partial class TrayContext
     private GaugeWindow? _gaugeWindow;
     private WidgetCardPresenter? _widgetCardPresenter;
     private CaseOpenCardPresenter? _caseOpenCardPresenter;
+    private WidgetCardPresenterCallbacks? _widgetCardCallbacks;
     private int _widgetLayoutDpi = CardPlacement96;
     private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
 
@@ -74,11 +75,17 @@ internal sealed partial class TrayContext
     // field, so a call that finds one or both stages already wired does nothing to them:
     //   - the data pipeline (_widgetStatus), which stays built for the rest of the process once
     //     CompositionRoot.BuildWidget first succeeds: WidgetStatusService already starts and stops its own
-    //     BLE source in response to the same Enabled setting changing later, so it is never torn down here;
-    //   - the UI/gauge pipeline (_gaugeController, _widgetCardPresenter, _taskbarWatcher), which ApplyWidget
-    //     tears down (bar the controller and presenter, cheap to keep) when the owner turns the widget off,
-    //     so a disabled widget leaves no UI Automation polling thread running, and rebuilds when turned back
-    //     on - including from a start where the widget began disabled and neither stage was ever wired.
+    //     BLE source in response to the same Enabled setting changing later, so it is never torn down here.
+    //     Enabled is the OR of ShowOnTaskbar and the other three consumers (WidgetSettings.WithWatcherRecomputed),
+    //     so this stage runs whenever any of them wants the watcher, not only the gauge;
+    //   - the card-side infrastructure that does not need the gauge to exist (_widgetTheme, the case-open
+    //     card): built whenever this stage runs at all, since the case-open notice places itself near the
+    //     tray with no gauge to anchor above;
+    //   - the gauge's own UI pipeline (_gaugeController, _widgetCardPresenter, _taskbarWatcher), wired
+    //     separately by WireGauge, called from here only when ShowOnTaskbar is on. ApplyWidget tears this one
+    //     down (bar the controller and presenter, cheap to keep) when the owner turns the gauge off, so a
+    //     hidden gauge leaves no UI Automation polling thread running, and WireGauge rebuilds it when turned
+    //     back on - including from a start where the gauge began off and this stage was never wired.
     private void WireWidget()
     {
         if (_widgetStatus is null)
@@ -86,8 +93,8 @@ internal sealed partial class TrayContext
             _widgetStatus = CompositionRoot.BuildWidget(_registry, () => _coordinator.BlockStatus, _time, _advertisementSourceFactory);
             if (_widgetStatus is null)
             {
-                // Still disabled: nothing to wire yet. A later ApplyWidget call re-enters this method once
-                // the owner turns the setting on.
+                // No consumer wants it yet: nothing to wire. A later ApplyWidget call re-enters this method
+                // once the owner turns one of the four consumer settings on.
                 return;
             }
 
@@ -99,9 +106,51 @@ internal sealed partial class TrayContext
             _autoPauseService = CompositionRoot.BuildAutoPauseService(_registry, _widgetStatus, () => _coordinator.BlockStatus, _time);
         }
 
-        if (_gaugeController is null)
+        if (_widgetTheme is null)
         {
             _widgetTheme = new ThemeReader(_log);
+
+            // Shared with the gauge-anchored card WireGauge builds below, whenever it is built: the same
+            // snapshot, the same callbacks, only the Where line differs (WidgetCard itself overrides that
+            // for a notice-mode instance regardless of what this carries).
+            _widgetCardCallbacks = new WidgetCardPresenterCallbacks(
+                CurrentSnapshot: () => _widgetSnapshotCache,
+                AutoPauseOn: () => _registry.Settings.Current.Widget.AutoPause,
+                CurrentIntent: () => TrayStatus.Intent(_snapshot, _registry.Settings.Current),
+                IsBusy: () => IsBusy,
+                Dpi: () => _widgetLayoutDpi,
+                Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
+                HighContrast: () => SystemInformation.HighContrast,
+                OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
+                RequestToggle: StartToggleFromWidget,
+                SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
+                    "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place));
+
+            var caseOpenGate = new CaseOpenCardGate(
+                Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
+                Closing: () => _closing,
+                HandBackInProgress: () => _coordinator.HandBackInProgress,
+                SessionEndInProgress: () => _coordinator.SessionEndInProgress,
+                OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
+            _caseOpenCardPresenter = new CaseOpenCardPresenter(
+                () => new WidgetCard(_log, notice: true), _widgetCardCallbacks, caseOpenGate, new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
+        }
+
+        if (_registry.Settings.Current.Widget.ShowOnTaskbar)
+        {
+            WireGauge();
+        }
+    }
+
+    // The gauge's own UI pipeline: the taskbar overlay (or tray icon fallback), its card, and the
+    // machinery that places and polls it. Called only while ShowOnTaskbar is on (from WireWidget, and from
+    // ApplyWidget when the setting turns on after starting off); never runs before WireWidget's own
+    // _widgetCardCallbacks exists, since ShowOnTaskbar being on already means Enabled is too
+    // (WithWatcherRecomputed), so WireWidget's first two stages always ran first in the same call.
+    private void WireGauge()
+    {
+        if (_gaugeController is null)
+        {
             var controller = new GaugeController(
                 CreateGaugeSurface,
                 _trayIconVisibilityFactory?.Invoke() ?? new NotifyIconVisibility(_notifyIcon),
@@ -113,37 +162,16 @@ internal sealed partial class TrayContext
             controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
             _gaugeController = controller;
 
-            var callbacks = new WidgetCardPresenterCallbacks(
-                CurrentSnapshot: () => _widgetSnapshotCache,
-                AutoPauseOn: () => _registry.Settings.Current.Widget.AutoPause,
-                CurrentIntent: () => TrayStatus.Intent(_snapshot, _registry.Settings.Current),
-                IsBusy: () => IsBusy,
-                Dpi: () => _widgetLayoutDpi,
-                Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
-                HighContrast: () => SystemInformation.HighContrast,
-                OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
-                RequestToggle: StartToggleFromWidget,
-                SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
-                    "pause when a bud comes out (widget)", s => s.Widget = s.Widget with { AutoPause = on }, place));
-            _widgetCardPresenter = new WidgetCardPresenter(() => new WidgetCard(_log), callbacks, _registry.UiPost, _time, _log);
-
-            var caseOpenGate = new CaseOpenCardGate(
-                Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
-                Closing: () => _closing,
-                HandBackInProgress: () => _coordinator.HandBackInProgress,
-                SessionEndInProgress: () => _coordinator.SessionEndInProgress,
-                OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
-            _caseOpenCardPresenter = new CaseOpenCardPresenter(
-                () => new WidgetCard(_log, notice: true), callbacks, caseOpenGate, new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
+            _widgetCardPresenter = new WidgetCardPresenter(() => new WidgetCard(_log), _widgetCardCallbacks!, _registry.UiPost, _time, _log);
         }
 
         if (_taskbarWatcher is null)
         {
             // Registered against the same hidden window that already carries every other shell broadcast,
             // for the lifetime of the gauge's UI pipeline exactly: ABM_NEW here, ABM_REMOVE wherever
-            // _taskbarWatcher itself is torn down (CloseWidget, ApplyWidget's Enabled-off branch), since
-            // ABM_NEW with no ABM_SETPOS reserves no taskbar space, so registering it while the gauge is
-            // merely hidden by settings costs nothing worth guarding separately from the watcher's own
+            // _taskbarWatcher itself is torn down (CloseWidget, ApplyWidget's ShowOnTaskbar-off branch),
+            // since ABM_NEW with no ABM_SETPOS reserves no taskbar space, so registering it while the gauge
+            // is merely hidden by settings costs nothing worth guarding separately from the watcher's own
             // start/stop.
             _appBarRegistration = new AppBarRegistration(_window.Handle, _log);
             LogAppBarOutcome(_appBarRegistration.Register());
@@ -207,6 +235,12 @@ internal sealed partial class TrayContext
     // changed the controller's state synchronously, without reaching into TaskbarWatcher's own timing.
     internal GaugeState? WidgetGaugeStateForTest => _gaugeController?.State;
 
+    // Whether the data pipeline and the case-open card are wired, for tests: proving they stay built while
+    // any consumer wants them (WidgetSettings.WithWatcherRecomputed), independently of whether the gauge
+    // itself is shown.
+    internal bool WidgetDataPipelineWiredForTest => _widgetStatus is not null;
+    internal bool WidgetCaseOpenCardWiredForTest => _caseOpenCardPresenter is not null;
+
     // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
     // left click and the menu's toggle item already use (Launch -> ToggleAsync -> BlockCoordinator), just
     // with the card placed above the gauge instead of at the cursor. Safe mode is unchanged: ToggleAsync's
@@ -225,7 +259,7 @@ internal sealed partial class TrayContext
     private GaugeControllerSettings ReadGaugeControllerSettings()
     {
         WidgetSettings widget = _registry.Settings.Current.Widget;
-        return new GaugeControllerSettings(widget.Enabled, widget.LeftClickConnects);
+        return new GaugeControllerSettings(widget.ShowOnTaskbar, widget.LeftClickConnects);
     }
 
     // Called from TaskbarWatcher's own worker thread (the Func<ShownGauge?> its constructor takes). Reads
@@ -419,18 +453,26 @@ internal sealed partial class TrayContext
         }
     }
 
-    // A settings change may have turned the widget on or off, or changed LeftClickConnects. LeftClickConnects
-    // and an already-running widget being turned off need only the controller's own Settings.Current re-check
-    // (an immediate poke, so a newly-off gauge disappears within one poll rather than up to two seconds
-    // later); Enabled turning off must also stop the UI Automation polling thread itself (WireWidget's
-    // construction logic is otherwise never re-run, so a widget that started disabled would have no watcher
-    // or controller for a later "turn it on" to act on); Enabled turning on - including for the first time,
-    // from a start where the widget began disabled - re-runs WireWidget, which is idempotent per field.
+    // A settings change may have turned the watcher, the gauge, or both on or off, or changed
+    // LeftClickConnects. Enabled (the OR of all four consumers, WidgetSettings.WithWatcherRecomputed) turning
+    // on runs WireWidget, which is idempotent per field and rebuilds the data pipeline and the case-open card
+    // whether or not the gauge itself is wanted; Enabled turning off leaves those objects in place exactly as
+    // it always has (WidgetStatusService stops its own BLE source itself, reading the same setting).
+    // ShowOnTaskbar turning on - including for the first time, from a start where the gauge began off -
+    // builds the gauge's UI pipeline (WireGauge, also idempotent); turning it off stops the UI Automation
+    // polling thread and the appbar registration, so a hidden gauge never leaves either running, and pokes
+    // for an immediate re-check the rest of the time (a newly-off gauge, or a LeftClickConnects change,
+    // disappears or takes effect within one poll rather than up to two seconds later).
     private void ApplyWidget()
     {
-        if (_registry.Settings.Current.Widget.Enabled)
+        WidgetSettings widget = _registry.Settings.Current.Widget;
+        if (widget.Enabled)
         {
             WireWidget();
+        }
+
+        if (widget.ShowOnTaskbar)
+        {
             _taskbarWatcher?.Poke();
         }
         else if (_taskbarWatcher is not null)

@@ -281,10 +281,10 @@ public sealed class WidgetCardTests
         });
     }
 
-    // M1 (widget-review-3): OnMouseUp used to raise ToggleRequested for any button's up over Connect with
-    // no matching press on the card at all - a drag that started elsewhere and released there, or a right
-    // or middle click, none of them a genuine left click. This plants each of the three shapes the review
-    // named and requires none of them to activate the button.
+    // OnMouseUp used to raise ToggleRequested for any button's up over Connect with no matching press on
+    // the card at all - a drag that started elsewhere and released there, or a right or middle click, none
+    // of them a genuine left click. This plants each of those shapes and requires none of them to activate
+    // the button.
     [TestMethod]
     [DataRow(MouseButtons.Right)]
     [DataRow(MouseButtons.Middle)]

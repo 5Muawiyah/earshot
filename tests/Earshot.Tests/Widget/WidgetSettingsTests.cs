@@ -23,6 +23,7 @@ public sealed class WidgetSettingsTests : IDisposable
         WidgetSettings defaults = WidgetSettings.Default;
 
         Assert.IsTrue(defaults.Enabled);
+        Assert.IsTrue(defaults.ShowOnTaskbar);
         Assert.AreEqual("iPhone", defaults.OtherDeviceLabel);
         Assert.IsTrue(defaults.AutoPause);
         Assert.IsTrue(defaults.LowBatteryAlert);
@@ -30,6 +31,29 @@ public sealed class WidgetSettingsTests : IDisposable
         Assert.IsTrue(defaults.CaseOpenCard);
         Assert.IsFalse(defaults.LeftClickConnects);
         Assert.AreEqual(WidgetSettings.Default, new EarshotSettings().Widget);
+    }
+
+    // Enabled - the flag WidgetStatusService itself reads to start or stop the BLE
+    // watcher - is the OR of the four consumers, so turning the gauge off alone never stops the watcher
+    // another consumer still wants.
+    [TestMethod]
+    public void WithWatcherRecomputedIsTheOrOfTheFourConsumers()
+    {
+        WidgetSettings allOff = WidgetSettings.Default with
+        {
+            ShowOnTaskbar = false, LowBatteryAlert = false, CaseOpenCard = false, AutoPause = false,
+        };
+        Assert.IsFalse(allOff.WithWatcherRecomputed().Enabled, "Nothing wants the watcher.");
+
+        Assert.IsTrue((allOff with { ShowOnTaskbar = true }).WithWatcherRecomputed().Enabled);
+        Assert.IsTrue((allOff with { LowBatteryAlert = true }).WithWatcherRecomputed().Enabled);
+        Assert.IsTrue((allOff with { CaseOpenCard = true }).WithWatcherRecomputed().Enabled);
+        Assert.IsTrue((allOff with { AutoPause = true }).WithWatcherRecomputed().Enabled);
+
+        // The gauge going off while another consumer is still on must not turn the watcher off with it.
+        WidgetSettings gaugeAndAlert = allOff with { ShowOnTaskbar = true, LowBatteryAlert = true };
+        Assert.IsTrue((gaugeAndAlert with { ShowOnTaskbar = false }).WithWatcherRecomputed().Enabled,
+            "The low battery alert still wants the watcher even with the gauge off.");
     }
 
     // Owner's decision: the card reads "On your iPhone" out of the box, not "On another device". The
@@ -123,7 +147,7 @@ public sealed class WidgetSettingsTests : IDisposable
 
         var expectedMembers = new HashSet<string>(StringComparer.Ordinal)
         {
-            "Enabled", "OtherDeviceLabel", "AutoPause", "LowBatteryAlert",
+            "Enabled", "ShowOnTaskbar", "OtherDeviceLabel", "AutoPause", "LowBatteryAlert",
             "LowBatteryThresholdPercent", "CaseOpenCard", "LeftClickConnects",
         };
 

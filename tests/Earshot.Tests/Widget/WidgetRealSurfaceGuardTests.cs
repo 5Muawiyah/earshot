@@ -20,7 +20,7 @@ namespace Earshot.Tests.Widget;
 // always supplies a fake advertisement source and a fake taskbar reader (TrayContextTests.TrayHarness), so
 // no TrayContext test constructs any of the four real classes below.
 //
-// Round 3: the first version of this guard only checked one TrayHarness run built with the widget left off.
+// The first version of this guard only checked one TrayHarness run built with the widget left off.
 // It missed WidgetShellSignalTests, AppBarWiringTests, WidgetRuntimeToggleTests and WidgetMenuTests, which
 // each turned the widget on and drove it far enough to construct a real UiaTaskbarReader (and, before the
 // advertisement source was made injectable, a real WinRtAdvertisementSource) against the owner's own

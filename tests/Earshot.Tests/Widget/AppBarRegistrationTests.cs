@@ -14,8 +14,8 @@ namespace Earshot.Tests.Widget;
 // Each successful ABM_NEW here calls WidgetRealSurfaceGuardTests.AllowRealConstruction() right after
 // asserting it reached the real Explorer, so the assembly-wide guard can tell this named real execution
 // apart from an unnoticed one elsewhere (AppBarWiringTests drives the same wiring on a private desktop
-// instead, where ABM_NEW is refused - ProbeAppBarOnPrivateDesktopTests, widget-review-3 - precisely so it
-// never needs to be on this list, and never touches AllowRealConstruction).
+// instead, where ABM_NEW is refused - see ProbeAppBarOnPrivateDesktopTests - precisely so it never needs to
+// be on this list, and never touches AllowRealConstruction).
 [TestClass]
 public sealed class AppBarRegistrationTests
 {

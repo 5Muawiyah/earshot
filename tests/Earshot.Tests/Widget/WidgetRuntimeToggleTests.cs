@@ -13,7 +13,7 @@ namespace Earshot.Tests.Widget;
 // GaugeController or WidgetCardPresenter for a later "turn it on" to act on, and turning an already-running
 // widget off left the UI Automation polling thread running (ApplyWidget only ever called Poke()).
 //
-// Round 3: this used to reset and read UiaTaskbarReader.ConstructionCount to prove the rebuild, which meant
+// This used to reset and read UiaTaskbarReader.ConstructionCount to prove the rebuild, which meant
 // constructing the real class (and, until the reader became injectable, starting a real UI Automation
 // poll against the owner's own taskbar the moment TaskbarWatcher.Start() ran). TrayHarness now always
 // injects a fake reader (TrayContextTests.TaskbarReaderFactoryCalls), so the same proof - a fresh instance
@@ -32,7 +32,7 @@ public sealed class WidgetRuntimeToggleTests
             tray.PumpUntilIdle();
             Assert.AreEqual(0, tray.TaskbarReaderFactoryCalls, "Sanity: the widget starts off, so nothing is built yet.");
 
-            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = true });
+            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, tray.TaskbarReaderFactoryCalls,
@@ -47,20 +47,41 @@ public sealed class WidgetRuntimeToggleTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { Enabled = true });
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
             Assert.AreEqual(1, tray.TaskbarReaderFactoryCalls, "Sanity: starting on builds one watcher.");
 
-            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = false });
+            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = false, ShowOnTaskbar = false });
             tray.PumpUntilIdle();
 
-            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = true });
+            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
 
             Assert.AreEqual(2, tray.TaskbarReaderFactoryCalls,
                 "Turning the widget off must stop the old watcher (so it is not just left running unpolled), and " +
                 "turning it back on must build a fresh one, not silently do nothing because a stale non-null field " +
                 "from before it was disposed made WireWidget think the UI side was still wired.");
+        });
+    }
+
+    // Before the fix, ShowOnTaskbar off meant Enabled off, which stopped the data
+    // pipeline outright: the low battery alert, the case-open card and auto-pause died silently while their
+    // own menu items stayed checked. The case-open card in particular does not need the gauge to exist at
+    // all (it places itself near the tray with no gauge to anchor above), so it must stay wired here even
+    // with the gauge fully off.
+    [TestMethod]
+    public void TheCaseOpenCardStaysWiredWithTheGaugeOffWhenAnotherConsumerWantsTheWatcher()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true }).WithWatcherRecomputed());
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "Sanity: CaseOpenCard alone must still want the watcher.");
+            Assert.IsTrue(tray.Context.WidgetDataPipelineWiredForTest, "The data pipeline must be wired for the case-open card to have anything to show.");
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "The case-open card itself must be wired even with the gauge off.");
+            Assert.AreEqual(0, tray.TaskbarReaderFactoryCalls, "The gauge itself must stay off: nothing here asked for it.");
         });
     }
 }

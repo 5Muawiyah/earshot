@@ -17,7 +17,20 @@ public sealed record WidgetSettings
     public const int DefaultLowBatteryThresholdPercent = 20;
     public const int MaxOtherDeviceLabelLength = 40;
 
-    public bool Enabled { get; set; } = true;                 // the watcher and everything after it
+    // The data pipeline: the BLE watcher, and everything that reads from it (the gauge, the card, the low
+    // battery alert, the case-open card, auto-pause). Not written directly by the "Show on the taskbar" menu
+    // item any more: it is the OR of ShowOnTaskbar and the other three consumer settings below, kept in sync
+    // by WithWatcherRecomputed wherever any of them is written, so
+    // turning the gauge off while the low battery alert, the case-open card or auto-pause is still wanted
+    // never stops the watcher those three depend on. An older settings file with no Widget member reads as
+    // Default, and Default.Enabled is true: the watcher starts for a file an earlier build saved, exactly as
+    // it would for a settings file this build wrote itself.
+    public bool Enabled { get; set; } = true;
+
+    // The gauge and its card specifically: whether the taskbar (or tray icon fallback) shows anything at
+    // all. Independent of Enabled above, which the low battery alert, the case-open card and auto-pause can
+    // each keep true on their own even while this is off.
+    public bool ShowOnTaskbar { get; set; } = true;
 
     // The owner's own label for "in use, not on this PC" (WidgetCopy.OtherDeviceCaption says so on the
     // setting itself): defaults to "iPhone" so the card reads "On your iPhone" out of the box (owner's
@@ -36,6 +49,12 @@ public sealed record WidgetSettings
     public bool LeftClickConnects { get; set; }                // false: a left click opens the card
 
     public static WidgetSettings Default => new();
+
+    // Recomputes Enabled from the four consumers (ShowOnTaskbar, LowBatteryAlert, CaseOpenCard, AutoPause):
+    // called after any write to one of them, so Enabled - the flag the watcher itself reads - always tells
+    // the truth about whether something still needs it, never just mirroring whichever one was last touched.
+    public WidgetSettings WithWatcherRecomputed() =>
+        this with { Enabled = ShowOnTaskbar || LowBatteryAlert || CaseOpenCard || AutoPause };
 
     // A threshold that is not a multiple of 10 or is outside 10 to 90 becomes the default and is recorded;
     // the label is trimmed, has its control characters removed, is cut at 40 characters, and is recorded

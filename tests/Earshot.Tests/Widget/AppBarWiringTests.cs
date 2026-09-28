@@ -9,14 +9,14 @@ using static Earshot.Tests.Phase1.Phase1Fixtures;
 namespace Earshot.Tests.Widget;
 
 // AppBarRegistration's wiring into TrayContext: registered when the widget's gauge machinery is wired up
-// (matching TaskbarWatcher's own lifetime exactly, Enabled toggle included), reregistered on TaskbarCreated,
+// (matching TaskbarWatcher's own lifetime exactly, the ShowOnTaskbar toggle included), reregistered on TaskbarCreated,
 // and its notification callback routed to an immediate hide for ABN_FULLSCREENAPP. Drives the real
 // TrayContext.Window the same way WidgetShellSignalTests already does (Window.Dispatch, the real WndProc),
 // against a real AppBarRegistration (ABM_NEW/ABM_REMOVE), never a fake: the wiring itself (when Register,
 // Reregister and Dispose are called) is what these tests prove, and LogAppBarOutcome logs the same
 // "sh-app-bar-message:abm-new"/"abm-remove" fragment whether the call actually reached Explorer or not.
 //
-// Round 3: earlier this ran on the interactive desktop (StaThread.Run), the same desktop
+// Earlier this ran on the interactive desktop (StaThread.Run), the same desktop
 // AppBarRegistrationTests uses for the one execution kept of a real ABM_NEW against the owner's real
 // Explorer - meaning these four tests sent four more, well outside that single named allow-list. Every
 // FindWindow-style shell lookup (SHAppBarMessage's own Shell_TrayWnd lookup included) is scoped to the
@@ -40,7 +40,7 @@ public sealed class AppBarWiringTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { Enabled = true });
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
             // WireWidget's initial Poke() starts a real background read; its result only reaches the
             // controller once TaskbarWatcher posts it back to this thread, so this pumps until that first
@@ -84,7 +84,7 @@ public sealed class AppBarWiringTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { Enabled = true });
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
             Assert.AreEqual(1, CountAppBarLog(tray, "abm-new"), "Sanity: WireWidget must already have registered the appbar once.");
             Assert.AreEqual(0, CountAppBarLog(tray, "abm-remove"), "Sanity: nothing has removed it yet.");
@@ -99,27 +99,27 @@ public sealed class AppBarWiringTests
         });
     }
 
-    // AppBarRegistration's lifetime is tied to Enabled exactly the way TaskbarWatcher's own start/stop
+    // AppBarRegistration's lifetime is tied to ShowOnTaskbar exactly the way TaskbarWatcher's own start/stop
     // already is (WidgetRuntimeToggleTests, which proves the same off/on cycle the same way: a fresh
-    // UiaTaskbarReader is built the second time, not silently skipped because a stale field looked wired).
+    // taskbar reader is built the second time, not silently skipped because a stale field looked wired).
     // AppBarRegistration.Dispose() does not log its own ABM_REMOVE outcome (mirroring TaskbarWatcher.Dispose,
-    // GaugeController.Dispose: neither logs on the way out either), so a fresh ABM_NEW on the second Enabled
-    // is what proves WireWidget's "if (_taskbarWatcher is null)" guard was re-armed by the off branch clearing
-    // _appBarRegistration, the same guard that gates rebuilding TaskbarWatcher itself.
+    // GaugeController.Dispose: neither logs on the way out either), so a fresh ABM_NEW on the second
+    // ShowOnTaskbar is what proves WireGauge's "if (_taskbarWatcher is null)" guard was re-armed by the off
+    // branch clearing _appBarRegistration, the same guard that gates rebuilding TaskbarWatcher itself.
     [TestMethod]
     public void TogglingTheWidgetOffAndOnRegistersAFreshAppBar()
     {
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { Enabled = true });
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
             Assert.AreEqual(1, CountAppBarLog(tray, "abm-new"), "Sanity: starting on registers once.");
 
-            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = false });
+            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = false, ShowOnTaskbar = false });
             tray.PumpUntilIdle();
 
-            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = true });
+            tray.Settings.Update(s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
 
             Assert.AreEqual(2, CountAppBarLog(tray, "abm-new"),

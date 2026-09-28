@@ -2044,8 +2044,9 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         CardPlace place = ClickPlace();
-        bool enabled = !_registry.Settings.Current.Widget.Enabled;
-        TryUpdateSettings("show on the taskbar", s => s.Widget = s.Widget with { Enabled = enabled }, place);
+        bool showOnTaskbar = !_registry.Settings.Current.Widget.ShowOnTaskbar;
+        TryUpdateSettings("show on the taskbar",
+            s => s.Widget = (s.Widget with { ShowOnTaskbar = showOnTaskbar }).WithWatcherRecomputed(), place);
     }
 
     private void OnLeftClickConnectsClicked()
@@ -2069,7 +2070,8 @@ internal sealed partial class TrayContext : ApplicationContext
 
         CardPlace place = ClickPlace();
         bool caseOpenCard = !_registry.Settings.Current.Widget.CaseOpenCard;
-        TryUpdateSettings("card when the case opens", s => s.Widget = s.Widget with { CaseOpenCard = caseOpenCard }, place);
+        TryUpdateSettings("card when the case opens",
+            s => s.Widget = (s.Widget with { CaseOpenCard = caseOpenCard }).WithWatcherRecomputed(), place);
     }
 
     private void OnLowBatteryAlertClicked()
@@ -2081,7 +2083,8 @@ internal sealed partial class TrayContext : ApplicationContext
 
         CardPlace place = ClickPlace();
         bool lowBatteryAlert = !_registry.Settings.Current.Widget.LowBatteryAlert;
-        TryUpdateSettings("low battery alert", s => s.Widget = s.Widget with { LowBatteryAlert = lowBatteryAlert }, place);
+        TryUpdateSettings("low battery alert",
+            s => s.Widget = (s.Widget with { LowBatteryAlert = lowBatteryAlert }).WithWatcherRecomputed(), place);
     }
 
     // A submenu entry sets the threshold outright, rather than toggling it. MenuModel disables every entry
