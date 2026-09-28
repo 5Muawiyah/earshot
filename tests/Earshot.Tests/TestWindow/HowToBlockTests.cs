@@ -92,7 +92,10 @@ public sealed class HowToBlockTests
         // A first-draft pass, not full coverage: most preconditions and most fit-and-finish
         // questions read fine without a picture (StoredCount below is this file's own record of
         // how many, checked in so a future pass narrowing the gap updates this number on purpose).
-        const int expectedMissingCount = 139;
+        // Test 19 added 38 instruction-shaped entries, 5 with a how-to block (display scaling,
+        // light and dark mode, and the three "find the icon or gauge" instructions), so 33 more
+        // with none: 139 + 33 = 172.
+        const int expectedMissingCount = 172;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +

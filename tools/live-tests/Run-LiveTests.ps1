@@ -219,6 +219,13 @@ $tests = @(
         Settles = 'Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes.'
         Needs = 'Set up, tray running, Block at boot on, Hand back at shut down and sleep ticked, this PC able to sleep.'
         Halves = 'one, but it takes a while'
+    },
+    [ordered]@{
+        Number = '19'; Script = '19-Widget.ps1'
+        Title = 'The AirPods widget: gauge, card and case-open card'
+        Settles = 'Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.'
+        Needs = 'Set up, tray running, "Show on the taskbar" ticked, AirPods paired, time for a long sitting.'
+        Halves = 'one, but it takes a while'
     }
 )
 

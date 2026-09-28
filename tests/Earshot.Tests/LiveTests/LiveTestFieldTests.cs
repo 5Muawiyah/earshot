@@ -5,6 +5,7 @@ using Earshot.Boot.Gate;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Tests.Phase4;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.LiveTests;
@@ -84,6 +85,7 @@ public sealed class LiveTestFieldTests
     private static readonly Type[] StoredFiles =
     [
         typeof(EarshotSettings),
+        typeof(WidgetSettings),
         typeof(GateConfig),
         typeof(DeviceIdentity),
         typeof(ProtectionRecord),

@@ -9,7 +9,7 @@ namespace Earshot.Tests.TestWindow;
 
 // Today only three halves (SandboxFakesSmokeTests, Test10VariantSmokeTests) are ever driven
 // through the window's own real protocol over the shipped scripts. This drives every script and
-// half tools\live-tests\selftest\Invoke-SelfTest.ps1's own $tests table covers (18 scripts, 25
+// half tools\live-tests\selftest\Invoke-SelfTest.ps1's own $tests table covers (19 scripts, 26
 // halves), each against the fakes, through the same real ChildRunner/Invoke-GuiHalf machinery,
 // answering exactly the way Fakes.psm1's own Get-FakeAnswer/Get-FakeNote would for the "one" case,
 // and checks three things for every half: (a) it is driven to a recorded result.json, (b) the row
@@ -73,8 +73,8 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         "17-HandBackOnShutdown.ps1 resume|shutdown-was-clean",
     };
 
-    private const int ExpectedScriptCount = 18;
-    private const int ExpectedHalfCount = 25;
+    private const int ExpectedScriptCount = 19;
+    private const int ExpectedHalfCount = 26;
 
     [TestMethod]
     public void EveryScriptAndHalfIsDrivenThroughTheWindowWithMatchingEvidence()

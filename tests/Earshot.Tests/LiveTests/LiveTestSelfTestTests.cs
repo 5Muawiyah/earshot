@@ -33,15 +33,16 @@ public sealed class LiveTestSelfTestTests
     // Test 13's two extra self-test cases, added the next day, brought the count to 68. The
     // at-rest closing step's own cases across 00, 01 and 09 bring the count to 77, tests 17 and
     // 18 bring it to 95 (99 runs total, four of which are the closing step's own disconnect-first
-    // cases added next: see ExpectedExtraCases below), and RealLauncherSelfTestTests.cs runs one
-    // PowerShell process more again, separately. Generous, because a machine under load is not a
-    // defect.
+    // cases added next: see ExpectedExtraCases below), test 19 adds no extra cases of its own but
+    // brings the shared three up to 102 (26 halves, 3 cases each, plus the same 24), and
+    // RealLauncherSelfTestTests.cs runs one PowerShell process more again, separately. Generous,
+    // because a machine under load is not a defect.
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(20);
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
     // to tools\live-tests without being added here would otherwise be run by nothing.
-    private const int ExpectedScripts = 18;
-    private const int ExpectedHalves = 25;
+    private const int ExpectedScripts = 19;
+    private const int ExpectedHalves = 26;
     private const int ExpectedCases = 3;
 
     // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
@@ -54,11 +55,12 @@ public sealed class LiveTestSelfTestTests
     // 09-ShutdownWhileConnected's declined-start, which runs both of that row's halves (2);
     // 17-HandBackOnShutdown's declined-start, handback-cut-short and handback-not-reached, each
     // run on both of that row's halves (6); 18-HandBackOnSleep's no-sleep-event,
-    // handback-cut-short and repaged-at-wake, on that row's one half (3). 2+2+9+2+6+3 = 24,
-    // printed by Invoke-SelfTest.ps1 itself (runs 99, halves 25, cases-per-half 3: 99 - 25*3 = 24)
-    // rather than re-derived here, because this arithmetic has been wrong before: a hand count
-    // made before tests 17 and 18 existed on this tree did not match what the runner actually
-    // printed once they did.
+    // handback-cut-short and repaged-at-wake, on that row's one half (3). 19-Widget adds none of
+    // its own: its three cases are the shared none/one/two only. 2+2+9+2+6+3 = 24, printed by
+    // Invoke-SelfTest.ps1 itself (runs 102, halves 26, cases-per-half 3: 102 - 26*3 = 24) rather
+    // than re-derived here, because this arithmetic has been wrong before: a hand count made
+    // before tests 17 and 18 existed on this tree did not match what the runner actually printed
+    // once they did.
     private const int ExpectedExtraCases = 24;
 
     [TestMethod]

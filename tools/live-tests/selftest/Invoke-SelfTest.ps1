@@ -156,6 +156,7 @@ $tests = @(
     # closing step offers a block.
     [ordered]@{ Number = '18'; Id = '18-handback-on-sleep'; Script = '18-HandBackOnSleep.ps1'; Halves = @('first'); Extra = @()
         Cases = @('none', 'one', 'two', 'no-sleep-event', 'handback-cut-short', 'repaged-at-wake') }
+    [ordered]@{ Number = '19'; Id = '19-widget'; Script = '19-Widget.ps1'; Halves = @('first'); Extra = @() }
 )
 
 $defaultCases = @('none', 'one', 'two')
@@ -388,6 +389,7 @@ $script:AtRestDefaults = @{
     '17-handback-on-shutdown|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
     '17-handback-on-shutdown|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '18-handback-on-sleep|first'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '19-widget|first'                    = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
 }
 
 # What the expectations for one case say should have been recorded, against what was. The

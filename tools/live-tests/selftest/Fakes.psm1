@@ -73,6 +73,18 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'WM_POWERBROADCAST received: Suspend'; Text = 'WM_POWERBROADCAST received: Suspend (wParam 0x4).' }
     [ordered]@{ Pattern = 'WM_POWERBROADCAST received: ResumeAutomatic'; Text = 'WM_POWERBROADCAST received: ResumeAutomatic (wParam 0x12).' }
     [ordered]@{ Pattern = 'Hand-back (resume):'; Text = 'Hand-back (resume): the nodes were enabled and not in use, so they are blocked now' }
+
+    # test 19: the widget's own log lines. None, one or two copies each, the same as every other
+    # generic pattern.
+    [ordered]@{ Pattern = 'sh-app-bar-message:abm-new'; Text = 'AppBar: sh-app-bar-message:abm-new ok S_OK (0x00000000)' }
+    [ordered]@{ Pattern = 'Widget watcher start:'; Text = 'Widget watcher start: start Started.' }
+    [ordered]@{ Pattern = 'Widget watcher stopped:'; Text = 'Widget watcher stopped: RadioNotAvailable (1).' }
+    [ordered]@{ Pattern = 'Widget counters:'; Text = 'Widget counters: watcher=Started allSections=4 apple=4 other=0 items=4 ok=4 truncated=0 unknownForm=0 owned=0 noClaim=4 modelOrColourMismatch=0 signalBelowThreshold=0 nibbleOrderMismatch=0 batteryUnreadable=0 batteryInconsistent=0 unknownFormShapes=[]' }
+    [ordered]@{ Pattern = 'AirPods claimed:'; Text = 'AirPods claimed: model and colour recorded, signal threshold -60 dBm.' }
+    [ordered]@{ Pattern = 'Claim not made:'; Text = 'Claim not made: No AirPods seen. Open the case next to the PC and try again.' }
+    [ordered]@{ Pattern = 'Auto-pause is waiting for phase 0'; Text = 'Auto-pause is waiting for phase 0 to confirm the broadcast continues while playing from this PC.' }
+    [ordered]@{ Pattern = 'Auto-pause paused'; Text = 'Auto-pause paused com.example.player.' }
+    [ordered]@{ Pattern = 'connect: '; Text = 'connect: Success. Connected.' }
 )
 
 # The one pattern that is also written with a stamp in the past, so the -SinceUtc filter in
@@ -109,6 +121,7 @@ $script:StartStates = @{
     '17-handback-on-shutdown|first'      = @{ NodeState = 'Allowed'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
     '17-handback-on-shutdown|resume'     = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '18-handback-on-sleep|first'         = @{ NodeState = 'Blocked'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
+    '19-widget|first'                    = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
 }
 
 # The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
@@ -157,6 +170,24 @@ $script:Answers = [ordered]@{
     'did the list show your airpods and your phone'    = 'yes'
     'were devices that are not present now shown'      = 'yes'
     'did the first half install earshot again'         = 'yes'
+
+    # test 19: the widget.
+    'does the gauge sit just to the right'                                   = 'yes'
+    'did the gauge move right to make room'                                  = 'yes'
+    'does the gauge sit beside the taskbar buttons'                          = 'yes'
+    'does the gauge follow the buttons again'                                = 'yes'
+    'did the gauge slide away with the taskbar'                              = 'yes'
+    'was the gauge gone, and was it back'                                    = 'yes'
+    'did the tray icon come back first'                                      = 'yes'
+    'did the gauge and the card both redraw crisply'                         = 'yes'
+    'did the ink on the gauge flip so it stays readable'                     = 'yes'
+    'right-click the gauge: does the same menu'                              = 'yes'
+    'is there any button, menu item or link that starts claiming'            = 'no'
+    'does the card say "no reading" for the battery'                         = 'yes'
+    'does the "where" line on the card say "on this pc"'                     = 'yes'
+    'did the audio keep playing on this pc'                                  = 'yes'
+    'with the airpods not connected to this pc, does the card say'           = 'yes'
+    'did any small card appear near the taskbar by itself'                   = 'no'
 }
 
 # What the owner types for a free-text note.

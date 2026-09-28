@@ -33,6 +33,7 @@ public sealed class ManifestNameProvesTests
         ["15"] = "Uninstall puts everything back, and install sets it up again.",
         ["17"] = "Earshot hands the AirPods back before this computer shuts down, and leaves them alone at the next start.",
         ["18"] = "Earshot hands the AirPods back before this computer sleeps, and does not take them back by itself on waking.",
+        ["19"] = "The taskbar gauge and its cards work, and nothing on them shows a reading that has not actually been measured yet.",
     };
 
     private static IReadOnlyList<ManifestRow> LoadManifest() =>
@@ -78,7 +79,7 @@ public sealed class ManifestNameProvesTests
     }
 
     [TestMethod]
-    public void ADisplayRowsNameAndProvesAreNeverEmptyForAnyOfTheTwentyRows()
+    public void ADisplayRowsNameAndProvesAreNeverEmptyForAnyRow()
     {
         foreach (DisplayRow row in DisplayRow.Flatten(LoadManifest()))
         {

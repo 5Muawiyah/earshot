@@ -261,6 +261,19 @@
       "settles": "Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes.",
       "powerCycleRequirement": "none",
       "maxSilenceSeconds": 900
+    },
+    {
+      "number": "19",
+      "script": "19-Widget.ps1",
+      "testId": "19-widget",
+      "kind": "owner-present",
+      "halves": 1,
+      "name": "The AirPods widget",
+      "title": "The AirPods widget: gauge, card and case-open card",
+      "proves": "The taskbar gauge and its cards work, and nothing on them shows a reading that has not actually been measured yet.",
+      "settles": "Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
     }
   ]
 }
