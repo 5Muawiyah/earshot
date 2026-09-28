@@ -23,10 +23,10 @@ public sealed class PostDisposalListLockedAndReadLoopExceptionRecordedTests
         const int deliveries = 200;
         int recordedCount = -1;
         Exception? failure = null;
-        var thread = new Thread(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             var form = new Earshot.TestWindow.Ui.MainForm(repoRoot, rows, wording, sandboxOptions, @"C:\nowhere\Earshot.exe");
-            form.ForceControlCreationForTests();
+            form.ForceControlCreationForTests(TestDesktop.IsOwnersDesktop);
             form.Dispose();
 
             try
@@ -41,10 +41,7 @@ public sealed class PostDisposalListLockedAndReadLoopExceptionRecordedTests
             {
                 failure = ex;
             }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(30)), "the STA thread did not finish in time.");
+        }, TimeSpan.FromSeconds(30));
 
         Assert.IsNull(failure, "concurrent SafeBeginInvoke deliveries must never throw.");
         Assert.AreEqual(deliveries, recordedCount,

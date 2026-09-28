@@ -2565,10 +2565,20 @@ internal sealed class MainForm : Form
 
     // Control.CreateControl() (protected on every Control) silently does nothing while Visible
     // is false, which a Form always is until shown; parked off-screen, with no taskbar entry, so
-    // nothing is ever seen, but every child control gets a real handle and the real message loop
-    // Control.BeginInvoke (every ChildRunner event) depends on, the same as actually running it.
-    internal void ForceControlCreationForTests()
+    // every child control gets a real handle and the real message loop Control.BeginInvoke (every
+    // ChildRunner event) depends on, the same as actually running it. Show() also activates the
+    // form, so on the owner's desktop it would take focus from whatever the owner is doing: this
+    // refuses that desktop, and the tests call it from a thread on a private desktop. The check is
+    // the caller's, because this assembly declares no P/Invoke (NoDevicePathTests), and it is a
+    // required argument so no caller can leave it out.
+    internal void ForceControlCreationForTests(Func<bool> isOnOwnersDesktop)
     {
+        ArgumentNullException.ThrowIfNull(isOnOwnersDesktop);
+        if (isOnOwnersDesktop())
+        {
+            throw new InvalidOperationException("ForceControlCreationForTests refuses to show the form on the owner's desktop; run it on a private desktop.");
+        }
+
         StartPosition = FormStartPosition.Manual;
         Location = new Point(-32000, -32000);
         ShowInTaskbar = false;
