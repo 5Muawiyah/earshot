@@ -31,7 +31,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
         source.Received += (sender, e) => receivedTcs.TrySetResult(e);
 
-        StepOutcome startStep = source.Start();
+        StepOutcome startStep = source.Start(1);
 
         if (!await WaitForStartedAsync(source))
         {
@@ -92,7 +92,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
         var stoppedTcs = new TaskCompletionSource<AdvertisementSourceStopped>(TaskCreationOptions.RunContinuationsAsynchronously);
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
 
-        StepOutcome startStep = source.Start();
+        StepOutcome startStep = source.Start(1);
         bool started = await WaitForStartedAsync(source);
         if (!started)
         {
@@ -135,7 +135,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
         WidgetRealSurfaceGuardTests.AllowRealConstruction();
         source.Dispose();
 
-        StepOutcome step = source.Start();
+        StepOutcome step = source.Start(1);
 
         Assert.IsFalse(step.Ok, "Start after Dispose must refuse rather than resurrect a native watcher.");
         Assert.AreEqual(Earshot.Contracts.NativeCodes.NotAttempted, step.Code,

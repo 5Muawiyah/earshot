@@ -1261,4 +1261,37 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
         service.Dispose();
     }
+
+    // Generations: the setting going off then on builds a fresh source (WithTheSettingOffNoSourceIsConstructed
+    // and TurningTheSettingOnStartsOne above prove that construction). The service's own generation count
+    // never resets, but each source only ever knows about its own Start() calls, so a fresh instance starts
+    // its idea of "its generation" over from whatever it begins at. A genuine Stopped from that fresh, current
+    // source must still be shown and retried, not dropped for looking older than the service's own count.
+    [TestMethod]
+    public void ASettingsOffThenOnGenuineStoppedFromTheFreshSourceIsNotDroppedAsStale()
+    {
+        var store = NewClaimStore();
+        var sources = new List<FakeAdvertisementSource>();
+        using var service = new WidgetStatusService(
+            () => { var built = new FakeAdvertisementSource(); sources.Add(built); return built; },
+            store, _settings, _deviceMonitor, () => null, _log,
+            action => { Interlocked.Increment(ref _posts); action(); }, _clock, () => ProximityDecodeTable.Unproved);
+
+        service.Start();
+        Assert.AreEqual(1, sources.Count);
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _settings.Update(s => s.Widget = s.Widget with { Enabled = false });
+        _settings.Update(s => s.Widget = s.Widget with { Enabled = true });
+
+        Assert.AreEqual(2, sources.Count, "The setting going off then on must build a fresh source, not reuse the old one.");
+        FakeAdvertisementSource fresh = sources[1];
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        // A genuine Stopped from the fresh, current source, tagged with its own idea of its generation.
+        fresh.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
+
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher,
+            "A genuine Stopped from the current, freshly built source must not be dropped as a stale generation.");
+    }
 }

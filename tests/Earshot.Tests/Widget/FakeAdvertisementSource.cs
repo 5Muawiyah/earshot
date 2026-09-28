@@ -24,10 +24,10 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
 
     public int DisposeCalls { get; private set; }
 
-    // The count of Start() calls so far, whatever each one returns: mirrors WinRtAdvertisementSource's own
-    // generation counter, so RaiseStopped(code, name, step) below can tag an ordinary Stopped with "current"
-    // without a test having to track the number itself. A test proving the stale-generation path (item 1)
-    // constructs an AdvertisementSourceStopped directly with an earlier value instead.
+    // Whatever a test last passed into Start(generation), mirroring WinRtAdvertisementSource's own label, so
+    // RaiseStopped(code, name, step) below can tag an ordinary Stopped with "current" without a test having
+    // to track the number itself. A test proving the stale-generation path constructs an
+    // AdvertisementSourceStopped directly with an earlier value instead.
     public int Generation { get; private set; }
 
     // Lets a test make Start or Stop report a failure, the way a real watcher's step can, so the
@@ -36,9 +36,9 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
 
     public Func<StepOutcome>? StopResult { get; set; }
 
-    // Test-only, for the deadlock proof (item 3: Start and Stop must run outside the service's own lock).
-    // Armed, Stop() signals _stopEntered and then waits for _releaseStop, so a test can hold it open while it
-    // tries something that needs the service's lock from another thread.
+    // Test-only, for the deadlock proof (Start and Stop must run outside the service's own lock). Armed,
+    // Stop() signals _stopEntered and then waits for _releaseStop, so a test can hold it open while it tries
+    // something that needs the service's lock from another thread.
     private readonly ManualResetEventSlim _stopEntered = new(initialState: false);
     private readonly ManualResetEventSlim _releaseStop = new(initialState: false);
     private bool _blockNextStop;
@@ -54,10 +54,10 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
 
     public event EventHandler<AdvertisementSourceStopped>? Stopped;
 
-    public StepOutcome Start()
+    public StepOutcome Start(int generation)
     {
         StartCalls++;
-        Generation++;
+        Generation = generation;
         if (_blockNextStart)
         {
             _blockNextStart = false;
@@ -103,7 +103,7 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
     }
 
     // Convenience for the ordinary, non-stale case: tags the event with the current generation, so a test
-    // exercising anything other than item 1's stale-Stopped path never has to know the number.
+    // exercising anything other than the stale-Stopped path never has to know the number.
     public void RaiseStopped(int errorCode, string errorName, StepOutcome step) =>
         RaiseStopped(new AdvertisementSourceStopped(errorCode, errorName, step, Generation));
 
