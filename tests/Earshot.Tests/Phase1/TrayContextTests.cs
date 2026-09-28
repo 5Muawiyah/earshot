@@ -51,7 +51,11 @@ public sealed class TrayContextTests
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
+            // Explicit, even though the harness already defaults to this: this test is specifically about
+            // the connect-toggle behaviour a left click now only has when LeftClickConnects is on.
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = s.Widget with { LeftClickConnects = true });
             var connect = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             tray.Connection.OnConnect = _ => connect.Task;
 
@@ -74,6 +78,27 @@ public sealed class TrayContextTests
             Assert.HasCount(1, tray.Connection.Calls);
             CollectionAssert.AreEqual(new[] { TrayStatus.CardConnecting, TrayStatus.CardConnected }, tray.Cards.Statuses);
             Assert.IsTrue(tray.Cards.Shown.All(s => s.Anchor == CardAnchor.NearCursor && s.Content.Title == AirPodsName));
+        });
+    }
+
+    // The production default (WidgetSettings.Default.LeftClickConnects is false): a tray icon left click
+    // must open a card rather than connect or disconnect, exactly as GaugeController.OnLeftClicked already
+    // does for the gauge itself. With the widget off (the harness default), there is no widget card
+    // presenter to open, so this exercises the existing fallback card (ShowStatusCard).
+    [TestMethod]
+    public void ALeftClickOpensACardRatherThanToggleWhenLeftClickConnectsIsOff()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = s.Widget with { LeftClickConnects = false });
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            Assert.IsEmpty(tray.Connection.Calls, "LeftClickConnects off: a left click must not toggle the connection.");
+            Assert.HasCount(1, tray.Cards.Shown, "LeftClickConnects off: a left click must open a card instead.");
         });
     }
 
@@ -1396,6 +1421,18 @@ internal sealed class TrayHarness : IDisposable
         {
             s.PinnedContainerId = AirPodsContainer;
             s.PinnedAddress = AirPodsAddress;
+            // The widget defaults to off here, unlike EarshotSettings.Default: WireWidget calls
+            // CompositionRoot.BuildWidget unconditionally from the TrayContext constructor, and with the
+            // widget on that builds a real BLE watcher, a real UI Automation taskbar reader and (once a
+            // layout places it) a real topmost gauge window. A harness-built TrayContext is not a named
+            // live test, so it stays off unless a test asks for it through the settings callback below,
+            // the same way a test asks for anything else non-default.
+            //
+            // LeftClickConnects defaults to true here, unlike WidgetSettings.Default (false): almost every
+            // test in this file drives a connect or disconnect through a tray icon left click, a behaviour
+            // that is now conditional on this setting (OnIconMouseClick). A test of the card-instead-of-
+            // toggle behaviour itself sets it back to false through the settings callback below.
+            s.Widget = s.Widget with { Enabled = false, LeftClickConnects = true };
             settings?.Invoke(s);
         });
 

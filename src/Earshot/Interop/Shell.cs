@@ -143,6 +143,13 @@ internal static unsafe partial class Shell
     [LibraryImport(User32, EntryPoint = "SystemParametersInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SystemParametersInfoForMessageDuration(uint uiAction, uint uiParam, out uint pvParam, uint fWinIni);
+
+    // Sets this process's AppUserModelID, so a toast shown against it is attributed to Earshot rather than to
+    // the host process. Must be called before creating or showing any UI (a window, a toast); the tray calls
+    // this before its first window exists. Returns an HRESULT.
+    // https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-setcurrentprocessexplicitappusermodelid
+    [LibraryImport(Shell32, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial int SetCurrentProcessExplicitAppUserModelID(string appID);
 }
 
 // APPBARDATA, 48 bytes on x64.

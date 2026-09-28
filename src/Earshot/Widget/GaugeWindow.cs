@@ -20,11 +20,17 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     private readonly ILog _log;
     private bool _tracking;
     private bool _shown;
+    private bool _leftButtonDown;
+
+    // Test seam only: counts real constructions so WidgetRealSurfaceGuardTests can prove a test harness
+    // never builds this class in place of a fake. Never read or reset in production.
+    internal static int ConstructionCount;
 
     public GaugeWindow(ILog log)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
+        Interlocked.Increment(ref ConstructionCount);
 
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -40,6 +46,18 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     public event EventHandler<Point>? RightClicked;
 
     protected override bool ShowWithoutActivation => true;
+
+    // Mirrors ConnectCard.OnDpiChanged: the gauge is already sized and rendered for the display it is
+    // moving to (GaugeController re-measures the taskbar and calls Render at the new DPI on the very next
+    // layout, driven by TaskbarWatcher's own poll rather than this event), so the resize
+    // DefWindowProc would otherwise apply here is cancelled rather than fought afterwards.
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        e.Cancel = true;
+        base.OnDpiChanged(e);
+    }
 
     protected override CreateParams CreateParams
     {
@@ -128,8 +146,21 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                 base.WndProc(ref m);
                 return;
 
+            case NativeMethods.WM_LBUTTONDOWN:
+                _leftButtonDown = true;
+                base.WndProc(ref m);
+                return;
+
             case NativeMethods.WM_LBUTTONUP:
-                LeftClicked?.Invoke(this, EventArgs.Empty);
+                // Only an up that follows a down on this same window is a click: a drag that started
+                // outside the window and released inside it must not count (it would otherwise deliver an
+                // up with no preceding down here).
+                if (_leftButtonDown)
+                {
+                    _leftButtonDown = false;
+                    LeftClicked?.Invoke(this, EventArgs.Empty);
+                }
+
                 return;
 
             case NativeMethods.WM_RBUTTONUP:

@@ -9,6 +9,7 @@ using Earshot.Infra;
 using Earshot.Streaming;
 using Earshot.Tray;
 using Earshot.Voice;
+using Earshot.Widget;
 
 namespace Earshot.App;
 
@@ -279,6 +280,22 @@ internal sealed partial class TrayContext : ApplicationContext
         _window.SessionEnding += OnSessionEnding;
         _window.PowerChanged += OnPowerChanged;
 
+        // The widget's own listeners on the same three shell signals: a null _taskbarWatcher (the widget is
+        // off, or not yet wired) makes each of these a no-op, exactly like ApplyWidget's own Poke() calls.
+        // TaskbarCreated means Explorer (and its taskbar) is new, so any poll-interval back-off measured
+        // against the old one is stale and is reset before the poke, and AppBarRegistration's own
+        // registration is redone (OnTaskbarCreatedForAppBar, a no-op the same way while nothing is wired
+        // yet); WM_SETTINGCHANGE and WM_DISPLAYCHANGE ask only for an immediate re-measure.
+        _window.TaskbarCreated += (_, _) => { _taskbarWatcher?.ResetBackoff(); _taskbarWatcher?.Poke(); };
+        _window.TaskbarCreated += (_, _) => OnTaskbarCreatedForAppBar();
+        _window.SettingChanged += (_, _) => _taskbarWatcher?.Poke();
+        _window.DisplayChanged += (_, _) => _taskbarWatcher?.Poke();
+
+        // AppBarRegistration's own notification callback (ABM_NEW's uCallbackMessage): ABN_STATECHANGE and
+        // ABN_POSCHANGED poke the watcher for an immediate re-measure; ABN_FULLSCREENAPP hides the gauge at
+        // once for the controller to decide (OnAppBarNotification).
+        _window.AppBarNotification += OnAppBarNotification;
+
         // WM_CLOSE asks Earshot to close, so it takes the same orderly path as Exit on the menu, the block before
         // closing included. There is no click to place a card by.
         _window.CloseRequested += (_, _) => _ = ExitAsync(CardPlace.NearTray, "Windows asked Earshot to close (WM_CLOSE).");
@@ -305,6 +322,17 @@ internal sealed partial class TrayContext : ApplicationContext
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
         _menu.OpenOnStartupClicked += (_, _) => OnOpenOnStartupClicked();
         _menu.SpeakStatusClicked += (_, _) => OnSpeakStatusClicked();
+        _menu.ShowOnTaskbarClicked += (_, _) => OnShowOnTaskbarClicked();
+        _menu.LeftClickConnectsClicked += (_, _) => OnLeftClickConnectsClicked();
+        _menu.CaseOpenCardClicked += (_, _) => OnCaseOpenCardClicked();
+        _menu.LowBatteryAlertClicked += (_, _) => OnLowBatteryAlertClicked();
+        _menu.LowBatteryThresholdItemClicked += OnLowBatteryThresholdItemClicked;
+        // The click point is read now, before the menu closes and the form opens, exactly as ChooseDeviceClicked below.
+        _menu.NameOtherDeviceClicked += (_, _) =>
+        {
+            CardPlace place = ClickPlace();
+            _registry.UiPost(() => OnNameOtherDeviceClicked(place));
+        };
         // The click point is read now, before the menu closes and the picker opens.
         _menu.ChooseDeviceClicked += (_, _) =>
         {
@@ -344,7 +372,7 @@ internal sealed partial class TrayContext : ApplicationContext
         ApplyHotkeys();
         ApplyVoiceOver();
         ApplyStreaming();
-        WireWidget(options);
+        WireWidget();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -395,6 +423,11 @@ internal sealed partial class TrayContext : ApplicationContext
     }
 
     // The NotifyIcon.MouseClick handler. Internal so tests can raise each button.
+    //
+    // A left click follows Widget.LeftClickConnects, the same setting GaugeController.OnLeftClicked reads
+    // for the gauge itself: off (the default) opens a card rather than connecting or disconnecting straight
+    // away. The widget's own three-column card is used when it is wired up; otherwise (the widget off, or
+    // not yet built) the icon falls back to the ordinary status card, the same one a second launch shows.
     internal void OnIconMouseClick(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left)
@@ -402,7 +435,20 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        StartToggle();
+        if (_registry.Settings.Current.Widget.LeftClickConnects)
+        {
+            StartToggle();
+            return;
+        }
+
+        if (_widgetCardPresenter is not null)
+        {
+            OnWidgetCardRequested(this, EventArgs.Empty);
+        }
+        else
+        {
+            ShowStatusCard();
+        }
     }
 
     protected override void ExitThreadCore()
@@ -1961,6 +2007,98 @@ internal sealed partial class TrayContext : ApplicationContext
 
         Report("open-on-startup", _startup.Apply(openOnStartup), place);
         _startupState = _startup.Read();
+    }
+
+    // The taskbar widget's own settings menu: each writes through TryUpdateSettings, the same path every
+    // other toggle above uses. Settings.Update raises Changed before it returns, and OnSettingsChanged's own
+    // ApplyWidget call (widget Enabled) or the presenters' own Refresh (the rest) picks the new value up
+    // from there, so nothing here calls into the widget directly.
+    private void OnShowOnTaskbarClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool enabled = !_registry.Settings.Current.Widget.Enabled;
+        TryUpdateSettings("show on the taskbar", s => s.Widget = s.Widget with { Enabled = enabled }, place);
+    }
+
+    private void OnLeftClickConnectsClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool leftClickConnects = !_registry.Settings.Current.Widget.LeftClickConnects;
+        TryUpdateSettings("left click connects straight away", s => s.Widget = s.Widget with { LeftClickConnects = leftClickConnects }, place);
+    }
+
+    private void OnCaseOpenCardClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool caseOpenCard = !_registry.Settings.Current.Widget.CaseOpenCard;
+        TryUpdateSettings("card when the case opens", s => s.Widget = s.Widget with { CaseOpenCard = caseOpenCard }, place);
+    }
+
+    private void OnLowBatteryAlertClicked()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        bool lowBatteryAlert = !_registry.Settings.Current.Widget.LowBatteryAlert;
+        TryUpdateSettings("low battery alert", s => s.Widget = s.Widget with { LowBatteryAlert = lowBatteryAlert }, place);
+    }
+
+    // A submenu entry sets the threshold outright, rather than toggling it. MenuModel disables every entry
+    // while the alert itself is off, so a click here always means the alert is already on.
+    private void OnLowBatteryThresholdItemClicked(object? sender, LowBatteryThresholdMenuItemEventArgs e)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        CardPlace place = ClickPlace();
+        int percent = e.Item.Percent;
+        TryUpdateSettings("low battery threshold", s => s.Widget = s.Widget with { LowBatteryThresholdPercent = percent }, place);
+    }
+
+    // Opens the picker-style modal for the owner's own device label. No device list to load here, unlike
+    // ChooseDeviceAsync, so this runs straight through rather than as an async Task.
+    private void OnNameOtherDeviceClicked(CardPlace place)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        string current = _registry.Settings.Current.Widget.OtherDeviceLabel;
+        DialogResult result;
+        string label;
+        using (var form = new OtherDeviceNameForm(current))
+        {
+            result = form.ShowDialog();
+            label = form.Label();
+        }
+
+        if (result != DialogResult.OK || _closing)
+        {
+            return;
+        }
+
+        TryUpdateSettings("other device label", s => s.Widget = s.Widget with { OtherDeviceLabel = label }, place);
     }
 
     // First run: apply the default (on). In safe mode, and against a test data folder, StartupRegistration

@@ -2,6 +2,7 @@ using Earshot.Contracts;
 using Earshot.Hotkeys;
 using Earshot.Streaming;
 using Earshot.Voice;
+using Earshot.Widget;
 
 namespace Earshot.Tray;
 
@@ -17,6 +18,11 @@ internal enum StartupState
 // How one menu item looks.
 internal readonly record struct MenuItemState(string Text, bool Checked, bool Enabled, bool Visible, bool Indeterminate = false);
 
+// One entry of the low battery threshold submenu, as data, the same way StreamingMenuItem lets
+// TrayMenu draw the Play from a phone submenu without knowing what built it. Text is built here
+// (WidgetCopy.Percent), not in TrayMenu, exactly as StreamingMenuModel already builds its own items' text.
+internal readonly record struct LowBatteryThresholdMenuItem(string Text, int Percent, bool Checked, bool Enabled);
+
 // How the whole tray menu looks, top to bottom. The separators are always shown.
 internal sealed record MenuState(
     MenuItemState SafeMode,
@@ -29,6 +35,12 @@ internal sealed record MenuState(
     MenuItemState ProtectCaveat,
     MenuItemState OpenOnStartup,
     MenuItemState SpeakStatus,
+    MenuItemState ShowOnTaskbar,
+    MenuItemState LeftClickConnectsItem,
+    MenuItemState CaseOpenCardItem,
+    MenuItemState LowBatteryAlert,
+    IReadOnlyList<LowBatteryThresholdMenuItem> LowBatteryThresholdItems,
+    MenuItemState NameOtherDeviceItem,
     MenuItemState ChooseDevice,
     MenuItemState SetUp,
     MenuItemState Exit);
@@ -114,9 +126,33 @@ internal static class MenuModel
                 Checked: settings.VoiceOver.Enabled,
                 Enabled: !busy && !voiceKnownMissing,
                 Visible: true),
+            ShowOnTaskbar: new MenuItemState(WidgetCopy.ShowOnTaskbar, Checked: settings.Widget.Enabled, Enabled: !busy, Visible: true),
+            LeftClickConnectsItem: new MenuItemState(WidgetCopy.LeftClickConnects, Checked: settings.Widget.LeftClickConnects, Enabled: !busy, Visible: true),
+            CaseOpenCardItem: new MenuItemState(WidgetCopy.CardWhenCaseOpens, Checked: settings.Widget.CaseOpenCard, Enabled: !busy, Visible: true),
+            LowBatteryAlert: new MenuItemState(WidgetCopy.LowBatteryAlert, Checked: settings.Widget.LowBatteryAlert, Enabled: !busy, Visible: true),
+            LowBatteryThresholdItems: LowBatteryThresholdItems(settings.Widget, busy),
+            NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
             SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.NeedsSetUp(block)),
             Exit: new MenuItemState(Exit, Checked: false, Enabled: true, Visible: true));
+    }
+
+    // The ten percentages the threshold can be set to, checked against the saved value and disabled
+    // together while the alert itself is off: a submenu with nothing to choose from would confuse a
+    // reader more than it helps them.
+    private static List<LowBatteryThresholdMenuItem> LowBatteryThresholdItems(WidgetSettings widget, bool busy)
+    {
+        var items = new List<LowBatteryThresholdMenuItem>(9);
+        for (int percent = 10; percent <= 90; percent += 10)
+        {
+            items.Add(new LowBatteryThresholdMenuItem(
+                WidgetCopy.Percent(percent),
+                percent,
+                Checked: percent == widget.LowBatteryThresholdPercent,
+                Enabled: !busy && widget.LowBatteryAlert));
+        }
+
+        return items;
     }
 
     // The check shows the saved intent. It turns indeterminate when the read-back from the device is

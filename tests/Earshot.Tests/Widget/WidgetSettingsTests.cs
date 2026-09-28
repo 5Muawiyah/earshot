@@ -23,13 +23,34 @@ public sealed class WidgetSettingsTests : IDisposable
         WidgetSettings defaults = WidgetSettings.Default;
 
         Assert.IsTrue(defaults.Enabled);
-        Assert.AreEqual("", defaults.OtherDeviceLabel);
+        Assert.AreEqual("iPhone", defaults.OtherDeviceLabel);
         Assert.IsTrue(defaults.AutoPause);
         Assert.IsTrue(defaults.LowBatteryAlert);
         Assert.AreEqual(20, defaults.LowBatteryThresholdPercent);
         Assert.IsTrue(defaults.CaseOpenCard);
         Assert.IsFalse(defaults.LeftClickConnects);
         Assert.AreEqual(WidgetSettings.Default, new EarshotSettings().Widget);
+    }
+
+    // Owner's decision: the card reads "On your iPhone" out of the box, not "On another device". The
+    // caption shown on the setting itself (WidgetCopy.OtherDeviceCaption) must still say plainly that this
+    // is the owner's own label, not something the AirPods report, so a default that reads like a real
+    // report never ships without that disclaimer alongside it.
+    [TestMethod]
+    public void TheDefaultLabelReadsOnYourIPhoneAndTheCaptionStillDisclaimsItIsTheOwnersOwnLabel()
+    {
+        Assert.AreEqual("On your iPhone", WidgetCopy.OnElsewhere(WidgetSettings.Default.OtherDeviceLabel));
+        StringAssert.Contains(WidgetCopy.OtherDeviceCaption, "your own label");
+        StringAssert.Contains(WidgetCopy.OtherDeviceCaption, "do not report");
+    }
+
+    // The empty-label fallback is unchanged: an owner who clears the default still sees the generic line,
+    // never an empty "On your ".
+    [TestMethod]
+    public void ClearingTheLabelStillShowsOnAnotherDevice()
+    {
+        Assert.AreEqual("On another device", WidgetCopy.OnElsewhere(""));
+        Assert.AreEqual("On another device", WidgetCopy.OnElsewhere("   "));
     }
 
     [TestMethod]

@@ -19,7 +19,11 @@ public sealed record WidgetSettings
 
     public bool Enabled { get; set; } = true;                 // the watcher and everything after it
 
-    public string OtherDeviceLabel { get; set; } = "";        // the owner's label; "" shows "On another device"
+    // The owner's own label for "in use, not on this PC" (WidgetCopy.OtherDeviceCaption says so on the
+    // setting itself): defaults to "iPhone" so the card reads "On your iPhone" out of the box (owner's
+    // decision), not something the AirPods themselves ever report. "" still shows "On another device"
+    // (WidgetCopy.OnElsewhere) for an owner who clears it.
+    public string OtherDeviceLabel { get; set; } = "iPhone";
 
     public bool AutoPause { get; set; } = true;                // acts only once the gate constant is true
 

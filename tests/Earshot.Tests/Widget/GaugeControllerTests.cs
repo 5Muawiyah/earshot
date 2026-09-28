@@ -160,26 +160,102 @@ public sealed class GaugeControllerTests
     [TestMethod]
     public void ACoveredTaskbarHidesTheGauge()
     {
-        (GaugeController controller, _, FakeTrayIcon icon, _, _) = Build();
-        TaskbarLayout covered = FreeSpaceLayout() with { Covered = true };
+        (GaugeController controller, FakeGaugeSurface surface, FakeTrayIcon icon, _, _) = Build();
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        Assert.IsInstanceOfType<GaugeState.Shown>(controller.State, "The gauge must already be on screen for hiding it to mean anything.");
 
+        TaskbarLayout covered = FreeSpaceLayout() with { Covered = true };
         controller.OnLayout(ITaskbarReader.Result.Ok(covered));
 
         Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
         Assert.AreEqual(HiddenReason.Covered, ((GaugeState.Hidden)controller.State).Reason);
         Assert.IsTrue(icon.Visible);
+        CollectionAssert.Contains(surface.Calls, "HideWindow", "A covered taskbar must hide the window itself, not just show the tray icon.");
     }
 
     [TestMethod]
     public void QunsBusyHidesTheGauge()
     {
-        (GaugeController controller, _, _, _, _) = Build();
-        TaskbarLayout busy = FreeSpaceLayout() with { NotificationState = Shell.QUNS_BUSY };
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
 
+        TaskbarLayout busy = FreeSpaceLayout() with { NotificationState = Shell.QUNS_BUSY };
         controller.OnLayout(ITaskbarReader.Result.Ok(busy));
 
         Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
         Assert.AreEqual(HiddenReason.NotificationState, ((GaugeState.Hidden)controller.State).Reason);
+        CollectionAssert.Contains(surface.Calls, "HideWindow", "A full-screen or presentation notification state must hide the window itself.");
+    }
+
+    // The appbar notification fast path (ABN_FULLSCREENAPP opening): must hide at once, the same
+    // HiddenReason a polled QUNS_RUNNING_D3D_FULL_SCREEN would eventually produce, without any OnLayout
+    // call in between - proving the notification itself moves the state, not a read that happens to follow it.
+    [TestMethod]
+    public void FullScreenAppOpeningHidesTheGaugeAtOnceWithNoIntervalRead()
+    {
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        Assert.IsInstanceOfType<GaugeState.Shown>(controller.State, "The gauge must already be on screen for hiding it to mean anything.");
+        surface.Calls.Clear();
+
+        controller.NotifyFullScreenApp(opening: true);
+
+        Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
+        Assert.AreEqual(HiddenReason.NotificationState, ((GaugeState.Hidden)controller.State).Reason);
+        CollectionAssert.Contains(surface.Calls, "HideWindow", "The notification must hide the real window itself, not just flip the tray icon.");
+    }
+
+    // Closing (opening: false) must not force a show: per the design the taskbar's actual state still needs
+    // re-reading, which is the caller's job (poking TaskbarWatcher), not this method's.
+    [TestMethod]
+    public void FullScreenAppClosingDoesNotForceAShowOrChangeTheState()
+    {
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        controller.NotifyFullScreenApp(opening: true);
+        Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
+        surface.Calls.Clear();
+
+        controller.NotifyFullScreenApp(opening: false);
+
+        Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State, "Closing must not show the gauge on its own.");
+        Assert.AreEqual(0, surface.Calls.Count, "Closing must touch neither ShowAt nor HideWindow: it changes nothing by itself.");
+    }
+
+    // While the widget is off (Off, not Hidden), a stray notification must not move the controller into
+    // Hidden: Off means no surface, no icon changes, nothing shown, and a notification arriving for a
+    // widget that has just been disabled must not resurrect any of that.
+    [TestMethod]
+    public void FullScreenAppOpeningDoesNothingWhileOff()
+    {
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build(enabled: false);
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        Assert.IsInstanceOfType<GaugeState.Off>(controller.State);
+
+        controller.NotifyFullScreenApp(opening: true);
+
+        Assert.IsInstanceOfType<GaugeState.Off>(controller.State);
+        Assert.AreEqual(0, surface.Calls.Count);
+    }
+
+    // The general regression for the defect the two tests above narrow to one reason each: leaving Shown
+    // for any Hidden reason must hide the real window, not just flip the tray icon back on. Before the fix,
+    // TransitionHiddenNoLog never called IGaugeSurface.HideWindow, so the gauge stayed topmost and visible
+    // over whatever caused the transition (a full-screen app, a taskbar button appearing underneath it).
+    [TestMethod]
+    public void LeavingShownForAnyHiddenReasonHidesTheWindow()
+    {
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        Assert.IsInstanceOfType<GaugeState.Shown>(controller.State);
+        surface.Calls.Clear();
+
+        var failure = new TaskbarReadFailure(TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false));
+        controller.OnLayout(ITaskbarReader.Result.Fail(failure));
+
+        Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
+        CollectionAssert.Contains(surface.Calls, "HideWindow");
+        Assert.IsFalse(surface.IsDisposed, "Hidden keeps the surface for reuse; only Off disposes it.");
     }
 
     [TestMethod]

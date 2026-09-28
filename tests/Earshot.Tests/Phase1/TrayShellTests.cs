@@ -1,7 +1,10 @@
 using System.Drawing;
+using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Icons;
+using Earshot.Interop;
 using Earshot.Tray;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
 
@@ -90,6 +93,47 @@ public sealed class TrayShellTests
         thread.Join();
 
         Assert.IsFalse(fromOtherThread, "A different OS thread must not be reported as owning the window.");
+    }
+
+    // AppBarRegistration.CallbackMessage, dispatched exactly as a real ABM_NEW notification would arrive
+    // (wParam the ABN_* code, lParam the extra data ABN_FULLSCREENAPP carries): must raise AppBarNotification
+    // with both decoded, and log the notification. Drives the real WndProc through Dispatch, the same way
+    // IsOwnedByCurrentThreadComparesTheRealWindowThread above uses a real window rather than a fake.
+    [TestMethod]
+    public void CallbackMessageRaisesAppBarNotificationWithTheDecodedKindAndLParam()
+    {
+        var log = new CapturingLog();
+        using var window = new ShellMessageWindow(log);
+
+        AppBarNotificationEventArgs? received = null;
+        window.AppBarNotification += (_, e) => received = e;
+
+        var message = Message.Create(window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 1);
+        window.Dispatch(ref message);
+
+        Assert.IsNotNull(received, "AppBarNotification must be raised for the registered callback message.");
+        Assert.AreEqual(Shell.ABN_FULLSCREENAPP, received!.Kind);
+        Assert.AreEqual((nint)1, received.LParam);
+        Assert.IsTrue(log.Has(LogLevel.Info, "AppBar notification received: ABN_FULLSCREENAPP (opening)"));
+    }
+
+    // The same message with lParam 0 (a full-screen app closing) must be decoded as "closing", not merely
+    // logged as the same line every time regardless of lParam.
+    [TestMethod]
+    public void AppBarFullScreenClosingIsDecodedFromAZeroLParam()
+    {
+        var log = new CapturingLog();
+        using var window = new ShellMessageWindow(log);
+
+        AppBarNotificationEventArgs? received = null;
+        window.AppBarNotification += (_, e) => received = e;
+
+        var message = Message.Create(window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 0);
+        window.Dispatch(ref message);
+
+        Assert.IsNotNull(received);
+        Assert.AreEqual((nint)0, received!.LParam);
+        Assert.IsTrue(log.Has(LogLevel.Info, "AppBar notification received: ABN_FULLSCREENAPP (closing)"));
     }
 
     [TestMethod]

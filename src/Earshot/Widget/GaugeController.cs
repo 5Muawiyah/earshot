@@ -3,13 +3,16 @@ using Earshot.Interop;
 
 namespace Earshot.Widget;
 
-// Why the gauge is not shown. This build folds two edges into the general read-failure and covered
-// paths rather than giving each its own fast path ahead of a read: an auto-hidden bar that has slid
-// away is expressed by GaugePlacement returning null (NoFreeSpace) once the on-screen part of the bar
-// is thinner than its own thickness, and a full-screen application is not wired to a fast appbar
-// notification in this build (see the report). Both still end up Hidden with the icon shown, which is
-// the observable behaviour that matters: a control on the bar when it should not be there, or missing
-// when it should be shown.
+// Why the gauge is not shown. An auto-hidden bar that has slid away is expressed by GaugePlacement
+// returning null (NoFreeSpace) once the on-screen part of the bar is thinner than its own thickness: this
+// build gives it no fast path of its own ahead of a read, it simply falls out of the next poll. A
+// full-screen application opening does get a fast path, NotifyFullScreenApp, called from the appbar
+// notification callback (ABN_FULLSCREENAPP) rather than waiting for the next poll to see it; the same
+// notification's own polled equivalent (QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE) still exists
+// for a state the appbar notification does not cover. Both still end up Hidden with the icon shown: every
+// transition into Hidden calls IGaugeSurface.HideWindow on the existing surface, so the window itself
+// disappears rather than merely leaving the tray icon to say so; a transition into Off goes further
+// and disposes the surface outright.
 internal enum HiddenReason { NoTaskbar, ReadFailed, NoFreeSpace, Covered, NotificationState, WindowFailed }
 
 // The controller's state.
@@ -154,6 +157,25 @@ internal sealed class GaugeController : IDisposable
         CheckIconDebounce();
     }
 
+    // ABN_FULLSCREENAPP from the appbar notification callback, decoded by the caller into opening/closing.
+    // Opening hides the gauge at once, without waiting for TaskbarWatcher's next scheduled read: reuses
+    // HiddenReason.NotificationState, the same reason a polled QUNS_BUSY/QUNS_RUNNING_D3D_FULL_SCREEN/
+    // QUNS_PRESENTATION_MODE result already produces, since both describe the same "something is claiming
+    // the screen" condition. Closing does nothing here: per the design, the taskbar's actual state still
+    // needs re-reading before anything is shown again, so the caller pokes TaskbarWatcher for a fresh read
+    // instead of this method forcing a show. Does nothing while the widget is off (Off is not a state this
+    // notification should move out of): the caller poking a disposed or never-built watcher is already
+    // harmless on its own.
+    public void NotifyFullScreenApp(bool opening)
+    {
+        if (_disposed || !opening || _state is GaugeState.Off)
+        {
+            return;
+        }
+
+        TransitionHiddenNoLog(HiddenReason.NotificationState);
+    }
+
     // The owner turned the setting off, or Enabled was already false: watcher stopped, icon shown,
     // window disposed. Idempotent.
     public void TurnOff() => TransitionOff();
@@ -240,6 +262,8 @@ internal sealed class GaugeController : IDisposable
         {
             _trayIcon!.Visible = true;
         }
+
+        _surface?.HideWindow();
     }
 
     private void TransitionOff()

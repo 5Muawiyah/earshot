@@ -20,10 +20,18 @@ public sealed class AppBarRegistrationTests
         using var window = new ShellMessageWindow(log);
         var appBar = new AppBarRegistration(window.Handle, log);
 
-        var registered = appBar.Register();
-        Assert.IsTrue(registered.Ok, "ABM_NEW: " + registered.CodeName + " " + registered.Detail);
-
-        appBar.Dispose();
+        // try/finally, not a bare sequence of calls: a failed assertion between Register and Dispose must
+        // still reach ABM_REMOVE, or the appbar stays registered against this process for the rest of the
+        // test run instead of just failing the one test.
+        try
+        {
+            var registered = appBar.Register();
+            Assert.IsTrue(registered.Ok, "ABM_NEW: " + registered.CodeName + " " + registered.Detail);
+        }
+        finally
+        {
+            appBar.Dispose();
+        }
 
         // A second Dispose is a no-op (idempotent), not a second ABM_REMOVE.
         appBar.Dispose();
@@ -35,12 +43,19 @@ public sealed class AppBarRegistrationTests
         var log = new CapturingLog();
         using var window = new ShellMessageWindow(log);
         var appBar = new AppBarRegistration(window.Handle, log);
-        Assert.IsTrue(appBar.Register().Ok);
 
-        (Earshot.Contracts.StepOutcome removed, Earshot.Contracts.StepOutcome added) = appBar.Reregister();
-        Assert.IsTrue(removed.Ok, "ABM_REMOVE: " + removed.CodeName);
-        Assert.IsTrue(added.Ok, "ABM_NEW: " + added.CodeName);
+        // Same reasoning as above: Dispose must run even if an assertion in between fails.
+        try
+        {
+            Assert.IsTrue(appBar.Register().Ok);
 
-        appBar.Dispose();
+            (Earshot.Contracts.StepOutcome removed, Earshot.Contracts.StepOutcome added) = appBar.Reregister();
+            Assert.IsTrue(removed.Ok, "ABM_REMOVE: " + removed.CodeName);
+            Assert.IsTrue(added.Ok, "ABM_NEW: " + added.CodeName);
+        }
+        finally
+        {
+            appBar.Dispose();
+        }
     }
 }

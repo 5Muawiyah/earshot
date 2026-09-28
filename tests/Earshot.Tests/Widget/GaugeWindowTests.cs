@@ -41,8 +41,23 @@ public sealed class GaugeWindowTests
         });
     }
 
+    // A private desktop has no foreground-window concept the way the input desktop does: GetForegroundWindow
+    // returns 0 both before and after activating a form there, so comparing it before and after ShowAt would
+    // pass even if SWP_NOACTIVATE were removed from GaugeWindow.ShowAt and it started stealing activation.
+    // The window's own activation state (GetActiveWindow, the calling thread's active window) is real on a
+    // private desktop and does discriminate, proved below by toggling the flag under test.
+    //
+    // The background window is shown but never made active by any real activation primitive (not
+    // Form.Activate(), not SetActiveWindow either): a real activation transition on a private desktop in
+    // this process was found to leave the NEXT CardDesktop.Run's own desktop permanently ERROR_BUSY at
+    // CloseDesktop, regardless of which real activation primitive performs it or which desktop performs it
+    // first - reproduced with GaugeWindowTests run before ConnectCardTests' own (deliberately real)
+    // activation test, 5/5, and confirmed down to SetActiveWindow alone with no Form.Activate() and no
+    // GaugeWindow involved at all. With nothing ever really activated, GetActiveWindow() starts at 0 and
+    // must stay 0 (never the gauge's handle) after a genuinely NOACTIVATE show, which still discriminates:
+    // proved below by toggling the flag under test.
     [TestMethod]
-    public void ShowAtDoesNotChangeTheForegroundWindowAndRendersAVisibleBitmap()
+    public void ShowAtDoesNotChangeTheActiveWindowAndRendersAVisibleBitmap()
     {
         Earshot.Tests.Phase5.CardDesktop.Run(() =>
         {
@@ -55,10 +70,11 @@ public sealed class GaugeWindowTests
                 ShowInTaskbar = false,
                 BackColor = Color.Black,
             };
-            background.Show();
-            background.Activate();
+            nint backgroundHandle = background.Handle;
+            NativeMethods.SetWindowPos(backgroundHandle, 0, 0, 0, 0, 0,
+                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER);
             Application.DoEvents();
-            nint foregroundBefore = GetForegroundWindow();
+            nint activeBefore = Earshot.Tests.Phase5.TestWindows.GetActiveWindow();
 
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
@@ -67,7 +83,9 @@ public sealed class GaugeWindowTests
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
             Application.DoEvents();
 
-            Assert.AreEqual(foregroundBefore, GetForegroundWindow(), "A NOACTIVATE show must not steal the foreground.");
+            nint activeAfter = Earshot.Tests.Phase5.TestWindows.GetActiveWindow();
+            Assert.AreEqual(activeBefore, activeAfter, "A NOACTIVATE show must not change the thread's active window.");
+            Assert.AreNotEqual(gauge.Handle, activeAfter, "The gauge must never become the active window.");
 
             WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
             {
@@ -90,8 +108,81 @@ public sealed class GaugeWindowTests
         });
     }
 
-    [DllImport("user32.dll")]
-    private static extern nint GetForegroundWindow();
+    // A drag that started outside the window and released inside it delivers WM_LBUTTONUP with no
+    // preceding WM_LBUTTONDOWN on this window: it must not be counted as a click.
+    [TestMethod]
+    public void ALeftButtonUpWithNoPrecedingDownIsNotAClick()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            nint handle = gauge.Handle;
+            bool clicked = false;
+            gauge.LeftClicked += (_, _) => clicked = true;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_LBUTTONUP);
+
+            Assert.IsFalse(clicked, "An up with no preceding down on this window must not raise LeftClicked.");
+        });
+    }
+
+    [TestMethod]
+    public void ALeftButtonDownThenUpOnTheSameWindowIsAClick()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            nint handle = gauge.Handle;
+            bool clicked = false;
+            gauge.LeftClicked += (_, _) => clicked = true;
+
+            Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_LBUTTONDOWN);
+            Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_LBUTTONUP);
+
+            Assert.IsTrue(clicked, "A down followed by an up on the same window is a click.");
+        });
+    }
+
+    // Mirrors ConnectCard.OnDpiChanged: the gauge is already sized for the display it is moving to, so a
+    // real WM_DPICHANGED must never let WinForms' default handling apply the message's own suggested
+    // rectangle. A real SendMessage (TestWindows.Send blocks until WndProc returns, exactly the real
+    // synchronous delivery https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagew
+    // documents), not a synthetic DpiChangedEventArgs, so the proof is the same WM_DPICHANGED path Windows
+    // itself would deliver on a real monitor or DPI change.
+    [TestMethod]
+    public void DpiChangedNeverAppliesTheSuggestedRect()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var gauge = new GaugeWindow(log);
+            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+            Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
+            Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
+            Application.DoEvents();
+            Rectangle before = gauge.Bounds;
+
+            // A suggested rectangle nothing here would ever produce on its own, so an unwanted resize is
+            // unmistakable if OnDpiChanged's cancellation stops working.
+            var suggested = new RECT { left = 500, top = 500, right = 900, bottom = 800 };
+            nint rectPtr = Marshal.AllocHGlobal(Marshal.SizeOf<RECT>());
+            try
+            {
+                Marshal.StructureToPtr(suggested, rectPtr, fDeleteOld: false);
+                nint wParam = (nint)(192 | (192 << 16)); // MAKEWPARAM(192, 192): a new DPI of 192 on both axes.
+                Earshot.Tests.Phase5.TestWindows.Send(gauge.Handle, NativeMethods.WM_DPICHANGED, wParam, rectPtr);
+                Application.DoEvents();
+
+                Assert.AreEqual(before, gauge.Bounds, "OnDpiChanged must cancel the event: the suggested rectangle from a real WM_DPICHANGED must never be applied.");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(rectPtr);
+            }
+        });
+    }
 
     [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(Point point);

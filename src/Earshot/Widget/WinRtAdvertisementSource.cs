@@ -22,6 +22,15 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
     private BluetoothLEAdvertisementWatcher? _watcher;
     private int _disposed;
 
+    // Test seam only: counts real constructions so WidgetRealSurfaceGuardTests can prove a test harness
+    // never builds this class in place of a fake. Never read or reset in production.
+    internal static int ConstructionCount;
+
+    public WinRtAdvertisementSource()
+    {
+        Interlocked.Increment(ref ConstructionCount);
+    }
+
     public event EventHandler<AdvertisementSample>? Received;
 
     public event EventHandler<AdvertisementSourceStopped>? Stopped;

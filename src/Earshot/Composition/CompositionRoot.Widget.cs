@@ -1,6 +1,7 @@
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Widget;
+using Earshot.Widget.Alert;
 using Earshot.Widget.EarPause;
 
 namespace Earshot.Composition;
@@ -14,11 +15,10 @@ namespace Earshot.Composition;
 // registry, from the registry itself. TrayContext calls BuildWidget from its own constructor, once the
 // coordinator exists, and owns starting, suspending, resuming and closing the result.
 //
-// Auto-pause's live wiring (feeding AutoPause.ApplyAsync from the ownership verdict and the in-ear bits
-// the status service reads internally) is not built here: IWidgetStatus's public surface carries only the
-// published snapshot, not the ownership verdict or the render container ids ApplyAsync needs, so that
-// wiring belongs inside the status service's own pipeline, not composition. Recorded in the report as
-// unfinished, not invented.
+// Auto-pause's live wiring is built here too (BuildAutoPauseService), now that IWidgetStatus carries
+// OwnedReadingApplied: the render container ids and Where still come from IDeviceMonitor/IWidgetStatus's
+// own public surface, not from the ownership verdict itself, so composition needs nothing WidgetStatusService
+// does not already publish.
 internal static partial class CompositionRoot
 {
     // Returns the concrete service, not just IWidgetStatus: Start, Suspend, Resume and Close are not on
@@ -40,6 +40,13 @@ internal static partial class CompositionRoot
         r.MediaSessions = new WindowsMediaSessions(r.Log);
 
         var claimStore = new ClaimStore(Paths.Current.WidgetClaimFile, r.Log);
+
+        // The public constructor, not the internal one that takes decodeTable/claimThreshold directly: that
+        // overload exists only so a test can exercise the proved paths without ProximityDecodeTable.Current
+        // or WidgetDefaults.SignalThresholdDbm ever holding anything but their shipped defaults (see its own
+        // header comment). Production must read those two constants itself, through WidgetStatusService's
+        // own public entry point, rather than have a caller hand them in - a caller that could, in principle,
+        // hand in something else.
         var status = new WidgetStatusService(
             static () => new WinRtAdvertisementSource(),
             claimStore,
@@ -48,9 +55,41 @@ internal static partial class CompositionRoot
             blockStatus,
             r.Log,
             r.UiPost,
-            time,
-            static () => ProximityDecodeTable.Current);
+            time);
         r.WidgetStatus = status;
         return status;
+    }
+
+    // The low battery alert's real notifier chain: a toast, falling back to the card the tray already shows
+    // its other one-off notices through; in safe mode or with a redirected data root the whole notifier is
+    // that card alone, so a test run or a safe-mode run never writes a Start menu shortcut or shows a real
+    // toast (the same safe-mode/redirected-root facts BuildWidget itself and NotificationRegistration read).
+    internal static LowBatteryAlertService BuildLowBatteryAlertService(ServiceRegistry r, IWidgetStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        ArgumentNullException.ThrowIfNull(status);
+
+        INotifier notifier = r.SafeMode || Paths.Current.IsRedirected
+            ? new CardNotifier(r.Cards)
+            : new ToastNotifier(NotificationRegistration.AppUserModelId, new CardNotifier(r.Cards), r.Log);
+
+        return new LowBatteryAlertService(status, r.Settings, notifier);
+    }
+
+    // Auto-pause's live wiring: AutoPause itself (r.MediaSessions, wrapped in safe mode by the registry's
+    // own setter, and the AutoPause setting) plus AutoPauseService, which feeds it from every
+    // OwnedReadingApplied event. Only ever called once BuildWidget has already run and found the widget
+    // enabled, which is the one thing that sets r.MediaSessions; a null MediaSessions here means something
+    // upstream is already broken, so it is asserted rather than silently no-op'd.
+    internal static AutoPauseService BuildAutoPauseService(ServiceRegistry r, IWidgetStatus status, Func<BootBlockStatus?> blockStatus, TimeProvider time)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        ArgumentNullException.ThrowIfNull(status);
+        ArgumentNullException.ThrowIfNull(blockStatus);
+        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(r.MediaSessions);
+
+        var autoPause = new AutoPause(r.MediaSessions, () => r.Settings.Current.Widget.AutoPause, r.Log);
+        return new AutoPauseService(status, r.Monitor, blockStatus, r.Settings, autoPause, time, r.Log);
     }
 }

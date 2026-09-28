@@ -1,19 +1,21 @@
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Earshot.App;
+using Earshot.Contracts;
+using Earshot.Infra;
 using Earshot.Widget;
 
 namespace Earshot;
 
-// probe widget --out <folder>: renders the taskbar gauge from two fixed synthetic snapshots (on this PC
-// with a charging left bud, and elsewhere) at three DPIs and two ink colours, and writes each as a PNG.
-// No IWidgetStatus, no device, no window shown: GaugeRenderer draws straight to a bitmap, the same
-// GDI+ path GaugeWindow pushes through UpdateLayeredWindow. Safe under EARSHOT_SAFE_MODE=1 with
-// EARSHOT_DATA_ROOT pointed at a temp folder, since it touches neither.
-//
-// The dedicated card (three columns, the case-open notice) the design describes is not built in this
-// pass (see the report): TrayContext.OnWidgetCardRequested reuses the existing ConnectCard/CardPresenter
-// infrastructure instead. This probe therefore covers the gauge only.
+// probe widget --out <folder>: renders the taskbar gauge, the dedicated three-column card and the
+// case-open notice card from fixed synthetic snapshots at three DPIs and two ink colours, and writes each
+// as a PNG. No IWidgetStatus, no device, no window shown: GaugeRenderer draws straight to a bitmap, the
+// same GDI+ path GaugeWindow pushes through UpdateLayeredWindow, and WidgetCard is drawn with
+// DrawToBitmap on an unshown Form, the same pattern WidgetCardTests' own pure checks use (never Show() or
+// Activate(), so nothing ever reaches the input desktop). Safe under EARSHOT_SAFE_MODE=1 with
+// EARSHOT_DATA_ROOT pointed at a temp folder: the card's own log writes land under that redirected folder
+// too, the same FileLog(Paths.Current.LogFolder) every other probe target already uses.
 internal static partial class Program
 {
     internal static readonly IReadOnlyList<uint> ProbeWidgetDpis = [96, 120, 144];
@@ -99,6 +101,35 @@ internal static partial class Program
             }
         }
 
+        // The card's own log (SetTheme/OnHandleCreated warnings if DWM ever refuses a corner or backdrop
+        // call) goes to the same FileLog every other probe target already writes through, under whatever
+        // folder Paths.Current resolves to; EARSHOT_DATA_ROOT redirects it away from the real profile.
+        var log = new FileLog(Paths.Current.LogFolder);
+        IReadOnlyList<(string Variant, WidgetCardModel Model)> cardVariants = ProbeWidgetCardVariants(now);
+
+        foreach ((string variant, WidgetCardModel model) in cardVariants)
+        {
+            foreach (uint dpi in ProbeWidgetDpis)
+            {
+                foreach ((string inkName, Color ink) in ProbeWidgetInks)
+                {
+                    files.Add(RenderProbeWidgetCard(log, "card-" + variant, variant, model, dpi, inkName, ink, notice: false, folder));
+                }
+            }
+        }
+
+        // spec 7.6: the case-open card's Where line always reads "Case open" regardless of the snapshot's
+        // Where, so which fixture backs it barely matters; the "this-pc" card model (already built above)
+        // is reused rather than building a second one.
+        (string noticeVariant, WidgetCardModel noticeModel) = cardVariants[0];
+        foreach (uint dpi in ProbeWidgetDpis)
+        {
+            foreach ((string inkName, Color ink) in ProbeWidgetInks)
+            {
+                files.Add(RenderProbeWidgetCard(log, "case-open-card", noticeVariant, noticeModel, dpi, inkName, ink, notice: true, folder));
+            }
+        }
+
         return files;
     }
 
@@ -115,6 +146,63 @@ internal static partial class Program
         catch (Exception ex) when (ex is ExternalException or ArgumentException or IOException or UnauthorizedAccessException)
         {
             return new ProbeWidgetFile(snapshotName, dpi, inkName, path, 0, ex.Message);
+        }
+    }
+
+    // The card variants the widget card probe renders, from the same two fixed synthetic snapshots the
+    // gauge already uses. "this-pc" and "elsewhere" are the shipped card as production actually renders it
+    // today (AutoPauseAvailable false in both, matching every real snapshot until a device proves the
+    // in-ear bits, so ShowSwitch is false and the switch row never appears). "auto-pause-preview" is
+    // clearly not that: production never sets AutoPauseAvailable true today, so this third variant exists
+    // only to preview the switch row's look, from a snapshot no real device produces yet, not as a claim
+    // about current shipped behaviour.
+    internal static IReadOnlyList<(string Variant, WidgetCardModel Model)> ProbeWidgetCardVariants(DateTimeOffset now)
+    {
+        IReadOnlyList<(string Name, WidgetSnapshot Snapshot)> snapshots = ProbeWidgetSnapshots(now);
+        WidgetSnapshot thisPc = snapshots[0].Snapshot;
+        WidgetSnapshot elsewhere = snapshots[1].Snapshot;
+
+        return
+        [
+            ("this-pc", new WidgetCardModel(thisPc, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
+            ("elsewhere", new WidgetCardModel(elsewhere, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
+                ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now)),
+            ("auto-pause-preview", new WidgetCardModel(thisPc with { AutoPauseAvailable = true },
+                AutoPauseOn: false, ShowSwitch: true, ConnectIntent: false, ButtonEnabled: true,
+                OtherDeviceLabel: "", Now: now)),
+        ];
+    }
+
+    // Renders one WidgetCard(notice) to a bitmap with DrawToBitmap, exactly the pattern
+    // WidgetCardTests' own private Render(WidgetCard) helper uses (never Show() or Activate()), and saves
+    // it as a PNG named "{namePrefix}-{dpi}dpi-{w}x{h}-{ink}.png" where w x h is the card's own ClientSize
+    // after Render, since the card's height comes from its content, not a fixed constant.
+    private static ProbeWidgetFile RenderProbeWidgetCard(
+        ILog log, string namePrefix, string variant, WidgetCardModel model, uint dpi, string inkName, Color ink, bool notice, string folder)
+    {
+        string fallbackPath = Path.Combine(folder, string.Create(CultureInfo.InvariantCulture,
+            $"{namePrefix}-{dpi}dpi-{inkName}.png"));
+        try
+        {
+            using var card = new WidgetCard(log, notice);
+            card.SetTheme(ink, highContrast: false);
+            card.Render(model, (int)dpi);
+
+            Size size = card.ClientSize;
+            using var bitmap = new Bitmap(Math.Max(1, size.Width), Math.Max(1, size.Height), PixelFormat.Format32bppArgb);
+            card.DrawToBitmap(bitmap, new Rectangle(Point.Empty, size));
+
+            string name = string.Create(CultureInfo.InvariantCulture,
+                $"{namePrefix}-{dpi}dpi-{size.Width}x{size.Height}-{inkName}.png");
+            string path = Path.Combine(folder, name);
+            bitmap.Save(path, ImageFormat.Png);
+            var info = new FileInfo(path);
+            return new ProbeWidgetFile(variant, dpi, inkName, path, (int)info.Length, null);
+        }
+        catch (Exception ex) when (ex is ExternalException or ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return new ProbeWidgetFile(variant, dpi, inkName, fallbackPath, 0, ex.Message);
         }
     }
 

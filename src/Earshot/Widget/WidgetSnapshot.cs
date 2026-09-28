@@ -28,3 +28,14 @@ public sealed class CaseOpenedEventArgs(DateTimeOffset at) : EventArgs
 {
     public DateTimeOffset At { get; } = at;
 }
+
+// Every owned reading, decoded, as WidgetStatusService applied it to its own state (the point right after
+// ApplyDecodedReadingLocked, which only an Owned verdict reaches). Deliberately carries no
+// OwnershipVerdict: reaching this event at all already means Owned, and keeping the verdict enum itself
+// out of this shape means it does not move when OwnershipVerdict's own members do.
+public sealed class OwnedReadingEventArgs(DecodedReading reading, DateTimeOffset at) : EventArgs
+{
+    public DecodedReading Reading { get; } = reading;
+
+    public DateTimeOffset At { get; } = at;
+}
