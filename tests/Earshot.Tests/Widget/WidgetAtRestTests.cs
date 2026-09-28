@@ -39,6 +39,10 @@ public sealed class WidgetAtRestTests
             0,
             Scanner.UnresolvedTokens,
             "A body token could not be resolved at all: the scanner cannot vouch for a widget method it gave up reading partway through.");
+        Assert.AreEqual(
+            0,
+            Scanner.MethodBodyReadFailures,
+            "GetMethodBody() threw for a real widget method: the scanner cannot vouch for a body it could not read at all.");
     }
 
     // The reviewers' five escapes, reproduced here so the scanner itself is proved against them, plus a
@@ -55,6 +59,10 @@ public sealed class WidgetAtRestTests
         AssertFlags(typeof(EscapeInterfaceSubclass), "a subclass of a forbidden interface");
         AssertFlags(typeof(EscapeTrayContextFieldCallingOnIconMouseClick), "a TrayContext field calling OnIconMouseClick");
         AssertFlags(typeof(EscapeWidgetLocalDllImport), "a widget-local DllImport of CM_Disable_DevNode");
+        AssertFlags(typeof(EscapeCallsProgramDispatch), "a body calling Earshot.Program.Dispatch");
+        AssertFlags(typeof(EscapeReflectionGetType), "a body calling Type.GetType");
+        AssertFlags(typeof(EscapeReflectionActivatorCreateInstance), "a body calling Activator.CreateInstance");
+        AssertFlags(typeof(EscapeReflectionMethodInfoInvoke), "a body calling MethodInfo.Invoke on ConnectionController");
     }
 
     private static void AssertFlags(Type escapeType, string what)
@@ -142,6 +150,37 @@ public sealed class WidgetAtRestTests
         public static void Touch() => _ = CM_Disable_DevNode(0, 0);
     }
 
+    // Third return of this class: Earshot.Program.Dispatch (the diag and gate command dispatcher) reaches
+    // the elevated worker, Task Scheduler and the rest of Boot; a widget type calling it, or referencing
+    // Earshot.Program at all, is exactly as forbidden as one calling TrayContext directly.
+    private sealed class EscapeCallsProgramDispatch
+    {
+        public static int Touch() => Earshot.Program.Dispatch(Array.Empty<string>(), null!, null!);
+    }
+
+    // Type.GetType(string) looks a type up by name at runtime: a widget body that calls it can reach any
+    // type at all, including a forbidden one, with nothing in the method's own signature to say so.
+    private sealed class EscapeReflectionGetType
+    {
+        public static Type? Touch() => Type.GetType("Earshot.Audio.Connect.ConnectionController");
+    }
+
+    // Activator.CreateInstance(Type) constructs whatever Type.GetType found, the second half of the same
+    // by-name escape.
+    private sealed class EscapeReflectionActivatorCreateInstance
+    {
+        public static object? Touch(Type t) => Activator.CreateInstance(t);
+    }
+
+    // MethodInfo.Invoke (declared on the common base, MethodBase) calls whatever method a by-name lookup
+    // found, completing the by-name path to ConnectionController.ConnectAsync: neither the field holding
+    // the MethodInfo nor this call's own parameters (object, object[]) ever mention ConnectionController,
+    // so nothing about this method's signature gives it away.
+    private sealed class EscapeReflectionMethodInfoInvoke
+    {
+        public static object? Touch(MethodInfo m, object target) => m.Invoke(target, Array.Empty<object>());
+    }
+
     // The scanner itself: reusable so both the real assembly scan and the escape-fixture proof run the same
     // logic, and the positive result actually means what it claims.
     private static class Scanner
@@ -157,6 +196,8 @@ public sealed class WidgetAtRestTests
             // (including OnIconMouseClick and the private StartToggle it calls) is forbidden, since reaching
             // either is reaching the tray's connect/disconnect toggle.
             typeof(Earshot.App.TrayContext),
+            // The command dispatcher (diag, gate): reaches the elevated worker, Task Scheduler and Boot.
+            typeof(Earshot.Program),
         };
 
         // "Anything in Earshot.Boot, Earshot.Protection [the AudioProtection namespace], Audio.Connect (KS
@@ -173,13 +214,19 @@ public sealed class WidgetAtRestTests
 
         // A body token this resolver could not walk at all: counted rather than silently dropped, since a
         // real one means IL that had something forbidden to say and the scanner simply gave up hearing it.
-        // (Unlike GetMethodBody itself failing, which is the ordinary, expected shape of a P/Invoke stub or
-        // an abstract member with no body to read in the first place.)
         public static int UnresolvedTokens { get; private set; }
+
+        // GetMethodBody() throwing at all, counted rather than silently dropped: the class comment this
+        // used to carry claimed a P/Invoke stub or an abstract member explained it, but GetMethodBody is
+        // documented to return null for exactly those cases, not throw - the null check right after this
+        // call already handles them - so a real throw here is unexplained and must not be read as proof of
+        // nothing to find. NoWidgetTypeReferencesADeviceController asserts this stays 0 for the real scan.
+        public static int MethodBodyReadFailures { get; private set; }
 
         public static List<string> Scan(IEnumerable<Type> types)
         {
             UnresolvedTokens = 0;
+            MethodBodyReadFailures = 0;
             var found = new List<string>();
 
             foreach (Type type in types)
@@ -285,7 +332,8 @@ public sealed class WidgetAtRestTests
             }
             catch (Exception)
             {
-                return; // some methods (P/Invoke stubs, abstract members) have no body reachable this way
+                MethodBodyReadFailures++;
+                return;
             }
 
             byte[]? il = body?.GetILAsByteArray();
@@ -423,6 +471,12 @@ public sealed class WidgetAtRestTests
                         found.Add(where + " calls " + Describe(methodOwner) + "." + m.Name);
                     }
 
+                    if (IsReflectionEntryPoint(m))
+                    {
+                        found.Add(where + " calls " + Describe(m.DeclaringType!) + "." + m.Name +
+                            ", a reflection entry point that can reach a forbidden type or member by name, invisibly to every other check here.");
+                    }
+
                     if (References(m.ReturnType))
                     {
                         found.Add(where + " calls a method returning " + Describe(m.ReturnType));
@@ -439,6 +493,18 @@ public sealed class WidgetAtRestTests
                     break;
             }
         }
+
+        // A widget type calling one of these can reach any type or member by name at runtime, including a
+        // forbidden one, with nothing in the call's own signature to say so: Type.GetType(string) looks a
+        // type up by name, Activator.CreateInstance(Type) builds whatever that found, and
+        // MethodBase.Invoke (the base every MethodInfo and ConstructorInfo shares) calls whatever member a
+        // lookup found. Deliberately narrow: object.GetType() (declared on System.Object, not System.Type)
+        // is the ordinary, harmless instance method every object has and stays unflagged; only the static
+        // by-name lookup on System.Type itself is checked here.
+        private static bool IsReflectionEntryPoint(MethodInfo m) =>
+            (m.DeclaringType == typeof(Type) && m.Name == nameof(Type.GetType)) ||
+            m.DeclaringType == typeof(Activator) ||
+            m.DeclaringType == typeof(MethodBase);
 
         // True when type is forbidden itself, is assignable to a forbidden type (a subclass or an
         // implementer, not just an exact match), or sits under a forbidden namespace.
