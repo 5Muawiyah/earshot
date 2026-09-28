@@ -11,6 +11,10 @@ namespace Earshot.Tests.Widget;
 // the Stopped event's error by name (inconclusive with the reason when this machine has no working radio),
 // wait up to 10 s for any Received of any company or a Stopped, then Stop and assert Stopped carried
 // Success. It never filters, connects or pairs.
+//
+// Each real WinRtAdvertisementSource constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(),
+// so the assembly-wide guard can tell this named real execution apart from an unnoticed one elsewhere: every
+// TrayContext test now gets a fake advertisement source instead (TrayContextTests.TrayHarness).
 [TestClass]
 public sealed class WinRtAdvertisementSourceBindingTests
 {
@@ -21,6 +25,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
     public async Task TheWatcherIsPassiveAndStartsOrSaysWhy()
     {
         using var source = new WinRtAdvertisementSource();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction();
         var stoppedTcs = new TaskCompletionSource<AdvertisementSourceStopped>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receivedTcs = new TaskCompletionSource<AdvertisementSample>(TaskCreationOptions.RunContinuationsAsynchronously);
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
@@ -83,6 +88,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
     public async Task StopRaisesStoppedWithSuccess()
     {
         using var source = new WinRtAdvertisementSource();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction();
         var stoppedTcs = new TaskCompletionSource<AdvertisementSourceStopped>(TaskCreationOptions.RunContinuationsAsynchronously);
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
 

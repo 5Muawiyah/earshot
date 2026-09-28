@@ -10,6 +10,12 @@ namespace Earshot.Tests.Widget;
 // probe found ABM_NEW itself refused (returns 0) for a window on a CreateDesktopW private desktop, so
 // this stays on the test host's own desktop like the existing ShellMessageWindow tests, never showing
 // anything. Transient and in-process: both calls run and the registration is removed in the same test.
+//
+// Each successful ABM_NEW here calls WidgetRealSurfaceGuardTests.AllowRealConstruction() right after
+// asserting it reached the real Explorer, so the assembly-wide guard can tell this named real execution
+// apart from an unnoticed one elsewhere (AppBarWiringTests drives the same wiring on a private desktop
+// instead, where ABM_NEW is refused - ProbeAppBarOnPrivateDesktopTests, widget-review-3 - precisely so it
+// never needs to be on this list, and never touches AllowRealConstruction).
 [TestClass]
 public sealed class AppBarRegistrationTests
 {
@@ -27,6 +33,7 @@ public sealed class AppBarRegistrationTests
         {
             var registered = appBar.Register();
             Assert.IsTrue(registered.Ok, "ABM_NEW: " + registered.CodeName + " " + registered.Detail);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
         }
         finally
         {
@@ -48,10 +55,12 @@ public sealed class AppBarRegistrationTests
         try
         {
             Assert.IsTrue(appBar.Register().Ok);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
 
             (Earshot.Contracts.StepOutcome removed, Earshot.Contracts.StepOutcome added) = appBar.Reregister();
             Assert.IsTrue(removed.Ok, "ABM_REMOVE: " + removed.CodeName);
             Assert.IsTrue(added.Ok, "ABM_NEW: " + added.CodeName);
+            WidgetRealSurfaceGuardTests.AllowRealConstruction();
         }
         finally
         {

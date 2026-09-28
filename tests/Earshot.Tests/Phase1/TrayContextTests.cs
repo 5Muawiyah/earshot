@@ -8,6 +8,8 @@ using Earshot.Infra;
 using Earshot.Tray;
 using Earshot.Tests.Hotkeys;
 using Earshot.Tests.Integration.Coordinator;
+using Earshot.Tests.Widget;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
 
@@ -1472,6 +1474,20 @@ internal sealed class TrayHarness : IDisposable
             // The same clock as the coordinator's by default, so a hand-back test can drive both with one
             // Advance; a test that wants HoldReply to pump against real time can pass TimeProvider.System.
             Time = time ?? Time,
+            // Fakes, never the real WinRtAdvertisementSource, UiaTaskbarReader or the real NotifyIcon (through
+            // GaugeController's own ITrayIconVisibility): a widget-enabled TrayContext test must never start a
+            // real Bluetooth watcher, poll the real taskbar with UI Automation, or make the real tray icon
+            // visible - GaugeController.TransitionOff/TransitionHiddenNoLog do that unconditionally by design,
+            // which would otherwise override ShowIcon=false (WidgetRealSurfaceGuardTests). TaskbarReaderFactoryCalls
+            // counts the factory's own invocations, the fake-backed replacement for the old
+            // UiaTaskbarReader.ConstructionCount proof of a rebuild.
+            AdvertisementSourceFactory = () => new FakeAdvertisementSource(),
+            TaskbarReaderFactory = () =>
+            {
+                TaskbarReaderFactoryCalls++;
+                return new FakeTaskbarReader();
+            },
+            TrayIconVisibilityFactory = () => new FakeTrayIcon(),
         };
         if (handBackBudget is { } hb)
         {
@@ -1532,6 +1548,10 @@ internal sealed class TrayHarness : IDisposable
 
     // How many times the tray asked for a streaming platform. None, while Play from a phone is off.
     public int StreamingPlatformsBuilt { get; private set; }
+
+    // How many times the tray asked for a widget taskbar reader: the fake-backed replacement for
+    // UiaTaskbarReader.ConstructionCount, which a widget-enabled TrayContext test must never touch for real.
+    public int TaskbarReaderFactoryCalls { get; private set; }
 
     public ServiceRegistry Registry { get; }
 

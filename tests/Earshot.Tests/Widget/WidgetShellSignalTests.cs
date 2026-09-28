@@ -19,7 +19,12 @@ namespace Earshot.Tests.Widget;
 // a genuine broadcast would reach. The widget is built for real (TrayHarness's default is off, so this
 // asks for it explicitly, the same as WidgetRuntimeToggleTests): an extra "Taskbar read took" debug line in
 // the log is the observable proof a poke actually reached the watcher's real background thread, since
-// TaskbarWatcher exposes no read-count of its own.
+// TaskbarWatcher exposes no read-count of its own. TrayHarness's fake taskbar reader and advertisement
+// source (WidgetRealSurfaceGuardTests) still let the watcher run and log every read; only the real UI
+// Automation and Bluetooth calls are skipped. Run on a private desktop (Earshot.Tests.Phase5.CardDesktop.Run),
+// never StaThread's own interactive-desktop thread: WireWidget still registers a real AppBarRegistration
+// (ABM_NEW) alongside the watcher, and a private desktop is where that call is refused rather than reaching
+// the owner's real Explorer (AppBarRegistrationTests's own header).
 //
 // TaskbarWatcher's own natural poll cadence is 1 s (ShownPollIntervalMs): a naive "does a read happen within
 // 5 s of dispatching" assertion would pass even with the wiring removed, since the watcher would read again
@@ -91,7 +96,7 @@ public sealed class WidgetShellSignalTests
 
     private static void AssertDispatchPokes(Action<TrayHarness> dispatch, string signalName)
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
                 settings: s => s.Widget = s.Widget with { Enabled = true });

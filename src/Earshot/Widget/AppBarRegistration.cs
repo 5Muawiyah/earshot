@@ -14,6 +14,17 @@ internal sealed class AppBarRegistration : IDisposable
     // this class's own SHAppBarMessage registration.
     public const uint CallbackMessage = NativeMethods.WM_USER + 1;
 
+    // A test-only proof. Unlike GaugeWindow/UiaTaskbarReader/WinRtAdvertisementSource, constructing this
+    // class does nothing by itself (SHAppBarMessage is not called until Register runs), and a local probe
+    // (ProbeAppBarOnPrivateDesktopTests, widget-review-3) found ABM_NEW itself refused for a window on a
+    // CreateDesktopW private desktop - SHAppBarMessage's own Shell_TrayWnd lookup is scoped to the calling
+    // thread's current desktop, the same way FindWindow and EnumWindows are, so it never finds the owner's
+    // real taskbar from there and never reaches it. So the proof that matters is not construction but a
+    // successful ABM_NEW: only that means this call actually reached and was accepted by the real Explorer.
+    // WidgetRealSurfaceGuardTests uses this to tell "a named allow-listed execution reached the real
+    // Explorer" from "something else did", across the whole assembly.
+    internal static int RealRegistrationCount;
+
     private readonly nint _hwnd;
     private readonly ILog _log;
     private bool _registered;
@@ -40,6 +51,11 @@ internal sealed class AppBarRegistration : IDisposable
         var data = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>(), hWnd = _hwnd, uCallbackMessage = CallbackMessage };
         nuint result = Shell.SHAppBarMessage(Shell.ABM_NEW, ref data);
         _registered = result != 0;
+        if (_registered)
+        {
+            Interlocked.Increment(ref RealRegistrationCount);
+        }
+
         return StepOutcomes.FromWin32("sh-app-bar-message:abm-new", 0, _registered ? null : "ABM_NEW returned FALSE.", ok: _registered);
     }
 

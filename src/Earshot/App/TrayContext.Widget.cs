@@ -37,6 +37,13 @@ internal sealed partial class TrayContext
     private int _widgetLayoutDpi = CardPlacement96;
     private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
 
+    // TrayStartOptions.AdvertisementSourceFactory/TaskbarReaderFactory: the real ones by default, a fake in
+    // tests (TrayHarness), so a widget-enabled test never starts a real Bluetooth watcher or polls the real
+    // taskbar with UI Automation. See WidgetRealSurfaceGuardTests.
+    private readonly Func<IAdvertisementSource>? _advertisementSourceFactory;
+    private readonly Func<ITaskbarReader> _taskbarReaderFactory;
+    private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
+
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
     // (RefreshShownGaugeForWorker, called after every OnTaskbarLayout, the only place the real window's
     // position or existence changes), read by the worker thread through ReadShownGauge. A plain field, not
@@ -76,7 +83,7 @@ internal sealed partial class TrayContext
     {
         if (_widgetStatus is null)
         {
-            _widgetStatus = CompositionRoot.BuildWidget(_registry, () => _coordinator.BlockStatus, _time);
+            _widgetStatus = CompositionRoot.BuildWidget(_registry, () => _coordinator.BlockStatus, _time, _advertisementSourceFactory);
             if (_widgetStatus is null)
             {
                 // Still disabled: nothing to wire yet. A later ApplyWidget call re-enters this method once
@@ -97,7 +104,7 @@ internal sealed partial class TrayContext
             _widgetTheme = new ThemeReader(_log);
             var controller = new GaugeController(
                 CreateGaugeSurface,
-                new NotifyIconVisibility(_notifyIcon),
+                _trayIconVisibilityFactory?.Invoke() ?? new NotifyIconVisibility(_notifyIcon),
                 ReadGaugeControllerSettings,
                 _log,
                 _time);
@@ -140,7 +147,7 @@ internal sealed partial class TrayContext
             _appBarRegistration = new AppBarRegistration(_window.Handle, _log);
             LogAppBarOutcome(_appBarRegistration.Register());
 
-            _taskbarWatcher = new TaskbarWatcher(new UiaTaskbarReader(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time);
+            _taskbarWatcher = new TaskbarWatcher(_taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time);
             _taskbarWatcher.Start();
             _taskbarWatcher.Poke();
         }
@@ -450,8 +457,22 @@ internal sealed class ShownGaugeBox(ShownGauge value)
 // interface it already declares.
 internal sealed class NotifyIconVisibility(NotifyIcon icon) : ITrayIconVisibility
 {
+    // A test-only proof, the same pattern as GaugeWindow/UiaTaskbarReader/WinRtAdvertisementSource's own
+    // ConstructionCount: how many times this adapter has made the real NotifyIcon visible. No execution is
+    // ever allowed to do this for real (WidgetRealSurfaceGuardTests asserts it stays 0 for the whole run),
+    // since a fake ITrayIconVisibility already proves everything GaugeController needs from this interface.
+    internal static int RealVisibleTrueCount;
+
     public bool Visible
     {
-        set => icon.Visible = value;
+        set
+        {
+            if (value)
+            {
+                Interlocked.Increment(ref RealVisibleTrueCount);
+            }
+
+            icon.Visible = value;
+        }
     }
 }

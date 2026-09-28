@@ -12,9 +12,19 @@ namespace Earshot.Tests.Widget;
 // (matching TaskbarWatcher's own lifetime exactly, Enabled toggle included), reregistered on TaskbarCreated,
 // and its notification callback routed to an immediate hide for ABN_FULLSCREENAPP. Drives the real
 // TrayContext.Window the same way WidgetShellSignalTests already does (Window.Dispatch, the real WndProc),
-// against a real AppBarRegistration (ABM_NEW/ABM_REMOVE), never a fake: both calls are cheap, already proved
-// safe for a test window by AppBarRegistrationTests, and TrayHarness.Dispose (via TrayContext.Close ->
-// CloseWidget) always removes whatever is left registered by the time a test ends.
+// against a real AppBarRegistration (ABM_NEW/ABM_REMOVE), never a fake: the wiring itself (when Register,
+// Reregister and Dispose are called) is what these tests prove, and LogAppBarOutcome logs the same
+// "sh-app-bar-message:abm-new"/"abm-remove" fragment whether the call actually reached Explorer or not.
+//
+// Round 3: earlier this ran on the interactive desktop (StaThread.Run), the same desktop
+// AppBarRegistrationTests uses for the one execution kept of a real ABM_NEW against the owner's real
+// Explorer - meaning these four tests sent four more, well outside that single named allow-list. Every
+// FindWindow-style shell lookup (SHAppBarMessage's own Shell_TrayWnd lookup included) is scoped to the
+// calling thread's current desktop, and AppBarRegistrationTests's own header already records a local probe
+// finding ABM_NEW refused on a CreateDesktopW private desktop: running here instead (CardDesktop.Run) keeps
+// the real class, the real SHAppBarMessage call and the real wiring proof, while the call itself never
+// reaches the owner's real Explorer. TrayHarness's fake taskbar reader and advertisement source
+// (WidgetRealSurfaceGuardTests) keep the rest of WireWidget's third stage off the real desktop and radio too.
 [TestClass]
 public sealed class AppBarWiringTests
 {
@@ -27,7 +37,7 @@ public sealed class AppBarWiringTests
     [TestMethod]
     public void FullScreenAppOpeningHidesTheGaugeControllerAtOnce()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
                 settings: s => s.Widget = s.Widget with { Enabled = true });
@@ -52,7 +62,7 @@ public sealed class AppBarWiringTests
     [TestMethod]
     public void FullScreenAppOpeningDoesNothingWhileTheWidgetIsOff()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
             tray.PumpUntilIdle();
@@ -71,7 +81,7 @@ public sealed class AppBarWiringTests
     [TestMethod]
     public void TaskbarCreatedReregistersTheAppBar()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
                 settings: s => s.Widget = s.Widget with { Enabled = true });
@@ -99,7 +109,7 @@ public sealed class AppBarWiringTests
     [TestMethod]
     public void TogglingTheWidgetOffAndOnRegistersAFreshAppBar()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
                 settings: s => s.Widget = s.Widget with { Enabled = true });

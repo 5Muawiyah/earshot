@@ -69,6 +69,26 @@ internal sealed record TrayStartOptions(
     // Called from ApplyStreaming only when settings ask for the feature, which by default they do not.
     public Func<ILog, IStreamingPlatform> StreamingPlatformFactory { get; init; } = static log => new WindowsStreamingPlatform(log);
 
+    // Builds the widget's BLE advertisement source, passed straight through to CompositionRoot.BuildWidget.
+    // Null (the default) means "let BuildWidget use its own real default", the same convention
+    // SetWidgetLifecycleForTest already uses for the widget's other test seams: a widget-enabled tray-level
+    // test must inject a fake here (TrayHarness does, by default) or it starts a real Bluetooth watcher the
+    // moment WireWidget runs.
+    public Func<IAdvertisementSource>? AdvertisementSourceFactory { get; init; }
+
+    // Builds the widget's taskbar reader, injected the same way as the two factories above: the real one
+    // (UiaTaskbarReader) by default, a fake in tests, so a widget-enabled tray-level test never polls the
+    // owner's real taskbar with UI Automation and never reaches a real GaugeWindow or the real tray icon
+    // through it.
+    public Func<ITaskbarReader> TaskbarReaderFactory { get; init; } = static () => new UiaTaskbarReader();
+
+    // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
+    // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
+    // widget-enabled tray-level test injects a fake instead, so GaugeController's own fallback logic
+    // (TransitionOff and TransitionHiddenNoLog both set Visible=true unconditionally, by design) never makes
+    // the real tray icon visible, overriding ShowIcon=false.
+    public Func<ITrayIconVisibility>? TrayIconVisibilityFactory { get; init; }
+
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
 
@@ -307,6 +327,9 @@ internal sealed partial class TrayContext : ApplicationContext
         _hotkeys.Activated += OnHotkeyActivated;
         _voiceEngineFactory = options.VoiceEngineFactory;
         _streamingPlatformFactory = options.StreamingPlatformFactory;
+        _advertisementSourceFactory = options.AdvertisementSourceFactory;
+        _taskbarReaderFactory = options.TaskbarReaderFactory;
+        _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;

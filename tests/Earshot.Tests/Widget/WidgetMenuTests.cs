@@ -11,15 +11,22 @@ namespace Earshot.Tests.Widget;
 // refreshes the menu, finds the item by its text and calls PerformClick(), the harness's settings store is
 // a real JsonSettingsStore under %TEMP% (TrayHarness's own TempFolder), never the real
 // %LOCALAPPDATA%\Earshot, and PumpUntilIdle drains OnSettingsChanged's posted callback (ApplyWidget among
-// them) before each assertion.
+// them) before each assertion. Run on a private desktop (Earshot.Tests.Phase5.CardDesktop.Run): the first
+// test below turns the widget on through the real menu click, which reaches WireWidget's real
+// AppBarRegistration (ABM_NEW) the same way AppBarWiringTests does, and a private desktop is where
+// AppBarRegistrationTests's own header records that call being refused rather than reaching the owner's
+// real Explorer. The other tests here never turn the widget on, but run the same way for consistency.
 [TestClass]
 public sealed class WidgetMenuTests
 {
+    // Round 3: this used to check UiaTaskbarReader.ConstructionCount, which meant constructing the real
+    // class. TrayHarness now always injects a fake reader (TrayContextTests.TaskbarReaderFactoryCalls), so
+    // the same proof - the menu click actually wires the widget, not just flips the setting - reads the
+    // fake factory's own call count instead.
     [TestMethod]
     public void ClickingShowOnTheTaskbarFlipsWidgetEnabledThroughTheRealSettingsWritePath()
     {
-        UiaTaskbarReader.ConstructionCount = 0;
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness();
             Assert.IsFalse(tray.Settings.Current.Widget.Enabled, "The harness starts the widget off (see TrayHarness).");
@@ -28,7 +35,7 @@ public sealed class WidgetMenuTests
             tray.PumpUntilIdle();
 
             Assert.IsTrue(tray.Settings.Current.Widget.Enabled);
-            Assert.AreEqual(1, UiaTaskbarReader.ConstructionCount,
+            Assert.AreEqual(1, tray.TaskbarReaderFactoryCalls,
                 "Turning it on through the menu must actually wire the widget (WireWidget), not just flip the flag.");
 
             tray.ClickMenu(WidgetCopy.ShowOnTaskbar);
@@ -41,7 +48,7 @@ public sealed class WidgetMenuTests
     [TestMethod]
     public void ClickingLeftClickConnectsFlipsItThroughTheRealSettingsWritePath()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness();
             bool before = tray.Settings.Current.Widget.LeftClickConnects;
@@ -56,7 +63,7 @@ public sealed class WidgetMenuTests
     [TestMethod]
     public void ClickingCardWhenTheCaseOpensFlipsItThroughTheRealSettingsWritePath()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness();
             bool before = tray.Settings.Current.Widget.CaseOpenCard;
@@ -71,7 +78,7 @@ public sealed class WidgetMenuTests
     [TestMethod]
     public void ClickingLowBatteryAlertFlipsItThroughTheRealSettingsWritePath()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness();
             bool before = tray.Settings.Current.Widget.LowBatteryAlert;
@@ -88,7 +95,7 @@ public sealed class WidgetMenuTests
     [TestMethod]
     public void ClickingAThresholdEntrySetsItThroughTheRealSettingsWritePath()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(settings: s => s.Widget = s.Widget with { LowBatteryAlert = true, LowBatteryThresholdPercent = 20 });
             tray.Context.Menu.Refresh();
