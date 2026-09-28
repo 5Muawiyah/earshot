@@ -71,10 +71,14 @@ public sealed class WidgetStatusServiceTests : IDisposable
         return service;
     }
 
-    private static WidgetClaim SampleClaim(OwnedBattery? last = null) => new(
+    // nibblesAreNamedOrder must match whatever table a test then passes to NewService: a claim made (or
+    // stood in for here) while the bud order is proved needs it true, or OwnershipRule now correctly refuses
+    // to compare its stored nibbles at all (round 2 item 4).
+    private static WidgetClaim SampleClaim(OwnedBattery? last = null, bool nibblesAreNamedOrder = false) => new(
         1, WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, WidgetFixtures.Colour, -70,
         new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero),
-        last ?? new OwnedBattery(null, null, null, new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero)));
+        last ?? new OwnedBattery(null, null, null, new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero)),
+        nibblesAreNamedOrder);
 
     private DeviceSnapshot ThisPcSnapshot(bool active)
     {
@@ -224,7 +228,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
             InEarWhenSet = true,
         };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
 
@@ -283,7 +287,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
 
@@ -341,7 +345,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
         _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05)); // both buds in ear, battery known
@@ -367,7 +371,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
         _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05));
@@ -776,7 +780,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         using WidgetStatusService service = NewService(store);
         service.Start();
 
-        _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
 
         WidgetSnapshot snapshot = service.Current;
         Assert.AreEqual(WidgetWatcherState.Stopped, snapshot.Watcher);
@@ -800,6 +804,126 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.Resume();
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
         Assert.AreEqual(2, _source.StartCalls);
+    }
+
+    // A late Stopped(Success) from the run Suspend's own Stop() just ended, arriving after Resume has
+    // already started a new one, must not show as the current watcher state or schedule a redundant retry -
+    // it belongs to a generation this service has already moved on from.
+    [TestMethod]
+    public void ALateStoppedFromASupersededGenerationIsIgnored()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        service.Suspend();
+        service.Resume();
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+        int startsBeforeStaleEvent = _source.StartCalls;
+
+        // Generation 1 is the run Suspend's Stop() ended; Resume moved the fake (and the service) on to
+        // generation 2, so this is exactly the shape of a late arrival.
+        _source.RaiseStopped(new AdvertisementSourceStopped(0, "Success", StepOutcomes.FromHResult("fake-stop", 0), 1));
+
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "A stale Stopped must not show as the current watcher state.");
+        Assert.IsTrue(_log.Has(LogLevel.Info, "superseded"), "A stale Success must be logged at Info, not treated as a real problem.");
+
+        _clock.Advance(WidgetTiming.WatcherRetryLimit);
+        Assert.AreEqual(startsBeforeStaleEvent, _source.StartCalls, "A stale Stopped must not schedule a redundant retry.");
+    }
+
+    // A Stopped that genuinely belongs to the current generation must still be shown and still retried:
+    // the fix above must not swallow a real stop just because a generation number now exists.
+    [TestMethod]
+    public void ACurrentGenerationStoppedIsStillShownAndRetried()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)); // the convenience overload: current generation
+
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher);
+        Assert.AreEqual(1, service.Current.WatcherErrorCode);
+        Assert.AreEqual("RadioNotAvailable", service.Current.WatcherErrorName);
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay);
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "A current-generation Stopped must still schedule and run a retry.");
+    }
+
+    // Retry gaps, first half: a Start that fails synchronously, with no Stopped event ever coming to carry
+    // the reason or trigger OnStopped's own retry, must keep its own error and still get a retry scheduled.
+    [TestMethod]
+    public void AFailingInitialStartKeepsTheErrorNameAndSchedulesARetry()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => StepOutcomes.FromHResult("fake-start", 5, detail: "ACCESS_DENIED", ok: false);
+
+        service.Start();
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(WidgetWatcherState.Stopped, snapshot.Watcher);
+        Assert.AreEqual(5, snapshot.WatcherErrorCode, "A failed start's own error code must be kept, not discarded.");
+        Assert.IsFalse(string.IsNullOrEmpty(snapshot.WatcherErrorName), "A failed start's own error name must be kept, not discarded.");
+
+        _source.StartResult = null; // the scheduled retry now succeeds
+        _clock.Advance(WidgetTiming.WatcherRetryDelay);
+
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "A failing first start must still have scheduled a retry.");
+    }
+
+    // Retry gaps, second half: a retry that was already dequeued from the thread pool when Suspend ran
+    // (disposing a timer never stops a callback already in flight) must not start the watcher during
+    // suspend. OnRetryDue is called directly to stand in for that already-running callback, since the fake
+    // clock's own timers fire synchronously and Suspend's cancel would otherwise simply prevent the call
+    // from happening at all, proving nothing about this race.
+    [TestMethod]
+    public void ARetryAlreadyInFlightWhenSuspendRunsDoesNotStartTheWatcher()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)); // schedules a retry
+
+        service.Suspend(); // wins the race: _suspended is now true and the timer is disposed
+        int startsAtSuspend = _source.StartCalls;
+
+        service.OnRetryDue(); // the already-in-flight callback, running anyway
+
+        Assert.AreEqual(startsAtSuspend, _source.StartCalls, "A retry already in flight when Suspend ran must not start the watcher.");
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher);
+
+        service.Resume();
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "Resume itself must still start the watcher normally afterwards.");
+    }
+
+    // Item 3: Start and Stop must run outside the service's own lock. Proved with a fake whose Stop blocks
+    // until a handler that needs the same lock (here, the public Current getter) has actually taken it: on
+    // the old code, Suspend calls Stop while still holding the lock, so the blocked Stop and the blocked
+    // locked call deadlock each other; on the new code, Stop runs unlocked, so the locked call sails through
+    // while Stop is still blocked.
+    [TestMethod]
+    public void SuspendCallsStopOutsideTheServiceLockSoAConcurrentLockedCallDoesNotDeadlock()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _source.ArmBlockingStop();
+        Task suspendTask = Task.Run(() => service.Suspend());
+        Assert.IsTrue(_source.WaitForStopEntered(TimeSpan.FromSeconds(5)), "Stop was not entered in time.");
+
+        // While Stop() is blocked inside the fake, a call that needs the service's own lock must still
+        // complete promptly.
+        Task<WidgetSnapshot> lockedCall = Task.Run(() => service.Current);
+        bool completedInTime = lockedCall.Wait(TimeSpan.FromSeconds(5));
+        _source.ReleaseStop();
+        Assert.IsTrue(suspendTask.Wait(TimeSpan.FromSeconds(5)), "Suspend itself must complete once Stop is released.");
+
+        Assert.IsTrue(
+            completedInTime,
+            "A call needing the service's own lock deadlocked while Stop() was blocked: Stop is still being called while the lock is held.");
     }
 
     // A second Start must not double-subscribe the device monitor, the settings store or the source's own
@@ -845,6 +969,55 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(changedBeforeCompletion, _changedEvents.Count, "Nothing after Close raises Changed.");
     }
 
+    // Round 2 item 4: a claim made while the bud order was unproved (wire order) read against a table that
+    // has since had the order proved must fail closed, and once, not once per advert.
+    [TestMethod]
+    public void ANibbleOrderMismatchShowsNothingAndLogsOnce()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim()); // NibblesAreNamedOrder defaults to false: wire order
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        using WidgetStatusService service = NewService(store, table: table);
+        service.Start();
+
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.IsNull(snapshot.Left.Percent, "Nothing is shown while the claim's nibble order no longer matches the table's.");
+        Assert.IsNull(snapshot.Right.Percent);
+        Assert.AreEqual(
+            1,
+            _log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("nibble order", StringComparison.OrdinalIgnoreCase)),
+            "A nibble order mismatch must be logged once, not once per advert.");
+    }
+
+    // Redoing the claim (opening the case next to the PC again) records the order the table currently
+    // proves, so a reading that was blocked by the mismatch is shown again afterwards.
+    [TestMethod]
+    public async Task RedoingTheClaimFixesANibbleOrderMismatch()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim()); // wire order
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        using WidgetStatusService service = NewService(store, table: table);
+        service.Start();
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+        Assert.IsNull(service.Current.Left.Percent, "Sanity: the mismatch must still block the reading before the redo.");
+
+        Task<ClaimOutcome> claimTask = service.ClaimAsync(CancellationToken.None);
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+        _clock.Advance(WidgetTiming.ClaimWindow);
+        ClaimOutcome outcome = await claimTask;
+
+        Assert.AreEqual(ClaimOutcomeStatus.Claimed, outcome.Status);
+        Assert.IsTrue(outcome.Claim!.NibblesAreNamedOrder, "A claim made while the order is proved must record named order.");
+
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+
+        Assert.IsNotNull(service.Current.Left.Percent, "After the redo, a matching reading must be shown again.");
+    }
+
     [TestMethod]
     public void AStoppedSourceIsStartedAgainAfterTheRetryDelayDoubling()
     {
@@ -857,7 +1030,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.Start();
 
         _source.StartResult = () => StepOutcomes.FromHResult("fake-start", 1, ok: false);
-        _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         int expectedStarts = _source.StartCalls;
 
         TimeSpan[] expectedDelays =
@@ -888,7 +1061,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         var store = NewClaimStore();
         using WidgetStatusService service = NewService(store);
         service.Start();
-        _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
 
         _clock.Advance(WidgetTiming.WatcherRetryDelay);
@@ -904,7 +1077,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         var store = NewClaimStore();
         using WidgetStatusService service = NewService(store);
         service.Start();
-        _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         int startsAfterStop = _source.StartCalls;
 
         service.RefreshAsync().GetAwaiter().GetResult();
@@ -955,7 +1128,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.Start();
 
         _source.Raise(Owned(batteryB: 0x05));
-        _source.RaiseStopped(new AdvertisementSourceStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)));
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         _clock.Advance(WidgetTiming.CountersLogInterval);
 
         List<LogEntry> widgetEntries = _log.Entries.Skip(baseline).ToList();

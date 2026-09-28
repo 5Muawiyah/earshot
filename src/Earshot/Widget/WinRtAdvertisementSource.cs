@@ -22,6 +22,12 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
     private BluetoothLEAdvertisementWatcher? _watcher;
     private int _disposed;
 
+    // The count of Start() calls, whatever each one returns; see AdvertisementSourceStopped's own comment.
+    // A fresh native watcher is built for each Start() rather than the one instance being reused across
+    // Stop()/Start() cycles, so the closure below ties a Stopped callback to the exact generation it belongs
+    // to, however late Windows delivers it.
+    private int _generation;
+
     // Test seam only: counts real constructions so WidgetRealSurfaceGuardTests can prove a test harness
     // never builds this class in place of a fake. Never read or reset in production.
     internal static int ConstructionCount;
@@ -86,16 +92,42 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
         {
             try
             {
-                if (_watcher is null)
+                if (_watcher is { } running && StatusOf(running.Status) == AdvertisementSourceState.Started)
                 {
-                    var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Passive };
-                    watcher.Received += OnReceived;
-                    watcher.Stopped += OnStopped;
-                    _watcher = watcher;
+                    // Already running: a redundant Start() (a manual refresh racing the retry timer, for
+                    // instance) leaves the current run, and its generation, exactly as they are.
+                    return StepOutcomes.FromHResult(StartStep, 0, detail: "status " + running.Status);
                 }
 
-                _watcher.Start();
-                return StepOutcomes.FromHResult(StartStep, 0, detail: "status " + _watcher.Status);
+                // A fresh native watcher per Start(), not the one instance reused across Stop()/Start()
+                // cycles: see AdvertisementSourceStopped's comment. The old watcher's Received is dropped so
+                // it cannot double-report once superseded; its own eventual Stopped, if any, still arrives
+                // through the closure captured below and is reported with the generation it belongs to.
+                if (_watcher is { } previous)
+                {
+                    previous.Received -= OnReceived;
+                }
+
+                _generation++;
+                int generation = _generation;
+                var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Passive };
+                watcher.Received += OnReceived;
+
+                // A lambda, not a plain method-group subscription like OnReceived's above, because each one
+                // needs its own generation baked in. The guard is repeated here, even though this line only
+                // ever runs already past the same check above: the call inside a lambda's own compiled body
+                // is a call site the platform-compatibility analyser considers separately from the method
+                // that created it, since the delegate can in principle outlive that guard's scope.
+                watcher.Stopped += (sender, args) =>
+                {
+                    if (WidgetPlatformGuard.HasBleWatcher)
+                    {
+                        OnStopped(args, generation);
+                    }
+                };
+                _watcher = watcher;
+                watcher.Start();
+                return StepOutcomes.FromHResult(StartStep, 0, detail: "status " + watcher.Status);
             }
             catch (Exception ex)
             {
@@ -146,10 +178,13 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
 
         lock (_gate)
         {
+            // Stopped is subscribed as a per-generation closure (see Start()), not this instance's own
+            // method, so there is nothing to unsubscribe from it here: it fires once more, harmlessly, once
+            // the watcher this Dispose just stopped actually finishes, and nothing is listening for the
+            // public Stopped event any more by then anyway (the owner unsubscribes before disposing).
             if (_watcher is { } watcher)
             {
                 watcher.Received -= OnReceived;
-                watcher.Stopped -= OnStopped;
             }
         }
     }
@@ -173,13 +208,15 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
         }
     }
 
-    // Only ever subscribed inside Start(); see OnReceived's comment.
+    // Subscribed as a closure inside Start(), one per generation, so a late event always carries the
+    // generation of the run it actually belongs to, whatever Start() calls have happened since; see
+    // AdvertisementSourceStopped's own comment and Start()'s.
     [SupportedOSPlatform("windows10.0.19041.0")]
-    private void OnStopped(BluetoothLEAdvertisementWatcher sender, BluetoothLEAdvertisementWatcherStoppedEventArgs args)
+    private void OnStopped(BluetoothLEAdvertisementWatcherStoppedEventArgs args, int generation)
     {
         BluetoothError error = args.Error;
         StepOutcome step = StepOutcomes.FromWin32(StopStep + ":event", (uint)error, ok: error == BluetoothError.Success);
-        Stopped?.Invoke(this, new AdvertisementSourceStopped((int)error, error.ToString(), step));
+        Stopped?.Invoke(this, new AdvertisementSourceStopped((int)error, error.ToString(), step, generation));
     }
 
     private uint SenderTagOf(ulong address)

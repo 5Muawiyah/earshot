@@ -105,7 +105,8 @@ internal sealed class ClaimFlow
             Colour: message2.Colour,
             SignalThresholdDbm: threshold,
             ClaimedAtUtc: now,
-            Last: OwnedBattery.FromMessage(message2, table, previous: null, at: now));
+            Last: OwnedBattery.FromMessage(message2, table, previous: null, at: now),
+            NibblesAreNamedOrder: table.HighNibbleIsRight is not null);
 
         _store.Save(claim);
         _log.Info("AirPods claimed: model and colour recorded, signal threshold " + threshold + " dBm.");

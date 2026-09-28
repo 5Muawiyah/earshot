@@ -11,11 +11,11 @@ public sealed record WidgetCounters(
     long AllSections, long AppleSections, long OtherCompanySections,
     long ProximityItems, long OkForm, long Truncated, long UnknownForm,
     long Owned, long NoClaim, long ModelOrColourMismatch,
-    long SignalBelowThreshold, long BatteryUnreadable, long BatteryInconsistent,
+    long SignalBelowThreshold, long NibbleOrderMismatch, long BatteryUnreadable, long BatteryInconsistent,
     IReadOnlyList<(byte? Prefix, int Length, long Count)> UnknownForms)
 {
     public const int MaxUnknownFormShapes = 16;
 
     public static WidgetCounters Empty { get; } = new(
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Array.Empty<(byte?, int, long)>());
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Array.Empty<(byte?, int, long)>());
 }

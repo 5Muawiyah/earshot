@@ -137,6 +137,26 @@ public sealed class ClaimStoreTests
         Assert.AreEqual(json, File.ReadAllText(path), "An invalid claim file must be left exactly as it was.");
     }
 
+    // Round 2 item 4: a claim file written before NibblesAreNamedOrder existed has no such member at all.
+    // Schema stays 1; a missing member must read as false (wire order), which is what every such file
+    // actually holds, rather than fail to load or default to something that would misread its nibbles.
+    [TestMethod]
+    public void AnOlderClaimFileLoadsAsWireOrder()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        string json =
+            "{\"SchemaVersion\":1,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
+            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"2026-09-27T00:00:00+00:00\"," +
+            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"2026-09-27T00:00:00+00:00\"}}";
+        File.WriteAllText(path, json);
+
+        var store = new ClaimStore(path, new CapturingLog(), static () => (sbyte)-70);
+
+        Assert.IsNotNull(store.Current);
+        Assert.IsFalse(store.Current!.NibblesAreNamedOrder, "A file with no such member must read as wire order.");
+    }
+
     // Probe 2: a file with no last reading at all is not a usable claim.
     [TestMethod]
     public void AClaimWithNoLastReadingIsNoClaimAndLogged()

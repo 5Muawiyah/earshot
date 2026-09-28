@@ -15,6 +15,7 @@ public enum OwnershipVerdict
     NotEvaluated,             // the parse was not Ok (truncated, wrong type, unknown form)
     ModelOrColourMismatch,
     SignalBelowThreshold,
+    NibbleOrderMismatch,      // the claim's stored nibble order no longer matches the decode table's
     BatteryUnreadable,        // every nibble unknown
     BatteryInconsistent
 }
@@ -51,6 +52,16 @@ public static class OwnershipRule
         }
 
         bool budsProved = input.Table.HighNibbleIsRight is not null;
+
+        // The claim's Last.NibbleHigh/Low were written under one of two conventions: wire order or named by
+        // bud (see WidgetClaim's comment). If the decode table's own provedness has moved on since the claim
+        // was made, the stored nibbles can no longer be told apart from a stranger's without guessing which
+        // convention wrote them, so nothing is owned until the owner redoes the claim.
+        if (budsProved != claim.NibblesAreNamedOrder)
+        {
+            return new OwnershipResult(OwnershipVerdict.NibbleOrderMismatch, null);
+        }
+
         DecodedReading reading = ProximityDecoder.Decode(message, input.Table, input.AtUtc);
         int? wireHigh = KnownNibble((message.BatteryA >> 4) & 0x0F);
         int? wireLow = KnownNibble(message.BatteryA & 0x0F);
