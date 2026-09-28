@@ -189,6 +189,7 @@ public sealed class ClaimFlowTests
         var expectedTopLevel = new HashSet<string>(StringComparer.Ordinal)
         {
             "SchemaVersion", "ModelHigh", "ModelLow", "Colour", "SignalThresholdDbm", "ClaimedAtUtc", "Last",
+            "NibblesAreNamedOrder",
         };
         CollectionAssert.AreEquivalent(expectedTopLevel.ToList(), topLevelMembers.ToList(), "Top level: " + json);
 

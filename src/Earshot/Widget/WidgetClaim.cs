@@ -38,10 +38,19 @@ public sealed record OwnedBattery(int? NibbleHigh, int? NibbleLow, int? Case, Da
 // %LOCALAPPDATA%\Earshot\widget\claim.json. The device the owner told Earshot is his: what a claiming run
 // read once, kept here rather than in settings.json because it is a device-derived record and not a
 // preference, and never roamed.
+//
+// NibblesAreNamedOrder records which of the two conventions OwnedBattery.FromMessage's comment above
+// describes was used to write Last.NibbleHigh/NibbleLow: false when they are BatteryA's wire high and low
+// nibble (the order was unproved at the time), true when they are the right and left bud by name (the
+// order was proved). Schema stays 1: an older file has no such member, and a missing one is read as false
+// (wire order), which is what every claim made before this field existed actually holds. When the decode
+// table's own current provedness no longer matches this flag, the stored nibbles cannot be told apart from
+// a stranger's without redoing the claim, so OwnershipRule fails closed rather than guess which they are.
 public sealed record WidgetClaim(
     int SchemaVersion,            // 1
     byte ModelHigh, byte ModelLow,
     byte Colour,
     sbyte SignalThresholdDbm,     // copied from WidgetDefaults.SignalThresholdDbm at claim time
     DateTimeOffset ClaimedAtUtc,
-    OwnedBattery Last);           // the reading the claim was made from, then the last owned reading
+    OwnedBattery Last,            // the reading the claim was made from, then the last owned reading
+    bool NibblesAreNamedOrder = false);

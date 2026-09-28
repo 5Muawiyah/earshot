@@ -58,7 +58,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private long _allSections, _appleSections, _otherCompanySections, _proximityItems;
     private long _okForm, _truncated, _unknownForm;
     private long _owned, _noClaim, _modelOrColourMismatch;
-    private long _signalBelowThreshold, _batteryUnreadable, _batteryInconsistent;
+    private long _signalBelowThreshold, _nibbleOrderMismatch, _batteryUnreadable, _batteryInconsistent;
+
+    // Set once a NibbleOrderMismatch has been logged, so a whole run of adverts against a stale claim
+    // produces one line, not one per advert; cleared whenever the claim changes (a redone claim, or one
+    // forgotten), since either might fix or remove the mismatch.
+    private bool _nibbleOrderMismatchLogged;
 
     // Everything below is read and written only while holding _gate, so a ClaimAsync/ForgetClaim call (from
     // whatever thread the owner's UI runs on) and a Received/Stopped callback never race each other.
@@ -331,6 +336,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _lidOpenBitSeen = false;
         _lastLidOpenState = false;
         _lastLidCounter = null;
+        _nibbleOrderMismatchLogged = false;
     }
 
     // One immediate retry when the watcher is not running; the doubling timer keeps trying regardless.
@@ -565,6 +571,16 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                     return;
                 case OwnershipVerdict.SignalBelowThreshold:
                     Interlocked.Increment(ref _signalBelowThreshold);
+                    return;
+                case OwnershipVerdict.NibbleOrderMismatch:
+                    Interlocked.Increment(ref _nibbleOrderMismatch);
+                    if (!_nibbleOrderMismatchLogged)
+                    {
+                        _nibbleOrderMismatchLogged = true;
+                        _log.Warn(
+                            "Widget: the claim's battery nibble order no longer matches the decode table's, so nothing is shown until the claim is redone.");
+                    }
+
                     return;
                 case OwnershipVerdict.BatteryUnreadable:
                     Interlocked.Increment(ref _batteryUnreadable);
@@ -894,6 +910,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Interlocked.Read(ref _noClaim),
             Interlocked.Read(ref _modelOrColourMismatch),
             Interlocked.Read(ref _signalBelowThreshold),
+            Interlocked.Read(ref _nibbleOrderMismatch),
             Interlocked.Read(ref _batteryUnreadable),
             Interlocked.Read(ref _batteryInconsistent),
             _cachedUnknownForms);
@@ -944,6 +961,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         a.NoClaim == b.NoClaim &&
         a.ModelOrColourMismatch == b.ModelOrColourMismatch &&
         a.SignalBelowThreshold == b.SignalBelowThreshold &&
+        a.NibbleOrderMismatch == b.NibbleOrderMismatch &&
         a.BatteryUnreadable == b.BatteryUnreadable &&
         a.BatteryInconsistent == b.BatteryInconsistent &&
         a.UnknownForms.SequenceEqual(b.UnknownForms);
@@ -967,6 +985,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             " noClaim=" + c.NoClaim +
             " modelOrColourMismatch=" + c.ModelOrColourMismatch +
             " signalBelowThreshold=" + c.SignalBelowThreshold +
+            " nibbleOrderMismatch=" + c.NibbleOrderMismatch +
             " batteryUnreadable=" + c.BatteryUnreadable +
             " batteryInconsistent=" + c.BatteryInconsistent +
             " unknownFormShapes=[" + shapes + "]";

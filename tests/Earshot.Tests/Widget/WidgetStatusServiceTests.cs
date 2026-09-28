@@ -71,10 +71,14 @@ public sealed class WidgetStatusServiceTests : IDisposable
         return service;
     }
 
-    private static WidgetClaim SampleClaim(OwnedBattery? last = null) => new(
+    // nibblesAreNamedOrder must match whatever table a test then passes to NewService: a claim made (or
+    // stood in for here) while the bud order is proved needs it true, or OwnershipRule now correctly refuses
+    // to compare its stored nibbles at all (round 2 item 4).
+    private static WidgetClaim SampleClaim(OwnedBattery? last = null, bool nibblesAreNamedOrder = false) => new(
         1, WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, WidgetFixtures.Colour, -70,
         new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero),
-        last ?? new OwnedBattery(null, null, null, new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero)));
+        last ?? new OwnedBattery(null, null, null, new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero)),
+        nibblesAreNamedOrder);
 
     private DeviceSnapshot ThisPcSnapshot(bool active)
     {
@@ -224,7 +228,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
             InEarWhenSet = true,
         };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
 
@@ -283,7 +287,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
 
@@ -341,7 +345,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
         _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05)); // both buds in ear, battery known
@@ -367,7 +371,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
-        store.Save(SampleClaim());
+        store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
         service.Start();
         _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05));
@@ -843,6 +847,55 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(ClaimOutcomeStatus.Claimed, outcome.Status, "The claim flow itself still completes and still writes claim.json.");
         Assert.IsFalse(service.Current.ClaimExists, "A claim completing after Close must not be applied to the closed service.");
         Assert.AreEqual(changedBeforeCompletion, _changedEvents.Count, "Nothing after Close raises Changed.");
+    }
+
+    // Round 2 item 4: a claim made while the bud order was unproved (wire order) read against a table that
+    // has since had the order proved must fail closed, and once, not once per advert.
+    [TestMethod]
+    public void ANibbleOrderMismatchShowsNothingAndLogsOnce()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim()); // NibblesAreNamedOrder defaults to false: wire order
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        using WidgetStatusService service = NewService(store, table: table);
+        service.Start();
+
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.IsNull(snapshot.Left.Percent, "Nothing is shown while the claim's nibble order no longer matches the table's.");
+        Assert.IsNull(snapshot.Right.Percent);
+        Assert.AreEqual(
+            1,
+            _log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("nibble order", StringComparison.OrdinalIgnoreCase)),
+            "A nibble order mismatch must be logged once, not once per advert.");
+    }
+
+    // Redoing the claim (opening the case next to the PC again) records the order the table currently
+    // proves, so a reading that was blocked by the mismatch is shown again afterwards.
+    [TestMethod]
+    public async Task RedoingTheClaimFixesANibbleOrderMismatch()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim()); // wire order
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        using WidgetStatusService service = NewService(store, table: table);
+        service.Start();
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+        Assert.IsNull(service.Current.Left.Percent, "Sanity: the mismatch must still block the reading before the redo.");
+
+        Task<ClaimOutcome> claimTask = service.ClaimAsync(CancellationToken.None);
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+        _clock.Advance(WidgetTiming.ClaimWindow);
+        ClaimOutcome outcome = await claimTask;
+
+        Assert.AreEqual(ClaimOutcomeStatus.Claimed, outcome.Status);
+        Assert.IsTrue(outcome.Claim!.NibblesAreNamedOrder, "A claim made while the order is proved must record named order.");
+
+        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
+
+        Assert.IsNotNull(service.Current.Left.Percent, "After the redo, a matching reading must be shown again.");
     }
 
     [TestMethod]

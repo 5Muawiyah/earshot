@@ -16,14 +16,15 @@ public sealed class OwnershipRuleTests
 
     private static ProximityParse Ok(ProximityMessage m) => new(ProximityParseStatus.Ok, m, null, null, 1, Array.Empty<byte>());
 
-    private static WidgetClaim Claim(sbyte threshold = -70, OwnedBattery? last = null) => new(
+    private static WidgetClaim Claim(sbyte threshold = -70, OwnedBattery? last = null, bool nibblesAreNamedOrder = false) => new(
         SchemaVersion: 1,
         ModelHigh: WidgetFixtures.ModelHigh,
         ModelLow: WidgetFixtures.ModelLow,
         Colour: WidgetFixtures.Colour,
         SignalThresholdDbm: threshold,
         ClaimedAtUtc: ClaimedAt,
-        Last: last ?? new OwnedBattery(null, null, null, ClaimedAt));
+        Last: last ?? new OwnedBattery(null, null, null, ClaimedAt),
+        NibblesAreNamedOrder: nibblesAreNamedOrder);
 
     private static OwnershipInput Input(
         ProximityParse parse, WidgetClaim? claim, ProximityDecodeTable? table = null, sbyte rssi = -50) =>
@@ -254,12 +255,42 @@ public sealed class OwnershipRuleTests
     public void WithTheOrderProvedTheBudsAreComparedByName()
     {
         var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
-        WidgetClaim claim = Claim(last: new OwnedBattery(NibbleHigh: 6, NibbleLow: 8, Case: 0, ClaimedAt)); // Right 6, Left 8
+        WidgetClaim claim = Claim(last: new OwnedBattery(NibbleHigh: 6, NibbleLow: 8, Case: 0, ClaimedAt), nibblesAreNamedOrder: true); // Right 6, Left 8
         ProximityMessage m = Message(batteryA: 0x86, batteryB: 0x00); // wire high (Right) 8, wire low (Left) 6
 
         OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, table: table, rssi: -50));
 
         Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
+    }
+
+    // Round 2 item 4: the claim did not used to record which convention wrote its stored nibbles. A claim
+    // made while the order was unproved (wire order) compared against a table that has since had the order
+    // proved (named) would otherwise silently compare the wrong things; it must fail closed instead.
+    [TestMethod]
+    public void ANamedOrderTableAgainstAWireOrderClaimIsNotOwned()
+    {
+        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        WidgetClaim claim = Claim(last: new OwnedBattery(NibbleHigh: 6, NibbleLow: 8, Case: 0, ClaimedAt), nibblesAreNamedOrder: false);
+        ProximityMessage m = Message(batteryA: 0x68, batteryB: 0x00); // would be Owned if compared unordered
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, table: table, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.NibbleOrderMismatch, result.Verdict);
+        Assert.IsNull(result.UpdatedLast);
+    }
+
+    // The reverse: a claim made once the order was proved (named), read back against a table that has
+    // reverted to unproved (a decode table change, or a claim moved to another build), must also fail closed
+    // rather than treat the named values as wire-position ones.
+    [TestMethod]
+    public void AWireOrderTableAgainstANamedOrderClaimIsNotOwned()
+    {
+        WidgetClaim claim = Claim(last: new OwnedBattery(NibbleHigh: 6, NibbleLow: 8, Case: 0, ClaimedAt), nibblesAreNamedOrder: true);
+        ProximityMessage m = Message(batteryA: 0x68, batteryB: 0x00);
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, table: ProximityDecodeTable.Unproved, rssi: -50));
+
+        Assert.AreEqual(OwnershipVerdict.NibbleOrderMismatch, result.Verdict);
     }
 
     [TestMethod]
