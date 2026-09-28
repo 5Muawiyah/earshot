@@ -6,6 +6,7 @@ using Earshot.Contracts;
 using Earshot.Hotkeys;
 using Earshot.Icons;
 using Earshot.Infra;
+using Earshot.Popup;
 using Earshot.Streaming;
 using Earshot.Tray;
 using Earshot.Voice;
@@ -82,12 +83,25 @@ internal sealed record TrayStartOptions(
     // through it.
     public Func<ITaskbarReader> TaskbarReaderFactory { get; init; } = static () => new UiaTaskbarReader();
 
+    // TaskbarWatcher's own baseline poll interval (ShownPollIntervalMs, 1 s, by default): the value its
+    // backoff reset returns to as well as the value it starts at. A test that needs to tell a poke's own
+    // read apart from a scheduled one, deterministically, sets this far longer than anything the test
+    // itself runs for, rather than racing a real timing window against a scheduled read.
+    public int TaskbarWatcherPollIntervalMs { get; init; } = TaskbarWatcher.ShownPollIntervalMs;
+
     // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
     // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
     // widget-enabled tray-level test injects a fake instead, so GaugeController's own fallback logic
     // (TransitionOff and TransitionHiddenNoLog both set Visible=true unconditionally, by design) never makes
     // the real tray icon visible, overriding ShowIcon=false.
     public Func<ITrayIconVisibility>? TrayIconVisibilityFactory { get; init; }
+
+    // Builds the ICardEnvironment the case-open notice reads its placement, DPI, palette and
+    // SHQueryUserNotificationState reading from. Null (the default) means "the real desktop"
+    // (SystemCardEnvironment), the production behaviour; a test that needs the notice to actually reach
+    // screen injects a fake instead, since the real notification-state check refuses outright on a private
+    // test desktop (recorded where it is exercised).
+    public Func<ICardEnvironment>? CardEnvironmentFactory { get; init; }
 
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
@@ -195,6 +209,14 @@ internal sealed partial class TrayContext : ApplicationContext
     private readonly BlockCoordinator _coordinator;
     private readonly ILog _log;
     private readonly NotifyIcon _notifyIcon;
+
+    // Every write to _notifyIcon.Visible goes through this single adapter instance, never the raw field
+    // directly: it is the same counted wrapper WireGauge hands GaugeController as ITrayIconVisibility
+    // (TrayContext.Widget.cs), and the count it keeps (NotifyIconVisibility.RealVisibleTrueCount) is what
+    // WidgetRealSurfaceGuardTests asserts stays 0 for the whole run. A direct _notifyIcon.Visible = true
+    // write anywhere in this file would make the real tray icon visible on the owner's own desktop with
+    // nothing here to notice it.
+    private readonly NotifyIconVisibility _notifyIconVisibility;
     private readonly TrayMenu _menu;
     private readonly ShellMessageWindow _window;
     private readonly HotkeyManager _hotkeys;
@@ -329,7 +351,9 @@ internal sealed partial class TrayContext : ApplicationContext
         _streamingPlatformFactory = options.StreamingPlatformFactory;
         _advertisementSourceFactory = options.AdvertisementSourceFactory;
         _taskbarReaderFactory = options.TaskbarReaderFactory;
+        _taskbarWatcherPollIntervalMs = options.TaskbarWatcherPollIntervalMs;
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
+        _cardEnvironmentFactory = options.CardEnvironmentFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;
@@ -350,6 +374,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _menu.CaseOpenCardClicked += (_, _) => OnCaseOpenCardClicked();
         _menu.LowBatteryAlertClicked += (_, _) => OnLowBatteryAlertClicked();
         _menu.LowBatteryThresholdItemClicked += OnLowBatteryThresholdItemClicked;
+        _menu.ClaimAirPodsClicked += (_, _) => Start("claim the AirPods", place => ClaimAirPodsAsync(place));
         // The click point is read now, before the menu closes and the form opens, exactly as ChooseDeviceClicked below.
         _menu.NameOtherDeviceClicked += (_, _) =>
         {
@@ -371,11 +396,12 @@ internal sealed partial class TrayContext : ApplicationContext
         };
 
         _notifyIcon = new NotifyIcon { ContextMenuStrip = _menu.Strip };
+        _notifyIconVisibility = new NotifyIconVisibility(_notifyIcon);
         _notifyIcon.MouseClick += OnIconMouseClick;
         _notifyIcon.MouseDown += (_, _) => _ = _coordinator.RefreshStatusAsync();
         _notifyIcon.MouseDown += OnIconMouseDownForStreaming;
         UpdatePresentation(forceIcon: true);
-        _notifyIcon.Visible = options.ShowIcon;
+        _notifyIconVisibility.Visible = options.ShowIcon;
 
         _registry.Monitor.SnapshotChanged += OnSnapshotChanged;
         _registry.Settings.Changed += OnSettingsChanged;
@@ -528,7 +554,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _coordinator.Stop();
         _lifetime.Cancel();
         _registry.Cards.Hide();
-        _notifyIcon.Visible = false;
+        _notifyIconVisibility.Visible = false;
         CloseWidget();
 
         // Every orderly exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
@@ -1797,7 +1823,9 @@ internal sealed partial class TrayContext : ApplicationContext
     }
 
     private MenuState CurrentMenuState() =>
-        MenuModel.Build(_snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy, _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu);
+        MenuModel.Build(
+            _snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy,
+            _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.ClaimAvailable ?? false);
 
     private void UpdatePresentation(bool forceIcon)
     {
@@ -1813,8 +1841,10 @@ internal sealed partial class TrayContext : ApplicationContext
         // a call here): without this, a card already open when a connect or disconnect started anywhere
         // (the tray icon, the menu, a hotkey, not just the card's own button) kept showing the button it
         // last rendered until the next IWidgetStatus.Changed happened to arrive. Refresh is a no-op when no
-        // card is open.
+        // card is open. The case-open notice's own button reads the same IsBusy through the same callbacks,
+        // so it needs exactly the same refresh; Refresh is a no-op there too when no notice is open.
         _widgetCardPresenter?.Refresh();
+        _caseOpenCardPresenter?.Refresh();
 
         // The tray's own busy flags change only beside a call to this method, and the block coordinator's Changed
         // event ends here too, so this is where the copy of the busy state that the streaming coordinator reads is
@@ -2109,6 +2139,22 @@ internal sealed partial class TrayContext : ApplicationContext
         TryUpdateSettings("low battery threshold", s => s.Widget = s.Widget with { LowBatteryThresholdPercent = percent }, place);
     }
 
+    // The claim trigger: runs the same ClaimAsync the data pipeline already exposed with nothing calling
+    // it. The menu item itself is disabled while ClaimAvailable is false, so reaching here with no widget
+    // built at all is defensive only; reaching it with the threshold still unset (a click landing between
+    // Opening and the menu actually closing, say) still goes through the real flow and shows its own
+    // refusal, never a locally guessed one.
+    private async Task ClaimAirPodsAsync(CardPlace place)
+    {
+        if (_widgetStatus is not { } status)
+        {
+            return;
+        }
+
+        ClaimOutcome outcome = await status.ClaimAsync(_lifetime.Token).ConfigureAwait(true);
+        ShowCard(TrayStatus.AppName, outcome.Message, place);
+    }
+
     // Opens the picker-style modal for the owner's own device label. No device list to load here, unlike
     // ChooseDeviceAsync, so this runs straight through rather than as an async Task.
     private void OnNameOtherDeviceClicked(CardPlace place)
@@ -2241,7 +2287,7 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             // No more input: the icon goes, the picker closes, and everything in flight is cancelled. The
             // coordinator then blocks enabled nodes that are not in use, after any clean-up in flight.
-            _notifyIcon.Visible = false;
+            _notifyIconVisibility.Visible = false;
             _picker?.Close();
             _exitPlace = place;
             _coordinator.BeginShutdown();

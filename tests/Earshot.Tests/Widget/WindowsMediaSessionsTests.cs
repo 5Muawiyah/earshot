@@ -72,8 +72,8 @@ public sealed class WindowsMediaSessionsTests
         Assert.IsNull(WindowsMediaSessions.PickSessionIndex(sessions, "app.exe", pause: true));
     }
 
-    // Round 2: the app id was still used as the session id outright, so two sessions of the same app read
-    // in one ReadAsync call were indistinguishable before PickSessionIndex's own state-preference heuristic
+    // The app id was still used as the session id outright, so two sessions of the same app read in one
+    // ReadAsync call were indistinguishable before PickSessionIndex's own state-preference heuristic
     // ever got a chance to run. ComposeSessionId gives each one sharing an app id its own id; AppIdOf recovers
     // the app id from either shape so FindSession can still look sessions up by it.
     [TestMethod]

@@ -13,7 +13,7 @@ namespace Earshot.Tests.Widget;
 // this stays on the test host's own desktop like the existing ShellMessageWindow tests, never showing
 // anything. Transient and in-process: both calls run and the registration is removed in the same test.
 //
-// Each successful ABM_NEW here calls WidgetRealSurfaceGuardTests.AllowRealConstruction() right after
+// Each successful ABM_NEW here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(RealWidgetSurface.AppBar) right after
 // asserting it reached the real Explorer, so the assembly-wide guard can tell this named real execution
 // apart from an unnoticed one elsewhere (AppBarWiringTests drives the same wiring on a private desktop
 // instead, where ABM_NEW is refused - see ProbeAppBarOnPrivateDesktopTests - precisely so it never needs to
@@ -35,7 +35,7 @@ public sealed class AppBarRegistrationTests
         {
             var registered = appBar.Register();
             Assert.IsTrue(registered.Ok, "ABM_NEW: " + registered.CodeName + " " + registered.Detail);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AppBar);
         }
         finally
         {
@@ -64,12 +64,12 @@ public sealed class AppBarRegistrationTests
         try
         {
             Assert.IsTrue(appBar.Register().Ok);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AppBar);
 
             (Earshot.Contracts.StepOutcome removed, Earshot.Contracts.StepOutcome added) = appBar.Reregister();
             Assert.IsTrue(removed.Ok, "ABM_REMOVE: " + removed.CodeName);
             Assert.IsTrue(added.Ok, "ABM_NEW: " + added.CodeName);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AppBar);
         }
         finally
         {

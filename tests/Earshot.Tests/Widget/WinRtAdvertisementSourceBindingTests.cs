@@ -12,7 +12,7 @@ namespace Earshot.Tests.Widget;
 // wait up to 10 s for any Received of any company or a Stopped, then Stop and assert Stopped carried
 // Success. It never filters, connects or pairs.
 //
-// Each real WinRtAdvertisementSource constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(),
+// Each real WinRtAdvertisementSource constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(RealWidgetSurface.AdvertisementSource),
 // so the assembly-wide guard can tell this named real execution apart from an unnoticed one elsewhere: every
 // TrayContext test now gets a fake advertisement source instead (TrayContextTests.TrayHarness).
 [TestClass]
@@ -25,13 +25,13 @@ public sealed class WinRtAdvertisementSourceBindingTests
     public async Task TheWatcherIsPassiveAndStartsOrSaysWhy()
     {
         using var source = new WinRtAdvertisementSource();
-        WidgetRealSurfaceGuardTests.AllowRealConstruction();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
         var stoppedTcs = new TaskCompletionSource<AdvertisementSourceStopped>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receivedTcs = new TaskCompletionSource<AdvertisementSample>(TaskCreationOptions.RunContinuationsAsynchronously);
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
         source.Received += (sender, e) => receivedTcs.TrySetResult(e);
 
-        StepOutcome startStep = source.Start();
+        StepOutcome startStep = source.Start(1);
 
         if (!await WaitForStartedAsync(source))
         {
@@ -88,11 +88,11 @@ public sealed class WinRtAdvertisementSourceBindingTests
     public async Task StopRaisesStoppedWithSuccess()
     {
         using var source = new WinRtAdvertisementSource();
-        WidgetRealSurfaceGuardTests.AllowRealConstruction();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
         var stoppedTcs = new TaskCompletionSource<AdvertisementSourceStopped>(TaskCreationOptions.RunContinuationsAsynchronously);
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
 
-        StepOutcome startStep = source.Start();
+        StepOutcome startStep = source.Start(1);
         bool started = await WaitForStartedAsync(source);
         if (!started)
         {
@@ -122,6 +122,24 @@ public sealed class WinRtAdvertisementSourceBindingTests
         AdvertisementSourceStopped stopped = stoppedTcs.Task.Result;
         Assert.AreEqual("Success", stopped.ErrorName);
         Assert.AreEqual(0, stopped.ErrorCode);
+    }
+
+    // Watcher lifecycle: a delayed retry that was already past its early checks when Close ran must not
+    // resurrect a native watcher behind this wrapper's back once its own, blocking Start() call finally
+    // returns. Proved against the real wrapper: Dispose, then Start, and the refusal must be a recorded
+    // step, never a silent no-op and never an actual native BluetoothLEAdvertisementWatcher.
+    [TestMethod]
+    public void StartAfterDisposeRefuses()
+    {
+        var source = new WinRtAdvertisementSource();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
+        source.Dispose();
+
+        StepOutcome step = source.Start(1);
+
+        Assert.IsFalse(step.Ok, "Start after Dispose must refuse rather than resurrect a native watcher.");
+        Assert.AreEqual(Earshot.Contracts.NativeCodes.NotAttempted, step.Code,
+            "Start after Dispose must record a refusal, not attempt a native call.");
     }
 
     // Start() returns as soon as the request is issued; the watcher's own Status can take a short moment

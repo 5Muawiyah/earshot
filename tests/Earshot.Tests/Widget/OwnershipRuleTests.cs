@@ -171,8 +171,8 @@ public sealed class OwnershipRuleTests
         Assert.IsNull(result.UpdatedLast);
     }
 
-    // Round 2, owner decision 2026-09-27 ("same checks always"): a live connection used to waive this exact
-    // jump. There is no live concept left in OwnershipInput at all; the same message now simply fails the
+    // Owner decision 2026-09-27 ("same checks always"): a live connection used to waive this exact jump.
+    // There is no live concept left in OwnershipInput at all; the same message now simply fails the
     // ordinary consistency check, like any other reading would.
     [TestMethod]
     public void ABatteryJumpTheOldLiveWaiverWouldHaveAcceptedIsNowInconsistent()
@@ -186,8 +186,8 @@ public sealed class OwnershipRuleTests
         Assert.IsNull(result.UpdatedLast);
     }
 
-    // Round 2, owner decision 2026-09-27: candidate counting went with the waiver, so there is nothing left
-    // to make "two candidates" ambiguous. A consistent reading is Owned by the ordinary checks alone.
+    // Owner decision 2026-09-27: candidate counting went with the waiver, so there is nothing left to make
+    // "two candidates" ambiguous. A consistent reading is Owned by the ordinary checks alone.
     [TestMethod]
     public void AConsistentReadingIsOwnedWithNoCandidateCountToConsult()
     {
@@ -266,9 +266,9 @@ public sealed class OwnershipRuleTests
         Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
     }
 
-    // Round 2 item 4: the claim did not used to record which convention wrote its stored nibbles. A claim
-    // made while the order was unproved (wire order) compared against a table that has since had the order
-    // proved (named) would otherwise silently compare the wrong things; it must fail closed instead.
+    // The claim did not used to record which convention wrote its stored nibbles. A claim made while the
+    // order was unproved (wire order) compared against a table that has since had the order proved (named)
+    // would otherwise silently compare the wrong things; it must fail closed instead.
     [TestMethod]
     public void ANamedOrderTableAgainstAWireOrderClaimIsNotOwned()
     {

@@ -804,7 +804,7 @@ public sealed class ConnectionControllerTests : IAsyncDisposable
 
         Assert.AreEqual(ConnectDecision.ReadFailed, ConnectionController.Decide(ConnectAction.Connect, EndpointRead.Failed([])));
         Assert.AreEqual(ConnectDecision.NotFound, ConnectionController.Decide(ConnectAction.Connect, Read(Phone())));
-        AudioEndpoint secondRender = Render(EndpointState.NotPresent) with { EndpointId = "{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516971}" };
+        AudioEndpoint secondRender = Render(EndpointState.NotPresent) with { EndpointId = "{0.0.0.00000000}.{77777777-8888-4999-8000-000000000001}" };
 
         Assert.AreEqual(ConnectDecision.NodesBlocked, ConnectionController.Decide(ConnectAction.Connect, Read(Render(EndpointState.NotPresent))));
         Assert.AreEqual(ConnectDecision.NodesBlocked, ConnectionController.Decide(ConnectAction.Connect,

@@ -259,9 +259,20 @@ internal sealed class ConnectCard : Form, ICardSurface
     protected override void OnPaint(PaintEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
+        RenderContent(e.Graphics);
+    }
+
+    // The card's whole content, factored out of OnPaint so a capture path (DocumentationCardImageTests,
+    // DocumentationSceneImageTests) can paint it straight into an off-screen Bitmap's Graphics, never
+    // Control.DrawToBitmap: found elsewhere in this codebase (WidgetCard) to make a top-level Form briefly
+    // visible on whatever desktop the calling thread is attached to, to do its own internal layout. This
+    // card carries WS_EX_NOACTIVATE unconditionally, so it was never the one seen stealing the foreground,
+    // but the same rule now applies to every top-level form's capture path regardless.
+    internal void RenderContent(Graphics g)
+    {
+        ArgumentNullException.ThrowIfNull(g);
         _painted.Clear();
 
-        Graphics g = e.Graphics;
         g.Clear(_palette.Background);
         if (!_dwmFrame)
         {

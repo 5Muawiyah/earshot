@@ -70,7 +70,7 @@ public sealed class EndpointModelBuilderTests
     [TestMethod]
     public void NamelessGroupsFollowNamedOnes()
     {
-        var nameless = new Guid("9a64ec90-3049-5710-96f2-493b2cff6b57");
+        var nameless = new Guid("cccccccc-dddd-4eee-8fff-000000000001");
         var readings = new List<EndpointReading>
         {
             new(Endpoint("{0.0.0.00000000}.{n}", EndpointFlow.Render, EndpointState.NotPresent, nameless, name: null), null),

@@ -405,7 +405,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [TestMethod]
     public void TheWantedStatesFollowTheRenderEndpoint()
     {
-        AudioEndpoint secondRender = Render(EndpointState.Unplugged) with { EndpointId = "{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516971}" };
+        AudioEndpoint secondRender = Render(EndpointState.Unplugged) with { EndpointId = "{0.0.0.00000000}.{77777777-8888-4999-8000-000000000001}" };
 
         Assert.IsTrue(ConfirmationWaiter.IsReached([Render(EndpointState.Active)], ConnectAction.Connect));
         Assert.IsTrue(ConfirmationWaiter.IsReached([Render(EndpointState.Active), secondRender], ConnectAction.Connect));
@@ -433,7 +433,7 @@ public sealed class ConfirmationWaiterTests : IDisposable
     [TestMethod]
     public void TheStateIsUnreachableWhenNoRenderEndpointCanGetThere()
     {
-        AudioEndpoint secondRender = Render(EndpointState.Unplugged) with { EndpointId = "{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516971}" };
+        AudioEndpoint secondRender = Render(EndpointState.Unplugged) with { EndpointId = "{0.0.0.00000000}.{77777777-8888-4999-8000-000000000001}" };
 
         Assert.IsTrue(ConfirmationWaiter.IsUnreachable([], ConnectAction.Connect));
         Assert.IsTrue(ConfirmationWaiter.IsUnreachable([Capture(EndpointState.Active)], ConnectAction.Connect));

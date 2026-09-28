@@ -67,6 +67,13 @@ internal static class CardSta
 // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddesktop
 internal static class CardDesktop
 {
+    // Every desktop this creates is named this prefix plus a fresh GUID: the one string every other
+    // piece of test-only safety plumbing that needs to recognise "a desktop this suite itself made
+    // private, not the owner's real one and not some other tool's own isolation" checks against
+    // (TestDesktop.IsOwnersDesktop, TopLevelWindowVisibilityGuard). Named here once so the three never
+    // drift apart.
+    internal const string PrivateDesktopNamePrefix = "EarshotCardTest-";
+
     // DESKTOP_READOBJECTS | DESKTOP_CREATEWINDOW | DESKTOP_CREATEMENU | DESKTOP_WRITEOBJECTS
     // https://learn.microsoft.com/en-us/windows/win32/winstation/desktop-security-and-access-rights
     private const uint DesktopAccess = 0x0001 | 0x0002 | 0x0004 | 0x0080;
@@ -96,7 +103,7 @@ internal static class CardDesktop
     public static void Run(Action<nint> work, TimeSpan timeout)
     {
         ExceptionDispatchInfo? failure = null;
-        nint desktop = CreateDesktopW("EarshotCardTest-" + Guid.NewGuid().ToString("N"), 0, 0, 0, DesktopAccess, 0);
+        nint desktop = CreateDesktopW(PrivateDesktopNamePrefix + Guid.NewGuid().ToString("N"), 0, 0, 0, DesktopAccess, 0);
         if (desktop == 0)
         {
             throw new AssertFailedException("CreateDesktopW failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");

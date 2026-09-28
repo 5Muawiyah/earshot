@@ -119,7 +119,8 @@ public sealed class TrayStreamingTests
                     "Connect", "Play from a phone", "-",
                     "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
                     "Speak status", "-",
-                    "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold", "Name your other device...", "-",
+                    "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold",
+                    "Make these my AirPods (no signal threshold set up yet)", "Name your other device...", "-",
                     "Choose device...", "-",
                     "Exit"),
                 texts);
@@ -190,8 +191,8 @@ public sealed class TrayStreamingTests
         });
     }
 
-    // Item 2 of the review. Switching the whole feature off (not stopping one device from the menu) used to leave
-    // the tooltip reading whatever it said the moment before: OnSettingsChanged refreshed the presentation, then
+    // Switching the whole feature off (not stopping one device from the menu) used to leave the tooltip
+    // reading whatever it said the moment before: OnSettingsChanged refreshed the presentation, then
     // ApplyStreaming let the connection go without refreshing it again, and by the time the coordinator's own
     // Changed handler could have said so it had already been unhooked.
     [TestMethod]
@@ -687,8 +688,8 @@ public sealed class TrayStreamingTests
         });
     }
 
-    // Item 1 of the review. A release that fails while the feature is switched off used to be reported once and
-    // then forgotten for good: StopStreaming nulled _streaming before letting go asynchronously, so once the next
+    // A release that fails while the feature is switched off used to be reported once and then forgotten for
+    // good: StopStreaming nulled _streaming before letting go asynchronously, so once the next
     // switch-on built a fresh StreamingCoordinator (a fresh platform with it), nothing referenced the coordinator
     // whose release had failed and its bookkeeping went with it. Here the feature is switched off with a release
     // Windows will not confirm, switched on again with a different platform (as a real switch-on always builds a
@@ -730,8 +731,8 @@ public sealed class TrayStreamingTests
         });
     }
 
-    // Item 4 of the review. The coordinator is built off the UI thread, so the setting can change again before it is
-    // ready. Here the building is held at the support check, the feature is switched off, and only then is the
+    // The coordinator is built off the UI thread, so the setting can change again before it is ready. Here
+    // the building is held at the support check, the feature is switched off, and only then is the
     // building let go: what comes back is no longer wanted and must not be taken up.
     [TestMethod]
     public void ACoordinatorThatIsReadyAfterTheFeatureWasSwitchedOffIsNotTakenUp()
@@ -800,8 +801,8 @@ public sealed class TrayStreamingTests
         });
     }
 
-    // Item 7 of the review. A device pinned as the one Earshot manages after the list was read is still on the menu,
-    // because a pin is no reason to read the list again; the click asks the rule again and is refused.
+    // A device pinned as the one Earshot manages after the list was read is still on the menu, because a
+    // pin is no reason to read the list again; the click asks the rule again and is refused.
     [TestMethod]
     public void ADevicePinnedAsTheManagedOneAfterTheListWasReadIsRefusedAtTheClick()
     {

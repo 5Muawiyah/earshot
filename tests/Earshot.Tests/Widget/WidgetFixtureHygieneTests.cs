@@ -131,7 +131,7 @@ public sealed class WidgetFixtureHygieneTests
         Assert.AreEqual(0, found.Count, "A fixture looks like it came from a real device:" + Environment.NewLine + string.Join(Environment.NewLine, found));
     }
 
-    // Round 2, three planted examples the prior version of this test missed:
+    // Three planted examples the prior version of this test missed:
     [TestMethod]
     public void AUlongHexLiteralWithATrailingULSuffixIsCaught()
     {

@@ -32,10 +32,11 @@ internal readonly record struct DismissDurationReading(bool Ok, uint Seconds, in
 // identically bar the Where line, which WidgetCard itself always overrides to "Case open" for a notice-mode
 // instance, regardless of what model it was last given.
 //
-// It never connects on its own. The only path from a CaseOpened event to
-// WidgetCardPresenterCallbacks.RequestToggle is a genuine left click on this card's Connect button while it
-// is open (WidgetCard.ToggleRequested, wired exactly as WidgetCardPresenter wires it: a left down and a left
-// up on the button, not any button's up alone); there is no timer and no other code path here that calls it.
+// It never connects, and never claims, on its own. The only path from a CaseOpened event to
+// WidgetCardPresenterCallbacks.RequestToggle or RequestClaim is a genuine left click on this card's Connect
+// button or claim link while it is open (WidgetCard.ToggleRequested/ClaimRequested, wired exactly as
+// WidgetCardPresenter wires them: a left down and a left up on the same one, not any button's up alone);
+// there is no timer and no other code path here that calls either.
 //
 // UI thread only from the outside; every public method posts through uiPost, matching WidgetCardPresenter.
 internal sealed class CaseOpenCardPresenter : IDisposable
@@ -86,6 +87,19 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // True while the card is on screen. For tests; the UI thread only.
     internal bool IsShown => _card is { IsDisposed: false, Visible: true };
 
+    // The open notice's own last-rendered model, for tests: null when no notice is open. Matches
+    // WidgetCardPresenter.CurrentModelForTest exactly, so a test can prove Refresh() actually reached the
+    // real card and re-rendered it, not only that Refresh() itself was called.
+    internal WidgetCardModel? CurrentModelForTest => _card?.Model;
+
+    // The gate's own two hand-back legs, read straight through rather than through RequestShow's whole
+    // chain: the real notification-state check (SHQueryUserNotificationState) sits ahead of both of these
+    // in RequestShowOnUiThread's own order, so a test proving which of the coordinator's own two flags each
+    // one actually reads cannot get there by raising a real CaseOpened event on a desktop where that earlier
+    // check already refuses (as this codebase's own private test desktops do). For tests only.
+    internal bool HandBackInProgressForTest => _gate.HandBackInProgress();
+    internal bool SessionEndInProgressForTest => _gate.SessionEndInProgress();
+
     // IWidgetStatus.CaseOpened, already posted to the UI thread by the data side, but this still posts
     // itself so a test or a future caller on another thread is safe too, matching WidgetCardPresenter.
     public void RequestShow(Rectangle? gaugeBounds) => _uiPost(() => RequestShowOnUiThread(gaugeBounds));
@@ -93,6 +107,15 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // Forces the card to hide: a settings change turning the card off while one is on screen, or the tray
     // closing.
     public void Hide() => _uiPost(HideOnUiThread);
+
+    // Re-renders the notice with the latest model, if it is on screen: matches WidgetCardPresenter.Refresh
+    // exactly, since the notice's own Connect/Disconnect button reads the same callbacks.IsBusy() the
+    // gauge-anchored card's button does. Before this existed, a notice already open when a connect or
+    // disconnect started anywhere else (the tray icon, the menu, a hotkey) kept showing the button it last
+    // rendered until the notice's own dismiss timer cleared it, the exact staleness
+    // TrayContext.UpdatePresentation's own comment already describes fixing for the other card. A no-op
+    // when no notice is open.
+    public void Refresh() => _uiPost(RefreshOnUiThread);
 
     public void Dispose()
     {
@@ -108,6 +131,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
             _card.CloseRequested -= OnCardClosed;
             _card.ToggleRequested -= OnToggleRequested;
             _card.AutoPauseChanged -= OnAutoPauseChanged;
+            _card.ClaimRequested -= OnClaimRequested;
             _card.Dispose();
             _card = null;
         }
@@ -164,6 +188,16 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         card.Bounds = PlaceCard(gaugeBounds, card.ClientSize);
         card.Show();
         StartDismissTimer();
+    }
+
+    private void RefreshOnUiThread()
+    {
+        if (_card is not { IsDisposed: false, Visible: true } card)
+        {
+            return;
+        }
+
+        card.Render(WidgetCardPresenter.BuildModel(_callbacks, _time), _callbacks.Dpi());
     }
 
     private void HideOnUiThread()
@@ -227,12 +261,14 @@ internal sealed class CaseOpenCardPresenter : IDisposable
             _card.CloseRequested -= OnCardClosed;
             _card.ToggleRequested -= OnToggleRequested;
             _card.AutoPauseChanged -= OnAutoPauseChanged;
+            _card.ClaimRequested -= OnClaimRequested;
         }
 
         _card = _createCard();
         _card.CloseRequested += OnCardClosed;
         _card.ToggleRequested += OnToggleRequested;
         _card.AutoPauseChanged += OnAutoPauseChanged;
+        _card.ClaimRequested += OnClaimRequested;
         return _card;
     }
 
@@ -241,6 +277,10 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     private void OnToggleRequested(object? sender, EventArgs e) => _callbacks.RequestToggle(CardPlace.NearTray);
 
     private void OnAutoPauseChanged(object? sender, bool on) => _callbacks.SetAutoPause(on, CardPlace.NearTray);
+
+    // Same rule as the button above: a genuine click on this card's own claim link while it is open, never
+    // anything automatic. Placed NearTray, matching OnToggleRequested.
+    private void OnClaimRequested(object? sender, EventArgs e) => _callbacks.RequestClaim(CardPlace.NearTray);
 
     private void OnCardClosed(object? sender, WidgetCardCloseReason reason) => StopDismissTimer();
 

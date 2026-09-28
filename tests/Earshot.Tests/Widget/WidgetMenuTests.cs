@@ -24,6 +24,16 @@ public sealed class WidgetMenuTests
     // proof - the menu click actually wires the widget, not just flips the setting - reads the fake
     // factory's own call count instead. The menu item now writes ShowOnTaskbar, not Enabled directly;
     // Enabled follows it (WithWatcherRecomputed) since nothing else here asks for the watcher independently.
+    //
+    // The tray.Context.Menu.Refresh() plus tray.MenuItem(...).Checked pair below matches
+    // AFirstRunTurnsOpenOnStartupOn's own precedent (TrayContextTests.cs): checking only
+    // tray.Settings.Current.Widget.ShowOnTaskbar proves the click wrote the setting, never that the real
+    // tray menu's own checkbox was ever told to reflect it. ContextMenu.Apply's Set(_showOnTaskbar, ...)
+    // call could vanish entirely - the menu item left showing whatever it showed before, the owner's own
+    // tickmark silently lying about the state of the gauge - with every assertion this test had before
+    // this addition, and PerformClick's own Enabled/Available sanity check inside ClickMenu, still green:
+    // Set assigns Enabled and Available together with Checked, so only the click into a disabled or
+    // unavailable item is caught that way, never a Checked value stuck on the wrong side of a real click.
     [TestMethod]
     public void ClickingShowOnTheTaskbarFlipsShowOnTaskbarThroughTheRealSettingsWritePath()
     {
@@ -40,11 +50,17 @@ public sealed class WidgetMenuTests
             Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "Turning the gauge on must also turn the watcher on for it.");
             Assert.AreEqual(1, tray.TaskbarReaderFactoryCalls,
                 "Turning it on through the menu must actually wire the gauge (WireGauge), not just flip the flag.");
+            tray.Context.Menu.Refresh();
+            Assert.IsTrue(tray.MenuItem(WidgetCopy.ShowOnTaskbar).Checked,
+                "The real menu item's own tickmark must actually turn on, not just the setting behind it.");
 
             tray.ClickMenu(WidgetCopy.ShowOnTaskbar);
             tray.PumpUntilIdle();
 
             Assert.IsFalse(tray.Settings.Current.Widget.ShowOnTaskbar);
+            tray.Context.Menu.Refresh();
+            Assert.IsFalse(tray.MenuItem(WidgetCopy.ShowOnTaskbar).Checked,
+                "The real menu item's own tickmark must actually turn off again too.");
             Assert.IsFalse(tray.Settings.Current.Widget.Enabled,
                 "Turning the gauge back off must also turn the watcher off, since nothing else here wants it.");
         });
@@ -92,6 +108,29 @@ public sealed class WidgetMenuTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(!before, tray.Settings.Current.Widget.LowBatteryAlert);
+        });
+    }
+
+    // No live run has ever proved a signal threshold on this machine (phase 0 stays unset), so the trigger
+    // reads disabled here exactly as it would in production: WidgetStatusService.ClaimAvailable reads the
+    // same WidgetDefaults.SignalThresholdDbm the real claim flow refuses on, with no test-only override
+    // reachable through TrayContext's own composition (CompositionRoot.BuildWidget's own header explains
+    // why). ToolStripMenuItem.PerformClick is a no-op on a disabled item, the same as Button.PerformClick
+    // elsewhere in this suite, so a click cannot be driven through it here: the wiring from a click to
+    // WidgetStatusService.ClaimAsync is proved instead where the item can genuinely be enabled
+    // (MenuModelTests, TrayMenuTests) and where ClaimAsync itself can be driven to every outcome
+    // (WidgetStatusServiceTests, ClaimFlowTests).
+    [TestMethod]
+    public void MakeTheseMyAirPodsReadsDisabledWithNoSignalThresholdEverProved()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(settings: s => s.Widget = s.Widget with { Enabled = true });
+            tray.Context.Menu.Refresh();
+
+            ToolStripMenuItem item = tray.MenuItem("Make these my AirPods (no signal threshold set up yet)");
+
+            Assert.IsFalse(item.Enabled, "No signal threshold has ever been proved on this build.");
         });
     }
 

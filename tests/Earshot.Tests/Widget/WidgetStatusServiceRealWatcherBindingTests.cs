@@ -6,8 +6,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// The one real execution for item 1 (late Stopped(Success) from a deliberate Stop): the service, wired to
-// the real WinRtAdvertisementSource, doing Suspend then an immediate Resume - the same Stop-then-Start shape
+// The one real execution proving a late Stopped(Success) from a deliberate Stop is told apart from a
+// genuine one: the service, wired to the real WinRtAdvertisementSource, doing Suspend then an immediate
+// Resume - the same Stop-then-Start shape
 // WinRtAdvertisementSourceBindingTests exercises on the source alone - and checked afterwards for the false
 // "Stopped" the old, ungenerationed code showed. Read-only, like that class: it never connects, pairs or
 // touches a device node. Inconclusive only when this machine never got the watcher to Started at all.
@@ -30,7 +31,7 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
         using var service = new WidgetStatusService(
             () =>
             {
-                WidgetRealSurfaceGuardTests.AllowRealConstruction();
+                WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
                 return new WinRtAdvertisementSource();
             },
             claimStore, settings, deviceMonitor, () => null, log,

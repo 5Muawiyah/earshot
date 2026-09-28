@@ -10,13 +10,13 @@
     (battery, charging, in-ear, the case-open card, the low battery alert, auto-pause) must honestly
     show nothing rather than a guessed figure. This test checks that it does.
 
-    It also found, while it was being written, that nothing in the running application calls
-    IWidgetStatus.ClaimAsync: WidgetStatusService.ClaimAsync exists and is exercised by the unit
-    tests, but no menu item, card button or hotkey in Earshot.App or Earshot.Widget ever calls it.
-    That is a second, separate reason the claim can never be made from this build, on top of phase 0
-    being outstanding. This test records that fact plainly rather than working around it, and marks
-    the one check that needs the claim to exist (half B, below) inconclusive rather than guessing at
-    a pass.
+    It also found, while it was being written, that nothing in the running application called
+    IWidgetStatus.ClaimAsync: WidgetStatusService.ClaimAsync existed and was exercised by the unit
+    tests, but no menu item, card button or hotkey in Earshot.App or Earshot.Widget ever called it.
+    A tray menu item, "Make these my AirPods", now does, but it is disabled with its own one-line
+    reason for as long as the signal threshold above stays unproved: never enabled on a guess. Half
+    B, below, checks the trigger is there and reads correctly disabled, still separately inconclusive
+    on whether a claim can actually be completed, since that still needs phase 0 done.
 
     Everything that does not depend on the claim or the decode table is exercised for real: the
     gauge's placement, its following the taskbar, its fallback under a full screen application, its
@@ -212,14 +212,19 @@ try
             -Detail $(if ($null -eq $newestCounterLine) { 'No "Widget counters:" line was logged in the wait; either nothing Apple was nearby or the watcher is not running.' } else { 'allSections=' + $allSections + ' apple=' + $appleSections + ' items=' + $proximityItems + '.' })
 
         Write-Section -Run $run -Title 'Half B: the claim'
-        $claimTriggerAnswer = Read-Answer -Run $run -Question 'Look through the tray menu and the widget card: is there any button, menu item or link that starts claiming your AirPods (for example something like "Claim my AirPods")?'
+        $claimTriggerAnswer = Read-Answer -Run $run -Question 'Right-click the Earshot tray icon: is there a "Make these my AirPods" item in the menu?'
+        $claimEnabledAnswer = if ($claimTriggerAnswer -eq 'yes') { Read-Answer -Run $run -Question 'Is that item greyed out (disabled), with a reason in brackets after its name?' } else { 'unsure' }
         $claimNow = Read-EarshotJsonFile -Run $run -Path $claimPath
         Add-Finding -Run $run -Name 'claimFlowWiredToUi' -Value $(if ($claimTriggerAnswer -eq 'yes') { 'yes' } else { 'no' }) `
-            -Detail 'IWidgetStatus.ClaimAsync exists on WidgetStatusService and is exercised by the unit tests, but nothing in Earshot.App or Earshot.Widget calls it: no menu item, card button or hotkey reaches it. This is separate from phase 0 being outstanding.'
+            -Detail 'IWidgetStatus.ClaimAsync exists on WidgetStatusService and is wired to a tray menu item, "Make these my AirPods". It must read disabled, with its own one-line reason, for as long as phase 0 has not proved a signal threshold: WidgetDefaults.SignalThresholdDbm still ships null on this build.'
         Add-Finding -Run $run -Name 'claimFileExistsAfterCheck' -Value $(if ($null -eq $claimNow) { 'no' } else { 'yes' }) -Detail $claimPath
-        Add-Criterion -Run $run -Id 'claim-flow-reachable' -Criterion 'The owner can start the claim flow from the running application.' `
-            -Outcome 'inconclusive' `
-            -Detail $(if ($claimTriggerAnswer -eq 'yes') { 'You found a way to start it; describe it in the summary notes so the script can be updated to exercise it.' } else { 'You answered ' + $claimTriggerAnswer + '. This half cannot be run to completion in this build: there is no owner action that calls ClaimAsync. Battery, charging, in-ear, the case-open card, most of "where" and the low battery alert all depend on a claim existing, so they stay honestly untestable beyond "correctly shows nothing" until this is wired up and phase 0 is done.' })
+        Add-Criterion -Run $run -Id 'claim-flow-reachable' -Criterion 'The claim trigger is in the running application, and reads correctly disabled for as long as phase 0 has not proved a signal threshold.' `
+            -Outcome $(if ($claimTriggerAnswer -ne 'yes') { 'fail' } elseif ($claimEnabledAnswer -eq 'yes') { 'pass' } elseif ($claimEnabledAnswer -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail $(
+                if ($claimTriggerAnswer -ne 'yes') { 'You answered ' + $claimTriggerAnswer + ': the trigger should be in the tray menu ("Make these my AirPods") even before phase 0 is done, only disabled. A missing trigger is a real defect.' }
+                elseif ($claimEnabledAnswer -eq 'yes') { 'Found, and correctly disabled: this build cannot honestly make a claim yet (phase 0 has not proved a signal threshold), and the trigger does not offer one it cannot keep. Actually completing a claim still needs phase 0''s own sitting.' }
+                elseif ($claimEnabledAnswer -eq 'no') { 'The item is enabled, but phase 0 has not proved a signal threshold on this build: it should read disabled. This is a real defect, not an inconclusive result.' }
+                else { 'You answered ' + $claimEnabledAnswer + ' on whether it reads disabled.' })
 
         Write-Section -Run $run -Title 'Half C: battery, honestly'
         Wait-Owner -Run $run -Text 'Left-click the Earshot icon or the gauge to open the card.'

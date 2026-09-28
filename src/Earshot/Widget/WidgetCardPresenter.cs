@@ -8,8 +8,9 @@ namespace Earshot.Widget;
 // it (and so tests hand it fakes instead of building a real TrayContext). Every write goes through the
 // exact path the tray icon's own click and the menu already use: RequestToggle is
 // TrayContext.StartToggleFromWidget (Launch -> ToggleAsync -> BlockCoordinator, the same as the tray
-// icon's left click), and SetAutoPause is TryUpdateSettingsFromWidget (the same TryUpdateSettings the menu
-// items use). Nothing here is a new device path or a new settings-write path.
+// icon's left click), SetAutoPause is TryUpdateSettingsFromWidget (the same TryUpdateSettings the menu
+// items use), and RequestClaim is TrayContext.RequestClaimFromWidget (Launch -> the same ClaimAsync call
+// the tray menu's own claim item makes). Nothing here is a new device path or a new settings-write path.
 internal sealed record WidgetCardPresenterCallbacks(
     Func<WidgetSnapshot> CurrentSnapshot,
     Func<bool> AutoPauseOn,
@@ -19,8 +20,10 @@ internal sealed record WidgetCardPresenterCallbacks(
     Func<Color> Ink,
     Func<bool> HighContrast,
     Func<string> OtherDeviceLabel,
+    Func<bool> ClaimAvailable,
     Action<CardPlace> RequestToggle,
-    Action<bool, CardPlace> SetAutoPause);
+    Action<bool, CardPlace> SetAutoPause,
+    Action<CardPlace> RequestClaim);
 
 // Owns the WidgetCard instance's lifecycle: creates it lazily, places it above the gauge (or a fallback
 // point when the gauge is hidden), shows it activated, re-renders on IWidgetStatus.Changed, refreshes the
@@ -104,6 +107,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         {
             _card.ToggleRequested -= OnToggleRequested;
             _card.AutoPauseChanged -= OnAutoPauseChanged;
+            _card.ClaimRequested -= OnClaimRequested;
             _card.CloseRequested -= OnCardClosed;
             _card.Dispose();
             _card = null;
@@ -194,7 +198,9 @@ internal sealed class WidgetCardPresenter : IDisposable
             ConnectIntent: intent?.Connect ?? true,
             ButtonEnabled: !busy && intent is not null,
             OtherDeviceLabel: callbacks.OtherDeviceLabel(),
-            Now: time.GetUtcNow());
+            Now: time.GetUtcNow(),
+            ShowClaimLink: !snapshot.ClaimExists,
+            ClaimAvailable: callbacks.ClaimAvailable());
     }
 
     private WidgetCard EnsureCard()
@@ -208,12 +214,14 @@ internal sealed class WidgetCardPresenter : IDisposable
         {
             _card.ToggleRequested -= OnToggleRequested;
             _card.AutoPauseChanged -= OnAutoPauseChanged;
+            _card.ClaimRequested -= OnClaimRequested;
             _card.CloseRequested -= OnCardClosed;
         }
 
         _card = _createCard();
         _card.ToggleRequested += OnToggleRequested;
         _card.AutoPauseChanged += OnAutoPauseChanged;
+        _card.ClaimRequested += OnClaimRequested;
         _card.CloseRequested += OnCardClosed;
         return _card;
     }
@@ -221,6 +229,8 @@ internal sealed class WidgetCardPresenter : IDisposable
     private void OnToggleRequested(object? sender, EventArgs e) => _callbacks.RequestToggle(_place);
 
     private void OnAutoPauseChanged(object? sender, bool on) => _callbacks.SetAutoPause(on, _place);
+
+    private void OnClaimRequested(object? sender, EventArgs e) => _callbacks.RequestClaim(_place);
 
     private void OnCardClosed(object? sender, WidgetCardCloseReason reason)
     {

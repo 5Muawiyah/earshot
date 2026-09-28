@@ -103,6 +103,52 @@ public sealed class WidgetHandBackOrderTests
         });
     }
 
+    // The case-open card's own gate has two legs that read the coordinator's HandBackInProgress and
+    // SessionEndInProgress separately, so the notice can say which one is happening
+    // (RequestShowOnUiThread's own "the session is ending" vs "a hand-back is running"). Nothing before
+    // this proved which of the two each leg actually reads: a mutant swapping the two wires in
+    // TrayContext.Widget.cs would leave every other test in this suite exactly as green, since a session
+    // end always sets both flags together (SessionEndInProgress by definition, HandBackInProgress because
+    // the hand-back itself runs inside it) and CaseOpenCardTests.cs proves each leg's own refusal against a
+    // fake gate, never against the real coordinator's own two properties. A sleep is the one real case
+    // where they come apart: PowerEventKind.Suspend runs the hand-back (HandBackInProgress true) without
+    // ever being a session end (SessionEndInProgress stays false throughout), read here from inside the
+    // fake block step while the hand-back is still genuinely in progress.
+    [TestMethod]
+    public void TheCaseOpenGatesTwoHandBackLegsReadTheMatchingCoordinatorFlagDuringASleepHandBack()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Connected),
+                settings: s =>
+                {
+                    s.HandBackOnShutdownAndSleep = true;
+                    s.Widget = (s.Widget with { CaseOpenCard = true }).WithWatcherRecomputed();
+                },
+                time: TimeProvider.System,
+                handBackBudget: TimeSpan.FromSeconds(2),
+                disconnectHandBackWait: TimeSpan.FromMilliseconds(500));
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "Sanity: the case-open card must be wired first.");
+
+            bool? handBackLegDuringHandBack = null;
+            bool? sessionEndLegDuringHandBack = null;
+            tray.Block.OnBlock = _ => Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(80));
+                handBackLegDuringHandBack = tray.Context.WidgetCaseOpenGateHandBackInProgressForTest;
+                sessionEndLegDuringHandBack = tray.Context.WidgetCaseOpenGateSessionEndInProgressForTest;
+                return ControllerResult.Ok("Blocked at boot");
+            });
+
+            tray.Context.OnPowerChanged(null, new PowerEventArgs(PowerEventKind.Suspend));
+
+            Assert.IsNotNull(handBackLegDuringHandBack, "Sanity: the fake block step must actually have run.");
+            Assert.IsTrue(handBackLegDuringHandBack, "A sleep hand-back is in progress: the gate's HandBackInProgress leg must read true.");
+            Assert.IsFalse(sessionEndLegDuringHandBack, "A sleep is never a session end: the gate's SessionEndInProgress leg must read false.");
+        });
+    }
+
     [TestMethod]
     public void ResumeAutomaticResumesTheWidget()
     {

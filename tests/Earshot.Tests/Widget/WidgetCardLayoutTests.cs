@@ -64,6 +64,38 @@ public sealed class WidgetCardLayoutTests
     }
 
     [TestMethod]
+    public void TheClaimLinkIsAbsentByDefault()
+    {
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+        Assert.IsFalse(layout.ShowClaimLink);
+        Assert.AreEqual(Rectangle.Empty, layout.ClaimLink);
+    }
+
+    [TestMethod]
+    public void TheClaimLinkAppearsBelowTheButtonWhenTheSwitchIsNotShown()
+    {
+        WidgetCardLayout.Layout with_ = WidgetCardLayout.Compute(96, showSwitch: false, showClaimLink: true);
+        Assert.IsTrue(with_.ShowClaimLink);
+        Assert.IsTrue(with_.ClaimLink.Top >= with_.Button.Bottom);
+
+        WidgetCardLayout.Layout without = WidgetCardLayout.Compute(96, showSwitch: false, showClaimLink: false);
+        Assert.IsGreaterThan(without.Height, with_.Height);
+    }
+
+    // The claim link is the least central of the three rows: when both it and the switch show, the switch
+    // (Connect/Disconnect's own nearest neighbour) stays directly under the button, and the claim link
+    // moves to the bottom rather than splitting them apart.
+    [TestMethod]
+    public void TheClaimLinkAppearsBelowTheSwitchWhenBothShow()
+    {
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: true, showClaimLink: true);
+        Assert.IsTrue(layout.ShowSwitch);
+        Assert.IsTrue(layout.ShowClaimLink);
+        Assert.IsTrue(layout.Switch.Top >= layout.Button.Bottom, "The switch still sits directly under the button.");
+        Assert.IsTrue(layout.ClaimLink.Top >= layout.Switch.Bottom, "The claim link sits below the switch, not between it and the button.");
+    }
+
+    [TestMethod]
     public void CopyPerAirPodsWhere()
     {
         Assert.AreEqual("Not seen yet", WidgetCopy.Where(AirPodsWhere.Unknown, ""));

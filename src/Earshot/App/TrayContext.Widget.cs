@@ -43,7 +43,9 @@ internal sealed partial class TrayContext
     // taskbar with UI Automation. See WidgetRealSurfaceGuardTests.
     private readonly Func<IAdvertisementSource>? _advertisementSourceFactory;
     private readonly Func<ITaskbarReader> _taskbarReaderFactory;
+    private readonly int _taskbarWatcherPollIntervalMs;
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
+    private readonly Func<ICardEnvironment>? _cardEnvironmentFactory;
 
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
     // (RefreshShownGaugeForWorker, called after every OnTaskbarLayout, the only place the real window's
@@ -122,9 +124,11 @@ internal sealed partial class TrayContext
                 Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
                 HighContrast: () => SystemInformation.HighContrast,
                 OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
+                ClaimAvailable: () => _widgetStatus?.ClaimAvailable ?? false,
                 RequestToggle: StartToggleFromWidget,
                 SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
-                    "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place));
+                    "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place),
+                RequestClaim: RequestClaimFromWidget);
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
@@ -133,7 +137,8 @@ internal sealed partial class TrayContext
                 SessionEndInProgress: () => _coordinator.SessionEndInProgress,
                 OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
             _caseOpenCardPresenter = new CaseOpenCardPresenter(
-                () => new WidgetCard(_log, notice: true), _widgetCardCallbacks, caseOpenGate, new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
+                () => new WidgetCard(_log, notice: true), _widgetCardCallbacks, caseOpenGate,
+                _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
         }
 
         if (_registry.Settings.Current.Widget.ShowOnTaskbar)
@@ -153,7 +158,7 @@ internal sealed partial class TrayContext
         {
             var controller = new GaugeController(
                 CreateGaugeSurface,
-                _trayIconVisibilityFactory?.Invoke() ?? new NotifyIconVisibility(_notifyIcon),
+                _trayIconVisibilityFactory?.Invoke() ?? _notifyIconVisibility,
                 ReadGaugeControllerSettings,
                 _log,
                 _time);
@@ -176,7 +181,7 @@ internal sealed partial class TrayContext
             _appBarRegistration = new AppBarRegistration(_window.Handle, _log);
             LogAppBarOutcome(_appBarRegistration.Register());
 
-            _taskbarWatcher = new TaskbarWatcher(_taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time);
+            _taskbarWatcher = new TaskbarWatcher(_taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time, _taskbarWatcherPollIntervalMs);
             _taskbarWatcher.Start();
             _taskbarWatcher.Poke();
         }
@@ -249,6 +254,22 @@ internal sealed partial class TrayContext
     // The open card's own last-rendered ButtonEnabled, for tests: null when no card is open.
     internal bool? WidgetCardButtonEnabledForTest => _widgetCardPresenter?.CurrentModelForTest?.ButtonEnabled;
 
+    // Drives the same path a real IWidgetStatus.CaseOpened event does, without a real case-open advert.
+    internal void RaiseCaseOpenedForTest() => OnCaseOpened(this, new CaseOpenedEventArgs(_time.GetUtcNow()));
+
+    // Whether the case-open notice is currently open, for tests: the same IsShown a real CaseOpened event,
+    // a gauge click closing it or the tray closing would change.
+    internal bool WidgetCaseOpenCardIsShownForTest => _caseOpenCardPresenter?.IsShown ?? false;
+
+    // The open notice's own last-rendered ButtonEnabled, for tests: null when no notice is open.
+    internal bool? WidgetCaseOpenCardButtonEnabledForTest => _caseOpenCardPresenter?.CurrentModelForTest?.ButtonEnabled;
+
+    // The case-open card's own gate, read straight through: which of the coordinator's own HandBackInProgress
+    // and SessionEndInProgress each of the gate's two matching legs actually reads. False (not null) when
+    // nothing is wired yet, since "not in progress" and "nothing to ask" read the same to a caller here.
+    internal bool WidgetCaseOpenGateHandBackInProgressForTest => _caseOpenCardPresenter?.HandBackInProgressForTest ?? false;
+    internal bool WidgetCaseOpenGateSessionEndInProgressForTest => _caseOpenCardPresenter?.SessionEndInProgressForTest ?? false;
+
     // Drives the same path a real left click on the gauge does, LeftClickConnects off, without simulating
     // an actual click on the real GaugeWindow this pipeline builds.
     internal void RequestWidgetCardForTest() => OnWidgetCardRequested(this, EventArgs.Empty);
@@ -267,6 +288,11 @@ internal sealed partial class TrayContext
     // uses, so a save failure is reported on a card exactly as it is for them.
     internal bool TryUpdateSettingsFromWidget(string what, Action<EarshotSettings> mutate, CardPlace place) =>
         TryUpdateSettings(what, mutate, place);
+
+    // The claim link on either card goes through the exact same ClaimAsync call the tray menu's own claim
+    // item makes (ClaimAirPodsAsync, TrayContext.cs), just placed above the gauge or NearTray instead of at
+    // the menu's own click point.
+    internal void RequestClaimFromWidget(CardPlace place) => Launch("claim the AirPods", () => ClaimAirPodsAsync(place), place);
 
     private GaugeControllerSettings ReadGaugeControllerSettings()
     {
@@ -344,12 +370,20 @@ internal sealed partial class TrayContext
     // A left click on the gauge, LeftClickConnects off (the default): opens the dedicated three-column
     // card, above the gauge when it is shown, or near the cursor when the click came from the tray icon
     // fallback instead.
+    //
+    // The case-open notice's own gate already refuses to show itself over the owner's own card
+    // (CaseOpenCardGate.OwnCardOpen), but nothing closed the reverse: a click on the gauge while the notice
+    // was already open left it sitting there, one Earshot window stacked on another, until its own dismiss
+    // timer eventually cleared it. Hide is a no-op when nothing is open, so this runs unconditionally
+    // rather than only when the notice happens to be showing.
     private void OnWidgetCardRequested(object? sender, EventArgs e)
     {
         if (_widgetCardPresenter is not { } presenter)
         {
             return;
         }
+
+        _caseOpenCardPresenter?.Hide();
 
         if (GaugeBoundsIfShown() is { } bounds)
         {

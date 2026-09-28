@@ -309,6 +309,41 @@ public sealed class CaseOpenCardTests
         });
     }
 
+    // Mirrors AcrossTheCardsWholeLifeTheToggleSinkSeesNoRequestsExceptOneFromConnect for the claim link: it
+    // never fires on its own (a timeout dismiss), only from a genuine click while the notice is open.
+    [TestMethod]
+    public void TheClaimLinkOnTheNoticeCardRoutesThroughRequestClaimOnlyFromAGenuineClick()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false), ClaimAvailableValue = true };
+            var gate = Gate();
+            var environment = new Earshot.Tests.Phase5.FakeCardEnvironment();
+            var log = new CapturingLog();
+            var time = new Streaming.TestTimeProvider();
+            WidgetCard? card = null;
+            using var presenter = new CaseOpenCardPresenter(
+                () => card = new WidgetCard(log, notice: true), callbacks.Build(), gate, environment, Inline, time, log,
+                () => new DismissDurationReading(true, 5, 0));
+
+            presenter.RequestShow(gaugeBounds: null);
+            Application.DoEvents();
+            time.Advance(TimeSpan.FromSeconds(5));
+            Assert.IsFalse(presenter.IsShown);
+            Assert.AreEqual(0, callbacks.ClaimCalls.Count, "A timeout dismiss must never claim.");
+
+            presenter.RequestShow(gaugeBounds: null);
+            Application.DoEvents();
+            Assert.IsTrue(presenter.IsShown);
+
+            Rectangle claimLink = WidgetCardLayout.Compute(96, showSwitch: false, showClaimLink: true).ClaimLink;
+            ClickAt(card!.Handle, new Point(claimLink.X + (claimLink.Width / 2), claimLink.Y + (claimLink.Height / 2)));
+
+            Assert.AreEqual(1, callbacks.ClaimCalls.Count, "Exactly one claim request, from the claim link.");
+            Assert.IsFalse(presenter.IsShown, "Activating the claim link closes the notice.");
+        });
+    }
+
     [TestMethod]
     public void AClickOutsideBothButtonsDismissesTheCardWithoutToggling()
     {
@@ -384,7 +419,7 @@ public sealed class CaseOpenCardTests
     private static CaseOpenCardGate Gate(bool enabled = true, bool closing = false, bool handBack = false, bool sessionEnd = false, bool ownCardOpen = false) =>
         new(Enabled: () => enabled, Closing: () => closing, HandBackInProgress: () => handBack, SessionEndInProgress: () => sessionEnd, OwnCardOpen: () => ownCardOpen);
 
-    private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false) =>
+    private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false, bool claimExists = true) =>
         new(
             where,
             PartReading.Unknown,
@@ -396,7 +431,7 @@ public sealed class CaseOpenCardTests
             WidgetWatcherState.Started,
             WatcherErrorCode: null,
             WatcherErrorName: null,
-            ClaimExists: true,
+            ClaimExists: claimExists,
             AutoPauseAvailable: autoPauseAvailable,
             WidgetCounters.Empty);
 
@@ -421,9 +456,13 @@ public sealed class CaseOpenCardTests
 
         public string OtherDeviceLabel { get; set; } = "";
 
+        public bool ClaimAvailableValue { get; set; }
+
         public List<CardPlace> ToggleCalls { get; } = new();
 
         public List<(bool On, CardPlace Place)> AutoPauseCalls { get; } = new();
+
+        public List<CardPlace> ClaimCalls { get; } = new();
 
         public WidgetCardPresenterCallbacks Build() => new(
             CurrentSnapshot: () => Snapshot,
@@ -434,7 +473,9 @@ public sealed class CaseOpenCardTests
             Ink: () => Ink,
             HighContrast: () => HighContrast,
             OtherDeviceLabel: () => OtherDeviceLabel,
+            ClaimAvailable: () => ClaimAvailableValue,
             RequestToggle: place => ToggleCalls.Add(place),
-            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)));
+            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)),
+            RequestClaim: place => ClaimCalls.Add(place));
     }
 }

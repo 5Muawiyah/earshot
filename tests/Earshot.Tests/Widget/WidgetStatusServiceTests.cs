@@ -73,7 +73,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
     // nibblesAreNamedOrder must match whatever table a test then passes to NewService: a claim made (or
     // stood in for here) while the bud order is proved needs it true, or OwnershipRule now correctly refuses
-    // to compare its stored nibbles at all (round 2 item 4).
+    // to compare its stored nibbles at all.
     private static WidgetClaim SampleClaim(OwnedBattery? last = null, bool nibblesAreNamedOrder = false) => new(
         1, WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, WidgetFixtures.Colour, -70,
         new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero),
@@ -114,6 +114,25 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNull(service.Current.Right.Percent);
         Assert.AreEqual(50, service.Current.Case.Percent, "The case nibble needs no table and must still decode.");
         service.Dispose();
+    }
+
+    // Close, and turning the setting off, both call RunStopOutsideLock with disposeSource true: the source
+    // is meant to actually be released, not just forgotten. Every test elsewhere in this file that ends with
+    // service.Dispose() would read exactly the same whether or not that Dispose call ever reached the
+    // source: nothing in the service's own public state (Current, the events, _source becoming null from
+    // the outside) tells the two apart, since _source is private. Only asking the fake itself whether its
+    // own Dispose ran proves the source is actually let go, not merely dropped.
+    [TestMethod]
+    public void CloseActuallyDisposesTheSourceNotJustTheServicesOwnReferenceToIt()
+    {
+        var store = NewClaimStore();
+        WidgetStatusService service = NewService(store);
+        service.Start();
+        Assert.AreEqual(0, _source.DisposeCalls, "Sanity: nothing has disposed the source yet.");
+
+        service.Close();
+
+        Assert.AreEqual(1, _source.DisposeCalls, "Close must dispose the source it stopped, not merely stop tracking it.");
     }
 
     [TestMethod]
@@ -392,6 +411,20 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNull(snapshot.Left.InEar, "A redone claim must not keep the old ear state.");
         Assert.IsNull(snapshot.Right.InEar);
         Assert.IsNull(snapshot.EarReadAt);
+    }
+
+    // The claim trigger's own gate: reads the same seam ClaimAsync itself refuses on
+    // (ClaimOutcomeStatus.NoThreshold), so the UI's idea of whether a claim can be made can never drift
+    // from what actually attempting one would do.
+    [TestMethod]
+    public void ClaimAvailableFollowsWhetherAThresholdIsSupplied()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService withThreshold = NewService(store, claimThreshold: -70);
+        using WidgetStatusService withoutThreshold = NewService(store, claimThreshold: null);
+
+        Assert.IsTrue(withThreshold.ClaimAvailable);
+        Assert.IsFalse(withoutThreshold.ClaimAvailable);
     }
 
     [TestMethod]
@@ -679,9 +712,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, _caseOpenedEvents.Count);
     }
 
-    // Round 2: a boolean "are we currently inside some uiPost action" cannot tell a genuine post apart from
-    // code that simply runs synchronously nested inside an already-posted action, so it passed even when the
-    // reviewer raised both events directly. This fake queues every posted action instead of running it
+    // A boolean "are we currently inside some uiPost action" cannot tell a genuine post apart from code
+    // that simply runs synchronously nested inside an already-posted action, so it passed even when both
+    // events were raised directly. This fake queues every posted action instead of running it
     // immediately, and records how many previously queued actions had FULLY finished (been dequeued and
     // returned) by the moment each event fires. A raise made through its own, separate uiPost call only runs
     // after the action that led to it has completed, so it fires with a completed-count of at least one; a
@@ -897,7 +930,63 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "Resume itself must still start the watcher normally afterwards.");
     }
 
-    // Item 3: Start and Stop must run outside the service's own lock. Proved with a fake whose Stop blocks
+    // Watcher lifecycle: OnRetryDue's own early check only catches a Suspend that landed before source.Start()
+    // was ever called. This proves the later race, where Suspend lands while that Start() call is still in
+    // flight (the real WinRT call can block) and only returns Ok after Suspend has already set _suspended and
+    // stopped the source once. Without re-checking _suspended after the start returns, the service marks
+    // itself Started and leaves the real source running underneath a service that believes it is idle.
+    [TestMethod]
+    public void ARetryRacingSuspendWhileStartIsInFlightStopsTheSourceOnceItReturns()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _source.ArmBlockingStart();
+        Task retryTask = Task.Run(() => service.OnRetryDue());
+        Assert.IsTrue(_source.WaitForStartEntered(TimeSpan.FromSeconds(5)), "Start was not entered in time.");
+
+        service.Suspend(); // wins the race while the retry's own Start() call is still in flight
+        int stopsAtSuspend = _source.StopCalls;
+
+        _source.ReleaseStart();
+        Assert.IsTrue(retryTask.Wait(TimeSpan.FromSeconds(5)), "The retry did not complete in time.");
+
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher,
+            "A retry that only started after Suspend ran must not leave the watcher marked Started.");
+        Assert.IsTrue(_source.StopCalls > stopsAtSuspend,
+            "The source that the race started after Suspend ran must be stopped again, not left running.");
+    }
+
+    // Watcher lifecycle, the same race against Close instead of Suspend: Close disposes and nulls _source, but
+    // only after its own Stop() call returns, which happens outside the service's lock exactly where the
+    // retry's Start() is blocked here. The existing _closed check already stops the service reporting Started,
+    // but on its own it never stops the source the race just (re)started, leaving a live source disposed of by
+    // nothing.
+    [TestMethod]
+    public void ARetryRacingCloseWhileStartIsInFlightStopsTheSourceOnceItReturns()
+    {
+        var store = NewClaimStore();
+        var service = NewService(store);
+        service.Start();
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _source.ArmBlockingStart();
+        Task retryTask = Task.Run(() => service.OnRetryDue());
+        Assert.IsTrue(_source.WaitForStartEntered(TimeSpan.FromSeconds(5)), "Start was not entered in time.");
+
+        service.Close(); // wins the race while the retry's own Start() call is still in flight
+        int stopsAtClose = _source.StopCalls;
+
+        _source.ReleaseStart();
+        Assert.IsTrue(retryTask.Wait(TimeSpan.FromSeconds(5)), "The retry did not complete in time.");
+
+        Assert.IsTrue(_source.StopCalls > stopsAtClose,
+            "The source that the race started after Close ran must be stopped again, not left running with nothing tracking it.");
+    }
+
+    // Start and Stop must run outside the service's own lock. Proved with a fake whose Stop blocks
     // until a handler that needs the same lock (here, the public Current getter) has actually taken it: on
     // the old code, Suspend calls Stop while still holding the lock, so the blocked Stop and the blocked
     // locked call deadlock each other; on the new code, Stop runs unlocked, so the locked call sails through
@@ -969,8 +1058,8 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(changedBeforeCompletion, _changedEvents.Count, "Nothing after Close raises Changed.");
     }
 
-    // Round 2 item 4: a claim made while the bud order was unproved (wire order) read against a table that
-    // has since had the order proved must fail closed, and once, not once per advert.
+    // A claim made while the bud order was unproved (wire order) read against a table that has since had
+    // the order proved must fail closed, and once, not once per advert.
     [TestMethod]
     public void ANibbleOrderMismatchShowsNothingAndLogsOnce()
     {
@@ -1104,8 +1193,8 @@ public sealed class WidgetStatusServiceTests : IDisposable
         @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b|(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){4,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b",
         RegexOptions.CultureInvariant);
 
-    // Round 2: the regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own
-    // separator swapped for a space is a common enough shape to plant deliberately here).
+    // The regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own separator
+    // swapped for a space is a common enough shape to plant deliberately here).
     [TestMethod]
     public void ForbiddenByteRunCatchesSpaceSeparatedHex()
     {
@@ -1204,5 +1293,38 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, factoryCalls);
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
         service.Dispose();
+    }
+
+    // Generations: the setting going off then on builds a fresh source (WithTheSettingOffNoSourceIsConstructed
+    // and TurningTheSettingOnStartsOne above prove that construction). The service's own generation count
+    // never resets, but each source only ever knows about its own Start() calls, so a fresh instance starts
+    // its idea of "its generation" over from whatever it begins at. A genuine Stopped from that fresh, current
+    // source must still be shown and retried, not dropped for looking older than the service's own count.
+    [TestMethod]
+    public void ASettingsOffThenOnGenuineStoppedFromTheFreshSourceIsNotDroppedAsStale()
+    {
+        var store = NewClaimStore();
+        var sources = new List<FakeAdvertisementSource>();
+        using var service = new WidgetStatusService(
+            () => { var built = new FakeAdvertisementSource(); sources.Add(built); return built; },
+            store, _settings, _deviceMonitor, () => null, _log,
+            action => { Interlocked.Increment(ref _posts); action(); }, _clock, () => ProximityDecodeTable.Unproved);
+
+        service.Start();
+        Assert.AreEqual(1, sources.Count);
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _settings.Update(s => s.Widget = s.Widget with { Enabled = false });
+        _settings.Update(s => s.Widget = s.Widget with { Enabled = true });
+
+        Assert.AreEqual(2, sources.Count, "The setting going off then on must build a fresh source, not reuse the old one.");
+        FakeAdvertisementSource fresh = sources[1];
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        // A genuine Stopped from the fresh, current source, tagged with its own idea of its generation.
+        fresh.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
+
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher,
+            "A genuine Stopped from the current, freshly built source must not be dropped as a stale generation.");
     }
 }

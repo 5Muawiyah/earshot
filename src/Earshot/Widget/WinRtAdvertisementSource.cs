@@ -22,11 +22,21 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
     private BluetoothLEAdvertisementWatcher? _watcher;
     private int _disposed;
 
-    // The count of Start() calls, whatever each one returns; see AdvertisementSourceStopped's own comment.
-    // A fresh native watcher is built for each Start() rather than the one instance being reused across
-    // Stop()/Start() cycles, so the closure below ties a Stopped callback to the exact generation it belongs
-    // to, however late Windows delivers it.
-    private int _generation;
+    // The caller's label for whichever run is currently live, in a mutable box rather
+    // than a plain field, so a Start() call that finds the native watcher already running (BluetoothLEAdvertisementWatcher's
+    // own Status can still read Started for a moment after Stop() was called, so a Suspend immediately
+    // followed by a Resume can land here) can retag the box in place with the caller's newest value without
+    // touching whichever earlier watcher's own closure still holds an older box. A fresh native watcher gets
+    // its own fresh box, so an old, already-superseded watcher's late Stopped keeps echoing whatever
+    // generation it was last actually, freshly, given - never the current box's now-later value.
+    // volatile: written under _gate by Start(), read by the Stopped closure on whatever thread Windows calls
+    // it back on, with no lock of its own there.
+    private sealed class GenerationBox
+    {
+        internal volatile int Value;
+    }
+
+    private GenerationBox? _generationBox;
 
     // Test seam only: counts real constructions so WidgetRealSurfaceGuardTests can prove a test harness
     // never builds this class in place of a fake. Never read or reset in production.
@@ -81,7 +91,7 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
     // stays false.
     // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.advertisement.bluetoothlescanningmode
     // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.advertisement.bluetoothleadvertisementreceivedeventargs
-    public StepOutcome Start()
+    public StepOutcome Start(int generation)
     {
         if (!WidgetPlatformGuard.HasBleWatcher)
         {
@@ -90,39 +100,58 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
 
         lock (_gate)
         {
+            if (_disposed != 0)
+            {
+                // A delayed retry that was already past its early checks when
+                // Dispose ran must not resurrect a native watcher behind this wrapper's back once this call
+                // finally reaches the front of whatever queued it. Refuse, with a step the caller logs,
+                // rather than silently doing nothing or starting a watcher nobody will ever stop again.
+                return StepOutcomes.NotAttempted(StartStep, "Disposed.");
+            }
+
             try
             {
                 if (_watcher is { } running && StatusOf(running.Status) == AdvertisementSourceState.Started)
                 {
-                    // Already running: a redundant Start() (a manual refresh racing the retry timer, for
-                    // instance) leaves the current run, and its generation, exactly as they are.
+                    // Already running - a redundant Start() (a manual refresh racing
+                    // the retry timer, or a Resume that lands before BluetoothLEAdvertisementWatcher's own
+                    // Status has settled back to Stopped after Suspend's Stop(), for instance) leaves the
+                    // current native watcher exactly as it is, but the caller's idea of the generation still
+                    // moved on; retag the box in place so this run's eventual Stopped echoes the caller's
+                    // newest value, not the one it was last freshly given.
+                    if (_generationBox is { } runningBox)
+                    {
+                        runningBox.Value = generation;
+                    }
+
                     return StepOutcomes.FromHResult(StartStep, 0, detail: "status " + running.Status);
                 }
 
                 // A fresh native watcher per Start(), not the one instance reused across Stop()/Start()
                 // cycles: see AdvertisementSourceStopped's comment. The old watcher's Received is dropped so
                 // it cannot double-report once superseded; its own eventual Stopped, if any, still arrives
-                // through the closure captured below and is reported with the generation it belongs to.
+                // through the closure captured below and is reported with the generation box it belongs to,
+                // which this fresh Start() never touches.
                 if (_watcher is { } previous)
                 {
                     previous.Received -= OnReceived;
                 }
 
-                _generation++;
-                int generation = _generation;
+                var generationBox = new GenerationBox { Value = generation };
+                _generationBox = generationBox;
                 var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Passive };
                 watcher.Received += OnReceived;
 
                 // A lambda, not a plain method-group subscription like OnReceived's above, because each one
-                // needs its own generation baked in. The guard is repeated here, even though this line only
-                // ever runs already past the same check above: the call inside a lambda's own compiled body
-                // is a call site the platform-compatibility analyser considers separately from the method
-                // that created it, since the delegate can in principle outlive that guard's scope.
+                // needs its own generation box baked in. The guard is repeated here, even though this line
+                // only ever runs already past the same check above: the call inside a lambda's own compiled
+                // body is a call site the platform-compatibility analyser considers separately from the
+                // method that created it, since the delegate can in principle outlive that guard's scope.
                 watcher.Stopped += (sender, args) =>
                 {
                     if (WidgetPlatformGuard.HasBleWatcher)
                     {
-                        OnStopped(args, generation);
+                        OnStopped(args, generationBox.Value);
                     }
                 };
                 _watcher = watcher;

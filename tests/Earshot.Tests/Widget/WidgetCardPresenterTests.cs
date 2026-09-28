@@ -212,11 +212,56 @@ public sealed class WidgetCardPresenterTests
         });
     }
 
+    // The model's own ShowClaimLink/ClaimAvailable come from BuildModel, shared with CaseOpenCardPresenter:
+    // proving it here proves both, since neither presenter has its own copy of this derivation.
+    [TestMethod]
+    public void TheModelShowsTheClaimLinkOnlyBeforeAClaimExistsAndFollowsClaimAvailable()
+    {
+        var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false), ClaimAvailableValue = true };
+        WidgetCardModel unclaimedAvailable = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
+        Assert.IsTrue(unclaimedAvailable.ShowClaimLink);
+        Assert.IsTrue(unclaimedAvailable.ClaimAvailable);
+
+        callbacks.ClaimAvailableValue = false;
+        WidgetCardModel unclaimedUnavailable = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
+        Assert.IsTrue(unclaimedUnavailable.ShowClaimLink, "Still shown, disabled: phase 0 not being done is not the same as a claim already existing.");
+        Assert.IsFalse(unclaimedUnavailable.ClaimAvailable);
+
+        callbacks.Snapshot = Snapshot(claimExists: true);
+        WidgetCardModel claimed = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
+        Assert.IsFalse(claimed.ShowClaimLink, "Once a claim exists, the trigger has nothing left to do.");
+    }
+
+    [TestMethod]
+    public void ClickingTheClaimLinkRoutesThroughRequestClaimWithThePlaceAboveTheGaugeAndClosesTheCard()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false), ClaimAvailableValue = true };
+            var time = new Streaming.TestTimeProvider();
+            var log = new CapturingLog();
+            WidgetCard? card = null;
+            using var presenter = new WidgetCardPresenter(() => card = new WidgetCard(log), callbacks.Build(), Inline, time, log);
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            Assert.AreEqual(0, callbacks.ClaimCalls.Count);
+
+            Phase5.TestWindows.Send(card!.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
+            Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Enter, 0);
+
+            Assert.AreEqual(1, callbacks.ClaimCalls.Count, "Exactly one claim request.");
+            CardPlace place = callbacks.ClaimCalls[0];
+            Assert.AreEqual(new Point(Gauge.X + (Gauge.Width / 2), Gauge.Y), place.ClickPoint, "The place follows the gauge, the same as a toggle request.");
+            Assert.IsFalse(presenter.IsShown, "The card closes once the claim link is activated.");
+        });
+    }
+
     private const int WM_KEYDOWN = 0x0100;
 
     private static void Inline(Action action) => action();
 
-    private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false, DateTimeOffset? readAt = null) =>
+    private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false, DateTimeOffset? readAt = null, bool claimExists = true) =>
         new(
             where,
             PartReading.Unknown,
@@ -228,7 +273,7 @@ public sealed class WidgetCardPresenterTests
             WidgetWatcherState.Started,
             WatcherErrorCode: null,
             WatcherErrorName: null,
-            ClaimExists: true,
+            ClaimExists: claimExists,
             AutoPauseAvailable: autoPauseAvailable,
             WidgetCounters.Empty);
 
@@ -252,9 +297,13 @@ public sealed class WidgetCardPresenterTests
 
         public string OtherDeviceLabel { get; set; } = "";
 
+        public bool ClaimAvailableValue { get; set; }
+
         public List<CardPlace> ToggleCalls { get; } = new();
 
         public List<(bool On, CardPlace Place)> AutoPauseCalls { get; } = new();
+
+        public List<CardPlace> ClaimCalls { get; } = new();
 
         public WidgetCardPresenterCallbacks Build() => new(
             CurrentSnapshot: () => Snapshot,
@@ -265,7 +314,9 @@ public sealed class WidgetCardPresenterTests
             Ink: () => Ink,
             HighContrast: () => HighContrast,
             OtherDeviceLabel: () => OtherDeviceLabel,
+            ClaimAvailable: () => ClaimAvailableValue,
             RequestToggle: place => ToggleCalls.Add(place),
-            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)));
+            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)),
+            RequestClaim: place => ClaimCalls.Add(place));
     }
 }

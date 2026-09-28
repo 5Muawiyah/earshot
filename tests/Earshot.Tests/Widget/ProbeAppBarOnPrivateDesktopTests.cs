@@ -10,7 +10,7 @@ namespace Earshot.Tests.Widget;
 // calling thread's current desktop the same way FindWindow and EnumWindows are documented to be, so it
 // never finds the owner's real taskbar from there and the call never reaches it. AppBarRegistration.Register
 // never increments RealRegistrationCount unless this succeeds, so this test needs no
-// WidgetRealSurfaceGuardTests.AllowRealConstruction() call: a refused ABM_NEW is not a real registration.
+// WidgetRealSurfaceGuardTests.AllowRealConstruction(RealWidgetSurface.AppBar) call: a refused ABM_NEW is not a real registration.
 // https://learn.microsoft.com/en-us/windows/win32/winstation/window-stations-and-desktops
 [TestClass]
 public sealed class ProbeAppBarOnPrivateDesktopTests

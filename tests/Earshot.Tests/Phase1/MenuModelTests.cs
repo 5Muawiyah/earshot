@@ -21,8 +21,9 @@ public sealed class MenuModelTests
         EarshotSettings? settings = null,
         bool busy = false,
         StartupState startup = StartupState.Off,
-        bool safeMode = false) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup, safeMode);
+        bool safeMode = false,
+        bool claimAvailable = false) =>
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup, safeMode, claimAvailable: claimAvailable);
 
     [TestMethod]
     public void TheCopyIsExactlyAsDesigned()
@@ -411,5 +412,36 @@ public sealed class MenuModelTests
     {
         Assert.IsFalse(MenuModel.ProtectionDisagrees(true, null));
         Assert.IsFalse(MenuModel.ProtectionDisagrees(false, null));
+    }
+
+    // The claim trigger: never enabled on a guess. Disabled while claimAvailable is false (phase 0 has not
+    // proved a signal threshold), whatever else the menu state carries, and its own text says why rather
+    // than leaving a plain grey row with no explanation.
+    [TestMethod]
+    public void ClaimAirPodsIsDisabledWithItsReasonUntilAThresholdIsAvailable()
+    {
+        MenuItemState disabled = Build(claimAvailable: false).ClaimAirPodsItem;
+
+        Assert.IsFalse(disabled.Enabled);
+        Assert.IsTrue(disabled.Visible);
+        Assert.AreEqual("Make these my AirPods (no signal threshold set up yet)", disabled.Text);
+    }
+
+    [TestMethod]
+    public void ClaimAirPodsIsEnabledOnceAThresholdIsAvailable()
+    {
+        MenuItemState enabled = Build(claimAvailable: true).ClaimAirPodsItem;
+
+        Assert.IsTrue(enabled.Enabled);
+        Assert.AreEqual("Make these my AirPods", enabled.Text);
+    }
+
+    // Busy still gates it the same as every other action here, once it would otherwise be available.
+    [TestMethod]
+    public void ClaimAirPodsIsDisabledWhileBusyEvenWithAThresholdAvailable()
+    {
+        MenuItemState item = Build(claimAvailable: true, busy: true).ClaimAirPodsItem;
+
+        Assert.IsFalse(item.Enabled);
     }
 }

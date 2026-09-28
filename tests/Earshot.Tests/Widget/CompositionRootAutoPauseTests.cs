@@ -53,6 +53,8 @@ public sealed class CompositionRootAutoPauseTests
     {
         public WidgetSnapshot Current => WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
 
+        public bool ClaimAvailable => false;
+
         public event EventHandler? Changed;
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
