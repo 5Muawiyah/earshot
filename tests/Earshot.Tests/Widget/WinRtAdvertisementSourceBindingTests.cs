@@ -124,6 +124,24 @@ public sealed class WinRtAdvertisementSourceBindingTests
         Assert.AreEqual(0, stopped.ErrorCode);
     }
 
+    // Watcher lifecycle: a delayed retry that was already past its early checks when Close ran must not
+    // resurrect a native watcher behind this wrapper's back once its own, blocking Start() call finally
+    // returns. Proved against the real wrapper: Dispose, then Start, and the refusal must be a recorded
+    // step, never a silent no-op and never an actual native BluetoothLEAdvertisementWatcher.
+    [TestMethod]
+    public void StartAfterDisposeRefuses()
+    {
+        var source = new WinRtAdvertisementSource();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction();
+        source.Dispose();
+
+        StepOutcome step = source.Start();
+
+        Assert.IsFalse(step.Ok, "Start after Dispose must refuse rather than resurrect a native watcher.");
+        Assert.AreEqual(Earshot.Contracts.NativeCodes.NotAttempted, step.Code,
+            "Start after Dispose must record a refusal, not attempt a native call.");
+    }
+
     // Start() returns as soon as the request is issued; the watcher's own Status can take a short moment
     // to read Started afterwards, so this polls briefly rather than deciding "did not start" on one read.
     private static async Task<bool> WaitForStartedAsync(WinRtAdvertisementSource source)

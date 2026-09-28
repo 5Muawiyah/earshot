@@ -90,6 +90,15 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
 
         lock (_gate)
         {
+            if (_disposed != 0)
+            {
+                // Item 1 (watcher lifecycle): a delayed retry that was already past its early checks when
+                // Dispose ran must not resurrect a native watcher behind this wrapper's back once this call
+                // finally reaches the front of whatever queued it. Refuse, with a step the caller logs,
+                // rather than silently doing nothing or starting a watcher nobody will ever stop again.
+                return StepOutcomes.NotAttempted(StartStep, "Disposed.");
+            }
+
             try
             {
                 if (_watcher is { } running && StatusOf(running.Status) == AdvertisementSourceState.Started)

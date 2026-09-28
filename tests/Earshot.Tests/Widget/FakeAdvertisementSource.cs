@@ -43,6 +43,13 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
     private readonly ManualResetEventSlim _releaseStop = new(initialState: false);
     private bool _blockNextStop;
 
+    // Test-only, for the start-outside-lock race (watcher lifecycle): armed, Start() signals _startEntered
+    // and then waits for _releaseStart, so a test can land a Suspend, Close or settings-off call while a
+    // retry's Start() is still in flight, the way the real, blocking WinRT call can be.
+    private readonly ManualResetEventSlim _startEntered = new(initialState: false);
+    private readonly ManualResetEventSlim _releaseStart = new(initialState: false);
+    private bool _blockNextStart;
+
     public event EventHandler<AdvertisementSample>? Received;
 
     public event EventHandler<AdvertisementSourceStopped>? Stopped;
@@ -51,6 +58,13 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
     {
         StartCalls++;
         Generation++;
+        if (_blockNextStart)
+        {
+            _blockNextStart = false;
+            _startEntered.Set();
+            _releaseStart.Wait(TimeSpan.FromSeconds(10));
+        }
+
         if (StartResult is { } result)
         {
             StepOutcome step = result();
@@ -105,6 +119,19 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
     public bool WaitForStopEntered(TimeSpan timeout) => _stopEntered.Wait(timeout);
 
     public void ReleaseStop() => _releaseStop.Set();
+
+    // Arms the next Start() call to block until ReleaseStart is called, and resets the two signals so it
+    // can be used more than once in the same test.
+    public void ArmBlockingStart()
+    {
+        _blockNextStart = true;
+        _startEntered.Reset();
+        _releaseStart.Reset();
+    }
+
+    public bool WaitForStartEntered(TimeSpan timeout) => _startEntered.Wait(timeout);
+
+    public void ReleaseStart() => _releaseStart.Set();
 
     public void Dispose() => DisposeCalls++;
 }

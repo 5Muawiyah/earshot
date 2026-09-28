@@ -409,26 +409,56 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private void RunStartOutsideLock(IAdvertisementSource source, bool publish = true)
     {
         StepOutcome step = source.Start();
+        bool stopWhatJustStarted = false;
+        bool disposeWhatJustStarted = false;
         lock (_gate)
         {
-            if (_closed || !ReferenceEquals(_source, source))
+            bool stillTracked = !_closed && ReferenceEquals(_source, source);
+            if (!stillTracked)
             {
-                return;
-            }
-
-            ApplyStartStepLocked(step);
-            if (_watcherState == WidgetWatcherState.Started)
-            {
-                _retryDelay = TimeSpan.Zero;
-                CancelRetryLocked();
+                // Item 1: Close, or the setting going off, can each run between source.Start() returning and
+                // this lock being retaken (the call itself is a blocking WinRT call outside the lock, see
+                // above). Neither's own stop pass is guaranteed to still catch this exact source once it has
+                // moved _source on or nulled it: whatever the race just (re)started here must be stopped and
+                // disposed on its own, or nothing left tracking it ever will.
+                if (step.Ok)
+                {
+                    stopWhatJustStarted = true;
+                    disposeWhatJustStarted = true;
+                }
             }
             else
             {
-                // Item 2: a Start that throws or fails synchronously, with no Stopped event ever coming to
-                // trigger OnStopped's own retry, must still get one scheduled here - whatever called this
-                // (the very first start, a settings toggle, Resume, or a manual refresh).
-                ScheduleRetryLocked();
+                ApplyStartStepLocked(step);
+                if (_watcherState == WidgetWatcherState.Started)
+                {
+                    // Suspend can also run between source.Start() returning and this lock being retaken;
+                    // re-check it here rather than trusting the snapshot this call started with, or a source
+                    // that raced past that check is left running with the service believing it is idle.
+                    if (_suspended || _stopRequested)
+                    {
+                        stopWhatJustStarted = true;
+                        _watcherState = WidgetWatcherState.Stopped;
+                    }
+                    else
+                    {
+                        _retryDelay = TimeSpan.Zero;
+                        CancelRetryLocked();
+                    }
+                }
+                else
+                {
+                    // Item 2: a Start that throws or fails synchronously, with no Stopped event ever coming to
+                    // trigger OnStopped's own retry, must still get one scheduled here - whatever called this
+                    // (the very first start, a settings toggle, Resume, or a manual refresh).
+                    ScheduleRetryLocked();
+                }
             }
+        }
+
+        if (stopWhatJustStarted)
+        {
+            RunStopOutsideLock(source, disposeSource: disposeWhatJustStarted);
         }
 
         if (publish)
@@ -906,24 +936,55 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         try
         {
             StepOutcome step = source.Start();
+            bool stopWhatJustStarted = false;
+            bool disposeWhatJustStarted = false;
             lock (_gate)
             {
-                if (_closed || !ReferenceEquals(_source, source))
+                bool stillTracked = !_closed && ReferenceEquals(_source, source);
+                if (!stillTracked)
                 {
-                    return;
-                }
-
-                ApplyStartStepLocked(step);
-                if (_watcherState == WidgetWatcherState.Started)
-                {
-                    _retryDelay = TimeSpan.Zero;
-                    CancelRetryLocked();
+                    // Item 1: Close, or the setting going off, can each run between source.Start() returning
+                    // and this lock being retaken. Neither's own stop pass is guaranteed to still catch this
+                    // exact source once it has moved _source on or nulled it: whatever this retry just
+                    // (re)started must be stopped and disposed on its own, or nothing left tracking it ever
+                    // will.
+                    if (step.Ok)
+                    {
+                        stopWhatJustStarted = true;
+                        disposeWhatJustStarted = true;
+                    }
                 }
                 else
                 {
-                    _retryDelay = Min(_retryDelay * 2, WidgetTiming.WatcherRetryLimit);
-                    ArmRetryTimerLocked();
+                    ApplyStartStepLocked(step);
+                    if (_watcherState == WidgetWatcherState.Started)
+                    {
+                        // Item 1's second half: Suspend can also run between source.Start() returning and
+                        // this lock being retaken. The early check at the top of this method only catches a
+                        // Suspend that landed before Start() was ever called; re-check here too, or a source
+                        // that raced past that check is left running with the service believing it is idle.
+                        if (_suspended || _stopRequested)
+                        {
+                            stopWhatJustStarted = true;
+                            _watcherState = WidgetWatcherState.Stopped;
+                        }
+                        else
+                        {
+                            _retryDelay = TimeSpan.Zero;
+                            CancelRetryLocked();
+                        }
+                    }
+                    else
+                    {
+                        _retryDelay = Min(_retryDelay * 2, WidgetTiming.WatcherRetryLimit);
+                        ArmRetryTimerLocked();
+                    }
                 }
+            }
+
+            if (stopWhatJustStarted)
+            {
+                RunStopOutsideLock(source, disposeSource: disposeWhatJustStarted);
             }
         }
         catch (Exception ex)

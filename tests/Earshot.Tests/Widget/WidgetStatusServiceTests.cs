@@ -897,6 +897,62 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "Resume itself must still start the watcher normally afterwards.");
     }
 
+    // Watcher lifecycle: OnRetryDue's own early check only catches a Suspend that landed before source.Start()
+    // was ever called. This proves the later race, where Suspend lands while that Start() call is still in
+    // flight (the real WinRT call can block) and only returns Ok after Suspend has already set _suspended and
+    // stopped the source once. Without re-checking _suspended after the start returns, the service marks
+    // itself Started and leaves the real source running underneath a service that believes it is idle.
+    [TestMethod]
+    public void ARetryRacingSuspendWhileStartIsInFlightStopsTheSourceOnceItReturns()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _source.ArmBlockingStart();
+        Task retryTask = Task.Run(() => service.OnRetryDue());
+        Assert.IsTrue(_source.WaitForStartEntered(TimeSpan.FromSeconds(5)), "Start was not entered in time.");
+
+        service.Suspend(); // wins the race while the retry's own Start() call is still in flight
+        int stopsAtSuspend = _source.StopCalls;
+
+        _source.ReleaseStart();
+        Assert.IsTrue(retryTask.Wait(TimeSpan.FromSeconds(5)), "The retry did not complete in time.");
+
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher,
+            "A retry that only started after Suspend ran must not leave the watcher marked Started.");
+        Assert.IsTrue(_source.StopCalls > stopsAtSuspend,
+            "The source that the race started after Suspend ran must be stopped again, not left running.");
+    }
+
+    // Watcher lifecycle, the same race against Close instead of Suspend: Close disposes and nulls _source, but
+    // only after its own Stop() call returns, which happens outside the service's lock exactly where the
+    // retry's Start() is blocked here. The existing _closed check already stops the service reporting Started,
+    // but on its own it never stops the source the race just (re)started, leaving a live source disposed of by
+    // nothing.
+    [TestMethod]
+    public void ARetryRacingCloseWhileStartIsInFlightStopsTheSourceOnceItReturns()
+    {
+        var store = NewClaimStore();
+        var service = NewService(store);
+        service.Start();
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _source.ArmBlockingStart();
+        Task retryTask = Task.Run(() => service.OnRetryDue());
+        Assert.IsTrue(_source.WaitForStartEntered(TimeSpan.FromSeconds(5)), "Start was not entered in time.");
+
+        service.Close(); // wins the race while the retry's own Start() call is still in flight
+        int stopsAtClose = _source.StopCalls;
+
+        _source.ReleaseStart();
+        Assert.IsTrue(retryTask.Wait(TimeSpan.FromSeconds(5)), "The retry did not complete in time.");
+
+        Assert.IsTrue(_source.StopCalls > stopsAtClose,
+            "The source that the race started after Close ran must be stopped again, not left running with nothing tracking it.");
+    }
+
     // Item 3: Start and Stop must run outside the service's own lock. Proved with a fake whose Stop blocks
     // until a handler that needs the same lock (here, the public Current getter) has actually taken it: on
     // the old code, Suspend calls Stop while still holding the lock, so the blocked Stop and the blocked
