@@ -252,6 +252,9 @@ internal sealed partial class TrayContext
     // The open card's own last-rendered ButtonEnabled, for tests: null when no card is open.
     internal bool? WidgetCardButtonEnabledForTest => _widgetCardPresenter?.CurrentModelForTest?.ButtonEnabled;
 
+    // Drives the same path a real IWidgetStatus.CaseOpened event does, without a real case-open advert.
+    internal void RaiseCaseOpenedForTest() => OnCaseOpened(this, new CaseOpenedEventArgs(_time.GetUtcNow()));
+
     // Drives the same path a real left click on the gauge does, LeftClickConnects off, without simulating
     // an actual click on the real GaugeWindow this pipeline builds.
     internal void RequestWidgetCardForTest() => OnWidgetCardRequested(this, EventArgs.Empty);

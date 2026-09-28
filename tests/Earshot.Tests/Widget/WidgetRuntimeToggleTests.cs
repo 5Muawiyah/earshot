@@ -68,6 +68,43 @@ public sealed class WidgetRuntimeToggleTests
         });
     }
 
+    // TrayContext.OnCaseOpened only ever runs from the real IWidgetStatus.CaseOpened event, which nothing
+    // in this suite raises: WidgetCaseOpenCardWiredForTest above proves a CaseOpenCardPresenter exists, but
+    // a mutant that dropped the "_widgetStatus.CaseOpened += OnCaseOpened" subscription in WireWidget, or
+    // that made OnCaseOpened's body do nothing, would leave every existing assertion in this file exactly
+    // as green as it is now. RaiseCaseOpenedForTest drives OnCaseOpened directly, the same way
+    // RequestWidgetCardForTest already drives OnWidgetCardRequested for the gauge-anchored card.
+    //
+    // The assertion reads the log for the presenter's own notification-state line rather than asking
+    // whether the card ended up visible: unlike the gauge-anchored card (whose click-driven gate skips the
+    // notification check outright for CardAnchor.NearCursor), the case-open notice's own gate always calls
+    // the real SHQueryUserNotificationState, and it reports QUNS_BUSY on this machine's private test
+    // desktop - a real, current fact about this environment, recorded here rather than forced around with a
+    // fake, since CaseOpenCardPresenter's environment is constructed directly in WireWidget
+    // (new SystemCardEnvironment(_log)) with no seam for a test to substitute. The log line still proves
+    // what this test is actually for: OnCaseOpened reached RequestShowOnUiThread and ran its gate for real,
+    // rather than the subscription being missing or the body doing nothing.
+    [TestMethod]
+    public void RaisingCaseOpenedReachesThePresentersOwnGate()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true }).WithWatcherRecomputed());
+            tray.PumpUntilIdle();
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "Sanity: the case-open card must be wired first.");
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Case-open card"), "Sanity: nothing has raised CaseOpened yet.");
+
+            tray.Context.RaiseCaseOpenedForTest();
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(
+                tray.Log.Has(LogLevel.Info, "Case-open card"),
+                "OnCaseOpened must actually reach the presenter's own gate, not merely a wired but inert " +
+                "presenter. Log: " + string.Join(" | ", tray.Log.Entries.Select(e => e.Level + ":" + e.Message)));
+        });
+    }
+
     // Before the fix, ShowOnTaskbar off meant Enabled off, which stopped the data
     // pipeline outright: the low battery alert, the case-open card and auto-pause died silently while their
     // own menu items stayed checked. The case-open card in particular does not need the gauge to exist at
