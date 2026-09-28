@@ -533,13 +533,14 @@ internal sealed class WidgetCard : Form
         DrawBatteryPart(g, column, part);
     }
 
-    // The bar, percent text and charging bolt: absent entirely (not even the percent text) when Percent is
-    // null, so the column shows the glyph only. No dash, no placeholder number ever stands in for a
-    // reading that was never taken.
+    // The bar and the charging bolt are absent entirely when Percent is null: there is nothing to show a
+    // bar or a bolt for. The words "No reading" take the percent line's own place instead (the owner's own
+    // instruction): never a number, never a dash standing in for a reading that was never taken.
     private void DrawBatteryPart(Graphics g, WidgetCardLayout.ColumnLayout column, PartReading part)
     {
         if (part.Percent is not { } percent)
         {
+            DrawLine(g, column.Percent, WidgetCopy.Percent(null), _palette.Status);
             return;
         }
 

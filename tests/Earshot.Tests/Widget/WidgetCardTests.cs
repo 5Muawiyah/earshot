@@ -17,7 +17,7 @@ public sealed class WidgetCardTests
     private const int WM_KEYDOWN = 0x0100;
 
     [TestMethod]
-    public void ANullPercentDrawsTheGlyphOnlyNoBarAndNoDigits()
+    public void ANullPercentDrawsTheGlyphAndNoReadingNeverABarOrDigits()
     {
         Phase5.CardSta.Run(() =>
         {
@@ -29,7 +29,7 @@ public sealed class WidgetCardTests
             WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
             Color background = bitmap.GetPixel(0, 0);
             Assert.IsFalse(HasInk(bitmap, layout.Left.Bar, background), "No bar for a null percent.");
-            Assert.IsFalse(HasInk(bitmap, layout.Left.Percent, background), "No percent text for a null percent.");
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Percent, background), "\"No reading\" takes the percent line's own place.");
             Assert.IsTrue(HasInk(bitmap, layout.Left.Glyph, background), "The glyph itself is still drawn.");
         });
     }

@@ -1,6 +1,5 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Globalization;
 using Earshot.Icons;
 using Earshot.Popup;
 
@@ -97,7 +96,7 @@ internal static class GaugeRenderer
                 using var textBrush = new SolidBrush(Color.FromArgb((int)Math.Round(255 * opacity), ink));
                 var numberBounds = new RectangleF(numberLeft, 0, CardPlacement.Scale(NumberWidthAt96, dpi), h);
                 var format = new StringFormat(StringFormatFlags.NoWrap) { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
-                g.DrawString(shown.ToString(CultureInfo.InvariantCulture), font, textBrush, numberBounds, format);
+                g.DrawString(WidgetCopy.Percent(shown), font, textBrush, numberBounds, format);
             }
         }
 
