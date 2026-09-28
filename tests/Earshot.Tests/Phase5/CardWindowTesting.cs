@@ -88,7 +88,12 @@ internal static class CardDesktop
     // Hands the created desktop's handle to work, so a second thread can SetThreadDesktop(sameDesktop)
     // and read UI Automation elements on that desktop too: the UIA worker thread must own no window, so
     // it cannot be the thread CardDesktop.Run already binds to the desktop.
-    public static void Run(Action<nint> work)
+    public static void Run(Action<nint> work) => Run(work, TimeSpan.FromSeconds(60));
+
+    // With a longer limit, for work that waits on real child processes (the test window's harness).
+    public static void Run(Action work, TimeSpan timeout) => Run(_ => work(), timeout);
+
+    public static void Run(Action<nint> work, TimeSpan timeout)
     {
         ExceptionDispatchInfo? failure = null;
         nint desktop = CreateDesktopW("EarshotCardTest-" + Guid.NewGuid().ToString("N"), 0, 0, 0, DesktopAccess, 0);
@@ -122,9 +127,9 @@ internal static class CardDesktop
                 Name = "Earshot card test desktop",
             };
             thread.Start();
-            if (!thread.Join(TimeSpan.FromSeconds(60)))
+            if (!thread.Join(timeout))
             {
-                throw new AssertFailedException("The desktop work did not finish within 60 seconds.");
+                throw new AssertFailedException("The desktop work did not finish within " + timeout.ToString("c", CultureInfo.InvariantCulture) + ".");
             }
         }
         finally

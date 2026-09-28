@@ -3,8 +3,8 @@ using Earshot.TestWindow.Ui;
 
 namespace Earshot.Tests.TestWindow;
 
-// Drives a real MainForm headlessly: constructed, its Win32 handle forced into existence, never
-// Shown. Runs the whole test body on a dedicated STA thread pumping its own message loop with
+// Drives a real MainForm headlessly: constructed, its Win32 handles forced into existence, shown
+// only on a private desktop. Runs the whole test body on a dedicated thread pumping its own message loop with
 // Application.DoEvents, since Control.BeginInvoke (every ChildRunner event MainForm subscribes
 // to) only ever runs when something pumps that thread's queue. A
 // predicate proved only in isolation proves nothing about the caller that used to bypass it, so
@@ -27,47 +27,44 @@ internal static class MainFormTestHarness
         IReadOnlyList<WordingEntry> wording = Wording.Load(Path.Combine(repoRoot, "src", "Earshot.TestWindow", "Data", "wording.json"));
         var sandbox = new SandboxOptions { Folder = sandboxFolder };
 
+        // On a private desktop, never the owner's: Show() activates the form, and on the owner's desktop
+        // that took focus from whatever the owner was doing. CardDesktop.Run's thread is not STA (an STA
+        // thread owns a COM window and cannot join another desktop); nothing the form does under test
+        // needs STA, since the file dialog, its one STA-only part, is replaced by a test seam.
         Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            MainForm? form = null;
-            try
+        TimeSpan effectiveTimeout = timeout ?? DefaultTimeout;
+        Phase5.CardDesktop.Run(
+            () =>
             {
-                form = new MainForm(repoRoot, rows, wording, sandbox, @"C:\nowhere\Earshot.exe");
-                form.ForceControlCreationForTests(); // real handles for the form and every child control.
-                body(form);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
+                MainForm? form = null;
                 try
                 {
-                    if (form?.ActiveRunnerForTests is not null)
-                    {
-                        form.KillActiveRunForTests();
-                    }
-
-                    form?.Dispose();
+                    form = new MainForm(repoRoot, rows, wording, sandbox, @"C:\nowhere\Earshot.exe");
+                    form.ForceControlCreationForTests(TestDesktop.IsOwnersDesktop); // real handles for the form and every child control.
+                    body(form);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Cleanup only; the real failure (if any) is already captured above.
+                    failure = ex;
                 }
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        TimeSpan effectiveTimeout = timeout ?? DefaultTimeout;
-        if (!thread.Join(effectiveTimeout))
-        {
-            throw new TimeoutException(
-                "MainFormTestHarness's STA thread did not finish within " + effectiveTimeout + ". If the test " +
-                "body itself is not hung, this default needs to grow again to stay above the longest PumpUntil " +
-                "wait any test performs inside it.");
-        }
+                finally
+                {
+                    try
+                    {
+                        if (form?.ActiveRunnerForTests is not null)
+                        {
+                            form.KillActiveRunForTests();
+                        }
+
+                        form?.Dispose();
+                    }
+                    catch
+                    {
+                        // Cleanup only; the real failure (if any) is already captured above.
+                    }
+                }
+            },
+            effectiveTimeout);
 
         if (failure is not null)
         {

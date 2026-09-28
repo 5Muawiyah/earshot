@@ -24,10 +24,10 @@ public sealed class PostDisposalDeliveryTests
         var sandboxOptions = new SandboxOptions { Folder = sandbox.Path };
 
         Exception? thrown = null;
-        var thread = new Thread(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             var form = new Earshot.TestWindow.Ui.MainForm(repoRoot, rows, wording, sandboxOptions, @"C:\nowhere\Earshot.exe");
-            form.ForceControlCreationForTests();
+            form.ForceControlCreationForTests(TestDesktop.IsOwnersDesktop);
             form.Dispose();
 
             try
@@ -44,10 +44,7 @@ public sealed class PostDisposalDeliveryTests
             Assert.AreEqual(1, form.PostDisposalDeliveryFailuresForTests.Count,
                 "A post-disposal delivery must be recorded, not silently dropped.");
             Assert.IsInstanceOfType<InvalidOperationException>(form.PostDisposalDeliveryFailuresForTests[0]);
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(20)), "the STA thread did not finish in time.");
+        }, TimeSpan.FromSeconds(20));
 
         Assert.IsNull(thrown, "SafeBeginInvoke must never let the exception escape to its caller.");
     }
