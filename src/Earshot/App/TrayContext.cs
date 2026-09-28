@@ -201,6 +201,14 @@ internal sealed partial class TrayContext : ApplicationContext
     private readonly BlockCoordinator _coordinator;
     private readonly ILog _log;
     private readonly NotifyIcon _notifyIcon;
+
+    // Every write to _notifyIcon.Visible goes through this single adapter instance, never the raw field
+    // directly: it is the same counted wrapper WireGauge hands GaugeController as ITrayIconVisibility
+    // (TrayContext.Widget.cs), and the count it keeps (NotifyIconVisibility.RealVisibleTrueCount) is what
+    // WidgetRealSurfaceGuardTests asserts stays 0 for the whole run. A direct _notifyIcon.Visible = true
+    // write anywhere in this file would make the real tray icon visible on the owner's own desktop with
+    // nothing here to notice it.
+    private readonly NotifyIconVisibility _notifyIconVisibility;
     private readonly TrayMenu _menu;
     private readonly ShellMessageWindow _window;
     private readonly HotkeyManager _hotkeys;
@@ -379,11 +387,12 @@ internal sealed partial class TrayContext : ApplicationContext
         };
 
         _notifyIcon = new NotifyIcon { ContextMenuStrip = _menu.Strip };
+        _notifyIconVisibility = new NotifyIconVisibility(_notifyIcon);
         _notifyIcon.MouseClick += OnIconMouseClick;
         _notifyIcon.MouseDown += (_, _) => _ = _coordinator.RefreshStatusAsync();
         _notifyIcon.MouseDown += OnIconMouseDownForStreaming;
         UpdatePresentation(forceIcon: true);
-        _notifyIcon.Visible = options.ShowIcon;
+        _notifyIconVisibility.Visible = options.ShowIcon;
 
         _registry.Monitor.SnapshotChanged += OnSnapshotChanged;
         _registry.Settings.Changed += OnSettingsChanged;
@@ -536,7 +545,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _coordinator.Stop();
         _lifetime.Cancel();
         _registry.Cards.Hide();
-        _notifyIcon.Visible = false;
+        _notifyIconVisibility.Visible = false;
         CloseWidget();
 
         // Every orderly exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
@@ -2267,7 +2276,7 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             // No more input: the icon goes, the picker closes, and everything in flight is cancelled. The
             // coordinator then blocks enabled nodes that are not in use, after any clean-up in flight.
-            _notifyIcon.Visible = false;
+            _notifyIconVisibility.Visible = false;
             _picker?.Close();
             _exitPlace = place;
             _coordinator.BeginShutdown();

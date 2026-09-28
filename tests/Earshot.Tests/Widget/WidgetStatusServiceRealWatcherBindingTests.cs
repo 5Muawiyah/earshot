@@ -31,7 +31,7 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
         using var service = new WidgetStatusService(
             () =>
             {
-                WidgetRealSurfaceGuardTests.AllowRealConstruction();
+                WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
                 return new WinRtAdvertisementSource();
             },
             claimStore, settings, deviceMonitor, () => null, log,

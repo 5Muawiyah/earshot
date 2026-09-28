@@ -1393,7 +1393,8 @@ internal sealed class TrayHarness : IDisposable
         TimeSpan? handBackBudget = null,
         TimeSpan? disconnectHandBackWait = null,
         TimeProvider? time = null,
-        int? taskbarWatcherPollIntervalMs = null)
+        int? taskbarWatcherPollIntervalMs = null,
+        bool showIcon = false)
     {
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
@@ -1464,7 +1465,7 @@ internal sealed class TrayHarness : IDisposable
         arrange?.Invoke(this);
         var options = new TrayStartOptions(firstRun, settingsStatus ?? Settings.LastLoadStatus, ExePath, Startup)
         {
-            ShowIcon = false,
+            ShowIcon = showIcon,
             ExitNoticeTime = TimeSpan.FromMilliseconds(10),
             CursorPosition = () => ClickPoint,
             StartedAtLogon = startedAtLogon,

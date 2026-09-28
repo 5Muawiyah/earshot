@@ -158,7 +158,7 @@ public sealed class WidgetRuntimeToggleTests
     // actually see. Proving it needs the gauge genuinely Shown at least once, which every other test in
     // this file stops short of (the fake taskbar reader's own constructor-time default, Fail(NoTaskbar),
     // never clears): this one feeds it a real free-space layout instead, so it also calls
-    // WidgetRealSurfaceGuardTests.AllowRealConstruction() for the one real GaugeWindow that puts on screen,
+    // WidgetRealSurfaceGuardTests.AllowRealConstruction(RealWidgetSurface.GaugeWindow) for the one real GaugeWindow that puts on screen,
     // on the same private desktop GaugeWindowTests itself always runs on.
     [TestMethod]
     public void GaugeBoundsIfShownIsNullOnceAFullScreenAppHidesTheGauge()
@@ -186,7 +186,7 @@ public sealed class WidgetRuntimeToggleTests
             tray.Settings.Update(s => s.Widget = s.Widget with { LeftClickConnects = true });
             TrayHarness.PumpUntil(() => tray.Context.WidgetGaugeStateForTest is GaugeState.Shown,
                 "Sanity: a free-space layout must show the gauge.");
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             Assert.IsNotNull(tray.Context.GaugeBoundsIfShownForTest, "Sanity: a shown gauge must report its bounds.");
 
             var message = Message.Create(tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 1);

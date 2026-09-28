@@ -13,7 +13,7 @@ namespace Earshot.Tests.Widget;
 // pixel is the gauge, at a pixel outside it is the window beneath). All on a private desktop
 // (CardDesktop.Run): the gauge is genuinely shown, so it must never touch the owner's real screen.
 //
-// Each real GaugeWindow constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(), so the
+// Each real GaugeWindow constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(RealWidgetSurface.GaugeWindow), so the
 // assembly-wide guard can tell these named, private-desktop executions apart from an unnoticed real
 // construction anywhere else in the suite.
 [TestClass]
@@ -26,7 +26,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             nint handle = gauge.Handle;
             long exStyle = Earshot.Tests.Phase5.TestWindows.ExtendedStyle(handle);
             const long Expected = NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_LAYERED;
@@ -41,7 +41,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             nint handle = gauge.Handle;
             nint result = Earshot.Tests.Phase5.TestWindows.Send(handle, NativeMethods.WM_MOUSEACTIVATE);
             Assert.AreEqual((nint)NativeMethods.MA_NOACTIVATE, result);
@@ -58,7 +58,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             nint handle = gauge.Handle;
 
             Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_LBUTTONDOWN);
@@ -76,7 +76,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             nint handle = gauge.Handle;
 
             Earshot.Tests.Phase5.TestWindows.Send(handle, Earshot.Tests.Phase5.TestWindows.WM_RBUTTONDOWN);
@@ -129,7 +129,7 @@ public sealed class GaugeWindowTests
 
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
@@ -172,7 +172,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
 
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
@@ -199,7 +199,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
 
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
@@ -225,7 +225,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             nint handle = gauge.Handle;
             bool clicked = false;
             gauge.LeftClicked += (_, _) => clicked = true;
@@ -243,7 +243,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             nint handle = gauge.Handle;
             bool clicked = false;
             gauge.LeftClicked += (_, _) => clicked = true;
@@ -268,7 +268,7 @@ public sealed class GaugeWindowTests
         {
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
-            WidgetRealSurfaceGuardTests.AllowRealConstruction();
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
             var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);

@@ -156,7 +156,7 @@ internal sealed partial class TrayContext
         {
             var controller = new GaugeController(
                 CreateGaugeSurface,
-                _trayIconVisibilityFactory?.Invoke() ?? new NotifyIconVisibility(_notifyIcon),
+                _trayIconVisibilityFactory?.Invoke() ?? _notifyIconVisibility,
                 ReadGaugeControllerSettings,
                 _log,
                 _time);

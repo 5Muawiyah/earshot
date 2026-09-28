@@ -12,7 +12,7 @@ namespace Earshot.Tests.Widget;
 // wait up to 10 s for any Received of any company or a Stopped, then Stop and assert Stopped carried
 // Success. It never filters, connects or pairs.
 //
-// Each real WinRtAdvertisementSource constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(),
+// Each real WinRtAdvertisementSource constructed here calls WidgetRealSurfaceGuardTests.AllowRealConstruction(RealWidgetSurface.AdvertisementSource),
 // so the assembly-wide guard can tell this named real execution apart from an unnoticed one elsewhere: every
 // TrayContext test now gets a fake advertisement source instead (TrayContextTests.TrayHarness).
 [TestClass]
@@ -25,7 +25,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
     public async Task TheWatcherIsPassiveAndStartsOrSaysWhy()
     {
         using var source = new WinRtAdvertisementSource();
-        WidgetRealSurfaceGuardTests.AllowRealConstruction();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
         var stoppedTcs = new TaskCompletionSource<AdvertisementSourceStopped>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receivedTcs = new TaskCompletionSource<AdvertisementSample>(TaskCreationOptions.RunContinuationsAsynchronously);
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
@@ -88,7 +88,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
     public async Task StopRaisesStoppedWithSuccess()
     {
         using var source = new WinRtAdvertisementSource();
-        WidgetRealSurfaceGuardTests.AllowRealConstruction();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
         var stoppedTcs = new TaskCompletionSource<AdvertisementSourceStopped>(TaskCreationOptions.RunContinuationsAsynchronously);
         source.Stopped += (sender, e) => stoppedTcs.TrySetResult(e);
 
@@ -132,7 +132,7 @@ public sealed class WinRtAdvertisementSourceBindingTests
     public void StartAfterDisposeRefuses()
     {
         var source = new WinRtAdvertisementSource();
-        WidgetRealSurfaceGuardTests.AllowRealConstruction();
+        WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
         source.Dispose();
 
         StepOutcome step = source.Start(1);
