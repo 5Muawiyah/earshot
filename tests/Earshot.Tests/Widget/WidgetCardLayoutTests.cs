@@ -36,6 +36,15 @@ public sealed class WidgetCardLayoutTests
     }
 
     [TestMethod]
+    public void TheColumnLabelSitsAboveTheGlyph()
+    {
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+        Assert.IsTrue(layout.Left.Label.Bottom <= layout.Left.Glyph.Top, "The L/R/Case label sits above the glyph, matching the mockup.");
+        Assert.IsTrue(layout.Right.Label.Bottom <= layout.Right.Glyph.Top);
+        Assert.IsTrue(layout.Case.Label.Bottom <= layout.Case.Glyph.Top);
+    }
+
+    [TestMethod]
     public void TheSwitchRowIsAbsentWhenAutoPauseIsUnsupported()
     {
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);

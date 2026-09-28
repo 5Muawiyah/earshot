@@ -321,6 +321,9 @@ internal sealed class WidgetCard : Form
         g.Clear(_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background);
 
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
+        DrawColumnLabel(g, layout.Left.Label, WidgetCopy.LeftLabel);
+        DrawColumnLabel(g, layout.Right.Label, WidgetCopy.RightLabel);
+        DrawColumnLabel(g, layout.Case.Label, WidgetCopy.CaseLabel);
         DrawEarbudColumn(g, layout.Left, _model.Snapshot.Left, mirror: false);
         DrawEarbudColumn(g, layout.Right, _model.Snapshot.Right, mirror: true);
         DrawCaseColumn(g, layout.Case, _model.Snapshot.Case);
@@ -508,6 +511,15 @@ internal sealed class WidgetCard : Form
         path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
         path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
         path.CloseFigure();
+    }
+
+    // "L", "R" or "Case" above the glyph, centred, in the same status ink the where/read lines use.
+    private void DrawColumnLabel(Graphics g, Rectangle bounds, string text)
+    {
+        using var font = new Font(_fontFamily, bounds.Height * 0.75f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(_palette.Status);
+        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near };
+        g.DrawString(text, font, brush, bounds, format);
     }
 
     private void DrawEarbudColumn(Graphics g, WidgetCardLayout.ColumnLayout column, PartReading part, bool mirror)

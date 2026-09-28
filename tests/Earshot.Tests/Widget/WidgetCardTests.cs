@@ -88,6 +88,26 @@ public sealed class WidgetCardTests
         });
     }
 
+    // L, R and Case labels above the three columns, matching the mockup: WidgetCardLayoutTests proves the
+    // layout puts Label above Glyph; this proves something is actually painted there.
+    [TestMethod]
+    public void TheThreeColumnsEachShowTheirOwnLabel()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot()), 96);
+            using Bitmap bitmap = Render(card);
+
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+            Color background = bitmap.GetPixel(0, 0);
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Label, background), "The L label must be drawn.");
+            Assert.IsTrue(HasInk(bitmap, layout.Right.Label, background), "The R label must be drawn.");
+            Assert.IsTrue(HasInk(bitmap, layout.Case.Label, background), "The Case label must be drawn.");
+        });
+    }
+
     [TestMethod]
     public void APercentDrawsTheBarAndTheDigits()
     {

@@ -17,6 +17,12 @@ internal static class WidgetCopy
     public const string AutoPauseSwitch = "Pause when a bud comes out";
     public const string CaseOpen = "Case open";
 
+    // The three column labels on the widget card, matching the mockup exactly (Case, not "Case column" or
+    // similar).
+    public const string LeftLabel = "L";
+    public const string RightLabel = "R";
+    public const string CaseLabel = "Case";
+
     public const string ShowOnTaskbar = "Show on the taskbar";
     public const string LeftClickConnects = "Left click connects straight away";
     public const string CardWhenCaseOpens = "Card when the case opens";
@@ -27,7 +33,6 @@ internal static class WidgetCopy
 
     private const string LeftAirPodLabel = "Left AirPod";
     private const string RightAirPodLabel = "Right AirPod";
-    private const string CaseLabel = "Case";
 
     // "Left AirPod at 20%" and so on: the low battery alert's one line, from the literal percent the reading
     // carried, never rounded or interpolated (there is no other figure to show).
