@@ -49,6 +49,15 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private bool _settingsHooked;
     private bool _started;
     private bool _closed;
+
+    // Bumped once for every Start() call this service makes on the source, whatever it returns; compared
+    // against a Stopped event's own Generation (item 1) to tell a run's genuine end from a late one that
+    // already belongs to a run a later Start has superseded. Read and written only under _gate.
+    private int _generation;
+
+    // True between Suspend() and Resume(): a retry already queued (or a spontaneous Stopped arriving) while
+    // suspended must not start the watcher again until Resume() itself does (item 2's second half).
+    private bool _suspended;
     private ITimer? _retryTimer;
     private TimeSpan _retryDelay;
     private ITimer? _countersLogTimer;
@@ -165,6 +174,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // constructing a second advertisement source over the first, still-running one.
     public void Start()
     {
+        IAdvertisementSource? sourceToStart = null;
         lock (_gate)
         {
             if (_started || _closed)
@@ -184,7 +194,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             if (_settings.Current.Widget.Enabled)
             {
-                StartSourceLocked();
+                sourceToStart = CreateSourceLocked();
             }
             else
             {
@@ -196,10 +206,20 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 static state => ((WidgetStatusService)state!).OnCountersLogDue(), this,
                 WidgetTiming.CountersLogInterval, WidgetTiming.CountersLogInterval);
         }
+
+        if (sourceToStart is not null)
+        {
+            // Unlike every other call site of RunStartOutsideLock, the very first Start() never publishes:
+            // nothing has anything to compare its first snapshot against yet, and it matches what the
+            // original, single-lock version of this method did (a caller watching uiPost's own queue,
+            // ChangedAndCaseOpenedAreRaisedThroughUiPost, pins it).
+            RunStartOutsideLock(sourceToStart, publish: false);
+        }
     }
 
     public void Suspend()
     {
+        IAdvertisementSource? sourceToStop;
         lock (_gate)
         {
             if (_source is null || _closed)
@@ -207,11 +227,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 return;
             }
 
-            _stopRequested = true;
-            CancelRetryLocked();
-            StepOutcome step = _source.Stop();
-            ApplyStopStepLocked(step);
-            _watcherState = WidgetWatcherState.Stopped;
+            _suspended = true;
+            sourceToStop = BeginStopLocked();
+        }
+
+        if (sourceToStop is not null)
+        {
+            RunStopOutsideLock(sourceToStop, disposeSource: false);
         }
 
         PublishAndNotify();
@@ -219,6 +241,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     public void Resume()
     {
+        IAdvertisementSource? sourceToStart;
         lock (_gate)
         {
             if (_source is null || !_settings.Current.Widget.Enabled || _closed)
@@ -226,12 +249,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 return;
             }
 
+            _suspended = false;
             _stopRequested = false;
-            StepOutcome step = _source.Start();
-            ApplyStartStepLocked(step);
+            _generation++;
+            sourceToStart = _source;
         }
 
-        PublishAndNotify();
+        RunStartOutsideLock(sourceToStart);
     }
 
     // Idempotent, and final: once closed, nothing on this service saves the claim or raises Changed or
@@ -239,6 +263,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // ran) tries next.
     public void Close()
     {
+        IAdvertisementSource? sourceToStop;
         lock (_gate)
         {
             if (_closed)
@@ -258,7 +283,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _countersLogTimer = null;
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
-            StopSourceLocked(disposeSource: true);
+            sourceToStop = BeginStopLocked();
+        }
+
+        if (sourceToStop is not null)
+        {
+            RunStopOutsideLock(sourceToStop, disposeSource: true);
         }
     }
 
@@ -356,21 +386,81 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         return Task.CompletedTask;
     }
 
-    private void StartSourceLocked()
+    // Constructs a fresh source, subscribes its events and claims the generation this Start() call will
+    // make, all cheap and under the lock; the source's own Start() (which can block, and for the real
+    // watcher is a WinRT call) happens afterwards, outside it - see RunStartOutsideLock.
+    private IAdvertisementSource CreateSourceLocked()
     {
-        _source = _sourceFactory();
-        _source.Received += OnReceived;
-        _source.Stopped += OnStopped;
+        var source = _sourceFactory();
+        source.Received += OnReceived;
+        source.Stopped += OnStopped;
+        _source = source;
         _stopRequested = false;
-        StepOutcome step = _source.Start();
-        ApplyStartStepLocked(step);
+        _generation++;
+        return source;
+    }
+
+    // Item 3: Start and Stop must run outside the service's own lock, since a handler that needs the same
+    // lock (Received, Stopped, or a public call such as Current) would otherwise be able to deadlock against
+    // one of them - a fake whose Stop blocks until such a handler has taken the lock proves it either way.
+    // The lock is only reacquired here to apply the result, and only if the source this call started is
+    // still the one the service knows about (nothing else replaced or closed it meanwhile). publish is false
+    // only for the very first Start(): see its own call site's comment.
+    private void RunStartOutsideLock(IAdvertisementSource source, bool publish = true)
+    {
+        StepOutcome step = source.Start();
+        lock (_gate)
+        {
+            if (_closed || !ReferenceEquals(_source, source))
+            {
+                return;
+            }
+
+            ApplyStartStepLocked(step);
+            if (_watcherState == WidgetWatcherState.Started)
+            {
+                _retryDelay = TimeSpan.Zero;
+                CancelRetryLocked();
+            }
+            else
+            {
+                // Item 2: a Start that throws or fails synchronously, with no Stopped event ever coming to
+                // trigger OnStopped's own retry, must still get one scheduled here - whatever called this
+                // (the very first start, a settings toggle, Resume, or a manual refresh).
+                ScheduleRetryLocked();
+            }
+        }
+
+        if (publish)
+        {
+            PublishAndNotify();
+        }
     }
 
     private void ApplyStartStepLocked(StepOutcome step)
     {
-        _watcherState = _source!.State == AdvertisementSourceState.Started ? WidgetWatcherState.Started : WidgetWatcherState.Stopped;
-        _watcherErrorCode = null;
-        _watcherErrorName = null;
+        // A successful Start() request can leave the real
+        // watcher's own Status reading Created for a moment before it settles to Started (documented on
+        // WinRtAdvertisementSourceBindingTests' own wait helper), and reading it again immediately here used
+        // to show that as Stopped, with the successful step's own code shown as if it were the error. Aborted
+        // is the one state Start() can return synchronously as a genuine failure; anything else the state
+        // reads after an Ok step is a run still settling, not a failed one.
+        AdvertisementSourceState state = _source!.State;
+        bool started = step.Ok && state != AdvertisementSourceState.Aborted;
+        _watcherState = started ? WidgetWatcherState.Started : WidgetWatcherState.Stopped;
+        if (started)
+        {
+            _watcherErrorCode = null;
+            _watcherErrorName = null;
+        }
+        else
+        {
+            // Item 2: a failed start's own error must stand, not be discarded the way it used to be here -
+            // a Stopped event is not coming to carry it, since none was ever raised for this attempt.
+            _watcherErrorCode = step.Code;
+            _watcherErrorName = step.CodeName;
+        }
+
         LogStepLocked("start", step);
     }
 
@@ -392,48 +482,82 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    private void StopSourceLocked(bool disposeSource)
+    // Marks the source as being stopped and cancels any pending retry, under the lock; the source's own
+    // Stop() call happens afterwards, outside it (item 3). Returns the source to stop, or null when there is
+    // none.
+    private IAdvertisementSource? BeginStopLocked()
     {
         if (_source is null)
         {
-            return;
+            return null;
         }
 
         _stopRequested = true;
         CancelRetryLocked();
-        StepOutcome stopStep = _source.Stop();
-        ApplyStopStepLocked(stopStep);
-        _source.Received -= OnReceived;
-        _source.Stopped -= OnStopped;
-        if (disposeSource)
-        {
-            _source.Dispose();
-            _source = null;
-        }
+        return _source;
+    }
 
-        _watcherState = WidgetWatcherState.Off;
+    // See RunStartOutsideLock's comment: the same reasoning applies to Stop. disposeSource is false for
+    // Suspend (the same source instance is reused on Resume) and true for Close and turning the setting off.
+    private void RunStopOutsideLock(IAdvertisementSource source, bool disposeSource)
+    {
+        StepOutcome step = source.Stop();
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_source, source))
+            {
+                return; // already replaced or disposed by something else meanwhile
+            }
+
+            ApplyStopStepLocked(step);
+            if (disposeSource)
+            {
+                source.Received -= OnReceived;
+                source.Stopped -= OnStopped;
+                source.Dispose();
+                _source = null;
+                _watcherState = WidgetWatcherState.Off;
+            }
+            else
+            {
+                _watcherState = WidgetWatcherState.Stopped;
+            }
+        }
     }
 
     private void OnSettingsChanged(object? sender, EarshotSettings settings)
     {
+        IAdvertisementSource? sourceToStart = null;
+        IAdvertisementSource? sourceToStop = null;
         bool changed;
         lock (_gate)
         {
             bool enabled = settings.Widget.Enabled;
             if (enabled && _source is null)
             {
-                StartSourceLocked();
+                sourceToStart = CreateSourceLocked();
                 changed = true;
             }
             else if (!enabled && _source is not null)
             {
-                StopSourceLocked(disposeSource: true);
+                sourceToStop = BeginStopLocked();
                 changed = true;
             }
             else
             {
                 changed = false;
             }
+        }
+
+        if (sourceToStart is not null)
+        {
+            RunStartOutsideLock(sourceToStart); // publishes itself
+            return;
+        }
+
+        if (sourceToStop is not null)
+        {
+            RunStopOutsideLock(sourceToStop, disposeSource: true);
         }
 
         if (changed)
@@ -675,14 +799,39 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     private void OnStopped(object? sender, AdvertisementSourceStopped stopped)
     {
-        bool ownStop;
+        bool stale;
+        bool ownStop = false;
         lock (_gate)
         {
-            ownStop = _stopRequested;
-            _stopRequested = false;
-            _watcherState = WidgetWatcherState.Stopped;
-            _watcherErrorCode = stopped.ErrorCode;
-            _watcherErrorName = stopped.ErrorName;
+            // Item 1: a Stopped whose generation is behind the one this service last started already
+            // belongs to a run that has been superseded (Stop then an immediate Start, most often, where
+            // the old run's own Stopped(Success) can arrive after the new one is already under way). Nothing
+            // about the shown watcher state or the retry schedule changes because of it.
+            stale = stopped.Generation < _generation;
+            if (!stale)
+            {
+                ownStop = _stopRequested;
+                _stopRequested = false;
+                _watcherState = WidgetWatcherState.Stopped;
+                _watcherErrorCode = stopped.ErrorCode;
+                _watcherErrorName = stopped.ErrorName;
+            }
+        }
+
+        if (stale)
+        {
+            string message = "Widget watcher stopped: " + stopped.ErrorName + " (" + stopped.ErrorCode +
+                "), generation " + stopped.Generation + ", superseded by a later start.";
+            if (stopped.ErrorCode == 0)
+            {
+                _log.Info(message);
+            }
+            else
+            {
+                _log.Warn(message);
+            }
+
+            return;
         }
 
         _log.Warn("Widget watcher stopped: " + stopped.ErrorName + " (" + stopped.ErrorCode + ").");
@@ -699,9 +848,22 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         lock (_gate)
         {
-            _retryDelay = _retryDelay <= TimeSpan.Zero ? WidgetTiming.WatcherRetryDelay : _retryDelay;
-            ArmRetryTimerLocked();
+            ScheduleRetryLocked();
         }
+    }
+
+    // Item 2's second half: a retry queued before Suspend must not start the watcher again during suspend.
+    // Resume() starts it directly and arms its own retry if that still fails, so there is nothing for a
+    // timer to do meanwhile.
+    private void ScheduleRetryLocked()
+    {
+        if (_suspended)
+        {
+            return;
+        }
+
+        _retryDelay = _retryDelay <= TimeSpan.Zero ? WidgetTiming.WatcherRetryDelay : _retryDelay;
+        ArmRetryTimerLocked();
     }
 
     private void ArmRetryTimerLocked()
@@ -714,18 +876,43 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // (a COM property on the watcher throwing, for instance) would otherwise end the whole process, so the
     // entire attempt is caught. The raw code is logged, never swallowed, and the retry is left armed at its
     // current delay so the doubling schedule simply tries again rather than stopping forever.
-    private void OnRetryDue()
+    //
+    // Item 2's second half: a retry that was queued before Suspend must not start the watcher during
+    // suspend. Suspend cancels the timer under the same lock this checks _suspended and _source in, so
+    // whichever of the two runs first is decided cleanly; if this callback had already fired and was only
+    // waiting on the lock, it now sees _suspended true and does nothing.
+    //
+    // Item 3: Start runs outside the lock, like every other call site now does, so a Start blocked here (the
+    // real watcher waiting on a slow COM call, say) cannot hold the lock a Received or Stopped callback also
+    // needs.
+    //
+    // Internal, not private: disposing a real timer does not stop a callback already dequeued and running,
+    // so a test proving the suspended check above closes that race calls this directly straight after
+    // Suspend(), standing in for a callback that fired just before the timer was disposed.
+    internal void OnRetryDue()
     {
+        IAdvertisementSource? source;
+        lock (_gate)
+        {
+            if (_source is null || _suspended)
+            {
+                return;
+            }
+
+            _generation++;
+            source = _source;
+        }
+
         try
         {
+            StepOutcome step = source.Start();
             lock (_gate)
             {
-                if (_source is null)
+                if (_closed || !ReferenceEquals(_source, source))
                 {
                     return;
                 }
 
-                StepOutcome step = _source.Start();
                 ApplyStartStepLocked(step);
                 if (_watcherState == WidgetWatcherState.Started)
                 {
@@ -748,26 +935,23 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         PublishAndNotify();
     }
 
-    // Used by RefreshAsync: one attempt now, outside the doubling schedule.
+    // Used by RefreshAsync: one attempt now, outside the doubling schedule. Suspended is checked the same
+    // way OnRetryDue checks it: a manual refresh must not restart the watcher during suspend either.
     private void RetryStartNow()
     {
+        IAdvertisementSource? source;
         lock (_gate)
         {
-            if (_source is null)
+            if (_source is null || _suspended)
             {
                 return;
             }
 
-            StepOutcome step = _source.Start();
-            ApplyStartStepLocked(step);
-            if (_watcherState == WidgetWatcherState.Started)
-            {
-                _retryDelay = TimeSpan.Zero;
-                CancelRetryLocked();
-            }
+            _generation++;
+            source = _source;
         }
 
-        PublishAndNotify();
+        RunStartOutsideLock(source);
     }
 
     private void CancelRetryLocked()
