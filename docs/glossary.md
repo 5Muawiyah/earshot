@@ -14,6 +14,11 @@ page at boot. See [architecture.md](architecture.md).
 disabled while they are not in use, so Windows cannot page them when the PC
 starts.
 
+**Claim.** The one-time record the AirPods widget makes of the owner's
+AirPods, model, colour and last known battery, made when he opens their case
+next to the PC. Everything a later broadcast is checked against. See
+[overview.md](overview.md#whose-airpods-it-shows).
+
 **Container / container GUID.** Windows groups the several device nodes that
 belong to one physical Bluetooth accessory (for instance, the AirPods'
 headset node and its hands-free node) under one container identifier.
@@ -37,6 +42,10 @@ setup, all running as SYSTEM: Gate blocks and allows the device nodes on
 demand, Protect changes the Bluetooth services on demand, and BootBlock runs
 once at startup as a safety net. See [architecture.md](architecture.md).
 
+**Gauge.** The small battery-and-status readout the AirPods widget places on
+the taskbar, or the tray icon it falls back to when there is no free space
+for one. See [overview.md](overview.md#the-airpods-widget).
+
 **Hands-Free profile.** The narrow, mono, phone-call-quality Bluetooth audio
 profile Windows switches a headset to whenever a program opens a microphone.
 Earshot can turn this profile off for the AirPods so there is nothing to
@@ -47,9 +56,25 @@ tests, a real phone and a real restart or shutdown, as opposed to the
 automated unit tests that run on every build. See
 [verification.md](verification.md).
 
+**Ownership rule.** The check the AirPods widget runs on every Bluetooth
+broadcast it hears, so that only a device matching the owner's claim, at a
+strong enough signal and with a consistent battery reading, is ever shown as
+his. See [architecture.md](architecture.md#the-airpods-widget).
+
+**Phase 0.** The one-time recording the AirPods widget still needs: the
+AirPods' own Bluetooth broadcast captured with the owner's phone battery
+reading beside it, so the widget's decoding can be checked against a known
+answer before anything is shown from it. Not yet done; see
+[overview.md](overview.md#the-honest-state-today).
+
 **Persistent disable / persistent flag.** Disabling a device node in a way
 that survives a restart. Without this flag, Windows would re-enable the node
 at the next boot on its own.
+
+**Proximity message.** The short, unencrypted part of the Bluetooth
+broadcast AirPods send while nearby, carrying their model and colour, and,
+once proved, their battery and lid state. What the AirPods widget reads
+instead of pairing or connecting.
 
 **Safe mode.** A mode Earshot can be started in, set by the
 `EARSHOT_SAFE_MODE` environment variable, that turns off every action that

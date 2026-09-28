@@ -22,7 +22,7 @@ browser tab or a game cannot drop them to call quality.
 
 | Document | What it covers |
 |---|---|
-| [Overview](docs/overview.md) | what Earshot does, a tour of the tray and its menu, in plain English |
+| [Overview](docs/overview.md) | what Earshot does, a tour of the tray, its menu and the AirPods widget, in plain English |
 | [Architecture](docs/architecture.md) | how it works, the safety model, setup and removal, the command line |
 | [Requirements](docs/requirements.md) | what Earshot has to do, the test that proves each point, and what it does not do |
 | [Verification](docs/verification.md) | the verification table and the live-test evidence behind it |
@@ -53,9 +53,17 @@ then Connect on the card.
 - **Blocks the Hands-Free profile**, on by default, so a browser tab or a game
   cannot drop the AirPods to a narrow voice channel. This turns off the
   AirPods microphone on this PC while it is on.
-- **Shows no battery figure.** There is no battery element in the tray at all.
 - **Hands the AirPods back at shut down and sleep**, on by default, releasing
   them and blocking the nodes again before this PC can grab them back.
+- **The AirPods widget: a battery gauge on the taskbar, a card, and a low
+  battery alert.** It reads left, right and case battery, charging and where
+  the AirPods are from their own Bluetooth broadcast, not from being
+  connected. It shows a figure only once it has actually read one off the
+  device; today that one-time reading has not been taken yet, so the card
+  says "No reading" and nothing else, and the widget has not had a live run.
+  See [docs/overview.md](docs/overview.md#the-airpods-widget) for what it
+  does and its limits, and [docs/architecture.md](docs/architecture.md#the-airpods-widget)
+  for how it works and what still needs a kernel driver.
 - **v1.1: keyboard shortcuts, spoken status and playing audio from a paired
   phone.** All three are built, reviewed and off by default, and none has had
   a live run yet. The hand-back above is built and covered by its own tests,

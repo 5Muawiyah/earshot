@@ -200,3 +200,158 @@ can start a change that would fight what the hand-back is doing.
 For what this does and does not guarantee when the PC is actually shut down,
 see [requirements.md](requirements.md#what-it-does-not-do) and
 [verification.md](verification.md).
+
+## The AirPods widget
+
+Alongside the tray icon, Earshot can show a small battery gauge on the
+taskbar, and from it a card with more detail. It works by listening to the
+AirPods' own Bluetooth broadcast, the same short signal a phone reads for its
+own battery widget, rather than needing them connected to this PC. That is
+also why it has firm limits; see [below](#what-the-widget-cannot-know).
+
+**The gauge.** A small readout on the taskbar, the way a laptop's own battery
+indicator sits there: the earbud mark, the lower-battery bud's percentage as
+a small bar with its number, and a charging mark when it applies. If there is
+no free space on the taskbar to put it, or it cannot attach to the taskbar at
+all, Earshot falls back to the ordinary tray icon on its own, without asking.
+
+<img src="images/widget-gauge.png" alt="Earshot's taskbar gauge, drawn from made-up values" width="220" align="right">
+
+<p align="center"><i>The taskbar gauge, drawn by Earshot's own code from made-up values (see the note below), not a screenshot of a real device.</i></p>
+
+<br clear="all">
+
+Left-click the gauge, or the tray icon when that is what is showing, to open
+the card. Turning on **Left click connects straight away** in the menu
+changes that: a left click then connects or disconnects immediately, the way
+the tray icon alone used to. It is off by default, so a click opens the card
+first.
+
+**The card.** Three battery gauges, left bud, right bud and case, each with
+its own charging mark; one line for where the AirPods are ("On this PC", or
+the owner's own label such as "On your iPhone" when they are in use
+somewhere else); one line for when the battery was last read; and a Connect
+or Disconnect button, whichever they are not already doing.
+
+<img src="images/widget-card-light.png" alt="The widget card in the light theme, drawn from made-up values" width="320" align="right">
+
+<p align="center"><i>The card in the light theme, drawn by Earshot's own code from made-up values, composited onto one measured sample of Windows' own card backdrop colour. Not a screenshot of a real device, and not the translucency Windows itself draws.</i></p>
+
+<br clear="all">
+
+<img src="images/widget-card-dark.png" alt="The widget card in the dark theme, drawn from made-up values" width="320" align="right">
+
+<p align="center"><i>The same card in the dark theme, drawn and composited the same way.</i></p>
+
+<br clear="all">
+
+**The case-open card.** When the AirPods' own case is opened near the PC,
+the same card appears by itself near the taskbar for a few seconds, then
+closes itself, using the same timing Windows' own notifications use on this
+PC. It never connects the AirPods by itself: opening a case only ever shows
+the card; pressing its button still takes a real click. A setting, **Card
+when the case opens**, turns it off.
+
+<img src="images/widget-case-open.png" alt="The case-open card, drawn from made-up values" width="320" align="right">
+
+<p align="center"><i>The case-open card, drawn and composited the same way as the card above.</i></p>
+
+<br clear="all">
+
+**The low battery alert.** A Windows notification, or the card if a
+notification cannot be shown, the moment a part first reads at or below a
+threshold, 20% by default and adjustable in steps of 10 from the menu. It
+only fires again once that part has read at least one 10% step back above
+the threshold, so a value sitting on the edge does not repeat itself.
+
+**Pausing when a bud comes out.** A switch on the card, on by default, that
+pauses whatever this PC is playing to the AirPods the moment a bud is taken
+out, and never resumes something the owner paused himself. It only ever acts
+once in-ear state has actually been proved to work from the AirPods'
+broadcast (see the honest state below); until then the switch does nothing.
+
+**The menu.** `Show on the taskbar`, `Card when the case opens`, `Low
+battery alert` with its threshold, `Left click connects straight away`, and
+`Name your other device...`, which sets the label used for "On your
+&lt;name&gt;".
+
+### The honest state today
+
+Battery, charging, in-ear state and the case-open card all wait on one
+thing: a short recording the owner has not made yet, holding his own AirPods
+and his phone's own battery reading beside the PC. Until that recording is
+made and checked, Earshot cannot tell his AirPods apart from anyone else's
+well enough to show anything about them. So, right now:
+
+- **The card shows "No reading" for every battery figure**, and nothing
+  else: no charging mark, no in-ear mark. The 70%, 60% and 90% in the
+  pictures above are made up to preview the finished layout; they are not a
+  figure the widget can show yet.
+- **No AirPods can be claimed as the owner's**, so nothing is shown, no
+  case-open card appears, and no low battery alert can fire.
+- **The pause switch is on in the menu but has nothing to act on**, for the
+  same reason.
+
+Nothing about the widget, including this honest "No reading" state, has
+been tried on the real hardware yet. The live test that covers it is
+written and waiting to be run.
+
+### What the widget cannot know
+
+- **The other device is the owner's own label, not a reading.** "On this
+  PC" comes from Windows itself. "On your iPhone", or whatever the owner
+  types, is only his name for "in use, somewhere that is not this PC"; the
+  AirPods never say what they are actually connected to.
+- **Battery is a snapshot, never live.** It is read in steps of 10% (0, 10,
+  20 … 100) from the last broadcast Earshot heard, and the card says how
+  long ago that was. It is never interpolated and never shown as current.
+- **In-ear detection is only as good as the broadcast.** If the AirPods stop
+  broadcasting while worn and playing from this PC, Earshot has no fresher
+  reading to show, and says so rather than guessing.
+- **The widget hears everyone's AirPods nearby, not only the owner's.** A
+  room full of the same model broadcasts the same way his do. What keeps a
+  stranger's AirPods off the card is the rule below.
+
+### Whose AirPods it shows
+
+Once, with his own AirPods' case opened near the PC, Earshot records their
+model, colour and the strength of that broadcast as the owner's claim. After
+that, a broadcast is only shown as his if all of the following hold:
+
+- the model and colour match the claim;
+- the signal clears the strength recorded at that claim;
+- and the battery is consistent with the last reading Earshot has for him:
+  the same, lower, or one step (10%) higher, and higher by more than that
+  only while the matching charging mark is set.
+
+Being connected to this PC does not, by itself, count as proof: the same
+checks run every time, connected or not. If a jump the rule cannot explain
+happens, Earshot stops showing anything until the owner opens the case by
+the PC again, which starts a fresh claim.
+
+Short of all of the above, Earshot fails closed: no battery, no case-open
+card, no pause. Nothing is recorded about an unmatched device beyond a count
+of how many were seen.
+
+**The accepted risk.** Because "the same or lower" always passes, a
+stranger's AirPods of the same model and colour, near the PC with a lower
+battery reading than the owner's last one, could be shown as his. This was
+put to the owner plainly, and he chose to accept that risk rather than make
+the rule stricter and risk missing his own AirPods on a false alarm.
+
+### What still needs a kernel driver
+
+Noise control, battery to the nearest 1%, and a few other AirPods features
+are not built, and are not close to being built, because of what Windows
+does and does not let an ordinary program do. See
+[architecture.md](architecture.md#the-airpods-widget) for the full list and
+why, with sources.
+
+### Privacy
+
+The widget only listens. It never connects to, or sends anything to, a
+Bluetooth device to get this data, and it does not need the AirPods paired
+to this PC at all. Nothing about a device that turns out not to be the
+owner's is kept, beyond a count of how many were seen. The one-time
+recording the widget still needs before it can show anything real stays on
+this PC; it is never part of the repository.
