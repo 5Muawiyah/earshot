@@ -352,9 +352,11 @@ close Earshot. The startup registry value belongs to the tray, and uninstall
 does not touch it; Earshot removes a value left behind the next time it
 starts with the setting off.
 
-Then run, from an administrator PowerShell or Command Prompt:
+Then run, from an administrator PowerShell:
 
-    "C:\Program Files\Earshot\Earshot.exe" uninstall
+    & "C:\Program Files\Earshot\Earshot.exe" uninstall
+
+PowerShell needs the `&` to run a quoted path; in Command Prompt, leave it out.
 
 Windows shows its administrator prompt when you open that window. Uninstall
 refuses to run without it.

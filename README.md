@@ -99,8 +99,8 @@ approval, for setup; nothing else to install, because the release is
 self-contained.
 
 To remove Earshot, turn **Open on startup** off in the menu, close Earshot,
-then run `"C:\Program Files\Earshot\Earshot.exe" uninstall` from an
-administrator PowerShell or Command Prompt. See
+then run `& "C:\Program Files\Earshot\Earshot.exe" uninstall` from an
+administrator PowerShell (in Command Prompt, leave out the `&`). See
 [docs/architecture.md](docs/architecture.md#setup-and-removal) for what that
 does and how it reports a step it could not finish.
 
