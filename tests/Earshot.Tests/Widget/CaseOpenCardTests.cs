@@ -10,8 +10,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// CaseOpenCardPresenter: spec 7.6, its own WidgetCard(notice: true) instance, never the gauge-anchored
-// card. The gate tests (setting off, closing, QUNS refusal, a failed notification-state read, hand-back,
+// CaseOpenCardPresenter: the case-open notice, its own WidgetCard(notice: true) instance, never the
+// gauge-anchored card. The gate tests (setting off, closing, QUNS refusal, a failed notification-state read, hand-back,
 // session end) never let a card be created at all: createCard throws, so a passing test proves no window
 // was ever built, not just that one happened to stay hidden. Everything that actually shows a card runs on
 // a private desktop (Earshot.Tests.Phase5.CardDesktop.Run), never the input desktop.
@@ -334,10 +334,12 @@ public sealed class CaseOpenCardTests
         });
     }
 
-    // Spec 7.6 says Escape dismisses "if the owner clicks it first, which activates nothing": since a
-    // notice-mode card is never activated (WS_EX_NOACTIVATE) it never receives real keyboard focus, so this
-    // sends the key message directly at the guard in WidgetCard.OnKeyDown rather than proving the OS would
-    // ever deliver it there. See the report for why this is a spec tension, not a gap in this test.
+    // Escape is meant to dismiss the card only if the owner clicks it first, which activates nothing: since
+    // a notice-mode card is never activated (WS_EX_NOACTIVATE) it never receives real keyboard focus, so
+    // this sends the key message directly at the guard in WidgetCard.OnKeyDown rather than proving the OS
+    // would ever deliver it there. That gap between the intended behaviour and what a real key press could
+    // ever trigger is inherent to a never-activated window, not something a differently written test could
+    // close.
     [TestMethod]
     public void KeyboardNeverActsOnANoticeModeCardEvenIfAKeyMessageArrivedAnyway()
     {

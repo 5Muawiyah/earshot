@@ -118,9 +118,9 @@ internal static partial class Program
             }
         }
 
-        // spec 7.6: the case-open card's Where line always reads "Case open" regardless of the snapshot's
-        // Where, so which fixture backs it barely matters; the "this-pc" card model (already built above)
-        // is reused rather than building a second one.
+        // WidgetCard always overrides the Where line to "Case open" for a notice-mode instance regardless
+        // of what the model's own snapshot says, so which fixture backs it barely matters; the "this-pc"
+        // card model (already built above) is reused rather than building a second one.
         (string noticeVariant, WidgetCardModel noticeModel) = cardVariants[0];
         foreach (uint dpi in ProbeWidgetDpis)
         {

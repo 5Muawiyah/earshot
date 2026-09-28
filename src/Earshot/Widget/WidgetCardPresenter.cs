@@ -71,10 +71,11 @@ internal sealed class WidgetCardPresenter : IDisposable
     internal bool HasPendingToggleCloseWindow => _closedByDeactivateAtTimestamp is not null;
 
     // Shows the card above gaugeBounds, or above a zero-size rectangle at fallbackPoint when the gauge is
-    // hidden and the click came from the tray icon fallback instead (see the report for why this is a
-    // simpler fallback than the gauge case, not the full click-anchor rule the tray's other cards use). A
-    // click within SystemInformation.DoubleClickTime of the card's last close-through-deactivation is the
-    // second half of that gesture: it closes, it does not reopen.
+    // hidden and the click came from the tray icon fallback instead: a simpler fallback than the gauge
+    // case, since the tray icon has no free taskbar rectangle of its own to anchor above, unlike the full
+    // click-anchor rule the tray's other cards use. A click within SystemInformation.DoubleClickTime of the
+    // card's last close-through-deactivation is the second half of that gesture: it closes, it does not
+    // reopen.
     public void RequestShow(Rectangle? gaugeBounds, Point fallbackPoint) =>
         _uiPost(() => RequestShowOnUiThread(gaugeBounds, fallbackPoint));
 

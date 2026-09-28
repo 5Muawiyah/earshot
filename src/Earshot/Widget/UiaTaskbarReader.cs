@@ -325,7 +325,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     // A point inside the taskbar, used only to ask what window is on top there. The taskbar's own
     // centre, not the gauge's candidate run: the reader does not know the placement yet (GaugePlacement
     // runs afterwards, on the layout this produces), so this is a general "is the bar covered" probe
-    // rather than the exact free-run point the design narrative describes.
+    // rather than a point inside wherever the gauge will actually be placed.
     private static Point ProbePoint(Rectangle taskbar) =>
         new(taskbar.Left + (taskbar.Width / 2), taskbar.Top + (taskbar.Height / 2));
 

@@ -211,7 +211,7 @@ internal sealed class GaugeController : IDisposable
             // Nothing changed. A future refinement re-raises the window here once, for the case where the
             // shell has raised the taskbar above the topmost band since the gauge was last shown (a full
             // screen state ending, or a flyout closing), which would otherwise leave the gauge invisible
-            // under the bar until the next move. Not implemented in this build (see the report).
+            // under the bar until the next move. Not implemented in this build: left for a future change.
             return;
         }
 

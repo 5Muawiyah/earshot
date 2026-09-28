@@ -39,9 +39,9 @@ internal sealed record WidgetCardModel(
 
 // The dedicated three-column card: Left, Right, Case battery, where the AirPods are, when the battery was
 // last read, and a Connect/Disconnect button, plus the auto-pause switch when the snapshot says it is
-// available. Built for the gauge's left click with LeftClickConnects off (the default). See the report on
-// TrayContext.Widget.OnWidgetCardRequested for why an earlier pass reused ConnectCard/CardPresenter (a
-// one-line card) instead of this.
+// available. Built for the gauge's left click with LeftClickConnects off (the default): ConnectCard/
+// CardPresenter, the tray's existing one-line card, has no room for three battery columns, a where-line and
+// an auto-pause switch together, so the gauge gets its own card rather than reusing that one.
 //
 // Owner-painted, no child controls, one Form: OnPaintBackground is empty, OnPaint starts with
 // Graphics.Clear and draws everything else with GDI+ FillPath/DrawString, never TextRenderer: GDI text
@@ -139,7 +139,7 @@ internal sealed class WidgetCard : Form
     internal WidgetCardFocus FocusTarget => _focus;
 
     // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for a
-    // notice-mode instance regardless of what the model's own Snapshot.Where says (spec 7.6). For tests.
+    // notice-mode instance regardless of what the model's own Snapshot.Where says. For tests.
     internal string WhereLineText => _notice ? WidgetCopy.CaseOpen : WidgetCopy.Where(_model.Snapshot.Where, _model.OtherDeviceLabel);
 
     // True once DWM accepted the translucent backdrop and DwmExtendFrameIntoClientArea for this window's
@@ -232,9 +232,9 @@ internal sealed class WidgetCard : Form
         ArgumentNullException.ThrowIfNull(e);
         if (_notice)
         {
-            // Spec 7.6: "No focus, no focus rectangle, keyboard does nothing (nothing has focus)." A
-            // notice-mode card is never activated, so it should never receive a key in practice; this
-            // guard makes that true even if a key event ever reached it regardless.
+            // No focus, no focus rectangle, keyboard does nothing: a notice-mode card is never activated
+            // (WS_EX_NOACTIVATE), so it should never receive a key in practice; this guard makes that true
+            // even if a key event ever reached it regardless.
             return;
         }
 
@@ -297,8 +297,8 @@ internal sealed class WidgetCard : Form
         }
         else if (_notice)
         {
-            // Spec 7.6: "dismissed by a click outside the two buttons." Only reachable in notice mode: the
-            // normal card already closes on deactivation for a click anywhere else.
+            // A notice-mode card is dismissed by a click outside the two buttons: only reachable in notice
+            // mode, since the normal card already closes on deactivation for a click anywhere else.
             RequestClose(WidgetCardCloseReason.ClickOutside);
         }
     }
@@ -441,9 +441,9 @@ internal sealed class WidgetCard : Form
 
     // A single earbud (a round head over a short stem) in bounds, mirrored horizontally for the right ear.
     // Adapted from the head/stem proportions Icon\EarbudGlyph.cs uses for the tray icon's pair; here one bud
-    // is filled directly with GDI+ FillPath, matching 7.3's painting model, rather than composited through
-    // EarbudGlyph's alpha buffer (built for the layered gauge's UpdateLayeredWindow, not an owner-painted
-    // Form).
+    // is filled directly with GDI+ FillPath, matching this card's own owner-painted model (OnPaint fills
+    // the whole client area itself), rather than composited through EarbudGlyph's alpha buffer (built for
+    // the layered gauge's UpdateLayeredWindow, not an owner-painted Form).
     private static GraphicsPath BudGlyphPath(Rectangle bounds, bool mirror)
     {
         var path = new GraphicsPath();

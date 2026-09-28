@@ -200,7 +200,8 @@ internal sealed partial class TrayContext
     // ABN_STATECHANGE and ABN_POSCHANGED ask only for an immediate re-measure. ABN_FULLSCREENAPP opening
     // hides the gauge at once through the controller (NotifyFullScreenApp), without waiting for a poll;
     // closing does not force a show, only a fresh read, since the taskbar's actual state still needs
-    // re-reading. ABN_WINDOWARRANGE is not wired to a fast path in this build (see the report).
+    // re-reading. ABN_WINDOWARRANGE is not wired to a fast path in this build: TaskbarWatcher's own poll
+    // still catches a rearranged taskbar, just not as immediately.
     private void OnAppBarNotification(object? sender, AppBarNotificationEventArgs e)
     {
         switch (e.Kind)
@@ -350,9 +351,9 @@ internal sealed partial class TrayContext
     }
 
     // IWidgetStatus.CaseOpened, documented as already raised on the UI thread. The presenter itself runs
-    // every gate in spec 7.6 (the setting, closing, already open, the notification state, hand-back or a
-    // session end) before it shows anything; this only supplies where the gauge is, the same rectangle
-    // OnWidgetCardRequested already uses for "above the gauge".
+    // every gate (the setting, closing, the owner's own card already open, the notification state,
+    // hand-back or a session end) before it shows anything; this only supplies where the gauge is, the same
+    // rectangle OnWidgetCardRequested already uses for "above the gauge".
     private void OnCaseOpened(object? sender, CaseOpenedEventArgs e) => _caseOpenCardPresenter?.RequestShow(GaugeBoundsIfShown());
 
     // The gauge's own bounds when it is actually on screen with a handle, or null (the case-open card falls
