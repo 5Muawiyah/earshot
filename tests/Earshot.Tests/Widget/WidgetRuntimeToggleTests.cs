@@ -84,4 +84,29 @@ public sealed class WidgetRuntimeToggleTests
             Assert.AreEqual(0, tray.TaskbarReaderFactoryCalls, "The gauge itself must stay off: nothing here asked for it.");
         });
     }
+
+    // Before the fix, ApplyWidget's ShowOnTaskbar-off branch tore down the taskbar watcher and the appbar
+    // registration but never touched the card presenter it built alongside them (WireGauge's own
+    // "if (_gaugeController is null)" block): a card already open above the gauge stayed open and visible
+    // with nothing left to anchor to, since the gauge that placed it there was now gone.
+    [TestMethod]
+    public void TurningOffShowOnTaskbarHidesAnyOpenWidgetCard()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = true, LeftClickConnects = false }).WithWatcherRecomputed());
+            tray.PumpUntilIdle();
+
+            tray.Context.RequestWidgetCardForTest();
+            tray.PumpUntilIdle();
+            Assert.IsTrue(tray.Context.WidgetCardIsShownForTest, "Sanity: the card must actually be open before the setting turns off.");
+
+            tray.Settings.Update(s => s.Widget = s.Widget with { ShowOnTaskbar = false });
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Context.WidgetCardIsShownForTest,
+                "Turning the gauge off must close any card anchored to it, not leave it open with nothing left to anchor to.");
+        });
+    }
 }

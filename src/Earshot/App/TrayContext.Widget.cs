@@ -242,6 +242,14 @@ internal sealed partial class TrayContext
     internal bool WidgetDataPipelineWiredForTest => _widgetStatus is not null;
     internal bool WidgetCaseOpenCardWiredForTest => _caseOpenCardPresenter is not null;
 
+    // Whether the gauge-anchored card is currently open, for tests: the same IsShown a real gauge click
+    // (OnWidgetCardRequested) or close would change.
+    internal bool WidgetCardIsShownForTest => _widgetCardPresenter?.IsShown ?? false;
+
+    // Drives the same path a real left click on the gauge does, LeftClickConnects off, without simulating
+    // an actual click on the real GaugeWindow this pipeline builds.
+    internal void RequestWidgetCardForTest() => OnWidgetCardRequested(this, EventArgs.Empty);
+
     // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
     // left click and the menu's toggle item already use (Launch -> ToggleAsync -> BlockCoordinator), just
     // with the card placed above the gauge instead of at the cursor. Safe mode is unchanged: ToggleAsync's
@@ -478,6 +486,12 @@ internal sealed partial class TrayContext
         }
         else if (_taskbarWatcher is not null)
         {
+            // The card this presenter owns is anchored above the gauge (OnWidgetCardRequested); once the
+            // gauge itself is gone, an already-open card has nothing left to anchor to and must not linger.
+            // The presenter and its card are not disposed here, only hidden: WireGauge only ever builds
+            // them once (its own "if (_gaugeController is null)" guard), so the same instances are reused
+            // if the gauge comes back.
+            _widgetCardPresenter?.Hide();
             _gaugeController?.TurnOff();
             _taskbarWatcher.Dispose();
             _taskbarWatcher = null;
