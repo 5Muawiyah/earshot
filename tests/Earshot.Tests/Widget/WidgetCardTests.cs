@@ -16,6 +16,23 @@ public sealed class WidgetCardTests
 {
     private const int WM_KEYDOWN = 0x0100;
 
+    // Control.AccessibleName's own default falls back to Text, which is only ever "Earshot" (TrayStatus.
+    // AppName): a screen reader could not tell this card apart from the gauge, the tray icon or any other
+    // Earshot window by name alone. The ordinary card and the case-open notice get their own distinct names.
+    [TestMethod]
+    public void TheOrdinaryCardAndTheNoticeCardHaveTheirOwnDistinctAccessibleNames()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var ordinary = new WidgetCard(new CapturingLog());
+            using var notice = new WidgetCard(new CapturingLog(), notice: true);
+
+            Assert.AreEqual("Earshot: AirPods", ordinary.AccessibleName);
+            Assert.AreEqual("Earshot: " + WidgetCopy.CaseOpen, notice.AccessibleName);
+            Assert.AreNotEqual(ordinary.AccessibleName, notice.AccessibleName);
+        });
+    }
+
     [TestMethod]
     public void ANullPercentDrawsTheGlyphAndNoReadingNeverABarOrDigits()
     {

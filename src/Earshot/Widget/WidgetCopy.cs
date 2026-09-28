@@ -85,15 +85,5 @@ internal static class WidgetCopy
     public static string Percent(int? percent) =>
         percent is { } value ? value.ToString(CultureInfo.InvariantCulture) + "%" : NoReading;
 
-    // The tooltip's one battery line, capped like the tray's own tooltip.
-    public static string TooltipLine(WidgetSnapshot snapshot)
-    {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        string left = Percent(snapshot.Left.Percent);
-        string right = Percent(snapshot.Right.Percent);
-        string box = Percent(snapshot.Case.Percent);
-        return "L " + left + "  R " + right + "  Case " + box;
-    }
-
     private static string Round(double value) => Math.Max(0, Math.Round(value)).ToString(CultureInfo.InvariantCulture);
 }

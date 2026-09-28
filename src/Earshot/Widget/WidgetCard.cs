@@ -98,6 +98,12 @@ internal sealed class WidgetCard : Form
         }
 
         Text = TrayStatus.AppName;
+        // AccessibleName was never set (null, confirmed by reading it directly rather than assuming a
+        // fallback to Text): a screen reader had nothing here to tell this card apart from the gauge, the
+        // tray icon or any other Earshot window. GaugeWindow already sets its own explicit name for the
+        // same reason; this card gets one that also tells the ordinary card and the case-open notice apart.
+        AccessibleName = TrayStatus.AppName + ": " + (notice ? WidgetCopy.CaseOpen : "AirPods");
+        AccessibleRole = AccessibleRole.Window;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
