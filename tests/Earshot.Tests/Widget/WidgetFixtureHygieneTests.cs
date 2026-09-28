@@ -110,9 +110,9 @@ public sealed class WidgetFixtureHygieneTests
             Assert.IsTrue(Directory.Exists(folder), "Expected folder not found: " + folder);
             foreach (string file in Directory.EnumerateFiles(folder, "*.cs", SearchOption.AllDirectories))
             {
-                if (string.Equals(Path.GetFullPath(file), thisFile, StringComparison.OrdinalIgnoreCase))
+                if (IsBuildOutput(file) || string.Equals(Path.GetFullPath(file), thisFile, StringComparison.OrdinalIgnoreCase))
                 {
-                    continue; // this test's own regex source is not fixture data
+                    continue; // this test's own regex source is not fixture data; build output is not source
                 }
 
                 filesRead++;
@@ -231,6 +231,19 @@ public sealed class WidgetFixtureHygieneTests
 
     private static void ScanFile(string file, List<string> found) =>
         ScanText(Path.GetFileName(file), File.ReadAllText(file), found);
+
+    // src\Earshot.AdvertProbe is a whole project root, unlike the two Widget subfolders scanned alongside
+    // it (their own project's bin/obj live above them, never inside), so a clean build's own generated
+    // Earshot.AdvertProbe.AssemblyInfo.cs (SourceRevisionId: the full 40-hex current git commit, baked in by
+    // the SDK's own SourceLink support) lands squarely in its scan and reads exactly like a Bluetooth
+    // address's hex run. The same exclusion NoSpecCitationsTests already uses for its own two, differently
+    // shaped trees.
+    private static bool IsBuildOutput(string path)
+    {
+        string separator = Path.DirectorySeparatorChar.ToString();
+        return path.Contains(separator + "bin" + separator, StringComparison.OrdinalIgnoreCase) ||
+            path.Contains(separator + "obj" + separator, StringComparison.OrdinalIgnoreCase);
+    }
 
     // Pure (no file I/O), so a planted example can be run through it directly rather than only ever through
     // a file on disk under src\Earshot\Widget or tests\Earshot.Tests\Widget.
