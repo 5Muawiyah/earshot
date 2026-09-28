@@ -51,12 +51,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private bool _closed;
 
     // Bumped once for every Start() call this service makes on the source, whatever it returns; compared
-    // against a Stopped event's own Generation (item 1) to tell a run's genuine end from a late one that
-    // already belongs to a run a later Start has superseded. Read and written only under _gate.
+    // against a Stopped event's own Generation to tell a run's genuine end from a late one that already
+    // belongs to a run a later Start has superseded. Read and written only under _gate.
     private int _generation;
 
     // True between Suspend() and Resume(): a retry already queued (or a spontaneous Stopped arriving) while
-    // suspended must not start the watcher again until Resume() itself does (item 2's second half).
+    // suspended must not start the watcher again until Resume() itself does.
     private bool _suspended;
     private ITimer? _retryTimer;
     private TimeSpan _retryDelay;
@@ -497,8 +497,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
         else
         {
-            // Item 2: a failed start's own error must stand, not be discarded the way it used to be here -
-            // a Stopped event is not coming to carry it, since none was ever raised for this attempt.
+            // A failed start's own error must stand, not be discarded the way it used to be here - a
+            // Stopped event is not coming to carry it, since none was ever raised for this attempt.
             _watcherErrorCode = step.Code;
             _watcherErrorName = step.CodeName;
         }
@@ -525,8 +525,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     }
 
     // Marks the source as being stopped and cancels any pending retry, under the lock; the source's own
-    // Stop() call happens afterwards, outside it (item 3). Returns the source to stop, or null when there is
-    // none.
+    // Stop() call happens afterwards, outside it, matching every other call site's own outside-the-lock
+    // rule. Returns the source to stop, or null when there is none.
     private IAdvertisementSource? BeginStopLocked()
     {
         if (_source is null)
@@ -901,9 +901,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    // Item 2's second half: a retry queued before Suspend must not start the watcher again during suspend.
-    // Resume() starts it directly and arms its own retry if that still fails, so there is nothing for a
-    // timer to do meanwhile.
+    // A retry queued before Suspend must not start the watcher again during suspend. Resume() starts it
+    // directly and arms its own retry if that still fails, so there is nothing for a timer to do meanwhile.
     private void ScheduleRetryLocked()
     {
         if (_suspended)
@@ -926,13 +925,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // entire attempt is caught. The raw code is logged, never swallowed, and the retry is left armed at its
     // current delay so the doubling schedule simply tries again rather than stopping forever.
     //
-    // Item 2's second half: a retry that was queued before Suspend must not start the watcher during
-    // suspend. Suspend cancels the timer under the same lock this checks _suspended and _source in, so
-    // whichever of the two runs first is decided cleanly; if this callback had already fired and was only
-    // waiting on the lock, it now sees _suspended true and does nothing.
+    // A retry that was queued before Suspend must not start the watcher during suspend. Suspend cancels the
+    // timer under the same lock this checks _suspended and _source in, so whichever of the two runs first is
+    // decided cleanly; if this callback had already fired and was only waiting on the lock, it now sees
+    // _suspended true and does nothing.
     //
-    // Item 3: Start runs outside the lock, like every other call site now does, so a Start blocked here (the
-    // real watcher waiting on a slow COM call, say) cannot hold the lock a Received or Stopped callback also
+    // Start runs outside the lock, like every other call site does, so a Start blocked here (the real
+    // watcher waiting on a slow COM call, say) cannot hold the lock a Received or Stopped callback also
     // needs.
     //
     // Internal, not private: disposing a real timer does not stop a callback already dequeued and running,

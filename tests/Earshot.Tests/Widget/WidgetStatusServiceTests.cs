@@ -73,7 +73,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
     // nibblesAreNamedOrder must match whatever table a test then passes to NewService: a claim made (or
     // stood in for here) while the bud order is proved needs it true, or OwnershipRule now correctly refuses
-    // to compare its stored nibbles at all (round 2 item 4).
+    // to compare its stored nibbles at all.
     private static WidgetClaim SampleClaim(OwnedBattery? last = null, bool nibblesAreNamedOrder = false) => new(
         1, WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, WidgetFixtures.Colour, -70,
         new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero),
@@ -693,9 +693,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, _caseOpenedEvents.Count);
     }
 
-    // Round 2: a boolean "are we currently inside some uiPost action" cannot tell a genuine post apart from
-    // code that simply runs synchronously nested inside an already-posted action, so it passed even when the
-    // reviewer raised both events directly. This fake queues every posted action instead of running it
+    // A boolean "are we currently inside some uiPost action" cannot tell a genuine post apart from code
+    // that simply runs synchronously nested inside an already-posted action, so it passed even when both
+    // events were raised directly. This fake queues every posted action instead of running it
     // immediately, and records how many previously queued actions had FULLY finished (been dequeued and
     // returned) by the moment each event fires. A raise made through its own, separate uiPost call only runs
     // after the action that led to it has completed, so it fires with a completed-count of at least one; a
@@ -967,7 +967,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
             "The source that the race started after Close ran must be stopped again, not left running with nothing tracking it.");
     }
 
-    // Item 3: Start and Stop must run outside the service's own lock. Proved with a fake whose Stop blocks
+    // Start and Stop must run outside the service's own lock. Proved with a fake whose Stop blocks
     // until a handler that needs the same lock (here, the public Current getter) has actually taken it: on
     // the old code, Suspend calls Stop while still holding the lock, so the blocked Stop and the blocked
     // locked call deadlock each other; on the new code, Stop runs unlocked, so the locked call sails through
@@ -1039,8 +1039,8 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(changedBeforeCompletion, _changedEvents.Count, "Nothing after Close raises Changed.");
     }
 
-    // Round 2 item 4: a claim made while the bud order was unproved (wire order) read against a table that
-    // has since had the order proved must fail closed, and once, not once per advert.
+    // A claim made while the bud order was unproved (wire order) read against a table that has since had
+    // the order proved must fail closed, and once, not once per advert.
     [TestMethod]
     public void ANibbleOrderMismatchShowsNothingAndLogsOnce()
     {
@@ -1174,8 +1174,8 @@ public sealed class WidgetStatusServiceTests : IDisposable
         @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b|(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){4,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b",
         RegexOptions.CultureInvariant);
 
-    // Round 2: the regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own
-    // separator swapped for a space is a common enough shape to plant deliberately here).
+    // The regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own separator
+    // swapped for a space is a common enough shape to plant deliberately here).
     [TestMethod]
     public void ForbiddenByteRunCatchesSpaceSeparatedHex()
     {

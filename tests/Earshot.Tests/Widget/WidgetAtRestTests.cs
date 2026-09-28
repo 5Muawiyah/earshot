@@ -181,8 +181,8 @@ public sealed class WidgetAtRestTests
         public Task<ConnectResult> DisconnectAsync(Guid containerId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    // Round 2 residual: a field of the tray's own context, reaching OnIconMouseClick (which itself calls the
-    // private StartToggle) the way TrayContext.cs actually wires its notify icon's click handler.
+    // A field of the tray's own context, reaching OnIconMouseClick (which itself calls the private
+    // StartToggle) the way TrayContext.cs actually wires its notify icon's click handler.
     private sealed class EscapeTrayContextFieldCallingOnIconMouseClick
     {
         private readonly Earshot.App.TrayContext _tray = null!;
@@ -190,8 +190,8 @@ public sealed class WidgetAtRestTests
         public void Touch() => _tray.OnIconMouseClick(null, default!);
     }
 
-    // Round 2 residual: a P/Invoke declared directly on a type the scanner is asked to check (standing in for
-    // a widget type), rather than calling the vetted CfgMgr32.CM_Disable_DevNode through Interop.
+    // A P/Invoke declared directly on a type the scanner is asked to check (standing in for a widget type),
+    // rather than calling the vetted CfgMgr32.CM_Disable_DevNode through Interop.
     private static class EscapeWidgetLocalDllImport
     {
         [System.Runtime.InteropServices.DllImport("cfgmgr32.dll")]

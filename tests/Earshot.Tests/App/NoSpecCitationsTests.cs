@@ -56,8 +56,18 @@ public sealed class NoSpecCitationsTests
     // pointing at a document outside this repository rather than a label, so they need their own literal
     // alternatives too. "spec" alone stays unbanned (the class comment on the first version of this field
     // explains why), so only "spec" directly followed by a number is new here.
+    // Fourth return of this class: every alternative above reads a review's own label shape (a letter code,
+    // a decimal section number, a named document); none of them ever covered the plainest shape of all, the
+    // fix list's own numbering read straight off the page - "item 1", "Item 2's second half", "Round 2 item
+    // 4" - because it has no letter, no decimal point and no document name for any prior alternative to
+    // anchor on, just an ordinary English word immediately before a bare number. Two new alternatives, each
+    // exactly that shape and nothing wider: "item" or "round" (either case), a space, then one or more
+    // digits. Deliberately still not "spec" or "section" alone, for the same reason the class comment above
+    // gives for those; deliberately not "round" or "item" without a following number either, since both are
+    // ordinary English words everywhere else in this codebase (a round trip, a loop variable named item) and
+    // only the pairing with a bare number is unique to a citation.
     private static readonly Regex Citation = new(
-        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b| names\b| the other half\b| in\b)|\b[BDHLMmST][0-9]{1,2}(?=(?-i:[A-Z][a-z]))|\((?-i:[BDFHLMST])[0-9]{1,2}\b|review round|handback-on-shutdown-and-sleep|handback-review|\bspec [0-9]+(\.[0-9]+)?\b|\b[0-9]+\.[0-9]+'s\b|\(see the report\)|the design narrative",
+        @"\bsection [0-9]+(\.[0-9]+)?\b|\b[BDHLMmST][0-9]{1,2}\b(?::|'s\b| says\b| names\b| the other half\b| in\b)|\b[BDHLMmST][0-9]{1,2}(?=(?-i:[A-Z][a-z]))|\((?-i:[BDFHLMST])[0-9]{1,2}\b|review round|handback-on-shutdown-and-sleep|handback-review|\bspec [0-9]+(\.[0-9]+)?\b|\b[0-9]+\.[0-9]+'s\b|\(see the report\)|the design narrative|\bitem [0-9]+\b|\bround [0-9]+\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly string[] OwnedFolders =
@@ -100,6 +110,34 @@ public sealed class NoSpecCitationsTests
     public void CitationCatchesEveryShapeMissedByTheThirdReviewRound(string plantedLine)
     {
         Assert.IsTrue(Citation.IsMatch(plantedLine), "Missed: " + plantedLine);
+    }
+
+    // Fourth return of this class: these were live in the tree at the head this round started from
+    // (WidgetStatusService.cs, WidgetStatusServiceTests.cs, WidgetStatusServiceRealWatcherBindingTests.cs,
+    // TrayStreamingTests.cs, HandForgedSequenceMarkerTests.cs, ClaimStoreTests.cs, OwnershipRuleTests.cs),
+    // and none of them matched the regex as it stood then: an ordinary English word immediately before a
+    // bare number, with no letter code and no document name in sight.
+    [TestMethod]
+    [DataRow("against a Stopped event's own Generation (item 1) to tell a run's genuine end")]
+    [DataRow("suspended must not start the watcher again until Resume() itself does (item 2's second half).")]
+    [DataRow("Item 2: a failed start's own error must stand, not be discarded")]
+    [DataRow("Item 2 of the review. Switching the whole feature off")]
+    [DataRow("Round 2 item 4: a claim file written before NibblesAreNamedOrder existed")]
+    [DataRow("Round 2, owner decision 2026-09-27 (\"same checks always\"): a live connection used to waive")]
+    public void CitationCatchesEveryShapeMissedInTheFourthReviewRound(string plantedLine)
+    {
+        Assert.IsTrue(Citation.IsMatch(plantedLine), "Missed: " + plantedLine);
+    }
+
+    // Confirms the new pairing does not also start flagging the two ordinary English words it is built
+    // from, the moment neither is followed by a bare number: a loop variable named item, and an actual
+    // round trip.
+    [TestMethod]
+    [DataRow("foreach (var item in collection) { Process(item); }")]
+    [DataRow("a round trip to the service and back, not a cached read")]
+    public void AnOrdinaryUseOfItemOrRoundWithNoFollowingNumberIsNotMistakenForACitation(string plantedLine)
+    {
+        Assert.IsFalse(Citation.IsMatch(plantedLine), "False positive: " + plantedLine);
     }
 
     // The two cases the letter-based fix above cannot cover, without also flagging a plain decimal argument

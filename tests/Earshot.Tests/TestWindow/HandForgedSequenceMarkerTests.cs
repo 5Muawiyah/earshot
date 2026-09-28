@@ -60,9 +60,9 @@ public sealed class HandForgedSequenceMarkerTests
     {
         using var root = new TempFolder();
 
-        // Both markers legitimately issued (never above the counter, so item 1's own forged-marker
-        // check never fires here): folderB's own gui-sequence.txt is a copy of folderA's, the exact
-        // shape "a copied or duplicated record" describes.
+        // Both markers legitimately issued (never above the counter, so this proves the copy case, not
+        // the forged one): folderB's own gui-sequence.txt is a copy of folderA's, the exact shape
+        // "a copied or duplicated record" describes.
         RunSequence.TakeNext(root.Path); // 1
         RunSequence.TakeNext(root.Path); // 2, both folders below claim this same number.
 

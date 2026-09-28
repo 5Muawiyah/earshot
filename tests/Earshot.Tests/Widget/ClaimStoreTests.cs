@@ -137,9 +137,9 @@ public sealed class ClaimStoreTests
         Assert.AreEqual(json, File.ReadAllText(path), "An invalid claim file must be left exactly as it was.");
     }
 
-    // Round 2 item 4: a claim file written before NibblesAreNamedOrder existed has no such member at all.
-    // Schema stays 1; a missing member must read as false (wire order), which is what every such file
-    // actually holds, rather than fail to load or default to something that would misread its nibbles.
+    // A claim file written before NibblesAreNamedOrder existed has no such member at all. Schema stays 1; a
+    // missing member must read as false (wire order), which is what every such file actually holds, rather
+    // than fail to load or default to something that would misread its nibbles.
     [TestMethod]
     public void AnOlderClaimFileLoadsAsWireOrder()
     {
