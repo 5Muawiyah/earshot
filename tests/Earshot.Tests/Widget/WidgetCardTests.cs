@@ -281,6 +281,68 @@ public sealed class WidgetCardTests
         });
     }
 
+    // M1 (widget-review-3): OnMouseUp used to raise ToggleRequested for any button's up over Connect with
+    // no matching press on the card at all - a drag that started elsewhere and released there, or a right
+    // or middle click, none of them a genuine left click. This plants each of the three shapes the review
+    // named and requires none of them to activate the button.
+    [TestMethod]
+    [DataRow(MouseButtons.Right)]
+    [DataRow(MouseButtons.Middle)]
+    public void AnUpFromAnyButtonOtherThanLeftNeverActivatesTheButton(MouseButtons button)
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            int toggles = 0;
+            card.ToggleRequested += (_, _) => toggles++;
+
+            Rectangle buttonRect = WidgetCardLayout.Compute(96, showSwitch: false).Button;
+            Point centre = new(buttonRect.X + (buttonRect.Width / 2), buttonRect.Y + (buttonRect.Height / 2));
+            int message = button switch
+            {
+                MouseButtons.Right => Phase5.TestWindows.WM_RBUTTONUP,
+                MouseButtons.Middle => Phase5.TestWindows.WM_MBUTTONUP,
+                _ => throw new ArgumentOutOfRangeException(nameof(button)),
+            };
+            Phase5.TestWindows.Send(card.Handle, message, 0, MakeLParam(centre.X, centre.Y));
+
+            Assert.AreEqual(0, toggles, button + " up alone must never activate the Connect button.");
+        });
+    }
+
+    // A left up over the button with no preceding left down on it (a drag that started elsewhere and
+    // released over the button) must not activate it either.
+    [TestMethod]
+    public void ALeftUpWithNoMatchingLeftDownNeverActivatesTheButton()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(Model(Snapshot(), buttonEnabled: true), 96);
+            card.Location = new Point(50, 50);
+            card.Show();
+            card.Activate();
+            Application.DoEvents();
+
+            int toggles = 0;
+            card.ToggleRequested += (_, _) => toggles++;
+
+            Rectangle buttonRect = WidgetCardLayout.Compute(96, showSwitch: false).Button;
+            Point centre = new(buttonRect.X + (buttonRect.Width / 2), buttonRect.Y + (buttonRect.Height / 2));
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(centre.X, centre.Y));
+
+            Assert.AreEqual(0, toggles, "A left up with no matching left down must never activate the Connect button.");
+        });
+    }
+
     [TestMethod]
     public void SpaceOnTheFocusedSwitchRaisesAutoPauseChangedAndDoesNotClose()
     {

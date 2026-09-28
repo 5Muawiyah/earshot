@@ -79,6 +79,8 @@ internal sealed class WidgetCard : Form
     private bool _cornersApplied;
     private WidgetCardFocus _focus = WidgetCardFocus.Button;
     private string? _lastFrameProblem;
+    private bool _leftButtonDownOnButton;
+    private bool _leftButtonDownOnSwitch;
 
     public WidgetCard(ILog log, bool notice = false)
     {
@@ -256,17 +258,39 @@ internal sealed class WidgetCard : Form
         base.OnKeyDown(e);
     }
 
+    // Tracks where a left button-down landed, so OnMouseUp below can require the up to land on the same
+    // control before it activates anything: any other button (right, middle) never sets either flag, so
+    // its own up can never activate the button or the switch either.
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        ArgumentNullException.ThrowIfNull(e);
+        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
+        _leftButtonDownOnButton = e.Button == MouseButtons.Left && layout.Button.Contains(e.Location);
+        _leftButtonDownOnSwitch = e.Button == MouseButtons.Left && layout.ShowSwitch && layout.Switch.Contains(e.Location);
+    }
+
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         ArgumentNullException.ThrowIfNull(e);
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
-        if (layout.Button.Contains(e.Location))
+
+        // A left up activates a control only when the matching left down already landed on that same
+        // control: a drag that started outside the button or the switch and released inside it, or any
+        // up from a button other than left (right, middle), must not count as pressing it, the same rule
+        // GaugeWindow's own left-click handling already applies.
+        bool activatesButton = e.Button == MouseButtons.Left && _leftButtonDownOnButton && layout.Button.Contains(e.Location);
+        bool activatesSwitch = e.Button == MouseButtons.Left && _leftButtonDownOnSwitch && layout.ShowSwitch && layout.Switch.Contains(e.Location);
+        _leftButtonDownOnButton = false;
+        _leftButtonDownOnSwitch = false;
+
+        if (activatesButton)
         {
             _focus = WidgetCardFocus.Button;
             ActivateFocused();
         }
-        else if (layout.ShowSwitch && layout.Switch.Contains(e.Location))
+        else if (activatesSwitch)
         {
             _focus = WidgetCardFocus.Switch;
             ActivateFocused();

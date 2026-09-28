@@ -427,6 +427,7 @@ internal static class TestWindows
     public const int WM_LBUTTONUP = 0x0202;
     public const int WM_RBUTTONDOWN = 0x0204;
     public const int WM_RBUTTONUP = 0x0205;
+    public const int WM_MBUTTONUP = 0x0208;
 
     public static long ExtendedStyle(nint hwnd) => GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 

@@ -349,8 +349,15 @@ public sealed class CaseOpenCardTests
     private static WidgetCard ThrowingFactory() =>
         throw new AssertFailedException("No WidgetCard should be created: the gate must refuse before a card is ever built.");
 
-    private static void ClickAt(nint handle, Point point) =>
-        Phase5.TestWindows.Send(handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(point.X, point.Y));
+    // A left down then a left up at the same point: WidgetCard.OnMouseUp now requires a matching left down
+    // on the same control before it activates anything (M1, widget-review-3), so an up alone no longer
+    // reaches the Connect button or the switch.
+    private static void ClickAt(nint handle, Point point)
+    {
+        nint lParam = MakeLParam(point.X, point.Y);
+        Phase5.TestWindows.Send(handle, Phase5.TestWindows.WM_LBUTTONDOWN, 0, lParam);
+        Phase5.TestWindows.Send(handle, Phase5.TestWindows.WM_LBUTTONUP, 0, lParam);
+    }
 
     private static nint MakeLParam(int x, int y) => (nint)(((y & 0xFFFF) << 16) | (x & 0xFFFF));
 

@@ -30,9 +30,10 @@ internal readonly record struct DismissDurationReading(bool Ok, uint Seconds, in
 // identically bar the Where line, which WidgetCard itself always overrides to "Case open" for a notice-mode
 // instance, regardless of what model it was last given.
 //
-// It never connects. The only path from a CaseOpened event to WidgetCardPresenterCallbacks.RequestToggle is
-// the owner's own click on this card's Connect button while it is open (WidgetCard.ToggleRequested, wired
-// exactly as WidgetCardPresenter wires it); there is no timer and no other code path here that calls it.
+// It never connects on its own. The only path from a CaseOpened event to
+// WidgetCardPresenterCallbacks.RequestToggle is a genuine left click on this card's Connect button while it
+// is open (WidgetCard.ToggleRequested, wired exactly as WidgetCardPresenter wires it: a left down and a left
+// up on the button, not any button's up alone); there is no timer and no other code path here that calls it.
 //
 // UI thread only from the outside; every public method posts through uiPost, matching WidgetCardPresenter.
 internal sealed class CaseOpenCardPresenter : IDisposable
