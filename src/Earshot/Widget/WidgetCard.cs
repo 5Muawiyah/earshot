@@ -150,6 +150,15 @@ internal sealed class WidgetCard : Form
     // life; false means the opaque palette paint is used instead.
     internal bool HasTranslucentBackdrop => _dwmBackdropOk;
 
+    // Set only by the probe widget capture path: DWM's own translucent backdrop is never actually
+    // composited for a Form that is never shown, and Control.DrawToBitmap cannot recover or preserve real
+    // per-pixel alpha from OnPaint's own transparent clear (it bakes straight to opaque black, GDI's own
+    // text and fill calls forcing alpha to 255 as they go). Overriding the clear colour outright, before
+    // any capture, is the only way a probe image ends up with a deliberate, readable background instead.
+    // Never set in the running tray: HasTranslucentBackdrop still reports what DWM itself did.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Color? OverrideBackgroundForCaptureOnly { get; set; }
+
     // True once DWMWA_WINDOW_CORNER_PREFERENCE succeeded for this window. False either because the OS is
     // below build 22000 (never asked) or because DWM refused it.
     internal bool CornersApplied => _cornersApplied;
@@ -318,7 +327,7 @@ internal sealed class WidgetCard : Form
         Graphics g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        g.Clear(_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background);
+        g.Clear(OverrideBackgroundForCaptureOnly ?? (_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background));
 
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(_dpi, _model.ShowSwitch);
         DrawColumnLabel(g, layout.Left.Label, WidgetCopy.LeftLabel);

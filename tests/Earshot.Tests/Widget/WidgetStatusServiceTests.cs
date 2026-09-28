@@ -942,7 +942,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ForbiddenByteRunCatchesADecimalDumpOfASection()
     {
-        Assert.IsTrue(ForbiddenByteRun.IsMatch("section 6, 32, 33, 34, 35, 36 read"), "A decimal dump of a section must be caught.");
+        Assert.IsTrue(ForbiddenByteRun.IsMatch("raw bytes 6, 32, 33, 34, 35, 36 read"), "A decimal dump of a section must be caught.");
     }
 
     [TestMethod]
