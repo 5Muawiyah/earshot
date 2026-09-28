@@ -30,7 +30,7 @@ public sealed class BluetoothDeviceListTests
     // The radio, the hands-free child and an audio endpoint.
     [DataRow(@"BTH\MS_BTHBRB\a&3c4d5e6&0&1")]
     [DataRow(@"BTHHFENUM\BTHHFPAUDIO\c&2b3c4d5e&1&97")]
-    [DataRow(@"SWD\MMDEVAPI\{0.0.0.00000000}.{6D6E788A-3608-4EF8-8B08-08DB2F516970}")]
+    [DataRow(@"SWD\MMDEVAPI\{0.0.0.00000000}.{55555555-6666-4777-8888-999999999901}")]
     // Malformed and look-alike ids.
     [DataRow(@"BTHENUM\DEV_0A1B2C3D4E8\b&1a2b3c4d&0&BLUETOOTHDEVICE_0A1B2C3D4E8")]
     [DataRow(@"BTHENUM\DEV_0A1B2C3D4E8CA\b&1a2b3c4d&0&BLUETOOTHDEVICE_0A1B2C3D4E8CA")]

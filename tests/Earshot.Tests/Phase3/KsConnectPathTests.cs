@@ -102,7 +102,7 @@ public sealed class KsConnectPathTests
     [TestMethod]
     public void DisconnectGoesToEveryDistinctFilter()
     {
-        var secondRender = new AudioEndpoint("{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516971}", EndpointFlow.Render, EndpointState.Active, null, AirPodsContainer);
+        var secondRender = new AudioEndpoint("{0.0.0.00000000}.{77777777-8888-4999-8000-000000000001}", EndpointFlow.Render, EndpointState.Active, null, AirPodsContainer);
         _machine.AddEndpoint(secondRender, SrcAdapter);
 
         KsSendResult result = Send(ConnectAction.Disconnect, FilterChoice.All, Render(EndpointState.Active), secondRender, Capture(EndpointState.Active));
@@ -322,7 +322,7 @@ public sealed class KsConnectPathTests
     public void TwoFiltersWithOneReferenceStringGetDistinctStepNames()
     {
         const string SecondSrc = "{2}.\\\\?\\bthenum#second#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\src";
-        var secondRender = new AudioEndpoint("{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516972}", EndpointFlow.Render, EndpointState.Unplugged, null, AirPodsContainer);
+        var secondRender = new AudioEndpoint("{0.0.0.00000000}.{77777777-8888-4999-8000-000000000002}", EndpointFlow.Render, EndpointState.Unplugged, null, AirPodsContainer);
         _machine.AddEndpoint(secondRender, SecondSrc);
         _machine.AddAdapter(SecondSrc, AirPodsContainer);
 

@@ -14,7 +14,7 @@ namespace Earshot.Tests.Interop;
 [TestClass]
 public sealed class NotificationClientDispatchTests
 {
-    private const string DeviceId = "{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516970}";
+    private const string DeviceId = "{0.0.0.00000000}.{55555555-6666-4777-8888-999999999901}";
 
     // Slots after IUnknown's three, in SDK header order.
     private const int OnDeviceStateChangedSlot = 3;

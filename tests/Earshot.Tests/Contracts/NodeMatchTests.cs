@@ -36,9 +36,9 @@ public sealed class NodeMatchTests
     private static readonly Node[] AirPodsNonTargets =
     [
         new(@"BTHHFENUM\BTHHFPAUDIO\c&2b3c4d5e&1&97", AirPodsContainer, "Jonathan\u2019s AirPods Pro - Find My Hands-Free"),
-        new(@"SWD\MMDEVAPI\{0.0.1.00000000}.{0B46D234-B82D-4B72-B995-E8E3CA2937C9}", AirPodsContainer, "Headset (Jonathan\u2019s AirPods Pro - Find My)"),
+        new(@"SWD\MMDEVAPI\{0.0.1.00000000}.{55555555-6666-4777-8888-999999999902}", AirPodsContainer, "Headset (Jonathan\u2019s AirPods Pro - Find My)"),
         new(@"SWD\MMDEVAPI\{0.0.0.00000000}.{A2901F31-DC17-41B7-B0AD-2F77A5F04490}", AirPodsContainer, "Headset (Jonathan\u2019s AirPods Pro - Find My Hands-Free)"),
-        new(@"SWD\MMDEVAPI\{0.0.0.00000000}.{6D6E788A-3608-4EF8-8B08-08DB2F516970}", AirPodsContainer, "Headphones (Jonathan\u2019s AirPods Pro - Find My)"),
+        new(@"SWD\MMDEVAPI\{0.0.0.00000000}.{55555555-6666-4777-8888-999999999901}", AirPodsContainer, "Headphones (Jonathan\u2019s AirPods Pro - Find My)"),
     ];
 
     // The paired iPhone, exactly as Windows spelled the ids.

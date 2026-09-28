@@ -108,7 +108,7 @@ public sealed class TopologyWalkTests
     [TestMethod]
     public void FindAdaptersGroupsEndpointsThatShareAnAdapter()
     {
-        var secondRender = new AudioEndpoint("{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516971}", EndpointFlow.Render, EndpointState.Unplugged, null, AirPodsContainer);
+        var secondRender = new AudioEndpoint("{0.0.0.00000000}.{77777777-8888-4999-8000-000000000001}", EndpointFlow.Render, EndpointState.Unplugged, null, AirPodsContainer);
         AddEndpoint(secondRender.EndpointId, SrcAdapter);
 
         AdapterDiscovery discovery = TopologyWalk.FindAdapters(_enumerator, new[] { Render, secondRender }, AirPodsContainer, _ledger.Release);
@@ -139,8 +139,8 @@ public sealed class TopologyWalkTests
     [TestMethod]
     public void FindAdaptersRecordsEachFailedStepAndCarriesOn()
     {
-        var noTopology = new AudioEndpoint("{0.0.1.00000000}.{0b46d234-b82d-4b72-b995-e8e3ca2937ca}", EndpointFlow.Capture, EndpointState.Active, null, AirPodsContainer);
-        var notConnected = new AudioEndpoint("{0.0.1.00000000}.{0b46d234-b82d-4b72-b995-e8e3ca2937cb}", EndpointFlow.Capture, EndpointState.Active, null, AirPodsContainer);
+        var noTopology = new AudioEndpoint("{0.0.1.00000000}.{77777777-8888-4999-8000-000000000003}", EndpointFlow.Capture, EndpointState.Active, null, AirPodsContainer);
+        var notConnected = new AudioEndpoint("{0.0.1.00000000}.{77777777-8888-4999-8000-000000000004}", EndpointFlow.Capture, EndpointState.Active, null, AirPodsContainer);
         _enumerator.GetDeviceFailures[Render.EndpointId] = CoreAudio.E_NOTFOUND;
         _enumerator.Add(new FakeEndpointDevice(_ledger, noTopology.EndpointId));
         AddEndpoint(notConnected.EndpointId, adapterId: null);

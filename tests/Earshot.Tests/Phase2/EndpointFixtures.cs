@@ -18,8 +18,8 @@ internal static class EndpointFixtures
     public static readonly Guid MicrophoneContainer = new("6a0d2c11-8f5e-4b7a-a9d3-2e41c7b05f18");
     public static readonly Guid PcContainer = NodeMatch.PcContainer;
 
-    public const string AirPodsRenderId = "{0.0.0.00000000}.{6d6e788a-3608-4ef8-8b08-08db2f516970}";
-    public const string AirPodsCaptureId = "{0.0.1.00000000}.{0b46d234-b82d-4b72-b995-e8e3ca2937c9}";
+    public const string AirPodsRenderId = "{0.0.0.00000000}.{55555555-6666-4777-8888-999999999901}";
+    public const string AirPodsCaptureId = "{0.0.1.00000000}.{55555555-6666-4777-8888-999999999902}";
 
     public static EndpointReading AirPodsRender(EndpointState state = EndpointState.Active) =>
         new(new AudioEndpoint(AirPodsRenderId, EndpointFlow.Render, state, "Headphones (" + AirPodsName + ")", AirPodsContainer), AirPodsName);
