@@ -6,6 +6,7 @@ using Earshot.Popup;
 using Earshot.Tray;
 using Earshot.Widget;
 using Earshot.Widget.Alert;
+using Earshot.Widget.EarPause;
 
 namespace Earshot.App;
 
@@ -25,6 +26,7 @@ internal sealed partial class TrayContext
 {
     private WidgetStatusService? _widgetStatus;
     private LowBatteryAlertService? _lowBatteryAlertService;
+    private AutoPauseService? _autoPauseService;
     private GaugeController? _gaugeController;
     private TaskbarWatcher? _taskbarWatcher;
     private AppBarRegistration? _appBarRegistration;
@@ -87,6 +89,7 @@ internal sealed partial class TrayContext
             _widgetSnapshotCache = _widgetStatus.Current;
             _widgetStatus.Start();
             _lowBatteryAlertService = CompositionRoot.BuildLowBatteryAlertService(_registry, _widgetStatus);
+            _autoPauseService = CompositionRoot.BuildAutoPauseService(_registry, _widgetStatus, () => _coordinator.BlockStatus, _time);
         }
 
         if (_gaugeController is null)
@@ -369,6 +372,8 @@ internal sealed partial class TrayContext
     // TrayContext.Close, on the UI thread.
     private void CloseWidget()
     {
+        _autoPauseService?.Dispose();
+        _autoPauseService = null;
         _lowBatteryAlertService?.Dispose();
         _lowBatteryAlertService = null;
         _widgetCardPresenter?.Dispose();

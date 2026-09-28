@@ -15,11 +15,10 @@ namespace Earshot.Composition;
 // registry, from the registry itself. TrayContext calls BuildWidget from its own constructor, once the
 // coordinator exists, and owns starting, suspending, resuming and closing the result.
 //
-// Auto-pause's live wiring (feeding AutoPause.ApplyAsync from the ownership verdict and the in-ear bits
-// the status service reads internally) is not built here: IWidgetStatus's public surface carries only the
-// published snapshot, not the ownership verdict or the render container ids ApplyAsync needs, so that
-// wiring belongs inside the status service's own pipeline, not composition. Recorded in the report as
-// unfinished, not invented.
+// Auto-pause's live wiring is built here too (BuildAutoPauseService), now that IWidgetStatus carries
+// OwnedReadingApplied: the render container ids and Where still come from IDeviceMonitor/IWidgetStatus's
+// own public surface, not from the ownership verdict itself, so composition needs nothing WidgetStatusService
+// does not already publish.
 internal static partial class CompositionRoot
 {
     // Returns the concrete service, not just IWidgetStatus: Start, Suspend, Resume and Close are not on
@@ -75,5 +74,22 @@ internal static partial class CompositionRoot
             : new ToastNotifier(NotificationRegistration.AppUserModelId, new CardNotifier(r.Cards), r.Log);
 
         return new LowBatteryAlertService(status, r.Settings, notifier);
+    }
+
+    // Auto-pause's live wiring: AutoPause itself (r.MediaSessions, wrapped in safe mode by the registry's
+    // own setter, and the AutoPause setting) plus AutoPauseService, which feeds it from every
+    // OwnedReadingApplied event. Only ever called once BuildWidget has already run and found the widget
+    // enabled, which is the one thing that sets r.MediaSessions; a null MediaSessions here means something
+    // upstream is already broken, so it is asserted rather than silently no-op'd.
+    internal static AutoPauseService BuildAutoPauseService(ServiceRegistry r, IWidgetStatus status, Func<BootBlockStatus?> blockStatus, TimeProvider time)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        ArgumentNullException.ThrowIfNull(status);
+        ArgumentNullException.ThrowIfNull(blockStatus);
+        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(r.MediaSessions);
+
+        var autoPause = new AutoPause(r.MediaSessions, () => r.Settings.Current.Widget.AutoPause, r.Log);
+        return new AutoPauseService(status, r.Monitor, blockStatus, r.Settings, autoPause, time, r.Log);
     }
 }
