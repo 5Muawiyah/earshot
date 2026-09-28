@@ -298,4 +298,47 @@ public sealed class TaskbarWatcherTests
         Thread.Sleep(200);
         Assert.AreEqual(TaskbarWatcher.ShownPollIntervalMs, watcher.PollIntervalMs, "Fast reads must not double it again.");
     }
+
+    // A caller on any thread may Poke() (TrayContext's shell-signal listeners do exactly this) at the same
+    // moment another thread disposes the watcher. Poke() and ResetBackoff() used to check the _disposed
+    // field and then, separately, call _poke.Set(): between that check and the call, Loop's own finally
+    // block (running on the worker thread once Dispose's Join sees the loop exit) could already have
+    // disposed _poke, so the caller's Set() landed on a disposed AutoResetEvent. This ran thousands of
+    // watchers, one after another, each raced against a burst of concurrent Poke() calls: on the
+    // unfixed code this reliably threw ObjectDisposedException from inside Poke() on a caller thread with
+    // nothing there to catch it, which crashed the test host under a full-suite run rather than failing
+    // this test cleanly (the same shape the check.ps1 run of 2026-09-28 hit in
+    // TaskbarWatcherTests.ResultsAreDeliveredThroughTheGivenUiPostDelegateNeverCalledDirectly, a different,
+    // innocent test whose failure was really this race in a concurrently-running watcher).
+    [TestMethod]
+    public void ConcurrentPokeAndResetBackoffDuringDisposeNeverThrow()
+    {
+        for (int i = 0; i < 300; i++)
+        {
+            var reader = new FakeTaskbarReader();
+            var log = new CapturingLog();
+            var watcher = new TaskbarWatcher(reader, () => null, _ => { }, ImmediateUiPost, log, TimeProvider.System)
+            {
+                PollIntervalMs = 1,
+            };
+            watcher.Start();
+
+            var ready = new ManualResetEventSlim(false);
+            var pokeThread = new Thread(() =>
+            {
+                ready.Set();
+                for (int j = 0; j < 100; j++)
+                {
+                    watcher.Poke();
+                    watcher.ResetBackoff();
+                }
+            })
+            { IsBackground = true };
+            pokeThread.Start();
+            ready.Wait();
+
+            watcher.Dispose();
+            Assert.IsTrue(pokeThread.Join(TimeSpan.FromSeconds(5)), "The poking thread must finish promptly.");
+        }
+    }
 }

@@ -33,6 +33,16 @@ internal sealed class TaskbarWatcher : IDisposable
     private volatile int _pollIntervalMs = ShownPollIntervalMs;
     private volatile bool _backoffResetRequested;
 
+    // Guards _poke and _stop against a call to Set() racing their disposal. Loop's own finally block is the
+    // only place either handle is ever disposed (see Dispose's comment), but a caller of Poke() or
+    // ResetBackoff() can be checking _disposed and about to call _poke.Set() at the exact moment Loop
+    // finishes and disposes it: checking a bool and then calling Set() are two separate steps with a gap
+    // between them, and that gap is exactly where a disposed handle used to be reached. _handlesDisposed is
+    // read and written only inside this lock, so "is it safe to call Set()" and "call Set()" happen as one
+    // step, and Loop's finally cannot run between them.
+    private readonly Lock _handleGate = new();
+    private bool _handlesDisposed;
+
     public TaskbarWatcher(ITaskbarReader reader, Func<ShownGauge?> shownGauge, Action<ITaskbarReader.Result> onResult, Action<Action> uiPost, ILog log, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -76,9 +86,12 @@ internal sealed class TaskbarWatcher : IDisposable
     // stays signalled until the loop waits on it again.
     public void Poke()
     {
-        if (!_disposed)
+        lock (_handleGate)
         {
-            _poke.Set();
+            if (!_handlesDisposed)
+            {
+                _poke.Set();
+            }
         }
     }
 
@@ -90,10 +103,13 @@ internal sealed class TaskbarWatcher : IDisposable
     // and Poke already use to cross from any caller's thread to the worker thread safely.
     public void ResetBackoff()
     {
-        if (!_disposed)
+        lock (_handleGate)
         {
-            _backoffResetRequested = true;
-            _poke.Set();
+            if (!_handlesDisposed)
+            {
+                _backoffResetRequested = true;
+                _poke.Set();
+            }
         }
     }
 
@@ -105,6 +121,13 @@ internal sealed class TaskbarWatcher : IDisposable
     // ObjectDisposedException on a background thread with nothing to catch it and taking the process down.
     // Loop's own finally block disposes them instead, after the thread is certain never to touch them
     // again, so only one thread ever calls Dispose on either handle.
+    //
+    // Only _stop.Set() is needed to wake a waiting Loop: it is one of the two handles WaitAny waits on, so
+    // setting it alone is enough for the loop to notice _stop.IsSet and return. An earlier version also
+    // called _poke.Set() here, which raced this very method: the worker thread can wake on _stop, return,
+    // and dispose _poke in Loop's finally before this method's own next line ran, throwing
+    // ObjectDisposedException out of Dispose() itself. Dropping the redundant call removes that race
+    // outright rather than guarding it.
     public void Dispose()
     {
         if (_disposed)
@@ -114,16 +137,24 @@ internal sealed class TaskbarWatcher : IDisposable
 
         _disposed = true;
         _stop.Set();
-        _poke.Set();
         if (_started)
         {
             _thread.Join(TimeSpan.FromMilliseconds(500));
         }
         else
         {
-            // The thread never started, so nothing else will ever dispose these.
-            _poke.Dispose();
-            _stop.Dispose();
+            // The thread never started, so nothing else will ever dispose these. Guarded by the same lock
+            // as Poke/ResetBackoff even though nothing else can race here (the thread never ran), so the
+            // "who disposes these handles" rule has exactly one enforcement point.
+            lock (_handleGate)
+            {
+                if (!_handlesDisposed)
+                {
+                    _handlesDisposed = true;
+                    _poke.Dispose();
+                    _stop.Dispose();
+                }
+            }
         }
     }
 
@@ -181,8 +212,12 @@ internal sealed class TaskbarWatcher : IDisposable
         }
         finally
         {
-            _poke.Dispose();
-            _stop.Dispose();
+            lock (_handleGate)
+            {
+                _handlesDisposed = true;
+                _poke.Dispose();
+                _stop.Dispose();
+            }
         }
     }
 
