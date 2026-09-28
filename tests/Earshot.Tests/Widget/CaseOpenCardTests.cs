@@ -95,6 +95,24 @@ public sealed class CaseOpenCardTests
         Assert.IsTrue(log.Has(LogLevel.Debug, "hand-back is running"));
     }
 
+    // M3 (widget-review-3): the case-open notice must never show over the owner's own gauge-anchored card,
+    // not just over a second instance of itself (ThrowingFactory proves no card is even built, the same
+    // proof the gate's other refusals already use).
+    [TestMethod]
+    public void TheOwnersOwnCardAlreadyOpenRefusesTheCard()
+    {
+        var callbacks = new FakeCallbacks();
+        var gate = Gate(ownCardOpen: true);
+        var environment = new Earshot.Tests.Phase5.FakeCardEnvironment();
+        var log = new CapturingLog();
+        using var presenter = new CaseOpenCardPresenter(ThrowingFactory, callbacks.Build(), gate, environment, Inline, new Streaming.TestTimeProvider(), log);
+
+        presenter.RequestShow(gaugeBounds: null);
+
+        Assert.IsFalse(presenter.IsShown);
+        Assert.IsTrue(log.Has(LogLevel.Debug, "the owner's own card is already open"));
+    }
+
     [TestMethod]
     public void SessionEndInProgressRefusesTheCard()
     {
@@ -361,8 +379,8 @@ public sealed class CaseOpenCardTests
 
     private static nint MakeLParam(int x, int y) => (nint)(((y & 0xFFFF) << 16) | (x & 0xFFFF));
 
-    private static CaseOpenCardGate Gate(bool enabled = true, bool closing = false, bool handBack = false, bool sessionEnd = false) =>
-        new(Enabled: () => enabled, Closing: () => closing, HandBackInProgress: () => handBack, SessionEndInProgress: () => sessionEnd);
+    private static CaseOpenCardGate Gate(bool enabled = true, bool closing = false, bool handBack = false, bool sessionEnd = false, bool ownCardOpen = false) =>
+        new(Enabled: () => enabled, Closing: () => closing, HandBackInProgress: () => handBack, SessionEndInProgress: () => sessionEnd, OwnCardOpen: () => ownCardOpen);
 
     private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false) =>
         new(

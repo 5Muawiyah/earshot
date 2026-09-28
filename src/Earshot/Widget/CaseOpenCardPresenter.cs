@@ -15,7 +15,8 @@ internal sealed record CaseOpenCardGate(
     Func<bool> Enabled,               // Settings.Widget.CaseOpenCard
     Func<bool> Closing,               // TrayContext._closing
     Func<bool> HandBackInProgress,    // BlockCoordinator.HandBackInProgress
-    Func<bool> SessionEndInProgress); // BlockCoordinator.SessionEndInProgress
+    Func<bool> SessionEndInProgress,  // BlockCoordinator.SessionEndInProgress
+    Func<bool> OwnCardOpen);          // WidgetCardPresenter.IsShown: the gauge-anchored card, not this one
 
 // SystemParametersInfoW(SPI_GETMESSAGEDURATION) as it returned: the raw Win32 result, read fresh at each
 // show so a machine's own accessibility setting is honoured every time, not just once at start-up.
@@ -131,6 +132,14 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         {
             // Idempotent: a second CaseOpened while one is already showing does not stack a second window.
             _log.Write(LogLevel.Debug, "Case-open card: already open, a second case-open notice is ignored.");
+            return;
+        }
+
+        if (_gate.OwnCardOpen())
+        {
+            // The owner's own gauge-anchored card is a card of ours too: showing the notice over it would
+            // stack one Earshot window on another, and the owner already has what he opened in front of him.
+            _log.Write(LogLevel.Debug, "Case-open card: not shown, the owner's own card is already open.");
             return;
         }
 

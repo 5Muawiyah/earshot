@@ -131,7 +131,8 @@ internal sealed partial class TrayContext
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
                 Closing: () => _closing,
                 HandBackInProgress: () => _coordinator.HandBackInProgress,
-                SessionEndInProgress: () => _coordinator.SessionEndInProgress);
+                SessionEndInProgress: () => _coordinator.SessionEndInProgress,
+                OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
             _caseOpenCardPresenter = new CaseOpenCardPresenter(
                 () => new WidgetCard(_log, notice: true), callbacks, caseOpenGate, new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
         }
