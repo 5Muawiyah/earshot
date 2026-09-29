@@ -23,6 +23,10 @@ internal sealed partial class TrayContext
         return !(_toggleSuperseded || clickedAt - _toggleClickedAt < (long)_doubleClickTime.TotalMilliseconds);
     }
 
+    // What a settings page binds its shortcut boxes to: a copy of the hotkey settings the page will save, with each
+    // box's chord, set, clear and "did it fail to register", the last read from what the running registration did.
+    internal HotkeyBindingModel HotkeyBindings(HotkeySettings editing) => new(editing, () => _hotkeys.CurrentOutcomes);
+
     // The shortcut for a direction fired. It asks for that end state whatever the tray last believed: pressed when
     // the AirPods are already there, the coordinator confirms without sending anything and the card says so.
     private void OnSwitchHotkey(HotkeyAction action)

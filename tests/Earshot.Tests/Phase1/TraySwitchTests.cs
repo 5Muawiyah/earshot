@@ -378,6 +378,40 @@ public sealed class TraySwitchTests
         });
     }
 
+    // The settings page binds to the tray's own registration: a chord another program holds shows as failed, and
+    // clearing or changing a box edits the copy the page will save.
+    [TestMethod]
+    public void TheBindingModelReadsWhatTheRunningRegistrationDidWithEachChord()
+    {
+        StaThread.Run(() =>
+        {
+            var native = new FakeNativeHotkeys();
+            native.SetResult(ToPcId, NativeCallResult.Failure(1409));
+            using var tray = new TrayHarness(nativeHotkeys: native);
+            tray.PumpUntilIdle();
+            HotkeySettings editing = tray.Settings.Current.Hotkeys;
+
+            HotkeyBindingModel model = tray.Context.HotkeyBindings(editing);
+
+            Assert.AreEqual("Ctrl+Alt+Shift+A", model.Chord(HotkeyAction.SwitchToPc));
+            Assert.IsTrue(model.RegistrationFailed(HotkeyAction.SwitchToPc));
+            StringAssert.Contains(model.FailureMessage(HotkeyAction.SwitchToPc)!, "1409");
+            Assert.IsFalse(model.RegistrationFailed(HotkeyAction.SwitchToPhone));
+
+            model.Clear(HotkeyAction.SwitchToPc);
+            Assert.IsNull(model.Set(HotkeyAction.SwitchToPhone, "Ctrl+Alt+Shift+P"));
+            tray.Settings.Update(s =>
+            {
+                s.Hotkeys.SwitchToPc = editing.SwitchToPc;
+                s.Hotkeys.SwitchToPhone = editing.SwitchToPhone;
+            });
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(model.RegistrationFailed(HotkeyAction.SwitchToPc), "A cleared chord is not a failure once the settings are applied.");
+            Assert.IsTrue(tray.NativeHotkeys.Calls.Any(c => c.Method == "RegisterHotKey" && c.Id == ToPhoneId && c.VirtualKey == 0x50));
+        });
+    }
+
     [TestMethod]
     public void AnErrorThatIsNotTheHeldOneIsAlsoOnTheCardAndInTheLogWithItsNumber()
     {
