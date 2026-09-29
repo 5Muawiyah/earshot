@@ -75,7 +75,9 @@ then Connect on the card.
   blocks them. It does not disconnect them. It does nothing else, takes no
   requests from any program, and reads its settings only from a folder that
   standard users cannot write to. Setup installs it and uninstall removes it.
-  It has not had a live run yet.
+  It does not cover a shut down with Fast Startup on, which Windows may
+  finish without telling services, and whether a restart gives it the
+  shut-down notice is not proved. It has not had a live run yet.
 
 See [docs/requirements.md](docs/requirements.md) for what each point promises
 and the test that proves it, and [docs/overview.md](docs/overview.md) for a

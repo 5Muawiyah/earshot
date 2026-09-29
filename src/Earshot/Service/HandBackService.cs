@@ -9,9 +9,9 @@ namespace Earshot.Service;
 // and when Windows starts to shut down blocks the pinned AirPods if the tray icon did not already hand them back.
 //
 // It does one thing, and nothing else is reachable from it. Its only work is the shut-down block of
-// GateActions.RunPreshutdown, which disables the pinned device's nodes and never enables one. It accepts three
-// controls: stop and interrogate, and the pre-shutdown control that only the system can send; the access list the
-// install applies takes stop away from every standard user. It opens no pipe, socket, RPC endpoint, COM server or
+// GateActions.RunPreshutdown, which disables the pinned device's nodes and never enables one. It answers three
+// controls: stop, interrogate, and the pre-shutdown control that only the system can send; the access list the
+// install applies takes stop and interrogate away from every standard user, so only an administrator can send either. It opens no pipe, socket, RPC endpoint, COM server or
 // window, and takes no request from the tray or any user: the setting it acts on and the device it blocks are read
 // from the machine folder, which only administrators can write, after that folder's access list has been checked.
 //
@@ -28,7 +28,9 @@ internal sealed class HandBackService : IDisposable
     internal const uint StartPendingWaitHintMs = 3_000;
     internal const uint StopPendingWaitHintMs = 10_000;
 
-    // The controls it takes: stop, and the pre-shutdown control. Interrogate needs no bit; the manager answers it.
+    // The controls it takes: stop, and the pre-shutdown control. Interrogate has no bit because every service takes it: the
+    // control manager sends it to the handler like any other control, and the handler answers NO_ERROR without a report,
+    // since the state has not changed.
     internal const uint AcceptedControls = AdvApi32.SERVICE_ACCEPT_STOP | AdvApi32.SERVICE_ACCEPT_PRESHUTDOWN;
 
     private const uint NoError = 0;
