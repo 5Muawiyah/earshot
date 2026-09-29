@@ -94,6 +94,19 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'Pause on leave: the AirPods left this PC'; Text = 'Pause on leave: the AirPods left this PC (change seen at 2026-09-29T14:05:00.000Z). Paused com.example.player 8 ms after the change was seen; this PC was playing to them at the last reading, 640 ms before.' }
     [ordered]@{ Pattern = 'Not paused: this PC was not playing to them'; Text = 'Pause on leave: the AirPods left this PC (change seen at 2026-09-29T14:10:00.000Z). Not paused: this PC was not playing to them (last reading: silent).' }
 
+    # test 16: the lines a measured switch leaves, and the two lines a shortcut press leaves. Raw: written exactly as
+    # they are, because 16-FastSwitch.ps1 reads their whole shape and a trailing counter would be a different line.
+    # Their text is pinned against the real formatter (SwitchTimelineText) by LiveTestFieldTests. The click shape
+    # took the allow-first path and the shortcut shape the direct one, so both paths are in the fixtures. The
+    # protect-on line is the one the coordinator logs for a protect verb it sends during a switch.
+    [ordered]@{ Pattern = 'Switch to-pc: '; Raw = $true; Text = 'Switch to-pc: active after 1719 ms (trigger click, path allow-first, queued 0, first-pass 12, status 6, allow 251, endpoints 9, connect 1441, protection 3228, total 4947, accepted 2026-09-15T20:30:00.000Z).' }
+    [ordered]@{ Pattern = 'Switch to-pc: '; Raw = $true; Text = 'Switch to-pc: active after 2749 ms (trigger shortcut-to-pc, path direct, queued 0, first-pass 2749, status -, allow -, endpoints -, connect -, protection 3300, total 6049, accepted 2026-09-15T20:30:00.000Z).' }
+    [ordered]@{ Pattern = 'Switch to-phone: '; Raw = $true; Text = 'Switch to-phone: released after 9 ms, at rest after 291 ms (trigger click, queued 0, block 282, total 291, accepted 2026-09-15T20:30:00.000Z).' }
+    [ordered]@{ Pattern = 'Switch to-phone: '; Raw = $true; Text = 'Switch to-phone: released after 58 ms, at rest after 349 ms (trigger shortcut-to-phone, queued 0, block 291, total 349, accepted 2026-09-15T20:30:00.000Z).' }
+    [ordered]@{ Pattern = 'Hotkey: switch to'; Text = 'Hotkey: switch to this PC.' }
+    [ordered]@{ Pattern = 'Hotkey: switch to'; Text = 'Hotkey: switch to the phone.' }
+    [ordered]@{ Pattern = 'protect-on ('; Text = 'protect-on (Allow): Success. Audio quality protected' }
+
     # test 19: the widget's own log lines. None, one or two copies each, the same as every other
     # generic pattern.
     [ordered]@{ Pattern = 'sh-app-bar-message:abm-new'; Text = 'AppBar: sh-app-bar-message:abm-new ok S_OK (0x00000000)' }
@@ -138,6 +151,7 @@ $script:StartStates = @{
     '14-set-device-refusal|first'        = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '15-uninstall-reversal|first'        = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '15-uninstall-reversal|resume'       = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'NotProtected'; SetUp = $true }
+    '16-fast-switch|first'               = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '17-handback-on-shutdown|first'      = @{ NodeState = 'Allowed'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
     '17-handback-on-shutdown|resume'     = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '18-handback-on-sleep|first'         = @{ NodeState = 'Blocked'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
@@ -216,6 +230,14 @@ $script:Answers = [ordered]@{
     'did the sound go back to your phone or stop coming out'                 = 'yes'
     'did a card say the airpods were being handed back'                      = 'yes'
 
+    # test 16: switching between the phone and this PC.
+    'did you hear this pc in the airpods'                                    = 'yes'
+    'was that wait acceptable'                                               = 'yes'
+    'did the sound cut out or change after it had started'                   = 'no'
+    'did the phone take the airpods back by itself'                          = 'yes'
+    'had you pressed either switch shortcut'                                 = 'no'
+    'when you pressed play on the phone'                                     = 'yes'
+
     # test 21: pause on leave.
     'pause by itself before you heard it come out of the speakers'           = 'yes'
     'did any of the music play out of the speakers'                          = 'no'
@@ -251,6 +273,7 @@ $script:CaseItemCounts = @{
     'declined-start' = 0
     'handback-cut-short' = 0; 'handback-not-reached' = 0; 'no-sleep-event' = 1; 'repaged-at-wake' = 1
     'exit-cut-short' = 0; 'pause-declined' = 0
+    'switch-timed-out' = 0; 'switch-not-at-rest' = 1; 'switch-rejected' = 1; 'switch-unparsable' = 0
 }
 
 function Initialize-FakeMachine
@@ -265,7 +288,8 @@ function Initialize-FakeMachine
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-            'exit-cut-short', 'pause-declined')][string]$Case
+            'exit-cut-short', 'pause-declined',
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -324,7 +348,8 @@ function New-FakeSandbox
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-            'exit-cut-short', 'pause-declined')][string]$Case
+            'exit-cut-short', 'pause-declined',
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -358,7 +383,10 @@ function New-FakeSandbox
         {
             $index = $index + 1
             $stamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
-            $lines = $lines + @([string]$stamp + ' INFO  ' + $fixture.Text + ' (' + ($i + 1) + ')')
+            # A fixture marked Raw is written exactly as it is: a script that reads its whole shape would not
+            # recognise it with a counter on the end.
+            $counter = $(if ($fixture.Contains('Raw') -and $fixture.Raw) { '' } else { ' (' + ($i + 1) + ')' })
+            $lines = $lines + @([string]$stamp + ' INFO  ' + $fixture.Text + $counter)
         }
 
         if ($fixture.Pattern -eq $script:PastStampedPattern)
@@ -448,6 +476,30 @@ function New-FakeSandbox
     {
         $index = $index + 1; $p1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
         $lines = $lines + @([string]$p1 + ' INFO  Pause on leave: the AirPods left this PC (change seen at ' + $p1 + '). Not paused: this PC was not playing to them (last reading: silent).')
+    }
+
+    # test 16, switch-timed-out: a switch to this PC that did not become active, the line Earshot writes when its own
+    # budget for the connect ran out. It is the only switch line in the log, so nothing else says a switch worked.
+    if ($Case -eq 'switch-timed-out')
+    {
+        $index = $index + 1; $w1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$w1 + ' WARN  Switch to-pc: not active (outcome Failed, trigger shortcut-to-pc, path allow-first, blocked-again yes, total 15012, accepted 2026-09-15T20:30:00.000Z).')
+    }
+
+    # test 16, switch-unparsable: every switch line is there and every figure in it is mangled, one of them left out
+    # altogether. A script that read a figure it could not find as 0 would call these instant switches.
+    if ($Case -eq 'switch-unparsable')
+    {
+        foreach ($mangled in @(
+                'Switch to-pc: active after  ms (trigger click, path direct, queued 0, first-pass 5, status -, allow -, endpoints -, connect -, protection 0, total 5, accepted 2026-09-15T20:30:00.000Z).'
+                'Switch to-pc: active after ?? ms (trigger shortcut-to-pc, path direct, queued 0, first-pass 5, status -, allow -, endpoints -, connect -, protection 0, total 5, accepted 2026-09-15T20:30:00.000Z).'
+                'Switch to-phone: released after  ms, at rest after 291 ms (trigger click, queued 0, block 282, total 291, accepted 2026-09-15T20:30:00.000Z).'
+                'Switch to-phone: released after 9 ms, at rest after ?? ms (trigger shortcut-to-phone, queued 0, block 282, total 291, accepted 2026-09-15T20:30:00.000Z).'))
+        {
+            $index = $index + 1
+            $mangledStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+            $lines = $lines + @([string]$mangledStamp + ' INFO  ' + $mangled)
+        }
     }
 
     # A line with no stamp at all and a line no pattern looks for, so reading a log that holds
@@ -1058,6 +1110,13 @@ function Get-FakeAnswer
     )
 
     $lower = $Question.ToLowerInvariant()
+
+    # test 16, switch-rejected: the owner says no to every "was that wait acceptable", blind, before any figure.
+    if ((Get-FakeContext).Case -eq 'switch-rejected' -and $lower.Contains('was that wait acceptable') -and ($Options -contains 'no'))
+    {
+        return 'no'
+    }
+
     foreach ($key in $script:Answers.Keys)
     {
         if ($lower.Contains($key))
@@ -1099,6 +1158,24 @@ function Update-FakeWorldForOwnerAction
     param([Parameter(Mandatory = $true)][string]$Text)
 
     $lower = $Text.ToLowerInvariant()
+
+    # test 16, ahead of every rule below because its texts also hold "left-click" and "the phone". A switch to this
+    # PC puts the AirPods here with the nodes enabled, as Earshot's connect does; a switch to the phone lets them go
+    # and blocks the nodes. switch-not-at-rest is the one case where the block did not take: the nodes still read
+    # Allowed, so the closing step is what has to notice and offer the block.
+    if ($lower.Contains('switch to this pc'))
+    {
+        $script:World.Render = 'Active'
+        $script:World.NodeState = 'Allowed'
+        return
+    }
+
+    if ($lower.Contains('switch to phone'))
+    {
+        $script:World.Render = 'Unplugged'
+        if ((Get-FakeContext).Case -ne 'switch-not-at-rest') { $script:World.NodeState = 'Blocked' } else { $script:World.NodeState = 'Allowed' }
+        return
+    }
 
     # test 20 and test 21, ahead of the rules below because their texts also hold "disconnect the airpods" or
     # "left-click". Choosing Exit hands the AirPods back, and Earshot's own Disconnect lets go and blocks after it:
