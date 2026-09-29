@@ -284,8 +284,11 @@ $script:CaseItemCounts = @{
     # list, and differs only in the status file the service wrote (Write-FakeStatusFiles below).
     'service-not-run' = 1; 'service-partial' = 1; 'service-over-budget' = 1
 
-    # test 22's own case: the owner did not end the Earshot task, so the tray is still running when the shut down starts.
-    'tray-not-ended' = 1
+    # test 22's own cases. tray-not-ended: the owner did not end the Earshot task, so the tray is still running when the shut
+    # down starts. service-block-sent and service-already-blocked: the two ways a status file can say the nodes ended up
+    # blocked, one where the service sent the block and one where it found them blocked already. tray-unreadable: the list of
+    # running programs could not be read, so "the tray is gone" is not known.
+    'tray-not-ended' = 1; 'service-block-sent' = 1; 'service-already-blocked' = 1; 'tray-unreadable' = 1
 }
 
 # How many status files the hand-back service wrote, per case: the shared none, one and two write 0, 1 and 2 (so the
@@ -295,6 +298,7 @@ $script:CaseItemCounts = @{
 $script:StatusFileCounts = @{
     none = 0; one = 1; two = 2
     'service-not-run' = 0; 'service-partial' = 1; 'service-over-budget' = 1; 'tray-not-ended' = 1
+    'service-block-sent' = 1; 'service-already-blocked' = 1; 'tray-unreadable' = 1
 }
 
 function Initialize-FakeMachine
@@ -310,7 +314,7 @@ function Initialize-FakeMachine
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined',
-            'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended',
+            'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
             'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
     )
 
@@ -372,7 +376,7 @@ function New-FakeSandbox
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined',
-            'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended',
+            'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
             'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
     )
 
@@ -589,7 +593,10 @@ function Write-FakeStatusFiles
         [Parameter(Mandatory = $true)][string]$Case
     )
 
-    $ahead = (Get-Date).ToUniversalTime().AddHours(1)
+    # Whole milliseconds, so the moment a fake service says it sent the block, which the real service writes to the
+    # millisecond, is exactly so many milliseconds after the file's start.
+    $now = (Get-Date).ToUniversalTime().AddHours(1)
+    $ahead = [datetime]::new($now.Ticks - ($now.Ticks % [TimeSpan]::TicksPerMillisecond), [System.DateTimeKind]::Utc)
     $stamp = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'"
     $invariant = [System.Globalization.CultureInfo]::InvariantCulture
     $count = 0
@@ -608,7 +615,18 @@ function Write-FakeStatusFiles
             [ordered]@{ Step = 'preshutdown'; Ok = $true; Code = 0; CodeName = 'S_OK'; Detail = 'already blocked' }
         )
 
-        if ($Case -eq 'service-over-budget') { $milliseconds = 9500 }
+        # The service sent the block itself: every node disabled, then the step that names the moment it was sent (120 ms in),
+        # the way the service's own status file has them. The over-budget case is one of these that took 9,500 ms.
+        if ($Case -eq 'service-block-sent' -or $Case -eq 'service-over-budget')
+        {
+            if ($Case -eq 'service-over-budget') { $milliseconds = 9500 }
+            $sentAt = $started.AddMilliseconds(120).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", $invariant)
+            $steps = @(
+                [ordered]@{ Step = 'gate-run-lock'; Ok = $true; Code = 0; CodeName = 'ERROR_SUCCESS'; Detail = 'Global\Earshot.Gate.RunLock' }
+                [ordered]@{ Step = ('cm-disable:' + $sinkNode); Ok = $true; Code = 0; CodeName = 'CR_SUCCESS'; Detail = 'Disabled until it is allowed again.' }
+                [ordered]@{ Step = 'preshutdown'; Ok = $true; Code = 0; CodeName = 'S_OK'; Detail = ('block sent at ' + $sentAt) }
+            )
+        }
         if ($Case -eq 'service-partial')
         {
             # The sink node refused with CR_REMOVE_VETOED (23) and stayed refused after the one retry.
@@ -800,7 +818,10 @@ function Get-FakeService
 # Whether the Earshot tray icon is still running in the fake machine: true until the owner is told to end its task.
 function Test-FakeTrayRunning
 {
-    return [bool]$script:World.TrayRunning
+    # yes, no or unknown, as the real helper answers. tray-unreadable is the case where the process list could not be read.
+    if ((Get-FakeContext).Case -eq 'tray-unreadable') { return 'unknown' }
+    if ([bool]$script:World.TrayRunning) { return 'yes' }
+    return 'no'
 }
 
 function Get-FakeTopology

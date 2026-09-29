@@ -60,8 +60,10 @@ $atRestReason = ''
 $startedFile = ''
 if (-not [string]::IsNullOrEmpty($RunRoot)) { $startedFile = Join-Path $run.Folder 'shutdown-start.txt' }
 
-# The newest test 17 result.json's overall outcome, from any earlier sitting, or 'not-run'. Recorded
-# as a finding, never a reason to refuse: the owner may have run it under a different RunRoot.
+# The newest test 17 result.json's overall outcome, from any earlier sitting, 'not-run' when there is
+# none, or 'unreadable' when there is one that cannot be read or holds no outcome (which is not the
+# same as never having run). Recorded as a finding, never a reason to refuse: the owner may have run it
+# under a different RunRoot.
 function Get-Test17Result
 {
     $paths = Get-EarshotDataPaths
@@ -85,12 +87,18 @@ function Get-Test17Result
     {
         $result = (Get-Content -LiteralPath $newestPath -Raw | ConvertFrom-Json)
         $overall = [string](Get-Field -Object $result -Name 'overall')
-        if ([string]::IsNullOrEmpty($overall)) { return 'not-run' }
+        if ([string]::IsNullOrEmpty($overall))
+        {
+            Write-Failure -Run $run -Message ('The test 17 result at ' + $newestPath + ' holds no overall outcome, so it is recorded as unreadable.')
+            return 'unreadable'
+        }
+
         return $overall
     }
     catch
     {
-        return 'not-run'
+        Write-Failure -Run $run -Message ('The test 17 result at ' + $newestPath + ' could not be read, so it is recorded as unreadable: ' + ($_ | Out-String).Trim())
+        return 'unreadable'
     }
 }
 
@@ -141,12 +149,13 @@ try
             $statesAfterEnd = Get-TargetEndpointStates -AudioJson $audioAfterEnd
             $nodesAfterEnd = Get-NodeState -Run $run -Label 'nodes-tray-gone'
             $nodeStateAfterEnd = Get-Field -Object $nodesAfterEnd -Name 'nodeState'
+            # yes, no or unknown: a process list that could not be read is not "the tray is gone".
             $trayRunning = Test-EarshotRunning
             Write-Line -Run $run -Text ('Tray running ' + $trayRunning + ', render ' + $statesAfterEnd.Render + ', nodes ' + $nodeStateAfterEnd)
 
             Add-Criterion -Run $run -Id 'tray-gone-still-connected' -Criterion 'The Earshot tray icon is gone and the AirPods are still connected with the nodes enabled.' `
-                -Outcome $(if (-not $trayRunning -and $nodeStateAfterEnd -eq 'Allowed') { 'pass' } elseif ($trayRunning) { 'fail' } else { 'inconclusive' }) `
-                -Detail ('tray running: ' + $trayRunning + '; render ' + $statesAfterEnd.Render + '; nodes ' + $nodeStateAfterEnd + '. The hand-back the tray does at shut down cannot run, so only the service can block.')
+                -Outcome $(if ($trayRunning -eq 'yes') { 'fail' } elseif ($trayRunning -eq 'unknown') { 'inconclusive' } elseif ($nodeStateAfterEnd -eq 'Allowed') { 'pass' } else { 'inconclusive' }) `
+                -Detail ('tray running: ' + $trayRunning + '; render ' + $statesAfterEnd.Render + '; nodes ' + $nodeStateAfterEnd + $(if ($trayRunning -eq 'unknown') { '. The list of running programs could not be read, so this cannot say the tray is gone.' } else { '. The hand-back the tray does at shut down cannot run, so only the service can block.' }))
 
             Add-Finding -Run $run -Name 'blockAtBootAtShutdown' -Value (Get-BlockAtBootSetting -Run $run)
             Add-Finding -Run $run -Name 'fastStartupAtShutdown' -Value (Get-FastStartupSetting -Run $run) `
@@ -161,7 +170,7 @@ try
                 -Detail 'HandBackAtShutdown read from config.json, the copy of the setting the service reads'
             Add-Finding -Run $run -Name 'serviceStateAtShutdown' -Value $serviceState `
                 -Detail 'running, stopped, missing, differs or unreadable, from probe service before the shutdown'
-            Add-Finding -Run $run -Name 'serviceWorkingSetBytes' -Value (Get-HandBackServiceWorkingSet -ServiceJson $service) `
+            Add-Finding -Run $run -Name 'serviceWorkingSetBytes' -Value (Get-HandBackServiceWorkingSet -ServiceJson $service -Run $run) `
                 -Detail 'the working set of the service process, read from Get-Process before the shutdown; not recorded when it cannot be told apart'
             Add-Finding -Run $run -Name 'test17Result' -Value (Get-Test17Result) -Detail 'the newest 17-HandBackOnShutdown result.json overall, from any earlier sitting'
 
@@ -179,13 +188,15 @@ try
     else
     {
         # Missing only when the first half never reached the point of shutting down (the owner said
-        # no to "ready to start", so there is nothing to resume from): not a failure of this half.
-        # Reading with no floor at all is the honest fallback: every status file and event the
-        # folder and the log hold is read, not none of them.
+        # no to "ready to start", so there is nothing to resume from): not a failure of this half. With
+        # no shutdown time the status files and the event log are not read at all: read with no floor, a
+        # file or an event from an earlier sitting could pass every criterion below.
+        $noFloor = $false
         if ([string]::IsNullOrEmpty($startedFile) -or -not (Test-Path -LiteralPath $startedFile -PathType Leaf))
         {
-            Write-Line -Run $run -Text 'shutdown-start.txt was not found; the first half likely never reached the shutdown. Reading with no time floor.'
+            Write-Line -Run $run -Text 'shutdown-start.txt was not found; the first half likely never reached the shutdown. The status files and the event log are not read without a shutdown time.'
             $shutdownStartUtc = [datetime]::MinValue
+            $noFloor = $true
         }
         else
         {
@@ -218,7 +229,9 @@ try
         Add-Finding -Run $run -Name 'restartedNotShutDown' -Value $restarted -Detail 'the owner''s answer; a restart is recorded the same way, and the status file says whether it delivered the pre-shutdown control'
 
         Write-Section -Run $run -Title 'What the service recorded'
-        $status = Get-PreshutdownStatus -Run $run -SinceUtc $shutdownStartUtc
+        $noFloorDetail = 'There is no shutdown time to read from (shutdown-start.txt was not found), so what was recorded was not read: a file or an event from an earlier sitting could otherwise pass.'
+        $status = $null
+        if (-not $noFloor) { $status = Get-PreshutdownStatus -Run $run -SinceUtc $shutdownStartUtc }
         $serviceAfter = Get-HandBackServiceState -Run $run -Label 'service-after-boot'
         $serviceStateAfter = Get-HandBackServiceSummary -ServiceJson $serviceAfter
 
@@ -226,6 +239,8 @@ try
         $result = $null
         $reason = $null
         $stateRead = $null
+        $blockSentAfterMs = $null
+        $blockMs = $null
         $vetoSeen = 'no-evidence'
         $retryTook = 'no-evidence'
         if ($null -ne $status)
@@ -234,9 +249,15 @@ try
             $result = $status.result
             $reason = $status.reason
             $stateRead = $status.state
+            $blockSentAfterMs = $status.blockSentAfterMs
+            $blockMs = $status.blockMs
             $vetoSeen = $status.vetoSeen
             $retryTook = $status.retryTook
             Write-Line -Run $run -Text ('Status file ' + $status.file + ': ' + $result + ', state ' + $stateRead + ', ' + $ranMs + ' ms, "' + $reason + '".')
+        }
+        elseif ($noFloor)
+        {
+            Write-Line -Run $run -Text $noFloorDetail
         }
         else
         {
@@ -244,34 +265,70 @@ try
         }
 
         Add-Criterion -Run $run -Id 'service-ran' -Criterion 'The service ran at shut down and wrote its status file.' `
-            -Outcome $(if ($null -ne $status) { 'pass' } else { 'fail' }) `
-            -Detail $(if ($null -ne $status) { 'status file ' + $status.file } else { 'no status file with the verb preshutdown at or after the shutdown; the service did not run, or its folder check failed' })
+            -Outcome $(if ($noFloor) { 'inconclusive' } elseif ($null -ne $status) { 'pass' } else { 'fail' }) `
+            -Detail $(if ($noFloor) { $noFloorDetail } elseif ($null -ne $status) { 'status file ' + $status.file } else { 'no status file with the verb preshutdown at or after the shutdown; the service did not run, or its folder check failed' })
 
-        Add-Criterion -Run $run -Id 'service-blocked' -Criterion 'The service blocked the AirPods, or found them blocked.' `
-            -Outcome $(if ($null -eq $status) { 'inconclusive' } elseif ($result -eq 'success' -and $stateRead -eq 'Blocked') { 'pass' } else { 'fail' }) `
-            -Detail $(if ($null -eq $status) { 'no status file to read' } elseif ($result -eq 'success' -and $stateRead -eq 'Blocked') { 'success, Blocked' } else { 'result ' + $result + ', state ' + $stateRead + '; failed steps: ' + $status.failedSteps })
+        # The service has to have blocked, not merely found the nodes blocked: "already blocked" means something else did
+        # it first, which in this test (the tray gone, the nodes enabled) shows nothing about the service.
+        $blockedOutcome = 'inconclusive'
+        $blockedDetail = 'no status file to read'
+        if ($noFloor)
+        {
+            $blockedDetail = $noFloorDetail
+        }
+        elseif ($null -ne $status)
+        {
+            if ($result -eq 'success' -and $stateRead -eq 'Blocked' -and $null -ne $status.blockSentUtc)
+            {
+                $blockedOutcome = 'pass'
+                $blockedDetail = 'The service sent the block at ' + $status.blockSentUtc + ' and the nodes read Blocked.'
+            }
+            elseif ($reason -eq 'already blocked')
+            {
+                $blockedDetail = 'The service found the nodes already blocked, so it did not block them, and this shows nothing about whether it can. Something else blocked them first: the tray may have handed back before it was ended, or the nodes were not enabled when the shut down began.'
+            }
+            elseif ($reason -eq 'Hand back is off' -or $reason -eq 'Block at boot is off')
+            {
+                $blockedDetail = 'The service did nothing because a setting was off (' + $reason + '), so it was not tested.'
+            }
+            elseif ($result -eq 'success')
+            {
+                $blockedDetail = 'The service reported success, but its status file does not say it sent a block (reason "' + $reason + '"), so this does not show that it blocked the AirPods.'
+            }
+            else
+            {
+                $blockedOutcome = 'fail'
+                $blockedDetail = 'result ' + $result + ', state ' + $stateRead + '; failed steps: ' + $status.failedSteps
+            }
+        }
+
+        Add-Criterion -Run $run -Id 'service-blocked' -Criterion 'The service blocked the AirPods.' `
+            -Outcome $blockedOutcome -Detail $blockedDetail
 
         Add-Criterion -Run $run -Id 'service-in-budget' -Criterion 'The service finished inside its 8,000 ms budget.' `
             -Outcome $(if ($null -eq $ranMs) { 'inconclusive' } elseif ($ranMs -le 8000) { 'pass' } else { 'fail' }) `
-            -Detail $(if ($null -eq $ranMs) { 'no status file to read' } else { [string]$ranMs + ' ms from the control to the status file.' })
+            -Detail $(if ($noFloor) { $noFloorDetail } elseif ($null -eq $ranMs) { 'no status file to read' } else { [string]$ranMs + ' ms from the control to the status file.' })
 
-        $events = Get-PowerEvents -Run $run -SinceUtc $shutdownStartUtc
+        $events = @()
+        if (-not $noFloor) { $events = Get-PowerEvents -Run $run -SinceUtc $shutdownStartUtc }
         $shutdownEvents = @($events | Where-Object { $_.id -eq 1074 })
         $dirtyEvents = @($events | Where-Object { $_.id -eq 41 })
         Add-Criterion -Run $run -Id 'shutdown-was-clean' -Criterion 'The shutdown itself was clean: a 1074 event and no dirty-boot 41 event after it.' `
-            -Outcome $(if (@($shutdownEvents).Count -gt 0 -and @($dirtyEvents).Count -eq 0) { 'pass' } else { 'fail' }) `
-            -Detail ([string]@($shutdownEvents).Count + ' shutdown-request event(s), ' + @($dirtyEvents).Count + ' dirty-boot event(s).')
+            -Outcome $(if ($noFloor) { 'inconclusive' } elseif (@($shutdownEvents).Count -gt 0 -and @($dirtyEvents).Count -eq 0) { 'pass' } else { 'fail' }) `
+            -Detail $(if ($noFloor) { $noFloorDetail } else { [string]@($shutdownEvents).Count + ' shutdown-request event(s), ' + @($dirtyEvents).Count + ' dirty-boot event(s).' })
 
         $serviceEvents = @($events | Where-Object { ($_.id -eq 7023 -or $_.id -eq 7024) -and ($_.message -match 'EarshotHandBack|Earshot hand-back') })
         Add-Criterion -Run $run -Id 'service-no-error-event' -Criterion 'The service control manager recorded no error for the service (no 7023 or 7024 event).' `
-            -Outcome $(if (@($serviceEvents).Count -eq 0) { 'pass' } else { 'fail' }) `
-            -Detail ([string]@($serviceEvents).Count + ' error event(s) naming the service.')
+            -Outcome $(if ($noFloor) { 'inconclusive' } elseif (@($serviceEvents).Count -eq 0) { 'pass' } else { 'fail' }) `
+            -Detail $(if ($noFloor) { $noFloorDetail } else { [string]@($serviceEvents).Count + ' error event(s) naming the service.' })
 
         $bootEvent = @($events | Where-Object { $_.id -eq 27 } | Select-Object -Last 1)
         $bootType = $(if (@($bootEvent).Count -gt 0) { @($bootEvent)[0].message } else { $null })
         $eventIds = @($events | Where-Object { $_.provider -eq 'Service Control Manager' } | ForEach-Object { [string]$_.id } | Sort-Object -Unique)
 
         Add-Finding -Run $run -Name 'servicePreshutdownMs' -Value $ranMs -Detail 'FinishedUtc minus StartedUtc of the status file; not recorded when there is none'
+        Add-Finding -Run $run -Name 'serviceBlockSentAfterMs' -Value $blockSentAfterMs -Detail 'from the control to the moment the service sent the block ("block sent at" in the status file); not recorded when the service sent no block'
+        Add-Finding -Run $run -Name 'serviceBlockMs' -Value $blockMs -Detail 'from the block being sent to the status file, the retry of a refused node included; not recorded when the service sent no block'
         Add-Finding -Run $run -Name 'serviceResult' -Value $result
         Add-Finding -Run $run -Name 'serviceState' -Value $serviceStateAfter -Detail 'how the service reads after the boot, from probe service'
         Add-Finding -Run $run -Name 'serviceReason' -Value $reason -Detail 'the Detail of the status file''s preshutdown step'

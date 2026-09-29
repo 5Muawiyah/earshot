@@ -1198,10 +1198,11 @@ function Get-HandBackServiceSummary
 }
 
 # The working set of the service's own process in bytes, from the process id `probe service`
-# reported, or $null when there is none or it cannot be read. Nothing here guesses a figure.
+# reported, or $null when there is none or it cannot be read. Nothing here guesses a figure. A read
+# that fails is written down with Write-Failure when a run is given, so a missing figure says why.
 function Get-HandBackServiceWorkingSet
 {
-    param($ServiceJson)
+    param($ServiceJson, $Run = $null)
 
     $processId = Get-Field -Object $ServiceJson -Name 'processId'
     if ($null -eq $processId) { return $null }
@@ -1213,26 +1214,63 @@ function Get-HandBackServiceWorkingSet
     }
     catch
     {
+        if ($null -ne $Run)
+        {
+            Write-Failure -Run $Run -Message ('The working set of process ' + [int]$processId + ' could not be read, so it is not recorded: ' +
+                ($_ | Out-String).Trim())
+        }
+
         return $null
     }
 }
 
-# Whether the Earshot tray icon is running. The hand-back service is also an Earshot.exe, and it
-# runs in session 0, where a signed-in user's programs never run, so only a process in a user
-# session counts as the tray. A read that fails reads as not running, and the caller says so.
+# Whether the Earshot tray icon is running: 'yes', 'no', or 'unknown' when the process list could not
+# be read. The hand-back service is also an Earshot.exe, and it runs in session 0, where a signed-in
+# user's programs never run, so only a process in a user session counts as the tray. A read that fails
+# is never 'no': the caller scores 'unknown' as inconclusive. A process that ends while the list is
+# read is not running.
+# https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.getprocessesbyname
 function Test-EarshotRunning
 {
-    $tray = Get-Process -Name 'Earshot' -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -ne 0 }
-    return (@($tray).Count -gt 0)
+    $tray = 0
+    try
+    {
+        foreach ($process in [System.Diagnostics.Process]::GetProcessesByName('Earshot'))
+        {
+            try
+            {
+                if ($process.SessionId -ne 0) { $tray = $tray + 1 }
+            }
+            catch [System.InvalidOperationException]
+            {
+                continue
+            }
+            finally
+            {
+                $process.Dispose()
+            }
+        }
+    }
+    catch
+    {
+        return 'unknown'
+    }
+
+    if ($tray -gt 0) { return 'yes' }
+    return 'no'
 }
 
 # The newest status file the hand-back service wrote at or after SinceUtc, read from the machine
 # folder, or $null when there is none. The service writes status-<nonce>.json with the verb
 # preshutdown; the tray's own gate runs write the same kind of file with other verbs, which are
 # skipped. Returns [ordered]@{ file; startedUtc; milliseconds; result; state; reason; failedSteps;
-# vetoSeen; retryTook }:
+# vetoSeen; retryTook; blockSentUtc; blockSentAfterMs; blockMs }:
 #   milliseconds  FinishedUtc minus StartedUtc
 #   reason        the Detail of the preshutdown step
+#   blockSentUtc  the time in a reason of the form "block sent at <utc>", the moment the service sent
+#                 the block; $null for any other reason (already blocked, a setting off, a failure)
+#   blockSentAfterMs  from the control to the block being sent; $null with blockSentUtc
+#   blockMs       from the block being sent to the status file; $null with blockSentUtc
 #   vetoSeen      yes when a cm-disable step carries CR_REMOVE_VETOED (23), else no
 #   retryTook     no-veto without one; else yes when a later cm-disable step for a vetoed node
 #                 succeeded, else no
@@ -1301,16 +1339,34 @@ function Get-PreshutdownStatus
         }
     }
 
+    # The block's own time is in the reason, not in a step of its own: "block sent at <utc>".
+    $blockSentUtc = $null
+    $blockSentAfterMs = $null
+    $blockMs = $null
+    if ($null -ne $reason -and $reason -match '^block sent at (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)$')
+    {
+        $sent = [datetime]::Parse($Matches[1], [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $blockSentUtc = $sent.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $blockSentAfterMs = [int]([math]::Round((New-TimeSpan -Start $newestStarted -End $sent).TotalMilliseconds))
+        if (-not [string]::IsNullOrEmpty($finishedText))
+        {
+            $blockMs = [int]([math]::Round((New-TimeSpan -Start $sent -End $finished).TotalMilliseconds))
+        }
+    }
+
     return [ordered]@{
-        file         = $newestFile
-        startedUtc   = $newestStarted.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
-        milliseconds = $milliseconds
-        result       = [string](Get-Field -Object $newest -Name 'Result')
-        state        = [string](Get-Field -Object $newest -Name 'State')
-        reason       = $reason
-        failedSteps  = (@($failed) -join ', ')
-        vetoSeen     = $(if ($veto) { 'yes' } else { 'no' })
-        retryTook    = $(if (-not $veto) { 'no-veto' } elseif ($took) { 'yes' } else { 'no' })
+        file             = $newestFile
+        startedUtc       = $newestStarted.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        milliseconds     = $milliseconds
+        result           = [string](Get-Field -Object $newest -Name 'Result')
+        state            = [string](Get-Field -Object $newest -Name 'State')
+        reason           = $reason
+        failedSteps      = (@($failed) -join ', ')
+        vetoSeen         = $(if ($veto) { 'yes' } else { 'no' })
+        retryTook        = $(if (-not $veto) { 'no-veto' } elseif ($took) { 'yes' } else { 'no' })
+        blockSentUtc     = $blockSentUtc
+        blockSentAfterMs = $blockSentAfterMs
+        blockMs          = $blockMs
     }
 }
 
