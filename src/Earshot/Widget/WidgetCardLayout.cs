@@ -73,8 +73,7 @@ internal static class WidgetCardLayout
 
     public static int WidthFor(int dpi) => CardPlacement.Scale(WidthAt96, dpi);
 
-    // One column's parts, in client pixels. Label ("L", "R" or "Case") sits above the glyph, matching the
-    // mockup.
+    // One column's parts, in client pixels. Label ("L", "R" or "Case") sits above the glyph.
     internal readonly record struct ColumnLayout(Rectangle Label, Rectangle Glyph, Rectangle Bar, Rectangle Percent);
 
     // The whole card, in client pixels. Switch and SetupButton are Rectangle.Empty when their own ShowX is
