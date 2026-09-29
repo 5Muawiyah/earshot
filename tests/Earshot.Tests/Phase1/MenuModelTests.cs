@@ -403,7 +403,7 @@ public sealed class MenuModelTests
         Assert.IsTrue(safe.NameOtherDeviceItem.Enabled);
     }
 
-    // The hand-back menu item: default on, and the check always follows the saved setting.
+    // The hand-back menu item: default off, and the check always follows the saved setting.
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
@@ -416,9 +416,9 @@ public sealed class MenuModelTests
     }
 
     [TestMethod]
-    public void HandBackIsCheckedByDefault()
+    public void HandBackIsUncheckedByDefault()
     {
-        Assert.IsTrue(Build().HandBack.Checked);
+        Assert.IsFalse(Build().HandBack.Checked);
     }
 
     [TestMethod]

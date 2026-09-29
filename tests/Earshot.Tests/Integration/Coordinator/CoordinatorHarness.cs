@@ -34,7 +34,7 @@ internal sealed class CoordinatorHarness : IDisposable
             s.PinnedAddress = Devices.Address;
             s.ProtectAudioQuality = protectAudio;
 
-            // Off here even though the production default is on (EarshotSettings.HandBackOnShutdownAndSleep):
+            // Set off explicitly here, though it is also the production default (EarshotSettings.HandBackOnShutdownAndSleep):
             // every existing test in this folder was written and passes against today's session-end behaviour,
             // so the harness keeps that byte for byte unless a hand-back test opts in explicitly.
             s.HandBackOnShutdownAndSleep = false;

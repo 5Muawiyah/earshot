@@ -70,7 +70,7 @@ public sealed class BlockControllerTests
         {
             Tasks.InstallAll(InstallFolder);
             Assert.IsTrue(Store.WriteDevice(RecordedNodes.AirPods()).Ok);
-            Assert.IsTrue(Store.WriteConfig(new GateConfig()).Ok);
+            Assert.IsTrue(Store.WriteConfig(new GateConfig { HandBackAtShutdown = true }).Ok);
         }
 
         // What \Earshot\Gate does when started: the real gate actions, then the scheduler state moves on.

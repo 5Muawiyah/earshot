@@ -30,7 +30,7 @@ public sealed class GateActionsPreshutdownTests
             Assert.IsTrue(Store.WriteDevice(RecordedNodes.AirPods()).Ok);
             if (writeConfig)
             {
-                Assert.IsTrue(Store.WriteConfig(new GateConfig()).Ok);
+                Assert.IsTrue(Store.WriteConfig(new GateConfig { HandBackAtShutdown = true }).Ok);
             }
 
             Started = Time.GetUtcNow();
@@ -191,9 +191,9 @@ public sealed class GateActionsPreshutdownTests
         Assert.HasCount(9, status.Steps.Where(s => s.Step.StartsWith("cm-disable:", StringComparison.Ordinal) && s.Ok));
     }
 
-    // A config.json written before the member existed has no hand-back setting, which reads as on.
+    // A config.json written before the member existed has no hand-back setting, which reads as off.
     [TestMethod]
-    public void AConfigWithoutTheHandBackMemberStillBlocks()
+    public void AConfigWithoutTheHandBackMemberChangesNothing()
     {
         using var h = new Harness(writeConfig: false);
         File.WriteAllText(h.Store.ConfigFile, "{\"SchemaVersion\":1,\"BlockAtBoot\":true}");
@@ -201,7 +201,8 @@ public sealed class GateActionsPreshutdownTests
         PreshutdownResult result = h.Run();
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome);
-        Assert.AreEqual(9, h.Disables);
+        Assert.AreEqual("Hand back is off", result.Reason);
+        Assert.AreEqual(0, h.Disables);
     }
 
     [TestMethod]

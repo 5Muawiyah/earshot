@@ -109,9 +109,9 @@ public sealed class GateStoreTests
         Assert.Contains("\"HandBackAtShutdown\": " + (handBack ? "true" : "false"), File.ReadAllText(store.ConfigFile), "The member is always written.");
     }
 
-    // A config.json written before the member existed reads as on, the direction the at-rest rule owes.
+    // A config.json written before the member existed reads as off, as the tray's own setting does.
     [TestMethod]
-    public void AConfigWrittenBeforeTheHandBackMemberReadsAsHandBackOn()
+    public void AConfigWrittenBeforeTheHandBackMemberReadsAsHandBackOff()
     {
         using var temp = new TempFolder();
         var store = new GateStore(temp.Path);
@@ -121,7 +121,7 @@ public sealed class GateStoreTests
 
         Assert.IsTrue(read.IsOk, read.Step.Detail);
         Assert.IsFalse(read.Value!.BlockAtBoot);
-        Assert.IsTrue(read.Value.HandBackAtShutdown);
+        Assert.IsFalse(read.Value.HandBackAtShutdown);
     }
 
     [TestMethod]

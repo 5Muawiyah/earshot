@@ -21,9 +21,10 @@ public sealed class TrayExitHandBackTests
 
     private static MouseEventArgs Press(MouseButtons button) => new(button, clicks: 1, x: 0, y: 0, delta: 0);
 
-    // The AirPods are in use and their nodes enabled: what a normal listening session looks like to Exit.
+    // The AirPods are in use and their nodes enabled: what a normal listening session looks like to Exit. Hand back is
+    // off by default, so it is turned on here unless a test says otherwise.
     private static TrayHarness InUse(Action<EarshotSettings>? settings = null, TimeProvider? time = null, TimeSpan? budget = null, TimeSpan? disconnectWait = null) =>
-        new(snapshot: Devices.Active(1), settings: settings, time: time, handBackBudget: budget, disconnectHandBackWait: disconnectWait,
+        new(snapshot: Devices.Active(1), settings: s => { s.HandBackOnShutdownAndSleep = true; settings?.Invoke(s); }, time: time, handBackBudget: budget, disconnectHandBackWait: disconnectWait,
             arrange: t => t.Block.Status = Block(BlockState.Allowed));
 
     // Disconnect, then block, in that order and no other: the order the fakes were called in.
@@ -87,7 +88,7 @@ public sealed class TrayExitHandBackTests
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Devices.Idle(1), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            using var tray = new TrayHarness(snapshot: Devices.Idle(1), settings: s => s.HandBackOnShutdownAndSleep = true, arrange: t => t.Block.Status = Block(BlockState.Allowed));
             int blocksBefore = tray.Block.Calls.Count(c => c == "block");
             tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
 
@@ -153,7 +154,7 @@ public sealed class TrayExitHandBackTests
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Devices.Idle(1), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            using var tray = new TrayHarness(snapshot: Devices.Idle(1), settings: s => s.HandBackOnShutdownAndSleep = true, arrange: t => t.Block.Status = Block(BlockState.Allowed));
             var order = new List<string>();
             tray.Connection.OnConnect = async ct =>
             {
@@ -210,7 +211,7 @@ public sealed class TrayExitHandBackTests
             fake.NextDiscovery(FakeStreamingPlatform.Found(new StreamingDevice("phone-1", "Test Phone", IPhoneContainer)));
             using var tray = new TrayHarness(
                 snapshot: Devices.Active(1),
-                settings: s => s.Streaming = s.Streaming with { Enabled = true },
+                settings: s => { s.HandBackOnShutdownAndSleep = true; s.Streaming = s.Streaming with { Enabled = true }; },
                 streamingPlatform: fake,
                 arrange: t => t.Block.Status = Block(BlockState.Allowed));
             tray.PumpUntilIdle();
