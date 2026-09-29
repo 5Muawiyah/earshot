@@ -1506,6 +1506,12 @@ internal sealed class TrayHarness : IDisposable
                 return reader;
             },
             TrayIconVisibilityFactory = () => new FakeTrayIcon(),
+            ForegroundChangeSourceFactory = () =>
+            {
+                var source = new FakeForegroundChangeSource();
+                LastForegroundSource = source;
+                return source;
+            },
             CardEnvironmentFactory = cardEnvironmentFactory,
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
         };
@@ -1577,6 +1583,10 @@ internal sealed class TrayHarness : IDisposable
     // read to pick it up (Poke, through any settings change ApplyWidget reacts to), rather than being stuck
     // with the constructor-time default of Fail(NoTaskbar) for the whole test.
     public FakeTaskbarReader? LastTaskbarReader { get; private set; }
+
+    // The fake foreground change source the widget's gauge pipeline built last (null until it has built one),
+    // so a test can see it installed and disposed and raise a foreground change through it.
+    public FakeForegroundChangeSource? LastForegroundSource { get; private set; }
 
     public ServiceRegistry Registry { get; }
 

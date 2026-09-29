@@ -18,14 +18,18 @@ internal sealed class FakeUiaElement : IUIAutomationElement
     private readonly Rectangle? _bounds;
     private readonly bool _offscreen;
     private readonly string? _automationId;
+    private readonly string? _className;
     private readonly int _boundingRectangleHResult;
+    private readonly int _classNameHResult;
 
-    public FakeUiaElement(Rectangle? bounds, bool offscreen = false, string? automationId = null, int boundingRectangleHResult = 0)
+    public FakeUiaElement(Rectangle? bounds, bool offscreen = false, string? automationId = null, int boundingRectangleHResult = 0, string? className = null, int classNameHResult = 0)
     {
         _bounds = bounds;
         _offscreen = offscreen;
         _automationId = automationId;
+        _className = className;
         _boundingRectangleHResult = boundingRectangleHResult;
+        _classNameHResult = classNameHResult;
     }
 
     public int SetFocus() => throw new NotSupportedException();
@@ -70,6 +74,12 @@ internal sealed class FakeUiaElement : IUIAutomationElement
         {
             value = _automationId;
             return 0;
+        }
+
+        if (propertyId == UiAutomation.UIA_ClassNamePropertyId)
+        {
+            value = _classNameHResult < 0 ? null : _className;
+            return _classNameHResult;
         }
 
         value = null;
@@ -146,6 +156,7 @@ public sealed class UiaTaskbarReaderTests
         bool ok = false;
         List<Rectangle>? occupied = null;
         Rectangle? startButton = null;
+        Rectangle? notificationArea = null;
         StepOutcome? failure = null;
         var stopwatch = new Stopwatch();
         ExceptionDispatchInfo? readerFailure = null;
@@ -166,7 +177,7 @@ public sealed class UiaTaskbarReaderTests
                 reader.TryReadOccupants(trayHandle, Rectangle.Empty, Earshot.Audio.ComRelease.Rcw, out _, out _, out _);
 
                 stopwatch.Start();
-                ok = reader.TryReadOccupants(trayHandle, Rectangle.Empty, Earshot.Audio.ComRelease.Rcw, out occupied, out startButton, out failure);
+                ok = reader.TryReadOccupants(trayHandle, Rectangle.Empty, Earshot.Audio.ComRelease.Rcw, out occupied, out startButton, out notificationArea, out failure);
                 stopwatch.Stop();
             }
             catch (Exception ex)
@@ -189,6 +200,13 @@ public sealed class UiaTaskbarReaderTests
         // The real taskbar always has at least the notification area's buttons; an empty result would
         // mean the reader found nothing at all, which is the failure this test exists to catch.
         Assert.IsGreaterThan(0, occupied!.Count, "The real taskbar must report at least one occupant.");
+
+        // The notification area is found by the class names UI Automation gives its buttons on this machine's
+        // own taskbar (SystemTray.* for the buttons, TrayNotifyWnd for the pane that spans them). The gauge's
+        // right-end position is measured from it, so a taskbar that names them otherwise would leave the
+        // gauge on the tray icon: this is the one place that is checked against the real thing.
+        Assert.IsNotNull(notificationArea, "The real taskbar's notification area must be identified from its class names.");
+        Assert.IsTrue(occupied.Any(o => o.Left == notificationArea.Value.Left), "It starts at one of the occupants.");
         Assert.IsLessThan(5000, stopwatch.ElapsedMilliseconds, "A sanity bound on the real UIA read, not a figure the product uses.");
     }
 
@@ -281,6 +299,74 @@ public sealed class UiaTaskbarReaderTests
         Assert.IsNull(failure);
         Assert.HasCount(2, occupied, "The offscreen element must not be counted as an occupant.");
         Assert.AreEqual(new Rectangle(50, 0, 45, 48), startButton);
+    }
+
+    // The notification area is the bounding box of the elements whose class says they belong to it.
+    [TestMethod]
+    public void TheNotificationAreaIsTheBoundsOfTheElementsWithTrayClassNames()
+    {
+        var chevron = new FakeUiaElement(new Rectangle(1738, 1032, 32, 48), className: "SystemTray.NormalButton");
+        var network = new FakeUiaElement(new Rectangle(1774, 1032, 24, 48), className: "SystemTray.AccentButton");
+        var clock = new FakeUiaElement(new Rectangle(1834, 1032, 70, 48), className: "SystemTray.OmniButton");
+        var app = new FakeUiaElement(new Rectangle(851, 1032, 44, 48), className: "Taskbar.TaskListButtonAutomationPeer");
+        var array = new FakeUiaElementArray([app, chevron, network, clock]);
+
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, NoRelease, out List<Rectangle> occupied, out _, out Rectangle? area, out StepOutcome? failure);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(failure);
+        Assert.HasCount(4, occupied);
+        Assert.AreEqual(Rectangle.FromLTRB(1738, 1032, 1904, 1080), area, "From the chevron's left edge to the clock's right edge; the app button is not part of it.");
+    }
+
+    [TestMethod]
+    public void TheLegacyTrayPaneCountsAsTheNotificationAreaToo()
+    {
+        var pane = new FakeUiaElement(new Rectangle(1738, 1032, 182, 48), className: "TrayNotifyWnd");
+        var app = new FakeUiaElement(new Rectangle(851, 1032, 44, 48), className: "Taskbar.TaskListButtonAutomationPeer");
+
+        UiaTaskbarReader.TryReadElements(new FakeUiaElementArray([app, pane]), Rectangle.Empty, NoRelease, out _, out _, out Rectangle? area, out _);
+
+        Assert.AreEqual(new Rectangle(1738, 1032, 182, 48), area);
+    }
+
+    // A taskbar that names nothing the way this one does gives no notification area, and the gauge then has
+    // nothing to measure its position from: the tray icon stays.
+    [TestMethod]
+    public void NoTrayClassNamesMeansNoNotificationArea()
+    {
+        var other = new FakeUiaElement(new Rectangle(1738, 1032, 32, 48), className: "SomethingElse");
+        var unnamed = new FakeUiaElement(new Rectangle(1774, 1032, 24, 48));
+
+        UiaTaskbarReader.TryReadElements(new FakeUiaElementArray([other, unnamed]), Rectangle.Empty, NoRelease, out _, out _, out Rectangle? area, out _);
+
+        Assert.IsNull(area);
+    }
+
+    // An offscreen tray element is not part of the area (it is not displayed).
+    [TestMethod]
+    public void AnOffscreenTrayElementIsNotPartOfTheNotificationArea()
+    {
+        var shown = new FakeUiaElement(new Rectangle(1774, 1032, 24, 48), className: "SystemTray.AccentButton");
+        var hidden = new FakeUiaElement(new Rectangle(1000, 1032, 24, 48), offscreen: true, className: "SystemTray.NormalButton");
+
+        UiaTaskbarReader.TryReadElements(new FakeUiaElementArray([hidden, shown]), Rectangle.Empty, NoRelease, out _, out _, out Rectangle? area, out _);
+
+        Assert.AreEqual(new Rectangle(1774, 1032, 24, 48), area);
+    }
+
+    // A class name that cannot be read is not known to be anything, so the read fails rather than treating the
+    // element as a non-tray occupant.
+    [TestMethod]
+    public void AClassNameThatCannotBeReadFailsTheWholeRead()
+    {
+        const int EFail = unchecked((int)0x80004005);
+        var element = new FakeUiaElement(new Rectangle(1774, 1032, 24, 48), classNameHResult: EFail);
+
+        bool ok = UiaTaskbarReader.TryReadElements(new FakeUiaElementArray([element]), Rectangle.Empty, NoRelease, out _, out _, out _, out StepOutcome? failure);
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual("uia:get-cached-property:class-name", failure!.Step);
     }
 
     // A security review found that UiaTaskbarReader never released a single COM object it obtained during a

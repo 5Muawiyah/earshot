@@ -46,6 +46,8 @@ internal sealed partial class TrayContext
     private readonly int _taskbarWatcherPollIntervalMs;
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
     private readonly Func<ICardEnvironment>? _cardEnvironmentFactory;
+    private readonly Func<IForegroundChangeSource>? _foregroundChangeSourceFactory;
+    private IForegroundChangeSource? _foregroundSource;
 
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
     // (RefreshShownGaugeForWorker, called after every OnTaskbarLayout, the only place the real window's
@@ -161,7 +163,9 @@ internal sealed partial class TrayContext
                 _trayIconVisibilityFactory?.Invoke() ?? _notifyIconVisibility,
                 ReadGaugeControllerSettings,
                 _log,
-                _time);
+                _time,
+                new WindowCoverProbe(),
+                _registry.UiPost);
             controller.CardRequested += OnWidgetCardRequested;
             controller.ToggleRequested += (_, _) => StartToggle();
             controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
@@ -185,6 +189,34 @@ internal sealed partial class TrayContext
             _taskbarWatcher.Start();
             _taskbarWatcher.Poke();
         }
+
+        if (_foregroundSource is null)
+        {
+            // Installed on this thread, the UI thread, which is where the hook's events are delivered and
+            // where the controller must be called from. A failed install leaves the poll as the only path to
+            // putting the gauge back on top; it is not retried.
+            IForegroundChangeSource source = _foregroundChangeSourceFactory?.Invoke() ?? new ForegroundChangeHook(_log);
+            source.ForegroundChanged += OnForegroundChanged;
+            _foregroundSource = source;
+            StepOutcome outcome = source.Install();
+            _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn, "Foreground hook: " + TrayReport.DescribeStep(outcome));
+        }
+    }
+
+    private void OnForegroundChanged(object? sender, ForegroundChangedEventArgs e) =>
+        _gaugeController?.OnForegroundChanged(e.RootClassName);
+
+    // Unhooks on the UI thread, before the controller it calls is torn down.
+    private void DisposeForegroundSource()
+    {
+        if (_foregroundSource is not { } source)
+        {
+            return;
+        }
+
+        source.ForegroundChanged -= OnForegroundChanged;
+        source.Dispose();
+        _foregroundSource = null;
     }
 
     // Explorer's internal appbar list is new after it restarts, so the old registration is gone with it;
@@ -478,6 +510,7 @@ internal sealed partial class TrayContext
         _widgetCardPresenter = null;
         _caseOpenCardPresenter?.Dispose();
         _caseOpenCardPresenter = null;
+        DisposeForegroundSource();
         _taskbarWatcher?.Dispose();
         _taskbarWatcher = null;
         _appBarRegistration?.Dispose();
@@ -540,6 +573,7 @@ internal sealed partial class TrayContext
             // if the gauge comes back.
             _widgetCardPresenter?.Hide();
             _gaugeController?.TurnOff();
+            DisposeForegroundSource();
             _taskbarWatcher.Dispose();
             _taskbarWatcher = null;
             _appBarRegistration?.Dispose();
