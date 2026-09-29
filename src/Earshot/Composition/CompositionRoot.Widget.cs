@@ -47,12 +47,9 @@ internal static partial class CompositionRoot
 
         var claimStore = new ClaimStore(Paths.Current.WidgetClaimFile, r.Log);
 
-        // The public constructor, not the internal one that takes decodeTable/claimThreshold directly: that
-        // overload exists only so a test can exercise the proved paths without ProximityDecodeTable.Current
-        // or WidgetDefaults.SignalThresholdDbm ever holding anything but their shipped defaults (see its own
-        // header comment). Production must read those two constants itself, through WidgetStatusService's
-        // own public entry point, rather than have a caller hand them in - a caller that could, in principle,
-        // hand in something else.
+        // The decode table comes from the set-up records under the widget folder and nowhere else: there is
+        // no constant to read, so what is proved is exactly what the owner's own set-ups proved.
+        var proof = new DecodeProofStore(WidgetSetupFolder(Paths.Current), WidgetProofFile(Paths.Current), r.Log, time);
         var status = new WidgetStatusService(
             advertisementSourceFactory ?? (static () => new WinRtAdvertisementSource()),
             claimStore,
@@ -61,9 +58,23 @@ internal static partial class CompositionRoot
             blockStatus,
             r.Log,
             r.UiPost,
-            time);
+            time,
+            proof);
         r.WidgetStatus = status;
         return status;
+    }
+
+    // The set-up records and the proof summary sit beside claim.json, under the same data root.
+    internal static string WidgetSetupFolder(Paths paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return Path.Combine(paths.WidgetFolder, "setup");
+    }
+
+    internal static string WidgetProofFile(Paths paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return Path.Combine(paths.WidgetFolder, "proof.json");
     }
 
     // The low battery alert's real notifier chain: a toast, falling back to the card the tray already shows
@@ -87,15 +98,17 @@ internal static partial class CompositionRoot
     // OwnedReadingApplied event. Only ever called once BuildWidget has already run and found the widget
     // enabled, which is the one thing that sets r.MediaSessions; a null MediaSessions here means something
     // upstream is already broken, so it is asserted rather than silently no-op'd.
-    internal static AutoPauseService BuildAutoPauseService(ServiceRegistry r, IWidgetStatus status, Func<BootBlockStatus?> blockStatus, TimeProvider time)
+    internal static AutoPauseService BuildAutoPauseService(
+        ServiceRegistry r, IWidgetStatus status, Func<BootBlockStatus?> blockStatus, TimeProvider time, Func<bool?> broadcastObserved)
     {
         ArgumentNullException.ThrowIfNull(r);
         ArgumentNullException.ThrowIfNull(status);
         ArgumentNullException.ThrowIfNull(blockStatus);
         ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(broadcastObserved);
         ArgumentNullException.ThrowIfNull(r.MediaSessions);
 
-        var autoPause = new AutoPause(r.MediaSessions, () => r.Settings.Current.Widget.AutoPause, r.Log);
+        var autoPause = new AutoPause(r.MediaSessions, broadcastObserved, () => r.Settings.Current.Widget.AutoPause, r.Log);
         return new AutoPauseService(status, r.Monitor, blockStatus, r.Settings, autoPause, time, r.Log);
     }
 }

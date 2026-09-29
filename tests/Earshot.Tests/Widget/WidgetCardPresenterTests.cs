@@ -212,50 +212,250 @@ public sealed class WidgetCardPresenterTests
         });
     }
 
-    // The model's own ShowClaimLink/ClaimAvailable come from BuildModel, shared with CaseOpenCardPresenter:
-    // proving it here proves both, since neither presenter has its own copy of this derivation.
+    // The model's own ShowSetupButton comes from BuildModel, shared with CaseOpenCardPresenter: proving it
+    // here proves both, since neither presenter has its own copy of this derivation.
     [TestMethod]
-    public void TheModelShowsTheClaimLinkOnlyBeforeAClaimExistsAndFollowsClaimAvailable()
+    public void TheModelShowsTheSetupButtonOnlyWhileNoPartHasAPercent()
     {
-        var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false), ClaimAvailableValue = true };
-        WidgetCardModel unclaimedAvailable = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
-        Assert.IsTrue(unclaimedAvailable.ShowClaimLink);
-        Assert.IsTrue(unclaimedAvailable.ClaimAvailable);
+        var callbacks = new FakeCallbacks { Snapshot = Snapshot() };
+        WidgetCardModel none = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
+        Assert.IsTrue(none.ShowSetupButton, "No part has a percent: the grid gives way to the set-up button.");
+        Assert.AreEqual(WidgetCardView.Main, none.View);
 
-        callbacks.ClaimAvailableValue = false;
-        WidgetCardModel unclaimedUnavailable = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
-        Assert.IsTrue(unclaimedUnavailable.ShowClaimLink, "Still shown, disabled: phase 0 not being done is not the same as a claim already existing.");
-        Assert.IsFalse(unclaimedUnavailable.ClaimAvailable);
+        callbacks.Snapshot = Snapshot() with { Left = new PartReading(70, false, null) { ReadAt = DateTimeOffset.UtcNow } };
+        WidgetCardModel reading = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
+        Assert.IsFalse(reading.ShowSetupButton, "With a reading the button is gone: a repeat set-up is reached from the menu.");
 
-        callbacks.Snapshot = Snapshot(claimExists: true);
-        WidgetCardModel claimed = WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider());
-        Assert.IsFalse(claimed.ShowClaimLink, "Once a claim exists, the trigger has nothing left to do.");
+        callbacks.Snapshot = Snapshot() with { Case = new PartReading(30, null, null) { ReadAt = DateTimeOffset.UtcNow } };
+        Assert.IsFalse(WidgetCardPresenter.BuildModel(callbacks.Build(), new Streaming.TestTimeProvider()).ShowSetupButton, "A case percent alone is a reading.");
     }
 
     [TestMethod]
-    public void ClickingTheClaimLinkRoutesThroughRequestClaimWithThePlaceAboveTheGaugeAndClosesTheCard()
+    public void RequestSetupShowsListeningAndStartsTheListen()
     {
         Phase5.CardDesktop.Run(() =>
         {
-            var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false), ClaimAvailableValue = true };
+            var callbacks = new FakeCallbacks();
             var time = new Streaming.TestTimeProvider();
             var log = new CapturingLog();
-            WidgetCard? card = null;
-            using var presenter = new WidgetCardPresenter(() => card = new WidgetCard(log), callbacks.Build(), Inline, time, log);
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, time, log);
 
-            presenter.RequestShow(Gauge, Gauge.Location);
+            presenter.RequestSetup(Gauge, Gauge.Location);
             Application.DoEvents();
-            Assert.AreEqual(0, callbacks.ClaimCalls.Count);
 
-            Phase5.TestWindows.Send(card!.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
-            Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Enter, 0);
-
-            Assert.AreEqual(1, callbacks.ClaimCalls.Count, "Exactly one claim request.");
-            CardPlace place = callbacks.ClaimCalls[0];
-            Assert.AreEqual(new Point(Gauge.X + (Gauge.Width / 2), Gauge.Y), place.ClickPoint, "The place follows the gauge, the same as a toggle request.");
-            Assert.IsFalse(presenter.IsShown, "The card closes once the claim link is activated.");
+            Assert.IsTrue(presenter.IsShown);
+            Assert.AreEqual(WidgetCardView.SetupListening, presenter.ViewForTest);
+            Assert.AreEqual(WidgetCardView.SetupListening, presenter.CurrentModelForTest!.View);
+            Assert.AreEqual("1/3", presenter.CurrentModelForTest.Setup!.Step);
+            Assert.AreEqual(1, callbacks.Listens.Count, "One listen is started.");
+            Assert.IsFalse(callbacks.ListenTokens[0].IsCancellationRequested);
         });
     }
+
+    [TestMethod]
+    public void FoundMovesToPickWithFiftiesAndChargingOff()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+            presenter.RequestSetup(Gauge, Gauge.Location);
+
+            callbacks.Listens[0].SetResult(FoundListen());
+
+            Application.DoEvents(); // the listen continues on the UI thread
+
+            Assert.AreEqual(WidgetCardView.SetupPick, presenter.ViewForTest);
+            SetupViewModel setup = presenter.CurrentModelForTest!.Setup!;
+            Assert.AreEqual("2/3", setup.Step);
+            Assert.AreEqual(new BatterySetupPicks(50, 50, 50, false, false, false), setup.Picks,
+                "Never the advertisement's own values: the pickers start at 50 with Charging off.");
+        });
+    }
+
+    [TestMethod]
+    public void SaveCompletesAndShowsTheResultsDoneView()
+    {
+        (BatterySetupResultStatus Status, string Text)[] expected =
+        [
+            (BatterySetupResultStatus.BatterySetUp, WidgetCopy.SetupBatterySetUp),
+            (BatterySetupResultStatus.CaseSetUp, WidgetCopy.SetupCaseSetUp),
+            (BatterySetupResultStatus.CaseSetUpBudsSame, WidgetCopy.SetupCaseSetUp),
+            (BatterySetupResultStatus.CouldNotRead, WidgetCopy.SetupCouldNotRead),
+        ];
+        foreach ((BatterySetupResultStatus status, string text) in expected)
+        {
+            Phase5.CardDesktop.Run(() =>
+            {
+                var callbacks = new FakeCallbacks { CompleteStatus = status };
+                var log = new CapturingLog();
+                WidgetCard? card = null;
+                using var presenter = new WidgetCardPresenter(() => card = new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+                presenter.RequestSetup(Gauge, Gauge.Location);
+                callbacks.Listens[0].SetResult(FoundListen());
+                Application.DoEvents(); // the listen continues on the UI thread
+
+                // The owner steps the left picker up once, then saves. Focus starts on Save.
+                card!.HandleSetupKey(Keys.Tab);   // Save -> Back
+                card.HandleSetupKey(Keys.Tab);    // Back -> left up
+                card.HandleSetupKey(Keys.Space);  // left +10
+                card.HandleSetupKey(Keys.Tab);    // left down
+                card.HandleSetupKey(Keys.Enter);  // Enter is Save wherever the focus is
+
+                Assert.AreEqual(1, callbacks.CompleteCalls.Count, "Save completes the set-up exactly once (" + status + ").");
+                Assert.AreEqual(60, callbacks.CompleteCalls[0].Picks.Left, "The picks the owner made reach the completion.");
+                Assert.AreEqual(WidgetCardView.SetupDone, presenter.ViewForTest);
+                Assert.AreEqual(text, presenter.CurrentModelForTest!.Setup!.Status, "The Done view says what this result was (" + status + ").");
+                Assert.AreEqual("3/3", presenter.CurrentModelForTest.Setup!.Step);
+            });
+        }
+    }
+
+    [TestMethod]
+    public void NotFoundShowsFailedWithTryAgain()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+            presenter.RequestSetup(Gauge, Gauge.Location);
+
+            callbacks.Listens[0].SetResult(Failed(BatterySetupListenStatus.NotFound));
+
+            Application.DoEvents(); // the listen continues on the UI thread
+
+            Assert.AreEqual(WidgetCardView.SetupFailed, presenter.ViewForTest);
+            SetupViewModel setup = presenter.CurrentModelForTest!.Setup!;
+            Assert.AreEqual(WidgetCopy.SetupNotFound, setup.Status);
+            CollectionAssert.AreEqual(new[] { WidgetCopy.Cancel, WidgetCopy.TryAgain }, setup.Buttons.Select(b => b.Label).ToArray());
+            Assert.IsTrue(setup.Buttons[1].Primary, "Try again is the primary button.");
+        });
+    }
+
+    [TestMethod]
+    public void TryAgainListensAgain()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            WidgetCard? card = null;
+            using var presenter = new WidgetCardPresenter(() => card = new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+            presenter.RequestSetup(Gauge, Gauge.Location);
+            callbacks.Listens[0].SetResult(Failed(BatterySetupListenStatus.Ambiguous));
+            Application.DoEvents(); // the listen continues on the UI thread
+            Assert.AreEqual(WidgetCardView.SetupFailed, presenter.ViewForTest);
+
+            card!.HandleSetupKey(Keys.Enter); // the primary button: Try again
+
+            Assert.AreEqual(2, callbacks.Listens.Count, "Try again starts a second listen.");
+            Assert.AreEqual(WidgetCardView.SetupListening, presenter.ViewForTest);
+            Assert.IsTrue(presenter.IsShown);
+        });
+    }
+
+    [TestMethod]
+    public void CancelDuringListenCancelsTheToken()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            WidgetCard? card = null;
+            using var presenter = new WidgetCardPresenter(() => card = new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+            presenter.RequestSetup(Gauge, Gauge.Location);
+
+            card!.HandleSetupKey(Keys.Escape);
+
+            Assert.IsTrue(callbacks.ListenTokens[0].IsCancellationRequested, "Escape cancels a listen that is still running.");
+            Assert.IsFalse(presenter.IsShown, "Escape closes the card.");
+            Assert.AreEqual(WidgetCardView.Main, presenter.ViewForTest);
+
+            // The listen finishing after the cancel is dropped: nothing reopens or moves on.
+            callbacks.Listens[0].SetResult(FoundListen());
+            Application.DoEvents(); // the listen continues on the UI thread
+            Assert.AreEqual(WidgetCardView.Main, presenter.ViewForTest);
+            Assert.AreEqual(0, callbacks.CompleteCalls.Count, "A cancelled set-up writes nothing.");
+        });
+    }
+
+    [TestMethod]
+    public void ShortFormOnlyGoesThroughPickThenSaysCouldNotRead()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks { CompleteStatus = BatterySetupResultStatus.CouldNotRead };
+            var log = new CapturingLog();
+            WidgetCard? card = null;
+            using var presenter = new WidgetCardPresenter(() => card = new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+            presenter.RequestSetup(Gauge, Gauge.Location);
+
+            callbacks.Listens[0].SetResult(FoundListen() with { Status = BatterySetupListenStatus.ShortFormOnly });
+
+            Application.DoEvents(); // the listen continues on the UI thread
+            Assert.AreEqual(WidgetCardView.SetupPick, presenter.ViewForTest, "The picks are still asked for: the record keeps them beside the captures.");
+
+            card!.HandleSetupKey(Keys.Enter);
+
+            Assert.AreEqual(WidgetCardView.SetupDone, presenter.ViewForTest);
+            Assert.AreEqual(WidgetCopy.SetupCouldNotRead, presenter.CurrentModelForTest!.Setup!.Status);
+            Assert.AreEqual(WidgetCopy.SetupCapturesKept, presenter.CurrentModelForTest.Setup.StatusSub);
+        });
+    }
+
+    [TestMethod]
+    public void TheSpinnerTimerRunsOnlyWhileListening()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var time = new Streaming.TestTimeProvider();
+            var log = new CapturingLog();
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, time, log);
+            Assert.IsFalse(presenter.SpinnerRunningForTest);
+
+            presenter.RequestSetup(Gauge, Gauge.Location);
+            Assert.IsTrue(presenter.SpinnerRunningForTest, "Listening turns the spinner.");
+            time.Advance(WidgetCardPresenter.SpinnerInterval);
+            Assert.AreEqual(1, presenter.CurrentModelForTest!.Setup!.SpinnerFrame, "Each 100 ms advances one frame.");
+
+            callbacks.Listens[0].SetResult(FoundListen());
+
+            Application.DoEvents(); // the listen continues on the UI thread
+            Assert.IsFalse(presenter.SpinnerRunningForTest, "Once the pickers show, no timer runs.");
+        });
+    }
+
+    // A set-up page does not close on a second gauge click: a stray click on the way to the owner's case must
+    // not lose the step.
+    [TestMethod]
+    public void ASecondGaugeClickDuringSetupIsIgnored()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+            presenter.RequestSetup(Gauge, Gauge.Location);
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+
+            Assert.IsTrue(presenter.IsShown, "The gauge click must not close a set-up page.");
+            Assert.AreEqual(WidgetCardView.SetupListening, presenter.ViewForTest);
+        });
+    }
+
+    private static BatterySetupListen FoundListen()
+    {
+        BatterySetupRecord record = SetupRecordFixtures.Record(SetupRecordFixtures.Message(high: 8, low: 4), SetupRecordFixtures.Picks(40, 80));
+        return new BatterySetupListen(
+            BatterySetupListenStatus.Found, string.Empty, record.Candidate, [], SetupRecordFixtures.Start, SetupRecordFixtures.Start.AddSeconds(20), 40, 12);
+    }
+
+    private static BatterySetupListen Failed(BatterySetupListenStatus status) =>
+        new(status, "x", Candidate: null, [], SetupRecordFixtures.Start, SetupRecordFixtures.Start.AddSeconds(20), 0, 0);
 
     private const int WM_KEYDOWN = 0x0100;
 
@@ -297,13 +497,19 @@ public sealed class WidgetCardPresenterTests
 
         public string OtherDeviceLabel { get; set; } = "";
 
-        public bool ClaimAvailableValue { get; set; }
-
         public List<CardPlace> ToggleCalls { get; } = new();
 
         public List<(bool On, CardPlace Place)> AutoPauseCalls { get; } = new();
 
-        public List<CardPlace> ClaimCalls { get; } = new();
+        // One TaskCompletionSource per listen the presenter starts, so a test finishes each in turn, and the
+        // token each was given.
+        public List<TaskCompletionSource<BatterySetupListen>> Listens { get; } = new();
+
+        public List<CancellationToken> ListenTokens { get; } = new();
+
+        public List<(BatterySetupListen Listen, BatterySetupPicks Picks)> CompleteCalls { get; } = new();
+
+        public BatterySetupResultStatus CompleteStatus { get; set; } = BatterySetupResultStatus.CaseSetUp;
 
         public WidgetCardPresenterCallbacks Build() => new(
             CurrentSnapshot: () => Snapshot,
@@ -314,9 +520,19 @@ public sealed class WidgetCardPresenterTests
             Ink: () => Ink,
             HighContrast: () => HighContrast,
             OtherDeviceLabel: () => OtherDeviceLabel,
-            ClaimAvailable: () => ClaimAvailableValue,
             RequestToggle: place => ToggleCalls.Add(place),
             SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)),
-            RequestClaim: place => ClaimCalls.Add(place));
+            ListenForSetup: ct =>
+            {
+                ListenTokens.Add(ct);
+                var listen = new TaskCompletionSource<BatterySetupListen>();
+                Listens.Add(listen);
+                return listen.Task;
+            },
+            CompleteSetup: (listen, picks) =>
+            {
+                CompleteCalls.Add((listen, picks));
+                return new BatterySetupResult(CompleteStatus, "setup.json", DecodeProof.Evaluate([]));
+            });
     }
 }

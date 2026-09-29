@@ -25,11 +25,10 @@ namespace Earshot;
 //
 // Every fixture rendered here is synthetic: the battery percentages, the read time and the where-state are
 // all made up for layout purposes, not read from a device. In particular, the left and right bud
-// percentages (70% and 60%) are values production cannot actually produce yet: ProximityDecodeTable.Current
-// ships Unproved until a live capture proves the bud nibble order, so a real snapshot's Left.Percent and
-// Right.Percent are always null today (WidgetCopy.Percent(null), "No reading") - only the case nibble
-// decodes without that table. These captures preview the finished layout ahead of that proof, not a claim
-// about what the widget currently shows on the owner's own hardware.
+// percentages (70% and 60%) are values production only produces once two of the owner's own set-ups have
+// proved the bud nibble order (DecodeProof), so until then a real snapshot's Left.Percent and Right.Percent
+// are null (WidgetCopy.Percent(null), "No reading") and only the case nibble decodes. These captures preview
+// the finished layout, not a claim about what the widget shows on the owner's own hardware.
 //
 // The card's window handle, if RenderContent's caller ever created one at all, is never shown, so
 // DwmExtendFrameIntoClientArea's translucent Mica backdrop is never actually composited by the desktop:
@@ -182,36 +181,46 @@ internal static partial class Program
     }
 
     // The card variants the widget card probe renders, from the same two fixed synthetic snapshots the
-    // gauge already uses. "this-pc" and "elsewhere" are the shipped card as production actually renders it
-    // today (AutoPauseAvailable false in both, matching every real snapshot until a device proves the
-    // in-ear bits, so ShowSwitch is false and the switch row never appears; ClaimExists true in both, so
-    // the claim link never appears either, matching the only claimed shape a device can currently reach).
-    // "auto-pause-preview" is clearly not that: production never sets AutoPauseAvailable true today, so
-    // this variant exists only to preview the switch row's look, from a snapshot no real device produces
-    // yet, not as a claim about current shipped behaviour. "claim-link-preview" and
-    // "claim-link-disabled-preview" are the same kind of preview for the claim link: an unclaimed snapshot,
-    // enabled and disabled, since phase 0 has never run on this build and so never actually produces the
-    // enabled state for real either.
+    // gauge already uses. "this-pc" and "elsewhere" are the card as it renders with a reading (AutoPauseAvailable
+    // false in both, so the switch row never appears). "auto-pause-preview" is a preview only: production never
+    // sets AutoPauseAvailable true until the in-ear bits are proved, which a set-up cannot do. "set-up-button"
+    // is the card with no reading at all, and "set-up-button-cannot-read" the same after a set-up that could
+    // not read the AirPods. The "setup-" variants are every page of the battery set-up, with fixed picks.
     internal static IReadOnlyList<(string Variant, WidgetCardModel Model)> ProbeWidgetCardVariants(DateTimeOffset now)
     {
         IReadOnlyList<(string Name, WidgetSnapshot Snapshot)> snapshots = ProbeWidgetSnapshots(now);
         WidgetSnapshot thisPc = snapshots[0].Snapshot;
         WidgetSnapshot elsewhere = snapshots[1].Snapshot;
         WidgetSnapshot unclaimed = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: false);
+        WidgetSnapshot cannotRead = unclaimed with { SetupCouldNotRead = true };
+        var picks = new BatterySetupPicks(80, 60, 90, LeftCharging: true, RightCharging: true, CaseCharging: false);
+
+        WidgetCardModel SetupPage(WidgetCardView view, SetupViewModel page) => new(
+            unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true, ButtonEnabled: true,
+            OtherDeviceLabel: "", Now: now, ShowSetupButton: true, View: view, Setup: page);
 
         return
         [
             ("this-pc", new WidgetCardModel(thisPc, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
-                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowClaimLink: false, ClaimAvailable: false)),
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowSetupButton: false)),
             ("elsewhere", new WidgetCardModel(elsewhere, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
-                ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now, ShowClaimLink: false, ClaimAvailable: false)),
+                ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now, ShowSetupButton: false)),
             ("auto-pause-preview", new WidgetCardModel(thisPc with { AutoPauseAvailable = true },
                 AutoPauseOn: false, ShowSwitch: true, ConnectIntent: false, ButtonEnabled: true,
-                OtherDeviceLabel: "", Now: now, ShowClaimLink: false, ClaimAvailable: false)),
-            ("claim-link-preview", new WidgetCardModel(unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
-                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowClaimLink: true, ClaimAvailable: true)),
-            ("claim-link-disabled-preview", new WidgetCardModel(unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
-                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowClaimLink: true, ClaimAvailable: false)),
+                OtherDeviceLabel: "", Now: now, ShowSetupButton: false)),
+            ("set-up-button", new WidgetCardModel(unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowSetupButton: true)),
+            ("set-up-button-cannot-read", new WidgetCardModel(cannotRead, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowSetupButton: true)),
+            ("setup-listening", SetupPage(WidgetCardView.SetupListening, SetupViewModel.Listening(spinnerFrame: 3))),
+            ("setup-pick", SetupPage(WidgetCardView.SetupPick, SetupViewModel.Pick(picks))),
+            ("setup-done-battery-set-up", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp))),
+            ("setup-done-case-set-up", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUp))),
+            ("setup-done-buds-same", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUpBudsSame))),
+            ("setup-done-could-not-read", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead))),
+            ("setup-failed-not-found", SetupPage(WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.NotFound))),
+            ("setup-failed-ambiguous", SetupPage(WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.Ambiguous))),
+            ("setup-failed-bluetooth-off", SetupPage(WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.WatcherNotStarted))),
         ];
     }
 

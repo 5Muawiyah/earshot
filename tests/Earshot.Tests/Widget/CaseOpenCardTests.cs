@@ -309,14 +309,14 @@ public sealed class CaseOpenCardTests
         });
     }
 
-    // Mirrors AcrossTheCardsWholeLifeTheToggleSinkSeesNoRequestsExceptOneFromConnect for the claim link: it
-    // never fires on its own (a timeout dismiss), only from a genuine click while the notice is open.
+    // The case-open notice never shows a set-up page or a set-up button, whatever the snapshot holds: it is
+    // always the main view, and a click on the spot where the button would be is not a set-up request.
     [TestMethod]
-    public void TheClaimLinkOnTheNoticeCardRoutesThroughRequestClaimOnlyFromAGenuineClick()
+    public void TheNoticeCardNeverShowsASetupButtonOrPage()
     {
         Phase5.CardDesktop.Run(() =>
         {
-            var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false), ClaimAvailableValue = true };
+            var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false) };
             var gate = Gate();
             var environment = new Earshot.Tests.Phase5.FakeCardEnvironment();
             var log = new CapturingLog();
@@ -328,19 +328,12 @@ public sealed class CaseOpenCardTests
 
             presenter.RequestShow(gaugeBounds: null);
             Application.DoEvents();
-            time.Advance(TimeSpan.FromSeconds(5));
-            Assert.IsFalse(presenter.IsShown);
-            Assert.AreEqual(0, callbacks.ClaimCalls.Count, "A timeout dismiss must never claim.");
 
-            presenter.RequestShow(gaugeBounds: null);
-            Application.DoEvents();
             Assert.IsTrue(presenter.IsShown);
-
-            Rectangle claimLink = WidgetCardLayout.Compute(96, showSwitch: false, showClaimLink: true).ClaimLink;
-            ClickAt(card!.Handle, new Point(claimLink.X + (claimLink.Width / 2), claimLink.Y + (claimLink.Height / 2)));
-
-            Assert.AreEqual(1, callbacks.ClaimCalls.Count, "Exactly one claim request, from the claim link.");
-            Assert.IsFalse(presenter.IsShown, "Activating the claim link closes the notice.");
+            Assert.AreEqual(WidgetCardView.Main, card!.Model.View);
+            Assert.AreEqual(WidgetCardView.Main, card.EffectiveView);
+            Assert.IsFalse(card.CurrentMainLayout.ShowSetupButton, "A notice never draws the set-up button.");
+            Assert.IsTrue(card.CurrentMainLayout.ShowColumns, "The three columns stay, with No reading in place of a percent.");
         });
     }
 
@@ -456,13 +449,11 @@ public sealed class CaseOpenCardTests
 
         public string OtherDeviceLabel { get; set; } = "";
 
-        public bool ClaimAvailableValue { get; set; }
-
         public List<CardPlace> ToggleCalls { get; } = new();
 
         public List<(bool On, CardPlace Place)> AutoPauseCalls { get; } = new();
 
-        public List<CardPlace> ClaimCalls { get; } = new();
+        public Task<BatterySetupListen> NeverListens(CancellationToken ct) => throw new NotSupportedException("The notice never sets up.");
 
         public WidgetCardPresenterCallbacks Build() => new(
             CurrentSnapshot: () => Snapshot,
@@ -473,9 +464,9 @@ public sealed class CaseOpenCardTests
             Ink: () => Ink,
             HighContrast: () => HighContrast,
             OtherDeviceLabel: () => OtherDeviceLabel,
-            ClaimAvailable: () => ClaimAvailableValue,
             RequestToggle: place => ToggleCalls.Add(place),
             SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)),
-            RequestClaim: place => ClaimCalls.Add(place));
+            ListenForSetup: NeverListens,
+            CompleteSetup: (_, _) => throw new NotSupportedException("The notice never sets up."));
     }
 }

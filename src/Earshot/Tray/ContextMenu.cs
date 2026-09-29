@@ -34,7 +34,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _caseOpenCard = new();
     private readonly ToolStripMenuItem _lowBatteryAlert = new();
     private readonly ToolStripMenuItem _lowBatteryThreshold = new();
-    private readonly ToolStripMenuItem _claimAirPods = new();
+    private readonly ToolStripMenuItem _setUpBattery = new();
     private readonly ToolStripMenuItem _nameOtherDevice = new();
     private readonly ToolStripMenuItem _chooseDevice = new();
     private readonly ToolStripMenuItem _setUp = new();
@@ -64,7 +64,7 @@ internal sealed class TrayMenu : IDisposable
             _caseOpenCard,
             _lowBatteryAlert,
             _lowBatteryThreshold,
-            _claimAirPods,
+            _setUpBattery,
             _nameOtherDevice,
             new ToolStripSeparator(),
             _chooseDevice,
@@ -83,7 +83,7 @@ internal sealed class TrayMenu : IDisposable
         _leftClickConnects.Click += (_, _) => LeftClickConnectsClicked?.Invoke(this, EventArgs.Empty);
         _caseOpenCard.Click += (_, _) => CaseOpenCardClicked?.Invoke(this, EventArgs.Empty);
         _lowBatteryAlert.Click += (_, _) => LowBatteryAlertClicked?.Invoke(this, EventArgs.Empty);
-        _claimAirPods.Click += (_, _) => ClaimAirPodsClicked?.Invoke(this, EventArgs.Empty);
+        _setUpBattery.Click += (_, _) => SetUpBatteryClicked?.Invoke(this, EventArgs.Empty);
         _nameOtherDevice.Click += (_, _) => NameOtherDeviceClicked?.Invoke(this, EventArgs.Empty);
         _chooseDevice.Click += (_, _) => ChooseDeviceClicked?.Invoke(this, EventArgs.Empty);
         _setUp.Click += (_, _) => SetUpClicked?.Invoke(this, EventArgs.Empty);
@@ -119,7 +119,7 @@ internal sealed class TrayMenu : IDisposable
     // One entry of the low battery threshold submenu was clicked.
     public event EventHandler<LowBatteryThresholdMenuItemEventArgs>? LowBatteryThresholdItemClicked;
 
-    public event EventHandler? ClaimAirPodsClicked;
+    public event EventHandler? SetUpBatteryClicked;
 
     public event EventHandler? NameOtherDeviceClicked;
 
@@ -159,7 +159,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_lowBatteryAlert, state.LowBatteryAlert);
         Set(_lowBatteryThreshold, state.LowBatteryThreshold);
         SetLowBatteryThresholdItems(state.LowBatteryThresholdItems);
-        Set(_claimAirPods, state.ClaimAirPodsItem);
+        Set(_setUpBattery, state.SetUpBatteryItem);
         Set(_nameOtherDevice, state.NameOtherDeviceItem);
         Set(_chooseDevice, state.ChooseDevice);
         Set(_setUp, state.SetUp);

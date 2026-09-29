@@ -13,31 +13,24 @@ namespace Earshot.Widget.EarPause;
 internal sealed class AutoPause
 {
     private readonly IMediaSessions _sessions;
-    private readonly Func<bool?> _broadcastContinuesWhilePlayingFromThisPc;
+    private readonly Func<bool?> _broadcastObserved;
     private readonly Func<bool> _autoPauseEnabled;
     private readonly ILog _log;
 
     private bool? _lastLeftInEar;
     private bool? _lastRightInEar;
 
-    // Production entry point: always reads phase 0's gate from WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc
-    // itself, so nothing composing this class can accidentally wire up a different value.
-    public AutoPause(IMediaSessions sessions, Func<bool> autoPauseEnabled, ILog log)
-        : this(sessions, static () => WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc, autoPauseEnabled, log)
-    {
-    }
-
-    // Test-only: supplies the gate directly, so a test can exercise the "phase 0 has proved this" path
-    // without WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc ever holding anything but its shipped
-    // null default, the way ClaimFlow's internal overload does for its own phase 0 constant.
-    internal AutoPause(IMediaSessions sessions, Func<bool?> broadcastContinuesWhilePlayingFromThisPc, Func<bool> autoPauseEnabled, ILog log)
+    // broadcastObserved: whether the AirPods were observed to keep broadcasting while this PC plays to them
+    // (the proof store's run-time observation): true once observed, null before. Nothing is paused until it
+    // is true.
+    public AutoPause(IMediaSessions sessions, Func<bool?> broadcastObserved, Func<bool> autoPauseEnabled, ILog log)
     {
         ArgumentNullException.ThrowIfNull(sessions);
-        ArgumentNullException.ThrowIfNull(broadcastContinuesWhilePlayingFromThisPc);
+        ArgumentNullException.ThrowIfNull(broadcastObserved);
         ArgumentNullException.ThrowIfNull(autoPauseEnabled);
         ArgumentNullException.ThrowIfNull(log);
         _sessions = sessions;
-        _broadcastContinuesWhilePlayingFromThisPc = broadcastContinuesWhilePlayingFromThisPc;
+        _broadcastObserved = broadcastObserved;
         _autoPauseEnabled = autoPauseEnabled;
         _log = log;
     }
@@ -84,9 +77,9 @@ internal sealed class AutoPause
             return false;
         }
 
-        if (_broadcastContinuesWhilePlayingFromThisPc() != true)
+        if (_broadcastObserved() != true)
         {
-            _log.Info("Auto-pause is waiting for phase 0 to confirm the broadcast continues while playing from this PC.");
+            _log.Info("Auto-pause is waiting for the broadcast to be observed while playing from this PC.");
             return false;
         }
 

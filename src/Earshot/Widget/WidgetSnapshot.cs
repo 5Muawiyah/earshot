@@ -15,9 +15,17 @@ public sealed record WidgetSnapshot(
     WidgetWatcherState Watcher,
     int? WatcherErrorCode, string? WatcherErrorName,
     bool ClaimExists,
-    bool AutoPauseAvailable,            // the gate constant is true and the in-ear bits are proved
+    bool AutoPauseAvailable,            // the broadcast has been observed while playing and the in-ear bits are proved
     WidgetCounters Counters)
 {
+    // True when the newest set-up saw only forms the parser does not read: nothing can be shown for these
+    // AirPods yet, and the card says so beside its button. Not part of the positional shape, so a snapshot
+    // built without it reads false.
+    public bool SetupCouldNotRead { get; init; }
+
+    // A reading older than one hour counts as no recent reading. False when there is no reading at all.
+    public bool BatteryIsRecent(DateTimeOffset now) => BatteryReadAt is { } at && now - at <= WidgetTiming.BatteryRecentWindow;
+
     public static WidgetSnapshot Empty(WidgetWatcherState watcher, bool claimExists) => new(
         AirPodsWhere.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown,
         BatteryReadAt: null, EarReadAt: null, LidOpen: null, watcher, WatcherErrorCode: null, WatcherErrorName: null,

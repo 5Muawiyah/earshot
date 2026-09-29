@@ -35,22 +35,33 @@ public sealed record OwnedBattery(int? NibbleHigh, int? NibbleLow, int? Case, Da
     private static int? KnownNibble(int nibble) => nibble is >= 0 and <= 10 ? nibble : null;
 }
 
-// %LOCALAPPDATA%\Earshot\widget\claim.json. The device the owner told Earshot is his: what a claiming run
+// %LOCALAPPDATA%\Earshot\widget\claim.json. The device the owner told Earshot is his: what a battery set-up
 // read once, kept here rather than in settings.json because it is a device-derived record and not a
 // preference, and never roamed.
+//
+// SchemaVersion 2 carries the signal figures the set-up measured (the threshold is derived from them, never
+// a constant) and the name of the set-up record it was made from. A version 1 file is not used and is left
+// where it is.
 //
 // NibblesAreNamedOrder records which of the two conventions OwnedBattery.FromMessage's comment above
 // describes was used to write Last.NibbleHigh/NibbleLow: false when they are BatteryA's wire high and low
 // nibble (the order was unproved at the time), true when they are the right and left bud by name (the
-// order was proved). Schema stays 1: an older file has no such member, and a missing one is read as false
-// (wire order), which is what every claim made before this field existed actually holds. When the decode
-// table's own current provedness no longer matches this flag, the stored nibbles cannot be told apart from
-// a stranger's without redoing the claim, so OwnershipRule fails closed rather than guess which they are.
+// order was proved). When the decode table's own current provedness no longer matches this flag, the stored
+// nibbles cannot be told apart from a stranger's without redoing the set-up, so OwnershipRule fails closed
+// rather than guess which they are.
 public sealed record WidgetClaim(
-    int SchemaVersion,            // 1
+    int SchemaVersion,            // 2
     byte ModelHigh, byte ModelLow,
     byte Colour,
-    sbyte SignalThresholdDbm,     // copied from WidgetDefaults.SignalThresholdDbm at claim time
+    sbyte SignalThresholdDbm,     // the weakest signal the set-up saw, less its margin
+    sbyte SignalMinDbm,
+    sbyte SignalMedianDbm,
+    sbyte SignalMaxDbm,
+    int SignalSamples,            // the messages those three figures were taken from
+    string SetupRecord,           // the set-up record's file name, no path
     DateTimeOffset ClaimedAtUtc,
     OwnedBattery Last,            // the reading the claim was made from, then the last owned reading
-    bool NibblesAreNamedOrder = false);
+    bool NibblesAreNamedOrder = false)
+{
+    public const int CurrentSchemaVersion = 2;
+}

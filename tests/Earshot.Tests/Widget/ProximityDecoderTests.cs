@@ -136,4 +136,20 @@ public sealed class ProximityDecoderTests
         Assert.AreEqual(At, reading.Left.ReadAt);
         Assert.AreEqual(At, reading.Case.ReadAt);
     }
+
+    // The owner's own set-ups contradicted the documented case nibble twice with nothing in its favour: it
+    // decodes to no case at all, as if it had never been read.
+    [TestMethod]
+    public void ADoubtedCaseDecodesNoCase()
+    {
+        ProximityMessage m = Message(batteryA: 0x53, batteryB: 0x37);
+        ProximityDecodeTable doubted = ProximityDecodeTable.Unproved with { CaseNibbleDoubted = true, CaseChargingBit = 4 };
+
+        DecodedReading reading = ProximityDecoder.Decode(m, doubted, At);
+
+        Assert.IsNull(reading.Case.Percent);
+        Assert.IsNull(reading.Case.Charging, "A doubted case is not shown as charging either.");
+        Assert.IsNull(reading.Case.ReadAt, "No read time for a value that is not shown.");
+        Assert.AreEqual(70, ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved with { CaseChargingBit = 4 }, At).Case.Percent, "Sanity: undoubted, the same message reads 70.");
+    }
 }

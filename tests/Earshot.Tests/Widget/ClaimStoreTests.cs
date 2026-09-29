@@ -9,14 +9,39 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class ClaimStoreTests
 {
+    private static readonly string[] LastMembers = ["NibbleHigh", "NibbleLow", "Case", "AtUtc"];
+
+    private const string SetupRecordName = "setup-2026.09.27T00.00.00Z.json";
+
     private static WidgetClaim SampleClaim() => new(
-        SchemaVersion: 1,
+        SchemaVersion: 2,
         ModelHigh: WidgetFixtures.ModelHigh,
         ModelLow: WidgetFixtures.ModelLow,
         Colour: WidgetFixtures.Colour,
         SignalThresholdDbm: -70,
+        SignalMinDbm: -60,
+        SignalMedianDbm: -58,
+        SignalMaxDbm: -55,
+        SignalSamples: 12,
+        SetupRecord: SetupRecordName,
         ClaimedAtUtc: new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero),
         Last: new OwnedBattery(5, 6, 7, new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero)));
+
+    // A hand-written schema 2 file, with every member the store reads; each test replaces the one it is
+    // about. Member names are the ones the store itself writes.
+    private static string Json(
+        int schema = 2, int threshold = -70, int min = -60, int median = -58, int max = -55, int samples = 12,
+        string setupRecord = SetupRecordName, string claimedAt = "2026-09-27T00:00:00+00:00", string? last = "default", bool namedOrder = false)
+    {
+        string lastJson = last == "default"
+            ? "{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"2026-09-27T00:00:00+00:00\"}"
+            : last ?? "null";
+        return
+            "{\"SchemaVersion\":" + schema + ",\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
+            "\"SignalThresholdDbm\":" + threshold + ",\"SignalMinDbm\":" + min + ",\"SignalMedianDbm\":" + median +
+            ",\"SignalMaxDbm\":" + max + ",\"SignalSamples\":" + samples + ",\"SetupRecord\":\"" + setupRecord + "\"," +
+            "\"ClaimedAtUtc\":\"" + claimedAt + "\",\"Last\":" + lastJson + ",\"NibblesAreNamedOrder\":" + (namedOrder ? "true" : "false") + "}";
+    }
 
     [TestMethod]
     public void AMissingFileIsNoClaim()
@@ -42,10 +67,7 @@ public sealed class ClaimStoreTests
         Assert.AreEqual("not valid json", File.ReadAllText(path));
     }
 
-    // SampleClaim's threshold is fixed at -70; every test below that saves it supplies a matching
-    // currentSignalThreshold so the store's own post-save reload does not invalidate what it just wrote
-    // a stored threshold is usable only when it equals the current one.
-    private static ClaimStore NewStore(string path, ILog log) => new(path, log, static () => (sbyte)-70);
+    private static ClaimStore NewStore(string path, ILog log) => new(path, log);
 
     [TestMethod]
     public async Task SaveIsAtomicAndReadable()
@@ -98,23 +120,132 @@ public sealed class ClaimStoreTests
             paths.WidgetClaimFile);
     }
 
-    // M1, reviewer probes 2 and 3: a claim whose stored threshold no longer matches phase 0's current one
-    // (here, the production default, which ships null) is unusable, whatever else in the file is valid.
+    // No claim was ever makeable before the schema changed, so a version 1 file can only be one a test or a
+    // hand wrote. It is not used, is logged by its version, and is left exactly where it is.
     [TestMethod]
-    public async Task AClaimWhoseThresholdNoLongerMatchesTheCurrentOneIsNoClaimAndLogged()
+    public void ASchemaOneFileIsNoClaimAndLogged()
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
-        var writer = NewStore(path, new CapturingLog());
-        writer.Save(SampleClaim());
-        await writer.IdleAsync();
+        string json = Json(schema: 1);
+        File.WriteAllText(path, json);
         var log = new CapturingLog();
 
-        var store = new ClaimStore(path, log); // the real, un-overridden default: WidgetDefaults.SignalThresholdDbm, null
+        var store = new ClaimStore(path, log);
 
         Assert.IsNull(store.Current);
-        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "threshold"));
-        Assert.AreNotEqual(0, new FileInfo(path).Length, "The file must be left in place, not deleted or rewritten.");
+        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "schema version 1, not 2"), "The refusal must name the version.");
+        Assert.AreEqual(json, File.ReadAllText(path), "The file must be left in place, not deleted or rewritten.");
+    }
+
+    // The threshold is whatever the set-up measured, so it is checked only for being a plausible signal.
+    [TestMethod]
+    public void AThresholdOutsideTheRangeIsNoClaim()
+    {
+        foreach (int threshold in new[] { 1, -128 })
+        {
+            using var temp = new TempFolder();
+            string path = temp.File("claim.json");
+            File.WriteAllText(path, Json(threshold: threshold, min: -60));
+            var log = new CapturingLog();
+
+            var store = new ClaimStore(path, log);
+
+            Assert.IsNull(store.Current, "A threshold of " + threshold + " must be refused.");
+            Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "threshold"));
+        }
+    }
+
+    [TestMethod]
+    public void AThresholdAnywhereInsideTheRangeIsUsedWhateverItIs()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        File.WriteAllText(path, Json(threshold: -127, min: -100, median: -90, max: -80));
+
+        var store = new ClaimStore(path, new CapturingLog());
+
+        Assert.IsNotNull(store.Current, "No constant is compared with: any plausible threshold loads.");
+        Assert.AreEqual((sbyte)-127, store.Current!.SignalThresholdDbm);
+    }
+
+    [TestMethod]
+    public void SignalFiguresOutOfOrderAreNoClaim()
+    {
+        (int Min, int Median, int Max, int Threshold, int Samples)[] bad =
+        [
+            (-58, -60, -55, -70, 12),   // minimum above the median
+            (-60, -58, -59, -70, 12),   // median above the maximum
+            (-60, -58, -55, -50, 12),   // threshold above the weakest message
+            (-60, -58, -55, -70, 0),    // no samples
+            (-60, -58, 5, -70, 12),     // a positive dBm
+        ];
+        foreach ((int min, int median, int max, int threshold, int samples) in bad)
+        {
+            using var temp = new TempFolder();
+            string path = temp.File("claim.json");
+            File.WriteAllText(path, Json(threshold: threshold, min: min, median: median, max: max, samples: samples));
+            var log = new CapturingLog();
+
+            var store = new ClaimStore(path, log);
+
+            Assert.IsNull(store.Current, "Figures " + min + "/" + median + "/" + max + " threshold " + threshold + " samples " + samples + " must be refused.");
+            Assert.IsTrue(log.Entries.Any(e => e.Level == Earshot.Contracts.LogLevel.Warn));
+        }
+    }
+
+    [TestMethod]
+    public void ASetupRecordThatIsAPathOrEmptyIsNoClaim()
+    {
+        foreach (string name in new[] { "", "..\\\\claim.json", "a/b.json", "C:\\\\x.json" })
+        {
+            using var temp = new TempFolder();
+            string path = temp.File("claim.json");
+            File.WriteAllText(path, Json(setupRecord: name));
+            var log = new CapturingLog();
+
+            var store = new ClaimStore(path, log);
+
+            Assert.IsNull(store.Current, "A set-up record name of '" + name + "' must be refused.");
+        }
+    }
+
+    // A hand-written file with a member missing is refused, not read with that member as zero.
+    [TestMethod]
+    public void AMissingRequiredMemberIsNoClaim()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        File.WriteAllText(path, Json().Replace("\"SignalMinDbm\":-60,", string.Empty, StringComparison.Ordinal));
+        var log = new CapturingLog();
+
+        var store = new ClaimStore(path, log);
+
+        Assert.IsNull(store.Current);
+        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "SignalMinDbm"));
+    }
+
+    // The claim file holds exactly the schema 2 members, and the last reading's four; nothing else. No
+    // address, no sender tag, no payload byte.
+    [TestMethod]
+    public async Task TheClaimFileHoldsTheSchemaTwoMembersAndNothingElse()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var store = NewStore(path, new CapturingLog());
+        store.Save(SampleClaim());
+        await store.IdleAsync();
+
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+        string[] members = document.RootElement.EnumerateObject().Select(p => p.Name).ToArray();
+        string[] expected =
+        [
+            "SchemaVersion", "ModelHigh", "ModelLow", "Colour", "SignalThresholdDbm", "SignalMinDbm", "SignalMedianDbm",
+            "SignalMaxDbm", "SignalSamples", "SetupRecord", "ClaimedAtUtc", "Last", "NibblesAreNamedOrder",
+        ];
+        CollectionAssert.AreEqual(expected, members);
+        string[] last = document.RootElement.GetProperty("Last").EnumerateObject().Select(p => p.Name).ToArray();
+        CollectionAssert.AreEquivalent(LastMembers, last);
     }
 
     // Probe 3: a newer schema version is never used, whatever threshold it carries.
@@ -123,35 +254,27 @@ public sealed class ClaimStoreTests
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
-        string json =
-            "{\"SchemaVersion\":99,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
-            "\"SignalThresholdDbm\":-128,\"ClaimedAtUtc\":\"2026-09-27T00:00:00+00:00\"," +
-            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"2026-09-27T00:00:00+00:00\"}}";
+        string json = Json(schema: 99);
         File.WriteAllText(path, json);
         var log = new CapturingLog();
 
-        var store = new ClaimStore(path, log, static () => (sbyte)-128);
+        var store = new ClaimStore(path, log);
 
         Assert.IsNull(store.Current);
         Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "99"));
         Assert.AreEqual(json, File.ReadAllText(path), "An invalid claim file must be left exactly as it was.");
     }
 
-    // A claim file written before NibblesAreNamedOrder existed has no such member at all. Schema stays 1; a
-    // missing member must read as false (wire order), which is what every such file actually holds, rather
-    // than fail to load or default to something that would misread its nibbles.
+    // A schema 2 file with no NibblesAreNamedOrder member reads as wire order (false), rather than fail to load
+    // or default to something that would misread its nibbles.
     [TestMethod]
-    public void AnOlderClaimFileLoadsAsWireOrder()
+    public void AFileWithNoNamedOrderMemberLoadsAsWireOrder()
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
-        string json =
-            "{\"SchemaVersion\":1,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
-            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"2026-09-27T00:00:00+00:00\"," +
-            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"2026-09-27T00:00:00+00:00\"}}";
-        File.WriteAllText(path, json);
+        File.WriteAllText(path, Json().Replace(",\"NibblesAreNamedOrder\":false", string.Empty, StringComparison.Ordinal));
 
-        var store = new ClaimStore(path, new CapturingLog(), static () => (sbyte)-70);
+        var store = new ClaimStore(path, new CapturingLog());
 
         Assert.IsNotNull(store.Current);
         Assert.IsFalse(store.Current!.NibblesAreNamedOrder, "A file with no such member must read as wire order.");
@@ -163,16 +286,14 @@ public sealed class ClaimStoreTests
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
-        string json =
-            "{\"SchemaVersion\":1,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
-            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"2026-09-27T00:00:00+00:00\"}";
+        string json = Json(last: null);
         File.WriteAllText(path, json);
         var log = new CapturingLog();
 
-        var store = new ClaimStore(path, log, static () => (sbyte)-70);
+        var store = new ClaimStore(path, log);
 
         Assert.IsNull(store.Current);
-        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "last"));
+        Assert.IsTrue(log.Entries.Any(e => e.Level == Earshot.Contracts.LogLevel.Warn), "A claim with no last reading must be refused and logged.");
     }
 
     // Repeated saves of a reading that has not actually changed must not hit the disk each time.
@@ -206,7 +327,7 @@ public sealed class ClaimStoreTests
         await writer.IdleAsync();
         File.SetAttributes(path, FileAttributes.ReadOnly);
         var log = new CapturingLog();
-        var store = new ClaimStore(path, log, static () => (sbyte)-70);
+        var store = new ClaimStore(path, log);
         WidgetClaim updated = SampleClaim() with { Last = new OwnedBattery(5, 6, 8, new DateTimeOffset(2026, 9, 27, 1, 0, 0, TimeSpan.Zero)) };
 
         try
@@ -291,15 +412,12 @@ public sealed class ClaimStoreTests
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
         var future = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        string json =
-            "{\"SchemaVersion\":1,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
-            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"" + future.ToString("O") + "\"," +
-            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"" + future.ToString("O") + "\"}}";
+        string json = Json(claimedAt: future.ToString("O"));
         File.WriteAllText(path, json);
         var log = new CapturingLog();
         var fixedNow = new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
 
-        var store = new ClaimStore(path, log, static () => (sbyte)-70, () => fixedNow);
+        var store = new ClaimStore(path, log, () => fixedNow);
 
         Assert.IsNull(store.Current);
         Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "future"));
@@ -314,14 +432,11 @@ public sealed class ClaimStoreTests
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
         var future = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        string json =
-            "{\"SchemaVersion\":1,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
-            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"" + future.ToString("O") + "\"," +
-            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"" + future.ToString("O") + "\"}}";
+        string json = Json(claimedAt: future.ToString("O"));
         File.WriteAllText(path, json);
         var log = new CapturingLog();
         var fixedNow = new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
-        var store = new ClaimStore(path, log, static () => (sbyte)-70, () => fixedNow);
+        var store = new ClaimStore(path, log, () => fixedNow);
 
         store.Save(SampleClaim());
         await store.IdleAsync();
@@ -358,17 +473,14 @@ public sealed class ClaimStoreTests
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
-        string json =
-            "{\"SchemaVersion\":99,\"ModelHigh\":238,\"ModelLow\":238,\"Colour\":238," +
-            "\"SignalThresholdDbm\":-70,\"ClaimedAtUtc\":\"2026-09-27T00:00:00+00:00\"," +
-            "\"Last\":{\"NibbleHigh\":5,\"NibbleLow\":6,\"Case\":7,\"AtUtc\":\"2026-09-27T00:00:00+00:00\"}}";
+        string json = Json(schema: 99);
         File.WriteAllText(path, json);
         File.SetAttributes(path, FileAttributes.ReadOnly);
         var log = new CapturingLog();
 
         try
         {
-            var store = new ClaimStore(path, log, static () => (sbyte)-70);
+            var store = new ClaimStore(path, log);
 
             Assert.IsNull(store.Current);
             Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "99"));

@@ -35,7 +35,8 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
                 return new WinRtAdvertisementSource();
             },
             claimStore, settings, deviceMonitor, () => null, log,
-            action => action(), TimeProvider.System);
+            action => action(), TimeProvider.System,
+            new DecodeProofStore(temp.File("setup"), temp.File("proof.json"), log, TimeProvider.System));
 
         service.Start();
 

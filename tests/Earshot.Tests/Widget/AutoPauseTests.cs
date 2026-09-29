@@ -179,22 +179,30 @@ public sealed class AutoPauseTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "could not pause"));
     }
 
-    // The public constructor must read WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc itself,
-    // not accept an arbitrary gate, so nothing composing this class can wire up anything but phase 0's own
-    // proved value (which ships null, so this stays held off).
+    // The gate is read at the moment a bud leaves the ear, not at construction: an observation that arrives
+    // later (the broadcast proved while playing) lets the very next edge act, and the held-off line says why
+    // it waited.
     [TestMethod]
-    public async Task TheProductionConstructorReadsThePhase0GateItselfAndStaysHeldOff()
+    public async Task TheGateReadsTheInjectedObservation()
     {
         var sessions = OnePlayingSession();
         var log = new CapturingLog();
-        var autoPause = new AutoPause(sessions, () => true, log);
+        bool? observation = null;
+        var autoPause = new AutoPause(sessions, () => observation, () => true, log);
 
+        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool heldOff = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.IsFalse(heldOff, "Nothing is paused until the broadcast has been observed while playing from this PC.");
+        Assert.AreEqual(0, sessions.PauseCalls.Count);
+        Assert.IsTrue(log.Has(LogLevel.Info, "waiting for the broadcast to be observed"));
+
+        observation = true;
         await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
         bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
-        Assert.IsFalse(paused, "WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc ships null, so the production constructor must stay held off.");
-        Assert.AreEqual(0, sessions.PauseCalls.Count);
-        Assert.IsTrue(log.Has(LogLevel.Info, "waiting for phase 0"));
+        Assert.IsTrue(paused, "Once observed, the same gate lets the next edge through.");
+        Assert.AreEqual(1, sessions.PauseCalls.Count);
     }
 
     [TestMethod]
