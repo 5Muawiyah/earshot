@@ -286,4 +286,57 @@ public sealed class ServiceControlRealTests
         Assert.IsTrue(other.Ok, other.Detail);
         TestContext?.WriteLine(gone.Detail + " | " + other.Detail);
     }
+
+    // The setup verifies the read-back of the optional settings, so a service that has none of them (no failure action, no
+    // trigger, no privilege list, as a fresh registration has) must read as a clean zero, not as a read that failed. This reads
+    // every service on the machine, as a standard user, and reports what each optional read did.
+    [TestMethod]
+    public void EveryServiceOnThisMachineReadsAllItsOptionalSettingsOrSaysWhyNot()
+    {
+        string[] names = Regex.Matches(Sc("query", "type=", "service", "state=", "all"), "^SERVICE_NAME:\\s*(\\S+)", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value).ToArray();
+        Assert.IsTrue(names.Length > 20, "sc.exe listed " + names.Length + " services.");
+        var control = new WindowsServiceControl();
+        var unread = new SortedDictionary<string, SortedSet<uint>>(StringComparer.Ordinal);
+        int read = 0, withNone = 0, unknown = 0;
+        foreach (string name in names)
+        {
+            ServiceQuery query = control.Query(name);
+            if (query.Presence != ServicePresence.Present)
+            {
+                unknown++;
+                continue;
+            }
+
+            read++;
+            if (query.FailureActionCount == 0 && query.TriggerCount == 0 && query.RequiredPrivileges is { Count: 0 })
+            {
+                withNone++;
+            }
+
+            foreach (StepOutcome step in query.Steps.Where(s => !s.Ok))
+            {
+                if (!unread.TryGetValue(step.Step, out SortedSet<uint>? codes))
+                {
+                    unread[step.Step] = codes = [];
+                }
+
+                codes.Add(unchecked((uint)step.Code));
+            }
+        }
+
+        string summary = read + " services read, " + withNone + " with no failure action, trigger or privilege list, " + unknown +
+                         " not readable; reads that failed: " +
+                         (unread.Count == 0 ? "none" : string.Join("; ", unread.Select(k => k.Key + " codes " + string.Join(",", k.Value))));
+        TestContext?.WriteLine(summary);
+        Assert.IsTrue(withNone > 0, "No service without those settings was read, so the clean zero was not exercised. " + summary);
+        foreach (string level in new[]
+                 {
+                     ServiceSteps.FailureActions, ServiceSteps.DelayedStart, ServiceSteps.Triggers, ServiceSteps.SidType, "service-privileges",
+                     "service-preshutdown", "service-config", "service-status", "service-acl",
+                 })
+        {
+            Assert.IsFalse(unread.ContainsKey(level), level + " failed to read for some service. " + summary);
+        }
+    }
 }
