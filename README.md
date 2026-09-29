@@ -172,7 +172,7 @@ Install:
 2. I right-click the earbud on the taskbar, or the tray icon if that is what shows, and choose "Set up Earshot...". Windows shows one administrator prompt.
 3. Setup copies Earshot into C:\Program Files\Earshot and installs its scheduled tasks and a small Windows service that, when Block at boot and Hand back are both on, blocks the AirPods at shut down if Earshot itself could not.
 
-Update:
+Update (my settings in %APPDATA%\Earshot and my battery set-up in %LOCALAPPDATA%\Earshot are kept):
 - If the installed Earshot's menu has "Check for updates", the simplest way is that item, then the Update button on the card that opens. It downloads the new release, checks its SHA-256 and shows one administrator prompt.
 - Otherwise do it by hand. Download and check the new release as above. I choose Exit from Earshot's menu. Run the new Earshot.exe from the unzipped folder, then I choose "Set up Earshot..." (it is offered when the running copy is newer than the installed one, or the install is damaged). One administrator prompt.
 
