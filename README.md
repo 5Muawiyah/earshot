@@ -40,10 +40,11 @@ than by unpairing it or turning Bluetooth off:
 https://learn.microsoft.com/en-us/answers/questions/4093792/how-to-prevent-windows-from-automatically-connecti
 
 Earshot takes the other route. It disables the AirPods' own Bluetooth device
-nodes while you are not using them on the PC. A disabled node stays disabled
-across a restart, so Windows never pages them at boot. The pairing is
-untouched, so enabling the nodes again is quick: left-click the Earshot icon,
-then Connect on the card.
+nodes while you are not using them on the PC. A disabled node is designed to
+stay disabled across a restart, so Windows has nothing to page at boot. The
+power cycle test that checks this (test 08) has not run yet, and a shut down
+with Fast Startup on is not covered. The pairing is untouched, so enabling the
+nodes again is quick: left-click the Earshot icon, then Connect on the card.
 
 ## What it does
 
@@ -53,11 +54,12 @@ then Connect on the card.
 - **Blocks the Hands-Free profile**, on by default, so a browser tab or a game
   cannot drop the AirPods to a narrow voice channel. This turns off the
   AirPods microphone on this PC while it is on.
-- **Hands the AirPods back at shut down, sleep and Exit.** With **Hand back
-  on shut down, sleep and Exit** ticked (in the menu and on the card's
-  settings page), Earshot lets the AirPods go, confirms it, and blocks the
-  device nodes again before this PC can grab them back. A stuck disconnect
-  still gets the block. The tests cover it against stand-ins; it has not had a
+- **Hands the AirPods back at shut down, sleep and Exit**, off by default.
+  With **Hand back on shut down, sleep and Exit** ticked (in the menu and on
+  the card's settings page), Earshot lets the AirPods go, confirms it, and
+  blocks the device nodes again before this PC can grab them back. A stuck
+  disconnect still gets the block. Until you tick it, Exit while the AirPods
+  are in use closes Earshot without blocking them, and says so. The tests cover it against stand-ins; it has not had a
   live run (tests 17, 18 and 20 are pending).
 - **The AirPods widget.** A gauge on the taskbar (the earbud mark with a ring
   in your Windows accent colour, and the lower proved bud's number), a card
@@ -88,7 +90,9 @@ then Connect on the card.
   been closed or has crashed, nothing in the tray can hand the AirPods back at
   shut down. A Windows service, `EarshotHandBack`, covers that case: at shut
   down it checks whether the AirPods are already blocked and, if they are not,
-  blocks them. It does not disconnect them. It does nothing else, takes no
+  blocks them. It acts only when Block at boot and Hand back are both on, and
+  Hand back is off by default, so until you tick it the service does nothing
+  at shut down. It never disconnects the AirPods. It takes no
   requests from any program, and reads its settings only from a folder that
   standard users cannot write to. Setup installs it and uninstall removes it.
   It does not cover a shut down with Fast Startup on, which Windows may
@@ -105,25 +109,32 @@ plain-English tour of the tray.
    by `tools\build-release.ps1`, which writes it to `artifacts\` with a
    `.sha256` file beside it and prints its size and SHA-256. Check that hash
    against the copy you were given before you unzip it, because setup copies
-   these files into Program Files.
+   these files into Program Files. The checksum shows the download matches
+   what was published. It does not protect against a compromised release or
+   account, because the checksum comes from the same release, and the app is
+   not signed.
 2. Unzip it anywhere. You get an `Earshot` folder.
-3. Run `Earshot.exe`. An earbud icon appears in the notification area.
-4. Right click the icon and choose **Set up Earshot...**. Windows shows one
+3. Run `Earshot.exe`. An earbud icon appears in the notification area. By
+   default the earbud then shows on the taskbar instead, and the tray icon
+   hides once it does.
+4. Right click the earbud on the taskbar, or the tray icon if that is what
+   shows, and choose **Set up Earshot...**. Windows shows one
    administrator prompt. The item appears before setup, for a damaged
    install, and when the running copy is newer than the installed one.
 
-Connect, disconnect and the audio protection do not need setup. Only the boot
-block does, because disabling a device node needs administrator rights.
+Connect and disconnect do not need setup. Block at boot and Protect audio
+quality do, because both change the device through Earshot's SYSTEM tasks.
 
 Requirements: Windows 11 on x64, which is what Earshot is built for and
-tested on. Only Play from a phone needs Windows 10 version 2004 (build 19041) or later,
-which every Windows 11 has; on anything older that one menu item is shown
-disabled. Otherwise: the AirPods paired to this PC and connected to it at
+tested on. Play from a phone and the AirPods widget need Windows 10 version 2004
+(build 19041) or later, which every Windows 11 has. Otherwise: the AirPods paired to this PC and connected to it at
 least once, so Windows has created their device nodes; one administrator
 approval, for setup; nothing else to install, because the release is
 self-contained.
 
-Settings are in `%APPDATA%\Earshot\settings.json`. Logs, live-test evidence
+Settings are in `%APPDATA%\Earshot\settings.json`. The hand-back setting
+(`HandBackOnShutdownAndSleep`) and the service's `HandBackAtShutdown` read as
+off when they are absent. Logs, live-test evidence
 and the widget's claim, set-up records and proof are in
 `%LOCALAPPDATA%\Earshot`. The files the elevated tasks and the service read
 are in `%ProgramData%\Earshot`.

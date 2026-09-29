@@ -11,11 +11,11 @@ and the evidence behind each run.
 | # | Requirement | Supporting work | Proof |
 |---|---|---|---|
 | 1 | Stop Windows paging the AirPods at boot | The persistent-disable unit tests confirm the disable and block matching logic | Test 04 (block survives a restart) and Test 08 (the full power cycle acceptance test), both pending a live run |
-| 2 | Connect and disconnect the AirPods: left-click the tray icon, then Connect or Disconnect on the card | Connection-state unit tests confirm the state machine each click drives | Test 01 passed on the AirPods on 19 September 2026, in that day's shipping default (left click connected directly) with Protect audio quality on. Test 02, disconnect in detail, is pending |
+| 2 | Connect and disconnect the AirPods: left-click the tray icon, then Connect or Disconnect on the card | Connection-state unit tests confirm the state machine each click drives | Test 01 passed on the AirPods on 19 September 2026 with Protect audio quality on. It sent the driver requests directly; it did not click the tray icon. The click itself is scored by Test 08's `left-click-connects`, pending. Test 02, disconnect in detail, is pending |
 | 3 | Keep the AirPods on A2DP, so a browser tab or a game cannot drop them to call quality | The read-only walk from the audio endpoints to both the A2DP and Hands-Free filters shows both filters answer, so the connect path is reachable | Test 06, pending |
 | 4 | Show no battery figure that was not read off the device | Three independent read-only checks, each run against a positive control so a broken query could not be mistaken for a missing value | Done, see [What it does not do](#what-it-does-not-do). The same check with the AirPods disconnected is Test 11, pending |
-| 5 | Ask for exactly one administrator prompt, at setup, and nothing after | The elevated worker's argument-validation unit tests confirm it refuses anything it does not expect | Test 15, Uninstall reversal, which exercises the live setup and its reversal, pending |
-| 6 | Hand the AirPods back at shut down, sleep and Exit: release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting; `tests/Earshot.Tests/Integration/Coordinator/ExitHandBackTests.cs` proves the same order for Exit | No live run yet. Tests 17, 18 and 20, pending; see [verification.md](verification.md) |
+| 5 | Ask for one administrator prompt at setup and one per update, and none in everyday use | The elevated worker's argument-validation unit tests confirm it refuses anything it does not expect | Test 15, Uninstall reversal, which exercises the live setup and its reversal, pending |
+| 6 | Hand the AirPods back at shut down, sleep and Exit, once Hand back is ticked (it is off by default): release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting; `tests/Earshot.Tests/Integration/Coordinator/ExitHandBackTests.cs` proves the same order for Exit | No live run yet. Tests 17, 18 and 20, pending; see [verification.md](verification.md) |
 
 ## Widget and later requirements
 
@@ -60,13 +60,12 @@ Every test below runs against a stand-in. None of these has had a live run.
   blocks again the next time it sees them enabled and unused, but a boot in
   between can let Windows page them.
 - **Guarantee the shutdown-while-connected case.** With Hand back on shut
-  down, sleep and Exit on, Earshot releases the AirPods and blocks the nodes
-  again inside the time Windows gives it: up to 4 seconds at a shut down,
-  restart or sign-out, up to 1.5 seconds at sleep. Exit uses the 4 second cap
-  too. It cannot do any of that when
-  Windows gives it no notice at all: a power cut, a held power button, a
-  kernel stop error, a forced shutdown such as `shutdown /f`, and the
-  battery reaching a critical level all send nothing. Earshot not running
+  down, sleep and Exit on (it is off by default), Earshot releases the
+  AirPods and blocks the nodes again inside its own cap of 4 seconds at a shut
+  down, restart or sign-out, and 1.5 seconds at sleep. Exit uses the 4 second
+  cap too. It cannot do any of that when Windows gives it no notice at all: a
+  power cut, a held power button, a kernel stop error and the battery reaching
+  a critical level all send nothing. Earshot not running
   (closed, crashed, or not yet started) is covered only in part: the
   hand-back service can block the nodes at a shut down, but it cannot
   disconnect the AirPods, and it has not had a live run. Otherwise nothing can run when

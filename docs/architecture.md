@@ -49,8 +49,11 @@ Disconnect only asks the AirPods to disconnect.
 With **Hand back on shut down, sleep and Exit** on, Earshot releases the
 AirPods and blocks their device nodes again before the session actually ends,
 the machine actually sleeps, or Exit closes the tray, so this PC does not take
-them back the moment it restarts or wakes. The setting is in the tray menu and
-on the widget card's settings page.
+them back the moment it restarts or wakes. The setting is off by default: the
+tray's `HandBackOnShutdownAndSleep` and the service's `HandBackAtShutdown` both
+read as off when absent. Until it is ticked, Exit while the AirPods are in use
+closes Earshot without blocking them, and the service does nothing at shut
+down. The setting is in the tray menu and on the widget card's settings page.
 
 **Where it runs.** Entirely inside the tray. For shut down, restart and
 sign-out and for sleep it runs on the real Windows messages the tray's hidden
@@ -130,10 +133,13 @@ system account, that its image is inside the install folder, and that the
 install folder is not writable by standard users. The machine settings folder
 is checked and logged at start, and checked again for real at pre-shutdown.
 When a start check fails the service logs why and stops at once, reporting
-service error 1066 with the failure's own code, which Windows records as event
-7024; it does not stay idle. At pre-shutdown it reads the settings and the
-device from the machine folder only. If Hand back is off, or the AirPods are
-already fully blocked, it makes no call. Otherwise it blocks them through the
+service error 1066 (`ERROR_SERVICE_SPECIFIC_ERROR`) with the failure's own
+code; it does not stay idle. At pre-shutdown it reads the settings and the
+device from the machine folder only. It acts only when Block at boot and Hand
+back are both on, and Hand back reads as off when it is absent, so a fresh
+install does nothing at shut down until Hand back is ticked. If either is off,
+or the AirPods are already fully blocked, it makes no call. It never
+disconnects. Otherwise it blocks them through the
 same routine the boot-time task uses, retries a vetoed node once when there is
 room, and writes a status file with each node's code.
 
@@ -205,8 +211,8 @@ Earshot records exactly which services it turned off, and turns those back on
 when you turn the setting off or uninstall. The change installs and removes
 profile drivers, so it can be slow, and the audio endpoints come and go while
 it runs; it runs through a SYSTEM task rather than in the tray. The change
-can also lapse: reconnecting or restarting can bring the Hands-Free service
-back, so Earshot re-reads the installed services after a connect and after
+can also lapse: reconnecting or restarting is reported to bring the Hands-Free
+service back, so Earshot re-reads the installed services after a connect and after
 boot and re-applies it when it has reverted, so it can take effect a moment
 after a connect rather than instantly.
 
@@ -290,10 +296,8 @@ battery reading than the owner's last one can pass the rule, and he chose to
 accept that risk rather than tighten it and risk the widget missing his own
 AirPods.
 
-**The taskbar gauge.** Windows 11 removed the deskband API that used to let
-a program dock a control into the taskbar, and has no replacement for it, so
-there is no supported way to do this. The gauge is an owned, topmost,
-layered overlay window positioned over free taskbar space, which it finds by
+**The taskbar gauge.** Earshot does not use a taskbar docking API. The gauge is
+an owned, topmost, layered overlay window positioned over free taskbar space, which it finds by
 reading the taskbar's own button layout through UI Automation and polling it
 for changes; the window's alpha-zero pixels let a click reach the taskbar
 underneath rather than the gauge
@@ -327,11 +331,13 @@ it; the tray icon fallback is what keeps the widget usable if that happens.
 
 **The card and the case-open card.** A borderless window with rounded
 corners and Windows' own translucent card backdrop, applied through the
-documented DWM extended-frame call
+`DWMWA_SYSTEMBACKDROP_TYPE` window attribute
+(https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmsetwindowattribute)
+and the documented DWM extended-frame call
 (https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmextendframeintoclientarea),
-following the system's light or dark theme; on a Windows build too old for
-that call, or if it fails, the card falls back to an opaque colour instead
-of the translucent one. It opens above the gauge, closes
+following the system's light or dark theme; on a Windows build older than
+22621, or if either call fails, the card falls back to an opaque colour
+instead of the translucent one. It opens above the gauge, closes
 when it loses focus, and works from the keyboard. The case-open card is the
 same window in a separate, unfocused instance: the case-open event shows it
 (which needs the lid state, so it stays off until that is proved), it reads its own dismiss time from
@@ -452,7 +458,7 @@ Not built, and not close to being built, on Windows without one:
   still an open question.
 
 **Why.** These all go through Apple's own accessory protocol, carried over a
-Bluetooth L2CAP channel at a fixed PSM (0x1001), not through anything in the
+Bluetooth L2CAP channel, not through anything in the
 advertisement the widget already reads. Microsoft's own documentation for
 opening an L2CAP connection to a remote device,
 ["Creating a L2CAP Client Connection to a Remote Device"](https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/creating-a-l2cap-client-connection-to-a-remote-device),
@@ -464,18 +470,15 @@ user mode.
 Windows' test-signing boot option is turned on
 (https://learn.microsoft.com/en-us/windows-hardware/drivers/install/the-testsigning-boot-configuration-option),
 commonly called Test Mode, which weakens the system's own code-integrity
-guarantees and is why kernel-level anti-cheat such as FACEIT refuses to run
-at all while it is on. Getting a driver trusted without Test Mode means
+guarantees. Getting a driver trusted without Test Mode means
 signing it through Microsoft's own driver programme: since the April 2026
 Windows update, Windows no longer trusts a kernel driver signed only through
 the older cross-signing route by default
 (https://techcommunity.microsoft.com/blog/windows-itpro-blog/advancing-windows-driver-security-removing-trust-for-the-cross-signed-driver-pro/4504818).
 
-**On top of the cost, one more limit.** No application reviewed for this
-project, on any platform, shows the name of the device the AirPods are
-actually connected to when that device is not the one asking; the widget's
-"On your iPhone" is the owner's own label, never a name read off the
-AirPods, for the reason above.
+**On top of the cost, one more limit.** Earshot does not read the name of the
+device the AirPods are connected to; the widget's "On your iPhone" is the
+owner's own label, never a name read off the AirPods.
 
 ## The safety model
 
@@ -528,9 +531,9 @@ menu. The item is offered before setup, for a damaged install, and when the
 running copy is newer than the installed one. It asks for one administrator
 prompt, then Earshot copies itself into Program
 Files, verifies every copied file, registers the three scheduled tasks
-described above, and installs the hand-back service. Connect, disconnect and audio protection all work without
-setup; only the boot block needs it, because disabling a device node needs
-administrator rights.
+described above, and installs the hand-back service. Connect and disconnect do
+not need setup. Block at boot and Protect audio quality do, because both
+change the device through Earshot's SYSTEM tasks.
 
 To remove Earshot, turn **Open on startup** off in the tray menu first, then
 close Earshot. The startup registry value belongs to the tray, and uninstall
