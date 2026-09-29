@@ -10,8 +10,10 @@ namespace Earshot.App;
 // The cap is the shut-down one (TrayStartOptions.HandBackBudget, 4 s, and 1.5 s of it for the disconnect). Exit has
 // no Windows deadline, but the owner is waiting at the click, so the cap is taken from the existing ones rather than
 // invented: it is the longest of them, and the one the procedure was sized to (a disconnect first, then a block that
-// is not vetoed), so it costs a normal Exit nothing and bounds a stuck one. Once the block has been sent to the gate
-// it runs in its own SYSTEM process, so a cap that passes after that point does not stop it.
+// is not vetoed), so it costs a normal Exit nothing and bounds a stuck one. A disconnect that outlasts the cap does
+// not stop the block: Exit has no Windows deadline to keep, and the block is what keeps this PC off the AirPods at rest,
+// so it is sent anyway, with a cap of its own. Once the block has been sent to the gate it runs in its own SYSTEM
+// process, so a cap that passes after that point does not stop it.
 //
 // Exit with the setting off, or with the AirPods not connected to this PC, is what it was before: the block before
 // closing, and "Closed while in use" when the AirPods are in use.

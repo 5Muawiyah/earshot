@@ -1372,6 +1372,13 @@ internal sealed partial class BlockCoordinator : IDisposable
             return;
         }
 
+        if (disconnectOutcome == DisconnectCutShortOutcome)
+        {
+            // Only Exit gets here (DisconnectStepAsync): the cap spent on the disconnect is gone, so the block is
+            // given a cap of the same length, from now.
+            deadline = _time.GetUtcNow() + (deadline - t0);
+        }
+
         // The block is sent whether or not the disconnect confirmed: today's code already blocks at the query
         // while the AirPods are in use, and a sink entry still in use only vetoes that one entry (Partial, seven
         // of the eight nodes still block). Refusing the block here would leave every node enabled by choice,
@@ -1417,6 +1424,9 @@ internal sealed partial class BlockCoordinator : IDisposable
     // blockAlreadySentAt is null on the normal path (nothing has been sent yet when the disconnect is cut
     // short), and the query's own issue time on the reuse path: the query-time block was already sent before
     // this disconnect ever ran, so "block was not sent" would say the opposite of what happened.
+    // What a disconnect that never came back records, when the hand-back goes on to send the block anyway (Exit only).
+    private const string DisconnectCutShortOutcome = "cut short";
+
     private async Task<string?> DisconnectStepAsync(HandBackTrigger trigger, Guid container, DateTimeOffset t0, DateTimeOffset deadline, TimeSpan disconnectWait, RenderState render, DateTimeOffset? blockAlreadySentAt = null)
     {
         if (render != RenderState.Active)
@@ -1453,8 +1463,17 @@ internal sealed partial class BlockCoordinator : IDisposable
         {
             NoteOwnLeaveEnded(false);
             _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["disconnect"], blockAlreadySentAt));
-            RecordHandBack("cut short", HandBackBlockOutcome.CutShort, "the disconnect had not finished");
-            return null;
+            if (trigger != HandBackTrigger.Exit)
+            {
+                RecordHandBack("cut short", HandBackBlockOutcome.CutShort, "the disconnect had not finished");
+                return null;
+            }
+
+            // Exit has no Windows deadline: nothing is waiting on its reply, and the block is what keeps this PC off
+            // the AirPods at rest, so a disconnect that never came back does not stop it. The caller gives the block
+            // a cap of its own.
+            _log.Warn(HandBackText.ExitBlockAfterStuckDisconnect());
+            return DisconnectCutShortOutcome;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -108,6 +108,10 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string SetupUnsafeEnvironmentMessage = "Setup stopped because the environment sets unsafe .NET runtime variables.";
     internal const string SetupCancelledMessage = "Setup was cancelled";
     internal const string SetupNeedsAdminMessage = "Setup needs administrator approval.";
+
+    // Install ended Partial: the boot block is set up and checked, and the service that hands the AirPods back at shut
+    // down with the tray closed could not be. The owner can run setup again to try the service again.
+    internal const string SetupHandBackNotSetUpMessage = "Earshot is set up, but the shut-down hand-back could not be set up. Try again.";
     internal const string SetupUnsafeFolderMessage = "Setup stopped because a folder it uses was not safe.";
     internal const string SetupNeedsReleaseMessage = Boot.Gate.FileManifest.MissingMessage;
     internal const string SetupFailedMessage = "Setup did not finish. Try again.";
@@ -276,6 +280,11 @@ internal sealed class BlockController : IBlockController, IDisposable
         }
 
         steps.Add(ExitStep("install-exit", exitCode));
+        if (exitCode == (int)GateExitCode.Partial)
+        {
+            return Finish("install", new ControllerResult(OpStatus.Partial, SetupHandBackNotSetUpMessage, steps));
+        }
+
         if (exitCode != (int)GateExitCode.Success)
         {
             string message = exitCode switch

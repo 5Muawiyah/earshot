@@ -35,24 +35,66 @@ public sealed class User32HotkeysTests
         Assert.AreEqual(1419, result.ErrorCode, "Observed as ERROR_HOTKEY_NOT_REGISTERED by a direct probe on this machine, not recalled from documentation.");
     }
 
-    // Ctrl+Alt+Shift+Win+F24: five keys no keyboard has and no program asks for. Nothing is ever pressed. The two
-    // tests below register it for the calling thread only (a null window handle makes the hot key the thread's own,
-    // and its WM_HOTKEY would go to the thread's queue) and release it before they end, so they run the real
-    // RegisterHotKey and UnregisterHotKey and touch nothing another program holds. They are meant for the private
-    // desktop the test runs use.
+    // A chord no keyboard has and no program asks for: one of F13 to F24, which no keyboard carries, with a random
+    // non-empty set of Alt, Ctrl, Shift and Win, chosen once for the run. Nothing is ever pressed. Two gates running
+    // at the same time on one machine would collide on any one fixed chord (the second registration would be reported
+    // taken, and fail), so each run draws its own from the 180 there are. The two tests below register it for the
+    // calling thread only (a null window handle makes the hot key the thread's own, and its WM_HOTKEY would go to the
+    // thread's queue) and release it before they end, so they run the real RegisterHotKey and UnregisterHotKey and
+    // touch nothing another program holds. They are meant for the private desktop the test runs use.
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey
-    private const uint UnusedChordModifiers = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x4000;
+    //
+    // A chord drawn at random can still be one another program on this machine holds (keyboard software does use
+    // these keys), and Windows says so with 1409 when it is registered. So a draw is tried, and released, before the
+    // test relies on it, and another is drawn while the answer is 1409, so a test fails only for a reason of its own.
+    private static (uint Modifiers, uint Key, string Text) FreeChord(User32Hotkeys native)
+    {
+        for (int attempt = 0; attempt < 60; attempt++)
+        {
+            (uint Modifiers, uint Key, string Text) chord = DrawUnusedChord();
+            NativeCallResult tried = native.Register(nint.Zero, 0x4AFE, chord.Modifiers, chord.Key);
+            if (tried.Succeeded)
+            {
+                native.Unregister(nint.Zero, 0x4AFE);
+                return chord;
+            }
 
-    private const uint UnusedChordKey = 0x87;
+            Assert.AreEqual(1409, tried.ErrorCode, "RegisterHotKey for " + chord.Text + " failed with something other than 'already registered'.");
+        }
+
+        Assert.Fail("Sixty chords drawn from F13 to F24 were all held by other programs.");
+        return default;
+    }
+
+    private static (uint Modifiers, uint Key, string Text) DrawUnusedChord()
+    {
+        (string Name, uint Flag)[] all = [("Ctrl", 0x0002), ("Alt", 0x0001), ("Shift", 0x0004), ("Win", 0x0008)];
+        int mask = Random.Shared.Next(1, 16);
+        int function = Random.Shared.Next(13, 25);
+        uint modifiers = 0x4000;
+        var text = new List<string>();
+        for (int i = 0; i < all.Length; i++)
+        {
+            if ((mask & (1 << i)) != 0)
+            {
+                modifiers |= all[i].Flag;
+                text.Add(all[i].Name);
+            }
+        }
+
+        text.Add("F" + function.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return (modifiers, 0x7Cu + (uint)(function - 13), string.Join('+', text));
+    }
 
     [TestMethod]
     public void ARealChordNoOneUsesRegistersAndUnregisters()
     {
         var native = new User32Hotkeys();
-        NativeCallResult registered = native.Register(nint.Zero, 0x4AF0, UnusedChordModifiers, UnusedChordKey);
+        (uint modifiers, uint key, string text) = FreeChord(native);
+        NativeCallResult registered = native.Register(nint.Zero, 0x4AF0, modifiers, key);
         try
         {
-            Assert.IsTrue(registered.Succeeded, "RegisterHotKey for a chord no one uses failed with error " + registered.ErrorCode + ".");
+            Assert.IsTrue(registered.Succeeded, "RegisterHotKey for the chord " + text + " failed with error " + registered.ErrorCode + ".");
         }
         finally
         {
@@ -77,7 +119,7 @@ public sealed class User32HotkeysTests
     public void ARealChordRegisteredTwiceIsReportedTakenWithTheRealCode()
     {
         var native = new User32Hotkeys();
-        var settings = new HotkeySettings { Enabled = true, SwitchToPc = "Ctrl+Alt+Shift+Win+F24", SwitchToPhone = string.Empty };
+        var settings = new HotkeySettings { Enabled = true, SwitchToPc = FreeChord(native).Text, SwitchToPhone = string.Empty };
         var holderWindow = new FakeMessageWindow { Handle = 0 };
         var pressedWindow = new FakeMessageWindow { Handle = 0 };
         using var holder = new HotkeyManager(holderWindow, native, new CapturingLog());

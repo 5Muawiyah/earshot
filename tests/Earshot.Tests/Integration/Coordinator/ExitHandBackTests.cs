@@ -247,13 +247,15 @@ public sealed class ExitHandBackTests
         Assert.AreEqual(BlockCoordinator.ExitNotDisconnectedBlockedMessage, h.Coordinator.ClosingNotice);
     }
 
-    // The cap is enforced: a disconnect that never returns and never notices cancellation ends Exit's wait at the
-    // budget, logs "cut short" naming the disconnect, sends no block, and says the change did not finish.
+    // The cap is enforced on the disconnect: one that never returns and never notices cancellation is given up at the
+    // budget and logged as cut short. The block is still sent, because Exit has no Windows deadline and the block is
+    // what keeps this PC off the AirPods at rest; it used to be dropped here, leaving the nodes enabled.
     [TestMethod]
-    public void ADisconnectThatNeverReturnsIsCutShortAtTheBudget()
+    public void ADisconnectThatNeverReturnsIsCutShortAtTheBudgetAndTheBlockIsStillSent()
     {
         using CoordinatorHarness h = Harness();
         Arrange(h, Statuses.Allowed(), Devices.Active(1));
+        h.Block.ActiveLink = ActiveLinkOnBlock.Stays;
         h.Connection.OnDisconnect = _ => new TaskCompletionSource<ConnectResult>().Task;
         h.Block.Calls.Clear();
         ExitHandBackPlan plan = Plan with { DisconnectWait = Budget * 2 };
@@ -264,9 +266,36 @@ public sealed class ExitHandBackTests
 
         Assert.IsTrue(idle.IsCompleted, "Exit's wait outlived the cap.");
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "Hand-back (exit): cut short at"));
-        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "still running: disconnect; block was not sent"));
-        Assert.IsEmpty(h.Block.Calls, "A block was sent after the disconnect that comes first never finished.");
-        Assert.AreEqual(BlockCoordinator.ClosedBeforeChangeEndedMessage, h.Coordinator.ClosingNotice);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "still running: disconnect; block was not sent"), "The disconnect's cut-short is still logged.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "Hand-back (exit): the disconnect had not finished by the cap, so the block is sent anyway"));
+        Assert.HasCount(1, h.Block.Calls, "The block was not sent after the disconnect that comes first never finished.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back (exit): block sent at"));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "disconnect cut short; block"), "The outcome is logged with both parts.");
+        Assert.AreEqual(BlockCoordinator.ExitNotDisconnectedBlockedMessage, h.Coordinator.ClosingNotice);
+    }
+
+    // The block after a stuck disconnect has a cap of its own, the same length: one that never returns is cut short and
+    // its outcome is still recorded when it arrives.
+    [TestMethod]
+    public void ABlockSentAfterAStuckDisconnectIsGivenItsOwnCapAndStillRecorded()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Active(1));
+        h.Connection.OnDisconnect = _ => new TaskCompletionSource<ConnectResult>().Task;
+        var pending = new TaskCompletionSource<ControllerResult>();
+        h.Block.OnBlock = _ => pending.Task;
+        ExitHandBackPlan plan = Plan with { DisconnectWait = Budget * 2 };
+
+        Task idle = Exit(h, plan);
+        h.Advance(Budget);
+        Assert.IsFalse(idle.IsCompleted, "The block has its own cap after the disconnect's.");
+        h.Advance(Budget);
+
+        Assert.IsTrue(idle.IsCompleted);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "block was sent at"));
+        pending.SetResult(ControllerResult.Ok("Blocked at boot"));
+        h.Pump();
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "the block that was still running finished"));
     }
 
     // A block already sent and still running at the cap is left to finish in its own process: Exit ends, says the
