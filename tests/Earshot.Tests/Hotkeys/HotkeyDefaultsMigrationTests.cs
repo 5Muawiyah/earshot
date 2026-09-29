@@ -94,6 +94,20 @@ public sealed class HotkeyDefaultsMigrationTests
         Assert.AreEqual("Ctrl+Alt+P", hotkeys.SwitchToPhone);
     }
 
+    // Either member alone is enough to show the file was written by a build that has them, so neither is migrated:
+    // the owner who cleared one and turned shortcuts off is taken at their word.
+    [TestMethod]
+    [DataRow("{ \"Hotkeys\": { \"Enabled\": false, \"SwitchToPc\": \"\" } }", "", HotkeySettings.DefaultSwitchToPhone)]
+    [DataRow("{ \"Hotkeys\": { \"Enabled\": false, \"SwitchToPhone\": \"\" } }", HotkeySettings.DefaultSwitchToPc, "")]
+    public void EitherNewMemberAloneMarksTheFileAsAlreadyUpgraded(string content, string toPc, string toPhone)
+    {
+        HotkeySettings hotkeys = Load(content, out _);
+
+        Assert.IsFalse(hotkeys.Enabled, "The file was migrated although it already held one of the new members.");
+        Assert.AreEqual(toPc, hotkeys.SwitchToPc);
+        Assert.AreEqual(toPhone, hotkeys.SwitchToPhone);
+    }
+
     // The owner had typed a chord that is the same as a default. Registering both would show a clash they did not
     // cause, so the new default steps aside and the typed one is kept.
     [TestMethod]

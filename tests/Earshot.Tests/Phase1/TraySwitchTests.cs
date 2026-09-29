@@ -208,6 +208,32 @@ public sealed class TraySwitchTests
         });
     }
 
+    // The session-end block is on the gate, so the coordinator is busy when the shortcut comes. The tray refuses
+    // before it answers anything else: one card that says why, not "Finishing another change first." first.
+    [TestMethod]
+    public void SwitchToPcWhileTheSessionEndBlockRunsGetsOnlyTheRefusalCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), arrange: t => t.Block.Status = Phase1Fixtures.Block(BlockState.Blocked));
+            var blocking = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Block.OnBlock = _ => blocking.Task;
+            tray.Block.Status = Phase1Fixtures.Block(BlockState.Allowed);
+            tray.Coordinator.RefreshStatusAsync().GetAwaiter().GetResult();
+            tray.PumpUntilIdle();
+            tray.Context.OnSessionEnding(null, SessionQuery());
+            Assert.IsTrue(tray.Coordinator.IsBusy, "This test needs the session-end block in flight.");
+            tray.Cards.Shown.Clear();
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.SwitchToPc));
+
+            CollectionAssert.AreEqual(new[] { BlockCoordinator.SessionEndingMessage }, tray.Cards.Statuses.ToArray());
+            blocking.SetResult(ControllerResult.Ok("Blocked at boot"));
+            tray.PumpUntilIdle();
+            Assert.IsEmpty(tray.Connection.Calls);
+        });
+    }
+
     // A switch to the phone sends no allow, so it still runs while the session ends.
     [TestMethod]
     public void SwitchToPhoneWhileTheSessionEndsStillRunsAndSendsNoAllow()
