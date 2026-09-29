@@ -5,6 +5,7 @@ using System.Security.Principal;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Service;
 
 namespace Earshot.Boot;
 
@@ -117,6 +118,9 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string RemoveFailedMessage = "Removal did not finish. Try again.";
     internal const string RemoveUnsafeEnvironmentMessage = "Removal stopped because the environment sets unsafe .NET runtime variables.";
     internal const string NoConfigMessage = "Earshot's boot block setting is missing. Choose Block at boot, then try again.";
+    internal const string HandBackMirrorOnMessage = "Hand back is on for the shut-down service";
+    internal const string HandBackMirrorOffMessage = "Hand back is off for the shut-down service";
+    internal const string HandBackMirrorFailedMessage = "Could not save Hand back for the shut-down service. Try again.";
 
     // The step that carries the gate's exit code for a set-device that did not move the pin, so the block
     // coordinator can tell a refusal it can work through from one it cannot.
@@ -134,6 +138,9 @@ internal sealed class BlockController : IBlockController, IDisposable
     private readonly string? _executable;
     private readonly ISystemWorker _worker;
     private readonly IDisposable? _ownedWorker;
+    private readonly IServiceControl? _service;
+    private readonly string? _installFolder;
+    private int _serviceLogged;
     private readonly Lock _statusLock = new();
     private volatile bool _isSetUp;
     private string _lastStatusProblems = "";
@@ -148,7 +155,9 @@ internal sealed class BlockController : IBlockController, IDisposable
         string? userSid,
         string? executable,
         ISystemWorker worker,
-        IDisposable? ownedWorker = null)
+        IDisposable? ownedWorker = null,
+        IServiceControl? service = null,
+        string? installFolder = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(settings);
@@ -167,6 +176,8 @@ internal sealed class BlockController : IBlockController, IDisposable
         _executable = executable;
         _worker = worker;
         _ownedWorker = ownedWorker;
+        _service = service;
+        _installFolder = installFolder;
     }
 
     // The real controller with a worker of its own. Constructing it reads the current user's SID and nothing
@@ -197,7 +208,7 @@ internal sealed class BlockController : IBlockController, IDisposable
         var gate = new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid,
             AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled, log);
         return new BlockController(log, settings, store, new CfgMgr32NodeReader(), gate, new ShellRunasLauncher(),
-            sid, Environment.ProcessPath, worker, ownedWorker);
+            sid, Environment.ProcessPath, worker, ownedWorker, new WindowsServiceControl(), paths.InstallFolder);
     }
 
     // \Earshot\Gate, \Earshot\Protect and \Earshot\BootBlock present and verified, as of the last status
@@ -222,6 +233,9 @@ internal sealed class BlockController : IBlockController, IDisposable
 
     public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default) =>
         _worker.RunAsync(token => SetBlockAtBoot(blockAtBoot, token), ct);
+
+    public Task<ControllerResult> SetHandBackAtShutdownAsync(bool handBack, CancellationToken ct = default) =>
+        _worker.RunAsync(token => SetHandBackAtShutdown(handBack, token), ct);
 
     public Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default) =>
         _worker.RunAsync(token => SetDevice(address12, token), ct);
@@ -363,11 +377,28 @@ internal sealed class BlockController : IBlockController, IDisposable
             }
         }
 
+        LogServiceOnce();
+
         return new BootBlockStatus(state, identity?.ContainerId ?? Guid.Empty, read.Nodes, installed, blockAtBoot)
         {
             BlockAtBootKnown = blockAtBootKnown,
             TasksKnown = tasks != TasksRead.Unknown,
+            HandBackAtShutdownMirror = configRead ? config.Value!.HandBackAtShutdown : null,
         };
+    }
+
+    // One line for the tray's log per run saying how the hand-back service reads (running, stopped, missing, differs or
+    // unreadable), so a service that is not there or not right is visible. A read of the control manager, on the
+    // thread pool with the rest of the status read, never on the UI thread; it changes nothing.
+    private void LogServiceOnce()
+    {
+        if (_service is null || _installFolder is null || Interlocked.Exchange(ref _serviceLogged, 1) == 1)
+        {
+            return;
+        }
+
+        ServiceQuery read = _service.Query(ServicePlan.ServiceName);
+        _log.Info(HandBackServiceText.Registration(read, ServicePlan.Spec(_installFolder)));
     }
 
     private enum TasksRead
@@ -577,6 +608,46 @@ internal sealed class BlockController : IBlockController, IDisposable
         return Finish(verb, applied
             ? ControllerResult.Ok(done, steps)
             : ControllerResult.Fail(run.Outcome == GateRunOutcome.TimedOut ? TimedOutMessage : BlockAtBootFailedMessage, steps));
+    }
+
+    // Copies the hand-back setting into config.json through \Earshot\Gate, as Block at boot is, and confirms it by reading
+    // the file back rather than by the task's result. A file that already says so needs no run.
+    private ControllerResult SetHandBackAtShutdown(bool handBack, CancellationToken ct)
+    {
+        string verb = handBack ? GateVerbs.SetHandBackOn : GateVerbs.SetHandBackOff;
+        string done = handBack ? HandBackMirrorOnMessage : HandBackMirrorOffMessage;
+        var steps = new List<StepOutcome>();
+
+        GateRead<GateConfig> before = _store.ReadConfig();
+        if (before.IsOk && before.Value is not null && before.Value.HandBackAtShutdown == handBack)
+        {
+            return Finish(verb, ControllerResult.Already(done));
+        }
+
+        GateRunResult run = _gate.Run(TaskPlan.GateTaskName, verb, NewNonce(), null, TaskSchedulerGate.GateTimeout, ct);
+        steps.AddRange(run.Steps);
+        if (run.Status is not null)
+        {
+            steps.AddRange(run.Status.Steps);
+        }
+
+        ControllerResult? refused = RunRefusal(run);
+        if (refused is not null)
+        {
+            return Finish(verb, refused with { Steps = steps });
+        }
+
+        if (IsBusy(run))
+        {
+            return Finish(verb, ControllerResult.Fail(BusyMessage, steps));
+        }
+
+        GateRead<GateConfig> after = _store.ReadConfig();
+        steps.Add(after.Step);
+        bool applied = after.IsOk && after.Value is not null && after.Value.HandBackAtShutdown == handBack;
+        return Finish(verb, applied
+            ? ControllerResult.Ok(done, steps)
+            : ControllerResult.Fail(run.Outcome == GateRunOutcome.TimedOut ? TimedOutMessage : HandBackMirrorFailedMessage, steps));
     }
 
     private ControllerResult SetDevice(string address12, CancellationToken ct)

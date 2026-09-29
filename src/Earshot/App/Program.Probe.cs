@@ -20,7 +20,7 @@ namespace Earshot;
 internal static partial class Program
 {
     internal const string ProbeUsage =
-        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json]";
+        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json] | probe service [--json] [--out <path>]";
 
     internal const string ProbeIconTarget = "icon";
 
@@ -28,6 +28,9 @@ internal static partial class Program
     // snapshot, the same as probe icon renders the tray glyph. No IWidgetStatus, no device, no window
     // shown; safe under EARSHOT_SAFE_MODE=1 with EARSHOT_DATA_ROOT pointed at a temp folder.
     internal const string ProbeWidgetTarget = "widget";
+
+    // probe service: how the hand-back service is registered and whether it runs. Named only, not part of all.
+    internal const string ProbeServiceTarget = "service";
 
     internal static readonly IReadOnlyList<string> ProbeTargets =
         ["audio", "topology", "nodes", "services", "task", "battery"];
@@ -102,7 +105,7 @@ internal static partial class Program
 
                 outPath = args[++i];
             }
-            else if (a == "all" || a == ProbeIconTarget || a == ProbeWidgetTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
+            else if (a == "all" || a == ProbeIconTarget || a == ProbeWidgetTarget || a == ProbeServiceTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
             {
                 if (target is not null)
                 {
@@ -220,6 +223,7 @@ internal static partial class Program
             case "battery":  ProbeBattery(ctx); break;
             case ProbeIconTarget: ProbeIcon(ctx, outPath); break;
             case ProbeWidgetTarget: ProbeWidget(ctx, outPath); break;
+            case ProbeServiceTarget: ProbeService(ctx); break;
             default:         break;
         }
     }
@@ -230,6 +234,7 @@ internal static partial class Program
     static partial void ProbeServices(ProbeContext ctx);
     static partial void ProbeTask(ProbeContext ctx);
     static partial void ProbeBattery(ProbeContext ctx);
+    static partial void ProbeService(ProbeContext ctx);
 
     // folder: where the images go (probe icon's --out).
     static partial void ProbeIcon(ProbeContext ctx, string? folder);

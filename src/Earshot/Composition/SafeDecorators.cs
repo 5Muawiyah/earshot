@@ -97,6 +97,9 @@ internal sealed class SafeBlockController : IBlockController
     public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.Refuse(_log, blockAtBoot ? "setboot-on" : "setboot-off"));
 
+    public Task<ControllerResult> SetHandBackAtShutdownAsync(bool handBack, CancellationToken ct = default) =>
+        Task.FromResult(SafeDecorators.Refuse(_log, handBack ? "sethandback-on" : "sethandback-off"));
+
     public Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.Refuse(_log, "set-device"));
 

@@ -37,6 +37,9 @@ internal sealed class FakeServiceControl : IServiceControl
 
     public bool SddlUnreadable { get; set; }
 
+    // The control manager cannot be read at all (access denied): the service is neither there nor not there.
+    public bool Unreadable { get; set; }
+
     public string? Description { get; private set; }
 
     public uint? Preshutdown { get; private set; }
@@ -62,6 +65,12 @@ internal sealed class FakeServiceControl : IServiceControl
     public ServiceQuery Query(string name)
     {
         Calls.Add("query");
+        if (Unreadable)
+        {
+            return new ServiceQuery(
+                ServicePresence.Unknown, [ServiceSteps.FromWin32(ServiceSteps.Query, 5, "The service control manager could not be opened.")]);
+        }
+
         if (!Exists || Created is null)
         {
             return new ServiceQuery(

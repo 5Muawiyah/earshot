@@ -1,5 +1,6 @@
 using System.Globalization;
 using Earshot.Boot.Gate;
+using Earshot.Interop;
 
 namespace Earshot.Service;
 
@@ -59,6 +60,40 @@ internal static class HandBackServiceText
     public const string StopReceived = Prefix + "stop received.";
 
     public const string Stopped = Prefix + "stopped.";
+
+    // How the registration reads, for the tray's start-up line and the probe: running, stopped, missing, differs from what
+    // setup registers (and how), or unreadable (and why). Missing and unreadable come first: a service that cannot be
+    // seen is never said to run.
+    public static string RegistrationClause(ServiceQuery read, ServiceSpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        ArgumentNullException.ThrowIfNull(spec);
+        if (read.Presence == ServicePresence.Missing)
+        {
+            return "missing";
+        }
+
+        if (read.Presence == ServicePresence.Unknown)
+        {
+            string why = string.Join(", ", read.Steps.Where(s => !s.Ok).Select(s => s.CodeName));
+            return why.Length == 0 ? "unreadable" : "unreadable: " + why;
+        }
+
+        IReadOnlyList<string> problems = ServiceCheck.Verify(read, spec);
+        if (problems.Count > 0)
+        {
+            return "differs: " + string.Join(" ", problems);
+        }
+
+        return read.State switch
+        {
+            AdvApi32.SERVICE_RUNNING => "running",
+            AdvApi32.SERVICE_STOPPED => "stopped",
+            _ => ServiceSteps.StateName(read.State),
+        };
+    }
+
+    public static string Registration(ServiceQuery read, ServiceSpec spec) => Prefix + RegistrationClause(read, spec) + ".";
 
     // What the log says about the outcome of a shut-down block: the "block ..." clause of the finished line.
     public static string BlockClause(PreshutdownResult result)

@@ -80,7 +80,7 @@ namespace Earshot.App;
 // is not lost when Earshot restarts. The microphone notice is shown once, after the first protect-on that leaves
 // the services protected, whatever started it. It is remembered only once it was on screen: a card nobody clicked
 // for can be held back by Windows, and then the notice follows the next click that leaves protection on.
-internal sealed class BlockCoordinator : IDisposable
+internal sealed partial class BlockCoordinator : IDisposable
 {
     public const string AllowingStatus = "Allowing";
     public const string CouldNotReachDriverMessage = "Could not reach the AirPods audio driver. Try again.";
@@ -525,6 +525,7 @@ internal sealed class BlockCoordinator : IDisposable
                     ReArmIdleRule("the node read changed from " + Describe(before) + " to " + Describe(status));
                 }
 
+                MirrorHandBackSetting(status);
                 RaiseChanged();
             }
 
