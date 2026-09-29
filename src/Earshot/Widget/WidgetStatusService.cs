@@ -632,8 +632,19 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             // A failed start's own error must stand, not be discarded the way it used to be here - a
             // Stopped event is not coming to carry it, since none was ever raised for this attempt.
-            _watcherErrorCode = step.Code;
-            _watcherErrorName = step.CodeName;
+            if (AdvertisementSourceCodes.IsRadioOff(step))
+            {
+                // Bluetooth is off: shown as the RadioNotAvailable a Stopped event would have carried, so
+                // the card, the set-up and the retry treat both the same way. The raw code stays in the log
+                // line below and in the step.
+                _watcherErrorCode = AdvertisementSourceCodes.RadioNotAvailableCode;
+                _watcherErrorName = AdvertisementSourceCodes.RadioNotAvailableName;
+            }
+            else
+            {
+                _watcherErrorCode = step.Code;
+                _watcherErrorName = step.CodeName;
+            }
         }
 
         LogStepLocked("start", step);

@@ -43,6 +43,20 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
         if (!await WaitUntilAsync(() => service.Current.Watcher == WidgetWatcherState.Started, StartGuard))
         {
             WidgetSnapshot snapshot = service.Current;
+
+            // The documented outcome with the Bluetooth radio switched off: the real Start threw 0x800710DF.
+            // The service must show it as it shows RadioNotAvailable, keep the raw code in its log, and
+            // report the set-up as unavailable, exactly as for any other stopped watcher. The literal is
+            // written here so the raw code is proved rather than compared with the product's own constant.
+            if (log.Has(LogLevel.Warn, "0x800710DF"))
+            {
+                Assert.AreEqual(WidgetWatcherState.Stopped, snapshot.Watcher);
+                Assert.AreEqual(1, snapshot.WatcherErrorCode, "BluetoothError.RadioNotAvailable is 1.");
+                Assert.AreEqual("RadioNotAvailable", snapshot.WatcherErrorName);
+                Assert.IsFalse(service.SetupAvailable, "With Bluetooth off there is nothing for a set-up to listen through.");
+                return;
+            }
+
             if (snapshot.Watcher == WidgetWatcherState.Stopped && snapshot.WatcherErrorName != "RadioNotAvailable")
             {
                 Assert.Fail("The watcher failed to start with an error other than RadioNotAvailable: " + snapshot.WatcherErrorName + ".");

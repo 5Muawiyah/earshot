@@ -933,6 +933,78 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "A failing first start must still have scheduled a retry.");
     }
 
+    // With Bluetooth off the real watcher's Start throws (0x800710DF) instead of raising Stopped with
+    // RadioNotAvailable. The service must show the same state as for that Stopped event, log the raw code,
+    // report the set-up as unavailable, and keep retrying on the doubling schedule until Bluetooth is on.
+    [TestMethod]
+    public void AStartThatFailsBecauseBluetoothIsOffShowsAsRadioNotAvailableAndKeepsRetrying()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
+
+        service.Start();
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(WidgetWatcherState.Stopped, snapshot.Watcher);
+        Assert.AreEqual(1, snapshot.WatcherErrorCode, "The same code a Stopped(RadioNotAvailable) carries.");
+        Assert.AreEqual("RadioNotAvailable", snapshot.WatcherErrorName);
+        Assert.IsFalse(service.SetupAvailable, "The set-up needs the watcher, so it must say Bluetooth is off.");
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "0x800710DF"), "The raw code must be in the log.");
+
+        // The same state as the event path, field for field.
+        _source = new FakeAdvertisementSource();
+        using WidgetStatusService other = NewService(store);
+        other.Start();
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
+        Assert.AreEqual(other.Current.WatcherErrorCode, snapshot.WatcherErrorCode);
+        Assert.AreEqual(other.Current.WatcherErrorName, snapshot.WatcherErrorName);
+        Assert.AreEqual(other.Current.Watcher, snapshot.Watcher);
+    }
+
+    [TestMethod]
+    public void ABluetoothOffStartIsRetriedOnTheDoublingScheduleAndRecoversWhenBluetoothComesOn()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
+        service.Start();
+        int starts = _source.StartCalls;
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay - TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts, _source.StartCalls, "Too early for the first retry.");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The first retry must run at the retry delay.");
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher);
+        Assert.AreEqual("RadioNotAvailable", service.Current.WatcherErrorName, "Every retry keeps the radio-off state.");
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 2 - TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The second retry waits twice as long.");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 2, _source.StartCalls);
+
+        _source.StartResult = null; // Bluetooth is now on
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 4);
+
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+        Assert.IsNull(service.Current.WatcherErrorCode, "A successful start clears the radio-off error.");
+        Assert.IsTrue(service.SetupAvailable);
+    }
+
+    // Any other failing code is still shown as itself, not as Bluetooth being off.
+    [TestMethod]
+    public void AStartThatFailsForAnotherReasonIsNotShownAsBluetoothOff()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => StepOutcomes.FromHResult("fake-start", unchecked((int)0x800710DE), detail: "COMException", ok: false);
+
+        service.Start();
+
+        Assert.AreEqual(unchecked((int)0x800710DE), service.Current.WatcherErrorCode);
+        Assert.AreNotEqual("RadioNotAvailable", service.Current.WatcherErrorName);
+    }
+
     // Retry gaps, second half: a retry that was already dequeued from the thread pool when Suspend ran
     // (disposing a timer never stops a callback already in flight) must not start the watcher during
     // suspend. OnRetryDue is called directly to stand in for that already-running callback, since the fake
