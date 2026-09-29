@@ -1696,7 +1696,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.CompleteSetup(await listening, SetupRecordFixtures.Picks(60, 80));
 
         Assert.IsTrue(_log.Entries.Count(e => e.Message.StartsWith("Battery set-up", StringComparison.Ordinal)) >= 2, "Sanity: the set-up did log.");
-        foreach (LogEntry entry in _log.Entries)
+        // Only the set-up's own lines: the settings store's lines name a temp folder, whose random name is not ours.
+        foreach (LogEntry entry in _log.Entries.Where(e => e.Message.Contains("set-up", StringComparison.Ordinal) ||
+            e.Message.StartsWith("Decode proof", StringComparison.Ordinal) || e.Message.StartsWith("AirPods claimed", StringComparison.Ordinal)))
         {
             Assert.IsFalse(ForbiddenByteRun.IsMatch(entry.Message), "A byte-like run in: " + entry.Message);
             Assert.DoesNotContain("EEEE", entry.Message);
