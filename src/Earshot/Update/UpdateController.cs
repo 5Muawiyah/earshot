@@ -8,8 +8,11 @@ namespace Earshot.Update;
 // Nothing is downloaded or installed until UpdateAsync is called, and only the person's own click calls it. A check
 // never downloads. The hand-over starts the installed, administrator-owned Earshot.exe elevated with the update verb
 // and the downloaded zip with the hash it matched; that program checks the zip again from a copy only administrators
-// can write, so nothing the signed-in user can change decides what is installed. Once it has started, HandedOver is
-// raised and the caller ends this program, because the install replaces the folder this one runs from and the
+// can write, against the hash on its own command line. That closes the gap between this program's check and the
+// install, but it does not stop a program the signed-in user runs from raising the same prompt with a zip of its own
+// and that zip's own hash, an older release included: the hash is only as trusted as the command line it came on, and
+// the person is the one who accepts or declines the prompt (Program.Update.cs says the same). Once it has started,
+// HandedOver is raised and the caller ends this program, because the install replaces the folder this one runs from and the
 // elevated program waits for this one to end first.
 //
 // Methods may be called from any thread; the state is guarded, and events are raised outside the guard.

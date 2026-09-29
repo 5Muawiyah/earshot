@@ -1412,21 +1412,23 @@ internal sealed partial class BlockCoordinator : IDisposable
         await WaitForBlockAsync(trigger, block, t0, deadline, t1, disconnectOutcome);
     }
 
+    // What a disconnect that never came back records, when the hand-back goes on to send the block anyway (Exit only).
+    private const string DisconnectCutShortOutcome = "cut short";
+
     // The disconnect step: nothing when render is not ACTIVE, otherwise the send, its own sub-cap
     // (disconnectWait) and the shared deadline both apply to. Shared between the normal path and the
     // query-block-reuse path, so render is always acted on fresh, whichever one runs.
     //
-    // Returns the outcome to record ("confirmed", "not confirmed", "nothing to disconnect", or "failed: <code>"
-    // for a non-cancellation fault), or null when the shared deadline passed while still waiting on it: "cut
-    // short" naming "disconnect" has already been logged, and the caller must return at once without sending
-    // the block, the same as WaitForBlockAsync's own cut-short leaves the block step.
+    // Returns the outcome to record: "confirmed", "not confirmed", "nothing to disconnect", "failed: <code>" for a
+    // non-cancellation fault, or DisconnectCutShortOutcome when Exit's disconnect never came back. In each of those
+    // the caller goes on and sends the block. It returns null only for shut down and sleep, when the shared deadline
+    // passed while still waiting on the disconnect: "cut short" naming "disconnect" has already been logged and the
+    // outcome recorded, and the caller must return at once without sending the block, the same as
+    // WaitForBlockAsync's own cut-short leaves the block step. Exit has no Windows deadline, so it never gets null.
     //
     // blockAlreadySentAt is null on the normal path (nothing has been sent yet when the disconnect is cut
     // short), and the query's own issue time on the reuse path: the query-time block was already sent before
     // this disconnect ever ran, so "block was not sent" would say the opposite of what happened.
-    // What a disconnect that never came back records, when the hand-back goes on to send the block anyway (Exit only).
-    private const string DisconnectCutShortOutcome = "cut short";
-
     private async Task<string?> DisconnectStepAsync(HandBackTrigger trigger, Guid container, DateTimeOffset t0, DateTimeOffset deadline, TimeSpan disconnectWait, RenderState render, DateTimeOffset? blockAlreadySentAt = null)
     {
         if (render != RenderState.Active)

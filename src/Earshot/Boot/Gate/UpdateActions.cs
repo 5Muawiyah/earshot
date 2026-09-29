@@ -172,6 +172,12 @@ internal sealed class ChildInstallStarter : IInstallStarter
 //      install retries the folder move for a few seconds (InstallActions.FolderMoveAttempts) in case it has not yet.
 // The install runs from the work folder and no program is left to remove it when the install ends, so the next update
 // run removes it.
+//
+// The tray has exited before any of this ends, so how it ended is written to update-outcome.json in the machine folder
+// (UpdateOutcomeRecorder): this run records that it handed over, or why it stopped, and the install it started records
+// that it finished or did not. The tray reads it once at its next start and says so on a card. Nothing here starts the
+// tray again: a program started from this elevated one would be elevated too, and the tray must not run elevated. So the
+// tray comes back at the owner's next sign-in (Open on startup) or when they start it, and the card is how it tells them.
 internal sealed class UpdateActions
 {
     // Waiting for the tray to end. Exit waits up to TrayContext.DefaultExitWaitLimit for actions in flight, keeps a
@@ -389,6 +395,8 @@ internal sealed class UpdateActions
                 return GateExitCode.Failed;
             }
 
+            // Only the final component is checked: a folder earlier in the path may be a link, which is why the copy is
+            // hashed and must match the hash on the command line.
             if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 steps.Add(StepOutcomes.NotAttempted("update-copy-zip", "The zip is a link, not a file: " + request.ZipPath));

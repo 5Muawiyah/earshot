@@ -159,8 +159,17 @@ internal static partial class Program
             {
                 // Task Scheduler COM runs on an MTA thread, as it does in the tray.
                 using var worker = new SystemWorker(log);
-                return worker.RunAsync(_ => CreateInstallActions(layout, log).Run(request))
+                InstallResult result = worker.RunAsync(_ => CreateInstallActions(layout, log).Run(request))
                     .GetAwaiter().GetResult();
+
+                // An install the update started completes the record the update run left; any other install leaves
+                // it alone (UpdateOutcomes.ForInstallRun).
+                if (Earshot.Update.ReleaseVersion.Running(typeof(Program).Assembly) is { } running)
+                {
+                    new UpdateOutcomeRecorder(paths.MachineFolder, new NtfsFolderSecurity(), log, TimeProvider.System).RecordInstallRun(result, running.ToString());
+                }
+
+                return result;
             }));
         }
         finally

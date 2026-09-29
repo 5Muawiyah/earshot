@@ -28,7 +28,10 @@ public static class DecodeProof
 
     // Why two: one discriminating record is already strong, but it cannot rule out the owner entering the two
     // buds the wrong way round. Two independent entries both wrong the same way is a much smaller risk. The case
-    // nibble needs the same two records that agree with the owner's pick, for the same reason.
+    // nibble needs two records that agree with the owner's pick too, but for a different reason: the case has no
+    // order to get wrong, and a single agreeing set-up could agree by chance within the tolerance, so two agreeing
+    // ones make that less likely. No variation between the records is required, so two set-ups at the same charge
+    // count.
     public const int OrderRecordsNeeded = 2;
 
     // A status bit that happens to be constant across a few records fits trivially, so a flip needs four
@@ -110,9 +113,11 @@ public static class DecodeProof
         fields[DecodeField.HighNibbleIsRight] = orderProof;
         fields[DecodeField.FlipBit] = flipProof;
 
-        // The case nibble: proved the way a bud is, by agreement with the owner's picks and never before. Two records
-        // whose case nibble is within Tolerance of the owner's case pick prove it (the count the bud order needs), and
-        // a record that does not agree withdraws it, as a record that contradicts the order withdraws the order.
+        // The case nibble: proved by agreement with the owner's picks and never before. Two records whose case nibble
+        // is within Tolerance of the owner's case pick prove it. The count is the bud order's, but the reason is not:
+        // there is no order to get wrong here, and one agreeing set-up could agree by chance within the tolerance,
+        // which two make less likely. The records need not differ from each other. A record that does not agree
+        // withdraws it, as a record that contradicts the order withdraws the order.
         int caseAgree = 0;
         int caseDisagree = 0;
         foreach ((BatterySetupRecord record, ProximityMessage message) in usable)

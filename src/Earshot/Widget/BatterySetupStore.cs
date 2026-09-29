@@ -94,11 +94,12 @@ internal sealed class BatterySetupStore
     }
 
     // One record by file name, read and validated like every other, or null (logged) when there is no such file
-    // or it cannot be used. The name is a file name and nothing else: a path never leaves the folder.
+    // or it cannot be used. The name is a file name and nothing else: a path never leaves the folder, and it has the
+    // shape of a record's own name (setup-*.json), as LoadAll reads only those.
     public BatterySetupRecord? Load(string fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName) || fileName.Length > 128 || Path.GetFileName(fileName) != fileName ||
-            !fileName.EndsWith(".json", StringComparison.Ordinal))
+            !fileName.StartsWith("setup-", StringComparison.Ordinal) || !fileName.EndsWith(".json", StringComparison.Ordinal))
         {
             return null;
         }

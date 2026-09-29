@@ -21,7 +21,7 @@ internal static partial class Program
     internal const string UpdateUsage =
         "Usage: Earshot.exe update <zipPath> <sha256> <trayPid> <userSid> <address> <containerGuid>.";
 
-    // The zip is always the download's own name, in a folder on a local drive.
+    // The zip is always the download's own name, written with a drive letter. A mapped drive letter can still be a share.
     private const int MaxZipPathLength = 300;
 
     static partial void TryRunUpdate(RunContext ctx)
@@ -34,8 +34,14 @@ internal static partial class Program
         var layout = new InstallLayout(AppContext.BaseDirectory, paths.InstallFolder, paths.MachineFolder);
         try
         {
+            // The tray has exited by the time the update ends, so how it ended is left in the machine folder for the
+            // tray to read at its next start. Only a run whose command line was accepted records anything.
             ctx.ExitCode = (int)Guarded(log, "update", () => RunUpdate(ctx.Args, WindowsProcessToken.Current(), log, request =>
-                new UpdateActions(layout, new NtfsFolderSecurity(), new ProcessExitWaiter(), new ChildInstallStarter(), log).Run(request)));
+            {
+                InstallResult result = new UpdateActions(layout, new NtfsFolderSecurity(), new ProcessExitWaiter(), new ChildInstallStarter(), log).Run(request);
+                new UpdateOutcomeRecorder(paths.MachineFolder, new NtfsFolderSecurity(), log, TimeProvider.System).RecordUpdateRun(result);
+                return result;
+            }));
         }
         finally
         {
@@ -75,9 +81,12 @@ internal static partial class Program
         return result.Outcome;
     }
 
-    // Exactly [update, zipPath, sha256, trayPid, userSid, address, containerGuid]. The zip path is a full path on a
-    // local drive (never a network path, which would make this elevated program open one), already normalised, whose
-    // file is called update.zip. The identity is checked by the rules install applies.
+    // Exactly [update, zipPath, sha256, trayPid, userSid, address, containerGuid]. The zip path is a string of a
+    // drive letter, a colon and a backslash then the rest, already normalised, whose final component is update.zip.
+    // Only the string and that final component are checked here, and UpdateActions refuses a final component that is a
+    // link; a folder earlier in the path can still be a link or a share, so this does not promise the file is local.
+    // What makes the file safe to use is that it is copied through one read-only handle and the copy must match the
+    // hash given. The identity is checked by the rules install applies.
     internal static bool TryParseUpdateArgs(
         IReadOnlyList<string> args,
         [NotNullWhen(true)] out UpdateRequest? request,
@@ -95,7 +104,7 @@ internal static partial class Program
         string zip = args[1];
         if (zip.Length is 0 or > MaxZipPathLength || zip.Any(char.IsControl) || zip.Length < 3 || !char.IsAsciiLetter(zip[0]) || zip[1] != ':' || zip[2] != '\\')
         {
-            problem = "the zip is not a path on a local drive";
+            problem = "the zip path does not start with a drive letter and a backslash";
             return false;
         }
 

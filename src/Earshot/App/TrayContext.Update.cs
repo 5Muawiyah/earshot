@@ -1,4 +1,5 @@
 using System.Security.Principal;
+using Earshot.Boot.Gate;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Infra;
@@ -7,6 +8,10 @@ using Earshot.Tray;
 using Earshot.Update;
 
 namespace Earshot.App;
+
+// The machine folder the tray reads an update's outcome from, and the file in this user's own folder that notes which
+// outcome it has shown.
+internal sealed record UpdateOutcomeSource(string MachineFolder, string ShownFile);
 
 // Check for updates, in the tray. The menu item runs a check and shows its result on the short message card the
 // tray already uses. The card has no button, so Update is not offered there: the update page on the card calls
@@ -54,6 +59,83 @@ internal sealed partial class TrayContext
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
         RemoveStaleUpdateStaging();
         ApplyUpdates();
+        if (options.UpdateOutcome is { } outcomeSource)
+        {
+            _registry.UiPost(() => ShowUpdateOutcomeOnce(outcomeSource));
+        }
+    }
+
+    // How the last update ended, said once, at the start after it. The elevated update has ended by then and the tray
+    // that started it is gone, so the outcome is read from the machine folder, where only administrators write. It
+    // is shown once: its Id is noted in a file of this user's own, and an outcome already noted is skipped. An install
+    // still inside its window is left for the next start. The elevated program does not start the tray again: a
+    // program it starts would be elevated too, and the tray must not run elevated. So after an update the tray comes
+    // back at the next sign-in (Open on startup) or when it is started by hand, and this card is how it says what
+    // happened.
+    private void ShowUpdateOutcomeOnce(UpdateOutcomeSource source)
+    {
+        GateRead<UpdateOutcome> read = new GateStore(source.MachineFolder).ReadUpdateOutcome();
+        if (read.Status == GateReadStatus.Missing)
+        {
+            return;
+        }
+
+        if (!read.IsOk)
+        {
+            _log.Warn("Update: how the last update ended could not be read. " + TrayReport.DescribeStep(read.Step));
+            return;
+        }
+
+        UpdateOutcome outcome = read.Value!;
+        if (LastShownOutcomeId(source.ShownFile) == outcome.Id)
+        {
+            return;
+        }
+
+        string? notice = UpdateOutcomes.NoticeFor(outcome, _time.GetUtcNow());
+        if (notice is null)
+        {
+            return;
+        }
+
+        _log.Info("Update: the last update ended as " + outcome.Kind + (outcome.Code.Length > 0 ? " (" + outcome.Code + ")" : "") + ".");
+        ShowCard(TrayStatus.AppName, notice, CardPlace.NearTray);
+        NoteOutcomeShown(source.ShownFile, outcome.Id);
+    }
+
+    private string? LastShownOutcomeId(string file)
+    {
+        try
+        {
+            return File.Exists(file) ? File.ReadAllText(file).Trim() : null;
+        }
+        catch (IOException ex)
+        {
+            _log.Warn("Update: the note of the last outcome shown could not be read (0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + file);
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn("Update: the note of the last outcome shown could not be read (0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + file);
+            return null;
+        }
+    }
+
+    private void NoteOutcomeShown(string file, string id)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            File.WriteAllText(file, id);
+        }
+        catch (IOException ex)
+        {
+            _log.Warn("Update: the outcome was shown but could not be noted, so it will show again (0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + file);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn("Update: the outcome was shown but could not be noted, so it will show again (0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + file);
+        }
     }
 
     // The staging folders a hand-over left behind, once the program that used them is gone. Only looked for when
