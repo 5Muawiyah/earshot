@@ -144,7 +144,7 @@ internal sealed class FakeReleaseServer : IDisposable
         string path = context.Request.Url!.AbsolutePath;
         lock (_gate)
         {
-            _requests.Add(new RecordedRequest(path, context.Request.Headers["User-Agent"], context.Request.Headers["Accept"], context.Request.HttpMethod));
+            _requests.Add(new RecordedRequest(path, context.Request.UserAgent, context.Request.Headers["Accept"], context.Request.HttpMethod));
         }
 
         Action<HttpListenerContext>? handler;

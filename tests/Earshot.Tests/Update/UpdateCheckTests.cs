@@ -240,7 +240,7 @@ public sealed class UpdateCheckTests
     }
 
     [TestMethod]
-    public async Task TheFeedRequestSendsTheUserAgentGitHubRequires()
+    public async Task TheFeedRequestNamesItsCallerAsGitHubRequires()
     {
         using var feed = new FeedFixture();
         using var temp = new TempFolder();
@@ -248,7 +248,7 @@ public sealed class UpdateCheckTests
         await CheckAsync(feed, temp);
 
         RecordedRequest request = feed.Server.Requests.Single(r => r.Path == FeedFixture.FeedPath);
-        Assert.IsFalse(string.IsNullOrWhiteSpace(request.UserAgent), "GitHub's REST API refuses a request with no User-Agent.");
+        Assert.IsFalse(string.IsNullOrWhiteSpace(request.UserAgent), "GitHub's REST API refuses a request that does not name its caller.");
         StringAssert.StartsWith(request.UserAgent, "Earshot/1.1.0");
         StringAssert.Contains(request.Accept, "application/vnd.github+json");
         Assert.AreEqual("GET", request.Method);

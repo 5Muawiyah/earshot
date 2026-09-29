@@ -29,7 +29,7 @@ internal sealed record UpdateTimeouts(TimeSpan Request, TimeSpan Stall)
 // Nothing is downloaded by a check. A download is checked against the SHA-256 the release publishes beside it
 // before anything is unpacked, and a failure at any step deletes what it had put in the staging folder.
 // https://docs.github.com/en/rest/releases/releases#get-the-latest-release
-// https://docs.github.com/en/rest/using-the-rest-api/getting-started-with-the-rest-api#user-agent
+// https://docs.github.com/en/rest/using-the-rest-api/getting-started-with-the-rest-api
 internal sealed partial class UpdateService : IUpdateSource
 {
     // The one feed address in production. GitHub's REST API answers a release request for a repository with the

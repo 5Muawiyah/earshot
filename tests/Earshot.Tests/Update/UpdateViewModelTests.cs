@@ -96,7 +96,7 @@ public sealed class UpdateViewModelTests
             UpdateViewModel view = For(stage, Next, 10, "reason", "notice");
             foreach (string? text in new[] { view.Title, view.Status, view.Sub, view.Reason, view.Notice }.Concat(view.Buttons.Select(b => b.Label)))
             {
-                Assert.IsFalse(text?.Contains('—') ?? false, stage + ": " + text);
+                Assert.IsFalse(text?.Contains((char)0x2014) ?? false, stage + ": " + text);
                 Assert.IsFalse(text?.Contains("1.3.2", StringComparison.Ordinal) ?? false, stage + " holds the design's placeholder version: " + text);
                 Assert.IsFalse(text?.Contains("1.4.0", StringComparison.Ordinal) ?? false, stage + " holds the design's placeholder version: " + text);
             }
