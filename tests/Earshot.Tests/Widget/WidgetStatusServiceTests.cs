@@ -1350,8 +1350,15 @@ public sealed class WidgetStatusServiceTests : IDisposable
     // The hex-only shapes above never covered a decimal dump of a section (a comma-separated run of byte
     // values, 0-255, five or more in a row - the same width as the hex run above, since a raw section is at
     // least 5 bytes here).
+    //
+    // The last shape is base64 (Convert.ToBase64String), which is what a dump of a section looks like when
+    // someone reaches for the shortest text form: eight or more characters from the base64 alphabet, or seven
+    // followed by "=" padding (a 5-byte section is seven characters and one "="), with at least one digit, one
+    // capital and one lower-case letter. Ordinary log words are letters only, or carry a digit only after an
+    // "=" (a counter), so they do not match; a real encoded run of that length has all three almost always.
     private static readonly Regex ForbiddenByteRun = new(
-        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b|(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){4,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b",
+        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b|(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){4,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b" +
+        @"|(?<![A-Za-z0-9+/])(?=[A-Za-z0-9+/]*[0-9])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])(?:[A-Za-z0-9+/]{7,}={1,2}|[A-Za-z0-9+/]{8,})",
         RegexOptions.CultureInvariant);
 
     // The regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own separator
@@ -1366,6 +1373,31 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public void ForbiddenByteRunCatchesADecimalDumpOfASection()
     {
         Assert.IsTrue(ForbiddenByteRun.IsMatch("raw bytes 6, 32, 33, 34, 35, 36 read"), "A decimal dump of a section must be caught.");
+    }
+
+    // A section logged as base64 (Convert.ToBase64String) is as much a dump of bytes as the hex and decimal
+    // shapes above, and none of them matched it. The samples are built at run time from arithmetic, so no
+    // literal payload sits in this file.
+    [TestMethod]
+    [DataRow(5)]
+    [DataRow(9)]
+    [DataRow(17)]
+    [DataRow(24)]
+    public void ForbiddenByteRunCatchesABase64DumpOfASection(int length)
+    {
+        byte[] section = Enumerable.Range(0, length).Select(i => (byte)(31 + (i * 37 % 200))).ToArray();
+        string dump = Convert.ToBase64String(section);
+
+        Assert.IsTrue(ForbiddenByteRun.IsMatch("section " + dump + " read"), "A base64 dump of a " + length + "-byte section (" + dump + ") must be caught.");
+    }
+
+    // Ordinary log words and the widget's own counters names are runs of letters from the base64 alphabet
+    // too; only a run that also has a digit and both cases reads as encoded bytes.
+    [TestMethod]
+    public void ForbiddenByteRunLeavesOrdinaryWordsAlone()
+    {
+        Assert.IsFalse(ForbiddenByteRun.IsMatch("Widget counters: watcher=Started signalBelowThreshold=0 batteryInconsistent=0 modelOrColourMismatch=0"));
+        Assert.IsFalse(ForbiddenByteRun.IsMatch("Widget watcher start: watcher-start ERROR_DEVICE_NOT_AVAILABLE (Bluetooth is off)."));
     }
 
     [TestMethod]
@@ -1409,14 +1441,21 @@ public sealed class WidgetStatusServiceTests : IDisposable
         int baseline = _log.Entries.Count;
         service.Start();
 
-        _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), Rssi: -60, _clock.GetUtcNow(), SenderTag: 1));
+        byte[] payload = WidgetFixtures.UnknownSeventeenByteForm();
+        _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, payload, Rssi: -60, _clock.GetUtcNow(), SenderTag: 1));
         _clock.Advance(WidgetTiming.CountersLogInterval);
+
+        // The exact text a base64 dump of this very payload (whole, or without its first byte) would be.
+        string asBase64 = Convert.ToBase64String(payload);
+        string withoutPrefix = Convert.ToBase64String(payload.AsSpan(1));
 
         List<LogEntry> widgetEntries = _log.Entries.Skip(baseline).ToList();
         Assert.IsTrue(widgetEntries.Count > 0, "The widget must have logged something to check.");
         foreach (LogEntry entry in widgetEntries)
         {
             Assert.IsFalse(ForbiddenByteRun.IsMatch(entry.Message), "A log line on the unknown-form path carried something that looks like raw bytes: " + entry.Message);
+            Assert.IsFalse(entry.Message.Contains(asBase64, StringComparison.Ordinal), "A log line carried the payload as base64: " + entry.Message);
+            Assert.IsFalse(entry.Message.Contains(withoutPrefix, StringComparison.Ordinal), "A log line carried the payload's body as base64: " + entry.Message);
         }
     }
 

@@ -14,8 +14,11 @@ namespace Earshot.Tests.Widget;
 // more, a base64 run shaped like a payload, and the words "Find My" (checked across the whole file, not line
 // by line, so a run split by a formatter across several lines is still caught, and lowered from a 16-byte to
 // an 8-byte threshold so a real payload split across two shorter declarations to duck a 16-byte minimum is
-// still caught in each half). The only byte runs let through are the fixture's own documented synthetic
-// ones, listed explicitly: the 0x10..0x1F and 0x20..0x2F fillers.
+// still caught in each half). Also caught: 0x_ digit separators straight after the prefix, six hex pairs
+// joined by colons, dashes, dots, underscores or single spaces, runs of \x escapes, and a payload cut into
+// short byte lists (two 4-byte arrays, two 7-byte ones) that add up to eight bytes or more. The only byte
+// runs let through are the fixture's own documented synthetic ones, listed explicitly: the 0x10..0x1F and
+// 0x20..0x2F fillers.
 [TestClass]
 public sealed class WidgetFixtureHygieneTests
 {
@@ -38,8 +41,36 @@ public sealed class WidgetFixtureHygieneTests
     // addresses). An optional UL/LU-style C# integer literal suffix is consumed too, itself allowed a
     // digit-separator split (0x..._...UL): \b does not sit between two word characters, so "...ABUL" would
     // otherwise never reach a boundary right after the hex digits and the literal would go uncaught.
+    // C# also allows separators straight after the prefix (0x_1234_5678_9ABC), so the prefix is followed by
+    // any number of underscores before the first digit.
     private static readonly Regex UlongHexLiteral = new(
-        @"\b0[xX](?:[0-9A-Fa-f]_*){12,}(?:_*[uU]_*[lL]?|_*[lL]_*[uU]?)?\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        @"\b0[xX]_*(?:[0-9A-Fa-f]_*){12,}(?:_*[uU]_*[lL]?|_*[lL]_*[uU]?)?\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    // Six hex pairs joined by any mix of colon, dash, dot, underscore or a single space: an address written
+    // in a form SixGroupHexAddress (colon and dash only, with \b anchors that an underscore defeats) does not
+    // cover. Anchored by "not next to a letter or digit" rather than \b, since an underscore is a word
+    // character and would otherwise hide a token that starts after one.
+    private static readonly Regex SixPairAnySeparator = new(
+        @"(?<![0-9A-Za-z])(?:[0-9A-Fa-f]{2}[:._\- ]){5}[0-9A-Fa-f]{2}(?![0-9A-Za-z])",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    // Four or more \x escapes in a row in a string literal: a payload written as escapes, with one to four
+    // hex digits each (C# allows that many).
+    private static readonly Regex BackslashXRun = new(
+        @"(?:\\x[0-9A-Fa-f]{1,4}){4,}", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    // A brace-enclosed list made only of byte-sized numbers, hex (digit separators allowed, an optional
+    // (byte) cast) or decimal: the body of a byte array initialiser, whatever precedes the brace, as long as
+    // whitespace does. That last condition keeps a regular expression's own quantifier ({5,} or {1,2}, which
+    // this file and others write inside string literals, always straight after the thing it repeats) from
+    // being read as a list of two byte values.
+    private static readonly Regex ByteListInitialiser = new(
+        @"(?<=\s)\{\s*(?<items>(?:(?:\(byte\)\s*)?(?:0[xX]_*[0-9A-Fa-f]_*[0-9A-Fa-f]?|\d{1,3})\s*,?\s*)+)\}",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.Singleline);
+
+    // How far apart (in characters, between one closing brace and the next opening one) two byte lists may
+    // be and still read as one payload cut into pieces: a statement or two of glue, not a page.
+    private const int MaxGapBetweenPayloadPieces = 200;
 
     // 16 or more hex byte literals in a row (a captured payload's shape), each optionally cast ((byte)0x..,
     // the shape a byte[] initialiser sometimes needs) and ignoring the punctuation a byte array initialiser
@@ -51,7 +82,7 @@ public sealed class WidgetFixtureHygieneTests
     // lowered from a 16-byte to an 8-byte threshold on the punctuated and bare-run shapes so a real payload
     // split across two shorter declarations to duck a 16-byte minimum is still caught in each half.
     private static readonly Regex LongHexRun = new(
-        @"(?:(?:\(byte\)\s*)?0[xX][0-9A-Fa-f]{2}[,\s]*){8,}|[0-9A-Fa-f]{14,}|(?:\b[0-9A-Fa-f]{2}\b[,\s]+){7,}\b[0-9A-Fa-f]{2}\b",
+        @"(?:(?:\(byte\)\s*)?0[xX]_*[0-9A-Fa-f]_*[0-9A-Fa-f][,\s]*){8,}|[0-9A-Fa-f]{14,}|(?:\b[0-9A-Fa-f]{2}\b[,\s]+){7,}\b[0-9A-Fa-f]{2}\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.Singleline);
 
     // 8 or more decimal byte values (0-255) in a row, comma- or whitespace-separated: the same captured-
@@ -229,6 +260,119 @@ public sealed class WidgetFixtureHygieneTests
         Assert.AreEqual(2, found.Count, "Each 8-byte half of a payload split across two declarations must be caught on its own.");
     }
 
+    // Shapes the scan above still let through, each planted here as a sample that must be reported. Every one
+    // is a way to write a device address or a captured payload that a fixture author could reach for
+    // without meaning to hide anything.
+
+    // C# lets an underscore follow the 0x prefix itself, before the first digit.
+    [TestMethod]
+    public void AUlongLiteralWithADigitSeparatorRightAfterTheZeroXIsCaught()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs", "ulong address = 0x_1234_5678_9ABC;", found);
+
+        Assert.IsTrue(found.Count > 0, "0x_ followed by 12 digits must be caught.");
+        Assert.IsTrue(UlongHexLiteral.IsMatch("0x_1234_5678_9ABCUL"), "The suffixed form must be caught too.");
+    }
+
+    [TestMethod]
+    public void ByteLiteralsWithDigitSeparatorsAreCaught()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs",
+            "var payload = new byte[] { 0x_10, 0x_11, 0x_12, 0x_13, 0x_14, 0x_15, 0x_16, 0x_17 };", found);
+
+        Assert.IsTrue(found.Count > 0, "Eight 0x_.. byte literals must be caught.");
+    }
+
+    [TestMethod]
+    [DataRow("AA_BB_CC_DD_EE_FF", "underscore separated")]
+    [DataRow("AA.BB.CC.DD.EE.FF", "dot separated")]
+    [DataRow("aa_bb_cc_dd_ee_ff", "lower-case underscore separated")]
+    [DataRow("AA:BB-CC_DD.EE:FF", "mixed separators")]
+    public void ASixPairAddressWithUnderscoresOrDotsIsCaught(string address, string shape)
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs", "var address = \"" + address + "\";", found);
+
+        Assert.IsTrue(found.Count > 0, "A six-pair address, " + shape + ", must be caught.");
+    }
+
+    [TestMethod]
+    public void AHexPayloadWrittenAsBackslashXEscapesIsCaught()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs", "var payload = \"\\x10\\x11\\x12\\x13\\x14\\x15\";", found);
+
+        Assert.IsTrue(found.Count > 0, "Six \\x.. escapes in a row must be caught.");
+    }
+
+    [TestMethod]
+    public void ASixPairAddressSeparatedOnlyBySpacesIsCaught()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs", "var address = \"AA BB CC DD EE FF\";", found);
+
+        Assert.IsTrue(found.Count > 0, "Six space-separated hex pairs must be caught.");
+    }
+
+    // A payload cut into pieces short enough to slip under the eight-byte threshold in each piece: two
+    // 4-byte arrays, and two 7-byte arrays, in hex and in decimal. The pieces are reported as a run.
+    [TestMethod]
+    public void APayloadSplitIntoFourByteHexArraysIsCaught()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs",
+            "var first = new byte[] { 0x10, 0x11, 0x12, 0x13 };\nvar second = new byte[] { 0x14, 0x15, 0x16, 0x17 };", found);
+
+        Assert.IsTrue(found.Count > 0, "Two 4-byte arrays that together make 8 bytes must be caught.");
+    }
+
+    [TestMethod]
+    public void APayloadSplitIntoSevenByteDecimalArraysIsCaught()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs",
+            "byte[] a = { 16, 17, 18, 19, 20, 21, 22 };\nbyte[] b = { 23, 24, 25, 26, 27, 28, 29 };", found);
+
+        Assert.IsTrue(found.Count > 0, "Two 7-byte decimal arrays must be caught.");
+    }
+
+    [TestMethod]
+    public void APayloadSplitIntoManySmallCastArraysIsCaught()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs",
+            "var parts = new[] { new byte[] { (byte)0x10, (byte)0x11 }, new byte[] { (byte)0x12, (byte)0x13 }, " +
+            "new byte[] { (byte)0x14, (byte)0x15 }, new byte[] { (byte)0x16, (byte)0x17 } };", found);
+
+        Assert.IsTrue(found.Count > 0, "Four 2-byte arrays that together make 8 bytes must be caught.");
+    }
+
+    // The runs above must not turn ordinary small arrays into findings: one short array, two that are far
+    // apart, and a repeated default value are all fine.
+    [TestMethod]
+    public void OrdinarySmallByteArraysAreNotReported()
+    {
+        var found = new List<string>();
+
+        ScanText("Plant.cs", "var one = new byte[] { 0x01, 0x02, 0x03, 0x04 };", found);
+        ScanText("Plant.cs",
+            "var a = new byte[] { 1, 2, 3, 4 };\n" + string.Concat(Enumerable.Repeat("// unrelated commentary line\n", 20)) +
+            "var b = new byte[] { 5, 6, 7, 8 };", found);
+        ScanText("Plant.cs", "var zeros = new byte[] { 0, 0, 0, 0 }; var more = new byte[] { 0, 0, 0, 0 };", found);
+
+        Assert.AreEqual(0, found.Count, string.Join(Environment.NewLine, found));
+    }
+
     private static void ScanFile(string file, List<string> found) =>
         ScanText(Path.GetFileName(file), File.ReadAllText(file), found);
 
@@ -253,9 +397,14 @@ public sealed class WidgetFixtureHygieneTests
         for (int i = 0; i < lines.Length; i++)
         {
             string line = lines[i];
-            if (SixGroupHexAddress.IsMatch(line) || SeparatedHexRun.IsMatch(line))
+            if (SixGroupHexAddress.IsMatch(line) || SeparatedHexRun.IsMatch(line) || SixPairAnySeparator.IsMatch(line))
             {
                 found.Add(name + ":" + (i + 1) + ": looks like a Bluetooth address: " + line.Trim());
+            }
+
+            if (BackslashXRun.IsMatch(line))
+            {
+                found.Add(name + ":" + (i + 1) + ": a run of \\x escapes shaped like a payload: " + line.Trim());
             }
 
             foreach (Match m in TwelveDigitHexAddress.Matches(line))
@@ -307,6 +456,87 @@ public sealed class WidgetFixtureHygieneTests
             int lineNumber = CountLines(text, m.Index);
             found.Add(name + ":" + lineNumber + ": a base64 run shaped like a captured payload: " + Truncate(m.Value));
         }
+
+        ScanCutUpPayloads(name, text, found);
+    }
+
+    // A payload cut into pieces that each stay under the eight-byte threshold (two 4-byte arrays, two 7-byte
+    // ones, four 2-byte ones) is one payload however it is declared. Lists of byte-sized numbers that follow
+    // each other within MaxGapBetweenPayloadPieces are added up, and a run of two or more pieces reaching
+    // eight bytes is reported. A list that is itself eight bytes or more is left to the scans above, so it is
+    // never reported twice; a run in which every number is the same is a default value, not a capture.
+    private static void ScanCutUpPayloads(string name, string text, List<string> found)
+    {
+        var pieces = new List<(int Start, int End, List<int> Values)>();
+        foreach (Match m in ByteListInitialiser.Matches(text))
+        {
+            List<int>? values = ParseByteList(m.Groups["items"].Value);
+            if (values is not null && values.Count is > 0 and < 8)
+            {
+                pieces.Add((m.Index, m.Index + m.Length, values));
+            }
+        }
+
+        int runStart = 0;
+        while (runStart < pieces.Count)
+        {
+            int runEnd = runStart;
+            var all = new List<int>(pieces[runStart].Values);
+            while (runEnd + 1 < pieces.Count && pieces[runEnd + 1].Start - pieces[runEnd].End <= MaxGapBetweenPayloadPieces)
+            {
+                runEnd++;
+                all.AddRange(pieces[runEnd].Values);
+            }
+
+            if (runEnd > runStart && all.Count >= 8 && all.Distinct().Count() > 1)
+            {
+                int lineNumber = CountLines(text, pieces[runStart].Start);
+                found.Add(name + ":" + lineNumber + ": " + (runEnd - runStart + 1) + " short byte lists that together make " +
+                    all.Count + " bytes, a payload cut into pieces");
+            }
+
+            runStart = runEnd + 1;
+        }
+    }
+
+    // The byte values in a brace body, or null when any item is not a number from 0 to 255.
+    private static List<int>? ParseByteList(string items)
+    {
+        var values = new List<int>();
+        foreach (string raw in items.Split(','))
+        {
+            string item = raw.Trim();
+            if (item.Length == 0)
+            {
+                continue;
+            }
+
+            if (item.StartsWith("(byte)", StringComparison.Ordinal))
+            {
+                item = item[6..].Trim();
+            }
+
+            bool parsed;
+            int value;
+            if (item.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                parsed = int.TryParse(item[2..].Replace("_", "", StringComparison.Ordinal), System.Globalization.NumberStyles.AllowHexSpecifier,
+                    System.Globalization.CultureInfo.InvariantCulture, out value);
+            }
+            else
+            {
+                parsed = int.TryParse(item, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out value);
+            }
+
+            if (!parsed || value is < 0 or > 255)
+            {
+                return null;
+            }
+
+            values.Add(value);
+        }
+
+        return values;
     }
 
     private static int CountLines(string text, int upToIndex)
