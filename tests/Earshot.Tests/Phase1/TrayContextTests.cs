@@ -1378,6 +1378,10 @@ internal sealed class TrayHarness : IDisposable
 
     private readonly TempFolder _folder = new();
 
+    // Every widget file the tray builds (the claim, the set-up records, the proof summary) lives under the data
+    // root, so a harness run keeps them in its own temp folder, never in the real profile.
+    private readonly EnvironmentVariableScope _dataRoot;
+
     public TrayHarness(
         bool safeMode = false,
         bool firstRun = false,
@@ -1405,6 +1409,7 @@ internal sealed class TrayHarness : IDisposable
         bool showIcon = false,
         Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null)
     {
+        _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
         // A fake, never a real SystemSpeechEngine: a TrayContext test must never construct a real
         // SpeechSynthesizer. Reused from tests\Earshot.Tests\Voice\FakeSpeechEngine.cs rather than a
@@ -1657,6 +1662,7 @@ internal sealed class TrayHarness : IDisposable
         Coordinator.Dispose();
         SynchronizationContext.SetSynchronizationContext(null);
         Ui.Dispose();
+        _dataRoot.Dispose();
         _folder.Dispose();
     }
 }

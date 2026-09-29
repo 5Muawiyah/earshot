@@ -18,6 +18,9 @@ internal sealed class FakeAdvertisementSource : IAdvertisementSource
         set => _state = value;
     }
 
+    // How many handlers are subscribed to Received right now, so a test can prove a listener let go.
+    public int ReceivedHandlerCount => Received?.GetInvocationList().Length ?? 0;
+
     public int StartCalls { get; private set; }
 
     public int StopCalls { get; private set; }

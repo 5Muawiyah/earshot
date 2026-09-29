@@ -11,7 +11,6 @@ internal sealed class ClaimStore
 {
     private readonly string _path;
     private readonly ILog _log;
-    private readonly Func<sbyte?> _currentSignalThreshold;
     private readonly Func<DateTimeOffset> _now;
     private readonly Lock _gate = new();
     private WidgetClaim? _current;
@@ -19,30 +18,20 @@ internal sealed class ClaimStore
     private int _diskWriteCount;
 
     public ClaimStore(string path, ILog log)
-        : this(path, log, static () => WidgetDefaults.SignalThresholdDbm)
-    {
-    }
-
-    // Test-only: supplies the "phase 0 has proved this threshold" comparison directly, so the claim's
-    // threshold validation can be exercised without WidgetDefaults.SignalThresholdDbm ever holding
-    // anything but its shipped null, the way ClaimFlow's internal overload does for the same constant.
-    internal ClaimStore(string path, ILog log, Func<sbyte?> currentSignalThreshold)
-        : this(path, log, currentSignalThreshold, static () => DateTimeOffset.UtcNow)
+        : this(path, log, static () => DateTimeOffset.UtcNow)
     {
     }
 
     // Test-only: supplies "now" directly, so a claim whose ClaimedAtUtc is in the future can be exercised
     // without waiting for the real clock to catch up to a fixture's fixed date.
-    internal ClaimStore(string path, ILog log, Func<sbyte?> currentSignalThreshold, Func<DateTimeOffset> now)
+    internal ClaimStore(string path, ILog log, Func<DateTimeOffset> now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(log);
-        ArgumentNullException.ThrowIfNull(currentSignalThreshold);
         ArgumentNullException.ThrowIfNull(now);
 
         _path = path;
         _log = log;
-        _currentSignalThreshold = currentSignalThreshold;
         _now = now;
         lock (_gate)
         {
@@ -225,6 +214,33 @@ internal sealed class ClaimStore
             return null;
         }
 
+        // The schema is read on its own first, so a file from an earlier version is refused by name and left
+        // as it is, whatever else it does or does not hold.
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("SchemaVersion", out JsonElement schema) ||
+                !schema.TryGetInt32(out int version))
+            {
+                _log.Warn("The widget claim file has no schema version, so nothing is claimed: " + _path);
+                return null;
+            }
+
+            if (version != WidgetClaim.CurrentSchemaVersion)
+            {
+                _log.Warn(
+                    "The widget claim file is schema version " + version + ", not " + WidgetClaim.CurrentSchemaVersion +
+                    ", so it is not used and is left as it is: " + _path);
+                return null;
+            }
+        }
+        catch (JsonException ex)
+        {
+            _log.Warn("The widget claim file is not valid, so nothing is claimed: " + _path + " (" + ex.Message + ")");
+            return null;
+        }
+
         WidgetClaim claim;
         try
         {
@@ -250,12 +266,6 @@ internal sealed class ClaimStore
     // unusable (read as "no claim") and the file exactly as it was; nothing here ever rewrites or deletes it.
     private bool Validate(WidgetClaim claim)
     {
-        if (claim.SchemaVersion != 1)
-        {
-            _log.Warn("The widget claim file is schema version " + claim.SchemaVersion + ", not 1, so it is not used and is left as it is: " + _path);
-            return false;
-        }
-
         object? last = claim.Last;
         if (last is null)
         {
@@ -269,11 +279,24 @@ internal sealed class ClaimStore
             return false;
         }
 
-        sbyte? currentThreshold = _currentSignalThreshold();
-        if (currentThreshold != claim.SignalThresholdDbm)
+        // The threshold is whatever the set-up measured, so it is checked for being a plausible signal, not
+        // against any constant.
+        if (claim.SignalThresholdDbm is > 0 or < -127)
         {
-            _log.Warn(
-                "The widget claim's signal threshold no longer matches phase 0's current one, so nothing is claimed: " + _path);
+            _log.Warn("The widget claim's signal threshold is outside -127 to 0 dBm, so nothing is claimed: " + _path);
+            return false;
+        }
+
+        if (claim.SignalMinDbm > claim.SignalMedianDbm || claim.SignalMedianDbm > claim.SignalMaxDbm ||
+            claim.SignalMinDbm < -127 || claim.SignalMaxDbm > 0 || claim.SignalThresholdDbm > claim.SignalMinDbm || claim.SignalSamples < 1)
+        {
+            _log.Warn("The widget claim's signal figures are out of order or out of range, so nothing is claimed: " + _path);
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(claim.SetupRecord) || claim.SetupRecord.Length > 128 || Path.GetFileName(claim.SetupRecord) != claim.SetupRecord)
+        {
+            _log.Warn("The widget claim does not name a set-up record, so nothing is claimed: " + _path);
             return false;
         }
 

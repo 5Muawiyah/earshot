@@ -8,8 +8,10 @@ public static class ProximityDecoder
     {
         ArgumentNullException.ThrowIfNull(t);
 
-        int? casePercent = BatteryNibble.ToPercent(m.BatteryB & 0x0F);
-        PartReading caseReading = new PartReading(casePercent, ChargingBit(m, t.CaseChargingBit), InEar: null)
+        // A case nibble the owner's own set-ups contradict is not shown, compared or charged: null percent,
+        // null charging and no read time, the same as a case that was never read.
+        int? casePercent = t.CaseNibbleDoubted ? null : BatteryNibble.ToPercent(m.BatteryB & 0x0F);
+        PartReading caseReading = new PartReading(casePercent, t.CaseNibbleDoubted ? null : ChargingBit(m, t.CaseChargingBit), InEar: null)
         {
             ReadAt = casePercent is not null ? at : null,
         };

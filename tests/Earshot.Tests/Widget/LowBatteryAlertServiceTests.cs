@@ -15,7 +15,7 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
     {
         public WidgetSnapshot Current => WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true);
 
-        public bool ClaimAvailable => false;
+        public bool SetupAvailable => false;
 
         public event EventHandler? Changed;
 
@@ -23,7 +23,9 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
 
         public event EventHandler<OwnedReadingEventArgs>? OwnedReadingApplied;
 
-        public Task<ClaimOutcome> ClaimAsync(CancellationToken ct) => throw new NotSupportedException();
+        public Task<BatterySetupListen> ListenForSetupAsync(CancellationToken ct) => throw new NotSupportedException();
+
+        public BatterySetupResult CompleteSetup(BatterySetupListen listen, BatterySetupPicks picks) => throw new NotSupportedException();
 
         public void ForgetClaim() => throw new NotSupportedException();
 

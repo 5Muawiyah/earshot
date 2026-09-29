@@ -22,8 +22,8 @@ public sealed class MenuModelTests
         bool busy = false,
         StartupState startup = StartupState.Off,
         bool safeMode = false,
-        bool claimAvailable = false) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup, safeMode, claimAvailable: claimAvailable);
+        bool setupAvailable = false) =>
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup, safeMode, setupAvailable: setupAvailable);
 
     [TestMethod]
     public void TheCopyIsExactlyAsDesigned()
@@ -414,33 +414,33 @@ public sealed class MenuModelTests
         Assert.IsFalse(MenuModel.ProtectionDisagrees(false, null));
     }
 
-    // The claim trigger: never enabled on a guess. Disabled while claimAvailable is false (phase 0 has not
-    // proved a signal threshold), whatever else the menu state carries, and its own text says why rather
-    // than leaving a plain grey row with no explanation.
+    // The set-up trigger is always in the menu, so a repeat set-up is reachable once there is a reading. It
+    // is disabled while the watcher is not running, and its own text says why rather than leaving a plain grey
+    // row with no explanation.
     [TestMethod]
-    public void ClaimAirPodsIsDisabledWithItsReasonUntilAThresholdIsAvailable()
+    public void SetUpBatteryIsDisabledWithItsReasonWhileTheWatcherIsNotRunning()
     {
-        MenuItemState disabled = Build(claimAvailable: false).ClaimAirPodsItem;
+        MenuItemState disabled = Build(setupAvailable: false).SetUpBatteryItem;
 
         Assert.IsFalse(disabled.Enabled);
         Assert.IsTrue(disabled.Visible);
-        Assert.AreEqual("Make these my AirPods (no signal threshold set up yet)", disabled.Text);
+        Assert.AreEqual("Set up battery (Bluetooth is off)", disabled.Text);
     }
 
     [TestMethod]
-    public void ClaimAirPodsIsEnabledOnceAThresholdIsAvailable()
+    public void SetUpBatteryIsEnabledWhileTheWatcherRuns()
     {
-        MenuItemState enabled = Build(claimAvailable: true).ClaimAirPodsItem;
+        MenuItemState enabled = Build(setupAvailable: true).SetUpBatteryItem;
 
         Assert.IsTrue(enabled.Enabled);
-        Assert.AreEqual("Make these my AirPods", enabled.Text);
+        Assert.AreEqual("Set up battery", enabled.Text);
     }
 
     // Busy still gates it the same as every other action here, once it would otherwise be available.
     [TestMethod]
-    public void ClaimAirPodsIsDisabledWhileBusyEvenWithAThresholdAvailable()
+    public void SetUpBatteryIsDisabledWhileBusyEvenWithTheWatcherRunning()
     {
-        MenuItemState item = Build(claimAvailable: true, busy: true).ClaimAirPodsItem;
+        MenuItemState item = Build(setupAvailable: true, busy: true).SetUpBatteryItem;
 
         Assert.IsFalse(item.Enabled);
     }

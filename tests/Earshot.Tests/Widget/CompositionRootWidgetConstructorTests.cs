@@ -7,19 +7,14 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.Widget;
 
 // A security review found CompositionRoot.BuildWidget calling WidgetStatusService's internal, test-only
-// constructor (the one that takes decodeTable/claimThreshold directly) from production code: a real
-// production binary built this way could silently run with a wrong or fixed table, since nothing then
-// enforces that the value passed in still matches ProximityDecodeTable.Current. WidgetStatusService's own
-// public constructor already reads that constant (and WidgetDefaults.SignalThresholdDbm) itself, through
-// its own header comment's stated design ("Production entry point: always reads phase 0's proved shape
-// from ProximityDecodeTable.Current itself, so nothing composing this service can accidentally wire up a
-// different table").
+// constructor (the one that takes the decode table directly) from production code: a real production binary
+// built this way could silently run with a wrong or fixed table. WidgetStatusService's own public constructor
+// takes the DecodeProofStore and reads the table and the broadcast observation from it, so nothing composing
+// this service can wire up a different table.
 //
-// Checked over the compiled IL, not by reading the source: both overloads currently pass identical values
-// (ComposedRoot's own decodeTable argument was itself ProximityDecodeTable.Current), so no behavioural test
-// can tell them apart - a static scan closes nothing either, per this repo's own rule, but "which
-// constructor overload the compiler bound the call to" is a fact about the compiled method, read here by
-// actually decoding its IL and resolving the constructor token, not by pattern-matching source text.
+// Checked over the compiled IL, not by reading the source: which constructor overload the compiler bound the
+// call to is a fact about the compiled method, read here by actually decoding its IL and resolving the
+// constructor token, not by pattern-matching source text.
 [TestClass]
 public sealed class CompositionRootWidgetConstructorTests
 {
@@ -36,13 +31,13 @@ public sealed class CompositionRootWidgetConstructorTests
         Assert.HasCount(1, calls, "BuildWidget must construct WidgetStatusService exactly once.");
         Assert.IsTrue(calls[0].IsPublic,
             "BuildWidget must call WidgetStatusService's public constructor, not the internal, test-only " +
-            "overload that takes decodeTable/claimThreshold directly - a production caller of that overload " +
-            "could silently pass something other than ProximityDecodeTable.Current and " +
-            "WidgetDefaults.SignalThresholdDbm.");
-        Assert.AreEqual(8, calls[0].GetParameters().Length,
-            "The public constructor takes exactly 8 parameters (no decodeTable, no claimThreshold); a call " +
-            "with 9 or 10 arguments is the internal overload even if every argument's value is currently " +
-            "identical to what the public one would use internally.");
+            "overload that takes the decode table directly.");
+        ParameterInfo[] parameters = calls[0].GetParameters();
+        Assert.HasCount(9, parameters,
+            "The public constructor takes exactly 9 parameters, the last the proof store; a call with more is " +
+            "the internal overload.");
+        Assert.AreEqual(typeof(DecodeProofStore), parameters[^1].ParameterType,
+            "The table and the broadcast observation must come from the proof store.");
     }
 
     // Mirrors WidgetAtRestTests' own IL walker (a full operand-size table is needed to skip variable-length

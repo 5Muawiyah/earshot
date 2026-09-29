@@ -16,15 +16,8 @@ public sealed class OwnershipRuleTests
 
     private static ProximityParse Ok(ProximityMessage m) => new(ProximityParseStatus.Ok, m, null, null, 1, Array.Empty<byte>());
 
-    private static WidgetClaim Claim(sbyte threshold = -70, OwnedBattery? last = null, bool nibblesAreNamedOrder = false) => new(
-        SchemaVersion: 1,
-        ModelHigh: WidgetFixtures.ModelHigh,
-        ModelLow: WidgetFixtures.ModelLow,
-        Colour: WidgetFixtures.Colour,
-        SignalThresholdDbm: threshold,
-        ClaimedAtUtc: ClaimedAt,
-        Last: last ?? new OwnedBattery(null, null, null, ClaimedAt),
-        NibblesAreNamedOrder: nibblesAreNamedOrder);
+    private static WidgetClaim Claim(sbyte threshold = -70, OwnedBattery? last = null, bool nibblesAreNamedOrder = false) =>
+        SetupRecordFixtures.Claim(last ?? new OwnedBattery(null, null, null, ClaimedAt), nibblesAreNamedOrder, threshold);
 
     private static OwnershipInput Input(
         ProximityParse parse, WidgetClaim? claim, ProximityDecodeTable? table = null, sbyte rssi = -50) =>
@@ -308,5 +301,21 @@ public sealed class OwnershipRuleTests
         Assert.AreEqual(5, result.UpdatedLast!.Case);
         Assert.AreEqual(0, result.UpdatedLast!.NibbleHigh);
         Assert.AreEqual(0, result.UpdatedLast!.NibbleLow);
+    }
+
+    // A doubted case decodes to nothing, so it is never compared with the claim's: a case that jumped is not a
+    // reason to refuse a reading whose buds are consistent.
+    [TestMethod]
+    public void ADoubtedCaseIsNotCompared()
+    {
+        var last = new OwnedBattery(5, 6, 2, ClaimedAt);
+        ProximityMessage jumped = Message(batteryA: 0x65, batteryB: 0x09);   // the case nibble went 2 -> 9
+
+        OwnershipResult undoubted = OwnershipRule.Evaluate(Input(Ok(jumped), Claim(last: last)));
+        OwnershipResult doubted = OwnershipRule.Evaluate(Input(Ok(jumped), Claim(last: last), ProximityDecodeTable.Unproved with { CaseNibbleDoubted = true }));
+
+        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, undoubted.Verdict, "Sanity: with the case trusted the jump is refused.");
+        Assert.AreEqual(OwnershipVerdict.Owned, doubted.Verdict, "With the case doubted it is not compared.");
+        Assert.AreEqual(2, doubted.UpdatedLast!.Case, "The last known case value is kept, not replaced by a value nobody believes.");
     }
 }

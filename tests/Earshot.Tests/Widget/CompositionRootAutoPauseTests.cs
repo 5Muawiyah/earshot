@@ -26,7 +26,7 @@ public sealed class CompositionRootAutoPauseTests
         var registry = new ServiceRegistry(log, settings, action => action(), safeMode: true);
         WidgetStatusService status = CompositionRoot.BuildWidget(registry, () => null, TimeProvider.System)!;
 
-        using AutoPauseService service = CompositionRoot.BuildAutoPauseService(registry, status, () => null, TimeProvider.System);
+        using AutoPauseService service = CompositionRoot.BuildAutoPauseService(registry, status, () => null, TimeProvider.System, () => null);
 
         Assert.IsNotNull(service);
         status.Dispose();
@@ -43,7 +43,7 @@ public sealed class CompositionRootAutoPauseTests
         // BuildWidget never ran (the widget stayed disabled, say), so registry.MediaSessions is still null:
         // a genuine upstream bug this must surface loudly, not silently no-op past.
         Assert.ThrowsExactly<ArgumentNullException>(() =>
-            CompositionRoot.BuildAutoPauseService(registry, new NullWidgetStatusForTest(), () => null, TimeProvider.System));
+            CompositionRoot.BuildAutoPauseService(registry, new NullWidgetStatusForTest(), () => null, TimeProvider.System, () => null));
     }
 
     // A minimal IWidgetStatus so ThrowsWhenMediaSessionsWasNeverSet can reach BuildAutoPauseService's own
@@ -53,7 +53,7 @@ public sealed class CompositionRootAutoPauseTests
     {
         public WidgetSnapshot Current => WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
 
-        public bool ClaimAvailable => false;
+        public bool SetupAvailable => false;
 
         public event EventHandler? Changed;
 
@@ -61,7 +61,9 @@ public sealed class CompositionRootAutoPauseTests
 
         public event EventHandler<OwnedReadingEventArgs>? OwnedReadingApplied;
 
-        public Task<ClaimOutcome> ClaimAsync(CancellationToken ct) => throw new NotSupportedException();
+        public Task<BatterySetupListen> ListenForSetupAsync(CancellationToken ct) => throw new NotSupportedException();
+
+        public BatterySetupResult CompleteSetup(BatterySetupListen listen, BatterySetupPicks picks) => throw new NotSupportedException();
 
         public void ForgetClaim() => throw new NotSupportedException();
 

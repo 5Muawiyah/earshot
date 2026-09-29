@@ -27,7 +27,7 @@ public sealed class ProbeWidgetTests
         // Gauge: 2 snapshots x 3 DPIs x 2 inks = 12. Card: 5 variants (this-pc, elsewhere,
         // auto-pause-preview, claim-link-preview, claim-link-disabled-preview) x 3 DPIs x 2 inks = 30.
         // Case-open card: 3 DPIs x 2 inks = 6. 12+30+6 = 48.
-        Assert.HasCount(48, files);
+        Assert.HasCount(12 + (AllCardVariants.Length * 6) + 6, files, "12 gauge files, every card variant, and the case-open card.");
         foreach (Program.ProbeWidgetFile file in files)
         {
             Assert.IsTrue(file.Bytes > 0, file.Snapshot + " " + file.Dpi + " " + file.Ink + ": " + file.Problem);
@@ -47,35 +47,47 @@ public sealed class ProbeWidgetTests
         Assert.AreEqual(Earshot.Widget.AirPodsWhere.Elsewhere, snapshots[1].Snapshot.Where);
     }
 
+    private static readonly string[] SetupVariants =
+    [
+        "setup-listening", "setup-pick", "setup-done-battery-set-up", "setup-done-case-set-up", "setup-done-buds-same",
+        "setup-done-could-not-read", "setup-failed-not-found", "setup-failed-ambiguous", "setup-failed-bluetooth-off",
+    ];
+
+    private static readonly string[] AllCardVariants =
+        ["this-pc", "elsewhere", "auto-pause-preview", "set-up-button", "set-up-button-cannot-read", .. SetupVariants];
+
+    // The files of one variant only: "card-set-up-button-" is also the start of "card-set-up-button-cannot-read-",
+    // so the name is matched up to the DPI that always follows it.
+    private static string[] VariantFiles(string folder, string variant) =>
+        Directory.GetFiles(folder, "card-*.png")
+            .Where(f => System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(f), "^card-" + System.Text.RegularExpressions.Regex.Escape(variant) + @"-\d+dpi-"))
+            .ToArray();
+
     [TestMethod]
-    public void TheCardVariantsAreThisPcElsewhereAnAutoPausePreviewAndTwoClaimLinkPreviews()
+    public void TheCardVariantsAreTheReadingCardsTheSetupButtonAndEverySetupPage()
     {
         var variants = Program.ProbeWidgetCardVariants(DateTimeOffset.UtcNow);
 
-        Assert.HasCount(5, variants);
-        Assert.AreEqual("this-pc", variants[0].Variant);
+        CollectionAssert.AreEqual(AllCardVariants, variants.Select(v => v.Variant).ToArray());
         Assert.IsFalse(variants[0].Model.ConnectIntent, "On this PC, connected, so the button reads Disconnect.");
         Assert.IsFalse(variants[0].Model.ShowSwitch, "Production never has AutoPauseAvailable true today.");
-        Assert.IsFalse(variants[0].Model.ShowClaimLink, "Both fixed snapshots are already claimed.");
-
-        Assert.AreEqual("elsewhere", variants[1].Variant);
+        Assert.IsFalse(variants[0].Model.ShowSetupButton, "A reading is showing, so no set-up button.");
         Assert.IsTrue(variants[1].Model.ConnectIntent, "Elsewhere, not connected here, so the button reads Connect.");
-        Assert.IsFalse(variants[1].Model.ShowSwitch);
-        Assert.IsFalse(variants[1].Model.ShowClaimLink);
-
-        Assert.AreEqual("auto-pause-preview", variants[2].Variant);
         Assert.IsTrue(variants[2].Model.ShowSwitch, "The preview variant exists to show the switch row.");
         Assert.IsTrue(variants[2].Model.Snapshot.AutoPauseAvailable);
-        Assert.IsFalse(variants[2].Model.ShowClaimLink);
 
-        Assert.AreEqual("claim-link-preview", variants[3].Variant);
-        Assert.IsTrue(variants[3].Model.ShowClaimLink, "The preview variant exists to show the claim link.");
-        Assert.IsTrue(variants[3].Model.ClaimAvailable, "This variant previews the enabled state.");
-        Assert.IsFalse(variants[3].Model.Snapshot.ClaimExists, "The claim link only ever shows before a claim exists.");
+        Assert.IsTrue(variants[3].Model.ShowSetupButton, "No reading: the set-up button.");
+        Assert.IsFalse(variants[3].Model.Snapshot.SetupCouldNotRead);
+        Assert.IsTrue(variants[4].Model.Snapshot.SetupCouldNotRead, "After a set-up that could not read: the caption and Try again.");
 
-        Assert.AreEqual("claim-link-disabled-preview", variants[4].Variant);
-        Assert.IsTrue(variants[4].Model.ShowClaimLink);
-        Assert.IsFalse(variants[4].Model.ClaimAvailable, "This variant previews the disabled state: no threshold, matching every real build before phase 0.");
+        foreach ((string name, WidgetCardModel model) in variants.Where(v => v.Variant.StartsWith("setup-", StringComparison.Ordinal)))
+        {
+            Assert.AreNotEqual(WidgetCardView.Main, model.View, name);
+            Assert.IsNotNull(model.Setup, name);
+        }
+
+        Assert.AreEqual(new BatterySetupPicks(80, 60, 90, true, true, false), variants.Single(v => v.Variant == "setup-pick").Model.Setup!.Picks,
+            "The pick page previews 80, 60 and 90 with two Charging toggles on.");
     }
 
     [TestMethod]
@@ -86,11 +98,10 @@ public sealed class ProbeWidgetTests
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
         string[] cardFiles = Directory.GetFiles(temp.Path, "card-*.png");
-        Assert.HasCount(30, cardFiles, "5 variants x 3 DPIs x 2 inks.");
-        foreach (string variant in new[] { "this-pc", "elsewhere", "auto-pause-preview", "claim-link-preview", "claim-link-disabled-preview" })
+        Assert.HasCount(AllCardVariants.Length * 6, cardFiles, AllCardVariants.Length + " variants x 3 DPIs x 2 inks.");
+        foreach (string variant in AllCardVariants)
         {
-            Assert.HasCount(6, Directory.GetFiles(temp.Path, "card-" + variant + "-*.png"),
-                variant + ": 3 DPIs x 2 inks.");
+            Assert.HasCount(6, VariantFiles(temp.Path, variant), variant + ": 3 DPIs x 2 inks.");
         }
 
         Program.ProbeWidgetFile cardEntry = files.Single(f =>
@@ -98,6 +109,22 @@ public sealed class ProbeWidgetTests
             f.Path.Contains("dark-taskbar-white-ink", StringComparison.Ordinal));
         Assert.IsTrue(cardEntry.Bytes > 0);
         Assert.IsNull(cardEntry.Problem);
+    }
+
+    // The set-up pages are drawn for both themes at every DPI with the file names the rest of the probe uses.
+    [TestMethod]
+    public void TheSetupPageFilesExistInLightAndDark()
+    {
+        using var temp = new TempFolder();
+
+        RenderUnderSafeMode(temp.Path);
+
+        foreach (string variant in SetupVariants)
+        {
+            string[] at96 = VariantFiles(temp.Path, variant).Where(f => Path.GetFileName(f).Contains("-96dpi-", StringComparison.Ordinal)).ToArray();
+            Assert.HasCount(1, at96.Where(f => f.EndsWith("-dark-taskbar-white-ink.png", StringComparison.Ordinal)).ToArray(), variant + " in dark");
+            Assert.HasCount(1, at96.Where(f => f.EndsWith("-light-taskbar-black-ink.png", StringComparison.Ordinal)).ToArray(), variant + " in light");
+        }
     }
 
     // The Form behind a card capture is never shown, so DWM never actually composites its translucent
@@ -157,8 +184,8 @@ public sealed class ProbeWidgetTests
 
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-this-pc-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-elsewhere-", StringComparison.Ordinal)));
-        Assert.IsTrue(files.Any(f => f.Path.Contains("card-claim-link-preview-", StringComparison.Ordinal)));
-        Assert.IsTrue(files.Any(f => f.Path.Contains("card-claim-link-disabled-preview-", StringComparison.Ordinal)));
+        Assert.IsTrue(files.Any(f => f.Path.Contains("card-set-up-button-", StringComparison.Ordinal)));
+        Assert.IsTrue(files.Any(f => f.Path.Contains("card-setup-pick-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-auto-pause-preview-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("case-open-card-", StringComparison.Ordinal)));
     }
@@ -170,7 +197,7 @@ public sealed class ProbeWidgetTests
 
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
-        Assert.HasCount(48, files);
+        Assert.HasCount(12 + (AllCardVariants.Length * 6) + 6, files, "12 gauge files, every card variant, and the case-open card.");
         Assert.IsTrue(files.All(f => f.Bytes > 0));
         Assert.IsTrue(Directory.Exists(temp.Path));
         // TempFolder's own Dispose (below, via `using`) deletes temp.Path once this test ends, so no

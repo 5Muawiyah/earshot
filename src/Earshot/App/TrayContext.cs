@@ -386,7 +386,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _menu.CaseOpenCardClicked += (_, _) => OnCaseOpenCardClicked();
         _menu.LowBatteryAlertClicked += (_, _) => OnLowBatteryAlertClicked();
         _menu.LowBatteryThresholdItemClicked += OnLowBatteryThresholdItemClicked;
-        _menu.ClaimAirPodsClicked += (_, _) => Start("claim the AirPods", place => ClaimAirPodsAsync(place));
+        _menu.SetUpBatteryClicked += (_, _) => OnSetUpBatteryClicked();
         // The click point is read now, before the menu closes and the form opens, exactly as ChooseDeviceClicked below.
         _menu.NameOtherDeviceClicked += (_, _) =>
         {
@@ -1843,7 +1843,7 @@ internal sealed partial class TrayContext : ApplicationContext
     private MenuState CurrentMenuState() =>
         MenuModel.Build(
             _snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy,
-            _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.ClaimAvailable ?? false,
+            _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.SetupAvailable ?? false,
             updateInProgress: _updates?.IsBusy ?? false);
 
     private void UpdatePresentation(bool forceIcon)
@@ -2158,20 +2158,17 @@ internal sealed partial class TrayContext : ApplicationContext
         TryUpdateSettings("low battery threshold", s => s.Widget = s.Widget with { LowBatteryThresholdPercent = percent }, place);
     }
 
-    // The claim trigger: runs the same ClaimAsync the data pipeline already exposed with nothing calling
-    // it. The menu item itself is disabled while ClaimAvailable is false, so reaching here with no widget
-    // built at all is defensive only; reaching it with the threshold still unset (a click landing between
-    // Opening and the menu actually closing, say) still goes through the real flow and shows its own
-    // refusal, never a locally guessed one.
-    private async Task ClaimAirPodsAsync(CardPlace place)
+    // The set-up trigger: opens the widget card at its first page, above the gauge when it is shown, else near
+    // the cursor. Not a device action, so it does not go through Launch: the listen only reads advertisements
+    // and the pages show their own results.
+    private void OnSetUpBatteryClicked()
     {
-        if (_widgetStatus is not { } status)
+        if (_closing)
         {
             return;
         }
 
-        ClaimOutcome outcome = await status.ClaimAsync(_lifetime.Token).ConfigureAwait(true);
-        ShowCard(TrayStatus.AppName, outcome.Message, place);
+        RequestSetupFromWidget();
     }
 
     // Opens the picker-style modal for the owner's own device label. No device list to load here, unlike

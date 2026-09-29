@@ -15,7 +15,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 {
     private readonly Func<IAdvertisementSource> _sourceFactory;
     private readonly ClaimStore _claimStore;
-    private readonly ClaimFlow _claimFlow;
     private readonly ISettingsStore _settings;
     private readonly IDeviceMonitor _deviceMonitor;
     private readonly Func<BootBlockStatus?> _blockStatus;
@@ -23,15 +22,20 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _timeProvider;
 
-    // Reads phase 0's proved shape. In production this is () => ProximityDecodeTable.Current, which stays
-    // Unproved until phase 0 edits it; tests supply a fixed table so the proved paths are exercised without
-    // that static ever holding anything but its shipped default.
+    // Reads what the owner's own set-up records have proved. In production this is the proof store's table,
+    // which only moves when a set-up is completed; there is no constant to read. Tests supply a fixed table
+    // so the proved paths are exercised directly.
     private readonly Func<ProximityDecodeTable> _decodeTable;
 
-    // Reads phase 0's proved signal threshold for ClaimAsync. In production this is
-    // () => WidgetDefaults.SignalThresholdDbm, which stays null until phase 0 edits it, so a claim can never
-    // be made from a guessed threshold; tests supply a fixed value so a claim can actually be exercised.
-    private readonly Func<sbyte?> _claimThreshold;
+    // Whether the AirPods were observed to keep broadcasting while this PC plays to them: true once observed,
+    // null before. In production the proof store's observation.
+    private readonly Func<bool?> _broadcastsWhilePlaying;
+
+    // Where a set-up's record and proof are kept. Null only in tests that never complete a set-up.
+    private readonly DecodeProofStore? _proof;
+
+    // True while the newest set-up saw only forms the parser does not read and nothing has been claimed since.
+    private bool _setupCouldNotRead;
 
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
@@ -93,8 +97,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private string? _watcherErrorName;
     private WidgetSnapshot? _lastPublished;
 
-    // Production entry point: always reads phase 0's proved shape from ProximityDecodeTable.Current itself,
-    // so nothing composing this service can accidentally wire up a different table.
+    // Production entry point: the decode table and the broadcast observation are always the proof store's own,
+    // so nothing composing this service can wire up a different table.
     public WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ClaimStore claimStore,
@@ -103,16 +107,20 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         Func<BootBlockStatus?> blockStatus,
         ILog log,
         Action<Action> uiPost,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        DecodeProofStore proof)
         : this(
             sourceFactory, claimStore, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider,
-            static () => ProximityDecodeTable.Current, static () => WidgetDefaults.SignalThresholdDbm)
+            RequireProof(proof).ReadTable, proof.ReadBroadcast, proof)
     {
     }
 
-    // Test-only: supplies the decode table and the claim threshold directly, so a test can exercise the
-    // proved paths, and can actually make a claim, without ProximityDecodeTable.Current or
-    // WidgetDefaults.SignalThresholdDbm ever holding anything but their shipped Unproved/null defaults.
+    private static DecodeProofStore RequireProof(DecodeProofStore? proof) =>
+        proof ?? throw new ArgumentNullException(nameof(proof));
+
+    // Test-only: supplies the decode table and the broadcast observation directly, so a test can exercise the
+    // proved paths without a set-up having proved anything. proof is needed only by a test that completes a
+    // set-up or counts owned messages while this PC plays.
     internal WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ClaimStore claimStore,
@@ -123,7 +131,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         Action<Action> uiPost,
         TimeProvider timeProvider,
         Func<ProximityDecodeTable> decodeTable,
-        Func<sbyte?>? claimThreshold = null)
+        Func<bool?>? broadcastsWhilePlaying = null,
+        DecodeProofStore? proof = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFactory);
         ArgumentNullException.ThrowIfNull(claimStore);
@@ -137,8 +146,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         _sourceFactory = sourceFactory;
         _claimStore = claimStore;
-        _claimFlow = new ClaimFlow(claimStore, log);
-        _claimThreshold = claimThreshold ?? (static () => WidgetDefaults.SignalThresholdDbm);
+        _broadcastsWhilePlaying = broadcastsWhilePlaying ?? (static () => null);
+        _proof = proof;
         _settings = settings;
         _deviceMonitor = deviceMonitor;
         _blockStatus = blockStatus;
@@ -147,6 +156,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _uiPost = uiPost;
         _timeProvider = timeProvider;
         _claim = claimStore.Current;
+        _setupCouldNotRead = _claim is null && proof?.Newest is { ListenStatus: BatterySetupListenStatus.ShortFormOnly };
     }
 
     public event EventHandler? Changed;
@@ -168,11 +178,22 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    // Reads the same seam ClaimAsync itself reads from (_claimThreshold: WidgetDefaults.SignalThresholdDbm
-    // in production, ships null until phase 0 edits it), so the UI's own idea of whether a claim can be
-    // made can never drift from what ClaimAsync would actually do. No lock needed: _claimThreshold is a
-    // plain injected read, exactly as ClaimAsync already calls it outside the lock.
-    public bool ClaimAvailable => _claimThreshold() is not null;
+    // Whether the AirPods were observed to keep broadcasting while this PC plays to them: true once observed,
+    // null before. What auto-pause's gate reads.
+    public bool? BroadcastObserved() => _broadcastsWhilePlaying();
+
+    // True while the watcher runs: a set-up listens through it, so with it stopped the trigger is disabled
+    // rather than left to fail after the owner has opened his case.
+    public bool SetupAvailable
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_closed && _watcherState == WidgetWatcherState.Started;
+            }
+        }
+    }
 
     // Constructed and started only while the setting is on; hooks the device monitor and settings change
     // regardless, so turning the setting on later (TurningTheSettingOnStartsOne) still works. Idempotent: a
@@ -305,44 +326,156 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     public void Dispose() => Close();
 
-    public async Task<ClaimOutcome> ClaimAsync(CancellationToken ct)
+    public async Task<BatterySetupListen> ListenForSetupAsync(CancellationToken ct)
     {
         IAdvertisementSource? source;
         lock (_gate)
         {
-            source = _source;
+            source = _closed ? null : _source;
         }
 
         if (source is null)
         {
-            return new ClaimOutcome(ClaimOutcomeStatus.WatcherNotStarted, "Bluetooth is off or the watcher stopped: see the log.", null);
+            DateTimeOffset now = _timeProvider.GetUtcNow();
+            _log.Warn("Battery set-up: the watcher is not running, so nothing was listened for.");
+            return new BatterySetupListen(
+                BatterySetupListenStatus.WatcherNotStarted, WidgetCopy.SetupBluetoothOff, Candidate: null, [], now, now, 0, 0);
         }
 
-        // The internal overload, with the threshold and table read through the same injectable seams as the
-        // rest of the service, so a test can actually drive a claim through without either static
-        // default ever holding anything but what it ships with.
-        ClaimOutcome outcome = await _claimFlow.RunAsync(
-            source, _timeProvider, WidgetTiming.ClaimWindow, _claimThreshold(), _decodeTable(), ct).ConfigureAwait(false);
-        if (outcome.Status == ClaimOutcomeStatus.Claimed)
+        return await BatterySetupFlow.ListenAsync(source, _timeProvider, WidgetTiming.SetupListenWindow, _log, ct).ConfigureAwait(false);
+    }
+
+    // The owner has answered step 2. The record is written and proof updated first, so the claim's
+    // NibblesAreNamedOrder matches the table the run-time rule will use: the other order would make the very
+    // first reading after the proving set-up a NibbleOrderMismatch.
+    public BatterySetupResult CompleteSetup(BatterySetupListen listen, BatterySetupPicks picks)
+    {
+        ArgumentNullException.ThrowIfNull(listen);
+        ArgumentNullException.ThrowIfNull(picks);
+        if (_proof is not { } proof)
         {
-            bool closed;
+            throw new InvalidOperationException("This service was built without a proof store, so a set-up cannot be completed.");
+        }
+
+        if (listen.Status is not (BatterySetupListenStatus.Found or BatterySetupListenStatus.ShortFormOnly) || listen.Candidate is not { } candidate)
+        {
+            throw new ArgumentException("Only a listen that found the owner's case can be completed.", nameof(listen));
+        }
+
+        if (!picks.IsValid)
+        {
+            throw new ArgumentOutOfRangeException(nameof(picks), "Picks are 0 to 100 in steps of 10.");
+        }
+
+        var record = new BatterySetupRecord(
+            BatterySetupRecord.CurrentSchemaVersion, listen.StartedAtUtc, listen.EndedAtUtc, listen.Status, AppVersion(),
+            listen.AppleSectionsSeen, listen.ProximityItemsSeen, candidate, listen.OtherSenders, picks);
+
+        string? saved = proof.Setups.Save(record);
+        _log.Info(
+            "Battery set-up saved: " + (saved ?? record.FileName) + "; picks L " + picks.Left + " R " + picks.Right + " Case " + picks.Case +
+            ", charging " + YesNo(picks.LeftCharging) + "/" + YesNo(picks.RightCharging) + "/" + YesNo(picks.CaseCharging) + ".");
+
+        proof.AddRecord(record);
+        ProximityDecodeTable table = proof.Table;
+        BudOrderEvidence evidence = DecodeProof.Discriminate(record);
+        DecodeProofResult result = proof.Result;
+
+        if (candidate.LastOkMessage is not ProximityMessage message)
+        {
             lock (_gate)
             {
-                closed = _closed;
-                if (!closed)
-                {
-                    _claim = outcome.Claim;
-                    ResetReadingsLocked();
-                }
+                _setupCouldNotRead = _claim is null;
             }
 
+            PublishAndNotify();
+            return new BatterySetupResult(BatterySetupResultStatus.CouldNotRead, record.FileName, result);
+        }
+
+        // A set-up always supersedes the claim before it: the store keeps only the newer of two claims, so a
+        // clock that reads earlier than the old claim's date must not make the new one lose.
+        DateTimeOffset claimedAt = _timeProvider.GetUtcNow();
+        if (_claimStore.Current is { } previousClaim && claimedAt <= previousClaim.ClaimedAtUtc)
+        {
+            claimedAt = previousClaim.ClaimedAtUtc + TimeSpan.FromSeconds(1);
+        }
+
+        var claim = new WidgetClaim(
+            SchemaVersion: WidgetClaim.CurrentSchemaVersion,
+            ModelHigh: message.ModelHigh,
+            ModelLow: message.ModelLow,
+            Colour: message.Colour,
+            SignalThresholdDbm: candidate.ThresholdDbm,
+            SignalMinDbm: candidate.RssiMin,
+            SignalMedianDbm: candidate.RssiMedian,
+            SignalMaxDbm: candidate.RssiMax,
+            SignalSamples: candidate.Messages,
+            SetupRecord: record.FileName,
+            ClaimedAtUtc: claimedAt,
+            Last: OwnedBattery.FromMessage(message, table, previous: null, at: listen.EndedAtUtc),
+            NibblesAreNamedOrder: table.HighNibbleIsRight is not null);
+
+        bool closed;
+        bool nothingShown = false;
+        lock (_gate)
+        {
+            closed = _closed;
             if (!closed)
             {
-                PublishAndNotify();
+                _claimStore.Save(claim);
+                _claim = claim;
+                _setupCouldNotRead = false;
+                ResetReadingsLocked();
             }
         }
 
-        return outcome;
+        if (!closed)
+        {
+            _log.Info("AirPods claimed from set-up " + record.FileName + ": threshold " + candidate.ThresholdDbm + " dBm.");
+
+            // The first reading is applied at once, so the card has something to show: the case, or all three
+            // once the order is proved. It goes through the same rule as every later one.
+            ApplyOwnedMessage(message, candidate.RssiMedian, listen.EndedAtUtc);
+            lock (_gate)
+            {
+                // A set-up that leaves nothing to show (the case unreadable or doubted, the buds unproved) is
+                // said to have read nothing, never "battery set up".
+                nothingShown = _left.Percent is null && _right.Percent is null && _case.Percent is null;
+                _setupCouldNotRead = nothingShown;
+            }
+
+            PublishAndNotify();
+        }
+
+        if (nothingShown)
+        {
+            return new BatterySetupResult(BatterySetupResultStatus.CouldNotRead, record.FileName, result);
+        }
+
+        BatterySetupResultStatus status = table.HighNibbleIsRight is not null
+            ? BatterySetupResultStatus.BatterySetUp
+            : evidence.HighNibbleIsRight is null
+                ? BatterySetupResultStatus.CaseSetUpBudsSame
+                : BatterySetupResultStatus.CaseSetUp;
+        return new BatterySetupResult(status, record.FileName, result);
+    }
+
+    private static string YesNo(bool value) => value ? "yes" : "no";
+
+    // The build's own version, without the source revision suffix a build may append.
+    private static string AppVersion()
+    {
+        string? version = typeof(WidgetStatusService).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), inherit: false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+        if (string.IsNullOrEmpty(version))
+        {
+            return "unknown";
+        }
+
+        int plus = version.IndexOf('+', StringComparison.Ordinal);
+        return plus > 0 ? version[..plus] : version;
     }
 
     public void ForgetClaim()
@@ -731,6 +864,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             {
                 case OwnershipVerdict.Owned:
                     Interlocked.Increment(ref _owned);
+
+                    // The one place this run watches for the AirPods still broadcasting while this PC plays to
+                    // them: what auto-pause needs to know before it may ever act.
+                    if (_thisPcActive)
+                    {
+                        _proof?.NoteOwnedWhileThisPcRenders(at);
+                    }
+
                     break;
                 case OwnershipVerdict.NoClaim:
                     Interlocked.Increment(ref _noClaim);
@@ -1090,6 +1231,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             previous.WatcherErrorCode != current.WatcherErrorCode ||
             previous.WatcherErrorName != current.WatcherErrorName ||
             previous.ClaimExists != current.ClaimExists ||
+            previous.SetupCouldNotRead != current.SetupCouldNotRead ||
             previous.AutoPauseAvailable != current.AutoPauseAvailable;
     }
 
@@ -1120,7 +1262,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         DateTimeOffset? batteryReadAt = OldestReadAt(_left, _right, _case);
         ProximityDecodeTable table = _decodeTable();
         bool? lidOpen = _lidOpenBitSeen ? _lastLidOpenState : null;
-        bool autoPauseAvailable = WidgetDefaults.BroadcastContinuesWhilePlayingFromThisPc == true &&
+        bool autoPauseAvailable = _broadcastsWhilePlaying() == true &&
             (table.LeftInEarBit is not null || table.RightInEarBit is not null);
 
         // Per-bud InEar is only as good as the reading it came from. Battery never expires, so Percent,
@@ -1132,7 +1274,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         return new WidgetSnapshot(
             where, left, right, _case, batteryReadAt, earReadAt, lidOpen,
             _watcherState, _watcherErrorCode, _watcherErrorName,
-            _claim is not null, autoPauseAvailable, BuildCountersLocked());
+            _claim is not null, autoPauseAvailable, BuildCountersLocked())
+        {
+            SetupCouldNotRead = _setupCouldNotRead,
+        };
     }
 
     private static DateTimeOffset? OldestReadAt(PartReading a, PartReading b, PartReading c)

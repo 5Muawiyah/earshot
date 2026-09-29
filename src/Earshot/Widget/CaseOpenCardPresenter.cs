@@ -32,11 +32,10 @@ internal readonly record struct DismissDurationReading(bool Ok, uint Seconds, in
 // identically bar the Where line, which WidgetCard itself always overrides to "Case open" for a notice-mode
 // instance, regardless of what model it was last given.
 //
-// It never connects, and never claims, on its own. The only path from a CaseOpened event to
-// WidgetCardPresenterCallbacks.RequestToggle or RequestClaim is a genuine left click on this card's Connect
-// button or claim link while it is open (WidgetCard.ToggleRequested/ClaimRequested, wired exactly as
-// WidgetCardPresenter wires them: a left down and a left up on the same one, not any button's up alone);
-// there is no timer and no other code path here that calls either.
+// It never connects on its own, and never shows a set-up page. The only path from a CaseOpened event to
+// WidgetCardPresenterCallbacks.RequestToggle is a genuine left click on this card's Connect button while it
+// is open (WidgetCard.ToggleRequested, wired exactly as WidgetCardPresenter wires it: a left down and a left
+// up on the same one, not any button's up alone); there is no timer and no other code path here that calls it.
 //
 // UI thread only from the outside; every public method posts through uiPost, matching WidgetCardPresenter.
 internal sealed class CaseOpenCardPresenter : IDisposable
@@ -131,7 +130,6 @@ internal sealed class CaseOpenCardPresenter : IDisposable
             _card.CloseRequested -= OnCardClosed;
             _card.ToggleRequested -= OnToggleRequested;
             _card.AutoPauseChanged -= OnAutoPauseChanged;
-            _card.ClaimRequested -= OnClaimRequested;
             _card.Dispose();
             _card = null;
         }
@@ -261,14 +259,12 @@ internal sealed class CaseOpenCardPresenter : IDisposable
             _card.CloseRequested -= OnCardClosed;
             _card.ToggleRequested -= OnToggleRequested;
             _card.AutoPauseChanged -= OnAutoPauseChanged;
-            _card.ClaimRequested -= OnClaimRequested;
         }
 
         _card = _createCard();
         _card.CloseRequested += OnCardClosed;
         _card.ToggleRequested += OnToggleRequested;
         _card.AutoPauseChanged += OnAutoPauseChanged;
-        _card.ClaimRequested += OnClaimRequested;
         return _card;
     }
 
@@ -277,10 +273,6 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     private void OnToggleRequested(object? sender, EventArgs e) => _callbacks.RequestToggle(CardPlace.NearTray);
 
     private void OnAutoPauseChanged(object? sender, bool on) => _callbacks.SetAutoPause(on, CardPlace.NearTray);
-
-    // Same rule as the button above: a genuine click on this card's own claim link while it is open, never
-    // anything automatic. Placed NearTray, matching OnToggleRequested.
-    private void OnClaimRequested(object? sender, EventArgs e) => _callbacks.RequestClaim(CardPlace.NearTray);
 
     private void OnCardClosed(object? sender, WidgetCardCloseReason reason) => StopDismissTimer();
 

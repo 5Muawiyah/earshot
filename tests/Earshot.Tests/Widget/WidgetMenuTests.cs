@@ -111,26 +111,47 @@ public sealed class WidgetMenuTests
         });
     }
 
-    // No live run has ever proved a signal threshold on this machine (phase 0 stays unset), so the trigger
-    // reads disabled here exactly as it would in production: WidgetStatusService.ClaimAvailable reads the
-    // same WidgetDefaults.SignalThresholdDbm the real claim flow refuses on, with no test-only override
-    // reachable through TrayContext's own composition (CompositionRoot.BuildWidget's own header explains
-    // why). ToolStripMenuItem.PerformClick is a no-op on a disabled item, the same as Button.PerformClick
-    // elsewhere in this suite, so a click cannot be driven through it here: the wiring from a click to
-    // WidgetStatusService.ClaimAsync is proved instead where the item can genuinely be enabled
-    // (MenuModelTests, TrayMenuTests) and where ClaimAsync itself can be driven to every outcome
-    // (WidgetStatusServiceTests, ClaimFlowTests).
+    // The set-up item is in the menu whatever the widget is doing. With the widget off there is no watcher, so
+    // it reads disabled with its reason, and a click cannot start a listen that would fail.
     [TestMethod]
-    public void MakeTheseMyAirPodsReadsDisabledWithNoSignalThresholdEverProved()
+    public void TheSetUpItemIsDisabledWithItsReasonWhileNothingRuns()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness();
+            tray.Context.Menu.Refresh();
+
+            Assert.IsFalse(tray.MenuItem(WidgetCopy.SetUpBatteryBluetoothOff).Enabled, "No watcher: the item is disabled and says why.");
+        });
+    }
+
+    [TestMethod]
+    public void TheSetUpItemIsEnabledWhileTheWatcherRuns()
     {
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(settings: s => s.Widget = s.Widget with { Enabled = true });
+            tray.PumpUntilIdle();
             tray.Context.Menu.Refresh();
 
-            ToolStripMenuItem item = tray.MenuItem("Make these my AirPods (no signal threshold set up yet)");
+            Assert.IsTrue(tray.MenuItem(WidgetCopy.SetUpBattery).Enabled, "With the watcher running the item is enabled.");
+        });
+    }
 
-            Assert.IsFalse(item.Enabled, "No signal threshold has ever been proved on this build.");
+    [TestMethod]
+    public void TheSetUpItemOpensTheCardAtListening()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(settings: s => s.Widget = s.Widget with { Enabled = true });
+            tray.PumpUntilIdle();
+            Assert.IsFalse(tray.Context.WidgetCardIsShownForTest);
+
+            tray.ClickMenu(WidgetCopy.SetUpBattery);
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(tray.Context.WidgetCardIsShownForTest, "The set-up opens the widget card.");
+            Assert.AreEqual(WidgetCardView.SetupListening, tray.Context.WidgetCardViewForTest, "At the first page: listening.");
         });
     }
 

@@ -107,7 +107,7 @@ internal sealed partial class TrayContext
             _widgetSnapshotCache = _widgetStatus.Current;
             _widgetStatus.Start();
             _lowBatteryAlertService = CompositionRoot.BuildLowBatteryAlertService(_registry, _widgetStatus);
-            _autoPauseService = CompositionRoot.BuildAutoPauseService(_registry, _widgetStatus, () => _coordinator.BlockStatus, _time);
+            _autoPauseService = CompositionRoot.BuildAutoPauseService(_registry, _widgetStatus, () => _coordinator.BlockStatus, _time, _widgetStatus.BroadcastObserved);
         }
 
         if (_widgetTheme is null)
@@ -126,11 +126,11 @@ internal sealed partial class TrayContext
                 Ink: () => _widgetTheme?.Ink() ?? SystemColors.WindowText,
                 HighContrast: () => SystemInformation.HighContrast,
                 OtherDeviceLabel: () => _registry.Settings.Current.Widget.OtherDeviceLabel,
-                ClaimAvailable: () => _widgetStatus?.ClaimAvailable ?? false,
                 RequestToggle: StartToggleFromWidget,
                 SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
                     "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place),
-                RequestClaim: RequestClaimFromWidget);
+                ListenForSetup: ListenForSetupFromCard,
+                CompleteSetup: CompleteSetupFromCard);
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
@@ -139,7 +139,7 @@ internal sealed partial class TrayContext
                 SessionEndInProgress: () => _coordinator.SessionEndInProgress,
                 OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
             _caseOpenCardPresenter = new CaseOpenCardPresenter(
-                () => new WidgetCard(_log, notice: true), _widgetCardCallbacks, caseOpenGate,
+                () => CreateWidgetCard(notice: true), _widgetCardCallbacks, caseOpenGate,
                 _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
         }
 
@@ -171,7 +171,7 @@ internal sealed partial class TrayContext
             controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
             _gaugeController = controller;
 
-            _widgetCardPresenter = new WidgetCardPresenter(() => new WidgetCard(_log), _widgetCardCallbacks!, _registry.UiPost, _time, _log);
+            EnsureWidgetCardPresenter();
         }
 
         if (_taskbarWatcher is null)
@@ -283,6 +283,9 @@ internal sealed partial class TrayContext
     // (OnWidgetCardRequested) or close would change.
     internal bool WidgetCardIsShownForTest => _widgetCardPresenter?.IsShown ?? false;
 
+    // Which page the gauge-anchored card is on, for tests: null when no card presenter exists.
+    internal WidgetCardView? WidgetCardViewForTest => _widgetCardPresenter?.ViewForTest;
+
     // The open card's own last-rendered ButtonEnabled, for tests: null when no card is open.
     internal bool? WidgetCardButtonEnabledForTest => _widgetCardPresenter?.CurrentModelForTest?.ButtonEnabled;
 
@@ -321,10 +324,50 @@ internal sealed partial class TrayContext
     internal bool TryUpdateSettingsFromWidget(string what, Action<EarshotSettings> mutate, CardPlace place) =>
         TryUpdateSettings(what, mutate, place);
 
-    // The claim link on either card goes through the exact same ClaimAsync call the tray menu's own claim
-    // item makes (ClaimAirPodsAsync, TrayContext.cs), just placed above the gauge or NearTray instead of at
-    // the menu's own click point.
-    internal void RequestClaimFromWidget(CardPlace place) => Launch("claim the AirPods", () => ClaimAirPodsAsync(place), place);
+    // Every widget card is made here, so what all of them share is set in one place. AccentSource is the
+    // card's seam for the system accent colour: it paints with the design's default blue until it is given one.
+    private WidgetCard CreateWidgetCard(bool notice) => new(_log, notice);
+
+    // The gauge-anchored card's presenter, built once. The gauge's own pipeline builds it, and so does the
+    // tray menu's "Set up battery" when the gauge is off, since the set-up pages are drawn on that card.
+    private WidgetCardPresenter EnsureWidgetCardPresenter() =>
+        _widgetCardPresenter ??= new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log);
+
+    // The tray menu's "Set up battery": the widget card opens at its first page, above the gauge when it is
+    // shown, else near the cursor. Not a device action: it listens to advertisements and shows its own pages.
+    internal void RequestSetupFromWidget()
+    {
+        if (_widgetStatus is null || _widgetCardCallbacks is null)
+        {
+            return;
+        }
+
+        _caseOpenCardPresenter?.Hide();
+        WidgetCardPresenter presenter = EnsureWidgetCardPresenter();
+        if (GaugeBoundsIfShown() is { } bounds)
+        {
+            presenter.RequestSetup(bounds, bounds.Location);
+        }
+        else
+        {
+            presenter.RequestSetup(gaugeBounds: null, _cursorPosition());
+        }
+    }
+
+    private Task<BatterySetupListen> ListenForSetupFromCard(CancellationToken ct)
+    {
+        if (_widgetStatus is { } status)
+        {
+            return status.ListenForSetupAsync(ct);
+        }
+
+        DateTimeOffset now = _time.GetUtcNow();
+        return Task.FromResult(new BatterySetupListen(
+            BatterySetupListenStatus.WatcherNotStarted, WidgetCopy.SetupBluetoothOff, Candidate: null, [], now, now, 0, 0));
+    }
+
+    private BatterySetupResult CompleteSetupFromCard(BatterySetupListen listen, BatterySetupPicks picks) =>
+        (_widgetStatus ?? throw new InvalidOperationException("The widget is not running, so a set-up cannot be completed.")).CompleteSetup(listen, picks);
 
     private GaugeControllerSettings ReadGaugeControllerSettings()
     {

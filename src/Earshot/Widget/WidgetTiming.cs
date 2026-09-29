@@ -1,14 +1,18 @@
 namespace Earshot.Widget;
 
 // Waiting budgets, injected so tests drive a TimeProvider. Each is a design choice made here, not a
-// measurement, until its own use notes that a phase 0 result replaces it.
+// measurement.
 public static class WidgetTiming
 {
     // How fresh an owned reading has to be for the ear state (Elsewhere/NotInUse) to be shown at all.
     public static readonly TimeSpan EarFreshWindow = TimeSpan.FromSeconds(10);
 
-    // How long a claiming run collects advertisements before deciding.
-    public static readonly TimeSpan ClaimWindow = TimeSpan.FromSeconds(20);
+    // How long the battery set-up listens for the owner's case before deciding.
+    public static readonly TimeSpan SetupListenWindow = TimeSpan.FromSeconds(20);
+
+    // A battery reading older than this counts as no recent reading: the gauge shows no ring and no number.
+    // The card still shows the last values with their read time.
+    public static readonly TimeSpan BatteryRecentWindow = TimeSpan.FromHours(1);
 
     public static readonly TimeSpan WatcherRetryDelay = TimeSpan.FromSeconds(30);
 
