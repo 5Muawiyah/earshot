@@ -43,6 +43,7 @@ public sealed class LiveTestScriptTests
         "13-GraceWindow.ps1",
         "14-SetDeviceRefusal.ps1",
         "15-UninstallReversal.ps1",
+        "16-FastSwitch.ps1",
         "20-HandBackOnExit.ps1",
         "21-PauseOnLeave.ps1",
         "LiveTest.psm1",

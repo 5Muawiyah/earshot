@@ -35,15 +35,16 @@ public sealed class LiveTestSelfTestTests
     // 18 bring it to 95 (99 runs total, four of which are the closing step's own disconnect-first
     // cases added next: see ExpectedExtraCases below), test 19 adds no extra cases of its own but
     // brings the shared three up to 102 (26 halves, 3 cases each, plus the same 24), tests 20 and 21
-    // bring it to 110 (28 halves, plus 26), and RealLauncherSelfTestTests.cs runs one PowerShell
+    // bring it to 110 (28 halves, plus 26), test 16 brings it to 117 (29 halves, plus 30: its four cases
+    // beyond the shared three, and the shared three it adds like every script), and RealLauncherSelfTestTests.cs runs one PowerShell
     // process more again, separately. Generous,
     // because a machine under load is not a defect.
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(20);
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
     // to tools\live-tests without being added here would otherwise be run by nothing.
-    private const int ExpectedScripts = 21;
-    private const int ExpectedHalves = 28;
+    private const int ExpectedScripts = 22;
+    private const int ExpectedHalves = 29;
     private const int ExpectedCases = 3;
 
     // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
@@ -58,12 +59,13 @@ public sealed class LiveTestSelfTestTests
     // run on both of that row's halves (6); 18-HandBackOnSleep's no-sleep-event,
     // handback-cut-short and repaged-at-wake, on that row's one half (3). 19-Widget adds none of
     // its own: its three cases are the shared none/one/two only. 20-HandBackOnExit's exit-cut-short
-    // (1) and 21-PauseOnLeave's pause-declined (1), each on that row's one half. 2+2+9+2+6+3+1+1
-    // = 26, printed by Invoke-SelfTest.ps1 itself (runs 110, halves 28, cases-per-half 3:
-    // 110 - 28*3 = 26) rather than re-derived here, because this arithmetic has been wrong before:
+    // (1) and 21-PauseOnLeave's pause-declined (1), each on that row's one half; 16-FastSwitch's switch-timed-out,
+    // switch-not-at-rest, switch-rejected and switch-unparsable (4), on that row's one half. 2+2+9+2+6+3+1+1+4
+    // = 30, printed by Invoke-SelfTest.ps1 itself (runs 117, halves 29, cases-per-half 3:
+    // 117 - 29*3 = 30) rather than re-derived here, because this arithmetic has been wrong before:
     // a hand count made before tests 17 and 18 existed on this tree did not match what the runner
     // actually printed once they did.
-    private const int ExpectedExtraCases = 26;
+    private const int ExpectedExtraCases = 30;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

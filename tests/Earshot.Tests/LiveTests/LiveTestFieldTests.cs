@@ -85,6 +85,7 @@ public sealed class LiveTestFieldTests
     private static readonly Type[] StoredFiles =
     [
         typeof(EarshotSettings),
+        typeof(Earshot.Hotkeys.HotkeySettings),
         typeof(WidgetSettings),
         typeof(GateConfig),
         typeof(DeviceIdentity),
