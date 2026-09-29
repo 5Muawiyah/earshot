@@ -48,6 +48,8 @@ internal enum GateExitCode
     Rejected = 20,          // the command line did not validate; nothing was done
     NotElevated = 21,        // not SYSTEM or an elevated administrator
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
+    NotAService = 23,        // the service run mode started by anything other than the service control manager
+    NotFromInstallFolder = 24, // the service run mode from an image outside %ProgramFiles%\Earshot
 }
 
 internal static class GateExitCodes
@@ -74,6 +76,8 @@ internal static class GateExitCodes
         [GateExitCode.Rejected] = "rejected",
         [GateExitCode.NotElevated] = "not-elevated",
         [GateExitCode.RunningAsSystem] = "running-as-system",
+        [GateExitCode.NotAService] = "not-a-service",
+        [GateExitCode.NotFromInstallFolder] = "not-from-install-folder",
     };
 
     public static string ResultName(GateExitCode code) =>
@@ -298,6 +302,8 @@ internal sealed partial class GateActions
                     GateVerbs.Status => Status(steps),
                     GateVerbs.SetBootOn => SetBoot(true, steps),
                     GateVerbs.SetBootOff => SetBoot(false, steps),
+                    GateVerbs.SetHandBackOn => SetHandBack(true, steps),
+                    GateVerbs.SetHandBackOff => SetHandBack(false, steps),
                     GateVerbs.SetDevice => SetDevice(request.Address ?? "", steps),
                     GateVerbs.Boot => Boot(steps),
                     GateVerbs.ProtectOn => Protect(request, protect: true, steps),
@@ -359,10 +365,13 @@ internal sealed partial class GateActions
         return problems.Count == 0;
     }
 
-    // The verbs that change a device or the pin. Boot refuses without a valid config.json on its own, status only
-    // reads, and set-boot-on and set-boot-off are what write the file.
+    // The verbs that change a device or the pin, and the hand-back setting. Boot refuses without a valid config.json
+    // on its own, status only reads, and set-boot-on and set-boot-off are what write the file when it is missing. The
+    // hand-back setting is not: a request queued behind uninstall must not make a config.json again, which the
+    // hand-back service would take as the sign that Earshot is set up.
     private static bool NeedsConfig(string verb) =>
-        verb is GateVerbs.Block or GateVerbs.Allow or GateVerbs.SetDevice or GateVerbs.ProtectOn or GateVerbs.ProtectOff;
+        verb is GateVerbs.Block or GateVerbs.Allow or GateVerbs.SetDevice or GateVerbs.ProtectOn or GateVerbs.ProtectOff
+            or GateVerbs.SetHandBackOn or GateVerbs.SetHandBackOff;
 
     // Install writes config.json, and uninstall deletes it. An uninstall that could not restore everything keeps only
     // device.json and protection.json, so a run that was queued behind it, or one started although setup never
@@ -475,9 +484,33 @@ internal sealed partial class GateActions
 
     private VerbResult SetBoot(bool blockAtBoot, List<StepOutcome> steps)
     {
-        StepOutcome written = _store.WriteConfig(new GateConfig { BlockAtBoot = blockAtBoot });
+        GateConfig current = ReadCurrentConfig(steps);
+        StepOutcome written = _store.WriteConfig(new GateConfig { BlockAtBoot = blockAtBoot, HandBackAtShutdown = current.HandBackAtShutdown });
         steps.Add(written);
         return new VerbResult(written.Ok ? GateExitCode.Success : GateExitCode.Failed, null);
+    }
+
+    // The hand-back service reads this setting from config.json, which the user's own settings file cannot reach.
+    // The request carries one boolean and no path or address, and the other setting in the file is kept.
+    private VerbResult SetHandBack(bool handBack, List<StepOutcome> steps)
+    {
+        GateConfig current = ReadCurrentConfig(steps);
+        StepOutcome written = _store.WriteConfig(new GateConfig { BlockAtBoot = current.BlockAtBoot, HandBackAtShutdown = handBack });
+        steps.Add(written);
+        return new VerbResult(written.Ok ? GateExitCode.Success : GateExitCode.Failed, null);
+    }
+
+    // The settings in config.json now, so a write of one keeps the other. A file that is missing, unreadable or not
+    // valid gives the defaults, as install does, and a file that is present but not valid is recorded as a step.
+    private GateConfig ReadCurrentConfig(List<StepOutcome> steps)
+    {
+        GateRead<GateConfig> existing = _store.ReadConfig();
+        if (existing.Status is GateReadStatus.Invalid or GateReadStatus.Unreadable)
+        {
+            steps.Add(existing.Step);
+        }
+
+        return existing.IsOk && existing.Value is not null ? existing.Value : new GateConfig();
     }
 
     // Re-pins device.json to the device with this address. The address is validated, but it is still

@@ -54,6 +54,10 @@ public sealed class LiveTestFieldTests
             ["src/Earshot/App/ProbeBattery.cs"],
             ["hasSource", "hasValue"]),
         new(
+            "probe service",
+            ["src/Earshot/Service/ProbeService.cs"],
+            ["processId", "summary"]),
+        new(
             "diag gate evidence",
             ["src/Earshot/Boot/DiagGate.cs", NodesProbe],
             [
@@ -89,6 +93,11 @@ public sealed class LiveTestFieldTests
         typeof(GateConfig),
         typeof(DeviceIdentity),
         typeof(ProtectionRecord),
+
+        // The status file the hand-back service writes, and the steps in it: test 17 and test 22 read the newest one
+        // with the verb preshutdown.
+        typeof(GateStatusFile),
+        typeof(StepOutcome),
     ];
 
     // Names that come from neither. The startup value under the user's Run key is called Earshot, and

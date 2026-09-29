@@ -5,6 +5,7 @@ using System.Security.Principal;
 using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Service;
 
 namespace Earshot.Boot.Gate;
 
@@ -327,7 +328,13 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 //      config, otherwise the default, on);
 //   4. delete any existing \Earshot task folder and its tasks, then create it with its SDDL and read it back;
 //   5. register Gate, Protect and BootBlock, then read back each task's SDDL and XML and fail closed on any
-//      difference, removing the tasks again.
+//      difference, removing the tasks again;
+//   6. register the hand-back service (ServicePlan), apply its pre-shutdown time-out and its access list, read
+//      the registration back and fail closed on any difference, removing the service and the tasks again, then
+//      start it, last of all, and wait for it to run.
+// A service left over from an earlier install is stopped first, before anything is copied, because it runs from the
+// install folder that the copy moves aside: a folder with a running image in it is not assumed movable. A service
+// that will not stop stops install with nothing replaced.
 // It never touches HKCU Run: the non-elevated tray owns its own startup value.
 internal sealed class InstallActions
 {
@@ -338,13 +345,20 @@ internal sealed class InstallActions
     private readonly Func<string, AccountLookup> _accountToSid;
     private readonly ILog _log;
     private readonly IBluetoothServiceReader? _bluetooth;
+    private readonly IServiceControl? _service;
     private bool _manifestMissing;
+
+    // How long install waits for the service to stop before it copies, and to run once it is started. Waiting budgets
+    // chosen here; nothing measured how long either takes.
+    public static readonly TimeSpan ServiceWait = TimeSpan.FromSeconds(30);
 
     // nodes is only read, to check the device before anything is changed. bluetooth is only read, to tell whether a
     // device pinned before has been removed from Windows; without it such a device's record is never taken as void.
+    // service is the control manager for the hand-back service; the setup the tray starts always passes the real one,
+    // and a run without one manages no service (the tests that are not about the service).
     public InstallActions(
         InstallLayout layout, IFolderSecurity folders, INodeReader nodes, ITaskRegistrar tasks, Func<string, AccountLookup> accountToSid, ILog log,
-        IBluetoothServiceReader? bluetooth = null)
+        IBluetoothServiceReader? bluetooth = null, IServiceControl? service = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(folders);
@@ -352,6 +366,7 @@ internal sealed class InstallActions
         ArgumentNullException.ThrowIfNull(tasks);
         ArgumentNullException.ThrowIfNull(accountToSid);
         ArgumentNullException.ThrowIfNull(log);
+        _service = service;
         _layout = layout;
         _folders = folders;
         _nodes = nodes;
@@ -360,6 +375,11 @@ internal sealed class InstallActions
         _log = log;
         _bluetooth = bluetooth;
     }
+
+    internal IServiceControl? Service => _service;
+
+    // For tests: the wait between polls of the service's state. Returning false stops waiting at once.
+    internal Func<TimeSpan, bool> ServicePoll { get; init; } = DeviceChangeLock.SleepAndContinue;
 
     // Nothing here is allowed to end the process without a record: an unexpected failure is logged and
     // returned with the steps taken so far, so a half-finished install is visible in the log and the exit code.
@@ -393,6 +413,11 @@ internal sealed class InstallActions
             return new InstallResult(kept, steps);
         }
 
+        if (!StopEarlierService(steps))
+        {
+            return new InstallResult(GateExitCode.Failed, steps);
+        }
+
         if (!CopyApplication(steps))
         {
             return new InstallResult(_manifestMissing ? GateExitCode.NoManifest : GateExitCode.Failed, steps);
@@ -409,6 +434,11 @@ internal sealed class InstallActions
         }
 
         if (!RegisterTasks(request, steps))
+        {
+            return new InstallResult(GateExitCode.Failed, steps);
+        }
+
+        if (!RegisterService(steps))
         {
             return new InstallResult(GateExitCode.Failed, steps);
         }
@@ -723,8 +753,9 @@ internal sealed class InstallActions
             steps.Add(existing.Step);
         }
 
-        bool blockAtBoot = existing.IsOk && existing.Value is not null ? existing.Value.BlockAtBoot : new GateConfig().BlockAtBoot;
-        StepOutcome config = store.WriteConfig(new GateConfig { BlockAtBoot = blockAtBoot });
+        // Both settings are kept from a valid existing file, so setting up again never turns either back on or off.
+        GateConfig kept = existing.IsOk && existing.Value is not null ? existing.Value : new GateConfig();
+        StepOutcome config = store.WriteConfig(new GateConfig { BlockAtBoot = kept.BlockAtBoot, HandBackAtShutdown = kept.HandBackAtShutdown });
         steps.Add(config);
         return config.Ok;
     }
@@ -753,7 +784,7 @@ internal sealed class InstallActions
         IReadOnlyList<string> problems = hr < 0 ? ["The task folder security could not be read."] : AclCheck.CheckTaskFolder(folderSddl, request.UserSid);
         if (!Accept("task-folder-acl", problems, steps))
         {
-            RemoveTasks(steps);
+            RemoveTasksAndService(steps);
             return false;
         }
 
@@ -763,7 +794,7 @@ internal sealed class InstallActions
             steps.Add(StepOutcomes.FromHResult("task-register:" + spec.Name, hr));
             if (hr < 0)
             {
-                RemoveTasks(steps);
+                RemoveTasksAndService(steps);
                 return false;
             }
         }
@@ -777,7 +808,7 @@ internal sealed class InstallActions
                 : AclCheck.CheckTask(sddl, request.UserSid, spec.UserMayRun).Concat(TaskXmlCheck.Verify(xml, spec, _accountToSid, steps)).ToList();
             if (!Accept("task-verify:" + spec.Name, problems, steps))
             {
-                RemoveTasks(steps);
+                RemoveTasksAndService(steps);
                 return false;
             }
         }
@@ -824,6 +855,137 @@ internal sealed class InstallActions
         hr = _tasks.DeleteFolder("\\", TaskPlan.FolderName);
         steps.Add(StepOutcomes.FromHResult("task-folder-delete", hr, hr < 0 ? "Remove the \\Earshot task folder by hand, then set up again." : null));
         return hr >= 0;
+    }
+
+    // The service from an earlier install runs from the install folder that CopyApplication moves aside, so it is
+    // stopped first. A service that is not there, or is stopped already, needs nothing. One that will not stop stops
+    // install before anything is replaced.
+    private bool StopEarlierService(List<StepOutcome> steps)
+    {
+        if (_service is null)
+        {
+            return true;
+        }
+
+        ServiceQuery read = _service.Query(ServicePlan.ServiceName);
+        if (read.Presence == ServicePresence.Missing)
+        {
+            steps.Add(new StepOutcome(ServiceSteps.Existing, true, 0, "S_OK", "No earlier service."));
+            return true;
+        }
+
+        if (read.Presence == ServicePresence.Unknown)
+        {
+            steps.AddRange(read.Steps.Where(s => !s.Ok));
+            steps.Add(StepOutcomes.NotAttempted(ServiceSteps.Stop,
+                "Whether an earlier Earshot hand-back service is running could not be read, so nothing was replaced. Restart, then set up again."));
+            return false;
+        }
+
+        steps.Add(new StepOutcome(ServiceSteps.Existing, true, 0, "S_OK", "An earlier service is " + ServiceSteps.StateName(read.State) + "."));
+        if (read.State == AdvApi32.SERVICE_STOPPED)
+        {
+            return true;
+        }
+
+        steps.Add(_service.Stop(ServicePlan.ServiceName));
+        StepOutcome waited = _service.WaitForState(ServicePlan.ServiceName, AdvApi32.SERVICE_STOPPED, ServiceWait, ServicePoll);
+        steps.Add(waited);
+        if (waited.Ok)
+        {
+            return true;
+        }
+
+        steps.Add(StepOutcomes.NotAttempted(ServiceSteps.Stop,
+            "The Earshot hand-back service could not be stopped, so nothing was replaced. Restart, then set up again."));
+        return false;
+    }
+
+    // Registers the service, applies every value of its plan, reads the registration back, and only then starts it. Any
+    // failure removes the service and the tasks again, so what install leaves is all of it or none.
+    private bool RegisterService(List<StepOutcome> steps)
+    {
+        if (_service is null)
+        {
+            return true;
+        }
+
+        ServiceSpec spec = ServicePlan.Spec(_layout.InstallFolder);
+        ServiceQuery existing = _service.Query(ServicePlan.ServiceName);
+        if (existing.Presence == ServicePresence.Unknown)
+        {
+            steps.AddRange(existing.Steps.Where(s => !s.Ok));
+            steps.Add(StepOutcomes.NotAttempted(ServiceSteps.Create, "Whether the Earshot hand-back service is registered could not be read."));
+            RemoveTasksAndService(steps);
+            return false;
+        }
+
+        // Present: brought to this plan in place. Absent: created. Either way every value comes from the plan.
+        StepOutcome applied = existing.Presence == ServicePresence.Present ? _service.Reconfigure(spec) : _service.Create(spec);
+        steps.Add(applied);
+        if (!applied.Ok)
+        {
+            if (applied.Code == (int)AdvApi32.ERROR_SERVICE_MARKED_FOR_DELETE)
+            {
+                steps.Add(StepOutcomes.NotAttempted(applied.Step,
+                    "The service from an earlier install is still marked for deletion. Restart, then set up again."));
+            }
+
+            RemoveTasksAndService(steps);
+            return false;
+        }
+
+        foreach (StepOutcome step in new[]
+                 {
+                     _service.SetDescription(spec.Name, spec.Description),
+                     _service.SetPreshutdownTimeout(spec.Name, spec.PreshutdownTimeoutMs),
+                     _service.SetDacl(spec.Name, spec.Sddl),
+                 })
+        {
+            steps.Add(step);
+            if (!step.Ok)
+            {
+                RemoveTasksAndService(steps);
+                return false;
+            }
+        }
+
+        ServiceQuery read = _service.Query(spec.Name);
+        steps.AddRange(read.Steps.Where(s => !s.Ok));
+        if (!Accept(ServiceSteps.Verify, ServiceCheck.Verify(read, spec), steps))
+        {
+            RemoveTasksAndService(steps);
+            return false;
+        }
+
+        StepOutcome started = _service.Start(spec.Name);
+        steps.Add(started);
+        if (started.Ok)
+        {
+            StepOutcome running = _service.WaitForState(spec.Name, AdvApi32.SERVICE_RUNNING, ServiceWait, ServicePoll);
+            steps.Add(running);
+            started = running;
+        }
+
+        if (!started.Ok)
+        {
+            RemoveTasksAndService(steps);
+            return false;
+        }
+
+        _log.Info("install: the hand-back service is registered and running.");
+        return true;
+    }
+
+    // What every failure after the tasks exist does: the tasks and the service both go, so a half-finished setup never
+    // stays behind.
+    private void RemoveTasksAndService(List<StepOutcome> steps)
+    {
+        RemoveTasks(steps);
+        if (_service is not null)
+        {
+            ServiceRemoval.Remove(_service, ServicePoll, steps);
+        }
     }
 
     private void RemoveTasks(List<StepOutcome> steps)

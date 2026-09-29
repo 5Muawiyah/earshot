@@ -247,4 +247,83 @@ public sealed class SddlAndAclCheckTests
         Assert.AreEqual(0x001200A9u, AclCheck.MapGeneric(0xA0000000));
         Assert.AreNotEqual(0u, AclCheck.MapGeneric(0x40000000) & AclCheck.WriteLikeRights);
     }
+
+    // The hand-back service's access list. Rights are the service's own bits, so every one is written as a hex mask.
+    private static string ServiceSddl(string authenticatedUsersMask) =>
+        "D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;" + authenticatedUsersMask + ";;;AU)";
+
+    [TestMethod]
+    public void TheServicePlanAccessListPassesTheServiceCheck()
+    {
+        Assert.IsEmpty(AclCheck.CheckService(Earshot.Service.ServicePlan.Sddl));
+    }
+
+    [TestMethod]
+    public void TheServiceCheckAcceptsTheQueryRightsAndAnySubsetOfThem()
+    {
+        Assert.IsEmpty(AclCheck.CheckService(ServiceSddl("0x2000D")));
+        Assert.IsEmpty(AclCheck.CheckService(ServiceSddl("0x20004")));
+        Assert.IsEmpty(AclCheck.CheckService(ServiceSddl("0x4")));
+    }
+
+    // Each right an authenticated user must never hold on the service: start, stop, pause, interrogate, a user-defined
+    // control, the right to change the configuration, delete, and the security rights. The problem names the SID and
+    // the mask.
+    [TestMethod]
+    [DataRow("0x10", "S-1-5-11", "0x00000010")]
+    [DataRow("0x20", "S-1-5-11", "0x00000020")]
+    [DataRow("0x40", "S-1-5-11", "0x00000040")]
+    [DataRow("0x80", "S-1-5-11", "0x00000080")]
+    [DataRow("0x100", "S-1-5-11", "0x00000100")]
+    [DataRow("0x2", "S-1-5-11", "0x00000002")]
+    [DataRow("0x10000", "S-1-5-11", "0x00010000")]
+    [DataRow("0x40000", "S-1-5-11", "0x00040000")]
+    [DataRow("0x80000", "S-1-5-11", "0x00080000")]
+    [DataRow("0x2018D", "S-1-5-11", "0x0002018D")]
+    public void TheServiceCheckRefusesAnyRightBeyondQueryForAnAuthenticatedUser(string mask, string sid, string hex)
+    {
+        IReadOnlyList<string> problems = AclCheck.CheckService(ServiceSddl(mask));
+
+        Assert.HasCount(1, problems);
+        StringAssert.Contains(problems[0], sid);
+        StringAssert.Contains(problems[0], hex);
+    }
+
+    [TestMethod]
+    [DataRow("GR")]
+    [DataRow("GA")]
+    [DataRow("GW")]
+    [DataRow("GX")]
+    [DataRow("0x2000000")]
+    [DataRow("0x1000000")]
+    public void TheServiceCheckRefusesGenericAndSpecialRightsWhoeverHoldsThem(string mask)
+    {
+        Assert.IsNotEmpty(AclCheck.CheckService(ServiceSddl(mask)));
+        Assert.IsNotEmpty(AclCheck.CheckService("D:P(A;;" + mask + ";;;SY)(A;;0xF01FF;;;BA)"));
+    }
+
+    [TestMethod]
+    public void TheServiceCheckRefusesAnyOtherSidWithMoreThanQuery()
+    {
+        Assert.HasCount(1, AclCheck.CheckService("D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x10;;;" + User + ")"));
+        Assert.HasCount(1, AclCheck.CheckService("D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x20;;;WD)"));
+        Assert.HasCount(1, AclCheck.CheckService("D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x20;;;BU)"));
+        Assert.IsEmpty(AclCheck.CheckService("D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x2000D;;;" + User + ")"));
+    }
+
+    [TestMethod]
+    public void TheServiceCheckIgnoresDenyEntriesAndFailsClosedOnAMissingOrNullList()
+    {
+        Assert.IsEmpty(AclCheck.CheckService("D:P(D;;0x10;;;AU)(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x2000D;;;AU)"));
+        Assert.IsNotEmpty(AclCheck.CheckService("D:NO_ACCESS_CONTROL"));
+        Assert.IsNotEmpty(AclCheck.CheckService(null));
+        Assert.IsNotEmpty(AclCheck.CheckService(""));
+        Assert.IsNotEmpty(AclCheck.CheckService("not an sddl"));
+    }
+
+    [TestMethod]
+    public void TheServiceCheckRefusesAConditionalEntry()
+    {
+        Assert.IsNotEmpty(AclCheck.CheckService("D:P(XA;;0x10;;;AU;(@User.Title==\"x\"))(A;;0xF01FF;;;SY)"));
+    }
 }

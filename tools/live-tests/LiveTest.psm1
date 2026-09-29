@@ -757,7 +757,7 @@ function Get-GateExitName
         6 = 'no-identity'; 7 = 'not-available'; 8 = 'other-device-blocked'; 9 = 'status-not-written'
         10 = 'folder-not-secure'; 11 = 'device-blocked'; 12 = 'not-audio-sink'; 13 = 'other-device-protected'
         14 = 'no-manifest'; 15 = 'device-mismatch'; 16 = 'unsafe-environment'; 17 = 'no-config'
-        20 = 'rejected'; 21 = 'not-elevated'; 22 = 'running-as-system'
+        20 = 'rejected'; 21 = 'not-elevated'; 22 = 'running-as-system'; 23 = 'not-a-service'; 24 = 'not-from-install-folder'
         1223 = 'the administrator prompt was declined'
         64 = 'bad command line'; 69 = 'not available in this build'; 70 = 'a check inside Earshot failed'
         71 = 'a system call failed'; 74 = 'the report could not be written'; 77 = 'refused'
@@ -1116,8 +1116,10 @@ function Get-FastStartupSetting
 
 # The System event log entries a hand-back test needs: sleep and wake (Microsoft-Windows-Kernel-Power
 # 42, 107), a dirty boot (Microsoft-Windows-Kernel-Power 41), a shutdown or restart request (User32
-# 1074), and the boot type (Microsoft-Windows-Kernel-Boot 27). Read-only; none of the five needs
-# elevation for the signed-in user on this machine. Returns ,$found: a list of
+# 1074), the boot type (Microsoft-Windows-Kernel-Boot 27), and a service that ended with an error
+# (Service Control Manager 7023 and 7024, which the test for the hand-back service reads by the
+# service's name in the message; every service's errors are returned, the caller chooses). Read-only;
+# none of them needs elevation for the signed-in user on this machine. Returns ,$found: a list of
 # [ordered]@{ utc; id; provider; message }, oldest first, at or after SinceUtc.
 #
 # Get-WinEvent throws when nothing matches the filter, which is its own way of saying zero, not a
@@ -1136,8 +1138,8 @@ function Get-PowerEvents
     {
         $events = Get-WinEvent -FilterHashtable @{
             LogName      = 'System'
-            ProviderName = @('Microsoft-Windows-Kernel-Power', 'Microsoft-Windows-Kernel-Boot', 'User32')
-            Id           = @(42, 107, 41, 1074, 27)
+            ProviderName = @('Microsoft-Windows-Kernel-Power', 'Microsoft-Windows-Kernel-Boot', 'User32', 'Service Control Manager')
+            Id           = @(42, 107, 41, 1074, 27, 7023, 7024)
             StartTime    = $SinceUtc
         } -ErrorAction Stop
 
@@ -1162,6 +1164,154 @@ function Get-PowerEvents
     }
 
     return ,$found
+}
+
+# ------------------------------------------------------ the hand-back service
+
+# How the hand-back service is registered and whether it runs, from `probe service`, which asks the
+# service control manager with the rights every signed-in user holds and changes nothing.
+function Get-HandBackServiceState
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [string]$Label = 'service'
+    )
+
+    $evidence = Join-Path $Run.Folder ([string]$Label + '.json')
+    $result = Invoke-Earshot -Run $Run -Label $Label -Command @('probe', 'service', '--json', '--out', $evidence)
+    if ($null -eq $result) { return $null }
+    return $result.json
+}
+
+# running, stopped, missing, differs or unreadable: the first word of the report's summary, or $null
+# when the probe did not answer. A service that is not registered as setup registers it reads
+# differs, whatever state it is in.
+function Get-HandBackServiceSummary
+{
+    param($ServiceJson)
+
+    $summary = Get-Field -Object $ServiceJson -Name 'summary'
+    if ($null -eq $summary) { return $null }
+    $text = [string]$summary
+    if ($text -match '^(running|stopped|missing|differs|unreadable)') { return $Matches[1] }
+    return $text
+}
+
+# The working set of the service's own process in bytes, from the process id `probe service`
+# reported, or $null when there is none or it cannot be read. Nothing here guesses a figure.
+function Get-HandBackServiceWorkingSet
+{
+    param($ServiceJson)
+
+    $processId = Get-Field -Object $ServiceJson -Name 'processId'
+    if ($null -eq $processId) { return $null }
+    if ([int]$processId -le 0) { return $null }
+    try
+    {
+        $process = Get-Process -Id ([int]$processId) -ErrorAction Stop
+        return [long]$process.WorkingSet64
+    }
+    catch
+    {
+        return $null
+    }
+}
+
+# Whether the Earshot tray icon is running. The hand-back service is also an Earshot.exe, and it
+# runs in session 0, where a signed-in user's programs never run, so only a process in a user
+# session counts as the tray. A read that fails reads as not running, and the caller says so.
+function Test-EarshotRunning
+{
+    $tray = Get-Process -Name 'Earshot' -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -ne 0 }
+    return (@($tray).Count -gt 0)
+}
+
+# The newest status file the hand-back service wrote at or after SinceUtc, read from the machine
+# folder, or $null when there is none. The service writes status-<nonce>.json with the verb
+# preshutdown; the tray's own gate runs write the same kind of file with other verbs, which are
+# skipped. Returns [ordered]@{ file; startedUtc; milliseconds; result; state; reason; failedSteps;
+# vetoSeen; retryTook }:
+#   milliseconds  FinishedUtc minus StartedUtc
+#   reason        the Detail of the preshutdown step
+#   vetoSeen      yes when a cm-disable step carries CR_REMOVE_VETOED (23), else no
+#   retryTook     no-veto without one; else yes when a later cm-disable step for a vetoed node
+#                 succeeded, else no
+function Get-PreshutdownStatus
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [Parameter(Mandatory = $true)][datetime]$SinceUtc
+    )
+
+    if (-not (Test-Path -LiteralPath $Run.MachineFolder)) { return $null }
+    $newest = $null
+    $newestStarted = [datetime]::MinValue
+    $newestFile = ''
+    foreach ($file in (Get-ChildItem -LiteralPath $Run.MachineFolder -Filter 'status-*.json' -File -ErrorAction SilentlyContinue))
+    {
+        $status = Read-EarshotJsonFile -Run $Run -Path $file.FullName
+        if ($null -eq $status) { continue }
+        if ([string](Get-Field -Object $status -Name 'Verb') -ne 'preshutdown') { continue }
+        $startedText = [string](Get-Field -Object $status -Name 'StartedUtc')
+        if ([string]::IsNullOrEmpty($startedText)) { continue }
+        $started = [datetime]::Parse($startedText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        if ($started -lt $SinceUtc) { continue }
+        if ($started -ge $newestStarted)
+        {
+            $newest = $status
+            $newestStarted = $started
+            $newestFile = $file.Name
+        }
+    }
+
+    if ($null -eq $newest) { return $null }
+
+    $finishedText = [string](Get-Field -Object $newest -Name 'FinishedUtc')
+    $milliseconds = $null
+    if (-not [string]::IsNullOrEmpty($finishedText))
+    {
+        $finished = [datetime]::Parse($finishedText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $milliseconds = [int]([math]::Round((New-TimeSpan -Start $newestStarted -End $finished).TotalMilliseconds))
+    }
+
+    $reason = $null
+    $veto = $false
+    $took = $false
+    $vetoedNodes = @()
+    $failed = @()
+    $steps = Get-Field -Object $newest -Name 'Steps'
+    foreach ($step in @($steps))
+    {
+        if ($null -eq $step) { continue }
+        $name = [string](Get-Field -Object $step -Name 'Step')
+        $code = [int](Get-Field -Object $step -Name 'Code')
+        if (-not [bool](Get-Field -Object $step -Name 'Ok')) { $failed = $failed + @([string]$name + ' ' + [string](Get-Field -Object $step -Name 'CodeName')) }
+        if ($name -eq 'preshutdown') { $reason = [string](Get-Field -Object $step -Name 'Detail') }
+        if ($name -like 'cm-disable:*')
+        {
+            if ($code -eq 23)
+            {
+                $veto = $true
+                $vetoedNodes = $vetoedNodes + @($name)
+            }
+            elseif ($code -eq 0 -and (@($vetoedNodes) -contains $name))
+            {
+                $took = $true
+            }
+        }
+    }
+
+    return [ordered]@{
+        file         = $newestFile
+        startedUtc   = $newestStarted.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        milliseconds = $milliseconds
+        result       = [string](Get-Field -Object $newest -Name 'Result')
+        state        = [string](Get-Field -Object $newest -Name 'State')
+        reason       = $reason
+        failedSteps  = (@($failed) -join ', ')
+        vetoSeen     = $(if ($veto) { 'yes' } else { 'no' })
+        retryTook    = $(if (-not $veto) { 'no-veto' } elseif ($took) { 'yes' } else { 'no' })
+    }
 }
 
 # The Earshot log lines written at or after the given UTC time whose text holds the
@@ -1741,5 +1891,6 @@ Export-ModuleMember -Function `
     Get-NodeState, Get-AudioState, Get-TopologyState, Get-ServiceState, Get-TaskState,
     Get-TargetEndpointStates, Read-EarshotJsonFile, Get-BlockAtBootSetting, Get-ProtectAudioSetting,
     Get-EarshotLogLines, Save-EarshotLog, Get-FastStartupSetting, Get-PowerEvents,
+    Get-HandBackServiceState, Get-HandBackServiceSummary, Get-HandBackServiceWorkingSet, Test-EarshotRunning, Get-PreshutdownStatus,
     Add-Criterion, Add-Finding, Write-Failure, Write-ResumeInstruction, Close-AtRest, Complete-LiveTestRun,
     Get-LiveTestExitCode

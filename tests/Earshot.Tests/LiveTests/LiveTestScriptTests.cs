@@ -45,6 +45,7 @@ public sealed class LiveTestScriptTests
         "15-UninstallReversal.ps1",
         "20-HandBackOnExit.ps1",
         "21-PauseOnLeave.ps1",
+        "22-ServiceHandBack.ps1",
         "LiveTest.psm1",
         "Run-LiveTests.ps1",
     ];

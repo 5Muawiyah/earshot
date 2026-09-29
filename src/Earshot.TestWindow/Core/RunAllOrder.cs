@@ -10,13 +10,12 @@ internal sealed record RunAllItem(string RowNumber, int? Variant)
     internal string Key => Variant is null ? RowNumber : RowNumber + "v" + Variant.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
-// Run all: a guided sequence in launcher order, 01 to 15 then 17 and 18 (16, fast switch, is a
-// spec only and is not built), with 10 as five items; 00 is not in it. Restore (00) is the manual
+// Run all: a guided sequence with 10 as five items; 00 is not in it. Restore (00) is the manual
 // escape hatch, never part of the sequence it might need to recover from.
 //
-// 17 and 18 sit at the end, after 15, not beside 09: whether 17 should sit beside 09 instead is
-// still an open owner question, and an unanswered owner question is not a default, so the order
-// here is the one that needed no answer.
+// The order follows the owner's decisions: 17 sits beside 09, with the other two hand-back tests
+// (20, Exit, and 22, the background part) straight after it, and the pause test (21) comes after
+// 15 with the fast switch test (16) ahead of it. 18 stays at the end.
 internal static class RunAllOrder
 {
     internal static readonly IReadOnlyList<RunAllItem> Items = BuildOrder();
@@ -24,7 +23,7 @@ internal static class RunAllOrder
     private static List<RunAllItem> BuildOrder()
     {
         var items = new List<RunAllItem>();
-        foreach (string number in new[] { "01", "02", "03", "04", "05", "06", "07", "08", "09" })
+        foreach (string number in new[] { "01", "02", "03", "04", "05", "06", "07", "08", "09", "17", "20", "22" })
         {
             items.Add(new RunAllItem(number, null));
         }
@@ -34,7 +33,7 @@ internal static class RunAllOrder
             items.Add(new RunAllItem("10", variant));
         }
 
-        foreach (string number in new[] { "11", "12", "13", "14", "15", "17", "18" })
+        foreach (string number in new[] { "11", "12", "13", "14", "15", "21", "18" })
         {
             items.Add(new RunAllItem(number, null));
         }

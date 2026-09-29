@@ -531,6 +531,7 @@ internal sealed partial class BlockCoordinator : IDisposable
                     ReArmIdleRule("the node read changed from " + Describe(before) + " to " + Describe(status));
                 }
 
+                MirrorHandBackSetting(status);
                 RaiseChanged();
             }
 

@@ -146,7 +146,8 @@ it is never lost.
 | 09 | shut down while the AirPods are connected to this PC |
 | 10 | one restart per variant, five variants: the fifth signs out and back in rather than restarting |
 | 15 | a restart, to check the delayed file deletion |
-| 17 | a full power down, not a restart: shut down from the Start menu with the AirPods connected and Hand back on |
+| 17 | a full power down, not a restart: shut down from the Start menu with the AirPods connected and Hand back on; the hand-back service must be running, and the test reads what it did |
+| 22 | a full power down, not a restart, with the Earshot icon closed from Task Manager and the AirPods still connected: only the hand-back service can act |
 
 ## Tests 20 and 21: Exit and pause on leave
 
@@ -213,6 +214,7 @@ recorded that way rather than guessed at.
 | 19 | Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure. |
 | 20 | Whether choosing Exit while the AirPods are connected lets them go and blocks them, inside its cap, and leaves the nodes blocked. |
 | 21 | Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything. |
+| 22 | Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone. |
 
 ## What the backlog asks, and where it is answered
 
@@ -293,10 +295,10 @@ criterion after it lost, and it happens on the success path, because "no matchin
 line" is what a boot block that held produces.
 
 `tools\live-tests\selftest` runs every script in this folder, and both halves of
-every resumable one, against a fake machine: twenty-one scripts, twenty-eight halves,
-three sets of fake inputs holding 0, 1 and 2 matching lines and list items (eighty-
-four runs), plus the twenty-six bespoke extra cases named against each row in
-`Invoke-SelfTest.ps1`'s `$tests`, one hundred and ten runs in total. Only the
+every resumable one, against a fake machine: twenty-two scripts, thirty halves,
+three sets of fake inputs holding 0, 1 and 2 matching lines and list items (ninety
+runs), plus the thirty-eight bespoke extra cases named against each row in
+`Invoke-SelfTest.ps1`'s `$tests`, one hundred and twenty-eight runs in total. Only the
 device-touching and owner-prompting helpers are replaced;
 `Get-EarshotLogLines`, `Get-DiagEvidence`, `Copy-AppEvidence`, `Read-KsEvidence`,
 `Read-EarshotJsonFile`, `Add-Criterion` and `Complete-LiveTestRun` all run for

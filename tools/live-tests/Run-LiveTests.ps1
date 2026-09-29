@@ -240,6 +240,13 @@ $tests = @(
         Settles = 'Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything.'
         Needs = 'Set up from a release build, tray running, Block at boot on, Pause when AirPods leave this PC on, AirPods paired with this PC and the phone, a player that shows in Windows media controls.'
         Halves = 'one'
+    },
+    [ordered]@{
+        Number = '22'; Script = '22-ServiceHandBack.ps1'
+        Title = 'Hand back by the service when Earshot is not running'
+        Settles = 'Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone.'
+        Needs = 'Set up, hand-back service installed and running, AirPods connected and playing, able to shut down and start again.'
+        Halves = 'two (a full shut down between them)'
     }
 )
 

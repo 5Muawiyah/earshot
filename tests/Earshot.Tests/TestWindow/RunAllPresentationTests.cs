@@ -43,20 +43,17 @@ public sealed class RunAllPresentationTests
 
         // Row 15 is Locked in a fresh sandbox (no administrator prompt check has ever run).
         // Jumping straight to its index proves the skip alone, without needing every earlier item
-        // genuinely run or faked first. 15 is no longer the last item (17 and 18 follow it), so
-        // reaching the true end of the sequence from here also needs 17 and 18 to already read as
-        // a clean, settled pass: otherwise AdvanceRunAll would start a real child for 17 once 15 is
-        // skipped, which this fast, offline test is not set up to do.
-        // A second-half-only criterion (see ManifestNameProvesTests's row 17 fixture), not a
-        // generic "c1": StateDeriver reads which half a result.json belongs to from the criteria
-        // it carries, and a result with none of 17's second-half markers reads as only the first
-        // half having run, which halts waiting for a restart rather than advancing past it.
-        ResultJsonFixture.WriteTo(Path.Combine(liveTestRoot, "20260921T000000Z", "17-handback-on-shutdown", "result.json"),
-            new ResultJsonFixture("17-handback-on-shutdown", "pass").WithCriterion("nodes-after-boot", "pass")
-                .WithFinding("leftAtRest", "yes").WithFinishedUtc("2026-09-21T00:00:00.000Z").Build());
+        // genuinely run or faked first. 15 is no longer the last item (21 and 18 follow it), so
+        // reaching the true end of the sequence from here also needs 21 and 18 to already read as
+        // a clean, settled pass: otherwise AdvanceRunAll would start a real child for 21 once 15 is
+        // skipped, which this fast, offline test is not set up to do. Both are one-half rows, so a
+        // generic criterion settles them.
         ResultJsonFixture.WriteTo(Path.Combine(liveTestRoot, "20260921T010000Z", "18-handback-on-sleep", "result.json"),
             new ResultJsonFixture("18-handback-on-sleep", "pass").WithCriterion("c1", "pass")
                 .WithFinding("leftAtRest", "yes").WithFinishedUtc("2026-09-21T01:00:00.000Z").Build());
+        ResultJsonFixture.WriteTo(Path.Combine(liveTestRoot, "20260921T020000Z", "21-pause-on-leave", "result.json"),
+            new ResultJsonFixture("21-pause-on-leave", "pass").WithCriterion("c1", "pass")
+                .WithFinding("leftAtRest", "yes").WithFinishedUtc("2026-09-21T02:00:00.000Z").Build());
 
         int rowFifteenIndex = System.Linq.Enumerable.ToList(RunAllOrder.Items).FindIndex(i => i.RowNumber == "15");
         Assert.AreNotEqual(-1, rowFifteenIndex, "row 15 was not found in Run all's own order.");

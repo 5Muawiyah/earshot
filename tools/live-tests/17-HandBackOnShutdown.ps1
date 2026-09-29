@@ -139,6 +139,40 @@ function Get-Test09Result
     }
 }
 
+# The hand-back service is a second thing that can block at shut down. When the tray's hand-back has
+# finished, the service reads the nodes as blocked and does nothing, so its status file says "already
+# blocked". Read before the shutdown (how it is registered, from probe service) and after it (what it
+# wrote, from its status file): never guessed, and null wherever the file or the report is missing.
+function Add-ServiceStateFinding
+{
+    param([Parameter(Mandatory = $true)]$Run)
+
+    $service = Get-HandBackServiceState -Run $Run -Label 'service-before'
+    Add-Finding -Run $Run -Name 'serviceStateAtShutdown' -Value (Get-HandBackServiceSummary -ServiceJson $service) `
+        -Detail 'running, stopped, missing, differs or unreadable, from probe service before the shutdown'
+}
+
+function Add-ServiceEvidence
+{
+    param(
+        [Parameter(Mandatory = $true)]$Run,
+        [Parameter(Mandatory = $true)][datetime]$SinceUtc
+    )
+
+    $status = Get-PreshutdownStatus -Run $Run -SinceUtc $SinceUtc
+    Add-Criterion -Run $Run -Id 'service-ran' -Criterion 'The hand-back service ran at shut down and wrote its status file.' `
+        -Outcome $(if ($null -ne $status) { 'pass' } else { 'fail' }) `
+        -Detail $(if ($null -ne $status) { 'status file ' + $status.file + ': ' + $status.result + ', "' + $status.reason + '"' } else { 'no status file with the verb preshutdown at or after the shutdown; the service did not run, or its folder check failed' })
+
+    Add-Finding -Run $Run -Name 'serviceReason' -Value $(if ($null -ne $status) { $status.reason } else { $null }) `
+        -Detail 'the Detail of the preshutdown step; already blocked when the tray''s hand-back had finished'
+    Add-Finding -Run $Run -Name 'servicePreshutdownMs' -Value $(if ($null -ne $status) { $status.milliseconds } else { $null }) `
+        -Detail 'FinishedUtc minus StartedUtc of the status file'
+    Add-Finding -Run $Run -Name 'serviceResult' -Value $(if ($null -ne $status) { $status.result } else { $null })
+    Add-Finding -Run $Run -Name 'serviceVetoSeen' -Value $(if ($null -ne $status) { $status.vetoSeen } else { 'no-evidence' }) `
+        -Detail 'CR_REMOVE_VETOED among the status file''s steps: yes, no or no-evidence'
+}
+
 try
 {
     if (-not $Resume)
@@ -147,6 +181,7 @@ try
             'Earshot is installed from a release built from the current head, set up, and running in the tray.',
             'Block at boot is on.',
             '"Hand back at shut down and sleep" is ticked in the menu.',
+            'The Earshot hand-back service is installed and running (setup installs it; this test reads it before the shutdown).',
             'The AirPods are paired with this PC and available to connect.'
         ) -PhysicalActions @(
             'Connect the AirPods to this PC by left-clicking the Earshot icon and clicking Connect on the card, and keep audio playing from this PC.',
@@ -174,6 +209,7 @@ try
                 -Detail ('render ' + $states.Render + ', nodes ' + (Get-Field -Object $nodes -Name 'nodeState') + '. This is the state the shutdown has to be started from.')
 
             Add-Finding -Run $run -Name 'blockAtBootAtShutdown' -Value (Get-BlockAtBootSetting -Run $run)
+            Add-ServiceStateFinding -Run $run
             Add-Finding -Run $run -Name 'fastStartupAtShutdown' -Value (Get-FastStartupSetting -Run $run) `
                 -Detail 'HiberbootEnabled under HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power, read before the shutdown'
 
@@ -327,6 +363,8 @@ try
 
             $vetoSeen = $(if ($veto) { 'yes' } else { 'no' })
         }
+
+        Add-ServiceEvidence -Run $run -SinceUtc $shutdownStartUtc
 
         Add-Finding -Run $run -Name 'gateBlockRunMs' -Value $gateBlockRunMs -Detail 'from the newest *-gate-block.json whose startedUtc is at or after the shutdown'
         Add-Finding -Run $run -Name 'vetoSeen' -Value $vetoSeen -Detail 'CR_REMOVE_VETOED in that evidence''s steps'

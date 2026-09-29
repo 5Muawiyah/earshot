@@ -3,6 +3,8 @@ using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Service;
+using Earshot.Tests.Service;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase4;
@@ -66,14 +68,17 @@ public sealed class InstallActionsTests
 
         public InstallLayout Layout => new(Source, Install, Machine);
 
+        // The service control manager of the run. Null: no service is managed, as in every test that is not about it.
+        public FakeServiceControl? Service { get; set; }
+
         public InstallResult RunInstall(TaskPrincipalMode mode = TaskPrincipalMode.System) =>
             RunInstall(RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer, mode);
 
         public InstallResult RunInstall(string address, Guid container, TaskPrincipalMode mode = TaskPrincipalMode.System) =>
-            new InstallActions(Layout, Folders, Nodes, Tasks, NoLookup, Log)
+            new InstallActions(Layout, Folders, Nodes, Tasks, NoLookup, Log, service: Service) { ServicePoll = _ => true }
                 .Run(new InstallRequest(TestUsers.Sid, address, container, mode));
 
-        public InstallResult RunUninstall() => new UninstallActions(Layout, Folders, Nodes, Tasks, Reboot, Log).Run();
+        public InstallResult RunUninstall() => new UninstallActions(Layout, Folders, Nodes, Tasks, Reboot, Log, service: Service).Run();
 
         // The fake registrar reads principals back as SIDs, so no name is ever looked up.
         private static AccountLookup NoLookup(string account) =>
@@ -847,5 +852,289 @@ public sealed class InstallActionsTests
 
         Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
         Assert.IsEmpty(h.Nodes.Calls);
+    }
+
+    // ---- the hand-back service ----
+
+    private static int IndexOf(InstallResult result, string step) => result.Steps.ToList().FindIndex(s => s.Step == step);
+
+    private static int IndexOfPrefix(InstallResult result, string prefix) =>
+        result.Steps.ToList().FindIndex(s => s.Step.StartsWith(prefix, StringComparison.Ordinal));
+
+    private static readonly string[] FreshServiceCalls =
+    [
+        "query", "query", "create", "description", "preshutdown:10000", "dacl:" + ServicePlan.Sddl, "query", "start", "wait:running",
+    ];
+
+    private static readonly string[] ReplacedServiceCalls =
+    [
+        "query", "stop", "wait:stopped", "query", "reconfigure", "description", "preshutdown:10000", "dacl:" + ServicePlan.Sddl,
+        "query", "start", "wait:running",
+    ];
+
+    private static readonly string[] RemovedServiceCalls = ["query", "stop", "wait:stopped", "delete"];
+
+    private static readonly string[] AbsentServiceCalls = ["query"];
+
+    [TestMethod]
+    public void AFreshInstallRegistersTheServiceWithEveryValueOfThePlanAndStartsItLast()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        FakeServiceControl service = h.Service!;
+        CollectionAssert.AreEqual(FreshServiceCalls, service.Calls);
+        ServiceSpec spec = ServicePlan.Spec(h.Install);
+        Assert.AreEqual(spec, service.Created, "Every value is the plan's.");
+        Assert.AreEqual("\"" + Path.Combine(h.Install, "Earshot.exe") + "\" service", service.Created!.ImagePath);
+        Assert.AreEqual(ServicePlan.Description, service.Description);
+        Assert.AreEqual(10_000u, service.Preshutdown);
+        Assert.AreEqual(ServicePlan.Sddl, service.Sddl);
+        Assert.AreEqual(AdvApi32.SERVICE_RUNNING, service.State);
+        Assert.IsTrue(IndexOf(result, ServiceSteps.Existing) < IndexOf(result, "copy-app"), "The earlier service is looked for before anything is copied.");
+        Assert.IsTrue(IndexOf(result, "copy-app") < IndexOf(result, ServiceSteps.Create));
+        Assert.IsTrue(IndexOfPrefix(result, "task-verify:") < IndexOf(result, ServiceSteps.Create), "After the tasks.");
+        Assert.AreEqual(ServiceSteps.Wait, result.Steps[^1].Step, "The service is started last.");
+    }
+
+    [TestMethod]
+    public void SettingUpOverARunningServiceStopsItBeforeTheCopyReconfiguresItAndStartsItLast()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        h.Service!.Install(AdvApi32.SERVICE_RUNNING, ServicePlan.Spec(@"C:\Old\Earshot"));
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        CollectionAssert.AreEqual(ReplacedServiceCalls, h.Service.Calls);
+        Assert.IsTrue(IndexOf(result, ServiceSteps.Stop) < IndexOf(result, "copy-app"), "Stopped before the install folder is moved aside.");
+        Assert.AreEqual(ServicePlan.Spec(h.Install), h.Service.Reconfigured.Single());
+        Assert.AreEqual(AdvApi32.SERVICE_RUNNING, h.Service.State);
+    }
+
+    [TestMethod]
+    public void AStoppedEarlierServiceIsNotStoppedAgain()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        h.Service!.Install(AdvApi32.SERVICE_STOPPED, ServicePlan.Spec(@"C:\Old\Earshot"));
+
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+
+        Assert.DoesNotContain("stop", h.Service.Calls);
+        Assert.Contains("reconfigure", h.Service.Calls);
+    }
+
+    [TestMethod]
+    public void AnEarlierServiceThatWillNotStopStopsInstallBeforeAnythingIsReplaced()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        h.Service!.Install(AdvApi32.SERVICE_RUNNING, ServicePlan.Spec(@"C:\Old\Earshot"));
+        h.Service.StateAfterStop = AdvApi32.SERVICE_STOP_PENDING;
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        StepOutcome refusal = result.Steps.Single(s => s.Step == ServiceSteps.Stop && s.Code == NativeCodes.NotAttempted);
+        StringAssert.Contains(refusal.Detail, "could not be stopped, so nothing was replaced");
+        Assert.AreEqual(-1, IndexOf(result, "copy-app"), "No copy step was reached.");
+        Assert.IsFalse(Directory.Exists(h.Install));
+        Assert.IsFalse(Directory.Exists(h.Machine));
+        Assert.IsEmpty(h.Tasks.Calls, "No task was touched.");
+        Assert.DoesNotContain("create", h.Service.Calls);
+        Assert.DoesNotContain("reconfigure", h.Service.Calls);
+        Assert.DoesNotContain("delete", h.Service.Calls);
+    }
+
+    [TestMethod]
+    public void AServiceMarkedForDeletionFromAnEarlierInstallStopsInstallWithTheInstruction()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        h.Service!.Fail("create", AdvApi32.ERROR_SERVICE_MARKED_FOR_DELETE);
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == ServiceSteps.Create && s.Code == (int)AdvApi32.ERROR_SERVICE_MARKED_FOR_DELETE));
+        Assert.IsTrue(result.Steps.Any(s => s.Detail is not null && s.Detail.Contains("still marked for deletion. Restart, then set up again.", StringComparison.Ordinal)));
+        Assert.IsEmpty(h.Tasks.Tasks, "Fail closed: the tasks are removed again.");
+        Assert.IsFalse(h.Tasks.FolderExists);
+    }
+
+    // Any difference in the registration read back is a failure that removes the service and the tasks.
+    [TestMethod]
+    [DataRow("image")]
+    [DataRow("startType")]
+    [DataRow("preshutdown")]
+    [DataRow("sddl")]
+    [DataRow("sddlUnreadable")]
+    public void ARegistrationThatDoesNotReadBackAsThePlanFailsInstallAndRemovesTheServiceAndTheTasks(string what)
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        FakeServiceControl service = h.Service!;
+        switch (what)
+        {
+            case "image": service.ReadImagePath = "\"C:\\Windows\\Temp\\Earshot.exe\" service"; break;
+            case "startType": service.ReadStartType = AdvApi32.SERVICE_DEMAND_START; break;
+            case "preshutdown": service.ReadPreshutdown = 180_000; break;
+            case "sddl": service.ReadSddl = "D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x2001D;;;AU)"; break;
+            default: service.SddlUnreadable = true; break;
+        }
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome, what);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == ServiceSteps.Verify && !s.Ok), what);
+        Assert.Contains("delete", service.Calls, what + ": the service is deleted again.");
+        Assert.DoesNotContain("start", service.Calls, what + ": never started.");
+        Assert.Contains("delete-task Gate", h.Tasks.Calls, what + ": the tasks are deleted again.");
+        Assert.IsEmpty(h.Tasks.Tasks, what);
+    }
+
+    [TestMethod]
+    [DataRow("start")]
+    [DataRow("never running")]
+    [DataRow("description")]
+    [DataRow("preshutdown")]
+    [DataRow("dacl")]
+    public void AStepThatFailsAfterTheServiceIsCreatedRemovesTheServiceAndTheTasks(string failure)
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        FakeServiceControl service = h.Service!;
+        if (failure == "never running")
+        {
+            service.StateAfterStart = AdvApi32.SERVICE_START_PENDING;
+        }
+        else
+        {
+            service.Fail(failure, AdvApi32.ERROR_SERVICE_REQUEST_TIMEOUT);
+        }
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome, failure);
+        Assert.Contains("delete", service.Calls, failure);
+        Assert.Contains("delete-task Gate", h.Tasks.Calls, failure);
+        Assert.IsEmpty(h.Tasks.Tasks, failure);
+        Assert.IsFalse(service.Exists, failure);
+        Assert.IsTrue(Directory.Exists(h.Install), "The install folder stays: it is under Program Files and safe.");
+    }
+
+    [TestMethod]
+    public void SettingUpKeepsBothSettingsOfAnExistingConfig()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        Directory.CreateDirectory(h.Machine);
+        Assert.IsTrue(new GateStore(h.Machine).WriteConfig(new GateConfig { BlockAtBoot = false, HandBackAtShutdown = false }).Ok);
+
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+
+        GateConfig kept = new GateStore(h.Machine).ReadConfig().Value!;
+        Assert.IsFalse(kept.BlockAtBoot);
+        Assert.IsFalse(kept.HandBackAtShutdown);
+    }
+
+    [TestMethod]
+    public void SettingUpWithNoConfigWritesBothSettingsOn()
+    {
+        using var h = new Harness();
+
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+
+        GateConfig written = new GateStore(h.Machine).ReadConfig().Value!;
+        Assert.IsTrue(written.BlockAtBoot);
+        Assert.IsTrue(written.HandBackAtShutdown);
+    }
+
+    [TestMethod]
+    public void TheSetupTheTrayStartsRunsWithTheRealServiceControlManager()
+    {
+        var log = new CapturingLog();
+        var layout = new InstallLayout(@"C:\x", @"C:\y", @"C:\z");
+
+        Assert.IsInstanceOfType<WindowsServiceControl>(Program.CreateInstallActions(layout, log).Service);
+        Assert.IsInstanceOfType<WindowsServiceControl>(Program.CreateUninstallActions(layout, log).Service);
+    }
+
+    [TestMethod]
+    public void UninstallStopsAndDeletesTheServiceAfterTheTasksAndBeforeTheInstallFolder()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Service!.Calls.Clear();
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        CollectionAssert.AreEqual(RemovedServiceCalls, h.Service.Calls);
+        Assert.IsFalse(h.Service.Exists);
+        int lastTask = result.Steps.ToList().FindLastIndex(s => s.Step.StartsWith("task-", StringComparison.Ordinal));
+        int stop = IndexOf(result, ServiceSteps.Stop);
+        int delete = IndexOf(result, ServiceSteps.Delete);
+        int folder = IndexOf(result, "remove-install-folder");
+        Assert.IsTrue(lastTask < stop && stop < delete && delete < folder, $"tasks {lastTask}, stop {stop}, delete {delete}, install folder {folder}");
+        Assert.IsFalse(Directory.Exists(h.Install), "Deleted now, not at the restart.");
+        Assert.IsEmpty(h.Reboot.Scheduled);
+    }
+
+    [TestMethod]
+    public void UninstallWithNoServiceRecordsThatAndCarriesOn()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Service!.Exists = false;
+        h.Service.Calls.Clear();
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        CollectionAssert.AreEqual(AbsentServiceCalls, h.Service.Calls);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == ServiceSteps.Existing && s.Ok && s.Detail == "No service."));
+    }
+
+    [TestMethod]
+    public void AServiceThatWillNotStopIsStillDeletedAndUninstallIsPartial()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Service!.StateAfterStop = AdvApi32.SERVICE_RUNNING;
+        h.Service.Calls.Clear();
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome);
+        CollectionAssert.AreEqual(RemovedServiceCalls, h.Service.Calls, "Delete is still called: the entry goes at the restart.");
+        Assert.IsTrue(result.Steps.Any(s => s.Detail is not null && s.Detail.Contains("deleted when the computer restarts", StringComparison.Ordinal)));
+        Assert.IsEmpty(h.Tasks.Tasks, "Everything else was still undone.");
+        Assert.IsFalse(Directory.Exists(h.Machine));
+    }
+
+    [TestMethod]
+    public void AServiceAlreadyMarkedForDeletionCountsAsGone()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Service!.State = AdvApi32.SERVICE_STOPPED;
+        h.Service.Fail("delete", AdvApi32.ERROR_SERVICE_MARKED_FOR_DELETE);
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+    }
+
+    [TestMethod]
+    public void UninstallStopsTheServiceEvenWhenTheMachineFolderCannotBeTrusted()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        Assert.AreEqual(GateExitCode.Success, h.RunInstall().Outcome);
+        h.Folders.DefaultMachineSddl = "O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)";
+        h.Service!.Calls.Clear();
+
+        InstallResult result = h.RunUninstall();
+
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome);
+        CollectionAssert.AreEqual(RemovedServiceCalls, h.Service.Calls);
+        Assert.IsFalse(Directory.Exists(h.Install));
     }
 }

@@ -13,8 +13,16 @@ public static class GateVerbs
     public const string SetDevice  = "set-device";   // the ONLY verb that carries an address arg
     public const string Boot       = "boot";         // supplied by the BootBlock trigger, no nonce
 
+    // Write the hand-back setting into config.json, for the service that hands the AirPods back at shut down.
+    public const string SetHandBackOn  = "sethandback-on";
+    public const string SetHandBackOff = "sethandback-off";
+
+    // The name the hand-back service gives its status file. It is a verb of the status file only: no command line, no
+    // task and no request from the tray carries it, so the gate refuses it wherever it reads a verb from outside.
+    public const string Preshutdown = "preshutdown";
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
-        { Block, Allow, Status, SetBootOn, SetBootOff, ProtectOn, ProtectOff, SetDevice, Boot };
+        { Block, Allow, Status, SetBootOn, SetBootOff, ProtectOn, ProtectOff, SetDevice, Boot, SetHandBackOn, SetHandBackOff, Preshutdown };
 }
 
 public static class BoundaryValidation

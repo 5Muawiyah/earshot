@@ -4,6 +4,8 @@ using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Interop;
+using Earshot.Service;
+using Earshot.Tests.Service;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -23,7 +25,7 @@ public sealed class BlockControllerTests
         private readonly TempFolder _temp = new();
         private readonly SystemWorker _worker;
 
-        public Harness(bool setUp = true, FakeNodeApi? nodes = null)
+        public Harness(bool setUp = true, FakeNodeApi? nodes = null, IServiceControl? service = null)
         {
             Nodes = nodes ?? RecordedNodes.Table();
             string machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
@@ -43,7 +45,7 @@ public sealed class BlockControllerTests
                 return !ct.IsCancellationRequested;
             });
             _worker = new SystemWorker(Log);
-            Controller = new BlockController(Log, Settings, Store, Nodes, gate, Launcher, TestUsers.Sid, Exe, _worker);
+            Controller = new BlockController(Log, Settings, Store, Nodes, gate, Launcher, TestUsers.Sid, Exe, _worker, null, service, InstallFolder);
         }
 
         public GateStore Store { get; }
@@ -771,5 +773,130 @@ public sealed class BlockControllerTests
         Assert.IsEmpty(h.Tasks.Runs);
         Assert.IsEmpty(h.Launcher.Launches);
         Assert.IsEmpty(h.Nodes.Calls);
+    }
+
+    // ---- the hand-back setting and the hand-back service ----
+
+    [TestMethod]
+    public async Task TheHandBackSettingIsSentThroughTheGateAndReadBack()
+    {
+        using var h = new Harness();
+
+        ControllerResult off = await h.Controller.SetHandBackAtShutdownAsync(false);
+        ControllerResult offAgain = await h.Controller.SetHandBackAtShutdownAsync(false);
+        ControllerResult on = await h.Controller.SetHandBackAtShutdownAsync(true);
+
+        Assert.AreEqual(OpStatus.Success, off.Status, off.UserMessage);
+        Assert.AreEqual(BlockController.HandBackMirrorOffMessage, off.UserMessage);
+        Assert.AreEqual(OpStatus.AlreadyInState, offAgain.Status, "A file that already says so needs no run.");
+        Assert.AreEqual(BlockController.HandBackMirrorOnMessage, on.UserMessage);
+        CollectionAssert.AreEqual(new[] { GateVerbs.SetHandBackOff, GateVerbs.SetHandBackOn }, h.Tasks.Runs.Select(r => r[0]).ToArray());
+        Assert.IsTrue(h.Tasks.Runs.All(r => BoundaryValidation.IsNonce(r[1]) && r.Length == 2), "A verb and a nonce, no address.");
+        GateConfig config = h.Store.ReadConfig().Value!;
+        Assert.IsTrue(config.HandBackAtShutdown);
+        Assert.IsTrue(config.BlockAtBoot, "The other setting is kept.");
+    }
+
+    [TestMethod]
+    public async Task TheHandBackSettingIsOkOnlyWhenTheFileNowSaysSo()
+    {
+        using var h = new Harness();
+        h.GateActs = false;
+        h.Tasks.OnRun = _ => h.Tasks.Current = new TaskRunState(TaskSchedulerCom.TASK_STATE_READY, 0, h.Tasks.Current.LastRunTime + 1);
+
+        ControllerResult result = await h.Controller.SetHandBackAtShutdownAsync(false);
+
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        Assert.AreEqual(BlockController.HandBackMirrorFailedMessage, result.UserMessage);
+        Assert.IsTrue(h.Store.ReadConfig().Value!.HandBackAtShutdown, "Nothing changed.");
+    }
+
+    [TestMethod]
+    public async Task TheHandBackSettingBeforeSetupSaysSoAndSendsNothing()
+    {
+        using var h = new Harness(setUp: false);
+
+        ControllerResult result = await h.Controller.SetHandBackAtShutdownAsync(false);
+
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        Assert.AreEqual(BlockController.NotSetUpMessage, result.UserMessage);
+        Assert.IsEmpty(h.Nodes.Calls);
+    }
+
+    [TestMethod]
+    public async Task TheStatusReadFillsTheHandBackMirrorFromConfigJson()
+    {
+        using var h = new Harness();
+
+        BootBlockStatus on = await h.Controller.GetStatusAsync();
+        Assert.IsTrue(h.Store.WriteConfig(new GateConfig { BlockAtBoot = true, HandBackAtShutdown = false }).Ok);
+        BootBlockStatus off = await h.Controller.GetStatusAsync();
+        File.Delete(h.Store.ConfigFile);
+        BootBlockStatus missing = await h.Controller.GetStatusAsync();
+        File.WriteAllText(h.Store.ConfigFile, "not json");
+        BootBlockStatus invalid = await h.Controller.GetStatusAsync();
+
+        Assert.AreEqual(true, on.HandBackAtShutdownMirror);
+        Assert.AreEqual(false, off.HandBackAtShutdownMirror);
+        Assert.IsNull(missing.HandBackAtShutdownMirror, "A file that was not read is no answer.");
+        Assert.IsNull(invalid.HandBackAtShutdownMirror);
+    }
+
+    [TestMethod]
+    public async Task TheHandBackServiceIsLoggedOncePerRunWithHowItReads()
+    {
+        var service = new FakeServiceControl();
+        using var h = new Harness(service: service);
+        service.Install(AdvApi32.SERVICE_RUNNING, ServicePlan.Spec(InstallFolder));
+
+        await h.Controller.GetStatusAsync();
+        await h.Controller.GetStatusAsync();
+
+        Assert.AreEqual(1, h.Log.Entries.Count(e => e.Message.StartsWith("Hand-back service: ", StringComparison.Ordinal)));
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back service: running."));
+        Assert.AreEqual(1, service.Calls.Count(c => c == "query"), "The control manager is asked once.");
+    }
+
+    [TestMethod]
+    [DataRow("stopped", "Hand-back service: stopped.")]
+    [DataRow("missing", "Hand-back service: missing.")]
+    [DataRow("differs", "Hand-back service: differs: The start type is 3, not 2.")]
+    public async Task EachWayTheServiceCanReadHasItsOwnLogLine(string kind, string expected)
+    {
+        var service = new FakeServiceControl();
+        using var h = new Harness(service: service);
+        switch (kind)
+        {
+            case "stopped": service.Install(AdvApi32.SERVICE_STOPPED, ServicePlan.Spec(InstallFolder)); break;
+            case "differs":
+                service.Install(AdvApi32.SERVICE_RUNNING, ServicePlan.Spec(InstallFolder));
+                service.ReadStartType = AdvApi32.SERVICE_DEMAND_START;
+                break;
+        }
+
+        await h.Controller.GetStatusAsync();
+
+        Assert.IsTrue(h.Log.Has(LogLevel.Info, expected), string.Join(" | ", h.Log.Entries.Select(e => e.Message)));
+    }
+
+    [TestMethod]
+    public void AServiceThatCouldNotBeReadIsLoggedAsUnreadableWithItsCode()
+    {
+        var read = new ServiceQuery(
+            ServicePresence.Unknown, [ServiceSteps.FromWin32(ServiceSteps.Query, 5, "The service control manager could not be opened.")]);
+
+        Assert.AreEqual("Hand-back service: unreadable: ERROR_ACCESS_DENIED.", HandBackServiceText.Registration(read, ServicePlan.Spec(InstallFolder)));
+    }
+
+    [TestMethod]
+    public async Task SafeModeRefusesTheHandBackSettingToo()
+    {
+        using var h = new Harness();
+        var safe = new SafeBlockController(h.Controller, h.Log);
+
+        ControllerResult result = await safe.SetHandBackAtShutdownAsync(false);
+
+        Assert.AreEqual(OpStatus.NotAttempted, result.Status);
+        Assert.IsEmpty(h.Tasks.Runs);
     }
 }

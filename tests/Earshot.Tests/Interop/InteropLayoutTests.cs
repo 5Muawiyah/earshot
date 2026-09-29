@@ -175,4 +175,37 @@ public sealed class InteropLayoutTests
         Assert.AreEqual(8, Marshal.SizeOf<POINT>());
         Assert.AreEqual(8, Marshal.SizeOf<SIZE>());
     }
+
+    // winsvc.h on x64: DWORDs are 4 bytes, pointers 8 and aligned to 8. Sizes measured on this machine with
+    // Marshal.SizeOf and Unsafe.SizeOf.
+    [TestMethod]
+    public void TheServiceStructsHaveTheirX64Layout()
+    {
+        Assert.AreEqual(28, Marshal.SizeOf<SERVICE_STATUS>());
+        Assert.AreEqual(28, Unsafe.SizeOf<SERVICE_STATUS>());
+        Assert.AreEqual(4, Offset<SERVICE_STATUS>(nameof(SERVICE_STATUS.dwCurrentState)));
+        Assert.AreEqual(8, Offset<SERVICE_STATUS>(nameof(SERVICE_STATUS.dwControlsAccepted)));
+        Assert.AreEqual(12, Offset<SERVICE_STATUS>(nameof(SERVICE_STATUS.dwWin32ExitCode)));
+        Assert.AreEqual(16, Offset<SERVICE_STATUS>(nameof(SERVICE_STATUS.dwServiceSpecificExitCode)));
+        Assert.AreEqual(20, Offset<SERVICE_STATUS>(nameof(SERVICE_STATUS.dwCheckPoint)));
+        Assert.AreEqual(24, Offset<SERVICE_STATUS>(nameof(SERVICE_STATUS.dwWaitHint)));
+
+        Assert.AreEqual(36, Marshal.SizeOf<SERVICE_STATUS_PROCESS>());
+        Assert.AreEqual(28, Offset<SERVICE_STATUS_PROCESS>(nameof(SERVICE_STATUS_PROCESS.dwProcessId)));
+        Assert.AreEqual(32, Offset<SERVICE_STATUS_PROCESS>(nameof(SERVICE_STATUS_PROCESS.dwServiceFlags)));
+
+        Assert.AreEqual(16, Unsafe.SizeOf<SERVICE_TABLE_ENTRYW>());
+        Assert.AreEqual(8, Offset<SERVICE_TABLE_ENTRYW>(nameof(SERVICE_TABLE_ENTRYW.lpServiceProc)));
+
+        Assert.AreEqual(64, Marshal.SizeOf<QUERY_SERVICE_CONFIGW>());
+        Assert.AreEqual(64, Unsafe.SizeOf<QUERY_SERVICE_CONFIGW>());
+        Assert.AreEqual(8, Offset<QUERY_SERVICE_CONFIGW>(nameof(QUERY_SERVICE_CONFIGW.dwErrorControl)));
+        Assert.AreEqual(16, Offset<QUERY_SERVICE_CONFIGW>(nameof(QUERY_SERVICE_CONFIGW.lpBinaryPathName)));
+        Assert.AreEqual(32, Offset<QUERY_SERVICE_CONFIGW>(nameof(QUERY_SERVICE_CONFIGW.dwTagId)));
+        Assert.AreEqual(48, Offset<QUERY_SERVICE_CONFIGW>(nameof(QUERY_SERVICE_CONFIGW.lpServiceStartName)));
+        Assert.AreEqual(56, Offset<QUERY_SERVICE_CONFIGW>(nameof(QUERY_SERVICE_CONFIGW.lpDisplayName)));
+
+        Assert.AreEqual(8, Marshal.SizeOf<SERVICE_DESCRIPTIONW>());
+        Assert.AreEqual(4, Marshal.SizeOf<SERVICE_PRESHUTDOWN_INFO>());
+    }
 }

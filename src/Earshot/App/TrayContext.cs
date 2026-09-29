@@ -2060,7 +2060,10 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         bool on = !_registry.Settings.Current.HandBackOnShutdownAndSleep;
-        TryUpdateSettings("hand back at shut down and sleep", s => s.HandBackOnShutdownAndSleep = on, place);
+        if (TryUpdateSettings("hand back at shut down and sleep", s => s.HandBackOnShutdownAndSleep = on, place))
+        {
+            MirrorHandBackSetting(on, place);
+        }
     }
 
     private void OnOpenOnStartupClicked()

@@ -83,9 +83,14 @@ internal sealed partial class GateStore
 
     // ---- config.json ----
 
+    // HandBackAtShutdown is optional: a file written before the member existed reads as on. When present it must be a
+    // boolean, and any other member is still refused.
     public GateRead<GateConfig> ReadConfig() => Read<GateConfig>(ConfigFile, "read-config", root =>
     {
-        string? shape = RequireShape(root, ("SchemaVersion", JsonValueKind.Number), ("BlockAtBoot", JsonValueKind.True));
+        bool hasHandBack = root.TryGetProperty(HandBackMember, out JsonElement handBack);
+        string? shape = hasHandBack
+            ? RequireShape(root, ("SchemaVersion", JsonValueKind.Number), ("BlockAtBoot", JsonValueKind.True), (HandBackMember, JsonValueKind.True))
+            : RequireShape(root, ("SchemaVersion", JsonValueKind.Number), ("BlockAtBoot", JsonValueKind.True));
         if (shape is not null)
         {
             return (null, shape);
@@ -96,8 +101,15 @@ internal sealed partial class GateStore
             return (null, "SchemaVersion is not " + SchemaVersion + ".");
         }
 
-        return (new GateConfig { SchemaVersion = version, BlockAtBoot = root.GetProperty("BlockAtBoot").GetBoolean() }, null);
+        return (new GateConfig
+        {
+            SchemaVersion = version,
+            BlockAtBoot = root.GetProperty("BlockAtBoot").GetBoolean(),
+            HandBackAtShutdown = !hasHandBack || handBack.GetBoolean(),
+        }, null);
     });
+
+    private const string HandBackMember = "HandBackAtShutdown";
 
     public StepOutcome WriteConfig(GateConfig config)
     {
@@ -107,6 +119,7 @@ internal sealed partial class GateStore
             w.WriteStartObject();
             w.WriteNumber("SchemaVersion", SchemaVersion);
             w.WriteBoolean("BlockAtBoot", config.BlockAtBoot);
+            w.WriteBoolean(HandBackMember, config.HandBackAtShutdown);
             w.WriteEndObject();
         });
     }

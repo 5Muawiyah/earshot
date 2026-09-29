@@ -42,8 +42,8 @@ public sealed class LiveTestSelfTestTests
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
     // to tools\live-tests without being added here would otherwise be run by nothing.
-    private const int ExpectedScripts = 21;
-    private const int ExpectedHalves = 28;
+    private const int ExpectedScripts = 22;
+    private const int ExpectedHalves = 30;
     private const int ExpectedCases = 3;
 
     // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
@@ -58,12 +58,15 @@ public sealed class LiveTestSelfTestTests
     // run on both of that row's halves (6); 18-HandBackOnSleep's no-sleep-event,
     // handback-cut-short and repaged-at-wake, on that row's one half (3). 19-Widget adds none of
     // its own: its three cases are the shared none/one/two only. 20-HandBackOnExit's exit-cut-short
-    // (1) and 21-PauseOnLeave's pause-declined (1), each on that row's one half. 2+2+9+2+6+3+1+1
-    // = 26, printed by Invoke-SelfTest.ps1 itself (runs 110, halves 28, cases-per-half 3:
-    // 110 - 28*3 = 26) rather than re-derived here, because this arithmetic has been wrong before:
-    // a hand count made before tests 17 and 18 existed on this tree did not match what the runner
-    // actually printed once they did.
-    private const int ExpectedExtraCases = 26;
+    // (1) and 21-PauseOnLeave's pause-declined (1), each on that row's one half. Then the hand-back
+    // service: 17's service-not-run on both of its halves (2), and 22-ServiceHandBack's
+    // declined-start, service-not-run, service-partial, service-over-budget and tray-not-ended on
+    // both of its halves (10). 2+2+9+2+6+3+1+1+2+10 = 38, printed by Invoke-SelfTest.ps1 itself
+    // (runs 128, halves 30, cases-per-half 3: 128 - 30*3 = 38) rather than re-derived here,
+    // because this arithmetic has been wrong before: a hand count made before tests 17 and 18
+    // existed on this tree did not match what the runner actually printed once they did, and the
+    // count for the service test made before it was built was short.
+    private const int ExpectedExtraCases = 38;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

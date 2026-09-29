@@ -191,4 +191,112 @@ public sealed class ProbeTests
         Assert.IsGreaterThan(3, bytes.Length);
         Assert.IsFalse(bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
     }
+
+    // ---- probe service ----
+
+    private static readonly string[] ServiceOnly = ["service"];
+
+    [TestMethod]
+    public void ProbeServiceIsANamedTargetAndNotPartOfAll()
+    {
+        CollectionAssert.AreEqual(ServiceOnly, Parse("probe", "service", "--json").Targets.ToArray());
+        CollectionAssert.AreEqual(AllTargets, Parse("probe", "all").Targets.ToArray());
+    }
+
+    private static (int Exit, string Output) RunServiceProbe(Earshot.Tests.Service.FakeServiceControl service, bool json)
+    {
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        var ctx = new ProbeContext("service", writer, json, NoServices);
+
+        int exit = Program.WriteServiceProbe(ctx, service, @"C:\Program Files\Earshot");
+
+        return (exit, writer.ToString());
+    }
+
+    [TestMethod]
+    public void ProbeServiceReportsARegisteredServiceAsJsonAndChangesNothing()
+    {
+        var service = new Earshot.Tests.Service.FakeServiceControl();
+        service.Install(Earshot.Interop.AdvApi32.SERVICE_RUNNING, Earshot.Service.ServicePlan.Spec(@"C:\Program Files\Earshot"));
+
+        (int exit, string output) = RunServiceProbe(service, json: true);
+
+        Assert.AreEqual(0, exit);
+        using JsonDocument document = JsonDocument.Parse(output);
+        JsonElement root = document.RootElement;
+        Assert.AreEqual("service", root.GetProperty("target").GetString());
+        Assert.AreEqual("EarshotHandBack", root.GetProperty("name").GetString());
+        Assert.IsTrue(root.GetProperty("present").GetBoolean());
+        Assert.AreEqual("running", root.GetProperty("summary").GetString());
+        Assert.AreEqual("running", root.GetProperty("state").GetString());
+        Assert.AreEqual(4, root.GetProperty("stateCode").GetInt32());
+        Assert.AreEqual(2, root.GetProperty("startType").GetInt32());
+        Assert.AreEqual(10_000, root.GetProperty("preshutdownMs").GetInt32());
+        Assert.AreEqual("LocalSystem", root.GetProperty("account").GetString());
+        Assert.AreEqual(Earshot.Service.ServicePlan.Sddl, root.GetProperty("sddl").GetString());
+        Assert.AreEqual(0, root.GetProperty("problems").GetArrayLength());
+        Assert.AreEqual("\"C:\\Program Files\\Earshot\\Earshot.exe\" service", root.GetProperty("imagePath").GetString());
+        Assert.AreEqual("query", string.Join(",", service.Calls), "Read-only: one query and no change.");
+    }
+
+    [TestMethod]
+    public void ProbeServiceReportsAServiceThatDiffersWithEachDifference()
+    {
+        var service = new Earshot.Tests.Service.FakeServiceControl();
+        service.Install(Earshot.Interop.AdvApi32.SERVICE_STOPPED, Earshot.Service.ServicePlan.Spec(@"C:\Program Files\Earshot"));
+        service.ReadStartType = Earshot.Interop.AdvApi32.SERVICE_DEMAND_START;
+
+        (int exit, string output) = RunServiceProbe(service, json: true);
+
+        Assert.AreEqual(0, exit);
+        using JsonDocument document = JsonDocument.Parse(output);
+        Assert.AreEqual("differs: The start type is 3, not 2.", document.RootElement.GetProperty("summary").GetString());
+        Assert.AreEqual(1, document.RootElement.GetProperty("problems").GetArrayLength());
+    }
+
+    [TestMethod]
+    public void ProbeServiceReportsAMissingServiceAsAnAnswer()
+    {
+        var service = new Earshot.Tests.Service.FakeServiceControl();
+
+        (int exit, string output) = RunServiceProbe(service, json: true);
+
+        Assert.AreEqual(0, exit, "A service that is not registered is a normal answer.");
+        using JsonDocument document = JsonDocument.Parse(output);
+        JsonElement root = document.RootElement;
+        Assert.IsFalse(root.GetProperty("present").GetBoolean());
+        Assert.IsTrue(root.GetProperty("readable").GetBoolean());
+        Assert.AreEqual("missing", root.GetProperty("summary").GetString());
+        Assert.AreEqual(JsonValueKind.Null, root.GetProperty("stateCode").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, root.GetProperty("sddl").ValueKind);
+        Assert.AreEqual(1060, root.GetProperty("steps")[0].GetProperty("code").GetInt32());
+    }
+
+    [TestMethod]
+    public void ProbeServiceTextNamesTheStateAndTheImagePath()
+    {
+        var service = new Earshot.Tests.Service.FakeServiceControl();
+        service.Install(Earshot.Interop.AdvApi32.SERVICE_RUNNING, Earshot.Service.ServicePlan.Spec(@"C:\Program Files\Earshot"));
+
+        (int exit, string output) = RunServiceProbe(service, json: false);
+
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(output, "service EarshotHandBack: running");
+        StringAssert.Contains(output, "state running, start type 2");
+        StringAssert.Contains(output, "image path \"C:\\Program Files\\Earshot\\Earshot.exe\" service");
+    }
+
+    [TestMethod]
+    public void ProbeServiceExitsNonZeroOnlyWhenTheControlManagerCouldNotBeRead()
+    {
+        var service = new Earshot.Tests.Service.FakeServiceControl { Unreadable = true };
+
+        (int exit, string output) = RunServiceProbe(service, json: true);
+
+        Assert.AreEqual(ExitCodes.OsError, exit);
+        using JsonDocument document = JsonDocument.Parse(output);
+        Assert.IsFalse(document.RootElement.GetProperty("present").GetBoolean());
+        Assert.IsFalse(document.RootElement.GetProperty("readable").GetBoolean());
+        Assert.AreEqual("unreadable: ERROR_ACCESS_DENIED", document.RootElement.GetProperty("summary").GetString());
+    }
 }

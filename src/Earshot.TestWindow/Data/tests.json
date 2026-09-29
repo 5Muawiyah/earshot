@@ -246,7 +246,8 @@
       "firstHalfOnlyCriteriaIds": [ "connected-first" ],
       "secondHalfOnlyCriteriaIds": [
         "end-session-logged", "handback-started", "handback-disconnect-confirmed", "handback-block-sent",
-        "handback-finished", "nodes-after-boot", "not-paged-at-boot", "heard-handed-back", "shutdown-was-clean"
+        "handback-finished", "nodes-after-boot", "not-paged-at-boot", "heard-handed-back", "shutdown-was-clean",
+        "service-ran"
       ]
     },
     {
@@ -274,6 +275,59 @@
       "settles": "Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.",
       "powerCycleRequirement": "none",
       "maxSilenceSeconds": 900
+    },
+    {
+      "number": "20",
+      "script": "20-HandBackOnExit.ps1",
+      "testId": "20-handback-on-exit",
+      "kind": "owner-present",
+      "halves": 1,
+      "name": "Hand back on Exit",
+      "title": "Hand back on Exit",
+      "proves": "Choosing Exit while the AirPods are connected lets them go and blocks them.",
+      "settles": "Whether choosing Exit while the AirPods are connected lets them go and blocks them, inside its cap, and leaves the nodes blocked.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "21",
+      "script": "21-PauseOnLeave.ps1",
+      "testId": "21-pause-on-leave",
+      "kind": "owner-present",
+      "halves": 1,
+      "name": "Pause when the AirPods leave",
+      "title": "Pause when the AirPods leave this PC",
+      "proves": "This PC pauses what it is playing when the AirPods leave it, and never resumes anything.",
+      "settles": "Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
+      "number": "22",
+      "script": "22-ServiceHandBack.ps1",
+      "testId": "22-service-handback",
+      "kind": "power-cycle-full-shutdown",
+      "halves": 2,
+      "name": "Hand back when Earshot is closed",
+      "title": "Hand back by the service when Earshot is not running",
+      "proves": "Even with the Earshot icon closed, the AirPods are handed back before this computer shuts down, and left alone at the next start.",
+      "settles": "Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone.",
+      "powerCycleRequirement": "full-shut-down",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [
+        "connected-first",
+        "tray-gone-still-connected"
+      ],
+      "secondHalfOnlyCriteriaIds": [
+        "nodes-after-boot",
+        "not-paged-at-boot",
+        "heard-handed-back",
+        "service-ran",
+        "service-blocked",
+        "service-in-budget",
+        "shutdown-was-clean",
+        "service-no-error-event"
+      ]
     }
   ]
 }

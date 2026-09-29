@@ -65,16 +65,18 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
     private static readonly HashSet<string> RowsWhereOverallIsNotPinned = new(StringComparer.Ordinal)
     {
         "17-HandBackOnShutdown.ps1 resume",
+        "22-ServiceHandBack.ps1 resume",
     };
 
     // Keyed by "<script> <half>|<criterion id>".
     private static readonly HashSet<string> CriteriaNotPinnedThroughThisPath = new(StringComparer.Ordinal)
     {
         "17-HandBackOnShutdown.ps1 resume|shutdown-was-clean",
+        "22-ServiceHandBack.ps1 resume|shutdown-was-clean",
     };
 
-    private const int ExpectedScriptCount = 21;
-    private const int ExpectedHalfCount = 28;
+    private const int ExpectedScriptCount = 22;
+    private const int ExpectedHalfCount = 30;
 
     [TestMethod]
     public void EveryScriptAndHalfIsDrivenThroughTheWindowWithMatchingEvidence()

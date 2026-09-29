@@ -24,6 +24,9 @@ public sealed class NullBlockController : IBlockController
     public Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default) =>
         Task.FromResult(NullResults.NotAttempted(blockAtBoot ? "setboot-on" : "setboot-off"));
 
+    public Task<ControllerResult> SetHandBackAtShutdownAsync(bool handBack, CancellationToken ct = default) =>
+        Task.FromResult(NullResults.NotAttempted(handBack ? "sethandback-on" : "sethandback-off"));
+
     public Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default) =>
         Task.FromResult(NullResults.NotAttempted("set-device"));
 

@@ -42,6 +42,8 @@ public sealed class GateCommandLineTests
     [DataRow("status")]
     [DataRow("setboot-on")]
     [DataRow("setboot-off")]
+    [DataRow("sethandback-on")]
+    [DataRow("sethandback-off")]
     public void AcceptsEachVerbWithANonce(string verb)
     {
         Assert.IsTrue(Program.TryParseGateArgs(["gate", verb, Nonce], out GateRequest? request, out string? problem), problem);
@@ -135,6 +137,16 @@ public sealed class GateCommandLineTests
     [DataRow("gate", "boot", Nonce)]
     [DataRow("gate", "boot", "$(Arg1)", "$(Arg2)")]
     [DataRow("gate", "boot", "")]
+    [DataRow("gate", "preshutdown", Nonce)]
+    [DataRow("gate", "preshutdown")]
+    [DataRow("gate", "Preshutdown", Nonce)]
+    [DataRow("gate", "preshutdown", Nonce, "0A1B2C3D4E8C")]
+    [DataRow("gate-protect", "preshutdown", Nonce)]
+    [DataRow("gate", "sethandback-on")]
+    [DataRow("gate", "sethandback-on", Nonce, "0A1B2C3D4E8C")]
+    [DataRow("gate", "sethandback-off", "bad")]
+    [DataRow("gate-protect", "sethandback-on", Nonce)]
+    [DataRow("gate-protect", "sethandback-off", Nonce)]
     [DataRow("gate", "set-device", Nonce)]
     [DataRow("gate", "set-device", Nonce, "$(Arg2)")]
     [DataRow("gate", "set-device", Nonce, "0a1b2c3d4e8c")]

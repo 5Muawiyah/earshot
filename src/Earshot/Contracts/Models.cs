@@ -66,6 +66,10 @@ public sealed record BootBlockStatus(
     // XML). The state is then Unknown, not NotSetUp: one failed read is not taken as "not set up", so setup is not
     // offered, and the state is read again.
     public bool TasksKnown { get; init; } = true;
+
+    // The hand-back setting as config.json records it, for the service that hands the AirPods back at shut down. Null
+    // when the file was not read (missing, not valid or unreadable), which is no answer: nothing is sent from it.
+    public bool? HandBackAtShutdownMirror { get; init; }
 }
 
 public sealed record AudioProtectionSnapshot(

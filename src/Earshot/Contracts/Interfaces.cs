@@ -48,6 +48,12 @@ public interface IBlockController
     // named after a language keyword, and On is a Visual Basic keyword.
     // https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/ca1716
     Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default);
+
+    // Copies the hand-back setting into the machine folder's config.json (RunEx "sethandback-on" or "sethandback-off"),
+    // where the service that hands the AirPods back at shut down can read it. The tray's own settings file is not
+    // readable by that service. A controller with no gate has nothing to copy it to.
+    Task<ControllerResult> SetHandBackAtShutdownAsync(bool handBack, CancellationToken ct = default) =>
+        Task.FromResult(Null.NullResults.NotAttempted(handBack ? "sethandback-on" : "sethandback-off"));
     Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default); // RunEx "set-device"
     Task<ControllerResult> RunSetupAsync(CancellationToken ct = default);   // ShellExecute runas (one UAC)
     Task<ControllerResult> UninstallAsync(CancellationToken ct = default);
