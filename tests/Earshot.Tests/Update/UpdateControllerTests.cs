@@ -344,6 +344,40 @@ public sealed class UpdateControllerTests
     }
 
     [TestMethod]
+    public async Task ALauncherThatThrowsEndsAsAFailedHandoverNotAViewStuckOnThePrompt()
+    {
+        using var rig = new Rig();
+        rig.WatchHandover();
+        FoundNewer(rig);
+        StagedUpdate staged = rig.Stage();
+        rig.Source.OnDownload = (_, _, _) => Task.FromResult(UpdateDownloadResult.Success(staged));
+        rig.Launcher.OnLaunch = _ => throw new InvalidCastException("boom");
+        await rig.Controller.CheckAsync(CancellationToken.None);
+
+        await rig.Controller.UpdateAsync(CancellationToken.None);
+
+        Assert.AreEqual(UpdateStage.HandoverFailed, rig.Controller.Stage);
+        Assert.AreEqual(0, rig.HandedOverRaised);
+        Assert.IsFalse(Directory.Exists(staged.WorkFolder), "The unused download is deleted.");
+        Assert.IsTrue(rig.Log.Has(LogLevel.Error, "InvalidCastException"), "The exception type is in the log.");
+    }
+
+    [TestMethod]
+    public async Task CancelWhenNothingIsDownloadingIsHarmless()
+    {
+        using var rig = new Rig();
+        FoundNewer(rig);
+        rig.Source.OnDownload = (_, _, _) => Task.FromResult(UpdateDownloadResult.Failed(new UpdateFailure(UpdateFailureKind.Network, "x", "x")));
+        rig.Controller.Cancel();
+        await rig.Controller.CheckAsync(CancellationToken.None);
+        await rig.Controller.UpdateAsync(CancellationToken.None);
+
+        rig.Controller.Cancel();
+
+        Assert.AreEqual(UpdateStage.DownloadFailed, rig.Controller.Stage, "A late Cancel changes nothing and does not throw.");
+    }
+
+    [TestMethod]
     public async Task AnUpdateThatCannotRunInThisProcessIsRefusedBeforeAnyDownload()
     {
         using var rig = new Rig(unavailable: "Safe mode: no device actions");

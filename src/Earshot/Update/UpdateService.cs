@@ -369,7 +369,10 @@ internal sealed partial class UpdateService : IUpdateSource
             case InvalidDataException:
                 return new UpdateFailure(UpdateFailureKind.BadArchive, ReasonFor(UpdateFailureKind.BadArchive), "The zip could not be read (" + ex.GetType().Name + "): " + ex.Message);
             case IOException io when IsNetworkIo(io):
-                return new UpdateFailure(UpdateFailureKind.Truncated, ReasonFor(UpdateFailureKind.Truncated),
+                // The connection ended while a body was being read: a check has nothing partial to keep, so it is
+                // a connection problem; a download stopped part way.
+                UpdateFailureKind ended = doing == "check" ? UpdateFailureKind.Network : UpdateFailureKind.Truncated;
+                return new UpdateFailure(ended, ReasonFor(ended),
                     "The connection ended early (" + ex.GetType().Name + ", HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + "): " + ex.Message);
             case IOException or UnauthorizedAccessException:
                 return new UpdateFailure(UpdateFailureKind.StagingFailed, ReasonFor(UpdateFailureKind.StagingFailed),

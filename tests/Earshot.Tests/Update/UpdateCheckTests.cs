@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using Earshot.Contracts;
 using Earshot.Update;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -192,6 +193,21 @@ public sealed class UpdateCheckTests
         Assert.AreEqual(UpdateFailureKind.Network, result.Failure!.Kind);
         StringAssert.Contains(result.Failure.Detail, nameof(HttpRequestException));
         Assert.IsTrue(log.Has(LogLevel.Warn, nameof(HttpRequestException)));
+    }
+
+    [TestMethod]
+    public async Task AFeedAnswerCutShortIsAConnectionProblemNotADownloadThatStoppedPartWay()
+    {
+        using var feed = new FeedFixture();
+        byte[] answer = Encoding.UTF8.GetBytes("{\"tag_name\":\"v1.2.0\",\"assets\":[]}");
+        feed.Server.MapTruncated(FeedFixture.FeedPath, answer, 10);
+        using var temp = new TempFolder();
+
+        UpdateCheckResult result = await CheckAsync(feed, temp);
+
+        Assert.AreEqual(UpdateCheckOutcome.Failed, result.Outcome);
+        Assert.AreEqual(UpdateFailureKind.Network, result.Failure!.Kind, result.Failure.Detail);
+        Assert.AreEqual("Couldn't reach GitHub. Check your connection.", result.Failure.Reason);
     }
 
     [TestMethod]

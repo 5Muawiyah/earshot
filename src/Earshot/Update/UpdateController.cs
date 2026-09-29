@@ -205,10 +205,7 @@ internal sealed class UpdateController
         UpdateDownloadResult download;
         try
         {
-            using (cancel)
-            {
-                download = await _source.DownloadAsync(release, new Progress(this), cancel.Token).ConfigureAwait(false);
-            }
+            download = await _source.DownloadAsync(release, new Progress(this), cancel.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -219,10 +216,15 @@ internal sealed class UpdateController
         {
             download = UpdateDownloadResult.Failed(new UpdateFailure(UpdateFailureKind.Cancelled, UpdateService.ReasonFor(UpdateFailureKind.Cancelled), "The download was cancelled."));
         }
-
-        lock (_gate)
+        finally
         {
-            _download = null;
+            // Forgotten before it is disposed, so a Cancel that arrives now never meets a disposed source.
+            lock (_gate)
+            {
+                _download = null;
+            }
+
+            cancel.Dispose();
         }
 
         if (download.Staged is null)
@@ -271,7 +273,18 @@ internal sealed class UpdateController
             return;
         }
 
-        LaunchResult launch = _launcher.Launch(staged.ExecutablePath, UpdateHandover.InstallArguments(identity), staged.AppFolder);
+        LaunchResult launch;
+        try
+        {
+            launch = _launcher.Launch(staged.ExecutablePath, UpdateHandover.InstallArguments(identity), staged.AppFolder);
+        }
+        catch (Exception ex)
+        {
+            // A launcher that throws instead of answering must not leave the view on "Approve the Windows prompt".
+            _log.Error("Update: starting the staged program threw " + ex.GetType().Name + ".", ex);
+            launch = new LaunchResult(LaunchOutcome.Failed, 0, ex.GetType().Name + ": " + ex.Message, null);
+        }
+
         if (launch.Outcome == LaunchOutcome.Started)
         {
             _log.Info("Update: started " + launch.Detail + ". Earshot ends so the new files can replace its own.");
