@@ -47,6 +47,7 @@ internal sealed partial class TrayContext
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
     private readonly Func<ICardEnvironment>? _cardEnvironmentFactory;
     private readonly Func<IForegroundChangeSource>? _foregroundChangeSourceFactory;
+    private readonly Func<IGaugeCoverProbe>? _gaugeCoverProbeFactory;
     private IForegroundChangeSource? _foregroundSource;
 
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
@@ -165,7 +166,7 @@ internal sealed partial class TrayContext
                 ReadGaugeControllerSettings,
                 _log,
                 _time,
-                new WindowCoverProbe(),
+                _gaugeCoverProbeFactory?.Invoke() ?? new WindowCoverProbe(),
                 _registry.UiPost);
             controller.CardRequested += OnWidgetCardRequested;
             controller.ToggleRequested += (_, _) => StartToggle();

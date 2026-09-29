@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Popup;
 using Earshot.Tests.Phase1;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -31,6 +32,20 @@ internal sealed class FakeForegroundChangeSource : IForegroundChangeSource
     public void Raise(string rootClass) => ForegroundChanged?.Invoke(this, new ForegroundChangedEventArgs(1, rootClass, 1));
 
     public void Dispose() => Disposed = true;
+}
+
+// A fake for what looks at the window over the gauge's centre: answers what a test sets and counts every look.
+internal sealed class FakeCoverProbe : IGaugeCoverProbe
+{
+    public GaugeCover Next { get; set; } = new(IsGauge: true, RootClassName: "");
+
+    public int Probes { get; private set; }
+
+    public GaugeCover Probe(ShownGauge gauge)
+    {
+        Probes++;
+        return Next;
+    }
 }
 
 // The foreground hook: its wiring into the gauge pipeline on fakes, and the one real execution of the hook, on
@@ -118,19 +133,105 @@ public sealed class ForegroundChangeHookTests
         });
     }
 
+    // The bar, and where a free-space layout puts the gauge in it, as GaugeControllerTests lays them out.
+    private static TaskbarLayout FreeSpaceLayout()
+    {
+        var bar = new Rectangle(0, 1032, 1920, 48);
+        var start = new Rectangle(762, 1032, 45, 48);
+        List<Rectangle> buttons = Enumerable.Range(0, 8).Select(i => new Rectangle(807 + (i * 44), 1032, 44, 48)).ToList();
+        return new TaskbarLayout(0, bar, TaskbarEdge.Bottom, AutoHide: false,
+            new Rectangle(0, 0, 1920, 1080), [start, .. buttons, new Rectangle(1678, 1032, 242, 48)], start,
+            Dpi: 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
+            NotificationArea: new Rectangle(1678, 1032, 242, 48));
+    }
+
+    // Feeds the tray's fake reader a free-space layout and pokes it, until the gauge is shown (for real, on the
+    // private desktop: this test allows the one real GaugeWindow it puts there).
+    private static void ShowTheGauge(TrayHarness tray)
+    {
+        tray.LastTaskbarReader!.SetNextResult(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        tray.Settings.Update(s => s.Widget = s.Widget with { LeftClickConnects = true });
+        TrayHarness.PumpUntil(() => tray.Context.WidgetGaugeStateForTest is GaugeState.Shown, "Sanity: a free-space layout must show the gauge.");
+        WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
+    }
+
     [TestMethod]
-    public void AForegroundChangeReachesTheControllerWithoutTouchingAnythingWhenTheGaugeIsNotShown()
+    public void AForegroundChangeWhileTheGaugeIsNotShownIsLookedAtByNothing()
     {
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
                 settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
             tray.PumpUntilIdle();
+            tray.LastCoverProbe!.Next = new GaugeCover(IsGauge: false, RootClassName: "Shell_TrayWnd", BelongsToExplorer: true);
 
             tray.LastForegroundSource!.Raise("Chrome_WidgetWin_1");
 
             Assert.IsNotInstanceOfType<GaugeState.Shown>(tray.Context.WidgetGaugeStateForTest, "Nothing was shown to put back on top.");
+            Assert.AreEqual(0, tray.LastCoverProbe.Probes, "With no gauge on screen there is nothing to look at.");
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Gauge raised"));
         });
+    }
+
+    // The foreground event, through the tray's own wiring (the source the pipeline built, the tray's handler, the
+    // real controller): with the taskbar over a shown gauge the change must end with the gauge raised. Removing the
+    // call that hands the event to the controller leaves the probe never asked and the gauge never raised, so this
+    // fails.
+    [TestMethod]
+    public void AForegroundChangeOverAShownGaugeReachesTheControllerWhichRaisesItWhenTheTaskbarCoversIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
+            tray.PumpUntilIdle();
+            ShowTheGauge(tray);
+            tray.LastCoverProbe!.Next = new GaugeCover(IsGauge: false, RootClassName: "Shell_TrayWnd", BelongsToExplorer: true);
+            int looked = tray.LastCoverProbe.Probes;
+
+            tray.LastForegroundSource!.Raise("Shell_TrayWnd");
+
+            Assert.AreEqual(looked + 1, tray.LastCoverProbe.Probes, "The change reached the controller, which looked at what is over the gauge.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Gauge raised: "), "The taskbar was over the gauge, so it was put back on top.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "after a foreground change to"), "And the log says it was the foreground change that did it.");
+        });
+    }
+
+    [TestMethod]
+    public void AForegroundChangeOverAShownGaugeLeavesItAloneWhenSomethingOtherThanTheTaskbarCoversIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
+            tray.PumpUntilIdle();
+            ShowTheGauge(tray);
+            tray.LastCoverProbe!.Next = new GaugeCover(IsGauge: false, RootClassName: "Windows.UI.Core.CoreWindow", BelongsToExplorer: true);
+            int looked = tray.LastCoverProbe.Probes;
+
+            tray.LastForegroundSource!.Raise("Windows.UI.Core.CoreWindow");
+
+            Assert.AreEqual(looked + 1, tray.LastCoverProbe.Probes, "The controller looked.");
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Gauge raised: "), "A flyout belongs over the gauge for now.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Debug, "Gauge left under"));
+        });
+    }
+
+    [TestMethod]
+    public void NoHarnessTestConstructsARealWindowCoverProbe()
+    {
+        int before = WindowCoverProbe.ConstructionCount;
+
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true });
+            tray.PumpUntilIdle();
+            Assert.IsNotNull(tray.LastCoverProbe, "The gauge pipeline asked for a cover probe, and got the fake.");
+        });
+
+        Assert.AreEqual(before, WindowCoverProbe.ConstructionCount,
+            "A widget-enabled TrayHarness built a real WindowCoverProbe; every such test would ask the desktop what is at a point on it.");
     }
 
     [TestMethod]

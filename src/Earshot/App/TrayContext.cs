@@ -114,6 +114,11 @@ internal sealed record TrayStartOptions(
     // widget-enabled tray-level test injects a fake instead, so no test hooks the desktop.
     public Func<IForegroundChangeSource>? ForegroundChangeSourceFactory { get; init; }
 
+    // Builds what looks at the window over the gauge's centre after a foreground change. Null (the default) means
+    // "the real one" (WindowCoverProbe); a widget-enabled tray-level test injects a fake, so no test asks the desktop
+    // what is at a point on it.
+    public Func<IGaugeCoverProbe>? GaugeCoverProbeFactory { get; init; }
+
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
 
@@ -366,6 +371,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _cardEnvironmentFactory = options.CardEnvironmentFactory;
         _foregroundChangeSourceFactory = options.ForegroundChangeSourceFactory;
+        _gaugeCoverProbeFactory = options.GaugeCoverProbeFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;
