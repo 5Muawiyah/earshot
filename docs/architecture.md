@@ -46,18 +46,24 @@ Disconnect only asks the AirPods to disconnect.
 
 ### Handing the AirPods back at shut down and sleep
 
-With **Hand back at shut down and sleep** on (the default), Earshot releases
-the AirPods and blocks their device nodes again before the session actually
-ends or the machine actually sleeps, so this PC does not take them back the
-moment it restarts or wakes.
+With **Hand back on shut down, sleep and Exit** on, Earshot releases the
+AirPods and blocks their device nodes again before the session actually ends,
+the machine actually sleeps, or Exit closes the tray, so this PC does not take
+them back the moment it restarts or wakes. The setting is in the tray menu and
+on the widget card's settings page.
 
-**Where it runs.** Entirely inside the tray's own hidden window, on the real
-Windows messages it already receives: `WM_ENDSESSION` (with the reply held
-open) for a shut down, a restart or a sign-out, and `WM_POWERBROADCAST` with
-`PBT_APMSUSPEND` for sleep. Nothing runs unless that window gets the
-message, which is why the tray has to be running for any of this to happen.
+**Where it runs.** Entirely inside the tray. For shut down, restart and
+sign-out and for sleep it runs on the real Windows messages the tray's hidden
+window already receives: `WM_ENDSESSION` (with the reply held open) and
+`WM_POWERBROADCAST` with `PBT_APMSUSPEND`. For Exit it runs as the block
+before closing, by the same procedure. Nothing runs unless the tray gets the
+message or the click, which is why the tray has to be running for any of this
+to happen. On Exit, a disconnect that outlasts its share of the cap does not
+stop the block: the block is sent anyway, because the block is what keeps this
+PC off the AirPods at rest. Exit with the setting off, or with the AirPods not
+connected to this PC, is the ordinary Exit.
 
-**The fixed order**, the same for both triggers:
+**The fixed order**, the same for every trigger:
 
 1. Let go of any open Play from a phone link.
 2. Send the disconnect and wait for confirmation that the audio render
@@ -74,6 +80,7 @@ message, which is why the tray has to be running for any of this to happen.
 |---|---|
 | Shut down, restart, sign-out (`WM_ENDSESSION`) | 4 seconds |
 | Sleep (`PBT_APMSUSPEND`) | 1.5 seconds |
+| Exit from the tray menu | 4 seconds, the shut-down cap (Exit has no Windows deadline, so it borrows the longest existing one) |
 
 Reaching a cap logs "cut short" and names what was still running. The cap
 is a single deadline, taken once and shared by both the reply hold and the
@@ -159,7 +166,9 @@ folders that administrators can write does not have the gap.
 **The log lines**, all written by one formatter so nothing here drifts from
 what a reader, or a live-test script, actually parses:
 
-- `Hand-back (shutdown): started at ...` and `Hand-back (sleep): started at ...`
+- `Hand-back (shutdown): started at ...`, `Hand-back (sleep): started at ...`
+  and `Hand-back (exit): started at ...`. The lines below are written with
+  the prefix of the trigger that raised them; the resume lines have their own
 - `Hand-back (shutdown): nothing to disconnect`, or `disconnect ...,
   confirmed after ... ms` / `not confirmed within ... ms`
 - `Hand-back (shutdown): block sent at ...`, or `block not sent: <reason>`
@@ -231,28 +240,55 @@ source is copied into this repository; both are cited by URL only. The
 watcher is read-only throughout: nothing it does ever writes to a Bluetooth
 device, and it is stopped and restarted around sleep.
 
-**Phase 0.** Before the widget can trust any of that message's fields, one
-capture has to prove what this hardware actually sends: a short, one-time
-recording, taken with the owner's AirPods and his phone's own battery
-reading side by side, so the decoded fields can be checked against a known
-answer. That recording has not been made yet. Until it has, the message's
-battery, charging and lid fields are held as unproved, and the widget shows
-nothing derived from them: see
-[overview.md](overview.md#the-honest-state-today).
+**Battery set-up and proof.** The message's battery, charging, in-ear and lid
+fields are held as unproved until the owner's own set-ups prove them. **Set up
+battery** (on the card and in the menu) listens for 20 seconds while the owner
+opens the case by the PC. It picks the one sender it treats as the case: the
+strongest by median signal, with at least three messages, and ten decibels
+clear of the next. It sets the signal threshold ten decibels under that
+sender's weakest message. Those three figures are design choices held as named
+constants (`SetupRules`), not facts about the device. The owner then answers
+three pickers (left bud, right bud, case, in steps of 10) and a Charging
+toggle for each, to match what the iPhone shows.
+
+What one set-up saw is kept as a record under `%LOCALAPPDATA%\Earshot\widget`,
+written once and never replaced. A message of the documented form is kept as
+its first nine bytes only. There is no field for a device address, a sender
+tag or a name. The picker values are evidence for `DecodeProof` and are never
+shown as a reading.
+
+`DecodeProof` works out, from the records alone, which fields can be read, and
+its result is saved as the proof. Every rule needs its evidence twice:
+
+- **Bud order and the case nibble** each need two records that agree with the
+  owner's picks (within one 10% step, since the iPhone's rounding is not
+  established). A record that disagrees withdraws what an earlier pair
+  proved. A status bit that flips the bud order needs four discriminating
+  records.
+- **A charging bit** is proved only when it equals the owner's flag in every
+  record, the flag varies, and no other bit or part varies the same way.
+- **In-ear and lid are marked not provable by set-up**, because three battery
+  pickers carry no truth about ears or the lid. Nothing then decodes them, so
+  ear detection, auto-pause and the case-open card stay off, and the settings
+  rows for them say "Earshot cannot yet tell...".
+
+Only fields the proof holds as proved reach the snapshot. A reading older than
+one hour counts as no recent reading. A claim is tied to its set-up record.
 
 **Whose AirPods it shows.** A room can hold several sets of the same model.
 `OwnershipRule` decides, on every advertisement, whether it is the owner's:
-model and colour bytes must match a one-time claim made when he opens his
-own case by the PC; the signal must clear the strength recorded at that
-claim; and the battery must be consistent with the last reading held for
-him, where "consistent" means the same, lower, or exactly one 10% step
-higher, and higher by more than that only while the matching charging bit is
-set. A live connection to this PC does not shortcut any of these checks; the
-same rule runs every time. Anything that fails is counted and nothing else
-is recorded about it. This is an owner decision, not an oversight: a
-same-model stranger with a lower battery reading than the owner's last one
-can pass the rule, and he chose to accept that risk rather than tighten it
-and risk the widget missing his own AirPods.
+model and colour bytes must match the claim a set-up made; the signal must
+clear the strength recorded at that claim; and the battery must be consistent
+with the last reading held for him, where "consistent" means the same, lower,
+or exactly one 10% step higher, and higher by more than that only while the
+matching charging bit is set. A live connection to this PC does not shortcut
+any of these checks; the same rule runs every time, and re-syncing after a
+jump the rule cannot explain is a re-claim (opening the case by the PC).
+Anything that fails is counted and nothing else is recorded about it. This is
+an owner decision, not an oversight: a same-model stranger with a lower
+battery reading than the owner's last one can pass the rule, and he chose to
+accept that risk rather than tighten it and risk the widget missing his own
+AirPods.
 
 **The taskbar gauge.** Windows 11 removed the deskband API that used to let
 a program dock a control into the taskbar, and has no replacement for it, so
@@ -262,10 +298,29 @@ reading the taskbar's own button layout through UI Automation and polling it
 for changes; the window's alpha-zero pixels let a click reach the taskbar
 underneath rather than the gauge
 (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
-If there is no free space, or reading the taskbar fails, or the window
-cannot be shown, the gauge hides itself and the ordinary tray icon takes
-over automatically. It re-measures and re-attaches after Explorer restarts,
-on the documented `TaskbarCreated` broadcast
+It draws the earbud mark with a ring in the Windows accent colour, filled to
+the lower proved bud's battery, and that number.
+
+The setting **Gauge position** chooses between two placements. At the right
+end (the default), its right edge sits 8 pixels (scaled for DPI) left of the
+notification area. Next to the apps, its left edge sits 4 pixels after the
+last button that is not part of the notification area. Either way the result
+must not touch anything already there and must stay inside the taskbar, or
+there is no placement and the tray icon stays. A left or right taskbar is not
+supported.
+
+A change of the foreground window, which Start, a flyout, a taskbar click and
+a full-screen application closing all cause, is watched by one read-only
+`SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND`
+(https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook).
+When something covers the gauge, it raises itself again, and the poll finds
+anything the hook missed. Raises are rate limited. Every hide, show, cover and
+raise is logged on a line starting `Gauge `, with a reason and the covering
+window's class only, never its title. One failed taskbar read keeps the gauge
+where it is; it hides only after three in a row. If there is no free space,
+or the window cannot be shown, the gauge hides itself and the ordinary tray
+icon takes over automatically. It re-measures and re-attaches after Explorer
+restarts, on the documented `TaskbarCreated` broadcast
 (https://learn.microsoft.com/en-us/windows/win32/shell/taskbar). Because
 this is unofficial, a Windows update to the taskbar's own layout could break
 it; the tray icon fallback is what keeps the widget usable if that happens.
@@ -278,8 +333,8 @@ following the system's light or dark theme; on a Windows build too old for
 that call, or if it fails, the card falls back to an opaque colour instead
 of the translucent one. It opens above the gauge, closes
 when it loses focus, and works from the keyboard. The case-open card is the
-same window in a separate, unfocused instance: Windows' own case-open event
-shows it, it reads its own dismiss time from
+same window in a separate, unfocused instance: the case-open event shows it
+(which needs the lid state, so it stays off until that is proved), it reads its own dismiss time from
 [`SystemParametersInfoW(SPI_GETMESSAGEDURATION)`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow)
 so it follows the owner's own accessibility setting, and its Connect or
 Disconnect button only ever fires on a genuine click on that button; nothing
@@ -293,6 +348,93 @@ screen, and no `IWidgetStatus` connection: see
 [docs/overview.md](overview.md#the-airpods-widget) for what the pictures
 made this way actually show and do not show.
 
+**The settings page.** The gear on the card opens a page drawn by the card
+itself, with no child controls. Its rows are read from the real settings each
+time it is drawn, so a row shows what is saved and never what was last asked
+for. Every change goes through the same path the tray menu's own item uses.
+The rows are, in order: Gauge position, Other device, Pause when a bud comes
+out, Pause when AirPods leave this PC, Case-open card, Low battery alert (the
+threshold), Left click connects, Hand back on shut down, sleep and Exit; then
+the shortcuts for Connect and Disconnect; then Check for updates and Check
+automatically. The two rows for features that need in-ear or lid proof carry
+a caption saying Earshot cannot yet tell, while that proof is missing.
+
+### Shortcuts and switch timing
+
+Shortcuts use `RegisterHotKey` through `Earshot.Hotkeys`. Two are on by
+default: Ctrl+Alt+Shift+A switches to this PC (the connect) and
+Ctrl+Alt+Shift+D switches to the phone (the disconnect). A chord Windows
+refuses because another program holds it is recorded as that shortcut's
+registration outcome, and the card and the settings row read it. Both
+shortcuts enter the same toggle path as a click, so every guard the click has
+applies unchanged. A press asks for an end state: the same direction as the
+one in flight changes nothing, and the other direction replaces it, so the
+last press wins.
+
+`HotkeySettings` reads an older settings file so that a chord the owner typed
+is kept, a file that never held one gets the two defaults, and a file that had
+shortcuts off with no chord typed reads as on. `System.Text.Json` calls a
+property's setter only for a member the file contains, which is how the code
+tells a file that predates the two defaults from one that has them.
+
+Every switch the tray starts is timed by `SwitchTimeline` on one monotonic
+clock and written by one formatter (`SwitchTimelineText`) as a `Switch to-pc:`
+or `Switch to-phone:` line. A connect line carries its phases (queued,
+first-pass, status, allow, endpoints, connect, protection), its path and, when
+it did not reach ACTIVE, whether the nodes are blocked again. A disconnect
+line carries the release, whether the PC is at rest, and the block. A cancelled
+switch says so. Test 16 reads these lines; none has been measured on a live
+run yet.
+
+### Pause when the AirPods leave this PC
+
+`PauseOnLeave` pauses playback when the AirPods stop being this PC's output
+while this PC was playing to them. It reads the AirPods' audio activity before
+Earshot's own disconnects (Disconnect, the hand-back at shut down, sleep or
+Exit, a fast switch) and pauses first, then lets them go. For any other leave,
+such as the phone taking them, it acts as soon as it sees the change, on the
+last reading taken. It pauses through Windows Media Controls
+(`SessionPause`), which does not say which output a session renders to, so it
+pauses the one session that is playing whichever output it uses, and none when
+two or more are playing. It never plays and never resumes. Each decision is
+one `Pause on leave:` line with its reason. No live run yet.
+
+### Updates
+
+The update source (`UpdateService`) reads the latest release of the project's
+GitHub repository. The feed address is a compile-time constant: nothing a user
+can write reaches it or a download address. Every address is HTTPS, redirects
+are followed by hand and each hop is checked, and no credential is sent. A
+check downloads nothing.
+
+Only a click on Update starts a download, and only an installed copy offers
+it, because only that copy can hand over safely. The zip is checked against
+the `.sha256` file the release publishes beside it before anything is
+unpacked, and a failure at any step deletes what was staged. The tray then
+starts the installed `Earshot.exe` with the update verb, which asks for one
+administrator prompt. That run copies the zip into a folder only
+administrators can write, hashes the copy, goes on only if the hash matches
+the one recorded at download, and installs from there. The staging folder is
+writable by the signed-in user, which is why the check is repeated in a folder
+that is not.
+
+What the checksum protects against: a damaged or cut-short download, and a
+file that differs from what the release lists. What it does not protect
+against: a compromised release or account, because the checksum comes from the
+same release, and the app is not signed. **Check automatically** is off by
+default and checks at most once a day, the first a little after startup; a
+check that fails is not retried until the next day.
+
+### Where settings and data live
+
+| Where | What |
+|---|---|
+| `%APPDATA%\Earshot\settings.json` | The owner's settings |
+| `%LOCALAPPDATA%\Earshot\logs` | The log |
+| `%LOCALAPPDATA%\Earshot\livetest` | Live-test evidence |
+| `%LOCALAPPDATA%\Earshot\widget` | The widget's claim, set-up records and proof |
+| `%ProgramData%\Earshot` | Machine files the elevated tasks and the service read: `device.json`, `config.json`, `protection.json`, `protection-intent.json` and the per-run status files |
+
 ### What still needs a kernel driver
 
 Not built, and not close to being built, on Windows without one:
@@ -305,8 +447,9 @@ Not built, and not close to being built, on Windows without one:
 - Personalised volume.
 - Renaming the AirPods.
 - The hearing features.
-- Real-time in-ear detection, if phase 0 shows the advertisement cannot
-  give it while playing from this PC; that is still an open question.
+- Real-time in-ear detection and the lid state. Battery set-up cannot prove
+  either, so they stay off; whether the advertisement can give them at all is
+  still an open question.
 
 **Why.** These all go through Apple's own accessory protocol, carried over a
 Bluetooth L2CAP channel at a fixed PSM (0x1001), not through anything in the
@@ -345,7 +488,7 @@ AirPods, for the reason above.
 - **`C:\ProgramData\Earshot`** has its inherited permissions removed: SYSTEM
   and administrators can write, you can read. It holds `device.json` (which
   device to block, as a Bluetooth address and container id), `config.json`
-  (Block at boot), `protection.json` and `protection-intent.json` (which
+  (Block at boot, and the hand-back setting the service reads), `protection.json` and `protection-intent.json` (which
   Bluetooth services Earshot turned off, so they can be turned back on), and
   one status file per run of the elevated worker.
 - **Three scheduled tasks, all running as SYSTEM**, in their own Task
@@ -381,9 +524,11 @@ AirPods, for the reason above.
 ## Setup and removal
 
 Setup is the one-time flow started from **Set up Earshot...** in the tray
-menu: one administrator prompt, then Earshot copies itself into Program
-Files, verifies every copied file, and registers the three scheduled tasks
-described above. Connect, disconnect and audio protection all work without
+menu. The item is offered before setup, for a damaged install, and when the
+running copy is newer than the installed one. It asks for one administrator
+prompt, then Earshot copies itself into Program
+Files, verifies every copied file, registers the three scheduled tasks
+described above, and installs the hand-back service. Connect, disconnect and audio protection all work without
 setup; only the boot block needs it, because disabling a device node needs
 administrator rights.
 
@@ -403,7 +548,7 @@ refuses to run without it.
 
 It enables every device node it disabled, turns back on the Bluetooth
 services it recorded, deletes the three scheduled tasks and the `\Earshot`
-task folder, removes `C:\ProgramData\Earshot`, and removes
+task folder, removes the hand-back service, removes `C:\ProgramData\Earshot`, and removes
 `C:\Program Files\Earshot`, scheduling that last one for the next restart if
 it is in use. Each step is reported. If a node or a service could not be
 restored, it keeps the two files that record what to restore and says so, so
@@ -427,5 +572,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
 | `Earshot.exe probe widget --out <folder>` | Writes the taskbar gauge, the card and the case-open card to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. See [The AirPods widget](#the-airpods-widget). |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
+| `Earshot.exe update <zip> <sha256> <pid> <userSid> <address> <containerGuid>` | The elevated half of Update. Started by the installed Earshot after the one administrator prompt, not by hand. See [Updates](#updates). |
+| `Earshot.exe service` | The hand-back service's run mode. Started by Windows from the service's registration, not by hand. |
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
 | `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep and `gate status` change the state of the device**; those two only read. They exist for the live tests in `tools\live-tests` and are not part of normal use. |

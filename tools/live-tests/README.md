@@ -51,7 +51,7 @@ whether its own criteria passed. "At rest" means the nodes read Blocked, so Wind
 nothing to page at the next boot. On 19 September a run left the nodes Allowed and the tray
 closed, with nobody asked whether that was still all right; the next boot paged the AirPods,
 the boot task then blocked them, and they bounced between the phone and the PC in between.
-This closing step is what now catches that. See the main README's verification table for the
+This closing step is what now catches that. See `docs/verification.md` for the
 sourced account of what was actually measured that day and what was not.
 
 - If Earshot is not set up, or Block at boot is off, being at rest does not apply, and the
@@ -92,7 +92,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -List
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-LiveTests.ps1 -Test 01 -ExePath "C:\Program Files\Earshot\Earshot.exe"
 ```
 
-Seven tests take an option of their own. The launcher passes each one on, and refuses
+Eight tests take an option of their own. The launcher passes each one on, and refuses
 it for a test that does not take it rather than dropping it quietly:
 
 | Option | Test | What it is for |
@@ -134,7 +134,7 @@ anything.
 
 ## Tests that need a restart
 
-Seven tests are in two halves, because a script cannot survive a restart. The first
+Eight tests are in two halves that need a restart or shut down, because a script cannot survive a restart. The first
 half stops, tells you how to restart, and prints the exact command to run after you
 log back in. That command is also saved as `resume.txt` in the evidence folder, so
 it is never lost.
@@ -238,7 +238,7 @@ recorded that way rather than guessed at.
 | 16 | How long a handover takes each way on the real AirPods, which path each switch to this PC took, whether the phone takes the AirPods back by itself, whether this PC is at rest after every switch to the phone, whether protection survives switching, and the first real press of a registered shortcut. |
 | 17 | Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone. |
 | 18 | Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes. |
-| 19 | Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure. |
+| 19 | Whether the taskbar gauge and its cards work as built today, whether every reading battery set-up has not proved honestly shows nothing rather than a guessed figure, and whether a figure that is shown agrees with the iPhone. |
 | 20 | Whether choosing Exit while the AirPods are connected lets them go and blocks them, inside its cap, and leaves the nodes blocked. |
 | 21 | Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything. |
 | 22 | Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone. |
@@ -322,10 +322,9 @@ criterion after it lost, and it happens on the success path, because "no matchin
 line" is what a boot block that held produces.
 
 `tools\live-tests\selftest` runs every script in this folder, and both halves of
-every resumable one, against a fake machine: twenty-three scripts, thirty-one halves,
-three sets of fake inputs holding 0, 1 and 2 matching lines and list items (ninety-three
-runs), plus the forty-two bespoke extra cases named against each row in
-`Invoke-SelfTest.ps1`'s `$tests`, one hundred and thirty-five runs in total. Only the
+every resumable one, against a fake machine: all twenty-three scripts, each run with
+fake inputs holding 0, 1 and more matching lines and list items, plus the bespoke
+extra cases named against each row in `Invoke-SelfTest.ps1`'s `$tests`. Only the
 device-touching and owner-prompting helpers are replaced;
 `Get-EarshotLogLines`, `Get-DiagEvidence`, `Copy-AppEvidence`, `Read-KsEvidence`,
 `Read-EarshotJsonFile`, `Add-Criterion` and `Complete-LiveTestRun` all run for
@@ -376,5 +375,5 @@ write the same evidence folder and talk to the same device at once.
 ## A note on numbers
 
 Never write a figure into the README or anywhere else that a test did not measure.
-If a test says `inconclusive`, that is what to record. The battery element is
-absent from v1 on purpose, and a placeholder would be worse than nothing.
+If a test says `inconclusive`, that is what to record. A picture that is not a
+real capture is captioned as pending, never presented as one.

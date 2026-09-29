@@ -15,20 +15,23 @@ and the evidence behind each run.
 | 3 | Keep the AirPods on A2DP, so a browser tab or a game cannot drop them to call quality | The read-only walk from the audio endpoints to both the A2DP and Hands-Free filters shows both filters answer, so the connect path is reachable | Test 06, pending |
 | 4 | Show no battery figure that was not read off the device | Three independent read-only checks, each run against a positive control so a broken query could not be mistaken for a missing value | Done, see [What it does not do](#what-it-does-not-do). The same check with the AirPods disconnected is Test 11, pending |
 | 5 | Ask for exactly one administrator prompt, at setup, and nothing after | The elevated worker's argument-validation unit tests confirm it refuses anything it does not expect | Test 15, Uninstall reversal, which exercises the live setup and its reversal, pending |
-| 6 | Hand the AirPods back at shut down and sleep: release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting | No live run yet. Tests 17 and 18, pending; see [verification.md](verification.md) |
+| 6 | Hand the AirPods back at shut down, sleep and Exit: release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting; `tests/Earshot.Tests/Integration/Coordinator/ExitHandBackTests.cs` proves the same order for Exit | No live run yet. Tests 17, 18 and 20, pending; see [verification.md](verification.md) |
 
-## v1.1 requirements
+## Widget and later requirements
 
-All three are built and reviewed, off by default, and none has had a live
-run: no real keyboard shortcut has been pressed, nobody has heard Earshot
-speak, and no real phone has played through it. Every test below runs
-against a stand-in.
+Every test below runs against a stand-in. None of these has had a live run.
 
-| # | Requirement | Covered by |
-|---|---|---|
-| 7 | Keyboard shortcuts for connect, audio protection, block at boot and speak status, off until the owner types one into the settings file | `tests/Earshot.Tests/Hotkeys` and the tray wiring in `tests/Earshot.Tests/Phase1` |
-| 8 | Spoken status, off until the owner turns it on from the menu | `tests/Earshot.Tests/Voice` and the tray wiring in `tests/Earshot.Tests/Phase1` |
-| 9 | Play from a phone, off until the owner turns it on in the settings file | `tests/Earshot.Tests/Streaming` and the tray wiring in `tests/Earshot.Tests/Phase1` |
+| # | Requirement | Covered by | Live proof |
+|---|---|---|---|
+| 7 | Keyboard shortcuts: Ctrl+Alt+Shift+A switches to this PC and Ctrl+Alt+Shift+D to the phone, on by default, editable and clearable; a chord another app holds is reported; the last press wins; older settings files are migrated and a typed chord is kept | `tests/Earshot.Tests/Hotkeys` (including `HotkeyDefaultsMigrationTests.cs`) and the tray wiring in `tests/Earshot.Tests/Phase1` | Test 16, pending |
+| 8 | Spoken status, off until the owner turns it on from the menu | `tests/Earshot.Tests/Voice` and the tray wiring in `tests/Earshot.Tests/Phase1` | None yet |
+| 9 | Play from a phone, off until the owner turns it on in the settings file | `tests/Earshot.Tests/Streaming` and the tray wiring in `tests/Earshot.Tests/Phase1` | None yet |
+| 10 | The taskbar gauge: the earbud mark with a ring and the lower proved bud's number, placed at the right end or next to the apps, raised again when covered, every hide, show, cover and raise logged with a reason and window class only, one failed read keeping it in place, the tray icon as the fallback | `GaugeContentTests.cs`, `GaugeRendererTests.cs`, `GaugePlacementTests.cs`, `GaugeControllerTests.cs`, `GaugeEventLogTests.cs`, `ForegroundChangeHookTests.cs` and `WindowCoverProbeTests.cs` in `tests/Earshot.Tests/Widget` | Test 19, pending |
+| 11 | Show a battery, charging, in-ear or lid field only once it is proved: bud order and the case each need two set-ups that agree with the iPhone, a disagreeing set-up withdraws the field, in-ear and lid cannot be proved by set-up | `DecodeProofTests.cs`, `DecodeProofStoreTests.cs`, `BatterySetupFlowTests.cs`, `ClaimStoreTests.cs` and `OwnershipRuleTests.cs` in `tests/Earshot.Tests/Widget` | Test 19, pending |
+| 12 | The card's settings page, with the rows in order and their defaults | `WidgetCardSettingsTests.cs`, `WidgetCardHostTests.cs` and `WidgetCardLayoutTests.cs` | None yet |
+| 13 | Pause when the AirPods leave this PC: only when this PC was playing to them, before Earshot's own disconnects, never resumes, none when two sessions play | `PauseOnLeaveTests.cs` and `WindowsMediaSessionsTests.cs` | Test 21, pending |
+| 14 | Updates: nothing downloads before Update, the zip is checked against the published `.sha256`, the installed copy checks it again and installs after one administrator prompt, Update is offered only by an installed copy | `tests/Earshot.Tests/Update` | None yet. Nothing has updated a real install |
+| 15 | Switch timing: one `Switch to-pc:` or `Switch to-phone:` log line per switch | `tests/Earshot.Tests/App/SwitchTimelineTextTests.cs` | Test 16, pending |
 
 ## What it does not do
 
@@ -56,10 +59,11 @@ against a stand-in.
   AirPods fresh device nodes, which would not carry the disable. Earshot
   blocks again the next time it sees them enabled and unused, but a boot in
   between can let Windows page them.
-- **Guarantee the shutdown-while-connected case.** With Hand back at shut
-  down and sleep on, Earshot releases the AirPods and blocks the nodes again
-  inside the time Windows gives it: up to 4 seconds at a shut down, restart
-  or sign-out, up to 1.5 seconds at sleep. It cannot do any of that when
+- **Guarantee the shutdown-while-connected case.** With Hand back on shut
+  down, sleep and Exit on, Earshot releases the AirPods and blocks the nodes
+  again inside the time Windows gives it: up to 4 seconds at a shut down,
+  restart or sign-out, up to 1.5 seconds at sleep. Exit uses the 4 second cap
+  too. It cannot do any of that when
   Windows gives it no notice at all: a power cut, a held power button, a
   kernel stop error, a forced shutdown such as `shutdown /f`, and the
   battery reaching a critical level all send nothing. Earshot not running
@@ -81,6 +85,14 @@ against a stand-in.
   Hands-Free filter back in place, and turns the protection on again; it
   reports honestly when the AirPods still do not arrive. Disconnect always
   ends in a block when Block at boot is on, so it works either way.
+- **Tell whether a bud is in your ear or whether the case lid is open.**
+  Battery set-up cannot prove either, so ear detection, auto-pause and the
+  case-open card stay off.
+- **Rule out a stranger's AirPods completely.** A same-model stranger with a
+  lower battery reading than yours can pass the ownership rule. The owner
+  accepted that risk.
+- **Protect an update against a compromised release or account.** The
+  checksum comes from the same release and the app is not signed.
 - **Claim anything about Administrator protection**, the newer Windows
   elevation model. It is off by default on this machine and has not been
   tested with. Setup follows Microsoft's guidance for a highest-privilege
