@@ -14,7 +14,10 @@
          the SHA-256 it records, and that the folder holds nothing else. install reads
          the same manifest, so a release that fails here could not be installed;
       5. zips the folder, with Earshot as the folder inside the zip;
-      6. prints the zip size and its SHA-256.
+      6. writes the zip's SHA-256 beside it as Earshot-<version>-win-x64.zip.sha256, in the
+         sha256sum form (hex, two spaces, file name), UTF-8 without a byte order mark,
+         which is what the in-app update reads from the release;
+      7. prints the zip size and its SHA-256.
 
     Full output goes to the log folder. The summary is JSON on stdout. Any failure
     exits non-zero and nothing is left in artifacts.
@@ -38,7 +41,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $result = [ordered]@{
     root = $Root; version = ''; published_files = 0
-    publish_dir = ''; zip = ''; zip_bytes = 0; zip_sha256 = ''
+    publish_dir = ''; zip = ''; zip_bytes = 0; zip_sha256 = ''; checksum_file = ''
     log = (Join-Path $LogDir 'publish.log'); problems = @()
 }
 
@@ -67,6 +70,8 @@ $result.publish_dir = $publishDir
 $artifactsDir = Join-Path $Root 'artifacts'
 $zipPath = Join-Path $artifactsDir ("Earshot-$version-win-x64.zip")
 $result.zip = $zipPath
+$checksumPath = $zipPath + '.sha256'
+$result.checksum_file = $checksumPath
 
 # A leftover file from an earlier publish stops the manifest being written, and an old zip must never
 # be mistaken for this run's.
@@ -75,6 +80,7 @@ try {
     New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
     New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
     if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+    if (Test-Path $checksumPath) { Remove-Item -Force $checksumPath }
 }
 catch { Stop-Release ("Could not clear the publish and artifacts folders: " + $_.Exception.Message) }
 
@@ -161,6 +167,16 @@ catch {
 
 $result.zip_bytes = (Get-Item $zipPath).Length
 $result.zip_sha256 = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash
+# Windows PowerShell 5.1 writes UTF-16 by default, which the update's parser refuses as malformed, so
+# the file is written through .NET with an explicit encoding.
+try {
+    $line = $result.zip_sha256.ToLowerInvariant() + '  ' + (Split-Path -Leaf $zipPath) + "`n"
+    [System.IO.File]::WriteAllText($checksumPath, $line, (New-Object System.Text.UTF8Encoding($false)))
+}
+catch {
+    Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
+    Stop-Release ("The checksum file could not be written: " + $_.Exception.Message)
+}
 $result.ok = $true
 $result | ConvertTo-Json -Depth 4
 exit 0
