@@ -73,11 +73,11 @@ internal sealed record WidgetCardModel(
 // deactivates either.
 internal sealed class WidgetCard : Form
 {
-    // The accent used until something supplies the system's own (AccentColour): the Windows default blue,
+    // The accent used until something supplies the system's own (AccentSource): the Windows default blue,
     // darker in light mode and lighter in dark mode, since the same light-mode blue reads as too pale against
     // a light background.
-    internal static readonly Color AccentLight = DefaultAccentColour.Light;
-    internal static readonly Color AccentDark = DefaultAccentColour.Dark;
+    internal static readonly Color AccentLight = DefaultCardAccent.Light;
+    internal static readonly Color AccentDark = DefaultCardAccent.Dark;
 
     private readonly ILog _log;
     private readonly bool _notice;
@@ -181,12 +181,12 @@ internal sealed class WidgetCard : Form
 
     internal WidgetCardLayout.SetupLayout? CurrentSetupLayout => _setupLayout;
 
-    // Where the card's accent colour comes from. Asked at every paint, so the system's own colour, once
+    // Where the card's accent colour comes from (ICardAccentSource). Asked at every paint, so the system's own colour, once
     // supplied, shows on the next one. Until then the design's default blue.
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    internal IAccentColour AccentColour { get; set; } = DefaultAccentColour.Instance;
+    internal ICardAccentSource AccentSource { get; set; } = DefaultCardAccent.Instance;
 
-    private CardColours Colours => CardColours.For(_dark, _palette, AccentColour.Accent(_dark));
+    private CardColours Colours => CardColours.For(_dark, _palette, AccentSource.AccentFor(lightTheme: !_dark));
 
     // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for a
     // notice-mode instance regardless of what the model's own Snapshot.Where says. For tests.

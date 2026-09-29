@@ -292,7 +292,7 @@ internal sealed partial class TrayContext
     internal bool TryUpdateSettingsFromWidget(string what, Action<EarshotSettings> mutate, CardPlace place) =>
         TryUpdateSettings(what, mutate, place);
 
-    // Every widget card is made here, so what all of them share is set in one place. AccentColour is the
+    // Every widget card is made here, so what all of them share is set in one place. AccentSource is the
     // card's seam for the system accent colour: it paints with the design's default blue until it is given one.
     private WidgetCard CreateWidgetCard(bool notice) => new(_log, notice);
 

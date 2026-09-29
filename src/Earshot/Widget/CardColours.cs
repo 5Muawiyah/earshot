@@ -3,23 +3,24 @@ using Earshot.Popup;
 namespace Earshot.Widget;
 
 // Where the card's accent colour comes from. The card asks for it every time it paints, so a change of the
-// system accent colour shows on the next paint without the card being rebuilt. dark is the card's own theme
-// (the Windows app-mode setting picked by the taskbar ink), not the accent's.
-internal interface IAccentColour
+// system accent colour shows on the next paint without the card being rebuilt. lightTheme is the card's own
+// theme (the Windows app-mode setting picked by the taskbar ink). The member is shaped like the system accent
+// service's, so that service can be handed to the card as it is.
+internal interface ICardAccentSource
 {
-    Color Accent(bool dark);
+    Color AccentFor(bool lightTheme);
 }
 
 // The accent the design uses when the system's own is not asked for: the Windows default blue, darker on a
 // light card and lighter on a dark one.
-internal sealed class DefaultAccentColour : IAccentColour
+internal sealed class DefaultCardAccent : ICardAccentSource
 {
     public static readonly Color Light = Color.FromArgb(0x00, 0x5F, 0xB8);
     public static readonly Color Dark = Color.FromArgb(0x60, 0xCD, 0xFF);
 
-    public static DefaultAccentColour Instance { get; } = new();
+    public static DefaultCardAccent Instance { get; } = new();
 
-    public Color Accent(bool dark) => dark ? Dark : Light;
+    public Color AccentFor(bool lightTheme) => lightTheme ? Light : Dark;
 }
 
 // The colours one card view is painted with, each a token of the design: text, secondary text, accent and

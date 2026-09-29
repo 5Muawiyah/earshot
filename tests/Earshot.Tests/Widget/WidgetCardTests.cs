@@ -269,7 +269,7 @@ public sealed class WidgetCardTests
         Phase5.CardSta.Run(() =>
         {
             var accent = Color.FromArgb(0xC2, 0x39, 0xB3);
-            using var card = new WidgetCard(new CapturingLog()) { AccentColour = new FixedAccent(accent) };
+            using var card = new WidgetCard(new CapturingLog()) { AccentSource = new FixedAccent(accent) };
             card.SetTheme(Color.Black, highContrast: false);
             card.Render(Model(Snapshot(left: new PartReading(100, false, false))), 96);
             using Bitmap bitmap = Render(card);
@@ -279,9 +279,9 @@ public sealed class WidgetCardTests
         });
     }
 
-    private sealed class FixedAccent(Color colour) : IAccentColour
+    private sealed class FixedAccent(Color colour) : ICardAccentSource
     {
-        public Color Accent(bool dark) => colour;
+        public Color AccentFor(bool lightTheme) => colour;
     }
 
     [TestMethod]
