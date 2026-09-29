@@ -62,13 +62,14 @@ public sealed class LiveTestSelfTestTests
     // (1) and 21-PauseOnLeave's pause-declined (1), each on that row's one half; 16-FastSwitch's
     // switch-timed-out, switch-not-at-rest, switch-rejected and switch-unparsable (4), on that row's
     // one half. Then the hand-back service: 17's service-not-run on both of its halves (2), and
-    // 22-ServiceHandBack's declined-start, service-not-run, service-partial, service-over-budget and
-    // tray-not-ended on both of its halves (10). 2+2+9+2+6+3+1+1+4+2+10 = 42, printed by
-    // Invoke-SelfTest.ps1 itself (runs 135, halves 31, cases-per-half 3: 135 - 31*3 = 42)
+    // 22-ServiceHandBack's declined-start, service-not-run, service-partial, service-over-budget,
+    // tray-not-ended, service-block-sent, service-already-blocked and tray-unreadable on both of its
+    // halves (16). 2+2+9+2+6+3+1+1+4+2+16 = 48, printed by
+    // Invoke-SelfTest.ps1 itself (runs 141, halves 31, cases-per-half 3: 141 - 31*3 = 48)
     // rather than re-derived here, because this arithmetic has been wrong before: a hand count
     // made before tests 17 and 18 existed on this tree did not match what the runner actually
     // printed once they did, and the count for the service test made before it was built was short.
-    private const int ExpectedExtraCases = 42;
+    private const int ExpectedExtraCases = 48;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
+using Earshot.Boot;
 using Earshot.Contracts;
 using Earshot.Interop;
 
@@ -28,7 +30,25 @@ internal sealed record ServiceQuery(
     string? Account = null,
     string? DisplayName = null,
     uint? PreshutdownTimeoutMs = null,
-    string? Sddl = null);
+    string? Sddl = null)
+{
+    // The optional settings the plan leaves at their defaults. Each is null when its own read failed.
+    // FailureActionCount and FailureCommand: what the control manager does when the service fails. DelayedAutoStart:
+    // whether an automatic start waits until the system has settled. TriggerCount: events that start or stop the service.
+    // RequiredPrivileges: the privileges the service's token is cut down to (empty when it keeps all it is given).
+    // ServiceSidType: whether the service has a security identifier of its own (0 none, 1 unrestricted, 3 restricted).
+    public uint? FailureActionCount { get; init; }
+
+    public string? FailureCommand { get; init; }
+
+    public bool? DelayedAutoStart { get; init; }
+
+    public uint? TriggerCount { get; init; }
+
+    public IReadOnlyList<string>? RequiredPrivileges { get; init; }
+
+    public uint? ServiceSidType { get; init; }
+}
 
 // The service control manager, behind one interface so install, uninstall, the tray's status read and the probe
 // run against a fake. Every method returns the Win32 code of its call as a step and never throws for a result the
@@ -65,6 +85,63 @@ internal interface IServiceControl
     // Polls the state every ServiceSteps.PollInterval until it is the wanted one. wait sleeps between polls and
     // returns false to stop waiting, so a test never sleeps.
     StepOutcome WaitForState(string name, uint state, TimeSpan timeout, Func<TimeSpan, bool> wait);
+
+    // Polls until the process that ran the service, by the id read before it was stopped, has gone. A service reports
+    // "stopped" before its process has exited, and a folder holding a running image cannot be moved or deleted.
+    StepOutcome WaitForProcessExit(uint processId, TimeSpan timeout, Func<TimeSpan, bool> wait);
+
+    // Remove every failure action, and the failure command, so nothing is run or restarted when the service fails.
+    StepOutcome ClearFailureActions(string name);
+
+    StepOutcome SetDelayedAutoStart(string name, bool delayed);
+
+    // 0 is no service security identifier.
+    StepOutcome SetServiceSidType(string name, uint type);
+
+    // Remove every trigger. Only for a service that has some: with none, the control manager refuses the call.
+    StepOutcome ClearTriggers(string name);
+}
+
+// The optional-setting levels of QueryServiceConfig2W and ChangeServiceConfig2W that AdvApi32 does not name.
+// https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-changeserviceconfig2w
+internal static class ServiceConfigLevels
+{
+    internal const uint FailureActions = 2;
+    internal const uint DelayedAutoStart = 3;
+    internal const uint ServiceSid = 5;
+    internal const uint RequiredPrivileges = 6;
+    internal const uint Trigger = 8;
+}
+
+// SERVICE_FAILURE_ACTIONSW: the reset period, two strings, the count and the array of actions.
+// https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_failure_actionsw
+[StructLayout(LayoutKind.Sequential)]
+internal struct SERVICE_FAILURE_ACTIONSW
+{
+    public uint dwResetPeriod;
+    public nint lpRebootMsg;
+    public nint lpCommand;
+    public uint cActions;
+    public nint lpsaActions;
+}
+
+// SC_ACTION: what to do (0 is nothing) and the delay before it, in milliseconds.
+// https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-sc_action
+[StructLayout(LayoutKind.Sequential)]
+internal struct SC_ACTION
+{
+    public uint Type;
+    public uint Delay;
+}
+
+// SERVICE_TRIGGER_INFO: the count, the array and a reserved pointer that must be null.
+// https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_trigger_info
+[StructLayout(LayoutKind.Sequential)]
+internal struct SERVICE_TRIGGER_INFO
+{
+    public uint cTriggers;
+    public nint pTriggers;
+    public nint pReserved;
 }
 
 internal static class ServiceSteps
@@ -81,6 +158,11 @@ internal static class ServiceSteps
     public const string Delete = "service-delete";
     public const string Verify = "service-verify";
     public const string Wait = "service-wait";
+    public const string ProcessExit = "service-process-exit";
+    public const string FailureActions = "service-failure-actions";
+    public const string DelayedStart = "service-delayed-start";
+    public const string SidType = "service-sid-type";
+    public const string Triggers = "service-triggers";
 
     public static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
@@ -143,19 +225,25 @@ internal sealed unsafe class WindowsServiceControl : IServiceControl
         uint? state = null, processId = null, type = null, start = null, errorControl = null, preshutdown = null;
         string? image = null, account = null, display = null, sddl = null;
 
-        byte[] status = new byte[Marshal.SizeOf<SERVICE_STATUS_PROCESS>()];
-        if (ReadInto("service-status", steps, status, (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceStatusEx(service, AdvApi32.SC_STATUS_PROCESS_INFO, b, size, out needed), out byte[] statusBytes))
+        using (NativeBuffer? status = ReadInto("service-status", steps, (uint)sizeof(SERVICE_STATUS_PROCESS),
+                   (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceStatusEx(service, AdvApi32.SC_STATUS_PROCESS_INFO, b, size, out needed)))
         {
-            SERVICE_STATUS_PROCESS process = MemoryMarshal.Read<SERVICE_STATUS_PROCESS>(statusBytes);
-            state = process.dwCurrentState;
-            processId = process.dwProcessId;
+            if (status is not null)
+            {
+                SERVICE_STATUS_PROCESS process = *(SERVICE_STATUS_PROCESS*)status.Pointer;
+                state = process.dwCurrentState;
+                processId = process.dwProcessId;
+            }
         }
 
-        if (ReadInto("service-config", steps, new byte[1024], (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceConfig(service, b, size, out needed), out byte[] configBytes))
+        // QueryServiceConfigW writes pointers to its strings into the buffer it is given, so the buffer stays where it is,
+        // and alive, until the strings have been read out of it: native memory, freed after the reads.
+        using (NativeBuffer? configBuffer = ReadInto("service-config", steps, 1024,
+                   (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceConfig(service, b, size, out needed)))
         {
-            fixed (byte* p = configBytes)
+            if (configBuffer is not null)
             {
-                QUERY_SERVICE_CONFIGW config = *(QUERY_SERVICE_CONFIGW*)p;
+                QUERY_SERVICE_CONFIGW config = *(QUERY_SERVICE_CONFIGW*)configBuffer.Pointer;
                 type = config.dwServiceType;
                 start = config.dwStartType;
                 errorControl = config.dwErrorControl;
@@ -165,17 +253,79 @@ internal sealed unsafe class WindowsServiceControl : IServiceControl
             }
         }
 
-        if (ReadInto("service-preshutdown", steps, new byte[16], (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceConfig2(service, AdvApi32.SERVICE_CONFIG_PRESHUTDOWN_INFO, b, size, out needed), out byte[] preshutdownBytes))
+        using (NativeBuffer? shutdown = ReadConfig2("service-preshutdown", steps, service, AdvApi32.SERVICE_CONFIG_PRESHUTDOWN_INFO, (uint)sizeof(SERVICE_PRESHUTDOWN_INFO)))
         {
-            preshutdown = MemoryMarshal.Read<SERVICE_PRESHUTDOWN_INFO>(preshutdownBytes).dwPreshutdownTimeout;
+            if (shutdown is not null)
+            {
+                preshutdown = ((SERVICE_PRESHUTDOWN_INFO*)shutdown.Pointer)->dwPreshutdownTimeout;
+            }
         }
 
-        if (ReadInto("service-acl", steps, new byte[512], (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceObjectSecurity(service, AdvApi32.DACL_SECURITY_INFORMATION, b, size, out needed), out byte[] aclBytes))
+        uint? failureActionCount = null, sidType = null, triggerCount = null;
+        string? failureCommand = null;
+        bool? delayed = null;
+        IReadOnlyList<string>? privileges = null;
+
+        using (NativeBuffer? failure = ReadConfig2("service-failure-actions", steps, service, ServiceConfigLevels.FailureActions, (uint)sizeof(SERVICE_FAILURE_ACTIONSW)))
         {
-            sddl = SddlOf(aclBytes, steps);
+            if (failure is not null)
+            {
+                SERVICE_FAILURE_ACTIONSW actions = *(SERVICE_FAILURE_ACTIONSW*)failure.Pointer;
+                failureActionCount = actions.cActions;
+                failureCommand = Marshal.PtrToStringUni(actions.lpCommand);
+            }
         }
 
-        return new ServiceQuery(ServicePresence.Present, steps, state, processId, type, start, errorControl, image, account, display, preshutdown, sddl);
+        using (NativeBuffer? delay = ReadConfig2("service-delayed-start", steps, service, ServiceConfigLevels.DelayedAutoStart, sizeof(uint)))
+        {
+            if (delay is not null)
+            {
+                delayed = *(uint*)delay.Pointer != 0;
+            }
+        }
+
+        using (NativeBuffer? triggers = ReadConfig2("service-triggers", steps, service, ServiceConfigLevels.Trigger, (uint)sizeof(SERVICE_TRIGGER_INFO)))
+        {
+            if (triggers is not null)
+            {
+                triggerCount = ((SERVICE_TRIGGER_INFO*)triggers.Pointer)->cTriggers;
+            }
+        }
+
+        using (NativeBuffer? required = ReadConfig2("service-privileges", steps, service, ServiceConfigLevels.RequiredPrivileges, (uint)sizeof(nint)))
+        {
+            if (required is not null)
+            {
+                privileges = ReadMultiString(*(nint*)required.Pointer);
+            }
+        }
+
+        using (NativeBuffer? sid = ReadConfig2("service-sid-type", steps, service, ServiceConfigLevels.ServiceSid, sizeof(uint)))
+        {
+            if (sid is not null)
+            {
+                sidType = *(uint*)sid.Pointer;
+            }
+        }
+
+        using (NativeBuffer? acl = ReadInto("service-acl", steps, 512,
+                   (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceObjectSecurity(service, AdvApi32.DACL_SECURITY_INFORMATION, b, size, out needed)))
+        {
+            if (acl is not null)
+            {
+                sddl = SddlOf(new ReadOnlySpan<byte>(acl.Pointer, (int)acl.Size).ToArray(), steps);
+            }
+        }
+
+        return new ServiceQuery(ServicePresence.Present, steps, state, processId, type, start, errorControl, image, account, display, preshutdown, sddl)
+        {
+            FailureActionCount = failureActionCount,
+            FailureCommand = failureCommand,
+            DelayedAutoStart = delayed,
+            TriggerCount = triggerCount,
+            RequiredPrivileges = privileges,
+            ServiceSidType = sidType,
+        };
     }
 
     public StepOutcome Create(ServiceSpec spec)
@@ -391,6 +541,145 @@ internal sealed unsafe class WindowsServiceControl : IServiceControl
         }
     }
 
+    public StepOutcome WaitForProcessExit(uint processId, TimeSpan timeout, Func<TimeSpan, bool> wait)
+    {
+        ArgumentNullException.ThrowIfNull(wait);
+        if (processId == 0)
+        {
+            return ServiceSteps.FromWin32(ServiceSteps.ProcessExit, 0, "The service had no process to wait for.");
+        }
+
+        long polls = timeout <= TimeSpan.Zero ? 0 : (long)Math.Ceiling(timeout / ServiceSteps.PollInterval);
+        for (long waited = 0; ; waited++)
+        {
+            StepOutcome? failed = ProcessIsRunning(processId, out bool running);
+            if (failed is not null)
+            {
+                return failed;
+            }
+
+            if (!running)
+            {
+                return ServiceSteps.FromWin32(ServiceSteps.ProcessExit, 0, "Process " + processId + " has exited.");
+            }
+
+            if (waited >= polls || !wait(ServiceSteps.PollInterval))
+            {
+                return ServiceSteps.FromWin32(ServiceSteps.ProcessExit, AdvApi32.ERROR_SERVICE_REQUEST_TIMEOUT,
+                    "Process " + processId + " had not exited after " +
+                    timeout.TotalSeconds.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + " s.", ok: false);
+            }
+        }
+    }
+
+    // Whether a process with this id and the service program's name is running. A process of another name is not the
+    // service: its id was given to something else after the service ended. The list of processes is read from the
+    // system's own snapshot, which needs no right on any process.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.getprocessesbyname
+    private static StepOutcome? ProcessIsRunning(uint processId, out bool running)
+    {
+        running = false;
+        Process[] candidates = [];
+        try
+        {
+            candidates = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(TaskPlan.ExecutableName));
+            running = candidates.Any(p => p.Id == processId);
+            return null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
+        {
+            uint code = ex is System.ComponentModel.Win32Exception native ? unchecked((uint)native.NativeErrorCode) : unchecked((uint)ex.HResult);
+            return ServiceSteps.FromWin32(ServiceSteps.ProcessExit, code, "The list of processes could not be read: " + ex.Message, ok: false);
+        }
+        finally
+        {
+            foreach (Process candidate in candidates)
+            {
+                candidate.Dispose();
+            }
+        }
+    }
+
+    public StepOutcome ClearFailureActions(string name)
+    {
+        (SafeServiceHandle? scm, SafeServiceHandle? service, StepOutcome? failed) = Open(name, AdvApi32.SERVICE_CHANGE_CONFIG, ServiceSteps.FailureActions);
+        using (scm)
+        using (service)
+        {
+            if (failed is not null)
+            {
+                return failed;
+            }
+
+            // A count of zero with an array that is not null deletes the actions and the reset period, and an empty string
+            // deletes the command and the reboot message, where a null leaves each as it is.
+            fixed (char* empty = "")
+            {
+                var none = new SC_ACTION { Type = 0, Delay = 0 };
+                var info = new SERVICE_FAILURE_ACTIONSW
+                {
+                    dwResetPeriod = 0, lpRebootMsg = (nint)empty, lpCommand = (nint)empty, cActions = 0, lpsaActions = (nint)(&none),
+                };
+                return AdvApi32.ChangeServiceConfig2(service!, ServiceConfigLevels.FailureActions, &info)
+                    ? ServiceSteps.FromWin32(ServiceSteps.FailureActions, 0, "No failure actions.")
+                    : ServiceSteps.FromWin32(ServiceSteps.FailureActions, LastError(), "The failure actions were not cleared.");
+            }
+        }
+    }
+
+    public StepOutcome SetDelayedAutoStart(string name, bool delayed)
+    {
+        (SafeServiceHandle? scm, SafeServiceHandle? service, StepOutcome? failed) = Open(name, AdvApi32.SERVICE_CHANGE_CONFIG, ServiceSteps.DelayedStart);
+        using (scm)
+        using (service)
+        {
+            if (failed is not null)
+            {
+                return failed;
+            }
+
+            uint value = delayed ? 1u : 0u;
+            return AdvApi32.ChangeServiceConfig2(service!, ServiceConfigLevels.DelayedAutoStart, &value)
+                ? ServiceSteps.FromWin32(ServiceSteps.DelayedStart, 0, delayed ? "Delayed." : "Not delayed.")
+                : ServiceSteps.FromWin32(ServiceSteps.DelayedStart, LastError(), "The delayed start setting was not changed.");
+        }
+    }
+
+    public StepOutcome SetServiceSidType(string name, uint type)
+    {
+        (SafeServiceHandle? scm, SafeServiceHandle? service, StepOutcome? failed) = Open(name, AdvApi32.SERVICE_CHANGE_CONFIG, ServiceSteps.SidType);
+        using (scm)
+        using (service)
+        {
+            if (failed is not null)
+            {
+                return failed;
+            }
+
+            return AdvApi32.ChangeServiceConfig2(service!, ServiceConfigLevels.ServiceSid, &type)
+                ? ServiceSteps.FromWin32(ServiceSteps.SidType, 0, "Service security identifier type " + type + ".")
+                : ServiceSteps.FromWin32(ServiceSteps.SidType, LastError(), "The service security identifier type was not changed.");
+        }
+    }
+
+    public StepOutcome ClearTriggers(string name)
+    {
+        (SafeServiceHandle? scm, SafeServiceHandle? service, StepOutcome? failed) = Open(name, AdvApi32.SERVICE_CHANGE_CONFIG, ServiceSteps.Triggers);
+        using (scm)
+        using (service)
+        {
+            if (failed is not null)
+            {
+                return failed;
+            }
+
+            var info = new SERVICE_TRIGGER_INFO { cTriggers = 0, pTriggers = 0, pReserved = 0 };
+            return AdvApi32.ChangeServiceConfig2(service!, ServiceConfigLevels.Trigger, &info)
+                ? ServiceSteps.FromWin32(ServiceSteps.Triggers, 0, "No triggers.")
+                : ServiceSteps.FromWin32(ServiceSteps.Triggers, LastError(), "The triggers were not cleared.");
+        }
+    }
+
     private static uint LastError() => unchecked((uint)Marshal.GetLastPInvokeError());
 
     // The manager and the service opened with the given rights. On a failure the step says so and both handles are
@@ -410,33 +699,27 @@ internal sealed unsafe class WindowsServiceControl : IServiceControl
             : (scm, service, null);
     }
 
-    // Calls a query that fills a buffer, growing the buffer once to the size the call reports. False, with the
-    // failed step recorded, when the read failed.
+    // Calls a query that fills a buffer, growing the buffer once to the size the call reports. Null, with the failed step
+    // recorded, when the read failed; otherwise the caller owns the buffer and frees it after reading from it.
     private delegate bool BufferQuery(byte* buffer, uint size, out uint needed);
 
-    private static bool ReadInto(string step, List<StepOutcome> steps, byte[] initial, BufferQuery query, out byte[] result)
+    private static NativeBuffer? ReadInto(string step, List<StepOutcome> steps, uint initialSize, BufferQuery query)
     {
-        byte[] buffer = initial;
+        var buffer = new NativeBuffer(initialSize);
         for (int attempt = 0; attempt < 2; attempt++)
         {
-            bool ok;
-            uint needed;
-            fixed (byte* p = buffer)
-            {
-                ok = query(p, (uint)buffer.Length, out needed);
-            }
-
+            bool ok = query(buffer.Pointer, buffer.Size, out uint needed);
             if (ok)
             {
                 steps.Add(ServiceSteps.FromWin32(step, 0));
-                result = buffer;
-                return true;
+                return buffer;
             }
 
             uint error = LastError();
-            if (error == AdvApi32.ERROR_INSUFFICIENT_BUFFER && needed > buffer.Length && attempt == 0)
+            if (error == AdvApi32.ERROR_INSUFFICIENT_BUFFER && needed > buffer.Size && attempt == 0)
             {
-                buffer = new byte[needed];
+                buffer.Dispose();
+                buffer = new NativeBuffer(needed);
                 continue;
             }
 
@@ -444,8 +727,58 @@ internal sealed unsafe class WindowsServiceControl : IServiceControl
             break;
         }
 
-        result = [];
-        return false;
+        buffer.Dispose();
+        return null;
+    }
+
+    private static NativeBuffer? ReadConfig2(string step, List<StepOutcome> steps, SafeServiceHandle service, uint level, uint initialSize) =>
+        ReadInto(step, steps, initialSize, (byte* b, uint size, out uint needed) => AdvApi32.QueryServiceConfig2(service, level, b, size, out needed));
+
+    // A multi-string is null-terminated strings ended by an empty one. A null pointer is the empty list.
+    private static List<string> ReadMultiString(nint pointer)
+    {
+        var found = new List<string>();
+        if (pointer == 0)
+        {
+            return found;
+        }
+
+        for (nint at = pointer; ;)
+        {
+            string? text = Marshal.PtrToStringUni(at);
+            if (string.IsNullOrEmpty(text))
+            {
+                return found;
+            }
+
+            found.Add(text);
+            at += (text.Length + 1) * sizeof(char);
+        }
+    }
+
+    // Native memory a query fills in. QueryServiceConfigW and its siblings put absolute pointers to strings into the
+    // buffer they are given, and a managed array can be moved by the garbage collector between the call and the reads of
+    // those strings, which leaves the pointers dangling. Native memory never moves.
+    private sealed class NativeBuffer : IDisposable
+    {
+        public NativeBuffer(uint size)
+        {
+            Size = size == 0 ? 1 : size;
+            Pointer = (byte*)NativeMemory.AllocZeroed(Size);
+        }
+
+        public byte* Pointer { get; private set; }
+
+        public uint Size { get; }
+
+        public void Dispose()
+        {
+            if (Pointer != null)
+            {
+                NativeMemory.Free(Pointer);
+                Pointer = null;
+            }
+        }
     }
 
     // The access list as SDDL, or null with the failure recorded.

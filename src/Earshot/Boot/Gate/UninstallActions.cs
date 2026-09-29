@@ -31,6 +31,9 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 
 // uninstall, run elevated from the tray with one UAC prompt. Each reversal is a step and a failure does not
 // stop the ones after it, so as much as possible is undone:
+//   0. stop and delete the hand-back service, before anything is enabled: a service still running could block the nodes
+//      again at a shut down that starts after they were enabled, and its program runs from the install folder, so once it
+//      has stopped (and its process has gone) the folder can be deleted now instead of at the next restart;
 //   1. read %ProgramData%\Earshot's security back; a folder that fails the check is not trusted, so its
 //      files are not read, no node or service is changed from them, and the folder is not deleted;
 //   2. enable every target node that is disabled or still carries the persistent disable flag, using the
@@ -40,11 +43,10 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 //      overlap a gate run, a node change or a service change; without both locks neither step runs;
 //   4. once both finished, and still inside both locks, delete device.json, config.json, protection.json and
 //      protection-intent.json, so no later gate run has an identity or a setting to act on;
-//   5. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder;
-//      then stop and delete the hand-back service, in both cases, before the install folder is removed: the service
-//      runs from that folder, so once it has stopped the folder can be deleted now instead of at the next restart. The
-//      service reads the same run lock as every elevated run, which this uninstall holds until the machine folder is
-//      gone, so a shut down that starts meanwhile finds it held, or finds no config.json, and changes nothing;
+//   5. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder. A
+//      shut down that starts during the uninstall finds the service already gone; and were it still to come, it reads the
+//      same run lock as every elevated run, which this uninstall holds until the machine folder is gone, so it would find
+//      it held, or find no config.json, and change nothing;
 //   6. remove %ProgramData%\Earshot, unless step 2 or 3 did not finish (or the run lock could not be entered):
 //      then device.json and protection.json are the only record of what to allow and turn back on, so the
 //      folder (still protected) is kept with those two files and everything else in it is removed, and
@@ -145,7 +147,9 @@ internal sealed class UninstallActions
 
     private InstallResult RunSteps(List<StepOutcome> steps)
     {
-        bool complete = true;
+        // First of all, so nothing can block again what the steps below enable. A service that will not stop is still
+        // deleted and goes at the next restart, and makes the result partial.
+        bool complete = RemoveService(steps);
         string machine = _layout.MachineFolder;
         bool machineExists = Directory.Exists(machine) || File.Exists(machine);
         bool machineTrusted = machineExists &&
@@ -167,7 +171,6 @@ internal sealed class UninstallActions
             }
 
             complete &= RemoveTasks(steps);
-            complete &= RemoveService(steps);
 
             if (machineExists)
             {
@@ -239,7 +242,6 @@ internal sealed class UninstallActions
 
         complete &= nodesRestored && servicesRestored;
         complete &= RemoveTasks(steps);
-        complete &= RemoveService(steps);
 
         if (!runLockHeld)
         {

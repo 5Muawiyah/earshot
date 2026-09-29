@@ -11,10 +11,14 @@ namespace Earshot.Tests.LiveTests;
 // been proven against Get-Process on this machine.
 //
 // This runs tools\live-tests\selftest\Test-RealEarshotRunning.ps1, which calls the real, unfaked helper and checks
-// that it returns a boolean and agrees with an independent read of the process list. It starts nothing.
+// that it answers yes or no and agrees with an independent read of the process list (tasklist.exe, by its session
+// column), and proves the yes answer with a decoy process named Earshot.exe (a copy of ping.exe, stopped again). It never
+// starts the tray, and it says whether the session-0 branch was exercised.
 [TestClass]
 public sealed class RealEarshotRunningSelfTestTests
 {
+    public TestContext? TestContext { get; set; }
+
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(2);
 
     [TestMethod]
@@ -53,9 +57,13 @@ public sealed class RealEarshotRunningSelfTestTests
             "The real process list read did not go as it should have:" + Environment.NewLine +
             string.Join(Environment.NewLine, problems) + Environment.NewLine + output);
         Assert.IsTrue(result.GetProperty("ok").GetBoolean(), "Test-RealEarshotRunning.ps1 reported ok: false with no problem listed." + Environment.NewLine + output);
-        Assert.IsTrue(
-            result.GetProperty("running").ValueKind is JsonValueKind.True or JsonValueKind.False,
-            "Test-EarshotRunning did not answer with a boolean." + Environment.NewLine + output);
+        string? running = result.GetProperty("running").GetString();
+        Assert.IsTrue(running is "yes" or "no", "Test-EarshotRunning did not answer yes or no: " + running + Environment.NewLine + output);
+        Assert.AreEqual(running, result.GetProperty("independentRunning").GetString(), "The helper and the independent read of tasklist.exe disagree." + Environment.NewLine + output);
+        Assert.AreEqual("yes", result.GetProperty("decoyRunning").GetString(), "A process named Earshot.exe in a user session was not seen as the tray." + Environment.NewLine + output);
+        string? session0 = result.GetProperty("session0Branch").GetString();
+        Assert.IsTrue(session0 is not null && (session0.StartsWith("exercised", StringComparison.Ordinal) || session0.StartsWith("unproved", StringComparison.Ordinal)), output);
+        TestContext?.WriteLine("Test-EarshotRunning: " + running + "; session 0 branch " + session0);
         Assert.AreEqual(0, exit, "Test-RealEarshotRunning.ps1 exited " + exit.ToString(CultureInfo.InvariantCulture) + " with nothing to report.");
     }
 

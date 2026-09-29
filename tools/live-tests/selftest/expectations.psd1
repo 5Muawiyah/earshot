@@ -635,7 +635,8 @@
         'declined-start' = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'fail'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'inconclusive'
-                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail'; 'service-ran' = 'fail' } }
+                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail'; 'service-ran' = 'inconclusive' }
+            FindingsInclude = @{ 'serviceReason' = $null; 'servicePreshutdownMs' = $null; 'serviceResult' = $null; 'serviceVetoSeen' = 'no-evidence' } }
         'handback-cut-short' = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'pass'; 'handback-started' = 'pass'; 'handback-disconnect-confirmed' = 'pass'
@@ -824,6 +825,14 @@
         'service-partial' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
         'service-over-budget' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
         'tray-not-ended' = @{ Overall = 'fail'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'fail' } }
+        'service-block-sent' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
+        'service-already-blocked' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
+        # The process list could not be read, so "the tray is gone" is not known and the criterion is inconclusive, never a pass.
+        # The earlier test 17 result cannot be read and the service's process cannot be found: each is recorded as such, with
+        # its error, and neither becomes a figure or "not run".
+        'tray-unreadable' = @{ Overall = 'inconclusive'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'inconclusive' }
+            FindingsInclude = @{ 'test17Result' = 'unreadable'; 'serviceWorkingSetBytes' = $null }
+            ExpectedErrors = 2 }
     }
     '22-service-handback|resume' = @{
         none = @{ Overall = 'fail'; Criteria = @{
@@ -831,20 +840,27 @@
                 'service-ran' = 'fail'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'inconclusive'
                 'shutdown-was-clean' = 'fail'; 'service-no-error-event' = 'pass' }
             FindingsInclude = @{ 'serviceResult' = $null; 'serviceVetoSeen' = 'no-evidence'; 'serviceRetryTook' = 'no-evidence'; 'serviceEventIds' = '7024'; 'serviceState' = 'running' } }
-        one  = @{ Overall = 'pass'; Criteria = @{
+        # The shared one and two write a status file whose reason is "already blocked": the service did not block, so
+        # service-blocked is inconclusive and the run is too, whatever else passes.
+        one  = @{ Overall = 'inconclusive'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
-                'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'pass'
                 'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
             FindingsInclude = @{ 'servicePreshutdownMs' = 250; 'serviceResult' = 'success'; 'serviceReason' = 'already blocked'; 'serviceVetoSeen' = 'no'
-                'serviceRetryTook' = 'no-veto'; 'serviceEventIds' = '7024'; 'serviceState' = 'running'; 'restartedNotShutDown' = 'no' } }
-        two  = @{ Overall = 'pass'; Criteria = @{
+                'serviceRetryTook' = 'no-veto'; 'serviceEventIds' = '7024'; 'serviceState' = 'running'; 'restartedNotShutDown' = 'no'
+                'serviceBlockSentAfterMs' = $null; 'serviceBlockMs' = $null } }
+        two  = @{ Overall = 'inconclusive'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
-                'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'pass'
                 'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' } }
-        'declined-start' = @{ Overall = 'fail'; Criteria = @{
+        # No shutdown time (the first half never got there): no status file and no event is read, so every criterion that
+        # depends on one is inconclusive, even though an earlier sitting's files are in the folder.
+        'declined-start' = @{ Overall = 'inconclusive'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
-                'service-ran' = 'fail'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'inconclusive'
-                'shutdown-was-clean' = 'fail'; 'service-no-error-event' = 'pass' } }
+                'service-ran' = 'inconclusive'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'inconclusive'
+                'shutdown-was-clean' = 'inconclusive'; 'service-no-error-event' = 'inconclusive' }
+            FindingsInclude = @{ 'servicePreshutdownMs' = $null; 'serviceBlockSentAfterMs' = $null; 'serviceResult' = $null; 'serviceReason' = $null
+                'serviceVetoSeen' = 'no-evidence'; 'serviceEventIds' = $null } }
         'service-not-run' = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'service-ran' = 'fail'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'inconclusive'
@@ -860,9 +876,28 @@
                 'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'fail'
                 'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
             FindingsInclude = @{ 'servicePreshutdownMs' = 9500 } }
-        'tray-not-ended' = @{ Overall = 'pass'; Criteria = @{
+        'tray-not-ended' = @{ Overall = 'inconclusive'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'pass'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' } }
+        # The status file says the service sent the block, 120 ms in, and had finished 250 ms in: the one way to pass.
+        'service-block-sent' = @{ Overall = 'pass'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'pass'
-                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' } }
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'servicePreshutdownMs' = 250; 'serviceBlockSentAfterMs' = 120; 'serviceBlockMs' = 130; 'serviceResult' = 'success'
+                'serviceReason' = 'any'; 'serviceVetoSeen' = 'no' } }
+        # The status file says the nodes were already blocked: the service did not block them, so nothing is settled.
+        'service-already-blocked' = @{ Overall = 'inconclusive'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'pass'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'serviceReason' = 'already blocked'; 'serviceBlockSentAfterMs' = $null; 'serviceBlockMs' = $null; 'serviceResult' = 'success' } }
+        'tray-unreadable' = @{ Overall = 'inconclusive'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'pass'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'test17Result' = 'unreadable' }
+            ExpectedErrors = 1 }
     }
 }

@@ -11,7 +11,7 @@ namespace Earshot;
 //   diag connect
 //   diag disconnect
 //   diag ks <reconnect|disconnect> <src|wave|all> [buffer4]
-//   diag gate <verb> [address]        verb from GateVerbs except boot; address only for set-device
+//   diag gate <verb> [address]        verb from GateVerbs except boot and preshutdown; address only for set-device
 //   diag protect-unelevated <on|off>
 //   diag battery-sweep
 //
@@ -147,7 +147,9 @@ internal static partial class Program
                     return "diag gate needs <verb> [address].";
                 }
 
-                if (!GateVerbs.All.Contains(rest[0]) || rest[0] == GateVerbs.Boot)
+                // boot is the boot task's own verb and preshutdown is only the name of the service's status file: neither is
+                // something the tray sends, and the gate task refuses both, so diag refuses them before it runs.
+                if (!GateVerbs.All.Contains(rest[0]) || rest[0] is GateVerbs.Boot or GateVerbs.Preshutdown)
                 {
                     return "diag gate verb is not one the tray sends.";
                 }

@@ -61,6 +61,7 @@ public sealed class DiagTests
     [DataRow("diag", "ks", "reconnect", "buffer4")]
     [DataRow("diag", "gate")]
     [DataRow("diag", "gate", "boot")]
+    [DataRow("diag", "gate", "preshutdown")]
     [DataRow("diag", "gate", "install")]
     [DataRow("diag", "gate", "BLOCK")]
     [DataRow("diag", "gate", "block", "0A1B2C3D4E8C")]

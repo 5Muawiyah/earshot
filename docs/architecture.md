@@ -120,15 +120,41 @@ starts with Windows, and accepts only stop, interrogate and pre-shutdown
 notices from Windows. It opens no pipe, socket or window, and standard users
 can query it but not control it. On start it checks that it is running as the
 system account, that its image is inside the install folder, and that the
-install folder and the machine settings folder are not writable by standard
-users; otherwise it stays idle. At pre-shutdown it reads the settings and the
+install folder is not writable by standard users. The machine settings folder
+is checked and logged at start, and checked again for real at pre-shutdown.
+When a start check fails the service logs why and stops at once, reporting
+service error 1066 with the failure's own code, which Windows records as event
+7024; it does not stay idle. At pre-shutdown it reads the settings and the
 device from the machine folder only. If Hand back is off, or the AirPods are
 already fully blocked, it makes no call. Otherwise it blocks them through the
 same routine the boot-time task uses, retries a vetoed node once when there is
-room, and writes a status file with each node's code. It never disconnects: that
-needs the tray's session. The work is held to 8,000 ms of the 10,000 ms Windows
-allows. The tray tells it about the Hand back tick by sending the setting to the
-same routine that writes the machine settings.
+room, and writes a status file with each node's code.
+
+It does not disconnect. That is a design choice, not a fact about Windows: the
+tray's disconnect runs in the signed-in session, and a disconnect from a system
+service was not tried, so whether it would help with a node a driver refuses is
+unproved. The work is held to 8,000 ms of the 10,000 ms Windows allows. The two
+lock waits together take at most 2,500 ms, so that a block as long as the one
+sample on record (about 5.5 s, when a driver refused a node while the AirPods
+played) still ends inside 8,000 ms, and a second try of a refused node is made
+only when its delay and a block of that length still fit. The 5.5 s is a single
+sample, not a limit; a driver slower than that would run the work past its
+budget. Before it writes its status file the service holds the machine folder
+open, so the folder cannot be renamed, deleted or replaced by a link while the
+file is written, and it checks the folder's owner and access list again on that
+open folder. The tray tells it about the Hand back tick by sending the setting to
+the same routine that writes the machine settings.
+
+**Threat notes for the service.** The service runs from the install folder, and
+only administrators can change that folder, the service's registration or its
+access list. What the code controls is the search order of the libraries it
+loads by name once it is running: the system folder and its own folder, never
+the working directory or the PATH. It does not control what the host and the
+runtime load before that, and those loads may use the machine PATH. If a folder
+on the machine PATH can be written by a standard user, the install folder's
+access list does not protect that step. Nobody has checked what is loaded at
+that step, so nothing here claims it is safe; a PC whose machine PATH lists only
+folders that administrators can write does not have the gap.
 
 **The log lines**, all written by one formatter so nothing here drifts from
 what a reader, or a live-test script, actually parses:

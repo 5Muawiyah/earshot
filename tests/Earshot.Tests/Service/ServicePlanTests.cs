@@ -21,7 +21,15 @@ public sealed class ServicePlanTests
         return new ServiceQuery(
             ServicePresence.Present, [], AdvApi32.SERVICE_RUNNING, 4242, type ?? spec.ServiceType, startType ?? spec.StartType,
             errorControl ?? spec.ErrorControl, image ?? spec.ImagePath, account ?? spec.Account, display ?? spec.DisplayName,
-            preshutdown ?? spec.PreshutdownTimeoutMs, nullSddl ? null : sddl ?? spec.Sddl);
+            preshutdown ?? spec.PreshutdownTimeoutMs, nullSddl ? null : sddl ?? spec.Sddl)
+        {
+            FailureActionCount = 0,
+            FailureCommand = null,
+            DelayedAutoStart = false,
+            TriggerCount = 0,
+            RequiredPrivileges = [],
+            ServiceSidType = ServicePlan.ServiceSidTypeNone,
+        };
     }
 
     [TestMethod]
@@ -116,6 +124,30 @@ public sealed class ServicePlanTests
         }
     }
 
+    // What the plan leaves unset is checked, not assumed: a registration from an earlier install with a restart, a command
+    // run at failure, a delayed start, a trigger, a service security identifier or a cut-down token is not the plan's.
+    [TestMethod]
+    public void EachSettingThePlanLeavesUnsetFailsTheReadBackAndNamesIt()
+    {
+        ServiceSpec spec = ServicePlan.Spec(Install);
+        (ServiceQuery Read, string Names)[] cases =
+        [
+            (Registered() with { FailureActionCount = 1 }, "failure action"),
+            (Registered() with { FailureCommand = @"C:\Tempun.exe" }, "command when it fails"),
+            (Registered() with { DelayedAutoStart = true }, "delayed start"),
+            (Registered() with { TriggerCount = 2 }, "trigger count"),
+            (Registered() with { ServiceSidType = 1 }, "service security identifier type"),
+            (Registered() with { RequiredPrivileges = ["SeChangeNotifyPrivilege"] }, "SeChangeNotifyPrivilege"),
+        ];
+
+        foreach ((ServiceQuery read, string names) in cases)
+        {
+            IReadOnlyList<string> problems = ServiceCheck.Verify(read, spec);
+            Assert.HasCount(1, problems, names + ": " + string.Join(" | ", problems));
+            StringAssert.Contains(problems[0], names);
+        }
+    }
+
     [TestMethod]
     public void AnAccessListGrantingAnAuthenticatedUserStartFailsTheReadBack()
     {
@@ -133,12 +165,13 @@ public sealed class ServicePlanTests
         ServiceQuery read = Registered() with
         {
             StartType = null, ImagePath = null, Account = null, DisplayName = null, PreshutdownTimeoutMs = null, Sddl = null,
-            ServiceType = null, ErrorControl = null,
+            ServiceType = null, ErrorControl = null, FailureActionCount = null, DelayedAutoStart = null, TriggerCount = null,
+            RequiredPrivileges = null, ServiceSidType = null,
         };
 
         IReadOnlyList<string> problems = ServiceCheck.Verify(read, spec);
 
-        Assert.HasCount(8, problems);
+        Assert.HasCount(13, problems);
         Assert.IsTrue(problems.All(p => p.Contains("could not be read", StringComparison.Ordinal)), string.Join(" | ", problems));
     }
 }

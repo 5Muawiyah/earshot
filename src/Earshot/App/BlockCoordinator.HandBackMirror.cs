@@ -11,16 +11,23 @@ internal sealed partial class BlockCoordinator
     // Set once a mirror has been sent this run, so a request the gate could not carry out is not repeated at every read.
     private bool _handBackMirrorSent;
 
+    // A mirror that was refused or failed is sent again by a later status read, so the shut-down service is not left on the
+    // wrong setting for the rest of the run. Not at once: the read that follows the operation itself would send it again,
+    // and again, so nothing is retried until this long has passed. A waiting budget chosen here.
+    internal static readonly TimeSpan HandBackMirrorRetryDelay = TimeSpan.FromSeconds(60);
+
+    private DateTimeOffset _handBackMirrorRetryAt = DateTimeOffset.MinValue;
+
     // Copies the setting to config.json as an operation of its own. Refused while the session is ending, a hand-back is
     // running or the machine is asleep, like every gate write. A gate change, so once it is running its result is
     // waited for.
-    public Task<ControllerResult> SetHandBackAtShutdownAsync(bool handBack, CancellationToken ct = default)
+    public async Task<ControllerResult> SetHandBackAtShutdownAsync(bool handBack, CancellationToken ct = default)
     {
         string verb = handBack ? GateVerbs.SetHandBackOn : GateVerbs.SetHandBackOff;
 
-        // Any attempt counts, so a status read after a change that failed does not send it a second time by itself.
+        // Any attempt counts while it runs, so the status read the operation makes itself does not send the request again.
         _handBackMirrorSent = true;
-        return RunExclusiveAsync(
+        ControllerResult result = await RunExclusiveAsync(
             verb,
             async token =>
             {
@@ -33,6 +40,16 @@ internal sealed partial class BlockCoordinator
             ct,
             () => RefusedAtSessionEnd(verb),
             () => StoppedAtSessionEnd(verb));
+
+        // A request that was refused or did not go through leaves config.json as it was. A later status read sends it
+        // again, once the delay has passed, so the setting the owner ticked reaches the service without another click.
+        if (!result.IsSuccess)
+        {
+            _handBackMirrorSent = false;
+            _handBackMirrorRetryAt = _time.GetUtcNow() + HandBackMirrorRetryDelay;
+        }
+
+        return result;
     }
 
     // Called with every status read that is kept. Sends the mirror when the tasks are installed, config.json was read and
@@ -40,7 +57,8 @@ internal sealed partial class BlockCoordinator
     // of its own and never awaited here, because this runs inside operations that hold the exclusive slot.
     private void MirrorHandBackSetting(BootBlockStatus status)
     {
-        if (_handBackMirrorSent || _disposed || _closing || _sessionEnding || _handingBack || _sleeping || _options.SafeMode)
+        if (_handBackMirrorSent || _disposed || _closing || _sessionEnding || _handingBack || _sleeping || _options.SafeMode ||
+            _time.GetUtcNow() < _handBackMirrorRetryAt)
         {
             return;
         }

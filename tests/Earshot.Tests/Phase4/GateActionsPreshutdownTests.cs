@@ -54,13 +54,16 @@ public sealed class GateActionsPreshutdownTests
 
         public IGateRunLock? RunLock { get; set; }
 
+        // The node API the run uses, when it is not the fake table itself.
+        public INodeApi? NodeApi { get; set; }
+
         public Func<TimeSpan, bool>? LockWait { get; set; }
 
         public Func<TimeSpan, bool>? RetryWait { get; set; }
 
         public PreshutdownResult Run(DateTimeOffset? deadline = null)
         {
-            var actions = new GateActions(Nodes, Store, Folders, Log, Time, RunLock)
+            var actions = new GateActions(NodeApi ?? Nodes, Store, Folders, Log, Time, RunLock)
             {
                 LockWait = LockWait ?? DeviceChangeLock.SleepAndContinue,
                 RetryWait = RetryWait ?? (_ => true),
@@ -88,6 +91,52 @@ public sealed class GateActionsPreshutdownTests
         public int Disables => Nodes.Calls.Count(c => c.Kind == "disable");
 
         public void Dispose() => _temp.Dispose();
+    }
+
+    // A run lock that is entered, but only after it was waited for the whole time it was given.
+    private sealed class AdvancingRunLock(ManualTime time) : IGateRunLock
+    {
+        public IDisposable? TryEnter(TimeSpan timeout, IList<StepOutcome> steps)
+        {
+            time.Advance(timeout);
+            return new NoDispose();
+        }
+
+        private sealed class NoDispose : IDisposable
+        {
+            public void Dispose()
+            {
+            }
+        }
+    }
+
+    // The fake node table, where disabling one node costs time.
+    private sealed class SlowNodes(FakeNodeApi inner, ManualTime time, string instanceId, TimeSpan cost) : INodeApi
+    {
+        public uint ListDeviceIds(out string[] ids) => inner.ListDeviceIds(out ids);
+
+        public uint Locate(string id, bool includeNonPresent, out uint devInst) => inner.Locate(id, includeNonPresent, out devInst);
+
+        public uint GetStatus(uint devInst, out uint status, out uint problem) => inner.GetStatus(devInst, out status, out problem);
+
+        public uint GetContainerId(uint devInst, out Guid containerId) => inner.GetContainerId(devInst, out containerId);
+
+        public uint GetConfigFlags(uint devInst, out uint configFlags) => inner.GetConfigFlags(devInst, out configFlags);
+
+        public uint GetName(uint devInst, out string? name) => inner.GetName(devInst, out name);
+
+        public uint Disable(uint devInst, uint flags)
+        {
+            uint result = inner.Disable(devInst, flags);
+            if (inner.Calls[^1].InstanceId == instanceId)
+            {
+                time.Advance(cost);
+            }
+
+            return result;
+        }
+
+        public uint Enable(uint devInst) => inner.Enable(devInst);
     }
 
     private sealed class BusyRunLock : IGateRunLock
@@ -321,13 +370,14 @@ public sealed class GateActionsPreshutdownTests
         var busy = new BusyRunLock();
         h.RunLock = busy;
 
-        h.Time.Advance(TimeSpan.FromMilliseconds(6_000));
+        h.Time.Advance(TimeSpan.FromMilliseconds(1_000));
         PreshutdownResult late = h.Run();
         h.Time.Advance(TimeSpan.FromMilliseconds(5_000));
         PreshutdownResult over = h.Run();
 
-        Assert.AreEqual(TimeSpan.FromMilliseconds(2_000), busy.Waits[0]);
-        Assert.AreEqual(TimeSpan.Zero, busy.Waits[1], "A deadline already passed waits not at all.");
+        // The room the block needs is kept out of what may be waited: 8,000 less 1,000 gone less 5,500 reserved.
+        Assert.AreEqual(TimeSpan.FromMilliseconds(1_500), busy.Waits[0]);
+        Assert.AreEqual(TimeSpan.Zero, busy.Waits[1], "A budget with no room left over waits not at all.");
         Assert.AreEqual("the run lock", late.CutShortWaitingFor);
         Assert.AreEqual("the run lock", over.CutShortWaitingFor);
         Assert.IsEmpty(h.Nodes.Calls);
@@ -354,7 +404,7 @@ public sealed class GateActionsPreshutdownTests
         Assert.IsEmpty(h.Nodes.Calls);
         TimeSpan waited = h.Time.GetUtcNow() - h.Started;
         Assert.IsTrue(waited <= PreshutdownBudget.Total - PreshutdownBudget.BlockReserve, "Waited " + waited + ", which leaves the block no time.");
-        Assert.IsTrue(waited > TimeSpan.FromSeconds(6), "It does wait for the lock, up to the budget: " + waited);
+        Assert.IsTrue(waited > TimeSpan.FromSeconds(2), "It does wait for the lock, up to what the budget leaves: " + waited);
         Assert.IsFalse(polls.Any(p => p != DeviceChangeLock.PollInterval));
     }
 
@@ -431,6 +481,58 @@ public sealed class GateActionsPreshutdownTests
         Assert.AreEqual(1, waits, "One retry, never more.");
         Assert.HasCount(2, h.Nodes.Calls.Where(c => c.InstanceId == SinkNode));
         Assert.AreEqual(10, h.Disables);
+    }
+
+    // The block is never cut short, so a retry starts only when its delay and a block as long as the reserve still fit.
+    [TestMethod]
+    [DataRow(1_400, true)]
+    [DataRow(1_600, false)]
+    public void ARetryIsMadeOnlyWhenTheDelayAndTheReserveStillFit(int elapsedMilliseconds, bool retried)
+    {
+        using var h = new Harness();
+        h.Nodes[SinkNode].DisableResult = CfgMgr32.CR_REMOVE_VETOED;
+        int waits = 0;
+        h.RetryWait = _ =>
+        {
+            waits++;
+            return true;
+        };
+        h.Time.Advance(TimeSpan.FromMilliseconds(elapsedMilliseconds));
+
+        h.Run();
+
+        Assert.AreEqual(retried ? 1 : 0, waits, elapsedMilliseconds + " ms gone of " + PreshutdownBudget.Total.TotalMilliseconds);
+    }
+
+    [TestMethod]
+    public void TheLockWaitsAndTheReserveForTheBlockFitInsideTheBudget()
+    {
+        Assert.IsTrue(PreshutdownBudget.RunLockWait + PreshutdownBudget.BlockReserve <= PreshutdownBudget.Total);
+        Assert.IsTrue(PreshutdownBudget.WaitBudget + PreshutdownBudget.BlockReserve <= PreshutdownBudget.Total);
+        Assert.AreEqual(PreshutdownBudget.VetoRetryDelay + PreshutdownBudget.BlockReserve, PreshutdownBudget.VetoRetryRoom);
+        Assert.AreEqual(2_500, PreshutdownBudget.WaitBudget.TotalMilliseconds);
+    }
+
+    // A run lock that is waited for the whole time it is allowed, then a block whose vetoed node costs what the sample says
+    // (5,460 ms), must still end, status file written, before the time Windows waits. With the old waits (up to 5,000 ms for
+    // the run lock) the same run ended past 10,000 ms.
+    [TestMethod]
+    public void TheLongestWaitFollowedByAVetoedBlockOfTheSampleLengthEndsInsideTheBudget()
+    {
+        using var h = new Harness();
+        h.RunLock = new AdvancingRunLock(h.Time);
+        var slow = new SlowNodes(h.Nodes, h.Time, SinkNode, TimeSpan.FromMilliseconds(5_460));
+        h.Nodes[SinkNode].DisableResult = CfgMgr32.CR_REMOVE_VETOED;
+        h.NodeApi = slow;
+
+        PreshutdownResult result = h.Run();
+
+        TimeSpan elapsed = h.Time.GetUtcNow() - h.Started;
+        Assert.IsTrue(result.StatusWritten, "The status file is written.");
+        Assert.IsTrue(elapsed <= PreshutdownBudget.Total, "Ended after " + elapsed.TotalMilliseconds + " ms of " + PreshutdownBudget.Total.TotalMilliseconds);
+        Assert.IsTrue(elapsed + TimeSpan.FromSeconds(2) <= TimeSpan.FromMilliseconds(10_000), "Leaves the two seconds Windows gives after the budget.");
+        Assert.AreEqual(GateExitCode.Partial, result.Outcome, "The vetoed node was not retried: no room was left for a second block.");
+        Assert.IsNull(result.RetryAfter);
     }
 
     [TestMethod]

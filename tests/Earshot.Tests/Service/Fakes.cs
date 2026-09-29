@@ -37,8 +37,35 @@ internal sealed class FakeServiceControl : IServiceControl
 
     public bool SddlUnreadable { get; set; }
 
+    // The process id the running service has, and whether that process is gone once the service is stopped.
+    public uint ProcessId { get; set; }
+
+    public bool ProcessExitsAfterStop { get; set; } = true;
+
+    // The optional settings a registration holds. A registration from an earlier install may have any of them; the fresh one
+    // has none.
+    public uint FailureActionCount { get; set; }
+
+    public string? FailureCommand { get; set; }
+
+    public bool DelayedAutoStart { get; set; }
+
+    public uint TriggerCount { get; set; }
+
+    public uint ServiceSidType { get; set; }
+
+    public IReadOnlyList<string> RequiredPrivileges { get; set; } = [];
+
+    // Set by a stop, when the fake's process is to be gone afterwards.
+    private bool _processGone;
+
     // The control manager cannot be read at all (access denied): the service is neither there nor not there.
     public bool Unreadable { get; set; }
+
+    // The control manager becomes unreadable after this many queries (the first ones answer as usual).
+    public int? UnreadableAfterQueries { get; set; }
+
+    private int _queries;
 
     public string? Description { get; private set; }
 
@@ -54,10 +81,12 @@ internal sealed class FakeServiceControl : IServiceControl
         Created = spec;
         Preshutdown = spec.PreshutdownTimeoutMs;
         Sddl = spec.Sddl;
+        ProcessId = 4321;
+        _processGone = false;
     }
 
     // The next call to this operation ("create", "start", "stop", "delete", "reconfigure", "description", "preshutdown",
-    // "dacl") returns this Win32 error.
+    // "dacl", "failure-actions", "delayed", "sid", "triggers") returns this Win32 error.
     public void Fail(string operation, uint error) => _failures[operation] = error;
 
     private bool Failed(string operation, out uint error) => _failures.TryGetValue(operation, out error);
@@ -65,7 +94,8 @@ internal sealed class FakeServiceControl : IServiceControl
     public ServiceQuery Query(string name)
     {
         Calls.Add("query");
-        if (Unreadable)
+        _queries++;
+        if (Unreadable || _queries > UnreadableAfterQueries)
         {
             return new ServiceQuery(
                 ServicePresence.Unknown, [ServiceSteps.FromWin32(ServiceSteps.Query, 5, "The service control manager could not be opened.")]);
@@ -80,9 +110,17 @@ internal sealed class FakeServiceControl : IServiceControl
 
         ServiceSpec spec = Created;
         return new ServiceQuery(
-            ServicePresence.Present, [ServiceSteps.FromWin32(ServiceSteps.Query, 0)], State, 0,
+            ServicePresence.Present, [ServiceSteps.FromWin32(ServiceSteps.Query, 0)], State, State == AdvApi32.SERVICE_STOPPED ? 0 : ProcessId,
             spec.ServiceType, ReadStartType ?? spec.StartType, spec.ErrorControl, ReadImagePath ?? spec.ImagePath, spec.Account,
-            spec.DisplayName, ReadPreshutdown ?? Preshutdown, SddlUnreadable ? null : ReadSddl ?? Sddl);
+            spec.DisplayName, ReadPreshutdown ?? Preshutdown, SddlUnreadable ? null : ReadSddl ?? Sddl)
+        {
+            FailureActionCount = FailureActionCount,
+            FailureCommand = FailureCommand,
+            DelayedAutoStart = DelayedAutoStart,
+            TriggerCount = TriggerCount,
+            RequiredPrivileges = RequiredPrivileges,
+            ServiceSidType = ServiceSidType,
+        };
     }
 
     public StepOutcome Create(ServiceSpec spec)
@@ -175,6 +213,7 @@ internal sealed class FakeServiceControl : IServiceControl
         }
 
         State = StateAfterStop;
+        _processGone = ProcessExitsAfterStop;
         return ServiceSteps.FromWin32(ServiceSteps.Stop, 0);
     }
 
@@ -194,6 +233,63 @@ internal sealed class FakeServiceControl : IServiceControl
 
         Exists = false;
         return ServiceSteps.FromWin32(ServiceSteps.Delete, 0);
+    }
+
+    public StepOutcome WaitForProcessExit(uint processId, TimeSpan timeout, Func<TimeSpan, bool> wait)
+    {
+        Calls.Add("wait-exit:" + processId);
+        return _processGone
+            ? ServiceSteps.FromWin32(ServiceSteps.ProcessExit, 0, "Process " + processId + " has exited.")
+            : ServiceSteps.FromWin32(ServiceSteps.ProcessExit, AdvApi32.ERROR_SERVICE_REQUEST_TIMEOUT, "Process " + processId + " had not exited.", ok: false);
+    }
+
+    public StepOutcome ClearFailureActions(string name)
+    {
+        Calls.Add("clear-failure-actions");
+        if (Failed("failure-actions", out uint error))
+        {
+            return ServiceSteps.FromWin32(ServiceSteps.FailureActions, error, "failed");
+        }
+
+        FailureActionCount = 0;
+        FailureCommand = null;
+        return ServiceSteps.FromWin32(ServiceSteps.FailureActions, 0);
+    }
+
+    public StepOutcome SetDelayedAutoStart(string name, bool delayed)
+    {
+        Calls.Add("delayed:" + delayed);
+        if (Failed("delayed", out uint error))
+        {
+            return ServiceSteps.FromWin32(ServiceSteps.DelayedStart, error, "failed");
+        }
+
+        DelayedAutoStart = delayed;
+        return ServiceSteps.FromWin32(ServiceSteps.DelayedStart, 0);
+    }
+
+    public StepOutcome SetServiceSidType(string name, uint type)
+    {
+        Calls.Add("sid:" + type);
+        if (Failed("sid", out uint error))
+        {
+            return ServiceSteps.FromWin32(ServiceSteps.SidType, error, "failed");
+        }
+
+        ServiceSidType = type;
+        return ServiceSteps.FromWin32(ServiceSteps.SidType, 0);
+    }
+
+    public StepOutcome ClearTriggers(string name)
+    {
+        Calls.Add("clear-triggers");
+        if (Failed("triggers", out uint error))
+        {
+            return ServiceSteps.FromWin32(ServiceSteps.Triggers, error, "failed");
+        }
+
+        TriggerCount = 0;
+        return ServiceSteps.FromWin32(ServiceSteps.Triggers, 0);
     }
 
     public StepOutcome WaitForState(string name, uint state, TimeSpan timeout, Func<TimeSpan, bool> wait)

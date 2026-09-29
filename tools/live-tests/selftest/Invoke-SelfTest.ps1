@@ -71,7 +71,7 @@ param(
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
         'exit-cut-short', 'pause-declined',
-        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended',
+        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
         'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
@@ -179,9 +179,14 @@ $tests = @(
     # finding read from that file stays null. service-partial: the sink node was refused (CR_REMOVE_VETOED) and stayed refused
     # after the one retry, and the service control manager recorded an error for the service. service-over-budget: the status
     # file's own figures say the block took 9,500 ms. tray-not-ended: the owner did not end the Earshot task, so the tray is
-    # still running and the shut down is not the case the service exists for. declined-start: as 09's.
+    # still running and the shut down is not the case the service exists for. declined-start: as 09's, and it also leaves no
+    # shut down time to read from, so no status file or event may be read and every criterion that depends on one is
+    # inconclusive. service-block-sent: the status file says the service sent the block, so service-blocked passes.
+    # service-already-blocked: it says the nodes were already blocked, so service-blocked is inconclusive: the service did not
+    # block them. tray-unreadable: the list of running programs could not be read, so the tray is not known to be gone.
     [ordered]@{ Number = '22'; Id = '22-service-handback'; Script = '22-ServiceHandBack.ps1'; Halves = @('first', 'resume'); Extra = @()
-        Cases = @('none', 'one', 'two', 'declined-start', 'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended') }
+        Cases = @('none', 'one', 'two', 'declined-start', 'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended',
+            'service-block-sent', 'service-already-blocked', 'tray-unreadable') }
 )
 
 $defaultCases = @('none', 'one', 'two')

@@ -87,12 +87,18 @@ internal sealed class Paths
         return Path.Combine(MachineFolder, "status-" + nonce + ".json");
     }
 
-    public static Paths FromEnvironment(Func<string, string?> getVariable)
+    public static Paths FromEnvironment(Func<string, string?> getVariable) => FromEnvironment(getVariable, DefaultFolder);
+
+    // getFolder answers for a special folder; only a test passes one that is not the system's. A folder that is not fully
+    // qualified is refused, so no path Earshot uses, and no path a service or a SYSTEM task opens, depends on the working
+    // directory, which for those is not a folder anyone chose.
+    internal static Paths FromEnvironment(Func<string, string?> getVariable, Func<Environment.SpecialFolder, string?> getFolder)
     {
         ArgumentNullException.ThrowIfNull(getVariable);
+        ArgumentNullException.ThrowIfNull(getFolder);
 
         bool safeMode = IsSafeModeValue(getVariable(SafeModeVariable));
-        string install = Path.Combine(RequireFolder(Environment.SpecialFolder.ProgramFiles), ProductFolderName);
+        string install = Path.Combine(RequireFolder(getFolder, Environment.SpecialFolder.ProgramFiles), ProductFolderName);
         string? root = getVariable(DataRootVariable);
 
         if (string.IsNullOrWhiteSpace(root))
@@ -100,9 +106,9 @@ internal sealed class Paths
             return new Paths(
                 dataRoot: null,
                 isSafeMode: safeMode,
-                roaming: Path.Combine(RequireFolder(Environment.SpecialFolder.ApplicationData), ProductFolderName),
-                local: Path.Combine(RequireFolder(Environment.SpecialFolder.LocalApplicationData), ProductFolderName),
-                machine: Path.Combine(RequireFolder(Environment.SpecialFolder.CommonApplicationData), ProductFolderName),
+                roaming: Path.Combine(RequireFolder(getFolder, Environment.SpecialFolder.ApplicationData), ProductFolderName),
+                local: Path.Combine(RequireFolder(getFolder, Environment.SpecialFolder.LocalApplicationData), ProductFolderName),
+                machine: Path.Combine(RequireFolder(getFolder, Environment.SpecialFolder.CommonApplicationData), ProductFolderName),
                 install: install);
         }
 
@@ -137,14 +143,22 @@ internal sealed class Paths
         return !(v == "0" || string.Equals(v, "false", StringComparison.OrdinalIgnoreCase));
     }
 
+    private static string? DefaultFolder(Environment.SpecialFolder folder) =>
+        Environment.GetFolderPath(folder, Environment.SpecialFolderOption.DoNotVerify);
+
     // An empty special folder would turn every path relative to the working directory, which for
-    // a scheduled task is System32. Refuse instead.
-    private static string RequireFolder(Environment.SpecialFolder folder)
+    // a scheduled task is System32. Refuse instead, and refuse a relative one for the same reason.
+    private static string RequireFolder(Func<Environment.SpecialFolder, string?> getFolder, Environment.SpecialFolder folder)
     {
-        string path = Environment.GetFolderPath(folder, Environment.SpecialFolderOption.DoNotVerify);
+        string? path = getFolder(folder);
         if (string.IsNullOrEmpty(path))
         {
             throw new InvalidOperationException("Windows did not return the " + folder + " folder.");
+        }
+
+        if (!Path.IsPathFullyQualified(path))
+        {
+            throw new InvalidOperationException("Windows returned a folder that is not fully qualified for " + folder + ": " + path);
         }
 
         return path;

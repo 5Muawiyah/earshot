@@ -104,9 +104,10 @@ function Get-NewestGateBlockEvidence
     return $newest
 }
 
-# The newest test 09 result.json's overall outcome, from any earlier sitting, or 'not-run'. Test 09
-# is a precondition recorded as a finding here, not one that refuses: the owner may have run it in
-# an earlier session, under a different RunRoot than this one.
+# The newest test 09 result.json's overall outcome, from any earlier sitting, 'not-run' when there is
+# none, or 'unreadable' when there is one that cannot be read or holds no outcome. Test 09 is a
+# precondition recorded as a finding here, not one that refuses: the owner may have run it in an
+# earlier session, under a different RunRoot than this one.
 function Get-Test09Result
 {
     $paths = Get-EarshotDataPaths
@@ -130,12 +131,18 @@ function Get-Test09Result
     {
         $result = (Get-Content -LiteralPath $newestPath -Raw | ConvertFrom-Json)
         $overall = [string](Get-Field -Object $result -Name 'overall')
-        if ([string]::IsNullOrEmpty($overall)) { return 'not-run' }
+        if ([string]::IsNullOrEmpty($overall))
+        {
+            Write-Failure -Run $run -Message ('The test 09 result at ' + $newestPath + ' holds no overall outcome, so it is recorded as unreadable.')
+            return 'unreadable'
+        }
+
         return $overall
     }
     catch
     {
-        return 'not-run'
+        Write-Failure -Run $run -Message ('The test 09 result at ' + $newestPath + ' could not be read, so it is recorded as unreadable: ' + ($_ | Out-String).Trim())
+        return 'unreadable'
     }
 }
 
@@ -158,6 +165,18 @@ function Add-ServiceEvidence
         [Parameter(Mandatory = $true)]$Run,
         [Parameter(Mandatory = $true)][datetime]$SinceUtc
     )
+
+    # With no shutdown time the status files are not read: read with no floor, a file from an earlier sitting could pass.
+    if ($SinceUtc -eq [datetime]::MinValue)
+    {
+        Add-Criterion -Run $Run -Id 'service-ran' -Criterion 'The hand-back service ran at shut down and wrote its status file.' -Outcome 'inconclusive' `
+            -Detail 'There is no shutdown time to read from (shutdown-start.txt was not found), so the status files were not read: a file from an earlier sitting could otherwise pass.'
+        Add-Finding -Run $Run -Name 'serviceReason' -Value $null -Detail 'not read: there is no shutdown time'
+        Add-Finding -Run $Run -Name 'servicePreshutdownMs' -Value $null -Detail 'not read: there is no shutdown time'
+        Add-Finding -Run $Run -Name 'serviceResult' -Value $null
+        Add-Finding -Run $Run -Name 'serviceVetoSeen' -Value 'no-evidence' -Detail 'not read: there is no shutdown time'
+        return
+    }
 
     $status = Get-PreshutdownStatus -Run $Run -SinceUtc $SinceUtc
     Add-Criterion -Run $Run -Id 'service-ran' -Criterion 'The hand-back service ran at shut down and wrote its status file.' `

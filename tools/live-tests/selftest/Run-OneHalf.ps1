@@ -78,7 +78,7 @@ param(
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
         'exit-cut-short', 'pause-declined',
-        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended',
+        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
         'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case,
     [Parameter(Mandatory = $true)][string]$RunRoot,
     [string]$ExtraArguments = ''
