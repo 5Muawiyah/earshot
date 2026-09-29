@@ -377,14 +377,14 @@ public sealed class WidgetCardUpdateTests
             Assert.AreEqual(1, tray.Source.CheckCalls);
             Assert.AreEqual(0, tray.Source.DownloadCalls, "A check never downloads.");
             Assert.AreEqual("1.2.0", host.AvailableUpdateVersion());
-            Assert.AreEqual(UpdateStage.Available, host.UpdateView()!.Stage);
+            Assert.AreEqual(UpdateCopy.AvailableStatus(new ReleaseVersion(1, 2, 0)), host.UpdatePage(0).Status);
             Assert.IsEmpty(tray.Cards.Shown, "The result is the card's own page, not a message card over it.");
 
             host.StartUpdate();
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, tray.Source.DownloadCalls, "Update is what downloads.");
-            Assert.AreEqual(UpdateStage.DownloadFailed, host.UpdateView()!.Stage);
+            Assert.AreEqual(UpdateCopy.DownloadFailedStatus, host.UpdatePage(0).Status);
             Assert.IsEmpty(tray.Launcher.Launches);
         });
     }

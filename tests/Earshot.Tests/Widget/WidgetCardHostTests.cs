@@ -1,5 +1,5 @@
+using System.Windows.Forms;
 using Earshot.Contracts;
-using Earshot.Hotkeys;
 using Earshot.Tests.Integration.Coordinator;
 using Earshot.Tests.Phase1;
 using Earshot.Tests.Update;
@@ -15,6 +15,19 @@ namespace Earshot.Tests.Widget;
 public sealed class WidgetCardHostTests
 {
     private static readonly Earshot.App.CardPlace Place = Earshot.App.CardPlace.NearTray;
+
+    // The widget reaches nothing of the update flow, so its own copy of these words must stay the flow's.
+    [TestMethod]
+    public void TheCardsUpdateWordsAreTheUpdateFlowsWords()
+    {
+        string[] theirs =
+        [
+            Earshot.Update.UpdateCopy.CheckRowLabel, Earshot.Update.UpdateCopy.CheckRowButton,
+            Earshot.Update.UpdateCopy.CheckAutomaticallyLabel, Earshot.Update.UpdateCopy.UpdateButton,
+        ];
+        string[] ours = [WidgetCopy.CheckForUpdates, WidgetCopy.CheckButton, WidgetCopy.CheckAutomatically, WidgetCopy.UpdateButton];
+        CollectionAssert.AreEqual(theirs, ours);
+    }
 
     [TestMethod]
     public void TheHostReadsWhatIsSavedAndSaysWhichFeaturesStillWaitOnAProvedField()
@@ -148,14 +161,14 @@ public sealed class WidgetCardHostTests
             using var tray = new UpdateTrayHarness();
             IWidgetCardHost host = tray.Context.WidgetCardHostForTest;
 
-            string? saved = host.SetShortcut(HotkeyAction.SwitchToPc, "Ctrl+Alt+P", Place);
+            string? saved = host.SetShortcut(CardShortcut.Connect, Keys.P, control: true, alt: true, shift: false, Place);
 
             Assert.IsNull(saved);
             Assert.AreEqual("Ctrl+Alt+P", tray.Settings.Current.Hotkeys.SwitchToPc);
             Assert.AreEqual("Ctrl+Alt+P", host.ReadSettings().ConnectChord);
             Assert.AreEqual("Ctrl+Alt+Shift+D", tray.Settings.Current.Hotkeys.SwitchToPhone, "The other shortcut is untouched.");
 
-            host.ClearShortcut(HotkeyAction.SwitchToPc, Place);
+            host.ClearShortcut(CardShortcut.Connect, Place);
 
             Assert.AreEqual(string.Empty, tray.Settings.Current.Hotkeys.SwitchToPc, "A cleared shortcut stays cleared.");
             Assert.AreEqual(string.Empty, host.ReadSettings().ConnectChord);
@@ -172,13 +185,15 @@ public sealed class WidgetCardHostTests
             using var tray = new UpdateTrayHarness();
             IWidgetCardHost host = tray.Context.WidgetCardHostForTest;
 
-            string? f12 = host.SetShortcut(HotkeyAction.SwitchToPc, "Ctrl+F12", Place);
-            string? clash = host.SetShortcut(HotkeyAction.SwitchToPc, "Ctrl+Alt+Shift+D", Place);
-            string? notAChord = host.SetShortcut(HotkeyAction.SwitchToPc, "P", Place);
+            string? f12 = host.SetShortcut(CardShortcut.Connect, Keys.F12, control: true, alt: false, shift: false, Place);
+            string? clash = host.SetShortcut(CardShortcut.Connect, Keys.D, control: true, alt: true, shift: true, Place);
+            string? notAChord = host.SetShortcut(CardShortcut.Connect, Keys.P, control: false, alt: false, shift: false, Place);
+            string? noName = host.SetShortcut(CardShortcut.Connect, Keys.ProcessKey, control: true, alt: false, shift: false, Place);
 
             Assert.AreEqual("F12 is kept by Windows for the debugger, so it cannot be a shortcut.", f12);
             StringAssert.Contains(clash!, "already set for another command");
             Assert.IsNotNull(notAChord);
+            Assert.AreEqual("That key cannot be used in a shortcut.", noName);
             Assert.AreEqual("Ctrl+Alt+Shift+A", tray.Settings.Current.Hotkeys.SwitchToPc, "A refused chord saves nothing.");
             Assert.AreEqual("Ctrl+Alt+Shift+D", tray.Settings.Current.Hotkeys.SwitchToPhone);
         });

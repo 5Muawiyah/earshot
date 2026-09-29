@@ -2,7 +2,6 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
 using Earshot.App;
-using Earshot.Hotkeys;
 using Earshot.Update;
 using Earshot.Widget;
 
@@ -100,25 +99,27 @@ internal sealed class FakeCardHost : IWidgetCardHost
         Values = Values with { CheckAutomatically = on };
     }
 
-    public string? SetShortcut(HotkeyAction action, string chord, CardPlace place)
+    public string? SetShortcut(CardShortcut shortcut, Keys key, bool control, bool alt, bool shift, CardPlace place)
     {
-        Calls.Add("shortcut:" + action + ":" + chord);
+        string chord = string.Join('+', new[] { control ? "Ctrl" : null, alt ? "Alt" : null, shift ? "Shift" : null, (key & Keys.KeyCode).ToString() }.Where(p => p is not null));
+        Calls.Add("shortcut:" + shortcut + ":" + chord);
         if (ShortcutRefusal is not null)
         {
             return ShortcutRefusal;
         }
 
-        Values = action == HotkeyAction.SwitchToPc ? Values with { ConnectChord = chord } : Values with { DisconnectChord = chord };
+        Values = shortcut == CardShortcut.Connect ? Values with { ConnectChord = chord } : Values with { DisconnectChord = chord };
         return null;
     }
 
-    public void ClearShortcut(HotkeyAction action, CardPlace place)
+    public void ClearShortcut(CardShortcut shortcut, CardPlace place)
     {
-        Calls.Add("clear:" + action);
-        Values = action == HotkeyAction.SwitchToPc ? Values with { ConnectChord = string.Empty } : Values with { DisconnectChord = string.Empty };
+        Calls.Add("clear:" + shortcut);
+        Values = shortcut == CardShortcut.Connect ? Values with { ConnectChord = string.Empty } : Values with { DisconnectChord = string.Empty };
     }
 
-    public UpdateViewModel? UpdateView() => View;
+    public SetupViewModel UpdatePage(int spinnerFrame) =>
+        View is { } view ? WidgetCardUpdatePage.From(view, spinnerFrame) : WidgetCardUpdatePage.Unavailable();
 
     public string? AvailableUpdateVersion() => AvailableVersion;
 
@@ -214,7 +215,7 @@ internal static class CardKit
         new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, false, WidgetCardView.Settings, Settings: values);
 
     public static WidgetCardModel UpdateModel(UpdateViewModel view) =>
-        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, false, WidgetCardView.Update, SetupViewModel.ForUpdate(view));
+        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, false, WidgetCardView.Update, WidgetCardUpdatePage.From(view));
 
     // A card painted into an off-screen bitmap through its own paint routine: never shown, never given a handle.
     public static Bitmap Render(WidgetCard card)

@@ -1,5 +1,4 @@
 using System.Drawing.Drawing2D;
-using Earshot.Hotkeys;
 using Earshot.Popup;
 
 namespace Earshot.Widget;
@@ -172,9 +171,9 @@ internal sealed partial class WidgetCard
                 Invalidate();
                 break;
             case SettingsPart.Clear:
-                if (ActionOf(target.Row) is { } action)
+                if (ShortcutOf(target.Row) is { } shortcut)
                 {
-                    Raise(new ShortcutClear(action));
+                    Raise(new ShortcutClear(shortcut));
                 }
 
                 break;
@@ -195,10 +194,10 @@ internal sealed partial class WidgetCard
         _ => false,
     };
 
-    private static HotkeyAction? ActionOf(SettingsRowId row) => row switch
+    private static CardShortcut? ShortcutOf(SettingsRowId row) => row switch
     {
-        SettingsRowId.Connect => HotkeyAction.SwitchToPc,
-        SettingsRowId.Disconnect => HotkeyAction.SwitchToPhone,
+        SettingsRowId.Connect => CardShortcut.Connect,
+        SettingsRowId.Disconnect => CardShortcut.Disconnect,
         _ => null,
     };
 
@@ -295,23 +294,14 @@ internal sealed partial class WidgetCard
             return;
         }
 
-        if (IsModifierKey(key) || !(ctrl || alt) || ActionOf(row) is not { } action)
-        {
-            return;
-        }
-
-        HotkeyModifiers modifiers = (ctrl ? HotkeyModifiers.Control : HotkeyModifiers.None)
-            | (alt ? HotkeyModifiers.Alt : HotkeyModifiers.None)
-            | (shift ? HotkeyModifiers.Shift : HotkeyModifiers.None);
-        ushort virtualKey = (ushort)(int)key;
-        if (!VirtualKeyTable.TryGetKeyName(virtualKey, out _))
+        if (IsModifierKey(key) || !(ctrl || alt) || ShortcutOf(row) is not { } shortcut)
         {
             return;
         }
 
         _capturing = null;
         Invalidate();
-        Raise(new ShortcutChange(action, HotkeyText.Format(new HotkeyCombination(modifiers, virtualKey))));
+        Raise(new ShortcutChange(shortcut, key, ctrl, alt, shift));
     }
 
     // ---- The text box
@@ -511,7 +501,7 @@ internal sealed partial class WidgetCard
                     DrawShortcut(g, item, colours, chord, focusVisible, focus);
                     break;
                 case SettingsRowId.CheckForUpdates:
-                    CardPaint.SmallButton(g, item.A, Earshot.Update.UpdateCopy.CheckRowButton, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Button));
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.CheckButton, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Button));
                     break;
                 default:
                     CardPaint.Toggle(g, item.A, ToggleValue(values, item.Row), colours, _dpi);

@@ -53,7 +53,10 @@ internal static class WidgetCopy
     public const string ShortcutNotSet = "Not set";
     public const string ShortcutPressKeys = "Press keys";
     public const string ShortcutClear = "Clear";
-    public const string UpdateCannotReadVersion = "Earshot cannot read its own version.";
+    public const string CheckForUpdates = "Check for updates";
+    public const string CheckButton = "Check";
+    public const string CheckAutomatically = "Check automatically";
+    public const string UpdateButton = "Update";
     public const string ShortcutNotSaved = "Couldn't save that shortcut.";
 
     // Battery set-up: the card's button, the menu item, the three steps and their outcomes. Plain, short,

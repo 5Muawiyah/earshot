@@ -1,5 +1,3 @@
-using Earshot.Update;
-
 namespace Earshot.Widget;
 
 // Which page the card shows. Main is the three-column card; Settings is the settings page; Update is the update
@@ -55,37 +53,6 @@ internal sealed record SetupViewModel(
         BatterySetupListenStatus.WatcherNotStarted => FailedWith(WidgetCopy.SetupBluetoothOff, WidgetCopy.SetupBluetoothOffHint),
         _ => FailedWith(WidgetCopy.SetupNotFound, WidgetCopy.SetupNotFoundHint),
     };
-
-    // The update page: the controller's own state, worded by it. A failure's cause (or a note about an update that
-    // stayed where it was) goes under the status as a caption.
-    public static SetupViewModel ForUpdate(UpdateViewModel view, int spinnerFrame = 0)
-    {
-        ArgumentNullException.ThrowIfNull(view);
-        SetupIcon icon = view.Icon switch
-        {
-            UpdateIcon.Spinner => SetupIcon.Spinner,
-            UpdateIcon.Check => SetupIcon.Check,
-            UpdateIcon.Down => SetupIcon.Down,
-            UpdateIcon.Caution => SetupIcon.Caution,
-            UpdateIcon.Shield => SetupIcon.Shield,
-            _ => SetupIcon.None,
-        };
-        var buttons = view.Buttons.Select(b => new SetupButton(b.Label, b.Primary, b.Role switch
-        {
-            UpdateButtonRole.Update => SetupAction.Update,
-            UpdateButtonRole.Cancel => SetupAction.Cancel,
-            UpdateButtonRole.TryAgain => SetupAction.TryAgain,
-            _ => SetupAction.Check,
-        })).ToList();
-        return new SetupViewModel(
-            view.Title, null, null, view.Reason ?? view.Notice, icon, view.Status, view.Sub, null, buttons, spinnerFrame,
-            ShowProgress: view.Stage == UpdateStage.Downloading, ProgressPercent: view.ProgressPercent);
-    }
-
-    // The update page when the running version cannot be read, so there is no controller to ask.
-    public static SetupViewModel UpdateUnavailable() => new(
-        UpdateCopy.Title, null, null, WidgetCopy.UpdateCannotReadVersion, SetupIcon.Caution, UpdateCopy.CheckFailedStatus, null, null,
-        Array.Empty<SetupButton>(), 0);
 
     private static SetupViewModel Finished(SetupIcon icon, string status, string? sub) => new(
         WidgetCopy.SetUpBattery, "3/3", null, null, icon, status, sub, null,

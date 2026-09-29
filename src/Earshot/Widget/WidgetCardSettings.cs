@@ -1,7 +1,5 @@
 using Earshot.App;
-using Earshot.Hotkeys;
 using Earshot.Popup;
-using Earshot.Update;
 
 namespace Earshot.Widget;
 
@@ -58,13 +56,14 @@ internal interface IWidgetCardHost
 
     void SetCheckAutomatically(bool on, CardPlace place);
 
-    // Stores the chord when this build would register it; otherwise nothing is stored and the reason is returned.
-    string? SetShortcut(HotkeyAction action, string chord, CardPlace place);
+    // The keys pressed for a shortcut. The chord is stored when this build would register it; otherwise nothing is
+    // stored and the reason is returned.
+    string? SetShortcut(CardShortcut shortcut, Keys key, bool control, bool alt, bool shift, CardPlace place);
 
-    void ClearShortcut(HotkeyAction action, CardPlace place);
+    void ClearShortcut(CardShortcut shortcut, CardPlace place);
 
-    // The update page's state, or null when the running version cannot be read.
-    UpdateViewModel? UpdateView();
+    // The update page as the update flow's state words it, and with a spinner frame when it is checking.
+    SetupViewModel UpdatePage(int spinnerFrame);
 
     // The newer version a check found and nothing has dealt with yet, as text, or null.
     string? AvailableUpdateVersion();
@@ -82,6 +81,9 @@ internal interface IWidgetCardHost
     // Raised, on any thread, whenever the update flow moves.
     event EventHandler? UpdateChanged;
 }
+
+// The two shortcuts the settings page edits.
+internal enum CardShortcut { Connect, Disconnect }
 
 internal enum SettingsRowId
 {
@@ -121,9 +123,9 @@ internal sealed record TextChange(string Value) : SettingChange;
 
 internal sealed record ThresholdChange(int Percent) : SettingChange;
 
-internal sealed record ShortcutChange(HotkeyAction Action, string Chord) : SettingChange;
+internal sealed record ShortcutChange(CardShortcut Shortcut, Keys Key, bool Control, bool Alt, bool Shift) : SettingChange;
 
-internal sealed record ShortcutClear(HotkeyAction Action) : SettingChange;
+internal sealed record ShortcutClear(CardShortcut Shortcut) : SettingChange;
 
 internal sealed record CheckRequest : SettingChange;
 
@@ -326,14 +328,14 @@ internal static class SettingsPageLayout
         Divider();
         Head(WidgetCopy.SettingsUpdates);
 
-        string checkLabel = UpdateCopy.CheckRowLabel;
-        int checkW = measure.Width(UpdateCopy.CheckRowButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+        string checkLabel = WidgetCopy.CheckForUpdates;
+        int checkW = measure.Width(WidgetCopy.CheckButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
         string? installed = values.InstalledVersion is null ? null : "Version " + values.InstalledVersion;
         Row(
             SettingsRowId.CheckForUpdates, checkLabel, installed, subIsProblem: false, subFullWidth: false, checkW,
             (top, _) => (new Rectangle(right - checkW, top, checkW, control), Rectangle.Empty, Rectangle.Empty),
             SettingsPart.Button);
-        ToggleRow(SettingsRowId.CheckAutomatically, UpdateCopy.CheckAutomaticallyLabel, null);
+        ToggleRow(SettingsRowId.CheckAutomatically, WidgetCopy.CheckAutomatically, null);
 
         int bodyHeight = y + CardPlacement.Scale(BodyBottomAt96, dpi);
         SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight, buttonCount: 0);

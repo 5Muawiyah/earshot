@@ -122,12 +122,29 @@ internal sealed partial class TrayContext
         public void SetCheckAutomatically(bool on, CardPlace place) =>
             Write("check for updates automatically (card)", s => s.CheckForUpdatesAutomatically = on, place);
 
-        public string? SetShortcut(HotkeyAction action, string chord, CardPlace place)
+        private static HotkeyAction ActionOf(CardShortcut shortcut) =>
+            shortcut == CardShortcut.Connect ? HotkeyAction.SwitchToPc : HotkeyAction.SwitchToPhone;
+
+        public string? SetShortcut(CardShortcut shortcut, Keys key, bool control, bool alt, bool shift, CardPlace place)
         {
             if (_tray._closing)
             {
                 return null;
             }
+
+            // The keys as a chord, in the words shortcuts are stored in. A key with no name in the shortcut table is
+            // not one this build can register.
+            HotkeyAction action = ActionOf(shortcut);
+            ushort virtualKey = (ushort)(int)(key & Keys.KeyCode);
+            if (!VirtualKeyTable.TryGetKeyName(virtualKey, out _))
+            {
+                return "That key cannot be used in a shortcut.";
+            }
+
+            HotkeyModifiers modifiers = (control ? HotkeyModifiers.Control : HotkeyModifiers.None)
+                | (alt ? HotkeyModifiers.Alt : HotkeyModifiers.None)
+                | (shift ? HotkeyModifiers.Shift : HotkeyModifiers.None);
+            string chord = HotkeyText.Format(new HotkeyCombination(modifiers, virtualKey));
 
             // Checked on a copy first, so a refused chord changes nothing and saves nothing.
             HotkeySettings scratch = CopyOf(_tray._registry.Settings.Current.Hotkeys);
@@ -141,10 +158,14 @@ internal sealed partial class TrayContext
             return saved ? null : WidgetCopy.ShortcutNotSaved;
         }
 
-        public void ClearShortcut(HotkeyAction action, CardPlace place) =>
+        public void ClearShortcut(CardShortcut shortcut, CardPlace place)
+        {
+            HotkeyAction action = ActionOf(shortcut);
             Write("clear shortcut (card)", s => _tray.HotkeyBindings(s.Hotkeys).Clear(action), place);
+        }
 
-        public UpdateViewModel? UpdateView() => _tray.EnsureUpdates()?.View;
+        public SetupViewModel UpdatePage(int spinnerFrame) =>
+            _tray.EnsureUpdates()?.View is { } view ? WidgetCardUpdatePage.From(view, spinnerFrame) : WidgetCardUpdatePage.Unavailable();
 
         public string? AvailableUpdateVersion() => _tray._updates?.AvailableRelease?.Version.ToString();
 

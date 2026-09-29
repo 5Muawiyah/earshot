@@ -1,9 +1,7 @@
 using Earshot.App;
 using Earshot.Contracts;
-using Earshot.Hotkeys;
 using Earshot.Popup;
 using Earshot.Tray;
-using Earshot.Update;
 
 namespace Earshot.Widget;
 
@@ -86,7 +84,7 @@ internal sealed class WidgetCardPresenter : IDisposable
     private WidgetCardView _updateFrom = WidgetCardView.Main;
 
     // The reason a typed shortcut was refused, shown on its row until the next change or until the page closes.
-    private (HotkeyAction Action, string Reason)? _shortcutNote;
+    private (CardShortcut Shortcut, string Reason)? _shortcutNote;
 
     public WidgetCardPresenter(
         Func<WidgetCard> createCard, WidgetCardPresenterCallbacks callbacks, Action<Action> uiPost, TimeProvider time, ILog log,
@@ -286,15 +284,14 @@ internal sealed class WidgetCardPresenter : IDisposable
     }
 
     // The update page, from the update flow's own state: the same words the tray's messages use.
-    private SetupViewModel UpdatePage() =>
-        _host?.UpdateView() is { } view ? SetupViewModel.ForUpdate(view, _spinnerFrame) : SetupViewModel.UpdateUnavailable();
+    private SetupViewModel UpdatePage() => _host!.UpdatePage(_spinnerFrame);
 
     private CardSettingsValues ReadSettings()
     {
         CardSettingsValues values = _host!.ReadSettings();
         if (_shortcutNote is { } note)
         {
-            values = note.Action == HotkeyAction.SwitchToPc
+            values = note.Shortcut == CardShortcut.Connect
                 ? values with { ConnectFailure = note.Reason }
                 : values with { DisconnectFailure = note.Reason };
         }
@@ -430,11 +427,11 @@ internal sealed class WidgetCardPresenter : IDisposable
                 ApplyToggle(toggle, place);
                 break;
             case ShortcutChange shortcut:
-                string? reason = _host.SetShortcut(shortcut.Action, shortcut.Chord, place);
-                _shortcutNote = reason is null ? null : (shortcut.Action, reason);
+                string? reason = _host.SetShortcut(shortcut.Shortcut, shortcut.Key, shortcut.Control, shortcut.Alt, shortcut.Shift, place);
+                _shortcutNote = reason is null ? null : (shortcut.Shortcut, reason);
                 break;
             case ShortcutClear clear:
-                _host.ClearShortcut(clear.Action, place);
+                _host.ClearShortcut(clear.Shortcut, place);
                 _shortcutNote = null;
                 break;
             case CheckRequest:
@@ -721,7 +718,7 @@ internal sealed class WidgetCardPresenter : IDisposable
             return;
         }
 
-        bool spinning = _card is { IsDisposed: false, Visible: true } && UpdatePage().Icon == SetupIcon.Spinner;
+        bool spinning = _host is not null && _card is { IsDisposed: false, Visible: true } && UpdatePage().Icon == SetupIcon.Spinner;
         if (spinning && _spinnerTimer is null)
         {
             StartSpinnerTimer();

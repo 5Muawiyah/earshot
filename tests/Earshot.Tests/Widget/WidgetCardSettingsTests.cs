@@ -1,6 +1,5 @@
 using System.Drawing;
 using System.Windows.Forms;
-using Earshot.Hotkeys;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -556,13 +555,13 @@ public sealed class WidgetCardSettingsTests
 
             page.Card.HandleSettingsKey(Keys.P | Keys.Control | Keys.Alt);
 
-            CardKit.AssertCalls(page.Host, "shortcut:SwitchToPc:Ctrl+Alt+P");
+            CardKit.AssertCalls(page.Host, "shortcut:Connect:Ctrl+Alt+P");
             Assert.IsNull(page.Card.CapturingShortcut);
             Assert.AreEqual("Ctrl+Alt+P", page.Card.ShortcutBoxText(SettingsRowId.Connect));
 
             CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.Disconnect, SettingsPart.Shortcut));
             page.Card.HandleSettingsKey(Keys.F5 | Keys.Alt | Keys.Shift);
-            Assert.AreEqual("shortcut:SwitchToPhone:Alt+Shift+F5", page.Host.Calls[^1]);
+            Assert.AreEqual("shortcut:Disconnect:Alt+Shift+F5", page.Host.Calls[^1]);
         });
     }
 
@@ -608,7 +607,7 @@ public sealed class WidgetCardSettingsTests
 
             CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.Connect, SettingsPart.Clear));
 
-            CardKit.AssertCalls(page.Host, "clear:SwitchToPc");
+            CardKit.AssertCalls(page.Host, "clear:Connect");
             Assert.AreEqual(WidgetCopy.ShortcutNotSet, page.Card.ShortcutBoxText(SettingsRowId.Connect));
             Assert.IsFalse(page.Card.CurrentSettingsLayout.Targets.Contains(new SettingsTarget(SettingsRowId.Connect, SettingsPart.Clear)), "An empty box has nothing to clear.");
 

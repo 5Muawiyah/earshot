@@ -4,7 +4,6 @@ using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Popup;
 using Earshot.Tray;
-using Earshot.Update;
 
 namespace Earshot.Widget;
 
@@ -375,7 +374,7 @@ internal sealed partial class WidgetCard : Form
         if (showUpdate)
         {
             using var font = new Font(_fontFamily, CardPlacement.Scale(12, _dpi), FontStyle.Regular, GraphicsUnit.Pixel);
-            SizeF size = measure.MeasureString(UpdateCopy.UpdateButton, font, int.MaxValue, StringFormat.GenericTypographic);
+            SizeF size = measure.MeasureString(WidgetCopy.UpdateButton, font, int.MaxValue, StringFormat.GenericTypographic);
             updateButtonWidth = Math.Max(
                 CardPlacement.Scale(WidgetCardLayout.UpdateButtonMinWidthAt96, _dpi),
                 (int)Math.Ceiling(size.Width) + (2 * CardPlacement.Scale(WidgetCardLayout.UpdateButtonPaddingAt96, _dpi)));
@@ -733,7 +732,7 @@ internal sealed partial class WidgetCard : Form
         CardPaint.Text(
             g, WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption, _fontFamily,
             CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
-        CardPaint.SmallButton(g, layout.UpdateButton, UpdateCopy.UpdateButton, colours, _fontFamily, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && ContainsFocus);
+        CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _fontFamily, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && ContainsFocus);
     }
 
     // Cycles Button, Switch (when shown), SetupButton (when shown), UpdateButton (when shown), Gear (when the view
