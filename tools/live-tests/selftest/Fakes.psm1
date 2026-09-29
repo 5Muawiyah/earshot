@@ -223,6 +223,9 @@ $script:CaseItemCounts = @{
     # test 17 and test 20: the hand-back service's own cases. Each looks like the shared "one" for every log line and
     # list, and differs only in the status file the service wrote (Write-FakeStatusFiles below).
     'service-not-run' = 1; 'service-partial' = 1; 'service-over-budget' = 1
+
+    # test 20's own case: the owner did not end the Earshot task, so the tray is still running when the shut down starts.
+    'tray-not-ended' = 1
 }
 
 # How many status files the hand-back service wrote, per case: the shared none, one and two write 0, 1 and 2 (so the
@@ -231,7 +234,7 @@ $script:CaseItemCounts = @{
 # service's, so a script that took the newest status file whatever its verb would read the wrong one.
 $script:StatusFileCounts = @{
     none = 0; one = 1; two = 2
-    'service-not-run' = 0; 'service-partial' = 1; 'service-over-budget' = 1
+    'service-not-run' = 0; 'service-partial' = 1; 'service-over-budget' = 1; 'tray-not-ended' = 1
 }
 
 function Initialize-FakeMachine
@@ -246,7 +249,7 @@ function Initialize-FakeMachine
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-        'service-not-run', 'service-partial', 'service-over-budget')][string]$Case
+        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -306,7 +309,7 @@ function New-FakeSandbox
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-        'service-not-run', 'service-partial', 'service-over-budget')][string]$Case
+        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -1179,7 +1182,7 @@ function Update-FakeWorldForOwnerAction
     # test 20: the owner ends the Earshot task in Task Manager, so the tray is gone while the AirPods stay connected.
     if ($lower.Contains('end task'))
     {
-        $script:World.TrayRunning = $false
+        if ((Get-FakeContext).Case -ne 'tray-not-ended') { $script:World.TrayRunning = $false }
         return
     }
 

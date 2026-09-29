@@ -70,7 +70,7 @@ param(
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-        'service-not-run', 'service-partial', 'service-over-budget')][string]$Case = '',
+        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -161,9 +161,10 @@ $tests = @(
     # service-not-run: 17's and 20's own case, the hand-back service wrote no status file, so service-ran fails and every
     # finding read from that file stays null. service-partial: the sink node was refused (CR_REMOVE_VETOED) and stayed refused
     # after the one retry, and the service control manager recorded an error for the service. service-over-budget: the status
-    # file's own figures say the block took 9,500 ms. declined-start: as 09's.
+    # file's own figures say the block took 9,500 ms. tray-not-ended: the owner did not end the Earshot task, so the tray is
+    # still running and the shut down is not the case the service exists for. declined-start: as 09's.
     [ordered]@{ Number = '20'; Id = '20-service-handback'; Script = '20-ServiceHandBack.ps1'; Halves = @('first', 'resume'); Extra = @()
-        Cases = @('none', 'one', 'two', 'declined-start', 'service-not-run', 'service-partial', 'service-over-budget') }
+        Cases = @('none', 'one', 'two', 'declined-start', 'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended') }
 )
 
 $defaultCases = @('none', 'one', 'two')

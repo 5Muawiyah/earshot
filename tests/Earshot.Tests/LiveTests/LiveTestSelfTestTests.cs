@@ -58,13 +58,13 @@ public sealed class LiveTestSelfTestTests
     // handback-cut-short and repaged-at-wake, on that row's one half (3). 19-Widget adds none of
     // its own: its three cases are the shared none/one/two only. Then the hand-back service:
     // 17's service-not-run on both of its halves (2), and 20-ServiceHandBack's declined-start,
-    // service-not-run, service-partial and service-over-budget on both of its halves (8).
-    // 2+2+9+2+6+3+2+8 = 34, printed by Invoke-SelfTest.ps1 itself (runs 118, halves 28,
-    // cases-per-half 3: 118 - 28*3 = 34) rather than re-derived here, because this arithmetic has
-    // been wrong before: a hand count made before tests 17 and 18 existed on this tree did not
-    // match what the runner actually printed once they did, and the count for test 20 made
-    // before it was built was two runs short.
-    private const int ExpectedExtraCases = 34;
+    // service-not-run, service-partial, service-over-budget and tray-not-ended on both of its
+    // halves (10). 2+2+9+2+6+3+2+10 = 36, printed by Invoke-SelfTest.ps1 itself (runs 120,
+    // halves 28, cases-per-half 3: 120 - 28*3 = 36) rather than re-derived here, because this
+    // arithmetic has been wrong before: a hand count made before tests 17 and 18 existed on this
+    // tree did not match what the runner actually printed once they did, and the count for test 20
+    // made before it was built was short.
+    private const int ExpectedExtraCases = 36;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

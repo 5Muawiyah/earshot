@@ -672,6 +672,7 @@
         'service-not-run' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
         'service-partial' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
         'service-over-budget' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
+        'tray-not-ended' = @{ Overall = 'fail'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'fail' } }
     }
     '20-service-handback|resume' = @{
         none = @{ Overall = 'fail'; Criteria = @{
@@ -708,5 +709,9 @@
                 'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'fail'
                 'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
             FindingsInclude = @{ 'servicePreshutdownMs' = 9500 } }
+        'tray-not-ended' = @{ Overall = 'pass'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'pass'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' } }
     }
 }

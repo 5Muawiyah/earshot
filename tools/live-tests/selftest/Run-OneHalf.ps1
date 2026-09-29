@@ -77,7 +77,7 @@ param(
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-        'service-not-run', 'service-partial', 'service-over-budget')][string]$Case,
+        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended')][string]$Case,
     [Parameter(Mandatory = $true)][string]$RunRoot,
     [string]$ExtraArguments = ''
 )
