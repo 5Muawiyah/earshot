@@ -19,8 +19,8 @@ internal sealed class WindowCoverProbe : IGaugeCoverProbe
 {
     private const string ShellTrayWndClass = "Shell_TrayWnd";
 
-    // Test seam only: counts real constructions so the real-surface guard can prove no test builds one by
-    // accident. Never read or reset in production.
+    // Test seam only: counts real constructions, so a test can prove a widget-enabled tray built with fakes never
+    // builds a real probe by accident. Never read or reset in production.
     internal static int ConstructionCount;
 
     public WindowCoverProbe()

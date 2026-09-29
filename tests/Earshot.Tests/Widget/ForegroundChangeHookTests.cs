@@ -234,6 +234,22 @@ public sealed class ForegroundChangeHookTests
             "A widget-enabled TrayHarness built a real WindowCoverProbe; every such test would ask the desktop what is at a point on it.");
     }
 
+    // A zero handle is a failed install whatever the last error says. With a stale zero error it used to read as
+    // success and the hook would be reported as installed when nothing was.
+    [TestMethod]
+    public void AHookThatWasNotSetIsAFailureEvenWithNoErrorCode()
+    {
+        StepOutcome noCode = ForegroundChangeHook.InstallOutcome(0, 0);
+        StepOutcome withCode = ForegroundChangeHook.InstallOutcome(0, 1400);
+        StepOutcome installed = ForegroundChangeHook.InstallOutcome(0x1234, 0);
+
+        Assert.IsFalse(noCode.Ok, "A zero handle with error 0 is still a failure.");
+        StringAssert.Contains(noCode.Detail, "no hook and no error code");
+        Assert.IsFalse(withCode.Ok);
+        Assert.AreEqual(1400, withCode.Code, "The raw code is kept.");
+        Assert.IsTrue(installed.Ok);
+    }
+
     [TestMethod]
     public void NoHarnessTestConstructsARealForegroundHook()
     {

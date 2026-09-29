@@ -99,6 +99,17 @@ public sealed class GaugeContentTests
         Assert.AreEqual(GaugeMode.MarkOnly, old.Mode);
     }
 
+    // The one rule for how old a reading may be: exactly an hour is still recent, a minute more is not.
+    [TestMethod]
+    public void AReadingOfExactlyOneHourIsRecentAndOneMinuteOlderIsNot()
+    {
+        GaugeContent atAnHour = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromHours(1)), Bud(60, age: TimeSpan.FromHours(1))), Now, Settings);
+        GaugeContent past = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromMinutes(61)), Bud(60, age: TimeSpan.FromMinutes(61))), Now, Settings);
+
+        Assert.AreEqual(GaugeMode.Reading, atAnHour.Mode, "An hour old is still recent.");
+        Assert.AreEqual(GaugeMode.MarkOnly, past.Mode, "61 minutes old counts as no recent reading.");
+    }
+
     // ---- Freshness ----
 
     [TestMethod]

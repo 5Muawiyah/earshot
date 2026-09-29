@@ -25,13 +25,16 @@ public sealed class EarshotSettings
     public bool   CheckForUpdatesAutomatically { get; set; }
 
     // Pause this PC's playback when the AirPods stop being this PC's output while it was playing to them
-    // (the phone took them, they went out of range, or Earshot let them go). Never resumes on its own. Defaults
+    // (the phone took them, they went out of range, or Earshot let them go). Never resumes on its own. It pauses the
+    // one media session playing on this PC whichever output that session uses, since Windows does not say which
+    // device a session renders to (Earshot.Widget.EarPause.SessionPause). Defaults
     // on, so an older settings file with no member reads as on. SchemaVersion stays 1.
     public bool   PauseWhenAirPodsLeave { get; set; } = true;
 
-    // v1.1: global keyboard shortcuts. Defaults off with every text empty (Earshot.Hotkeys.HotkeySettings),
-    // so an older settings file with no Hotkeys member reads as "off, nothing typed" and nothing is
-    // registered until the owner asks.
+    // v1.1: global keyboard shortcuts. Defaults on with the two directional chords typed, Ctrl+Alt+Shift+A to
+    // connect and Ctrl+Alt+Shift+D to disconnect (Earshot.Hotkeys.HotkeySettings), and every other shortcut empty.
+    // An older settings file that never typed a chord reads as on with those two, and a chord the owner cleared
+    // stays cleared.
     public Earshot.Hotkeys.HotkeySettings Hotkeys { get; set; } = new();
 
     // v1.1: spoken status. Defaults off (Earshot.Voice.VoiceOverSettings.Default), so an older settings
@@ -45,7 +48,7 @@ public sealed class EarshotSettings
 
     // v1.1: the AirPods widget's data side. Defaults on (Earshot.Widget.WidgetSettings.Default), so an
     // older settings file with no Widget member reads as the widget's own defaults; every feature that
-    // depends on the advertisement still fails closed on its own until phase 0 has proved what it needs.
+    // depends on the advertisement still fails closed on its own until the owner's battery set-ups have proved what it needs.
     public Earshot.Widget.WidgetSettings Widget { get; set; } = Earshot.Widget.WidgetSettings.Default;
 }
 

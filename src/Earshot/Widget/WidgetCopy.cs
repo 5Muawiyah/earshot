@@ -78,6 +78,8 @@ internal static class WidgetCopy
     public const string SetupRepeatForBuds = "To set up the buds, try again when they show different levels.";
     public const string SetupBudsReadTheSame = "Both buds read the same. Try again when they differ.";
     public const string SetupSaved = "Set-up saved";
+    public const string SetupNotSaved = "Couldn't save the set-up";
+    public const string SetupNotSavedSub = "Nothing was changed. Try again.";
     public const string SetupNeedsAnother = "Set up once more to confirm it. The battery shows once it is confirmed.";
     public const string SetupCouldNotRead = "Couldn't read your AirPods' battery";
     public const string SetupCapturesKept = "What was seen is kept on this PC.";

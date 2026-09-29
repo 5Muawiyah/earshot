@@ -23,9 +23,6 @@ public sealed record WidgetSnapshot(
     // built without it reads false.
     public bool SetupCouldNotRead { get; init; }
 
-    // A reading older than one hour counts as no recent reading. False when there is no reading at all.
-    public bool BatteryIsRecent(DateTimeOffset now) => BatteryReadAt is { } at && now - at <= WidgetTiming.BatteryRecentWindow;
-
     public static WidgetSnapshot Empty(WidgetWatcherState watcher, bool claimExists) => new(
         AirPodsWhere.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown,
         BatteryReadAt: null, EarReadAt: null, LidOpen: null, watcher, WatcherErrorCode: null, WatcherErrorName: null,

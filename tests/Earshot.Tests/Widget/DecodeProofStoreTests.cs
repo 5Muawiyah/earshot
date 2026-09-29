@@ -289,4 +289,57 @@ public sealed class DecodeProofStoreTests : IDisposable
 
         Assert.IsNull(store.Table.HighNibbleIsRight, "The table comes from the records, not from what the summary says.");
     }
+
+    private static string Summary(int ownedMessages, string? first, string? last, bool proved) =>
+        "{\"schemaVersion\":1,\"evaluatedAtUtc\":\"2026-09-01T00:00:00+00:00\",\"records\":0,\"fields\":{}," +
+        "\"broadcastWhilePlayingFromThisPc\":{\"ownedMessages\":" + ownedMessages + ",\"firstAtUtc\":" + (first is null ? "null" : "\"" + first + "\"") +
+        ",\"lastAtUtc\":" + (last is null ? "null" : "\"" + last + "\"") + ",\"proved\":" + (proved ? "true" : "false") + "},\"notes\":[]}";
+
+    // Proved is worked out again from the count and the times the file holds, never taken as written: a file that says
+    // proved with figures that do not amount to it proves nothing, and says so in the log.
+    [TestMethod]
+    public void AProvedFlagTheFilesOwnFiguresDoNotSupportIsNotBelieved()
+    {
+        (string Name, string Text)[] lies =
+        [
+            ("no messages", Summary(0, null, null, proved: true)),
+            ("too few messages", Summary(19, "2026-09-01T00:00:00+00:00", "2026-09-01T00:02:00+00:00", proved: true)),
+            ("too short a span", Summary(25, "2026-09-01T00:00:00+00:00", "2026-09-01T00:00:59+00:00", proved: true)),
+            ("no times", Summary(25, null, null, proved: true)),
+        ];
+        foreach ((string name, string text) in lies)
+        {
+            File.WriteAllText(ProofFile, text);
+            var log = new CapturingLog();
+
+            var store = new DecodeProofStore(SetupFolder, ProofFile, log, _clock);
+
+            Assert.IsNull(store.BroadcastsWhilePlayingFromThisPc, name + ": a proved flag with no figures behind it proves nothing.");
+            Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "do not amount to that"), name + ": the log says the flag was not believed.");
+        }
+    }
+
+    [TestMethod]
+    public void AProvedFlagTheFilesOwnFiguresSupportIsBelievedWhetherOrNotItIsSetAndAnUnsetOneIsRecomputed()
+    {
+        File.WriteAllText(ProofFile, Summary(21, "2026-09-01T00:00:00+00:00", "2026-09-01T00:01:00+00:00", proved: true));
+        Assert.AreEqual(true, new DecodeProofStore(SetupFolder, ProofFile, _log, _clock).BroadcastsWhilePlayingFromThisPc, "Twenty-one messages over a minute.");
+
+        File.WriteAllText(ProofFile, Summary(21, "2026-09-01T00:00:00+00:00", "2026-09-01T00:01:00+00:00", proved: false));
+        Assert.AreEqual(true, new DecodeProofStore(SetupFolder, ProofFile, _log, _clock).BroadcastsWhilePlayingFromThisPc,
+            "The figures amount to it, so an unset flag is worked out as proved: the file's flag decides nothing either way.");
+    }
+
+    [TestMethod]
+    public void AnObservationThatRunsBackwardsInTimeStartsAgain()
+    {
+        File.WriteAllText(ProofFile, Summary(30, "2026-09-01T00:05:00+00:00", "2026-09-01T00:00:00+00:00", proved: true));
+        var log = new CapturingLog();
+
+        var store = new DecodeProofStore(SetupFolder, ProofFile, log, _clock);
+
+        Assert.IsNull(store.BroadcastsWhilePlayingFromThisPc);
+        Assert.AreEqual(0, store.OwnedMessagesCounted);
+        Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "runs backwards in time"));
+    }
 }

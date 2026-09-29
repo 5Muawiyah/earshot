@@ -12,6 +12,7 @@ internal sealed class ClaimStore
     private readonly string _path;
     private readonly ILog _log;
     private readonly Func<DateTimeOffset> _now;
+    private readonly Func<string, BatterySetupRecord?>? _setupRecord;
     private readonly Lock _gate = new();
     private WidgetClaim? _current;
     private Task _pendingWrite = Task.CompletedTask;
@@ -22,9 +23,16 @@ internal sealed class ClaimStore
     {
     }
 
+    // setupRecord: reads the set-up record a claim names, or null when there is none. A claim is only ever trusted with
+    // that record beside it and agreeing with it; without one (tests of the store on its own) that check is not made.
+    public ClaimStore(string path, ILog log, Func<string, BatterySetupRecord?> setupRecord)
+        : this(path, log, static () => DateTimeOffset.UtcNow, setupRecord)
+    {
+    }
+
     // Test-only: supplies "now" directly, so a claim whose ClaimedAtUtc is in the future can be exercised
     // without waiting for the real clock to catch up to a fixture's fixed date.
-    internal ClaimStore(string path, ILog log, Func<DateTimeOffset> now)
+    internal ClaimStore(string path, ILog log, Func<DateTimeOffset> now, Func<string, BatterySetupRecord?>? setupRecord = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(log);
@@ -33,6 +41,7 @@ internal sealed class ClaimStore
         _path = path;
         _log = log;
         _now = now;
+        _setupRecord = setupRecord;
         lock (_gate)
         {
             _current = Load();
@@ -285,24 +294,31 @@ internal sealed class ClaimStore
             return false;
         }
 
-        // The threshold is whatever the set-up measured, so it is checked for being a plausible signal, not
-        // against any constant.
-        if (claim.SignalThresholdDbm is > 0 or < -127)
+        // The threshold is the one the set-up rules derive from the weakest message the set-up saw, so a claim whose
+        // threshold is anything else (a hand-edited file that would let a stranger's signal pass) was not made by a
+        // set-up. The other figures must be in order and come from at least the messages a candidate needs.
+        if (claim.SignalMinDbm > claim.SignalMedianDbm || claim.SignalMedianDbm > claim.SignalMaxDbm ||
+            claim.SignalMinDbm < SetupRules.WeakestSignalDbm || claim.SignalMaxDbm > 0 || claim.SignalSamples < SetupRules.MinMessages)
         {
-            _log.Warn("The widget claim's signal threshold is outside -127 to 0 dBm, so nothing is claimed: " + _path);
+            _log.Warn("The widget claim's signal figures are out of order or out of range, so nothing is claimed: " + _path);
             return false;
         }
 
-        if (claim.SignalMinDbm > claim.SignalMedianDbm || claim.SignalMedianDbm > claim.SignalMaxDbm ||
-            claim.SignalMinDbm < -127 || claim.SignalMaxDbm > 0 || claim.SignalThresholdDbm > claim.SignalMinDbm || claim.SignalSamples < 1)
+        if (claim.SignalThresholdDbm != SetupRules.ThresholdFor(claim.SignalMinDbm))
         {
-            _log.Warn("The widget claim's signal figures are out of order or out of range, so nothing is claimed: " + _path);
+            _log.Warn("The widget claim's signal threshold is not the set-up rules' " + SetupRules.SignalMarginDb +
+                " dB under its weakest message, so nothing is claimed: " + _path);
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(claim.SetupRecord) || claim.SetupRecord.Length > 128 || Path.GetFileName(claim.SetupRecord) != claim.SetupRecord)
         {
             _log.Warn("The widget claim does not name a set-up record, so nothing is claimed: " + _path);
+            return false;
+        }
+
+        if (_setupRecord is not null && !AgreesWithItsSetupRecord(claim))
+        {
             return false;
         }
 
@@ -313,6 +329,29 @@ internal sealed class ClaimStore
         if (claim.ClaimedAtUtc > _now())
         {
             _log.Warn("The widget claim file is dated in the future, so nothing is claimed: " + _path);
+            return false;
+        }
+
+        return true;
+    }
+
+    // The claim is made from a set-up record and names it, so the record must be there and say the same: the model and
+    // colour of its newest documented-form message, its signal figures, its threshold and its message count. A claim
+    // with no such record beside it, or one that disagrees, is not trusted.
+    private bool AgreesWithItsSetupRecord(WidgetClaim claim)
+    {
+        BatterySetupRecord? record = _setupRecord!(claim.SetupRecord);
+        if (record?.Candidate is not { LastOkMessage: { } message } candidate)
+        {
+            _log.Warn("The widget claim names a set-up record that is not there or holds no documented-form message, so nothing is claimed: " + _path);
+            return false;
+        }
+
+        if (message.ModelHigh != claim.ModelHigh || message.ModelLow != claim.ModelLow || message.Colour != claim.Colour ||
+            candidate.RssiMin != claim.SignalMinDbm || candidate.RssiMedian != claim.SignalMedianDbm || candidate.RssiMax != claim.SignalMaxDbm ||
+            candidate.ThresholdDbm != claim.SignalThresholdDbm || candidate.Messages != claim.SignalSamples)
+        {
+            _log.Warn("The widget claim does not agree with the set-up record it names, so nothing is claimed: " + _path);
             return false;
         }
 

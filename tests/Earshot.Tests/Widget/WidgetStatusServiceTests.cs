@@ -424,6 +424,47 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNull(snapshot.EarReadAt);
     }
 
+    // The record cannot be written (here, a file stands where its folder should be): the proof and the claim are not
+    // touched, the card is told plainly, and nothing is reported as set up.
+    [TestMethod]
+    public async Task ASetupWhoseRecordCannotBeSavedChangesNeitherTheProofNorTheClaimAndSaysSo()
+    {
+        var store = NewClaimStore();
+        DecodeProofStore proof = NewProof();
+        using WidgetStatusService service = NewService(store, proof: proof);
+        service.Start();
+        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
+        File.WriteAllText(_temp.File("setup"), "a file where the folder should be");
+
+        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80, box: 50));
+
+        Assert.AreEqual(BatterySetupResultStatus.NotSaved, result.Status);
+        Assert.IsEmpty(proof.Records, "A record that was not written is not counted.");
+        Assert.IsNull(store.Current, "No claim names a record that is not there.");
+        Assert.IsFalse(service.Current.ClaimExists);
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "could not be saved, so the proof and the claim were left as they were"));
+        Assert.IsFalse(_log.Has(LogLevel.Info, "Battery set-up saved:"), "It must not log a save that did not happen.");
+    }
+
+    // The claim store keeps only the newer of two claims, so a set-up must never lose to the claim before it, even
+    // when the clock reads earlier than that claim's date or the same: the new claim's date is one second past the old.
+    [TestMethod]
+    public async Task ARepeatSetupWithTheClockAtOrBeforeTheOldClaimsDateStillReplacesIt()
+    {
+        var store = NewClaimStore();
+        DateTimeOffset oldDate = _clock.GetUtcNow().AddHours(1);
+        store.Save(SampleClaim() with { ClaimedAtUtc = oldDate, SetupRecord = "setup-older.json" });
+        DecodeProofStore proof = NewProof();
+        using WidgetStatusService service = NewService(store, proof: proof);
+        service.Start();
+        BatterySetupListen listen = await ListenAsync(service, batteryB: 0x05);
+
+        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(50, 50, 50));
+
+        Assert.AreEqual(result.RecordFileName, store.Current!.SetupRecord, "The new claim replaced the older one.");
+        Assert.AreEqual(oldDate.AddSeconds(1), store.Current.ClaimedAtUtc, "Its date is one second past the older claim's.");
+    }
+
     // Runs one real listening window over the test's fake source: enough messages from one sender, the newest a
     // documented-form message with the given battery bytes.
     private async Task<BatterySetupListen> ListenAsync(
@@ -1151,18 +1192,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
         var service = NewService(store, proof: proof);
         service.Start();
 
-        Task<BatterySetupListen> listening = service.ListenForSetupAsync(CancellationToken.None);
-        for (int i = 0; i < 4; i++)
-        {
-            _source.Raise(new AdvertisementSample(
-                ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x05), -60, _clock.GetUtcNow(), SenderTag: 1));
-        }
+        BatterySetupListen listen = await ListenAsync(service, batteryB: 0x05);   // the owner's case was heard
 
-        service.Close(); // closes while the listening window is still open
+        service.Close(); // closes while the owner is still choosing what the iPhone shows
         int changedBeforeCompletion = _changedEvents.Count;
 
-        _clock.Advance(WidgetTiming.SetupListenWindow);
-        BatterySetupListen listen = await listening;
         service.CompleteSetup(listen, SetupRecordFixtures.Picks(50, 50, 50));
 
         Assert.IsFalse(service.Current.ClaimExists, "A set-up completing after Close must not be applied to the closed service.");
@@ -1879,18 +1913,6 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         Assert.AreEqual(true, service.BroadcastObserved(), "The production constructor reads the store's observation.");
         Assert.IsFalse(service.Current.AutoPauseAvailable, "Still off: no in-ear bit is proved, and none can be by a set-up.");
-    }
-
-    [TestMethod]
-    public void BatteryIsRecentTurnsFalseAfterOneHour()
-    {
-        DateTimeOffset readAt = new(2026, 9, 29, 12, 0, 0, TimeSpan.Zero);
-        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { BatteryReadAt = readAt };
-
-        Assert.IsTrue(snapshot.BatteryIsRecent(readAt.AddMinutes(59)), "59 minutes: recent.");
-        Assert.IsTrue(snapshot.BatteryIsRecent(readAt.AddMinutes(60)), "Exactly an hour is still recent.");
-        Assert.IsFalse(snapshot.BatteryIsRecent(readAt.AddMinutes(61)), "61 minutes: no recent reading.");
-        Assert.IsFalse(WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true).BatteryIsRecent(readAt), "No reading at all is not recent.");
     }
 
     // Every line the set-up logs carries numbers, statuses and a file name: no byte, no model or colour byte, no tag.

@@ -3,10 +3,14 @@ using System.Text.Json.Serialization;
 
 namespace Earshot.Widget;
 
-// Everything one set-up saw, kept as one file under the widget's data folder and never rewritten: the
-// candidate's messages (the documented form's first nine bytes, any other form whole), the signal statistics,
-// the derived threshold, what the owner said his iPhone showed, and the outcome. No address, no sender tag,
-// no name and no encrypted byte ever reaches it. The picks are evidence for DecodeProof only.
+// Everything one set-up saw, kept as one file under the widget's data folder: the candidate's messages, the signal
+// statistics, the derived threshold, what the owner said his iPhone showed, and the outcome. A file is written once
+// and never replaced (BatterySetupStore.Save refuses to overwrite one).
+//
+// A message of the documented form is kept as its first nine bytes only, never the encrypted bytes after them. A
+// message of any other form is kept whole, as received, because it is the only evidence of what that form is; Earshot
+// does not know what those bytes are, so it cannot promise what they do not hold. There is no field here for a
+// device address, a sender tag or a name, and none is ever passed in. The picks are evidence for DecodeProof only.
 public sealed record BatterySetupRecord(
     int SchemaVersion,
     DateTimeOffset StartedAtUtc,
@@ -21,8 +25,8 @@ public sealed record BatterySetupRecord(
 {
     public const int CurrentSchemaVersion = 1;
 
-    // The file this record is kept in. Digits are separated by dots so no log line that names it carries a
-    // run of hex digits long enough to be mistaken for a payload.
+    // The file this record is kept in. Digits are separated by dots, so a log line that names it has no run of digits
+    // that could be read as payload bytes.
     [JsonIgnore]
     public string FileName => "setup-" + EndedAtUtc.UtcDateTime.ToString("yyyy'.'MM'.'dd'T'HH'.'mm'.'ss'Z'", CultureInfo.InvariantCulture) + ".json";
 

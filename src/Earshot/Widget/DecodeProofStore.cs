@@ -196,10 +196,26 @@ internal sealed class DecodeProofStore
             return;
         }
 
+        if (observation.FirstAtUtc is { } first && observation.LastAtUtc is { } last && first > last)
+        {
+            _log.Warn("The decode proof summary's observation runs backwards in time, so it starts again: " + _proofFile);
+            return;
+        }
+
         _ownedMessages = observation.OwnedMessages;
         _firstAt = observation.FirstAtUtc;
         _lastAt = observation.LastAtUtc;
-        _broadcastProved = observation.Proved;
+
+        // Proved is worked out again from the count and the times the file holds, never taken as written: a file that
+        // says proved with figures that do not amount to it (a hand edit, a damaged write) proves nothing.
+        bool supported = _ownedMessages >= BroadcastProofMessages && _firstAt is { } firstAt && _lastAt is { } lastAt &&
+                         lastAt - firstAt >= BroadcastProofSpan;
+        if (observation.Proved && !supported)
+        {
+            _log.Warn("The decode proof summary says the broadcast is proved, but its own count and times do not amount to that, so it is not: " + _proofFile);
+        }
+
+        _broadcastProved = supported;
     }
 
     private void WriteProofFile()

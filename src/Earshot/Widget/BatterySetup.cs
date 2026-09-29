@@ -53,6 +53,7 @@ public sealed record BatterySetupPicks(
 }
 
 // SavedNeedsAnother: the record is kept and read, but one record proves nothing, so nothing is shown yet.
-public enum BatterySetupResultStatus { CaseSetUp, BatterySetUp, CaseSetUpBudsSame, SavedNeedsAnother, CouldNotRead }
+// NotSaved: the record could not be written, so nothing was proved or claimed.
+public enum BatterySetupResultStatus { CaseSetUp, BatterySetUp, CaseSetUpBudsSame, SavedNeedsAnother, NotSaved, CouldNotRead }
 
 public sealed record BatterySetupResult(BatterySetupResultStatus Status, string RecordFileName, DecodeProofResult Proof);

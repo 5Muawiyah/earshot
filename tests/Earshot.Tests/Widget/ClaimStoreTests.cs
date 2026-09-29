@@ -156,17 +156,111 @@ public sealed class ClaimStoreTests
         }
     }
 
+    // The threshold is the one the set-up rules derive from the weakest message, ten decibels under it and never below
+    // the floor a signal can have, so a claim written by a set-up always loads.
     [TestMethod]
-    public void AThresholdAnywhereInsideTheRangeIsUsedWhateverItIs()
+    public void TheThresholdTheSetUpRulesDeriveLoadsAtAnySignalIncludingTheFloor()
+    {
+        (int Min, int Median, int Max, int Threshold)[] made =
+        [
+            (-60, -58, -55, -70),
+            (-100, -90, -80, -110),
+            (-120, -110, -100, -127),   // ten under would be -130: the floor
+            (-127, -120, -100, -127),
+        ];
+        foreach ((int min, int median, int max, int threshold) in made)
+        {
+            using var temp = new TempFolder();
+            string path = temp.File("claim.json");
+            File.WriteAllText(path, Json(threshold: threshold, min: min, median: median, max: max));
+
+            var store = new ClaimStore(path, new CapturingLog());
+
+            Assert.IsNotNull(store.Current, "A threshold of " + threshold + " under a weakest message of " + min + " is what the rules make.");
+            Assert.AreEqual(threshold, store.Current.SignalThresholdDbm);
+            Assert.AreEqual(threshold, SetupRules.ThresholdFor(min));
+        }
+    }
+
+    // A hand-edited threshold, above or below what the rules make, would let a stranger's signal pass or lock the
+    // owner's out, so it is not a claim.
+    [TestMethod]
+    public void AThresholdThatIsNotWhatTheSetUpRulesMakeIsNoClaim()
+    {
+        (int Min, int Threshold)[] wrong =
+        [
+            (-60, -60),    // at the weakest message: no margin
+            (-60, -65),    // half the margin
+            (-60, -80),    // a wider margin than the rules make
+            (-60, -127),   // wide open
+            (-120, -128),
+        ];
+        foreach ((int min, int threshold) in wrong)
+        {
+            using var temp = new TempFolder();
+            string path = temp.File("claim.json");
+            File.WriteAllText(path, Json(threshold: threshold, min: min, median: min + 2, max: min + 5));
+            var log = new CapturingLog();
+
+            var store = new ClaimStore(path, log);
+
+            Assert.IsNull(store.Current, "A threshold of " + threshold + " under " + min + " is not what a set-up derives.");
+            Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "threshold"), "Refused with the reason.");
+        }
+    }
+
+    [TestMethod]
+    public void AClaimFromFewerMessagesThanACandidateNeedsIsNoClaim()
     {
         using var temp = new TempFolder();
         string path = temp.File("claim.json");
-        File.WriteAllText(path, Json(threshold: -127, min: -100, median: -90, max: -80));
+        File.WriteAllText(path, Json(samples: SetupRules.MinMessages - 1));
 
-        var store = new ClaimStore(path, new CapturingLog());
+        Assert.IsNull(new ClaimStore(path, new CapturingLog()).Current);
+    }
 
-        Assert.IsNotNull(store.Current, "No constant is compared with: any plausible threshold loads.");
-        Assert.AreEqual((sbyte)-127, store.Current!.SignalThresholdDbm);
+    // The claim is made from a set-up record and names it: with that record beside it and agreeing, it loads; with the
+    // record missing, unusable or saying something else, it does not.
+    [TestMethod]
+    public void AClaimIsTrustedOnlyWithTheSetUpRecordItNamesBesideItAndAgreeingWithIt()
+    {
+        BatterySetupRecord Record(sbyte min = -60, sbyte threshold = -70, int messages = 12, byte colour = 0xEE)
+        {
+            ProximityMessage message = SetupRecordFixtures.Message(8, 4) with { Colour = colour, ModelHigh = WidgetFixtures.ModelHigh, ModelLow = WidgetFixtures.ModelLow };
+            var candidate = new BatterySetupCandidate(messages, messages, 0, min, -58, -55, threshold, [], message);
+            return new BatterySetupRecord(1, new DateTimeOffset(2026, 9, 26, 23, 59, 0, TimeSpan.Zero), new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero),
+                BatterySetupListenStatus.Found, "1.1.0", 40, 12, candidate, [], SetupRecordFixtures.Picks(40, 80));
+        }
+
+        (string Name, BatterySetupRecord? Record, bool Loads)[] cases =
+        [
+            ("agrees", Record(colour: WidgetFixtures.Colour), true),
+            ("no record", null, false),
+            ("another colour", Record(colour: (byte)(WidgetFixtures.Colour + 1)), false),
+            ("another weakest message", Record(colour: WidgetFixtures.Colour, min: -61, threshold: -71), false),
+            ("another message count", Record(colour: WidgetFixtures.Colour, messages: 11), false),
+        ];
+        foreach ((string name, BatterySetupRecord? record, bool loads) in cases)
+        {
+            using var temp = new TempFolder();
+            string path = temp.File("claim.json");
+            File.WriteAllText(path, Json());
+            var log = new CapturingLog();
+            string? asked = null;
+
+            var store = new ClaimStore(path, log, setupRecord: n =>
+            {
+                asked = n;
+                return record;
+            }, now: () => new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero));
+
+            Assert.AreEqual(SetupRecordName, asked, name + ": the record the claim names is the one asked for.");
+            Assert.AreEqual(loads, store.Current is not null, name);
+            if (!loads)
+            {
+                Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Warn, "set-up record"), name + ": refused with the reason.");
+            }
+        }
     }
 
     [TestMethod]

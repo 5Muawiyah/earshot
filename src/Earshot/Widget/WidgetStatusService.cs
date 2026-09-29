@@ -372,8 +372,16 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             listen.AppleSectionsSeen, listen.ProximityItemsSeen, candidate, listen.OtherSenders, picks);
 
         string? saved = proof.Setups.Save(record);
+        if (saved is null)
+        {
+            // Without the record on disk the proof would count a set-up that is gone at the next start, and a claim
+            // would name a record nobody can read: neither is updated, and the owner is told plainly.
+            _log.Warn("Battery set-up: the record " + record.FileName + " could not be saved, so the proof and the claim were left as they were.");
+            return new BatterySetupResult(BatterySetupResultStatus.NotSaved, record.FileName, proof.Result);
+        }
+
         _log.Info(
-            "Battery set-up saved: " + (saved ?? record.FileName) + "; picks L " + picks.Left + " R " + picks.Right + " Case " + picks.Case +
+            "Battery set-up saved: " + saved + "; picks L " + picks.Left + " R " + picks.Right + " Case " + picks.Case +
             ", charging " + YesNo(picks.LeftCharging) + "/" + YesNo(picks.RightCharging) + "/" + YesNo(picks.CaseCharging) + ".");
 
         proof.AddRecord(record);
