@@ -226,6 +226,13 @@ $tests = @(
         Settles = 'Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.'
         Needs = 'Set up, tray running, "Show on the taskbar" ticked, AirPods paired, time for a long sitting.'
         Halves = 'one, but it takes a while'
+    },
+    [ordered]@{
+        Number = '20'; Script = '20-ServiceHandBack.ps1'
+        Title = 'Hand back by the service when Earshot is not running'
+        Settles = 'Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone.'
+        Needs = 'Set up, hand-back service installed and running, AirPods connected and playing, able to shut down and start again.'
+        Halves = 'two (a full shut down between them)'
     }
 )
 

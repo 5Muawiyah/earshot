@@ -69,7 +69,8 @@ param(
         'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
-        'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case = '',
+        'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
+        'service-not-run', 'service-partial', 'service-over-budget')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -148,7 +149,7 @@ $tests = @(
     # case carries none of them), so handback-started fails and the finding stays null rather than
     # reading a missing line as 0.
     [ordered]@{ Number = '17'; Id = '17-handback-on-shutdown'; Script = '17-HandBackOnShutdown.ps1'; Halves = @('first', 'resume'); Extra = @()
-        Cases = @('none', 'one', 'two', 'declined-start', 'handback-cut-short', 'handback-not-reached') }
+        Cases = @('none', 'one', 'two', 'declined-start', 'handback-cut-short', 'handback-not-reached', 'service-not-run') }
     # no-sleep-event: no Kernel-Power 42 or 107 at all, so sleep-happened is inconclusive and so is
     # the run overall. handback-cut-short: the same shape as 17's, on the sleep prefix, where the
     # block was never sent either, so handback-finished-or-sent fails. repaged-at-wake: the render
@@ -157,6 +158,12 @@ $tests = @(
     [ordered]@{ Number = '18'; Id = '18-handback-on-sleep'; Script = '18-HandBackOnSleep.ps1'; Halves = @('first'); Extra = @()
         Cases = @('none', 'one', 'two', 'no-sleep-event', 'handback-cut-short', 'repaged-at-wake') }
     [ordered]@{ Number = '19'; Id = '19-widget'; Script = '19-Widget.ps1'; Halves = @('first'); Extra = @() }
+    # service-not-run: 17's and 20's own case, the hand-back service wrote no status file, so service-ran fails and every
+    # finding read from that file stays null. service-partial: the sink node was refused (CR_REMOVE_VETOED) and stayed refused
+    # after the one retry, and the service control manager recorded an error for the service. service-over-budget: the status
+    # file's own figures say the block took 9,500 ms. declined-start: as 09's.
+    [ordered]@{ Number = '20'; Id = '20-service-handback'; Script = '20-ServiceHandBack.ps1'; Halves = @('first', 'resume'); Extra = @()
+        Cases = @('none', 'one', 'two', 'declined-start', 'service-not-run', 'service-partial', 'service-over-budget') }
 )
 
 $defaultCases = @('none', 'one', 'two')
@@ -363,6 +370,10 @@ function Invoke-Half
 #   14-set-device-refusal|first          yes, 1, 0   set-device never touches the nodes; nothing renders
 #   15-uninstall-reversal|first          yes, 1, 0   uninstall allows, install does not re-block; nothing renders
 #   15-uninstall-reversal|resume          yes, 1, 0   stays Allowed from the first half; the offer blocks; nothing renders
+#   17-handback-on-shutdown|first  no-on-purpose, 0, 0   the reason is always given once ready
+#   17-handback-on-shutdown|resume        yes, 0, 0   stays Blocked; nothing to offer
+#   20-service-handback|first      no-on-purpose, 0, 0   the reason is always given once ready
+#   20-service-handback|resume            yes, 0, 0   stays Blocked; nothing to offer
 $script:AtRestDefaults = @{
     '00-restore|first'                   = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
     '01-a2dp-oneshot|first'              = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 1 }
@@ -390,6 +401,8 @@ $script:AtRestDefaults = @{
     '17-handback-on-shutdown|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '18-handback-on-sleep|first'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '19-widget|first'                    = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '20-service-handback|first'          = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
+    '20-service-handback|resume'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
 }
 
 # What the expectations for one case say should have been recorded, against what was. The

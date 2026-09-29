@@ -524,35 +524,42 @@
         'declined-start' = @{ Overall = 'inconclusive'; Criteria = @{} }
         'handback-cut-short' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
         'handback-not-reached' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
+        'service-not-run' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }
     }
     '17-handback-on-shutdown|resume' = @{
         none = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'fail'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'inconclusive'
-                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail' } }
+                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail'; 'service-ran' = 'fail' } }
         one  = @{ Overall = 'pass'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'pass'; 'handback-started' = 'pass'; 'handback-disconnect-confirmed' = 'pass'
-                'handback-block-sent' = 'pass'; 'handback-finished' = 'pass'; 'shutdown-was-clean' = 'pass' }
-            FindingsInclude = @{ 'handBackFinishedMs' = 303; 'handBackDisconnectMs' = 37 } }
+                'handback-block-sent' = 'pass'; 'handback-finished' = 'pass'; 'shutdown-was-clean' = 'pass'; 'service-ran' = 'pass' }
+            FindingsInclude = @{ 'handBackFinishedMs' = 303; 'handBackDisconnectMs' = 37; 'serviceReason' = 'already blocked'
+                'servicePreshutdownMs' = 250; 'serviceResult' = 'success'; 'serviceVetoSeen' = 'no' } }
         two  = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'pass'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'pass'
-                'handback-block-sent' = 'pass'; 'handback-finished' = 'pass'; 'shutdown-was-clean' = 'pass' } }
+                'handback-block-sent' = 'pass'; 'handback-finished' = 'pass'; 'shutdown-was-clean' = 'pass'; 'service-ran' = 'pass' } }
         'declined-start' = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'fail'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'inconclusive'
-                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail' } }
+                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail'; 'service-ran' = 'fail' } }
         'handback-cut-short' = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'pass'; 'handback-started' = 'pass'; 'handback-disconnect-confirmed' = 'pass'
-                'handback-block-sent' = 'pass'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'pass' }
+                'handback-block-sent' = 'pass'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'pass'; 'service-ran' = 'fail' }
             FindingsInclude = @{ 'handBackCutShortStillRunning' = 'block' } }
         'handback-not-reached' = @{ Overall = 'fail'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'end-session-logged' = 'fail'; 'handback-started' = 'fail'; 'handback-disconnect-confirmed' = 'inconclusive'
-                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail' }
+                'handback-block-sent' = 'fail'; 'handback-finished' = 'fail'; 'shutdown-was-clean' = 'fail'; 'service-ran' = 'fail' }
             FindingsInclude = @{ 'handBackFinishedMs' = $null; 'handBackDisconnectMs' = $null } }
+        'service-not-run' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'end-session-logged' = 'pass'; 'handback-started' = 'pass'; 'handback-disconnect-confirmed' = 'pass'
+                'handback-block-sent' = 'pass'; 'handback-finished' = 'pass'; 'shutdown-was-clean' = 'pass'; 'service-ran' = 'fail' }
+            FindingsInclude = @{ 'serviceReason' = $null; 'servicePreshutdownMs' = $null; 'serviceResult' = $null; 'serviceVetoSeen' = 'no-evidence' } }
     }
 
     # ------------------------------------------------------ 18 hand back on sleep
@@ -648,5 +655,58 @@
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
                 'caseOpenToggleLinesSeen' = 2; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
+    }
+
+    # ------------------------------------------------------ 20 hand back by the service
+    # The fake owner ends the Earshot task in Task Manager, so the tray is gone while the AirPods stay connected. The status
+    # files the fake service left decide the second half: none, declined-start and service-not-run wrote none; one and two
+    # wrote a good one; service-partial wrote one with a refused node (and the control manager recorded an error for the
+    # service); service-over-budget wrote one whose own times say 9,500 ms.
+    '20-service-handback|first' = @{
+        none = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' }
+            FindingsInclude = @{ 'serviceStateAtShutdown' = 'running'; 'serviceWorkingSetBytes' = 'any'; 'test17Result' = 'not-run' } }
+        one  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' }
+            FindingsInclude = @{ 'serviceStateAtShutdown' = 'running'; 'serviceWorkingSetBytes' = 'any'; 'handBackMirrorAtShutdown' = 'True' } }
+        two  = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
+        'declined-start' = @{ Overall = 'inconclusive'; Criteria = @{} }
+        'service-not-run' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
+        'service-partial' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
+        'service-over-budget' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
+    }
+    '20-service-handback|resume' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'fail'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'inconclusive'
+                'shutdown-was-clean' = 'fail'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'serviceResult' = $null; 'serviceVetoSeen' = 'no-evidence'; 'serviceRetryTook' = 'no-evidence'; 'serviceEventIds' = '7024'; 'serviceState' = 'running' } }
+        one  = @{ Overall = 'pass'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'pass'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'servicePreshutdownMs' = 250; 'serviceResult' = 'success'; 'serviceReason' = 'already blocked'; 'serviceVetoSeen' = 'no'
+                'serviceRetryTook' = 'no-veto'; 'serviceEventIds' = '7024'; 'serviceState' = 'running'; 'restartedNotShutDown' = 'no' } }
+        two  = @{ Overall = 'pass'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'pass'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' } }
+        'declined-start' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'fail'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'inconclusive'
+                'shutdown-was-clean' = 'fail'; 'service-no-error-event' = 'pass' } }
+        'service-not-run' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'fail'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'inconclusive'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'servicePreshutdownMs' = $null; 'serviceResult' = $null; 'serviceReason' = $null } }
+        'service-partial' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'fail'; 'service-in-budget' = 'pass'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'fail' }
+            FindingsInclude = @{ 'serviceResult' = 'partial'; 'serviceVetoSeen' = 'yes'; 'serviceRetryTook' = 'no'; 'servicePreshutdownMs' = 250 } }
+        'service-over-budget' = @{ Overall = 'fail'; Criteria = @{
+                'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
+                'service-ran' = 'pass'; 'service-blocked' = 'pass'; 'service-in-budget' = 'fail'
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'servicePreshutdownMs' = 9500 } }
     }
 }

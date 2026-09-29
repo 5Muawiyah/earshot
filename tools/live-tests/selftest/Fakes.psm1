@@ -122,6 +122,8 @@ $script:StartStates = @{
     '17-handback-on-shutdown|resume'     = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '18-handback-on-sleep|first'         = @{ NodeState = 'Blocked'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
     '19-widget|first'                    = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '20-service-handback|first'          = @{ NodeState = 'Allowed'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
+    '20-service-handback|resume'         = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
 }
 
 # The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
@@ -165,6 +167,7 @@ $script:Answers = [ordered]@{
     'did the airpods connect to this pc by themselves' = 'no'
     'is "hand back at shut down and sleep" ticked'     = 'yes'
     'did the airpods go back to your phone'            = 'yes'
+    'did you restart the computer'                     = 'no'
     'did it take the airpods back by itself'           = 'no'
     'did earshot ever cut the connection'              = 'no'
     'did the list show your airpods and your phone'    = 'yes'
@@ -216,6 +219,19 @@ $script:CaseItemCounts = @{
     'atrest-render-active' = 0; 'atrest-disconnect-declined' = 0; 'atrest-disconnect-not-confirmed' = 0; 'atrest-audio-unreadable' = 0
     'declined-start' = 0
     'handback-cut-short' = 0; 'handback-not-reached' = 0; 'no-sleep-event' = 1; 'repaged-at-wake' = 1
+
+    # test 17 and test 20: the hand-back service's own cases. Each looks like the shared "one" for every log line and
+    # list, and differs only in the status file the service wrote (Write-FakeStatusFiles below).
+    'service-not-run' = 1; 'service-partial' = 1; 'service-over-budget' = 1
+}
+
+# How many status files the hand-back service wrote, per case: the shared none, one and two write 0, 1 and 2 (so the
+# script that reads them sees the same three counts as for every other list), the three service cases their own
+# shape, and every other case none. A status file for another verb is always written as well, newer than the
+# service's, so a script that took the newest status file whatever its verb would read the wrong one.
+$script:StatusFileCounts = @{
+    none = 0; one = 1; two = 2
+    'service-not-run' = 0; 'service-partial' = 1; 'service-over-budget' = 1
 }
 
 function Initialize-FakeMachine
@@ -229,7 +245,8 @@ function Initialize-FakeMachine
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
-            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
+            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
+        'service-not-run', 'service-partial', 'service-over-budget')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -254,10 +271,11 @@ function Initialize-FakeMachine
     }
 
     $script:World = [ordered]@{
-        NodeState  = $start.NodeState
-        Render     = $start.Render
-        Protection = $start.Protection
-        SetUp      = $start.SetUp
+        NodeState   = $start.NodeState
+        Render      = $start.Render
+        Protection  = $start.Protection
+        SetUp       = $start.SetUp
+        TrayRunning = $true
     }
 
     # test 18's own case: the resume check never got the chance to re-block, because this computer
@@ -287,7 +305,8 @@ function New-FakeSandbox
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
-            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
+            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
+        'service-not-run', 'service-partial', 'service-over-budget')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -397,6 +416,7 @@ function New-FakeSandbox
         -Value $lines -Encoding UTF8
 
     Write-FakeMachineFiles -DataFolder $data -BlockAtBoot $true -Items $items
+    Write-FakeStatusFiles -DataFolder $data -Case $Case
 
     # atrest-config-missing is the real failure shape Get-BlockAtBootSetting sees when
     # config.json is not there: Read-EarshotJsonFile returns $null without throwing, the same as
@@ -425,7 +445,7 @@ function Write-FakeMachineFiles
 
     New-Item -ItemType Directory -Force -Path $DataFolder | Out-Null
     Set-Content -LiteralPath (Join-Path $DataFolder 'config.json') `
-        -Value (@{ BlockAtBoot = $BlockAtBoot } | ConvertTo-Json) -Encoding UTF8
+        -Value ([ordered]@{ SchemaVersion = 1; BlockAtBoot = $BlockAtBoot; HandBackAtShutdown = $true } | ConvertTo-Json) -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $DataFolder 'device.json') `
         -Value ([ordered]@{ Address = $script:PinnedAddress; ContainerId = $script:ContainerId } | ConvertTo-Json) -Encoding UTF8
 
@@ -438,6 +458,82 @@ function Write-FakeMachineFiles
 
     Set-Content -LiteralPath (Join-Path $DataFolder 'protection.json') `
         -Value ([ordered]@{ DisabledServices = $disabled; PendingProtect = $null } | ConvertTo-Json -Depth 5) -Encoding UTF8
+}
+
+# The status files in the machine folder. The hand-back service writes one with the verb preshutdown for each
+# shut down it handled; the tray's own gate runs write others, with other verbs, which a script must skip. Every
+# file is stamped an hour ahead like the log lines, so it falls after the shutdown time the script reads them from.
+function Write-FakeStatusFiles
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$DataFolder,
+        [Parameter(Mandatory = $true)][string]$Case
+    )
+
+    $ahead = (Get-Date).ToUniversalTime().AddHours(1)
+    $stamp = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'"
+    $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    $count = 0
+    if ($script:StatusFileCounts.ContainsKey($Case)) { $count = $script:StatusFileCounts[$Case] }
+    $sinkNode = 'BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001005D_PID&2038\8&' + $script:PinnedAddress + '&0&' + $script:PinnedAddress + '_C00000000'
+
+    for ($i = 0; $i -lt $count; $i++)
+    {
+        $started = $ahead.AddSeconds($i)
+        $milliseconds = 250
+        $result = 'success'
+        $exitCode = 0
+        $state = 'Blocked'
+        $steps = @(
+            [ordered]@{ Step = 'gate-run-lock'; Ok = $true; Code = 0; CodeName = 'ERROR_SUCCESS'; Detail = 'Global\Earshot.Gate.RunLock' }
+            [ordered]@{ Step = 'preshutdown'; Ok = $true; Code = 0; CodeName = 'S_OK'; Detail = 'already blocked' }
+        )
+
+        if ($Case -eq 'service-over-budget') { $milliseconds = 9500 }
+        if ($Case -eq 'service-partial')
+        {
+            # The sink node refused with CR_REMOVE_VETOED (23) and stayed refused after the one retry.
+            $result = 'partial'
+            $exitCode = 2
+            $state = 'Mixed'
+            $steps = @(
+                [ordered]@{ Step = 'gate-run-lock'; Ok = $true; Code = 0; CodeName = 'ERROR_SUCCESS'; Detail = 'Global\Earshot.Gate.RunLock' }
+                [ordered]@{ Step = ('cm-disable:' + $sinkNode); Ok = $false; Code = 23; CodeName = 'CR_REMOVE_VETOED'; Detail = 'A driver or app refused to let the node go.' }
+                [ordered]@{ Step = 'preshutdown'; Ok = $true; Code = 0; CodeName = 'S_OK'; Detail = ('block sent at ' + $started.ToString($stamp, $invariant)) }
+                [ordered]@{ Step = ('cm-disable:' + $sinkNode); Ok = $false; Code = 23; CodeName = 'CR_REMOVE_VETOED'; Detail = 'A driver or app refused to let the node go.' }
+            )
+        }
+
+        $nonce = ('{0:x32}' -f ($i + 1))
+        Set-Content -LiteralPath (Join-Path $DataFolder ('status-' + $nonce + '.json')) -Encoding UTF8 -Value ([ordered]@{
+                SchemaVersion  = 1
+                Nonce          = $nonce
+                Verb           = 'preshutdown'
+                StartedUtc     = $started.ToString($stamp, $invariant)
+                FinishedUtc    = $started.AddMilliseconds($milliseconds).ToString($stamp, $invariant)
+                Result         = $result
+                ExitCode       = $exitCode
+                State          = $state
+                Steps          = $steps
+                StepsTruncated = $false
+            } | ConvertTo-Json -Depth 6)
+    }
+
+    # A block the tray asked for, newer than any of the above.
+    $other = $ahead.AddMinutes(5)
+    $otherNonce = ('{0:x32}' -f 255)
+    Set-Content -LiteralPath (Join-Path $DataFolder ('status-' + $otherNonce + '.json')) -Encoding UTF8 -Value ([ordered]@{
+            SchemaVersion  = 1
+            Nonce          = $otherNonce
+            Verb           = 'block'
+            StartedUtc     = $other.ToString($stamp, $invariant)
+            FinishedUtc    = $other.AddMilliseconds(300).ToString($stamp, $invariant)
+            Result         = 'success'
+            ExitCode       = 0
+            State          = 'Blocked'
+            Steps          = @([ordered]@{ Step = ('cm-disable:' + $sinkNode); Ok = $true; Code = 0; CodeName = 'CR_SUCCESS'; Detail = 'Disabled until it is allowed again.' })
+            StepsTruncated = $false
+        } | ConvertTo-Json -Depth 6)
 }
 
 # ------------------------------------------------------------------- the reports
@@ -555,6 +651,37 @@ function Get-FakeTask
     }
 
     return [ordered]@{ setUp = $script:World.SetUp; tasks = $rows }
+}
+
+# What `probe service` writes for a machine whose hand-back service is registered as setup registers it and running.
+# processId is this process's own, so the working set the script reads back is a real one and never a made-up figure.
+function Get-FakeService
+{
+    return [ordered]@{
+        target        = 'service'
+        name          = 'EarshotHandBack'
+        present       = $true
+        readable      = $true
+        summary       = 'running'
+        state         = 'running'
+        stateCode     = 4
+        startType     = 2
+        serviceType   = 16
+        processId     = $PID
+        imagePath     = ('"' + (Join-Path $script:Context.ProgramFolder 'Earshot.exe') + '" service')
+        account       = 'LocalSystem'
+        displayName   = 'Earshot hand-back'
+        preshutdownMs = 10000
+        sddl          = 'D:P(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLORC;;;AU)'
+        problems      = @()
+        steps         = @([ordered]@{ step = 'service-query'; ok = $true; code = 0; codeName = 'ERROR_SUCCESS' })
+    }
+}
+
+# Whether the Earshot tray icon is still running in the fake machine: true until the owner is told to end its task.
+function Test-FakeTrayRunning
+{
+    return [bool]$script:World.TrayRunning
 }
 
 function Get-FakeTopology
@@ -832,7 +959,17 @@ function Get-FakePowerEvents
     if ($counts.ContainsKey($fake.Case)) { $count = $counts[$fake.Case] }
     if ($fake.Case -eq 'handback-cut-short' -or $fake.Case -eq 'repaged-at-wake') { $count = 4 }
 
-    return , @($all | Select-Object -First $count)
+    # A service that ended with an error is in the System log in every case, another vendor's, which a script that reads
+    # by service name must not count. The hand-back service's own shows only in the case built for it.
+    $scm = @(
+        [ordered]@{ utc = '2026-09-22T01:32:10.000Z'; id = 7024; provider = 'Service Control Manager'; message = 'The Fake Vendor Update service terminated with the following service-specific error: 5.' }
+    )
+    if ($fake.Case -eq 'service-partial')
+    {
+        $scm = $scm + @([ordered]@{ utc = '2026-09-22T01:31:44.000Z'; id = 7024; provider = 'Service Control Manager'; message = 'The Earshot hand-back service terminated with the following service-specific error: 3.' })
+    }
+
+    return , @(@($all | Select-Object -First $count) + @($scm))
 }
 
 # ------------------------------------------------------------- how a command moves the world
@@ -942,6 +1079,7 @@ function Get-FakeCommandAnswer
             'task' { $report = Get-FakeTask }
             'topology' { $report = Get-FakeTopology }
             'battery' { $report = Get-FakeBattery }
+            'service' { $report = Get-FakeService }
             default { $report = [ordered]@{ target = $Command[1] } }
         }
     }
@@ -1037,6 +1175,14 @@ function Update-FakeWorldForOwnerAction
     param([Parameter(Mandatory = $true)][string]$Text)
 
     $lower = $Text.ToLowerInvariant()
+
+    # test 20: the owner ends the Earshot task in Task Manager, so the tray is gone while the AirPods stay connected.
+    if ($lower.Contains('end task'))
+    {
+        $script:World.TrayRunning = $false
+        return
+    }
+
     foreach ($away in @('once more', 'stop using', 'disconnect the airpods'))
     {
         if ($lower.Contains($away))
@@ -1087,5 +1233,5 @@ Export-ModuleMember -Function `
     Initialize-FakeMachine, Get-FakeContext, New-FakeSandbox, Write-FakeMachineFiles,
     Get-FakeNodes, Get-FakeAudio, Get-FakeServices, Get-FakeTask, Get-FakeTopology,
     Get-FakeKsFilters, Get-FakeKsEvidence, Get-FakeGateEvidence, Get-FakeUnelevatedEvidence,
-    Get-FakeSweepEvidence, Get-FakeBattery, Get-FakePowerEvents, Test-FakeReached, Update-FakeWorld, Get-FakeCommandAnswer,
+    Get-FakeSweepEvidence, Get-FakeBattery, Get-FakeService, Test-FakeTrayRunning, Write-FakeStatusFiles, Get-FakePowerEvents, Test-FakeReached, Update-FakeWorld, Get-FakeCommandAnswer,
     Get-FakeAnswer, Get-FakeNote, Update-FakeWorldForOwnerAction, Write-FakeGap, Get-FakeEvidenceName
