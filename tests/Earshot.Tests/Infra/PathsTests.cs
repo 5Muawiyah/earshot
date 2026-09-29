@@ -126,4 +126,41 @@ public sealed class PathsTests
             Assert.ThrowsExactly<ArgumentException>(() => paths.StatusFile(bad));
         }
     }
+
+    // Every folder is fully qualified, so nothing a service or a SYSTEM task opens depends on its working directory.
+    [TestMethod]
+    public void EveryFolderIsFullyQualifiedWithAndWithoutARedirect()
+    {
+        using var temp = new TempFolder();
+
+        foreach (Paths paths in new[] { Paths.FromEnvironment(Env()), Paths.FromEnvironment(Env(dataRoot: temp.Path)) })
+        {
+            string[] folders =
+            [
+                paths.RoamingFolder, paths.LocalFolder, paths.MachineFolder, paths.InstallFolder, paths.LogFolder, paths.LiveTestFolder,
+                paths.WidgetFolder,
+            ];
+            foreach (string folder in folders)
+            {
+                Assert.IsTrue(Path.IsPathFullyQualified(folder), folder);
+            }
+
+            foreach (string file in new[] { paths.SettingsFile, paths.LogFile, paths.GateConfigFile, paths.DeviceIdentityFile, paths.ProtectionRecordFile, paths.InstalledExe, paths.WidgetClaimFile })
+            {
+                Assert.IsTrue(Path.IsPathFullyQualified(file), file);
+            }
+        }
+    }
+
+    // A folder Windows reports that is not fully qualified would put a path under the working directory.
+    [TestMethod]
+    [DataRow("Users\\me\\AppData")]
+    [DataRow("\\AppData")]
+    [DataRow("C:AppData")]
+    public void ASpecialFolderThatIsNotFullyQualifiedFailsClosed(string reported)
+    {
+        Assert.ThrowsExactly<InvalidOperationException>(() => Paths.FromEnvironment(Env(), _ => reported));
+        using var temp = new TempFolder();
+        Assert.ThrowsExactly<InvalidOperationException>(() => Paths.FromEnvironment(Env(dataRoot: temp.Path), _ => reported), "The install folder is never redirected.");
+    }
 }
