@@ -20,9 +20,17 @@ public sealed class HandBackMirrorTests
         // False: the gate accepts the request but config.json does not change.
         public bool Applies { get; set; } = true;
 
+        // True: the request is refused or fails, and config.json does not change.
+        public bool Fails { get; set; }
+
         public Task<ControllerResult> SetHandBackAtShutdownAsync(bool handBack, CancellationToken ct = default)
         {
             HandBackCalls.Add(handBack ? "on" : "off");
+            if (Fails)
+            {
+                return Task.FromResult(ControllerResult.Fail("Could not save Hand back", [StepOutcomes.NotAttempted("set-hand-back", "refused")]));
+            }
+
             if (Applies)
             {
                 inner.Status = inner.Status with { HandBackAtShutdownMirror = handBack };
@@ -189,6 +197,57 @@ public sealed class HandBackMirrorTests
 
         Assert.HasCount(1, rig.Block.HandBackCalls);
         Assert.AreEqual(1, Mirrors(rig));
+    }
+
+    // A request the gate refused or that failed leaves config.json as it was, so the next status read after the delay sends
+    // it again; the read that follows the failed operation itself, and any read before the delay is over, do not.
+    [TestMethod]
+    public void AFailedMirrorIsSentAgainByAStatusReadAfterTheDelayAndNotBefore()
+    {
+        using var rig = new Rig(setting: true, mirror: false);
+        rig.Block.Fails = true;
+        rig.Start();
+        rig.Pump(() => rig.Block.HandBackCalls.Count > 0);
+        rig.Pump(() => false, 300);
+        Assert.HasCount(1, rig.Block.HandBackCalls, "The read that follows the failed operation does not send it again.");
+
+        rig.Harness.Time.Advance(BlockCoordinator.HandBackMirrorRetryDelay - TimeSpan.FromSeconds(1));
+        rig.Coordinator.RefreshStatusAsync();
+        rig.Pump(() => false, 300);
+        Assert.HasCount(1, rig.Block.HandBackCalls, "Not before the delay is over.");
+
+        rig.Block.Fails = false;
+        rig.Harness.Time.Advance(TimeSpan.FromSeconds(2));
+        rig.Coordinator.RefreshStatusAsync();
+        rig.Pump(() => rig.Block.HandBackCalls.Count > 1);
+        rig.Pump(() => false, 300);
+
+        Assert.AreEqual("on,on", string.Join(",", rig.Block.HandBackCalls));
+        Assert.AreEqual(2, Mirrors(rig), "Each send is logged with its reason.");
+
+        rig.Harness.Time.Advance(TimeSpan.FromMinutes(5));
+        rig.Coordinator.RefreshStatusAsync();
+        rig.Pump(() => false, 300);
+        Assert.HasCount(2, rig.Block.HandBackCalls, "Once it went through, it is not sent again.");
+    }
+
+    [TestMethod]
+    public void AMenuTickThatFailedIsSentAgainByALaterStatusRead()
+    {
+        using var rig = new Rig(setting: true, mirror: true);
+        rig.Block.Fails = true;
+        rig.Start();
+
+        Task<ControllerResult> tick = rig.Coordinator.SetHandBackAtShutdownAsync(false);
+        rig.Pump(() => tick.IsCompleted);
+        Assert.IsFalse(tick.Result.IsSuccess);
+        rig.Harness.Settings.Update(s => s.HandBackOnShutdownAndSleep = false);
+        rig.Block.Fails = false;
+        rig.Harness.Time.Advance(BlockCoordinator.HandBackMirrorRetryDelay + TimeSpan.FromSeconds(1));
+        rig.Coordinator.RefreshStatusAsync();
+        rig.Pump(() => rig.Block.HandBackCalls.Count > 1);
+
+        Assert.AreEqual("off,off", string.Join(",", rig.Block.HandBackCalls));
     }
 
     [TestMethod]
