@@ -387,6 +387,7 @@ public sealed class TaskSchedulerGateTests
 
     [TestMethod]
     [DataRow(GateVerbs.Boot, Nonce, null)]
+    [DataRow(GateVerbs.Preshutdown, Nonce, null)]
     [DataRow("install", Nonce, null)]
     [DataRow(GateVerbs.Block, "nonce", null)]
     [DataRow(GateVerbs.Block, Nonce, "0A1B2C3D4E8C")]

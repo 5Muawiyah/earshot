@@ -43,6 +43,11 @@ public sealed class GateConfig
 {
     public int  SchemaVersion { get; set; } = 1;
     public bool BlockAtBoot   { get; set; } = true;   // owner: default ON. Canonical copy.
+
+    // Whether the hand-back service blocks the AirPods at shut down when the tray did not. The service cannot read the
+    // user's settings file, so the setting is copied here (sethandback-on and sethandback-off). A file written before
+    // the member existed has none, and reads as on, as the tray's own setting does.
+    public bool HandBackAtShutdown { get; set; } = true;
 }
 
 // SYSTEM-owned, %ProgramData%\Earshot\device.json. The identity the gate trusts.

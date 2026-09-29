@@ -91,6 +91,56 @@ public sealed class GateStoreTests
     }
 
     [TestMethod]
+    [DataRow(true, true)]
+    [DataRow(true, false)]
+    [DataRow(false, true)]
+    [DataRow(false, false)]
+    public void TheHandBackSettingRoundTripsBesideBlockAtBoot(bool blockAtBoot, bool handBack)
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+
+        Assert.IsTrue(store.WriteConfig(new GateConfig { BlockAtBoot = blockAtBoot, HandBackAtShutdown = handBack }).Ok);
+
+        GateRead<GateConfig> read = store.ReadConfig();
+        Assert.IsTrue(read.IsOk, read.Step.Detail);
+        Assert.AreEqual(blockAtBoot, read.Value!.BlockAtBoot);
+        Assert.AreEqual(handBack, read.Value.HandBackAtShutdown);
+        Assert.Contains("\"HandBackAtShutdown\": " + (handBack ? "true" : "false"), File.ReadAllText(store.ConfigFile), "The member is always written.");
+    }
+
+    // A config.json written before the member existed reads as on, the direction the at-rest rule owes.
+    [TestMethod]
+    public void AConfigWrittenBeforeTheHandBackMemberReadsAsHandBackOn()
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        File.WriteAllText(store.ConfigFile, "{\"SchemaVersion\":1,\"BlockAtBoot\":false}");
+
+        GateRead<GateConfig> read = store.ReadConfig();
+
+        Assert.IsTrue(read.IsOk, read.Step.Detail);
+        Assert.IsFalse(read.Value!.BlockAtBoot);
+        Assert.IsTrue(read.Value.HandBackAtShutdown);
+    }
+
+    [TestMethod]
+    [DataRow("{\"SchemaVersion\":1,\"BlockAtBoot\":true,\"HandBackAtShutdown\":\"true\"}")]
+    [DataRow("{\"SchemaVersion\":1,\"BlockAtBoot\":true,\"HandBackAtShutdown\":1}")]
+    [DataRow("{\"SchemaVersion\":1,\"BlockAtBoot\":true,\"HandBackAtShutdown\":null}")]
+    [DataRow("{\"SchemaVersion\":1,\"BlockAtBoot\":true,\"HandBackAtShutdown\":true,\"HandBackAtShutdown\":false}")]
+    [DataRow("{\"SchemaVersion\":1,\"BlockAtBoot\":true,\"HandBackAtShutdown\":true,\"Extra\":true}")]
+    [DataRow("{\"SchemaVersion\":1,\"HandBackAtShutdown\":true}")]
+    public void AHandBackMemberOfTheWrongShapeMakesTheConfigInvalid(string content)
+    {
+        using var temp = new TempFolder();
+        var store = new GateStore(temp.Path);
+        File.WriteAllText(store.ConfigFile, content);
+
+        Assert.AreEqual(GateReadStatus.Invalid, store.ReadConfig().Status);
+    }
+
+    [TestMethod]
     [DataRow("{\"SchemaVersion\":1}")]
     [DataRow("{\"BlockAtBoot\":true}")]
     [DataRow("{\"SchemaVersion\":2,\"BlockAtBoot\":true}")]

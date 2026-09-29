@@ -323,7 +323,7 @@ internal sealed class TaskSchedulerGate
 
     public GateRunResult Run(string taskName, string verb, string nonce, string? address, TimeSpan timeout, CancellationToken ct)
     {
-        if (!GateVerbs.All.Contains(verb) || verb == GateVerbs.Boot || !BoundaryValidation.IsNonce(nonce) ||
+        if (!GateVerbs.All.Contains(verb) || verb is GateVerbs.Boot or GateVerbs.Preshutdown || !BoundaryValidation.IsNonce(nonce) ||
             (verb == GateVerbs.SetDevice) != (address is not null) ||
             (address is not null && !BoundaryValidation.IsAddress12(address)))
         {

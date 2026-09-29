@@ -491,7 +491,8 @@ internal static partial class Program
         string nonce = args[2];
         string address = args.Count == 4 ? BoundaryValidation.Normalise(args[3]) : "";
 
-        if (!GateVerbs.All.Contains(verb) || verb == GateVerbs.Boot)
+        // preshutdown names the hand-back service's status file. It is never a request, so it is refused here as boot is.
+        if (!GateVerbs.All.Contains(verb) || verb is GateVerbs.Boot or GateVerbs.Preshutdown)
         {
             problem = "unknown verb";
             return false;
