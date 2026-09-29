@@ -275,6 +275,11 @@ public sealed class ForegroundChangeHookTests
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 
+    // The calling thread's active window. Unlike the foreground window, which belongs to the desktop taking
+    // input, this follows activation on whichever desktop the thread runs on, including a private one.
+    [DllImport("user32.dll")]
+    private static extern nint GetActiveWindow();
+
     // Pumps messages on this thread (out-of-context hook events arrive as messages) until the condition holds
     // or the time is up.
     private static bool PumpUntil(Func<bool> condition, TimeSpan limit)
@@ -327,6 +332,13 @@ public sealed class ForegroundChangeHookTests
             Assert.IsTrue(install.Ok, "Install: " + install.CodeName + " " + install.Detail);
 
             SetForegroundWindow(a.Handle);
+            // A host whose desktop never activates the test's own window (a hosted runner's is one) cannot show
+            // the hook delivering anything, so the test says so rather than failing or passing on nothing.
+            if (!PumpUntil(() => GetActiveWindow() == a.Handle, TimeSpan.FromSeconds(3)))
+            {
+                hook.Dispose();
+                Assert.Inconclusive("This desktop did not activate the test's own window, so no change could be delivered.");
+            }
             Assert.IsTrue(PumpUntil(() => events.Any(e => e.Args.Hwnd == a.Handle), TimeSpan.FromSeconds(3)),
                 "The hook must deliver the change to the first window. Log: " + string.Join(" | ", log.Entries.Select(e => e.Message)));
             SetForegroundWindow(b.Handle);

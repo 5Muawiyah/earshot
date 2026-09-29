@@ -1024,6 +1024,11 @@ public sealed class WidgetCardTests
 
     // A set-up page keeps the card open when it loses the focus; the ordinary card closes. Real activation, on
     // a private desktop, like the other activation checks.
+    // The calling thread's active window, which follows activation on a private desktop too (the foreground
+    // window belongs to the desktop taking input, so it cannot be used here).
+    [DllImport("user32.dll")]
+    private static extern nint GetActiveWindow();
+
     [TestMethod]
     public void ASetupViewDoesNotCloseOnDeactivate()
     {
@@ -1043,6 +1048,11 @@ public sealed class WidgetCardTests
             other.Show();
             other.Activate();
             Application.DoEvents();
+
+            // On a desktop that never activates the other window the card never loses the focus, so the check
+            // below would pass on nothing: say so instead.
+            if (GetActiveWindow() != other.Handle)
+                Assert.Inconclusive("This desktop did not activate the other window, so the card never lost the focus.");
 
             Assert.IsEmpty(reasons, "A set-up page never asks to close because it lost the focus.");
             Assert.IsTrue(card.Visible);
