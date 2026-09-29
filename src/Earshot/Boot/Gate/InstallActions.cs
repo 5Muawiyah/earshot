@@ -330,11 +330,15 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 //   5. register Gate, Protect and BootBlock, then read back each task's SDDL and XML and fail closed on any
 //      difference, removing the tasks again;
 //   6. register the hand-back service (ServicePlan), apply its pre-shutdown time-out and its access list, read
-//      the registration back and fail closed on any difference, removing the service and the tasks again, then
-//      start it, last of all, and wait for it to run.
+//      the registration back and fail closed on any difference, then start it, last of all, and wait for it to run.
+//      The service is only the backstop for a shut down with the tray gone; the tasks are what block at every boot. So a
+//      step of this stage that fails removes the half-registered service and nothing else: the verified tasks stay, the
+//      result is Partial, and a step names the failed calls with their raw codes and says the backstop is not set up.
 // A service left over from an earlier install is stopped first, before anything is copied, because it runs from the
-// install folder that the copy moves aside: a folder with a running image in it is not assumed movable. A service
-// that will not stop stops install with nothing replaced.
+// install folder that the copy moves aside: a folder with a running image in it is not assumed movable, so the stop is
+// finished only when the service's process has exited too. A service that will not stop stops install with nothing
+// replaced. If install then fails before the service is registered again, the service it stopped is started again, or
+// the log says it stays stopped until the computer restarts.
 // It never touches HKCU Run: the non-elevated tray owns its own startup value.
 internal sealed class InstallActions
 {
@@ -347,6 +351,10 @@ internal sealed class InstallActions
     private readonly IBluetoothServiceReader? _bluetooth;
     private readonly IServiceControl? _service;
     private bool _manifestMissing;
+
+    // Set when this run stopped a running service before the copy, so a failure before the service is registered again
+    // can start it again.
+    private bool _stoppedRunningService;
 
     // How long install waits for the service to stop before it copies, and to run once it is started. Waiting budgets
     // chosen here; nothing measured how long either takes.
@@ -380,6 +388,17 @@ internal sealed class InstallActions
 
     // For tests: the wait between polls of the service's state. Returning false stops waiting at once.
     internal Func<TimeSpan, bool> ServicePoll { get; init; } = DeviceChangeLock.SleepAndContinue;
+
+    // The install folder is moved aside and the new one moved in. A program still running from the folder (the tray that
+    // started an in-app update is still on its way out when setup begins) makes the move fail until it has let go, so a
+    // failed move is tried again a few times before install gives up, each attempt a step with its raw code. Waiting
+    // budgets chosen here: ten attempts half a second apart, about five seconds in all.
+    public const int FolderMoveAttempts = 10;
+
+    public static readonly TimeSpan FolderMoveDelay = TimeSpan.FromMilliseconds(500);
+
+    // For tests: the wait between two attempts. Returning false stops trying at once.
+    internal Func<TimeSpan, bool> FolderMoveWait { get; init; } = DeviceChangeLock.SleepAndContinue;
 
     // Nothing here is allowed to end the process without a record: an unexpected failure is logged and
     // returned with the steps taken so far, so a half-finished install is visible in the log and the exit code.
@@ -420,16 +439,19 @@ internal sealed class InstallActions
 
         if (!CopyApplication(steps))
         {
+            RestartEarlierService(steps);
             return new InstallResult(_manifestMissing ? GateExitCode.NoManifest : GateExitCode.Failed, steps);
         }
 
         if (!PrepareMachineFolder(steps))
         {
+            RestartEarlierService(steps);
             return new InstallResult(GateExitCode.FolderNotSecure, steps);
         }
 
         if (!WriteMachineFiles(request, steps))
         {
+            RestartEarlierService(steps);
             return new InstallResult(GateExitCode.Failed, steps);
         }
 
@@ -438,9 +460,11 @@ internal sealed class InstallActions
             return new InstallResult(GateExitCode.Failed, steps);
         }
 
+        // The boot block is set up and verified by now. The service is the backstop for a shut down with the tray gone, so
+        // when it cannot be set up the result says so and the tasks stay: Partial, never a setup that undoes the block.
         if (!RegisterService(steps))
         {
-            return new InstallResult(GateExitCode.Failed, steps);
+            return new InstallResult(GateExitCode.Partial, steps);
         }
 
         return new InstallResult(GateExitCode.Success, steps);
@@ -567,14 +591,14 @@ internal sealed class InstallActions
         if (Directory.Exists(install))
         {
             old = Path.Combine(parent, Path.GetFileName(install) + ".old-" + suffix);
-            if (!FileSteps.MoveFolder(install, old, "move-old-install", steps))
+            if (!FileSteps.MoveFolderWithRetry(install, old, "move-old-install", steps, FolderMoveAttempts, FolderMoveDelay, FolderMoveWait))
             {
                 FileSteps.DeleteTree(staging, "remove-staging", steps);
                 return false;
             }
         }
 
-        if (!FileSteps.MoveFolder(staging, install, "move-install", steps))
+        if (!FileSteps.MoveFolderWithRetry(staging, install, "move-install", steps, FolderMoveAttempts, FolderMoveDelay, FolderMoveWait))
         {
             if (old is not null)
             {
@@ -888,11 +912,9 @@ internal sealed class InstallActions
             return true;
         }
 
-        steps.Add(_service.Stop(ServicePlan.ServiceName));
-        StepOutcome waited = _service.WaitForState(ServicePlan.ServiceName, AdvApi32.SERVICE_STOPPED, ServiceWait, ServicePoll);
-        steps.Add(waited);
-        if (waited.Ok)
+        if (ServiceStopper.StopAndWait(_service, ServicePlan.ServiceName, read, ServiceWait, ServicePoll, steps))
         {
+            _stoppedRunningService = read.State == AdvApi32.SERVICE_RUNNING;
             return true;
         }
 
@@ -901,8 +923,36 @@ internal sealed class InstallActions
         return false;
     }
 
-    // Registers the service, applies every value of its plan, reads the registration back, and only then starts it. Any
-    // failure removes the service and the tasks again, so what install leaves is all of it or none.
+    // Install failed after it had stopped the earlier service and before it registered the service again, so the service
+    // is put back as it was: started. If that fails too, the record says so, so the owner knows there is no hand-back
+    // service until the computer restarts.
+    private void RestartEarlierService(List<StepOutcome> steps)
+    {
+        if (_service is null || !_stoppedRunningService)
+        {
+            return;
+        }
+
+        _stoppedRunningService = false;
+        StepOutcome started = _service.Start(ServicePlan.ServiceName);
+        steps.Add(started);
+        if (started.Ok)
+        {
+            started = _service.WaitForState(ServicePlan.ServiceName, AdvApi32.SERVICE_RUNNING, ServiceWait, ServicePoll);
+            steps.Add(started);
+        }
+
+        if (!started.Ok)
+        {
+            steps.Add(StepOutcomes.NotAttempted(ServiceSteps.Start,
+                "Setup stopped the Earshot hand-back service and could not start it again, so it stays stopped until the computer restarts."));
+        }
+    }
+
+    // Registers the service, applies every value of its plan, reads the registration back, and only then starts it. This is
+    // the backstop, not the main protection, so a failure here never touches the tasks: it removes what it registered
+    // (a half-registered service is not left behind), records what failed with the raw codes, and says plainly that the
+    // shut-down backstop is not set up. False in that case.
     private bool RegisterService(List<StepOutcome> steps)
     {
         if (_service is null)
@@ -910,13 +960,37 @@ internal sealed class InstallActions
             return true;
         }
 
+        int first = steps.Count;
+        bool registered = false;
+        if (TryRegisterService(steps, ref registered))
+        {
+            _log.Info("install: the hand-back service is registered and running.");
+            return true;
+        }
+
+        if (registered)
+        {
+            ServiceRemoval.Remove(_service, ServicePoll, steps);
+        }
+
+        string codes = string.Join("; ", steps.Skip(first).Where(x => !x.Ok).Select(x => x.Step + " " + x.CodeName + " (" + x.Code + ")"));
+        steps.Add(StepOutcomes.NotAttempted("service-backstop",
+            "The Earshot hand-back service could not be set up" + (codes.Length == 0 ? "" : " (" + codes + ")") +
+            ", so nothing hands the AirPods back at shut down when the tray is closed. The tasks are set up, so the AirPods are still blocked at every start. Set up again to try the service again."));
+        _log.Warn("install: the hand-back service could not be set up" + (codes.Length == 0 ? "." : ": " + codes + "."));
+        return false;
+    }
+
+    // registered: set once the control manager holds a registration this run created or changed, so the caller knows
+    // there is something to remove.
+    private bool TryRegisterService(List<StepOutcome> steps, ref bool registered)
+    {
         ServiceSpec spec = ServicePlan.Spec(_layout.InstallFolder);
-        ServiceQuery existing = _service.Query(ServicePlan.ServiceName);
+        ServiceQuery existing = _service!.Query(ServicePlan.ServiceName);
         if (existing.Presence == ServicePresence.Unknown)
         {
             steps.AddRange(existing.Steps.Where(s => !s.Ok));
             steps.Add(StepOutcomes.NotAttempted(ServiceSteps.Create, "Whether the Earshot hand-back service is registered could not be read."));
-            RemoveTasksAndService(steps);
             return false;
         }
 
@@ -931,30 +1005,39 @@ internal sealed class InstallActions
                     "The service from an earlier install is still marked for deletion. Restart, then set up again."));
             }
 
-            RemoveTasksAndService(steps);
             return false;
         }
 
+        registered = true;
         foreach (StepOutcome step in new[]
                  {
                      _service.SetDescription(spec.Name, spec.Description),
                      _service.SetPreshutdownTimeout(spec.Name, spec.PreshutdownTimeoutMs),
-                     _service.SetDacl(spec.Name, spec.Sddl),
                  })
         {
             steps.Add(step);
             if (!step.Ok)
             {
-                RemoveTasksAndService(steps);
                 return false;
             }
+        }
+
+        if (!ApplyUnsetValues(spec, steps))
+        {
+            return false;
+        }
+
+        StepOutcome dacl = _service.SetDacl(spec.Name, spec.Sddl);
+        steps.Add(dacl);
+        if (!dacl.Ok)
+        {
+            return false;
         }
 
         ServiceQuery read = _service.Query(spec.Name);
         steps.AddRange(read.Steps.Where(s => !s.Ok));
         if (!Accept(ServiceSteps.Verify, ServiceCheck.Verify(read, spec), steps))
         {
-            RemoveTasksAndService(steps);
             return false;
         }
 
@@ -967,18 +1050,45 @@ internal sealed class InstallActions
             started = running;
         }
 
-        if (!started.Ok)
-        {
-            RemoveTasksAndService(steps);
-            return false;
-        }
-
-        _log.Info("install: the hand-back service is registered and running.");
-        return true;
+        return started.Ok;
     }
 
-    // What every failure after the tasks exist does: the tasks and the service both go, so a half-finished setup never
-    // stays behind.
+    // What the plan leaves unset is set to that on a registration from an earlier install, so the registration is the
+    // plan's whatever it was: no failure action, no delayed start, no service security identifier, no trigger. A fresh
+    // service has none of them, so nothing is written for it. Only what differs is written, and a value that could not
+    // be read is written too. Required privileges are not written (see ServicePlan); the read-back refuses them.
+    private bool ApplyUnsetValues(ServiceSpec spec, List<StepOutcome> steps)
+    {
+        ServiceQuery current = _service!.Query(spec.Name);
+        var changes = new List<StepOutcome>();
+        if (current.FailureActionCount != 0 || !string.IsNullOrEmpty(current.FailureCommand))
+        {
+            changes.Add(_service.ClearFailureActions(spec.Name));
+        }
+
+        if (current.DelayedAutoStart != spec.DelayedAutoStart)
+        {
+            changes.Add(_service.SetDelayedAutoStart(spec.Name, spec.DelayedAutoStart));
+        }
+
+        if (current.ServiceSidType != spec.ServiceSidType)
+        {
+            changes.Add(_service.SetServiceSidType(spec.Name, spec.ServiceSidType));
+        }
+
+        // With none, the control manager refuses the call, so it is made only for a service that has some. A count that
+        // could not be read is left to the read-back.
+        if (current.TriggerCount is > 0)
+        {
+            changes.Add(_service.ClearTriggers(spec.Name));
+        }
+
+        steps.AddRange(changes);
+        return changes.All(c => c.Ok);
+    }
+
+    // What a failure in the task stage does: the tasks and any service both go, so a half-finished task setup never stays
+    // behind. The service stage does not use this: its failure leaves the verified tasks.
     private void RemoveTasksAndService(List<StepOutcome> steps)
     {
         RemoveTasks(steps);
@@ -1070,6 +1180,31 @@ internal static class FileSteps
         }
 
         return false;
+    }
+
+    // Moves a folder, trying again when the move fails, up to attempts tries with delay between them (wait returns false
+    // to stop trying). Every failed try is a step with its raw code, and the move that worked is a step too.
+    public static bool MoveFolderWithRetry(
+        string from, string to, string step, IList<StepOutcome> steps, int attempts, TimeSpan delay, Func<TimeSpan, bool> wait)
+    {
+        ArgumentNullException.ThrowIfNull(wait);
+        for (int attempt = 1; ; attempt++)
+        {
+            int before = steps.Count;
+            if (MoveFolder(from, to, step, steps))
+            {
+                return true;
+            }
+
+            if (attempt >= attempts || !wait(delay))
+            {
+                return false;
+            }
+
+            // The failed try is already the last step; say which one it was.
+            StepOutcome failed = steps[before];
+            steps[before] = failed with { Detail = "Attempt " + attempt + " of " + attempts + ": " + failed.Detail };
+        }
     }
 
     public static bool MoveFolder(string from, string to, string step, IList<StepOutcome> steps)

@@ -15,7 +15,9 @@ internal sealed record ServiceSpec(
     uint ErrorControl,
     string Account,
     uint PreshutdownTimeoutMs,
-    string Sddl);
+    string Sddl,
+    bool DelayedAutoStart = false,
+    uint ServiceSidType = 0);
 
 // The one always-on part of Earshot: a LocalSystem service that, when Windows starts to shut down, blocks the
 // pinned AirPods if the tray icon did not already hand them back. Registered by install, removed by uninstall.
@@ -36,7 +38,10 @@ internal sealed record ServiceSpec(
 //                    user-defined controls.
 //   Not set          failure actions (a queued restart cannot be cancelled and would fight uninstall), required
 //                    privileges (the privileges the device call needs are not documented), a service SID, triggers,
-//                    dependencies and a load order group
+//                    delayed start, dependencies and a load order group. "Not set" is checked, not assumed: the
+//                    read-back reads each of them, and install clears the ones it can when a registration from an
+//                    earlier install has them. Required privileges are only read: what an empty list would mean to the
+//                    control manager is not documented, and a list that cut the token down could stop the device call.
 // https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-createservicew
 // https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_preshutdown_info
 // https://learn.microsoft.com/en-us/windows/win32/services/service-security-and-access-rights
@@ -65,7 +70,11 @@ internal static class ServicePlan
         new(
             ServiceName, DisplayName, Description, ImagePath(installFolder),
             AdvApi32.SERVICE_WIN32_OWN_PROCESS, AdvApi32.SERVICE_AUTO_START, AdvApi32.SERVICE_ERROR_NORMAL,
-            AccountName, PreshutdownTimeoutMs, Sddl);
+            AccountName, PreshutdownTimeoutMs, Sddl, DelayedAutoStart: false, ServiceSidType: ServiceSidTypeNone);
+
+    // SERVICE_SID_TYPE_NONE.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_sid_info
+    public const uint ServiceSidTypeNone = 0;
 }
 
 // Checks a service read back from the control manager against its spec and lists every difference. An empty list
@@ -96,6 +105,42 @@ internal static class ServiceCheck
         Compare(problems, "image path", read.ImagePath, expected.ImagePath);
         Compare(problems, "account", read.Account, expected.Account);
         Compare(problems, "display name", read.DisplayName, expected.DisplayName);
+
+        // Everything the plan leaves unset, read back: a registration with a failure command, a restart, a trigger, a
+        // delayed start, a service security identifier or a cut-down token is not the one this plan describes.
+        if (read.FailureActionCount is null)
+        {
+            problems.Add("The failure actions could not be read.");
+        }
+        else if (read.FailureActionCount.Value != 0)
+        {
+            problems.Add("The service has " + read.FailureActionCount.Value + " failure action(s), not none.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(read.FailureCommand))
+        {
+            problems.Add("The service runs a command when it fails: " + read.FailureCommand + ".");
+        }
+
+        if (read.DelayedAutoStart is null)
+        {
+            problems.Add("The delayed start setting could not be read.");
+        }
+        else if (read.DelayedAutoStart.Value != expected.DelayedAutoStart)
+        {
+            problems.Add("The delayed start setting is " + (read.DelayedAutoStart.Value ? "on" : "off") + ", not " + (expected.DelayedAutoStart ? "on" : "off") + ".");
+        }
+
+        Compare(problems, "trigger count", read.TriggerCount, 0);
+        Compare(problems, "service security identifier type", read.ServiceSidType, expected.ServiceSidType);
+        if (read.RequiredPrivileges is null)
+        {
+            problems.Add("The required privileges could not be read.");
+        }
+        else if (read.RequiredPrivileges.Count != 0)
+        {
+            problems.Add("The service is limited to " + read.RequiredPrivileges.Count + " privilege(s): " + string.Join(", ", read.RequiredPrivileges) + ".");
+        }
 
         if (read.Sddl is null)
         {
