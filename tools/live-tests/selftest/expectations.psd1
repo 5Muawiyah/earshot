@@ -659,24 +659,28 @@
         none = @{ Overall = 'fail'; Criteria = @{
                 'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'fail'; 'handback-started' = 'fail'
                 'handback-disconnect-confirmed' = 'inconclusive'; 'handback-block-sent' = 'fail'; 'handback-finished-or-sent' = 'fail'
-                'resume-logged' = 'fail'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+                'resume-logged' = 'fail'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' }
+            FindingsInclude = @{ 'firstSleepWithEarshotInstalled' = 'yes' } }
         one  = @{ Overall = 'inconclusive'; Criteria = @{
                 'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'pass'; 'handback-started' = 'pass'
                 'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
                 'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' }
-            FindingsInclude = @{ 'handBackFinishedMs' = 280; 'handBackDisconnectMs' = 22 } }
+            FindingsInclude = @{ 'handBackFinishedMs' = 280; 'handBackDisconnectMs' = 22; 'firstSleepWithEarshotInstalled' = 'yes' } }
         two  = @{ Overall = 'fail'; Criteria = @{
                 'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'fail'; 'handback-started' = 'pass'
                 'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
-                'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+                'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' }
+            FindingsInclude = @{ 'firstSleepWithEarshotInstalled' = 'yes' } }
         'no-sleep-event' = @{ Overall = 'inconclusive'; Criteria = @{
                 'sleep-happened' = 'inconclusive'; 'suspend-logged' = 'pass'; 'handback-started' = 'pass'
                 'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
-                'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+                'resume-logged' = 'pass'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' }
+            FindingsInclude = @{ 'firstSleepWithEarshotInstalled' = 'yes' } }
         'handback-cut-short' = @{ Overall = 'fail'; Criteria = @{
                 'sleep-happened' = 'pass'; 'suspend-logged' = 'fail'; 'handback-started' = 'pass'
                 'handback-disconnect-confirmed' = 'fail'; 'handback-block-sent' = 'fail'; 'handback-finished-or-sent' = 'fail'
-                'resume-logged' = 'fail'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' } }
+                'resume-logged' = 'fail'; 'nodes-after-wake' = 'pass'; 'not-repaged-at-wake' = 'pass'; 'heard-handed-back' = 'pass' }
+            FindingsInclude = @{ 'firstSleepWithEarshotInstalled' = 'yes' } }
         # The render endpoint reads ACTIVE again once the owner is back (this computer re-paged the
         # AirPods, the point of this case), so the resume check never got the chance to re-block:
         # the nodes read Allowed, not Blocked, at the close. The closing step's own re-read is what
@@ -685,7 +689,7 @@
                 'sleep-happened' = 'pass'; 'suspend-logged' = 'pass'; 'handback-started' = 'pass'
                 'handback-disconnect-confirmed' = 'pass'; 'handback-block-sent' = 'pass'; 'handback-finished-or-sent' = 'pass'
                 'resume-logged' = 'pass'; 'nodes-after-wake' = 'fail'; 'not-repaged-at-wake' = 'fail'; 'heard-handed-back' = 'pass' }
-            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes'; 'firstSleepWithEarshotInstalled' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 1 } }
     }
 
@@ -714,11 +718,14 @@
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'pass'; 'bluetooth-off-then-on' = 'inconclusive'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
-                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass' }
+                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
+                'gauge-stays-on-top' = 'inconclusive' }
             FindingsInclude = @{
                 'claimFileExistsAtStart' = 'no'; 'batterySetupInMenu' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
                 'widgetAllSectionsSeen' = $null; 'widgetAppleSectionsSeen' = $null; 'widgetProximityItemsSeen' = $null
-                'caseOpenToggleLinesSeen' = 0; 'widgetWatcherStoppedLine' = $null; 'leftAtRest' = 'yes' }
+                'caseOpenToggleLinesSeen' = 0; 'widgetWatcherStoppedLine' = $null; 'leftAtRest' = 'yes'
+                'gaugeRaisedLines' = 0; 'gaugeLeftUnderLines' = 0; 'gaugeRingShown' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
         one  = @{ Overall = 'fail'; Criteria = @{
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
@@ -729,11 +736,14 @@
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
-                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass' }
+                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
+                'gauge-stays-on-top' = 'pass' }
             FindingsInclude = @{
                 'claimFileExistsAtStart' = 'no'; 'batterySetupInMenu' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
-                'caseOpenToggleLinesSeen' = 1; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes' }
+                'caseOpenToggleLinesSeen' = 1; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes'
+                'gaugeRaisedLines' = 1; 'gaugeLeftUnderLines' = 1; 'gaugeRingShown' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
         two  = @{ Overall = 'fail'; Criteria = @{
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
@@ -744,11 +754,14 @@
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
-                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass' }
+                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
+                'gauge-stays-on-top' = 'pass' }
             FindingsInclude = @{
                 'claimFileExistsAtStart' = 'no'; 'batterySetupInMenu' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
-                'caseOpenToggleLinesSeen' = 2; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes' }
+                'caseOpenToggleLinesSeen' = 2; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes'
+                'gaugeRaisedLines' = 2; 'gaugeLeftUnderLines' = 2; 'gaugeRingShown' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
     }
 

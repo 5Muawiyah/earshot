@@ -102,8 +102,10 @@ public sealed class HowToBlockTests
         // test 21 (pause on leave) adds 16 (five preconditions, three actions, two instructions and six
         // questions): 211. Test 16 (switching) adds 19 (six preconditions, three actions, four instructions and
         // six questions): 230. Test 19's set-up questions replace two claim questions and add a step and two more
-        // questions, three more with no how-to block: 233.
-        const int expectedMissingCount = 233;
+        // questions, three more with no how-to block: 233. Test 19's two gauge positions, the gauge staying on top,
+        // the second set-up, the ring and its colour and the one-hour rule add thirteen rows, three of which carry the
+        // find-the-icon block, so ten with none, and test 18's first-sleep question one more: 244.
+        const int expectedMissingCount = 244;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +
