@@ -57,10 +57,15 @@ internal sealed partial class GateStore
         MaxDepth = 8,
     };
 
-    public GateStore(string folder)
+    private readonly IFolderPinner? _pinner;
+
+    // pinner: when there is one, a status file is written only into a folder that was held open and checked at that moment
+    // (see IFolderPinner). The gate and the hand-back service pass the real one; a store over a test's temp folder does not.
+    public GateStore(string folder, IFolderPinner? pinner = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         Folder = folder;
+        _pinner = pinner;
     }
 
     public string Folder { get; }
@@ -364,7 +369,23 @@ internal sealed partial class GateStore
             }
         }
 
-        return WriteBytes(path, "write-status", bytes);
+        // The folder was checked when the run began, and a run can take seconds (and uninstall may remove the folder meanwhile),
+        // so it is held and checked again immediately before the write. Nothing is written into a folder that is now a link,
+        // is somewhere else, or no longer passes.
+        IDisposable? pin = null;
+        if (_pinner is not null)
+        {
+            pin = _pinner.Pin(Folder, out StepOutcome pinned);
+            if (pin is null)
+            {
+                return pinned with { Step = "write-status" };
+            }
+        }
+
+        using (pin)
+        {
+            return WriteBytes(path, "write-status", bytes);
+        }
     }
 
     // Deletes status files beyond the newest MaxStatusFilesKept - 1 (leaving room for the one about to be

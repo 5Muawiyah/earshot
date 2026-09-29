@@ -236,7 +236,12 @@ internal sealed partial class GateActions
     }
 
     public static GateActions ForMachine(string machineFolder, ILog log) =>
-        new(new CfgMgr32NodeApi(), new GateStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System, new MachineGateMutex(), new BluetoothServiceApi());
+        new(new CfgMgr32NodeApi(), MachineStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System, new MachineGateMutex(), new BluetoothServiceApi());
+
+    // The store of the real machine folder: its status files are written only into a folder held open and checked at that
+    // moment.
+    internal static GateStore MachineStore(string machineFolder) =>
+        new(machineFolder, new WindowsFolderPinner(new NtfsFolderSecurity(), AclCheck.CheckMachineFolder));
 
     internal IGateRunLock RunLock => _runLock;
 

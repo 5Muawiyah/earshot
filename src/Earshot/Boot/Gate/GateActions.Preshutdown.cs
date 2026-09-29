@@ -75,7 +75,7 @@ internal sealed partial class GateActions
     // The gate the hand-back service runs: the real node API, the machine-wide run lock and no Bluetooth API, so the
     // service holds nothing that could turn a Bluetooth service on or off.
     public static GateActions ForPreshutdown(string machineFolder, ILog log) =>
-        new(new CfgMgr32NodeApi(), new GateStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System, new MachineGateMutex());
+        new(new CfgMgr32NodeApi(), MachineStore(machineFolder), new NtfsFolderSecurity(), log, TimeProvider.System, new MachineGateMutex());
 
     private sealed class PreshutdownDecision
     {
