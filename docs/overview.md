@@ -60,7 +60,7 @@ Top to bottom, with the exact wording:
 | `Speak status`, or `Speak status (no voice)` when no speech voice is installed | A tick, off by default, for this v1.1 feature. Clicking it does not itself speak anything. |
 | `Choose device...` | Lists the Bluetooth devices paired to this PC, so you can point Earshot at a different one, for instance if your AirPods were renamed, so that the default match "AirPods" no longer fits. Choosing one pins it, and points the elevated worker at the same device. A device that cannot play audio from this PC, a phone for instance, is refused. |
 | `Set up Earshot...` | Runs the one-time setup. Shown only while setup is still needed. |
-| `Exit` | Closes Earshot. With Block at boot on, it blocks the device nodes first. |
+| `Exit` | Closes Earshot. With Block at boot on, it blocks the device nodes first. With Hand back ticked and the AirPods connected to this PC, it lets them go first, then blocks the device nodes. |
 
 Once a keyboard shortcut is set and switched on, it is shown beside the
 item's own label, for instance `Connect (Ctrl+Alt+P)`.
