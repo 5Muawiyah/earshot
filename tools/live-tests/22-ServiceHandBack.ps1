@@ -101,7 +101,7 @@ try
         $ready = Show-Preconditions -Run $run -Preconditions @(
             'Earshot is installed from a release built from the current head, set up, and running in the tray.',
             'Block at boot is on.',
-            '"Hand back at shut down and sleep" is ticked in the menu.',
+            '"Hand back on shut down, sleep and Exit" is ticked in the menu.',
             'The Earshot hand-back service is installed and running (setup installs it; this test reads it before the shutdown).',
             'The AirPods are paired with this PC and available to connect.'
         ) -PhysicalActions @(

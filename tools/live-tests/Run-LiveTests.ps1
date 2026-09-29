@@ -221,14 +221,14 @@ $tests = @(
         Number = '17'; Script = '17-HandBackOnShutdown.ps1'
         Title = 'Hand back on shut down, then the next boot'
         Settles = 'Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone.'
-        Needs = 'Set up from a release build, tray running, Block at boot on, Hand back at shut down and sleep ticked, AirPods paired, able to power down.'
+        Needs = 'Set up from a release build, tray running, Block at boot on, Hand back on shut down, sleep and Exit ticked, AirPods paired, able to power down.'
         Halves = 'two'
     },
     [ordered]@{
         Number = '18'; Script = '18-HandBackOnSleep.ps1'
         Title = 'Hand back on sleep, then wake'
         Settles = 'Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes.'
-        Needs = 'Set up, tray running, Block at boot on, Hand back at shut down and sleep ticked, this PC able to sleep.'
+        Needs = 'Set up, tray running, Block at boot on, Hand back on shut down, sleep and Exit ticked, this PC able to sleep.'
         Halves = 'one, but it takes a while'
     },
     [ordered]@{

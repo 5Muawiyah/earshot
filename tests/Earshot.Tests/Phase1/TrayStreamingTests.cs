@@ -117,7 +117,7 @@ public sealed class TrayStreamingTests
             CollectionAssert.AreEqual(
                 Sequence.Of(
                     "Connect", "Play from a phone", "-",
-                    "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
+                    "Block at boot", "Hand back on shut down, sleep and Exit", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
                     "Speak status", "-",
                     "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold",
                     "Set up battery (Bluetooth is off)", "Name your other device...", "-",

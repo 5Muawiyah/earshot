@@ -127,6 +127,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string SetDeviceExitStep = "set-device-exit";
 
     private const uint ErrorCancelled = 1223;
+    private const string InstalledExecutableName = "Earshot.exe";
 
     private readonly ILog _log;
     private readonly ISettingsStore _settings;
@@ -140,6 +141,7 @@ internal sealed class BlockController : IBlockController, IDisposable
     private readonly IDisposable? _ownedWorker;
     private readonly IServiceControl? _service;
     private readonly string? _installFolder;
+    private readonly IInstalledFiles? _files;
     private int _serviceLogged;
     private readonly Lock _statusLock = new();
     private volatile bool _isSetUp;
@@ -157,7 +159,8 @@ internal sealed class BlockController : IBlockController, IDisposable
         ISystemWorker worker,
         IDisposable? ownedWorker = null,
         IServiceControl? service = null,
-        string? installFolder = null)
+        string? installFolder = null,
+        IInstalledFiles? files = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(settings);
@@ -178,6 +181,7 @@ internal sealed class BlockController : IBlockController, IDisposable
         _ownedWorker = ownedWorker;
         _service = service;
         _installFolder = installFolder;
+        _files = files;
     }
 
     // The real controller with a worker of its own. Constructing it reads the current user's SID and nothing
@@ -208,7 +212,7 @@ internal sealed class BlockController : IBlockController, IDisposable
         var gate = new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid,
             AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled, log);
         return new BlockController(log, settings, store, new CfgMgr32NodeReader(), gate, new ShellRunasLauncher(),
-            sid, Environment.ProcessPath, worker, ownedWorker, new WindowsServiceControl(), paths.InstallFolder);
+            sid, Environment.ProcessPath, worker, ownedWorker, new WindowsServiceControl(), paths.InstallFolder, new InstalledFileReader());
     }
 
     // \Earshot\Gate, \Earshot\Protect and \Earshot\BootBlock present and verified, as of the last status
@@ -356,7 +360,8 @@ internal sealed class BlockController : IBlockController, IDisposable
 
         bool blockAtBoot = configRead ? config.Value!.BlockAtBoot : blockAtBootKnown && new GateConfig().BlockAtBoot;
 
-        DeviceIdentity? identity = ResolveIdentity(steps);
+        DeviceIdentity? identity = ResolveIdentity(steps, out bool deviceFileDamaged);
+        (bool installDamaged, bool runningNewer) = installed ? ReadInstall(steps, deviceFileDamaged) : (false, false);
         NodeReadResult read = identity is null ? NodeReadResult.NoIdentity : _reader.Read(identity.ContainerId, identity.Address);
         steps.AddRange(read.Steps);
         BlockState state = tasks == TasksRead.Unknown
@@ -384,7 +389,37 @@ internal sealed class BlockController : IBlockController, IDisposable
             BlockAtBootKnown = blockAtBootKnown,
             TasksKnown = tasks != TasksRead.Unknown,
             HandBackAtShutdownMirror = configRead ? config.Value!.HandBackAtShutdown : null,
+            NeedsRepair = installDamaged,
+            RunningCopyIsNewer = runningNewer,
         };
+    }
+
+    // What the tasks do not show: the installed Earshot.exe is there, and the running copy is not newer than it. Only
+    // read once the tasks are verified, so a machine before setup logs nothing about a folder it never had. A file that
+    // could not be read, or that holds no version, is neither damaged nor older: its step, with the code, is recorded.
+    private (bool Damaged, bool RunningNewer) ReadInstall(List<StepOutcome> steps, bool deviceFileDamaged)
+    {
+        bool damaged = deviceFileDamaged;
+        bool runningNewer = false;
+        if (_files is null || _installFolder is null)
+        {
+            return (damaged, runningNewer);
+        }
+
+        InstalledFile installedFile = _files.Read(Path.Combine(_installFolder, InstalledExecutableName));
+        steps.Add(installedFile.Step);
+        if (!installedFile.Present)
+        {
+            damaged = true;
+        }
+        else if (installedFile.Version is { } installedVersion && !string.IsNullOrEmpty(_executable))
+        {
+            InstalledFile running = _files.Read(_executable);
+            steps.Add(running.Step);
+            runningNewer = running.Version is { } runningVersion && runningVersion > installedVersion;
+        }
+
+        return (damaged, runningNewer);
     }
 
     // One line for the tray's log per run saying how the hand-back service reads (running, stopped, missing, differs or
@@ -435,9 +470,12 @@ internal sealed class BlockController : IBlockController, IDisposable
     }
 
     // device.json when valid (what the gate acts on), otherwise the pinned settings, otherwise none.
-    private DeviceIdentity? ResolveIdentity(List<StepOutcome> steps)
+    // deviceFileDamaged: device.json is missing or not valid. One that could not be read is not counted, since a read
+    // that failed says nothing about the file.
+    private DeviceIdentity? ResolveIdentity(List<StepOutcome> steps, out bool deviceFileDamaged)
     {
         GateRead<DeviceIdentity> device = _store.ReadDevice();
+        deviceFileDamaged = device.Status is GateReadStatus.Missing or GateReadStatus.Invalid;
         if (device.IsOk)
         {
             return device.Value;

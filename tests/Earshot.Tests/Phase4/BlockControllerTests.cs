@@ -25,7 +25,7 @@ public sealed class BlockControllerTests
         private readonly TempFolder _temp = new();
         private readonly SystemWorker _worker;
 
-        public Harness(bool setUp = true, FakeNodeApi? nodes = null, IServiceControl? service = null)
+        public Harness(bool setUp = true, FakeNodeApi? nodes = null, IServiceControl? service = null, IInstalledFiles? files = null)
         {
             Nodes = nodes ?? RecordedNodes.Table();
             string machine = Path.Combine(_temp.Path, "ProgramData", "Earshot");
@@ -45,7 +45,7 @@ public sealed class BlockControllerTests
                 return !ct.IsCancellationRequested;
             });
             _worker = new SystemWorker(Log);
-            Controller = new BlockController(Log, Settings, Store, Nodes, gate, Launcher, TestUsers.Sid, Exe, _worker, null, service, InstallFolder);
+            Controller = new BlockController(Log, Settings, Store, Nodes, gate, Launcher, TestUsers.Sid, Exe, _worker, null, service, InstallFolder, files);
         }
 
         public GateStore Store { get; }
@@ -95,6 +95,153 @@ public sealed class BlockControllerTests
             _worker.Dispose();
             _temp.Dispose();
         }
+    }
+
+    // The installed and the running Earshot.exe as the status read sees them: a file that is there with a version,
+    // one that is missing, or one whose read failed.
+    private sealed class FakeInstalledFiles : IInstalledFiles
+    {
+        private readonly Dictionary<string, InstalledFile> _files = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<string> Reads { get; } = [];
+
+        public FakeInstalledFiles With(string path, string? version) =>
+            Put(path, new InstalledFile(true, version is null ? null : new Version(version), StepOutcomes.FromHResult("read-file-version", 0, path)));
+
+        public FakeInstalledFiles Missing(string path) =>
+            Put(path, new InstalledFile(false, null, StepOutcomes.FromHResult("read-file-version", unchecked((int)0x80070002), "Missing: " + path, ok: false)));
+
+        public FakeInstalledFiles Unreadable(string path) =>
+            Put(path, new InstalledFile(true, null, StepOutcomes.FromHResult("read-file-version", unchecked((int)0x80070020), path + ": in use")));
+
+        public InstalledFile Read(string path)
+        {
+            Reads.Add(path);
+            return _files[path];
+        }
+
+        private FakeInstalledFiles Put(string path, InstalledFile file)
+        {
+            _files[path] = file;
+            return this;
+        }
+    }
+
+    private static readonly string InstalledExe = Path.Combine(InstallFolder, "Earshot.exe");
+
+    // Tasks that read fine, with the installed Earshot.exe gone: setup puts the file back, and nothing else offers to.
+    [TestMethod]
+    public async Task AnInstallWhoseEarshotExeIsMissingNeedsRepair()
+    {
+        FakeInstalledFiles files = new FakeInstalledFiles().Missing(InstalledExe);
+        using var h = new Harness(files: files);
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.AreEqual(BlockState.Allowed, status.State, "The tasks read fine, so this is not NotSetUp.");
+        Assert.IsTrue(status.TasksInstalled);
+        Assert.IsTrue(status.NeedsRepair);
+        Assert.IsFalse(status.RunningCopyIsNewer);
+        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsFalse(TrayStatus.NeedsSetUp(status));
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "read-file-version"), "The failed read is on record with its code.");
+    }
+
+    // The same message a block gives when device.json is gone ("Boot block needs repair. Choose Set up Earshot.") must
+    // have the item it names on the menu.
+    [TestMethod]
+    public async Task AnInstallWithNoDeviceFileNeedsRepair()
+    {
+        FakeInstalledFiles files = new FakeInstalledFiles().With(InstalledExe, "1.2.0.0").With(Exe, "1.2.0.0");
+        using var h = new Harness(files: files);
+        File.Delete(h.Store.DeviceFile);
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.IsTrue(status.TasksInstalled);
+        Assert.IsTrue(status.NeedsRepair);
+        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.AreEqual(BlockController.NeedsRepairMessage, (await h.Controller.BlockAsync()).UserMessage);
+    }
+
+    // Tasks that run some other file than the installed Earshot.exe are not verified, so the state is NotSetUp, and
+    // that already offers setup. Recorded here because the damaged case was reported as unhandled.
+    [TestMethod]
+    public async Task TasksThatRunAnotherPathThanTheInstalledExeReadAsNotSetUp()
+    {
+        FakeInstalledFiles files = new FakeInstalledFiles().With(InstalledExe, "1.2.0.0").With(Exe, "1.2.0.0");
+        using var h = new Harness(setUp: false, files: files);
+        h.Tasks.InstallAll(@"D:\Somewhere\Else");
+        Assert.IsTrue(h.Store.WriteDevice(RecordedNodes.AirPods()).Ok);
+        Assert.IsTrue(h.Store.WriteConfig(new GateConfig()).Ok);
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.AreEqual(BlockState.NotSetUp, status.State);
+        Assert.IsFalse(status.TasksInstalled);
+        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsEmpty(files.Reads, "Before the tasks verify there is no installed file to ask about.");
+    }
+
+    [TestMethod]
+    public async Task ARunningCopyWithANewerFileVersionThanTheInstalledOneIsFlagged()
+    {
+        FakeInstalledFiles files = new FakeInstalledFiles().With(InstalledExe, "1.1.0.0").With(Exe, "1.2.0.0");
+        using var h = new Harness(files: files);
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.IsTrue(status.RunningCopyIsNewer);
+        Assert.IsFalse(status.NeedsRepair);
+        Assert.AreEqual(BlockState.Allowed, status.State);
+        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsFalse(TrayStatus.NeedsSetUp(status));
+    }
+
+    [TestMethod]
+    public async Task ACopyThatIsTheSameAsOrOlderThanTheInstalledOneIsNotFlagged()
+    {
+        foreach ((string installed, string running) in new[] { ("1.2.0.0", "1.2.0.0"), ("1.2.0.0", "1.1.9.0"), ("2.0.0.0", "1.9.9.9") })
+        {
+            FakeInstalledFiles files = new FakeInstalledFiles().With(InstalledExe, installed).With(Exe, running);
+            using var h = new Harness(files: files);
+
+            BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+            Assert.IsFalse(status.RunningCopyIsNewer, installed + " installed, " + running + " running");
+            Assert.IsFalse(status.NeedsRepair, installed + " installed, " + running + " running");
+            Assert.IsFalse(TrayStatus.OffersSetUp(status), installed + " installed, " + running + " running");
+        }
+    }
+
+    // A version that cannot be read is not a newer copy and not a damaged install: nothing is offered on a guess, and
+    // the failed step is kept.
+    [TestMethod]
+    public async Task AVersionThatCouldNotBeReadIsNeitherNewerNorDamaged()
+    {
+        FakeInstalledFiles files = new FakeInstalledFiles().Unreadable(InstalledExe);
+        using var h = new Harness(files: files);
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.IsFalse(status.NeedsRepair);
+        Assert.IsFalse(status.RunningCopyIsNewer);
+        Assert.IsFalse(TrayStatus.OffersSetUp(status));
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "read-file-version"));
+    }
+
+    [TestMethod]
+    public async Task AHealthyInstallOffersNothing()
+    {
+        FakeInstalledFiles files = new FakeInstalledFiles().With(InstalledExe, "1.2.0.0").With(Exe, "1.2.0.0");
+        using var h = new Harness(files: files);
+
+        BootBlockStatus status = await h.Controller.GetStatusAsync();
+
+        Assert.AreEqual(BlockState.Allowed, status.State);
+        Assert.IsFalse(status.NeedsRepair);
+        Assert.IsFalse(status.RunningCopyIsNewer);
+        Assert.IsFalse(TrayStatus.OffersSetUp(status));
     }
 
     [TestMethod]

@@ -138,6 +138,28 @@ public sealed class TrayStatusTests
         }
     }
 
+    // Setup is the only repair and the only update, and the install verb is not one a person can type, so the menu
+    // has to offer it for a damaged install and for a copy newer than the installed one as well as before setup.
+    // NeedsSetUp stays the "before setup" question the Block at boot click and the device choice ask.
+    [TestMethod]
+    public void SetUpIsOfferedBeforeSetupForARepairAndForANewerCopyButNotForAHealthyInstall()
+    {
+        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.NotSetUp)));
+        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Allowed) with { NeedsRepair = true }));
+        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Blocked) with { NeedsRepair = true }));
+        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Allowed) with { RunningCopyIsNewer = true }));
+        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Blocked) with { RunningCopyIsNewer = true }));
+
+        Assert.IsFalse(TrayStatus.OffersSetUp(null));
+        foreach (BlockState state in new[] { BlockState.Allowed, BlockState.Blocked, BlockState.Mixed, BlockState.Unknown, BlockState.NotFound })
+        {
+            Assert.IsFalse(TrayStatus.OffersSetUp(Block(state)), state.ToString());
+        }
+
+        Assert.IsFalse(TrayStatus.NeedsSetUp(Block(BlockState.Allowed) with { NeedsRepair = true }), "Only before setup does a click run setup in place of a block.");
+        Assert.IsFalse(TrayStatus.NeedsSetUp(Block(BlockState.Allowed) with { RunningCopyIsNewer = true }));
+    }
+
     [TestMethod]
     public void CardStatusUsesTheDesignedLines()
     {

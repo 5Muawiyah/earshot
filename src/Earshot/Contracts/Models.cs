@@ -70,6 +70,16 @@ public sealed record BootBlockStatus(
     // The hand-back setting as config.json records it, for the service that hands the AirPods back at shut down. Null
     // when the file was not read (missing, not valid or unreadable), which is no answer: nothing is sent from it.
     public bool? HandBackAtShutdownMirror { get; init; }
+
+    // True when the tasks read fine but the install behind them is damaged: the installed Earshot.exe is missing, or
+    // device.json is missing or not valid, so a block or an allow has nothing to act on. Setup puts it right. False
+    // whenever the tasks themselves are missing or differ (State is then NotSetUp, which already offers setup) and
+    // whenever a read failed, since a read that failed says nothing about the install.
+    public bool NeedsRepair { get; init; }
+
+    // True when the running copy of Earshot.exe carries a newer file version than the installed one, so setup would
+    // bring the install up to date. False when either version could not be read.
+    public bool RunningCopyIsNewer { get; init; }
 }
 
 public sealed record AudioProtectionSnapshot(

@@ -2,7 +2,7 @@ using Earshot.Contracts;
 
 namespace Earshot.App;
 
-// The menu tick for "Hand back at shut down and sleep" saves the setting, and this carries it to config.json for the
+// The menu tick for "Hand back on shut down, sleep and Exit" saves the setting, and this carries it to config.json for the
 // service that hands the AirPods back at shut down.
 internal sealed partial class TrayContext
 {

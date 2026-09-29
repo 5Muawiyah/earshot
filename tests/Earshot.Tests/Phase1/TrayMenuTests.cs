@@ -17,7 +17,7 @@ public sealed class TrayMenuTests
     private static readonly string[] DesignedOrder =
     [
         "Connect", "-",
-        "Block at boot", "Hand back at shut down and sleep", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
+        "Block at boot", "Hand back on shut down, sleep and Exit", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
         "Speak status", "-",
         "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold",
         "Set up battery (Bluetooth is off)", "Name your other device...", "-",
@@ -297,7 +297,7 @@ public sealed class TrayMenuTests
 
             Assert.IsFalse(Item("Disconnect").Enabled);
             Assert.AreEqual(CheckState.Unchecked, Item("Block at boot").CheckState);
-            Assert.AreEqual(CheckState.Checked, Item("Hand back at shut down and sleep").CheckState, "Default on.");
+            Assert.AreEqual(CheckState.Checked, Item("Hand back on shut down, sleep and Exit").CheckState, "Default on.");
             Assert.AreEqual(CheckState.Indeterminate, Item("Protect audio quality").CheckState);
             Assert.IsFalse(Item("Turns off the AirPods microphone").Enabled);
             Assert.IsTrue(Item("Exit").Enabled);

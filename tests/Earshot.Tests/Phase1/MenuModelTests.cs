@@ -34,7 +34,7 @@ public sealed class MenuModelTests
         Assert.AreEqual("Connect", state.Toggle.Text);
         Assert.AreEqual("Disconnect", Build(snapshot: Target(ConnectionState.Connected)).Toggle.Text);
         Assert.AreEqual("Block at boot", state.BlockAtBoot.Text);
-        Assert.AreEqual("Hand back at shut down and sleep", state.HandBack.Text);
+        Assert.AreEqual("Hand back on shut down, sleep and Exit", state.HandBack.Text);
         Assert.AreEqual("Protect audio quality", state.ProtectAudio.Text);
         Assert.AreEqual("Turns off the AirPods microphone", state.ProtectCaveat.Text);
         Assert.AreEqual("Open on startup", state.OpenOnStartup.Text);
@@ -210,6 +210,16 @@ public sealed class MenuModelTests
         Assert.IsTrue(state.SetUp.Enabled);
         Assert.IsTrue(state.ChooseDevice.Enabled);
         Assert.IsTrue(state.Exit.Enabled);
+    }
+
+    [TestMethod]
+    public void SetUpShowsForADamagedInstallAndForANewerCopyAndStaysHiddenForAHealthyOne()
+    {
+        Assert.IsTrue(Build(block: Block(BlockState.NotSetUp)).SetUp.Visible);
+        Assert.IsTrue(Build(block: Block(BlockState.Allowed) with { NeedsRepair = true }).SetUp.Visible);
+        Assert.IsTrue(Build(block: Block(BlockState.Blocked) with { RunningCopyIsNewer = true }).SetUp.Visible);
+        Assert.IsFalse(Build(block: Block(BlockState.Allowed)).SetUp.Visible);
+        Assert.IsFalse(Build(block: Block(BlockState.Blocked)).SetUp.Visible);
     }
 
     [TestMethod]

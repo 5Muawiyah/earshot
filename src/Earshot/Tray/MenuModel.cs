@@ -59,7 +59,7 @@ internal static class MenuModel
     // Kept exactly as StreamingLabels has it, referenced rather than duplicated, as with AnnouncerCopy below.
     public const string PlayFromPhone = StreamingLabels.Parent;
     public const string BlockAtBoot = "Block at boot";
-    public const string HandBackOnShutdownAndSleep = "Hand back at shut down and sleep";
+    public const string HandBackOnShutdownAndSleep = "Hand back on shut down, sleep and Exit";
     public const string ProtectAudioQuality = "Protect audio quality";
     public const string ProtectCaveat = "Turns off the AirPods microphone";
     public const string OpenOnStartup = "Open on startup";
@@ -154,7 +154,7 @@ internal static class MenuModel
                 Visible: true),
             NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
-            SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.NeedsSetUp(block)),
+            SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.OffersSetUp(block)),
             // A check reads GitHub and touches no device, so a connect in flight does not stop it; only another
             // update step does.
             CheckForUpdates: new MenuItemState(CheckForUpdates, Checked: false, Enabled: !updateInProgress, Visible: true),

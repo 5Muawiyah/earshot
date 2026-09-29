@@ -67,6 +67,10 @@ public sealed class NoBannedWordsInPlainModeTests
 
         "choose Exit from the Earshot menu",
         "exit it from the menu",
+
+        // The real tray menu item that hands the AirPods back, quoted the way the menu spells it. Its last word
+        // is the menu's own name for leaving Earshot.
+        "Hand back on shut down, sleep and Exit",
     };
 
     private static IReadOnlyList<WordingEntry> LoadWording() =>
