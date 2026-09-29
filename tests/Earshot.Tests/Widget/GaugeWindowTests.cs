@@ -130,7 +130,7 @@ public sealed class GaugeWindowTests
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
             WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
-            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+            var bounds = new Rectangle(50, 50, GaugeLayout.For(96).Width, GaugeLayout.For(96).Height);
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
             Application.DoEvents();
@@ -144,7 +144,7 @@ public sealed class GaugeWindowTests
                 Where = AirPodsWhere.ThisPc,
                 Left = new PartReading(70, false, null),
             };
-            gauge.Render(snapshot, 96, bounds, Color.White, hover: false, "Segoe UI");
+            gauge.Render(snapshot, DateTimeOffset.UtcNow, GaugeDisplaySettings.Default, 96, bounds, Color.White, "Segoe UI");
             Application.DoEvents();
 
             // The pill covers the whole gauge at at least alpha 1, so its centre must now show the gauge
@@ -173,7 +173,7 @@ public sealed class GaugeWindowTests
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
             WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
-            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+            var bounds = new Rectangle(50, 50, GaugeLayout.For(96).Width, GaugeLayout.For(96).Height);
 
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
@@ -200,7 +200,7 @@ public sealed class GaugeWindowTests
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
             WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
-            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+            var bounds = new Rectangle(50, 50, GaugeLayout.For(96).Width, GaugeLayout.For(96).Height);
 
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
@@ -269,7 +269,7 @@ public sealed class GaugeWindowTests
             var log = new CapturingLog();
             using var gauge = new GaugeWindow(log);
             WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
-            var bounds = new Rectangle(50, 50, GaugeRenderer.WidthFor(96), 48);
+            var bounds = new Rectangle(50, 50, GaugeLayout.For(96).Width, GaugeLayout.For(96).Height);
             Earshot.Contracts.StepOutcome shown = gauge.ShowAt(bounds);
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
             Application.DoEvents();

@@ -88,6 +88,35 @@ internal static class WidgetCopy
         return "Battery read " + amount + " ago";
     }
 
+    // The gauge's tooltip. Three lines when there is a reading, one line otherwise.
+    public const string GaugeAirPods = "AirPods";
+    public const string GaugeCharging = "Charging";
+    public const string GaugeLowBattery = "Low battery";
+    public const string GaugeNotOnThisPc = "Not on this PC";
+    public const string GaugeBatteryNotSetUp = "Battery not set up";
+    public const string GaugeNoRecentReading = "No recent reading";
+
+    // "L 70%   R 60%": the buds that have a proved reading, left first, three spaces apart. A bud with none is
+    // left out, never shown as a dash or a guess.
+    public static string GaugeBudsLine(int? left, int? right)
+    {
+        string l = left is { } lp ? LeftLabel + " " + lp.ToString(CultureInfo.InvariantCulture) + "%" : "";
+        string r = right is { } rp ? RightLabel + " " + rp.ToString(CultureInfo.InvariantCulture) + "%" : "";
+        return l.Length > 0 && r.Length > 0 ? l + "   " + r : l + r;
+    }
+
+    // "Read just now" inside the first minute, then "Read 2 min ago" (whole minutes, rounded down, so the
+    // line is never younger than the reading).
+    public static string GaugeReadLine(TimeSpan age)
+    {
+        if (age < TimeSpan.FromMinutes(1))
+        {
+            return "Read just now";
+        }
+
+        return "Read " + ((long)Math.Floor(age.TotalMinutes)).ToString(CultureInfo.InvariantCulture) + " min ago";
+    }
+
     // The percent for one part, or NoReading when it has not been proved.
     public static string Percent(int? percent) =>
         percent is { } value ? value.ToString(CultureInfo.InvariantCulture) + "%" : NoReading;

@@ -32,10 +32,14 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     // and IsHandleCreated stays true even once hidden (the handle is never destroyed by either call).
     internal bool IsShown => _shown;
 
-    public GaugeWindow(ILog log)
+    // accent: where the ring's colour comes from; null means the real Windows accent colour (the shared
+    // AccentColourService), which is what production uses.
+    public GaugeWindow(ILog log, IAccentColours? accent = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
+        _accent = accent ?? AccentColourService.Shared(log);
+        _accent.Changed += OnAccentChanged;
         Interlocked.Increment(ref ConstructionCount);
 
         FormBorderStyle = FormBorderStyle.None;
@@ -52,6 +56,9 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     public event EventHandler<Point>? RightClicked;
 
     protected override bool ShowWithoutActivation => true;
+
+    // The window handle, or 0 while none has been created: reading Handle would create it.
+    public nint WindowHandle => IsHandleCreated ? Handle : 0;
 
     // Mirrors ConnectCard.OnDpiChanged: the gauge is already sized and rendered for the display it is
     // moving to (GaugeController re-measures the taskbar and calls Render at the new DPI on the very next
@@ -75,12 +82,81 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         }
     }
 
-    // Renders content and pushes it through UpdateLayeredWindow, at the window's current screen location
-    // (or the location bounds gives, for the first push before the window has ever been positioned).
-    public void Render(WidgetSnapshot snapshot, int dpi, Rectangle bounds, Color ink, bool hover, string fontFamily)
+    // What the last Render was asked for, so a hover change or an accent colour change can draw the same
+    // thing again without waiting for the next poll.
+    private sealed record RenderRequest(
+        WidgetSnapshot Snapshot, DateTimeOffset Now, GaugeDisplaySettings Settings, int Dpi, Rectangle Bounds, Color Ink, string FontFamily);
+
+    // What the last push drew: a repaint that would draw exactly the same is not pushed again, so the poll
+    // (which asks once a second) never redraws for nothing.
+    private sealed record PushKey(GaugeContent Content, GaugePalette Palette, GaugeLayout Layout, bool Hover, string FontFamily, Point Location);
+
+    private readonly IAccentColours _accent;
+    private readonly ToolTip _tip = new() { ShowAlways = true };
+    // Test seam only: how many bitmaps have been pushed, so a test can tell a repaint that changed something
+    // from one that was skipped as identical. Never read in production.
+    internal int PushCount { get; private set; }
+
+    private RenderRequest? _lastRequest;
+    private PushKey? _lastPush;
+    private bool _hover;
+
+    // Renders content and pushes it through UpdateLayeredWindow at bounds' location. The gauge draws its own
+    // fixed size (GaugeLayout), which the placement also made the window's.
+    public void Render(WidgetSnapshot snapshot, DateTimeOffset now, GaugeDisplaySettings settings, int dpi, Rectangle bounds, Color ink, string fontFamily)
     {
-        using Bitmap bitmap = GaugeRenderer.Render(snapshot, dpi, bounds.Height, ink, hover, fontFamily);
-        Push(bitmap, bounds.Location);
+        _lastRequest = new RenderRequest(snapshot, now, settings, dpi, bounds, ink, fontFamily);
+        Repaint();
+    }
+
+    private void Repaint()
+    {
+        if (_lastRequest is not { } r)
+        {
+            return;
+        }
+
+        bool light = r.Ink.GetBrightness() < 0.5f;
+        GaugePalette palette = GaugePalette.Create(light, _accent.AccentFor(light), SystemInformation.HighContrast, r.Ink);
+        GaugeContent content = GaugeContent.From(r.Snapshot, r.Now, r.Settings);
+        GaugeLayout layout = GaugeLayout.For(r.Dpi);
+        var key = new PushKey(content, palette, layout, _hover, r.FontFamily, r.Bounds.Location);
+        if (key == _lastPush)
+        {
+            return;
+        }
+
+        using Bitmap bitmap = GaugeRenderer.Render(content, palette, layout, _hover, r.FontFamily);
+        Push(bitmap, r.Bounds.Location);
+        PushCount++;
+        _lastPush = key;
+        AccessibleDescription = content.Tooltip.Replace("\r\n", ", ", StringComparison.Ordinal);
+        if (IsHandleCreated)
+        {
+            _tip.SetToolTip(this, content.Tooltip);
+        }
+    }
+
+    private void OnAccentChanged(object? sender, EventArgs e) => Repaint();
+
+    private void SetHover(bool hover)
+    {
+        if (_hover != hover)
+        {
+            _hover = hover;
+            Repaint();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _accent.Changed -= OnAccentChanged;
+            _tip.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     public StepOutcome ShowAt(Rectangle bounds)
@@ -152,11 +228,13 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
 
             case NativeMethods.WM_MOUSEMOVE:
                 TrackLeave();
+                SetHover(true);
                 base.WndProc(ref m);
                 return;
 
             case NativeMethods.WM_MOUSELEAVE:
                 _tracking = false;
+                SetHover(false);
                 base.WndProc(ref m);
                 return;
 

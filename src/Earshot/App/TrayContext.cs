@@ -109,6 +109,11 @@ internal sealed record TrayStartOptions(
     // test desktop (recorded where it is exercised).
     public Func<ICardEnvironment>? CardEnvironmentFactory { get; init; }
 
+    // Builds the source of foreground window changes the gauge uses to put itself back on top when the shell
+    // raises the taskbar over it. Null (the default) means "the real hook" (ForegroundChangeHook); a
+    // widget-enabled tray-level test injects a fake instead, so no test hooks the desktop.
+    public Func<IForegroundChangeSource>? ForegroundChangeSourceFactory { get; init; }
+
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
 
@@ -360,6 +365,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _taskbarWatcherPollIntervalMs = options.TaskbarWatcherPollIntervalMs;
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _cardEnvironmentFactory = options.CardEnvironmentFactory;
+        _foregroundChangeSourceFactory = options.ForegroundChangeSourceFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;

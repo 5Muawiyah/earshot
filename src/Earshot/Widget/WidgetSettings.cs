@@ -48,6 +48,10 @@ public sealed record WidgetSettings
 
     public bool LeftClickConnects { get; set; }                // false: a left click opens the card
 
+    // Where the gauge sits on the taskbar: the right-hand end (the default) or next to the app buttons.
+    // Written as its number; a number that names neither position is read as RightEnd (Clamped records it).
+    public GaugePosition GaugePosition { get; set; } = GaugePosition.RightEnd;
+
     public static WidgetSettings Default => new();
 
     // Recomputes Enabled from the four consumers (ShowOnTaskbar, LowBatteryAlert, CaseOpenCard, AutoPause):
@@ -80,7 +84,19 @@ public sealed record WidgetSettings
 
         string label = CleanLabel(OtherDeviceLabel, list);
 
-        WidgetSettings result = this with { LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label };
+        GaugePosition position = GaugePosition;
+        if (!Enum.IsDefined(position))
+        {
+            list.Add(new StepOutcome(
+                "clamp:GaugePosition",
+                Ok: true,
+                Code: 0,
+                CodeName: "S_OK",
+                Detail: ((int)position).ToString(CultureInfo.InvariantCulture) + " is not a gauge position, so the right-hand end is used."));
+            position = GaugePosition.RightEnd;
+        }
+
+        WidgetSettings result = this with { LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label, GaugePosition = position };
         notes = list;
         return result;
     }

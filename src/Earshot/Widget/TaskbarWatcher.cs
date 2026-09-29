@@ -197,11 +197,13 @@ internal sealed class TaskbarWatcher : IDisposable
                 catch (Exception ex)
                 {
                     // A crash here must never reach the UI thread with the process still believing the
-                    // gauge is attached: the widget has no reference to anything that can touch a device,
-                    // so the worst outcome is a gauge stuck hidden with the tray icon shown.
+                    // gauge is attached: the widget has no reference to anything that can touch a device.
+                    // It is reported as its own step, not as "no taskbar": a read that threw says nothing
+                    // about whether the bar is there, so the controller counts it like any other failed
+                    // read instead of hiding the gauge at once.
                     _log.Error("Taskbar watcher: the read threw.", ex);
                     result = ITaskbarReader.Result.Fail(new TaskbarReadFailure(
-                        TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromHResult("taskbar-watcher:read", NativeCodes.NotAvailable, ex.Message)));
+                        TaskbarReadFailureStep.Exception, StepOutcomes.FromHResult("taskbar-watcher:read", NativeCodes.NotAvailable, ex.Message)));
                 }
 
                 RecordDuration(_time.GetElapsedTime(started));

@@ -1,154 +1,141 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using Earshot.Icons;
-using Earshot.Popup;
 
 namespace Earshot.Widget;
 
-// Draws the gauge bitmap: the earbud mark, the lower bud's battery as a bar and a number, a charging
-// bolt, and a hover pill behind the whole gauge (the taskbar's own hover look). Pure drawing, used by
-// GaugeWindow, the tests and the screenshot probe.
+// Draws the gauge bitmap: the earbud mark, a ring round it that fills to the lower proved bud's battery, that
+// number beside it, and a charging bolt in a slot that is always kept. Pure drawing, used by GaugeWindow, the
+// tests and the screenshot probe. Every coordinate comes from GaugeLayout.
 //
 // GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit): GDI text (TextRenderer) writes alpha
 // 0 and would vanish on a layered window (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
+//
+// The number is drawn one digit at a time in cells as wide as a "0", so every digit has the same width and
+// the number never shifts as it changes (GDI+ has no tabular figures switch). The cells are left aligned in
+// the number slot, which fits three digits.
 internal static class GaugeRenderer
 {
-    // Layout at 96 DPI: | 8 | mark 20 | 6 | bar 24 x 6 | 4 | number (room for three digits, 9 pt) | 8 |
-    public const int PaddingAt96 = 8;
-    public const int MarkSizeAt96 = 20;
-    public const int GapAfterMarkAt96 = 6;
-    public const int BarWidthAt96 = 24;
-    public const int BarHeightAt96 = 6;
-    public const int GapAfterBarAt96 = 4;
-    public const int NumberWidthAt96 = 18; // 88 total: 8 + 20 + 6 + 24 + 4 + 18 + 8
-    public const int BoltWidthAt96 = 6;
-    public const int BoltHeightAt96 = 10;
-    public const float NumberPoints = 9f;
+    // The earbud mark's opacity when the AirPods are not on this PC.
+    public const double AwayOpacity = EarbudGlyph.BusyOpacity;
 
-    // Track ink and hover pill ink, as a fraction of full alpha. Design choices.
-    public const double TrackInk = 0.30;
-    public const double HoverPillInk = 0.12;
-    public const byte IdlePillAlpha = 1;
+    // The phone mark (a rounded outline, drawn on a 16 unit grid): the rectangle and its corner radius and
+    // stroke, in grid units.
+    private const float PhoneGrid = 16f;
+    private const float PhoneX = 4.6f;
+    private const float PhoneY = 1.6f;
+    private const float PhoneWidth = 6.8f;
+    private const float PhoneHeight = 12.8f;
+    private const float PhoneCorner = 1.6f;
+    private const float PhoneStroke = 1.2f;
 
-    public static int WidthFor(int dpi) =>
-        CardPlacement.Scale(PaddingAt96, dpi) + CardPlacement.Scale(MarkSizeAt96, dpi) + CardPlacement.Scale(GapAfterMarkAt96, dpi) +
-        CardPlacement.Scale(BarWidthAt96, dpi) + CardPlacement.Scale(GapAfterBarAt96, dpi) + CardPlacement.Scale(NumberWidthAt96, dpi) +
-        CardPlacement.Scale(PaddingAt96, dpi);
+    // The bolt, on a 9 by 12 grid.
+    private static readonly PointF[] BoltGrid =
+    [
+        new(6f, 0f), new(1f, 7f), new(4.5f, 7f), new(3.5f, 12f), new(9f, 4.5f), new(5.5f, 4.5f),
+    ];
 
-    // The gauge bitmap, width x height (height is the taskbar's own thickness), Format32bppPArgb so it
-    // can go straight to UpdateLayeredWindow. The caller disposes it.
-    public static Bitmap Render(WidgetSnapshot snapshot, int dpi, int height, Color ink, bool hover, string fontFamily)
+    private const float BoltGridWidth = 9f;
+    private const float BoltGridHeight = 12f;
+
+    public static int WidthFor(int dpi) => GaugeLayout.For(dpi).Width;
+
+    // The gauge for a snapshot at a moment: the content the snapshot gives, drawn in the palette for the
+    // theme the ink says (a dark ink is the light theme). height is the taskbar's own thickness, which the
+    // gauge no longer depends on (the window is a fixed size, centred by the placement); it stays in the
+    // signature for callers that still pass it.
+    public static Bitmap Render(
+        WidgetSnapshot snapshot, DateTimeOffset now, int dpi, int height, Color ink, bool hover, string fontFamily,
+        GaugeDisplaySettings? settings = null, Color? accent = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        _ = height;
+        bool light = ink.GetBrightness() < 0.5f;
+        Color accentColour = accent ?? UiSettingsColourSource.DefaultShade(light ? AccentShade.Dark1 : AccentShade.Light2);
+        GaugePalette palette = GaugePalette.Create(light, accentColour, highContrast: false, ink);
+        return Render(GaugeContent.From(snapshot, now, settings ?? GaugeDisplaySettings.Default), palette, GaugeLayout.For(dpi), hover, fontFamily);
+    }
+
+    // The gauge as an older caller asks for it: no time given, so the time now.
+    public static Bitmap Render(WidgetSnapshot snapshot, int dpi, int height, Color ink, bool hover, string fontFamily) =>
+        Render(snapshot, DateTimeOffset.UtcNow, dpi, height, ink, hover, fontFamily);
+
+    // The gauge bitmap, layout.Width x layout.Height, Format32bppPArgb so it can go straight to
+    // UpdateLayeredWindow. The caller disposes it.
+    public static Bitmap Render(GaugeContent content, GaugePalette palette, GaugeLayout layout, bool hover, string fontFamily)
+    {
+        ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(fontFamily);
-        int width = Math.Max(1, WidthFor(dpi));
-        int h = Math.Max(1, height);
-        var bitmap = new Bitmap(width, h, PixelFormat.Format32bppPArgb);
-        using (var g = Graphics.FromImage(bitmap))
+        var bitmap = new Bitmap(layout.Width, layout.Height, PixelFormat.Format32bppPArgb);
+        using Graphics g = Graphics.FromImage(bitmap);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        g.Clear(Color.Transparent);
+
+        FillBackground(g, palette, layout, hover);
+
+        double markOpacity = content.Mode == GaugeMode.NotOnThisPc ? AwayOpacity : 1.0;
+        DrawMark(g, layout.Mark, palette.Ink, markOpacity);
+
+        switch (content.Mode)
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            g.Clear(Color.Transparent);
-
-            byte pillAlpha = hover ? (byte)Math.Round(255 * HoverPillInk) : IdlePillAlpha;
-            using (GraphicsPath pillPath = Pill(new Rectangle(0, 0, width, h)))
-            using (var pillBrush = new SolidBrush(Color.FromArgb(pillAlpha, ink)))
-            {
-                g.FillPath(pillBrush, pillPath);
-            }
-
-            bool dimmed = snapshot.Where != AirPodsWhere.ThisPc;
-            double opacity = dimmed ? EarbudGlyph.BusyOpacity : 1.0;
-            int markSize = CardPlacement.Scale(MarkSizeAt96, dpi);
-            int pad = CardPlacement.Scale(PaddingAt96, dpi);
-            int markTop = Math.Max(0, (h - markSize) / 2);
-            GlyphState state = snapshot.Where == AirPodsWhere.ThisPc ? GlyphState.Connected : GlyphState.Disconnected;
-            DrawGlyph(g, pad, markTop, markSize, state, ink, opacity);
-
-            (int? percent, bool? charging) = LowerReading(snapshot);
-            int barLeft = pad + markSize + CardPlacement.Scale(GapAfterMarkAt96, dpi);
-            int barWidth = CardPlacement.Scale(BarWidthAt96, dpi);
-            int barHeight = CardPlacement.Scale(BarHeightAt96, dpi);
-            int barTop = Math.Max(0, (h - barHeight) / 2);
-
-            if (percent is { } shown)
-            {
-                using (var trackBrush = new SolidBrush(Color.FromArgb((int)Math.Round(255 * TrackInk * opacity), ink)))
+            case GaugeMode.Reading:
+                DrawRing(g, layout, palette, content);
+                DrawNumber(g, layout, content, palette, fontFamily);
+                if (content.Charging)
                 {
-                    g.FillRectangle(trackBrush, barLeft, barTop, barWidth, barHeight);
+                    DrawBolt(g, layout, palette.Ink);
                 }
 
-                int filled = (int)Math.Round(barWidth * Math.Clamp(shown, 0, 100) / 100.0);
-                if (filled > 0)
-                {
-                    using var fillBrush = new SolidBrush(Color.FromArgb((int)Math.Round(255 * opacity), ink));
-                    g.FillRectangle(fillBrush, barLeft, barTop, filled, barHeight);
-                }
+                break;
 
-                if (charging == true)
-                {
-                    int boltHeight = CardPlacement.Scale(BoltHeightAt96, dpi);
-                    DrawBolt(g, barLeft + barWidth, Math.Max(0, (h - boltHeight) / 2), dpi, ink, opacity);
-                }
+            case GaugeMode.OnOtherDevice:
+                DrawPhone(g, layout, palette.Ink);
+                break;
 
-                int numberLeft = barLeft + barWidth + CardPlacement.Scale(GapAfterBarAt96, dpi);
-                using var font = new Font(fontFamily, NumberPoints * dpi / 72f, FontStyle.Regular, GraphicsUnit.Pixel);
-                using var textBrush = new SolidBrush(Color.FromArgb((int)Math.Round(255 * opacity), ink));
-                var numberBounds = new RectangleF(numberLeft, 0, CardPlacement.Scale(NumberWidthAt96, dpi), h);
-                var format = new StringFormat(StringFormatFlags.NoWrap) { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
-                g.DrawString(WidgetCopy.Percent(shown), font, textBrush, numberBounds, format);
-            }
+            case GaugeMode.MarkOnly:
+            case GaugeMode.NotOnThisPc:
+            default:
+                break;
         }
 
         return bitmap;
     }
 
-    // The bar and number bounds for a rendered gauge, in client pixels, for tests that sample pixels.
-    internal static (Rectangle Bar, Rectangle Number) ContentBounds(int dpi, int height)
+    // The centre of the ring, and the ring's own square.
+    internal static PointF RingCentre(GaugeLayout layout) =>
+        new(layout.RingBox.X + (layout.RingBox.Width / 2f), layout.RingBox.Y + (layout.RingBox.Height / 2f));
+
+    // The digit cell: the advance of a "0" at the gauge's type size, measured, not assumed.
+    internal static float DigitCell(string fontFamily, int typePixels)
     {
-        int pad = CardPlacement.Scale(PaddingAt96, dpi);
-        int markSize = CardPlacement.Scale(MarkSizeAt96, dpi);
-        int barLeft = pad + markSize + CardPlacement.Scale(GapAfterMarkAt96, dpi);
-        int barWidth = CardPlacement.Scale(BarWidthAt96, dpi);
-        int barHeight = CardPlacement.Scale(BarHeightAt96, dpi);
-        int barTop = Math.Max(0, (height - barHeight) / 2);
-        int numberLeft = barLeft + barWidth + CardPlacement.Scale(GapAfterBarAt96, dpi);
-        return (new Rectangle(barLeft, barTop, barWidth, barHeight), new Rectangle(numberLeft, 0, CardPlacement.Scale(NumberWidthAt96, dpi), height));
+        using var bitmap = new Bitmap(1, 1);
+        using Graphics g = Graphics.FromImage(bitmap);
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        using var font = new Font(fontFamily, typePixels, FontStyle.Regular, GraphicsUnit.Pixel);
+        return g.MeasureString("0", font, PointF.Empty, StringFormat.GenericTypographic).Width;
     }
 
-    // The lower of the two buds' percent (the minimum of left and right among the known values; one
-    // null uses the other; both null means no reading at all), and the charging flag of whichever bud
-    // that percent came from. Left wins a tie: the design does not care which bud reads first.
-    private static (int? Percent, bool? Charging) LowerReading(WidgetSnapshot snapshot)
+    // The whole window: the hover fill while pointed at, otherwise an alpha of 1 so a click lands on the
+    // gauge. Layered-window hit testing follows the painted pixels, so nothing outside this rounded rectangle
+    // ever answers a click.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows
+    private static void FillBackground(Graphics g, GaugePalette palette, GaugeLayout layout, bool hover)
     {
-        int? left = snapshot.Left.Percent;
-        int? right = snapshot.Right.Percent;
-        if (left is null && right is null)
-        {
-            return (null, null);
-        }
-
-        if (left is null)
-        {
-            return (right, snapshot.Right.Charging);
-        }
-
-        if (right is null)
-        {
-            return (left, snapshot.Left.Charging);
-        }
-
-        return left <= right ? (left, snapshot.Left.Charging) : (right, snapshot.Right.Charging);
+        using GraphicsPath path = RoundedRectangle(new RectangleF(0, 0, layout.Width, layout.Height), layout.CornerRadius);
+        using var brush = new SolidBrush(hover ? palette.HoverFill : palette.IdleFill);
+        g.FillPath(brush, path);
     }
 
-    private static void DrawGlyph(Graphics g, int x, int y, int px, GlyphState state, Color ink, double opacity)
+    private static void DrawMark(Graphics g, Rectangle mark, Color ink, double opacity)
     {
-        if (px < EarbudGlyph.MinSize)
+        if (mark.Width < EarbudGlyph.MinSize)
         {
             return;
         }
 
-        byte[] alpha = EarbudGlyph.Coverage(px, state);
+        byte[] alpha = EarbudGlyph.Coverage(mark.Width, GlyphState.Connected);
         if (opacity < 1.0)
         {
             for (int i = 0; i < alpha.Length; i++)
@@ -157,47 +144,96 @@ internal static class GaugeRenderer
             }
         }
 
-        using Bitmap glyph = EarbudGlyph.ToBitmap(alpha, px, ink);
-        g.DrawImageUnscaled(glyph, x, y);
+        using Bitmap glyph = EarbudGlyph.ToBitmap(alpha, mark.Width, ink);
+        g.DrawImageUnscaled(glyph, mark.X, mark.Y);
     }
 
-    // A five-point lightning bolt, scaled to a BoltWidthAt96 x BoltHeightAt96 box. A layout choice, not
-    // a measurement.
-    private static void DrawBolt(Graphics g, int x, int y, int dpi, Color ink, double opacity)
+    // The track is the whole circle; the fill runs from 12 o'clock clockwise for the battery's share of it.
+    // Flat ends. GDI+ measures angles clockwise from 3 o'clock, so 12 o'clock is -90.
+    private static void DrawRing(Graphics g, GaugeLayout layout, GaugePalette palette, GaugeContent content)
     {
-        float w = CardPlacement.Scale(BoltWidthAt96, dpi);
-        float h = CardPlacement.Scale(BoltHeightAt96, dpi);
-        PointF[] points =
-        [
-            new PointF(x + (w * 0.55f), y),
-            new PointF(x, y + (h * 0.6f)),
-            new PointF(x + (w * 0.42f), y + (h * 0.6f)),
-            new PointF(x + (w * 0.45f), y + h),
-            new PointF(x + w, y + (h * 0.38f)),
-            new PointF(x + (w * 0.58f), y + (h * 0.38f)),
-        ];
-        using var brush = new SolidBrush(Color.FromArgb((int)Math.Round(255 * opacity), ink));
+        PointF c = RingCentre(layout);
+        float r = layout.RingRadius;
+        var square = new RectangleF(c.X - r, c.Y - r, r * 2, r * 2);
+
+        using (var track = new Pen(palette.Track, layout.RingStroke))
+        {
+            g.DrawEllipse(track, square);
+        }
+
+        int percent = content.Percent ?? 0;
+        if (percent <= 0)
+        {
+            return;
+        }
+
+        using var fill = new Pen(content.Low ? palette.Caution : palette.Accent, layout.RingStroke);
+        if (percent >= 100)
+        {
+            g.DrawEllipse(fill, square);
+        }
+        else
+        {
+            g.DrawArc(fill, square, -90f, 360f * percent / 100f);
+        }
+    }
+
+    private static void DrawNumber(Graphics g, GaugeLayout layout, GaugeContent content, GaugePalette palette, string fontFamily)
+    {
+        if (content.Percent is not { } percent)
+        {
+            return;
+        }
+
+        float cell = DigitCell(fontFamily, layout.TypePixels);
+        using var font = new Font(fontFamily, layout.TypePixels, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(content.Low ? palette.Caution : palette.Ink);
+        using var format = new StringFormat(StringFormat.GenericTypographic) { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
+        float x = layout.NumberSlot.X;
+        foreach (char digit in percent.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        {
+            g.DrawString(digit.ToString(), font, brush, new RectangleF(x, layout.NumberSlot.Y, cell, layout.NumberSlot.Height), format);
+            x += cell;
+        }
+    }
+
+    private static void DrawBolt(Graphics g, GaugeLayout layout, Color ink)
+    {
+        float k = Math.Min(layout.Bolt.Width / BoltGridWidth, layout.Bolt.Height / BoltGridHeight);
+        float left = layout.ChargingSlot.X + ((layout.ChargingSlot.Width - (BoltGridWidth * k)) / 2f);
+        float top = (layout.Height - (BoltGridHeight * k)) / 2f;
+        var points = new PointF[BoltGrid.Length];
+        for (int i = 0; i < points.Length; i++)
+        {
+            points[i] = new PointF(left + (BoltGrid[i].X * k), top + (BoltGrid[i].Y * k));
+        }
+
+        using var brush = new SolidBrush(ink);
         g.FillPolygon(brush, points);
     }
 
-    // A stadium (fully rounded ends) covering bounds, or a plain rectangle when it is too short to
-    // round. The whole gauge is one clickable target: layered-window hit testing follows the painted
-    // pixels (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows), so nothing outside this shape ever answers a click.
-    private static GraphicsPath Pill(Rectangle bounds)
+    // The phone, in the number slot: an outlined rounded rectangle on a 16 unit grid, drawn at full ink.
+    private static void DrawPhone(Graphics g, GaugeLayout layout, Color ink)
+    {
+        float k = layout.PhoneSize / PhoneGrid;
+        float left = layout.NumberSlot.X;
+        float top = (layout.Height - layout.PhoneSize) / 2f;
+        var rect = new RectangleF(left + (PhoneX * k), top + (PhoneY * k), PhoneWidth * k, PhoneHeight * k);
+        using GraphicsPath path = RoundedRectangle(rect, PhoneCorner * k);
+        using var pen = new Pen(ink, PhoneStroke * k);
+        g.DrawPath(pen, path);
+    }
+
+    private static GraphicsPath RoundedRectangle(RectangleF bounds, float radius)
     {
         var path = new GraphicsPath();
-        int r = Math.Min(bounds.Width, bounds.Height) / 2;
-        if (r <= 0 || bounds.Width <= 0 || bounds.Height <= 0)
+        float d = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
+        if (d <= 0)
         {
-            if (bounds.Width > 0 && bounds.Height > 0)
-            {
-                path.AddRectangle(bounds);
-            }
-
+            path.AddRectangle(bounds);
             return path;
         }
 
-        int d = r * 2;
         path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
         path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
         path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);

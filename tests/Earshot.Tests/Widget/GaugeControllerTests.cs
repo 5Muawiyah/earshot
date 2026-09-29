@@ -14,7 +14,11 @@ internal sealed class FakeGaugeSurface : IGaugeSurface
 
     public StepOutcome NextShowAtResult { get; set; } = new("show-at", true, 0, "S_OK", null);
 
+    public StepOutcome NextRaiseResult { get; set; } = new("raise", true, 0, "S_OK", null);
+
     public bool IsDisposed { get; private set; }
+
+    public nint WindowHandle { get; set; } = 0x1234;
 
     public event EventHandler? LeftClicked;
 
@@ -35,7 +39,7 @@ internal sealed class FakeGaugeSurface : IGaugeSurface
     public StepOutcome Raise()
     {
         Calls.Add("Raise");
-        return new StepOutcome("raise", true, 0, "S_OK", null);
+        return NextRaiseResult;
     }
 
     public void HideWindow() => Calls.Add("HideWindow");
@@ -74,9 +78,14 @@ public sealed class GaugeControllerTests
     private static TaskbarLayout FreeSpaceLayout(int buttonCount = 8) =>
         new(0, Bar, TaskbarEdge.Bottom, false, new Rectangle(0, 0, 1920, 1080),
             [Start, .. Buttons(buttonCount), new Rectangle(1678, 1032, 242, 48)], Start,
-            96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null);
+            96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
+            NotificationArea: new Rectangle(1678, 1032, 242, 48));
 
-    private static (GaugeController Controller, FakeGaugeSurface Surface, FakeTrayIcon Icon, Streaming.TestTimeProvider Time, CapturingLog Log) Build(bool enabled = true, bool leftClickConnects = false)
+    // Where the gauge goes with the notification area at 1678: eight pixels left of it, centred in the bar.
+    private static readonly Rectangle RightEndBounds = new(1678 - 8 - 74, 1036, 74, 40);
+
+    private static (GaugeController Controller, FakeGaugeSurface Surface, FakeTrayIcon Icon, Streaming.TestTimeProvider Time, CapturingLog Log) Build(
+        bool enabled = true, bool leftClickConnects = false, GaugePosition position = GaugePosition.RightEnd)
     {
         var surface = new FakeGaugeSurface();
         var icon = new FakeTrayIcon();
@@ -84,7 +93,7 @@ public sealed class GaugeControllerTests
         var log = new CapturingLog();
         bool settingsEnabled = enabled;
         bool settingsLeftClickConnects = leftClickConnects;
-        var controller = new GaugeController(() => surface, icon, () => new GaugeControllerSettings(settingsEnabled, settingsLeftClickConnects), log, time);
+        var controller = new GaugeController(() => surface, icon, () => new GaugeControllerSettings(settingsEnabled, settingsLeftClickConnects, position), log, time);
         return (controller, surface, icon, time, log);
     }
 
@@ -96,13 +105,13 @@ public sealed class GaugeControllerTests
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
 
         Assert.IsInstanceOfType<GaugeState.Shown>(controller.State);
-        CollectionAssert.Contains(surface.Calls, "ShowAt " + new Rectangle(1183, 1032, 88, 48).ToString());
+        CollectionAssert.Contains(surface.Calls, "ShowAt " + RightEndBounds.ToString());
         Assert.IsTrue(icon.Visible, "The icon stays visible until the debounce elapses.");
 
         time.Advance(TimeSpan.FromSeconds(1));
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
         Assert.IsTrue(icon.Visible, "Not yet 2 s.");
-        Assert.IsFalse(surface.Calls.Contains("MoveTo " + new Rectangle(1183, 1032, 88, 48).ToString()), "An identical layout must not move the gauge.");
+        Assert.IsFalse(surface.Calls.Contains("MoveTo " + RightEndBounds.ToString()), "An identical layout must not move the gauge.");
 
         time.Advance(TimeSpan.FromSeconds(1.5));
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
@@ -127,7 +136,7 @@ public sealed class GaugeControllerTests
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout() with { GaugeCentreIsGauge = false }));
 
         CollectionAssert.Contains(surface.Calls, "Raise");
-        Assert.IsFalse(surface.Calls.Contains("MoveTo " + new Rectangle(1183, 1032, 88, 48).ToString()),
+        Assert.IsFalse(surface.Calls.Contains("MoveTo " + RightEndBounds.ToString()),
             "The rectangle is unchanged, so this must be a Raise, never a MoveTo.");
     }
 
@@ -145,9 +154,9 @@ public sealed class GaugeControllerTests
     }
 
     [TestMethod]
-    public void OneMoreButtonMovesTheGaugeRatherThanShowingItAgain()
+    public void OneMoreButtonMovesAGaugeNextToTheAppsRatherThanShowingItAgain()
     {
-        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build(position: GaugePosition.NextToApps);
 
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout(8)));
         Assert.AreEqual(1, surface.Calls.Count(c => c.StartsWith("ShowAt", StringComparison.Ordinal)));
@@ -177,10 +186,11 @@ public sealed class GaugeControllerTests
     {
         (GaugeController controller, FakeGaugeSurface surface, FakeTrayIcon icon, _, _) = Build();
 
-        // 300 pixels of buttons leaves no run wide enough (24 + 88 + 24) before the tray at 1678.
+        // Buttons that reach 1620 run into the gauge's place (1596 to 1670) beside the tray at 1678.
         var tight = new TaskbarLayout(0, Bar, TaskbarEdge.Bottom, false, new Rectangle(0, 0, 1920, 1080),
-            [Start, .. Enumerable.Range(0, (1580 - 807) / 44).Select(i => new Rectangle(807 + (i * 44), 1032, 44, 48)), new Rectangle(1678, 1032, 242, 48)],
-            Start, 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null);
+            [Start, new Rectangle(807, 1032, 813, 48), new Rectangle(1678, 1032, 242, 48)],
+            Start, 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
+            NotificationArea: new Rectangle(1678, 1032, 242, 48));
 
         controller.OnLayout(ITaskbarReader.Result.Ok(tight));
         Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
@@ -189,7 +199,7 @@ public sealed class GaugeControllerTests
 
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
         Assert.IsInstanceOfType<GaugeState.Shown>(controller.State);
-        CollectionAssert.Contains(surface.Calls, "ShowAt " + new Rectangle(1183, 1032, 88, 48).ToString());
+        CollectionAssert.Contains(surface.Calls, "ShowAt " + RightEndBounds.ToString());
     }
 
     [TestMethod]
@@ -236,7 +246,7 @@ public sealed class GaugeControllerTests
         controller.NotifyFullScreenApp(opening: true);
 
         Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
-        Assert.AreEqual(HiddenReason.NotificationState, ((GaugeState.Hidden)controller.State).Reason);
+        Assert.AreEqual(HiddenReason.FullScreenNotified, ((GaugeState.Hidden)controller.State).Reason, "The fast path has its own reason, so the log tells it from a polled one.");
         CollectionAssert.Contains(surface.Calls, "HideWindow", "The notification must hide the real window itself, not just flip the tray icon.");
     }
 
