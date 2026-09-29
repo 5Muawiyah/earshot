@@ -18,6 +18,12 @@ internal static class InteropLayout
     internal const int BluetoothFindRadioParamsBytes = 4;
     internal const int KsJackDescriptionBytes = 28;
     internal const int AppBarDataBytes = 48;
+    internal const int ServiceStatusBytes = 28;
+    internal const int ServiceStatusProcessBytes = 36;
+    internal const int ServiceTableEntryBytes = 16;
+    internal const int QueryServiceConfigBytes = 64;
+    internal const int ServiceDescriptionBytes = 8;
+    internal const int ServicePreshutdownInfoBytes = 4;
 
     public static void AssertSizes()
     {
@@ -41,6 +47,12 @@ internal static class InteropLayout
         Expect(nameof(BLUETOOTH_DEVICE_SEARCH_PARAMS), Marshal.SizeOf<BLUETOOTH_DEVICE_SEARCH_PARAMS>(), BluetoothDeviceSearchParamsBytes);
         Expect(nameof(BLUETOOTH_FIND_RADIO_PARAMS), Marshal.SizeOf<BLUETOOTH_FIND_RADIO_PARAMS>(), BluetoothFindRadioParamsBytes);
 
+        Expect(nameof(SERVICE_STATUS), Marshal.SizeOf<SERVICE_STATUS>(), ServiceStatusBytes);
+        Expect(nameof(SERVICE_STATUS_PROCESS), Marshal.SizeOf<SERVICE_STATUS_PROCESS>(), ServiceStatusProcessBytes);
+        Expect(nameof(QUERY_SERVICE_CONFIGW), Marshal.SizeOf<QUERY_SERVICE_CONFIGW>(), QueryServiceConfigBytes);
+        Expect(nameof(SERVICE_DESCRIPTIONW), Marshal.SizeOf<SERVICE_DESCRIPTIONW>(), ServiceDescriptionBytes);
+        Expect(nameof(SERVICE_PRESHUTDOWN_INFO), Marshal.SizeOf<SERVICE_PRESHUTDOWN_INFO>(), ServicePreshutdownInfoBytes);
+
         // Structs passed to native code as raw pointers: the in-memory size is what native code sees.
         Expect(nameof(BLUETOOTH_DEVICE_INFO) + " (in memory)", Unsafe.SizeOf<BLUETOOTH_DEVICE_INFO>(), BluetoothDeviceInfoBytes);
         Expect(nameof(BLUETOOTH_DEVICE_SEARCH_PARAMS) + " (in memory)", Unsafe.SizeOf<BLUETOOTH_DEVICE_SEARCH_PARAMS>(), BluetoothDeviceSearchParamsBytes);
@@ -49,6 +61,9 @@ internal static class InteropLayout
         Expect(nameof(KSP_PIN) + " (in memory)", Unsafe.SizeOf<KSP_PIN>(), KspPinBytes);
         Expect(nameof(PROPVARIANT) + " (in memory)", Unsafe.SizeOf<PROPVARIANT>(), PropVariantBytes);
         Expect(nameof(DEVPROPKEY) + " (in memory)", Unsafe.SizeOf<DEVPROPKEY>(), DevPropKeyBytes);
+        Expect(nameof(SERVICE_TABLE_ENTRYW) + " (in memory)", Unsafe.SizeOf<SERVICE_TABLE_ENTRYW>(), ServiceTableEntryBytes);
+        Expect(nameof(SERVICE_STATUS) + " (in memory)", Unsafe.SizeOf<SERVICE_STATUS>(), ServiceStatusBytes);
+        Expect(nameof(QUERY_SERVICE_CONFIGW) + " (in memory)", Unsafe.SizeOf<QUERY_SERVICE_CONFIGW>(), QueryServiceConfigBytes);
     }
 
     // Throws when a struct's size differs from the verified value.

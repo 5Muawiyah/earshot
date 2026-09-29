@@ -105,6 +105,74 @@ internal static class AclCheck
         return problems;
     }
 
+    // What anyone but SYSTEM and Administrators may hold on the hand-back service: READ_CONTROL,
+    // SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS and SERVICE_ENUMERATE_DEPENDENTS.
+    internal const uint ServiceQueryOnly = 0x0002000D;
+
+    // The hand-back service's access list, as the control manager reports it. A service's rights are their own
+    // bits, not file rights, so the generic rights are not mapped: install writes none, so a generic bit is itself
+    // the problem. Every allow ACE for a SID other than SYSTEM or Administrators may carry the query rights and
+    // nothing else, which keeps start, stop, pause, interrogate, the user-defined controls, the right to change the
+    // configuration, delete and the security rights away from a standard user. Deny ACEs only remove access.
+    // https://learn.microsoft.com/en-us/windows/win32/services/service-security-and-access-rights
+    public static IReadOnlyList<string> CheckService(string? sddl)
+    {
+        var problems = new List<string>();
+        RawSecurityDescriptor? sd = Parse(sddl, problems);
+        if (sd is null)
+        {
+            return problems;
+        }
+
+        RawAcl? dacl = sd.DiscretionaryAcl;
+        if (dacl is null)
+        {
+            problems.Add("There is no DACL, which grants everyone full access.");
+            return problems;
+        }
+
+        const uint anyGeneric = GENERIC_ALL | GENERIC_EXECUTE | GENERIC_WRITE | GENERIC_READ | MAXIMUM_ALLOWED | ACCESS_SYSTEM_SECURITY;
+        foreach (GenericAce ace in dacl)
+        {
+            if (ace is not QualifiedAce qualified)
+            {
+                problems.Add("Unsupported ACE type " + ace.AceType + ".");
+                continue;
+            }
+
+            if (qualified.AceQualifier is AceQualifier.AccessDenied or AceQualifier.SystemAudit or AceQualifier.SystemAlarm)
+            {
+                continue;
+            }
+
+            if (qualified.IsCallback)
+            {
+                problems.Add("Conditional ACE for " + qualified.SecurityIdentifier.Value + ".");
+                continue;
+            }
+
+            SecurityIdentifier sid = qualified.SecurityIdentifier;
+            uint mask = unchecked((uint)qualified.AccessMask);
+            if ((mask & anyGeneric) != 0)
+            {
+                problems.Add(sid.Value + " holds a generic or special right: " + Hex(mask) + ".");
+                continue;
+            }
+
+            if (IsPrivileged(sid, allowTrustedInstaller: false))
+            {
+                continue;
+            }
+
+            if ((mask & ~ServiceQueryOnly) != 0)
+            {
+                problems.Add(sid.Value + " holds more than the query rights: " + Hex(mask) + ".");
+            }
+        }
+
+        return problems;
+    }
+
     // The \Earshot task folder.
     public static IReadOnlyList<string> CheckTaskFolder(string? sddl, string userSid)
     {
