@@ -20,14 +20,15 @@ namespace Earshot;
 //   install ... / uninstall           TryRunInstall, TryRunUninstall
 //   probe [target] [--json] [--out]   TryRunProbe      App\Program.Probe.cs
 //   diag <target> ...                 TryRunDiag       App\Program.Diag.cs
+//   service                           TryRunService    App\Program.Service.cs (started by the service control manager only)
 //
 // Dispatch runs before WinForms is initialised and before the single-instance mutex, so the
 // headless modes never touch WinForms and install is never mistaken for a second tray.
 // A hook that is not implemented is removed by the compiler; the mode then logs
 // "Not available in this build." and exits with ExitCodes.Unavailable. That includes the tray.
 //
-// gate, gate-protect, install and uninstall change device nodes, Bluetooth services, scheduled tasks and
-// machine folders. They are refused before dispatch in safe mode (EARSHOT_SAFE_MODE) and whenever
+// gate, gate-protect, install, uninstall and service change device nodes, Bluetooth services, scheduled tasks, the
+// hand-back service and machine folders. They are refused before dispatch in safe mode (EARSHOT_SAFE_MODE) and whenever
 // EARSHOT_DATA_ROOT is set, because an elevated process started from a user session may inherit a
 // variable that user set, which would move install's writes to a folder the user controls while the
 // gate kept reading %ProgramData%. The SYSTEM task never has either variable, so this costs nothing.
@@ -140,6 +141,7 @@ internal static partial class Program
             case "uninstall": label = mode; TryRunUninstall(ctx); break;
             case "probe":     label = mode; TryRunProbe(ctx); break;
             case "diag":      label = mode; TryRunDiag(ctx); break;
+            case "service":   label = mode; TryRunService(ctx); break;
             default:          label = "tray"; TryRunTray(ctx); break;
         }
 
@@ -162,7 +164,7 @@ internal static partial class Program
     }
 
     internal static readonly IReadOnlySet<string> PrivilegedModes =
-        new HashSet<string>(StringComparer.Ordinal) { "gate", "gate-protect", "install", "uninstall" };
+        new HashSet<string>(StringComparer.Ordinal) { "gate", "gate-protect", "install", "uninstall", "service" };
 
     // Why a privileged mode must not run with these paths, or null when it may (or the mode is not
     // privileged). See the header comment.
@@ -197,6 +199,7 @@ internal static partial class Program
     static partial void TryRunUninstall(RunContext ctx);
     static partial void TryRunProbe(RunContext ctx);
     static partial void TryRunDiag(RunContext ctx);
+    static partial void TryRunService(RunContext ctx);
 
     // A failure before any mode runs. Written to the debugger output, and to the log ModeLog chooses when the
     // log folder can be resolved.
