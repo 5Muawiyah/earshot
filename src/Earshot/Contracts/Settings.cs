@@ -18,6 +18,11 @@ public sealed class EarshotSettings
     // stays 1; an older file without this member still reads as this build's current schema, not a newer one.
     public bool   HandBackOnShutdownAndSleep { get; set; } = true;
 
+    // "Check automatically": look for a newer release once a day, after startup. Defaults off, because a check
+    // contacts GitHub, so an older settings file with no member reads as off and nothing is contacted until the
+    // owner asks. A check never downloads or installs anything; that stays behind the owner's own click.
+    public bool   CheckForUpdatesAutomatically { get; set; }
+
     // v1.1: global keyboard shortcuts. Defaults off with every text empty (Earshot.Hotkeys.HotkeySettings),
     // so an older settings file with no Hotkeys member reads as "off, nothing typed" and nothing is
     // registered until the owner asks.

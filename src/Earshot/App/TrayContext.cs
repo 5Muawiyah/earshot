@@ -33,6 +33,12 @@ internal sealed record TrayStartOptions(
     // False only in tests, so they add no icon to the user's notification area.
     public bool ShowIcon { get; init; } = true;
 
+    // The update check and download, and the launcher that hands over to Windows' administrator prompt: the real
+    // ones when null, fakes in tests, so a tray-level test never reaches GitHub or starts an elevated program.
+    public Func<Earshot.Update.IUpdateSource>? UpdateSourceFactory { get; init; }
+
+    public Earshot.Update.IUpdateLauncher? UpdateLauncher { get; init; }
+
     // True when Windows started Earshot from its Run value (--startup).
     public bool StartedAtLogon { get; init; }
 
@@ -422,6 +428,7 @@ internal sealed partial class TrayContext : ApplicationContext
         ApplyVoiceOver();
         ApplyStreaming();
         WireWidget();
+        WireUpdates(options);
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -1050,6 +1057,7 @@ internal sealed partial class TrayContext : ApplicationContext
                 ApplyVoiceOver();
                 ApplyStreaming();
                 ApplyWidget();
+                ApplyUpdates();
             }
         });
 
@@ -1825,7 +1833,8 @@ internal sealed partial class TrayContext : ApplicationContext
     private MenuState CurrentMenuState() =>
         MenuModel.Build(
             _snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy,
-            _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.ClaimAvailable ?? false);
+            _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.ClaimAvailable ?? false,
+            updateInProgress: _updates?.IsBusy ?? false);
 
     private void UpdatePresentation(bool forceIcon)
     {

@@ -45,6 +45,8 @@ internal sealed record MenuState(
     MenuItemState NameOtherDeviceItem,
     MenuItemState ChooseDevice,
     MenuItemState SetUp,
+    MenuItemState CheckForUpdates,
+    MenuItemState CheckAutomatically,
     MenuItemState Exit);
 
 // The tray menu as a pure function of cached state. The menu applies it in its Opening handler, which
@@ -67,6 +69,10 @@ internal static class MenuModel
     public const string SpeakStatusNoVoice = AnnouncerCopy.MenuItemNoVoice;
     public const string ChooseDevice = "Choose device...";
     public const string SetUpEarshot = "Set up Earshot...";
+    // Kept exactly as UpdateCopy has it, referenced rather than duplicated, so the menu and the update page never
+    // word the same thing two ways.
+    public const string CheckForUpdates = Earshot.Update.UpdateCopy.CheckRowLabel;
+    public const string CheckAutomatically = Earshot.Update.UpdateCopy.CheckAutomaticallyLabel;
     public const string Exit = "Exit";
 
     // safeMode (EARSHOT_SAFE_MODE) adds one caption at the top and changes nothing else: every item stays as it
@@ -93,7 +99,8 @@ internal static class MenuModel
         bool safeMode = false,
         bool voiceKnownMissing = false,
         StreamingMenuModel? streaming = null,
-        bool claimAvailable = false)
+        bool claimAvailable = false,
+        bool updateInProgress = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -149,6 +156,10 @@ internal static class MenuModel
             NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
             SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.NeedsSetUp(block)),
+            // A check reads GitHub and touches no device, so a connect in flight does not stop it; only another
+            // update step does.
+            CheckForUpdates: new MenuItemState(CheckForUpdates, Checked: false, Enabled: !updateInProgress, Visible: true),
+            CheckAutomatically: new MenuItemState(CheckAutomatically, Checked: settings.CheckForUpdatesAutomatically, Enabled: !busy, Visible: true),
             Exit: new MenuItemState(Exit, Checked: false, Enabled: true, Visible: true));
     }
 
