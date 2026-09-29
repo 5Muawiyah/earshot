@@ -4,16 +4,17 @@ namespace Earshot.Widget;
 
 // Pure row layout for the widget card. No window, no drawing.
 //
-// Main view: width 320 at 96 DPI, padding 16: three columns (Left, Right, Case), the where line, the read
-// line, then the Connect/Disconnect button and, only when the snapshot says auto-pause is available, the
-// switch row beneath it. With no reading at all the columns are replaced by one primary "Set up battery"
-// button below the where and read lines.
+// Main view: width 360 at 96 DPI like every other page, padding 16: a title row (the title, and the gear that
+// opens the settings when the view has one), three columns (Left, Right, Case), the where line, the read line,
+// the update line when a check found a newer version, then the Connect/Disconnect button and, only when the
+// snapshot says auto-pause is available, the switch row beneath it. With no reading at all the columns are
+// replaced by one primary "Set up battery" button below the where and read lines.
 //
-// Set-up pages: width 360, on the sub-page frame (SubPageFrame): the header and footer are the frame's, the
-// body holds the prompt, the status row and the three pickers.
+// Sub-pages (set-up, settings, updates): width 360, on the sub-page frame (SubPageFrame): the header and footer
+// are the frame's, the body is the page's own.
 internal static class WidgetCardLayout
 {
-    public const int WidthAt96 = 320;
+    public const int WidthAt96 = 360;
     public const int PaddingAt96 = 16;
     public const int ColumnGapAt96 = 8;
     public const int RowGapAt96 = 10;
@@ -26,6 +27,20 @@ internal static class WidgetCardLayout
     public const int ColumnGapToLabelAt96 = 2;
     public const int ButtonHeightAt96 = 32;
     public const int SwitchRowHeightAt96 = 24;
+
+    // The title row: 12 above it, 32 high, the gear a 32 by 32 button whose right edge is 8 into the padding.
+    public const int TopPaddingAt96 = 12;
+    public const int TitleRowAt96 = 32;
+    public const int GearSizeAt96 = 32;
+    public const int GearOverhangAt96 = 8;
+    public const int TitleGapAt96 = 4;
+
+    // The update line: 40 high, full width, a divider above, the caption left and a 24 high button right.
+    public const int UpdateLineHeightAt96 = 40;
+    public const int UpdateLinePaddingAt96 = 8;
+    public const int UpdateButtonHeightAt96 = 24;
+    public const int UpdateButtonPaddingAt96 = 10;
+    public const int UpdateButtonMinWidthAt96 = 60;
 
     // The gap above the set-up button, and its own height.
     public const int SetupButtonGapAt96 = 16;
@@ -52,6 +67,9 @@ internal static class WidgetCardLayout
     public const int PickerToggleRowAt96 = 24;
     public const int ToggleWidthAt96 = 40;
     public const int ToggleHeightAt96 = 20;
+    public const int ProgressBarHeightAt96 = 4;
+    public const int ProgressTextWidthAt96 = 36;
+    public const int ProgressGapAt96 = 12;
 
     public static int WidthFor(int dpi) => CardPlacement.Scale(WidthAt96, dpi);
 
@@ -76,10 +94,21 @@ internal static class WidgetCardLayout
         Rectangle Switch,
         bool ShowSetupButton,
         Rectangle SetupCaption,
-        Rectangle SetupButton);
+        Rectangle SetupButton,
+        Rectangle Title = default,
+        Rectangle Gear = default,
+        bool ShowUpdateLine = false,
+        Rectangle UpdateLine = default,
+        Rectangle UpdateCaption = default,
+        Rectangle UpdateButton = default);
 
     // setupButtonWidth: the set-up button's own width (its text and padding), or 0 for the full content width.
-    public static Layout Compute(int dpi, bool showSwitch, bool showSetupButton = false, bool showSetupCaption = false, int setupButtonWidth = 0)
+    // showGear: the view has a settings button (the case-open notice does not). showUpdateLine: a check found a
+    // newer version; updateButtonWidth is the "Update" button's own width (its text and padding), or 0 for the
+    // least width the design gives it.
+    public static Layout Compute(
+        int dpi, bool showSwitch, bool showSetupButton = false, bool showSetupCaption = false, int setupButtonWidth = 0,
+        bool showGear = true, bool showUpdateLine = false, int updateButtonWidth = 0)
     {
         int width = WidthFor(dpi);
         int pad = CardPlacement.Scale(PaddingAt96, dpi);
@@ -98,7 +127,17 @@ internal static class WidgetCardLayout
         int contentWidth = Math.Max(1, width - (2 * pad));
         int colWidth = Math.Max(1, (contentWidth - (2 * colGap)) / 3);
 
-        int y = pad;
+        int titleRowHeight = CardPlacement.Scale(TitleRowAt96, dpi);
+        int gearSize = CardPlacement.Scale(GearSizeAt96, dpi);
+        int gearOverhang = CardPlacement.Scale(GearOverhangAt96, dpi);
+        int titleTop = CardPlacement.Scale(TopPaddingAt96, dpi);
+        Rectangle gear = showGear
+            ? new Rectangle(width - pad + gearOverhang - gearSize, titleTop + ((titleRowHeight - gearSize) / 2), gearSize, gearSize)
+            : Rectangle.Empty;
+        int titleRight = showGear ? gear.X : width - pad;
+        var title = new Rectangle(pad, titleTop, Math.Max(1, titleRight - pad), titleRowHeight);
+
+        int y = title.Bottom + CardPlacement.Scale(TitleGapAt96, dpi);
         ColumnLayout left = default;
         ColumnLayout right = default;
         ColumnLayout box = default;
@@ -139,7 +178,22 @@ internal static class WidgetCardLayout
             afterLines = readLine.Bottom;
         }
 
+        Rectangle updateLine = Rectangle.Empty;
+        Rectangle updateCaption = Rectangle.Empty;
+        Rectangle updateButton = Rectangle.Empty;
         int buttonY = afterLines + rowGap;
+        if (showUpdateLine)
+        {
+            int updateLineHeight = CardPlacement.Scale(UpdateLineHeightAt96, dpi);
+            int linePad = CardPlacement.Scale(UpdateLinePaddingAt96, dpi);
+            int updateButtonHeight = CardPlacement.Scale(UpdateButtonHeightAt96, dpi);
+            int buttonWidth = updateButtonWidth > 0 ? updateButtonWidth : CardPlacement.Scale(UpdateButtonMinWidthAt96, dpi);
+            updateLine = new Rectangle(0, afterLines + rowGap, width, updateLineHeight);
+            updateButton = new Rectangle(width - pad - buttonWidth, updateLine.Y + linePad, buttonWidth, updateButtonHeight);
+            updateCaption = new Rectangle(pad, updateLine.Y + linePad, Math.Max(1, updateButton.X - pad - linePad), updateButtonHeight);
+            buttonY = updateLine.Bottom + pad;
+        }
+
         var button = new Rectangle(pad, buttonY, contentWidth, buttonHeight);
 
         Rectangle switchRect = Rectangle.Empty;
@@ -152,7 +206,8 @@ internal static class WidgetCardLayout
 
         return new Layout(
             width, bottom, ShowColumns: !showSetupButton, left, right, box, whereLine, readLine, button,
-            showSwitch, switchRect, showSetupButton, setupCaption, setupButton);
+            showSwitch, switchRect, showSetupButton, setupCaption, setupButton,
+            title, gear, showUpdateLine, updateLine, updateCaption, updateButton);
     }
 
     private static ColumnLayout Column(int x, int y, int colWidth, int labelHeight, int gapToLabel, int glyphSize, int barWidth, int barHeight, int gapToBar, int lineHeight)
@@ -176,7 +231,8 @@ internal static class WidgetCardLayout
         Rectangle StatusIcon,
         Rectangle StatusText,
         Rectangle StatusSub,
-        IReadOnlyList<PickerLayout> Pickers);
+        IReadOnlyList<PickerLayout> Pickers,
+        Rectangle Progress = default);
 
     // promptLines, captionLines and subLines: how many lines the prompt (14 px), the caption (12 px) and the
     // status sub-line (12 px) wrap to at this width, measured by the caller since this layout draws nothing.
@@ -242,6 +298,21 @@ internal static class WidgetCardLayout
             }
         }
 
+        // A caption with no prompt above it (the update page's cause of a failure) is its own item.
+        if (view.Prompt is null && view.Caption is not null)
+        {
+            int captionHeight = captionLine * Math.Max(1, captionLines);
+            int top = Place(captionHeight);
+            caption = new Rectangle(side, top, contentWidth, captionHeight);
+        }
+
+        Rectangle progress = Rectangle.Empty;
+        if (view.ShowProgress)
+        {
+            int progressTop = Place(captionLine);
+            progress = new Rectangle(side, progressTop, contentWidth, captionLine);
+        }
+
         var pickers = new List<PickerLayout>();
         if (view.Picks is not null)
         {
@@ -286,7 +357,8 @@ internal static class WidgetCardLayout
             frame, Shift(prompt, offset), Shift(caption, offset), Shift(statusIcon, offset), Shift(statusText, offset), Shift(statusSub, offset),
             pickers.Select(p => new PickerLayout(
                 Shift(p.Box, offset), Shift(p.Label, offset), Shift(p.Up, offset), Shift(p.Value, offset), Shift(p.Down, offset),
-                Shift(p.ChargingLabel, offset), Shift(p.Toggle, offset))).ToList());
+                Shift(p.ChargingLabel, offset), Shift(p.Toggle, offset))).ToList(),
+            Shift(progress, offset));
     }
 
     private static Rectangle Shift(Rectangle rect, int dy) => rect.IsEmpty ? rect : new Rectangle(rect.X, rect.Y + dy, rect.Width, rect.Height);

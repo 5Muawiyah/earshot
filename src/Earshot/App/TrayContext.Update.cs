@@ -83,6 +83,7 @@ internal sealed partial class TrayContext
         IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, running.Value, UpdateStagingRoot());
         var controller = new UpdateController(source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, UpdateUnavailableReason, running.Value, _log);
         controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
+        controller.Changed += (_, _) => RaiseCardUpdateChanged();
         _updates = controller;
         return controller;
     }
@@ -133,6 +134,34 @@ internal sealed partial class TrayContext
     // What the update page's Update button calls: download, verify and hand over, with a card for the outcome
     // unless the program is about to close for the hand-over.
     internal void StartUpdate() => Start("update", RunUpdateAsync);
+
+    // The card's settings row runs a check like the menu's, but the result is the update page the card is already
+    // showing, not a message card over it. It only checks.
+    internal void CheckForUpdatesFromCard() => Start("check for updates (card)", CheckForUpdatesQuietAsync);
+
+    private async Task CheckForUpdatesQuietAsync(CardPlace place)
+    {
+        UpdateController? updates = EnsureUpdates();
+        if (updates is null)
+        {
+            return;
+        }
+
+        await updates.CheckAsync(_lifetime.Token);
+    }
+
+    // The update page's Try again: a failed check checks again, anything else is the person asking for the
+    // download again, which is what Update does.
+    internal void TryUpdateAgainFromCard()
+    {
+        if (_updates?.Stage == UpdateStage.CheckFailed)
+        {
+            CheckForUpdatesFromCard();
+            return;
+        }
+
+        StartUpdate();
+    }
 
     private async Task RunUpdateAsync(CardPlace place)
     {

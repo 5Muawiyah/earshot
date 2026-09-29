@@ -420,6 +420,8 @@ public sealed class WidgetCardTests
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Switch, card.FocusTarget);
             SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget, "The gear is last in the order.");
+            SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
         });
     }
@@ -445,6 +447,8 @@ public sealed class WidgetCardTests
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.SetupButton, card.FocusTarget);
             SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget, "The gear is last in the order.");
+            SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
         });
     }
@@ -465,6 +469,8 @@ public sealed class WidgetCardTests
 
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.SetupButton, card.FocusTarget);
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget, "The gear is last in the order.");
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
         });

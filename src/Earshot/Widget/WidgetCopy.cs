@@ -16,6 +16,7 @@ internal static class WidgetCopy
     public const string Disconnect = "Disconnect";
     public const string AutoPauseSwitch = "Pause when a bud comes out";
     public const string CaseOpen = "Case open";
+    public const string CardTitle = "AirPods";
 
     // The three column labels on the widget card, matching the mockup exactly (Case, not "Case column" or
     // similar).
@@ -31,6 +32,29 @@ internal static class WidgetCopy
     public const string LowBatteryAlert = "Low battery alert";
     public const string LowBatteryThreshold = "Threshold";
     public const string OtherDeviceNameTitle = "Name your other device";
+
+    // The settings page: row labels, the two gauge positions, section heads and the captions that say why a
+    // switched-on row cannot act yet.
+    public const string SettingsTitle = "Settings";
+    public const string SettingsGaugePosition = "Gauge position";
+    public const string PositionRightEnd = "Right end";
+    public const string PositionNextToApps = "Next to apps";
+    public const string SettingsOtherDevice = "Other device";
+    public const string SettingsPauseBud = AutoPauseSwitch;
+    public const string SettingsPauseLeave = "Pause when AirPods leave this PC";
+    public const string SettingsCaseCard = "Case-open card";
+    public const string SettingsLowBattery = "Low battery alert";
+    public const string SettingsLeftClick = "Left click connects";
+    public const string SettingsHandBack = Earshot.Tray.MenuModel.HandBackOnShutdownAndSleep;
+    public const string SettingsShortcuts = "Shortcuts";
+    public const string SettingsUpdates = "Updates";
+    public const string SettingsWaitsOnInEar = "Needs battery set-up to prove the in-ear field.";
+    public const string SettingsWaitsOnLid = "Needs battery set-up to prove the lid field.";
+    public const string ShortcutNotSet = "Not set";
+    public const string ShortcutPressKeys = "Press keys";
+    public const string ShortcutClear = "Clear";
+    public const string UpdateCannotReadVersion = "Earshot cannot read its own version.";
+    public const string ShortcutNotSaved = "Couldn't save that shortcut.";
 
     // Battery set-up: the card's button, the menu item, the three steps and their outcomes. Plain, short,
     // never a figure the set-up did not prove.
@@ -62,6 +86,9 @@ internal static class WidgetCopy
 
     private const string LeftAirPodLabel = "Left AirPod";
     private const string RightAirPodLabel = "Right AirPod";
+
+    // The update line on the card: the version a check found, from the release itself.
+    public static string UpdateAvailable(string version) => "Version " + version + " is available";
 
     // "Left AirPod at 20%" and so on: the low battery alert's one line, from the literal percent the reading
     // carried, never rounded or interpolated (there is no other figure to show).

@@ -138,6 +138,8 @@ internal static class SubPageFrame
 
 // The small shapes and text the card's own views are drawn from: GDI+ only (never TextRenderer, whose alpha 0
 // text vanishes on the translucent backdrop), pixel sizes scaled from the design's 96 DPI values.
+internal enum GlyphKind { Minus, Plus, Cross }
+
 internal static class CardPaint
 {
     public static void Text(
@@ -200,6 +202,29 @@ internal static class CardPaint
         }
 
         Text(g, label, rect, fontFamily, Scale(14, dpi), bold: false, primary ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
+        if (focused)
+        {
+            FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
+        }
+    }
+
+    // The 24 px button of the update line: the standard control fill and stroke, the caption size.
+    public static void SmallButton(Graphics g, Rectangle rect, string label, CardColours colours, string fontFamily, int dpi, bool focused)
+    {
+        ArgumentNullException.ThrowIfNull(colours);
+        int radius = Scale(4, dpi);
+        using GraphicsPath path = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
+        using (var fill = new SolidBrush(colours.ControlFill))
+        {
+            g.FillPath(fill, path);
+        }
+
+        using (var pen = new Pen(colours.ControlStroke, 1f))
+        {
+            g.DrawPath(pen, path);
+        }
+
+        Text(g, label, rect, fontFamily, Scale(12, dpi), bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
             FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
@@ -288,6 +313,154 @@ internal static class CardPaint
         var arc = new RectangleF(bounds.X + inset, bounds.Y + inset, bounds.Width - (2 * inset), bounds.Height - (2 * inset));
         float start = (((frame % 10) + 10) % 10) * 36f - 90f;
         g.DrawArc(pen, arc, start, 110f);
+    }
+
+    // The 16 px gear of the title row: a small circle inside a larger one, with eight short spokes.
+    public static void Gear(Graphics g, Rectangle button, Color colour, int dpi)
+    {
+        float s = dpi / 96f;
+        float left = button.X + ((button.Width - (16 * s)) / 2f);
+        float top = button.Y + ((button.Height - (16 * s)) / 2f);
+        PointF P(float x, float y) => new(left + (x * s), top + (y * s));
+        using var pen = RoundPen(colour, 1.2f * s);
+        g.DrawEllipse(pen, left + (5.8f * s), top + (5.8f * s), 4.4f * s, 4.4f * s);
+        g.DrawEllipse(pen, left + (3.2f * s), top + (3.2f * s), 9.6f * s, 9.6f * s);
+        (float X1, float Y1, float X2, float Y2)[] spokes =
+        [
+            (8f, 1.2f, 8f, 3.2f), (8f, 12.8f, 8f, 14.8f), (1.2f, 8f, 3.2f, 8f), (12.8f, 8f, 14.8f, 8f),
+            (3.2f, 3.2f, 4.6f, 4.6f), (11.4f, 11.4f, 12.8f, 12.8f), (12.8f, 3.2f, 11.4f, 4.6f), (4.6f, 11.4f, 3.2f, 12.8f),
+        ];
+        foreach ((float x1, float y1, float x2, float y2) in spokes)
+        {
+            g.DrawLine(pen, P(x1, y1), P(x2, y2));
+        }
+    }
+
+    // The 20 px arrow into a tray that stands for an update: the download and the available icons.
+    public static void DownIcon(Graphics g, Rectangle bounds, Color colour, int dpi)
+    {
+        float s = dpi / 96f;
+        PointF P(float x, float y) => new(bounds.X + (x * s), bounds.Y + (y * s));
+        using var pen = RoundPen(colour, 1.4f * s);
+        g.DrawLine(pen, P(10f, 2.5f), P(10f, 13f));
+        g.DrawLines(pen, new[] { P(5.5f, 8.5f), P(10f, 13f), P(14.5f, 8.5f) });
+        g.DrawLine(pen, P(3f, 17f), P(17f, 17f));
+    }
+
+    // The 20 px shield of the step where Windows asks for its administrator approval.
+    public static void ShieldIcon(Graphics g, Rectangle bounds, Color colour, int dpi)
+    {
+        float s = dpi / 96f;
+        PointF P(float x, float y) => new(bounds.X + (x * s), bounds.Y + (y * s));
+        using var pen = RoundPen(colour, 1.4f * s);
+        using var path = new GraphicsPath();
+        path.AddLine(P(10f, 1.8f), P(16.8f, 4.4f));
+        path.AddLine(P(16.8f, 4.4f), P(16.8f, 9.4f));
+        path.AddBezier(P(16.8f, 9.4f), P(16.8f, 13.6f), P(13.9f, 16.8f), P(10f, 18.2f));
+        path.AddBezier(P(10f, 18.2f), P(6.1f, 16.8f), P(3.2f, 13.6f), P(3.2f, 9.4f));
+        path.AddLine(P(3.2f, 9.4f), P(3.2f, 4.4f));
+        path.CloseFigure();
+        g.DrawPath(pen, path);
+    }
+
+    // A 4 px bar with full radius: the track, and the accent fill over the first percent of it.
+    public static void ProgressBar(Graphics g, Rectangle bounds, int percent, CardColours colours)
+    {
+        ArgumentNullException.ThrowIfNull(colours);
+        using (GraphicsPath track = RoundedRectangle(bounds, bounds.Height / 2f))
+        using (var brush = new SolidBrush(colours.Track))
+        {
+            g.FillPath(brush, track);
+        }
+
+        int filled = (int)Math.Round(bounds.Width * Math.Clamp(percent, 0, 100) / 100.0);
+        if (filled > 0)
+        {
+            var fillRect = new Rectangle(bounds.X, bounds.Y, filled, bounds.Height);
+            using GraphicsPath fill = RoundedRectangle(fillRect, bounds.Height / 2f);
+            using var brush = new SolidBrush(colours.Accent);
+            g.FillPath(brush, fill);
+        }
+    }
+
+    // A 10 px minus, plus or cross centred in bounds, 1.2 px round line.
+    public static void Glyph10(Graphics g, Rectangle bounds, GlyphKind kind, Color colour, int dpi)
+    {
+        float s = dpi / 96f;
+        float left = bounds.X + ((bounds.Width - (10 * s)) / 2f);
+        float top = bounds.Y + ((bounds.Height - (10 * s)) / 2f);
+        PointF P(float x, float y) => new(left + (x * s), top + (y * s));
+        using var pen = RoundPen(colour, 1.2f * s);
+        switch (kind)
+        {
+            case GlyphKind.Minus:
+                g.DrawLine(pen, P(1, 5), P(9, 5));
+                break;
+            case GlyphKind.Plus:
+                g.DrawLine(pen, P(1, 5), P(9, 5));
+                g.DrawLine(pen, P(5, 1), P(5, 9));
+                break;
+            default:
+                g.DrawLine(pen, P(1.5f, 1.5f), P(8.5f, 8.5f));
+                g.DrawLine(pen, P(8.5f, 1.5f), P(1.5f, 8.5f));
+                break;
+        }
+    }
+
+    // One of the settings page's two-choice buttons: the accent when it is the choice, the standard control when not.
+    public static void Segment(Graphics g, Rectangle rect, string label, bool selected, CardColours colours, string fontFamily, int dpi, bool focused)
+    {
+        ArgumentNullException.ThrowIfNull(colours);
+        int radius = Scale(4, dpi);
+        using GraphicsPath path = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
+        using (var fill = new SolidBrush(selected ? colours.Accent : colours.ControlFill))
+        {
+            g.FillPath(fill, path);
+        }
+
+        using (var pen = new Pen(selected ? colours.Accent : colours.ControlStroke, 1f))
+        {
+            g.DrawPath(pen, path);
+        }
+
+        Text(g, label, rect, fontFamily, Scale(12, dpi), bold: false, selected ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
+        if (focused)
+        {
+            FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
+        }
+    }
+
+    // A 28 by 28 button holding a minus, a plus or a cross. Drawn at 35% when it cannot be used.
+    public static void IconButton(Graphics g, Rectangle rect, GlyphKind kind, bool enabled, CardColours colours, int dpi, bool focused, bool bordered = true)
+    {
+        ArgumentNullException.ThrowIfNull(colours);
+        int radius = Scale(4, dpi);
+        int alpha = enabled ? 255 : 89;
+        if (bordered)
+        {
+            using GraphicsPath path = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
+            using (var fill = new SolidBrush(Color.FromArgb((colours.ControlFill.A * alpha) / 255, colours.ControlFill)))
+            {
+                g.FillPath(fill, path);
+            }
+
+            using var pen = new Pen(Color.FromArgb((colours.ControlStroke.A * alpha) / 255, colours.ControlStroke), 1f);
+            g.DrawPath(pen, path);
+        }
+
+        Glyph10(g, rect, kind, Color.FromArgb(alpha, bordered ? colours.Text : colours.TextSecondary), dpi);
+        if (focused)
+        {
+            FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
+        }
+    }
+
+    // A one pixel line across, in the divider colour.
+    public static void Divider(Graphics g, int x1, int x2, int y, CardColours colours)
+    {
+        ArgumentNullException.ThrowIfNull(colours);
+        using var pen = new Pen(colours.Divider);
+        g.DrawLine(pen, x1, y, x2, y);
     }
 
     private static Pen RoundPen(Color colour, float width) =>
