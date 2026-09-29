@@ -2,7 +2,7 @@ namespace Earshot.Hotkeys;
 
 // One action's result from HotkeyManager.Apply. This is a separate family from
 // Earshot.Contracts.ControllerResult: that type carries one outcome for one operation, and Apply always
-// produces exactly four, one per HotkeyAction, so folding them together would force a fake list of
+// produces exactly six, one per HotkeyAction, so folding them together would force a fake list of
 // steps onto a shape that already has its own per-action state. ErrorCode is 0 unless Windows gave a
 // code, and is the raw code, not a name: the fixed "RegisterHotKey ... error=<code>" / "UnregisterHotKey
 // ... error=<code>" log lines this feature writes (HotkeyManager.LogRegister/LogUnregister) are a spec-

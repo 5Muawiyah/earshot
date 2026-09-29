@@ -374,7 +374,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _time = options.Time;
 
         _menu = new TrayMenu(CurrentMenuState);
-        _menu.ToggleClicked += (_, _) => StartToggle();
+        _menu.ToggleClicked += (_, _) => StartToggle(trigger: SwitchTrigger.Menu);
         _menu.PlayFromPhoneItemClicked += OnPlayFromPhoneItemClicked;
         _menu.BlockAtBootClicked += (_, _) => Start("block at boot", place => BlockAtBootAsync(place));
         _menu.HandBackClicked += (_, _) => OnHandBackClicked();
@@ -609,11 +609,13 @@ internal sealed partial class TrayContext : ApplicationContext
 
     // viaHotkey: the trigger was a global shortcut, not the icon. It changes where the card that follows
     // lands (CardPlace.NearTray, since there is no click point) and whether a success is shown at all.
-    private void StartToggle(bool viaHotkey = false)
+    // trigger names what started it, for the log line of the switch. wanted: the direction a stated shortcut asks
+    // for, or null to do the opposite of what the tray shows, as a click does.
+    private void StartToggle(bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, bool? wanted = null)
     {
         CardPlace place = viaHotkey ? CardPlace.NearTray : ClickPlace();
         long clickedAt = _tickCount();
-        Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey), place);
+        Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey, trigger, wanted), place);
     }
 
     private void Start(string action, Func<CardPlace, Task> work, bool viaHotkey = false)
@@ -667,28 +669,28 @@ internal sealed partial class TrayContext : ApplicationContext
 
     // Toggles the connection of the pinned (or resolved) device through the coordinator, which owns the
     // block, allow and protection order around it and shows its cards.
-    private async Task ToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false)
+    private async Task ToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, bool? wanted = null)
     {
         if (_toggleInFlight)
         {
-            if (_toggleSuperseded || clickedAt - _toggleClickedAt < (long)_doubleClickTime.TotalMilliseconds)
+            if (!SupersedesInFlightToggle(wanted, clickedAt))
             {
                 _log.Write(LogLevel.Debug, "Click ignored: a connect or disconnect is already in flight.");
                 return;
             }
 
-            await SupersedeToggleAsync(place, clickedAt, viaHotkey);
+            await SupersedeToggleAsync(place, clickedAt, viaHotkey, trigger);
             return;
         }
 
-        await RunToggleAsync(place, clickedAt, connect: null, viaHotkey);
+        await RunToggleAsync(place, clickedAt, connect: wanted, viaHotkey, trigger);
     }
 
     // A click while a connect or disconnect is in flight asks for the opposite. The one in flight is cancelled and
     // the new one runs only once it has ended, clean-up included, so a re-block after a cancelled allow always
     // comes first. That can take minutes (a gate change already sent is waited for, a protect verb included), so the
     // click is answered with a card at once.
-    private async Task SupersedeToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false)
+    private async Task SupersedeToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click)
     {
         bool connect = !_toggleConnect;
         string next = connect ? "connect" : "disconnect";
@@ -723,11 +725,11 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        await RunToggleAsync(place, clickedAt, connect, viaHotkey);
+        await RunToggleAsync(place, clickedAt, connect, viaHotkey, trigger);
     }
 
     // connect: the intent a newer click asked for, or null to take it from the device state.
-    private async Task RunToggleAsync(CardPlace place, long clickedAt, bool? connect, bool viaHotkey = false)
+    private async Task RunToggleAsync(CardPlace place, long clickedAt, bool? connect, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click)
     {
         if (_toggleInFlight)
         {
@@ -807,7 +809,7 @@ internal sealed partial class TrayContext : ApplicationContext
         try
         {
             ToggleReport report = await _coordinator.ToggleAsync(
-                new ToggleRequest(wanted, intent.Container, intent.DeviceName, place), cts.Token);
+                new ToggleRequest(wanted, intent.Container, intent.DeviceName, place) { Trigger = trigger }, cts.Token);
 
             // A controller that reports a cancellation rather than throwing one is still a cancelled click. The
             // coordinator names the reason when it cancelled the operation itself (a session end, say).
@@ -818,6 +820,7 @@ internal sealed partial class TrayContext : ApplicationContext
                 report.UserMessage,
                 report.Steps);
             _log.Write(report.IsSuccess || cancelled ? LogLevel.Info : LogLevel.Warn, text);
+            LogSwitch(_log, report);
 
             // A click sees the result on the icon; a hotkey has nothing else to show it, so it gets a
             // card for the outcome, success included.
@@ -1798,7 +1801,7 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             case HotkeyAction.ToggleConnection:
                 _log.Info("Hotkey: toggle connection.");
-                StartToggle(viaHotkey: true);
+                StartToggle(viaHotkey: true, SwitchTrigger.ShortcutToggle);
                 break;
 
             case HotkeyAction.ToggleAudioProtection:
@@ -1814,6 +1817,11 @@ internal sealed partial class TrayContext : ApplicationContext
             case HotkeyAction.SpeakStatus:
                 _log.Info("Hotkey: speak status.");
                 SpeakCurrentStatus();
+                break;
+
+            case HotkeyAction.SwitchToPc:
+            case HotkeyAction.SwitchToPhone:
+                OnSwitchHotkey(e.Action);
                 break;
 
             default:

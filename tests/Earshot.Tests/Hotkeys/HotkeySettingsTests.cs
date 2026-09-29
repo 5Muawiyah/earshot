@@ -35,14 +35,16 @@ public sealed class HotkeySettingsTests
     }
 
     [TestMethod]
-    public void DefaultsAreOffWithEveryTextEmpty()
+    public void DefaultsAreOnWithOnlyTheTwoSwitchShortcutsTyped()
     {
         HotkeySettings defaults = HotkeySettings.Defaults;
-        Assert.IsFalse(defaults.Enabled);
+        Assert.IsTrue(defaults.Enabled);
         Assert.AreEqual(string.Empty, defaults.ToggleConnection);
         Assert.AreEqual(string.Empty, defaults.ToggleAudioProtection);
         Assert.AreEqual(string.Empty, defaults.ToggleBlockAtBoot);
         Assert.AreEqual(string.Empty, defaults.SpeakStatus);
+        Assert.AreEqual("Ctrl+Alt+Shift+A", defaults.SwitchToPc);
+        Assert.AreEqual("Ctrl+Alt+Shift+D", defaults.SwitchToPhone);
     }
 
     // Adapted from the spec's Settings_RoundTripThroughJson: Earshot's own settings pipeline serialises
@@ -103,7 +105,9 @@ public sealed class HotkeySettingsTests
         EarshotSettings? settings = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.EarshotSettings);
 
         Assert.IsNotNull(settings);
-        Assert.IsFalse(settings!.Hotkeys.Enabled);
+        Assert.IsTrue(settings!.Hotkeys.Enabled);
+        Assert.AreEqual(HotkeySettings.DefaultSwitchToPc, settings.Hotkeys.SwitchToPc);
+        Assert.AreEqual(HotkeySettings.DefaultSwitchToPhone, settings.Hotkeys.SwitchToPhone);
         Assert.AreEqual(string.Empty, settings.Hotkeys.ToggleConnection);
         Assert.AreEqual(string.Empty, settings.Hotkeys.ToggleAudioProtection);
         Assert.AreEqual(string.Empty, settings.Hotkeys.ToggleBlockAtBoot);

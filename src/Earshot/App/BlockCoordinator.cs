@@ -564,6 +564,10 @@ internal sealed partial class BlockCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(request);
         string name = request.Connect ? "connect" : "disconnect";
 
+        // Measured from acceptance, before anything can make it wait. The stamps below only read a clock.
+        var timeline = new SwitchTimeline(_time, _log, request.Connect, request.Trigger);
+        request = request with { Timeline = timeline };
+
         // A connect may send the allow that enables the nodes, so it is refused while a session end is in
         // progress. A disconnect still runs: it sends no allow, its only gate change is the block that follows it
         // (and that Block sequence starts no protect verb while the session ends), so it cannot leave the nodes
@@ -572,7 +576,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         if (_sessionEnding && refused is not null)
         {
             _log.Info(name + ": not started, because the session is ending.");
-            return refused();
+            return Timed(refused(), timeline);
         }
 
         // The user has acted, so the start-up check has nothing left to reconcile.
@@ -584,19 +588,27 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         try
         {
-            return await RunExclusiveAsync(
+            ToggleReport report = await RunExclusiveAsync(
                 name,
                 token => request.Connect ? ConnectCoreAsync(request, token) : DisconnectCoreAsync(request, token),
                 ct,
                 refused);
+            return Timed(report, timeline);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // The operation body turns its own cancellation into a report, so this is a cancellation while it
             // waited for the operation before it. Nothing was shown or sent for it.
             _log.Info(name + ": cancelled before it started.");
-            return new ToggleReport(request.Connect, OpStatus.NotAttempted, "", Array.Empty<StepOutcome>(), Cancelled: true);
+            return Timed(new ToggleReport(request.Connect, OpStatus.NotAttempted, "", Array.Empty<StepOutcome>(), Cancelled: true), timeline);
         }
+    }
+
+    // Closes the measurement with how the operation ended and hands it back on the report.
+    private static ToggleReport Timed(ToggleReport report, SwitchTimeline timeline)
+    {
+        timeline.Complete(report.Status, report.Cancelled);
+        return report with { Timeline = timeline };
     }
 
     // The Protect audio quality menu toggle. The caller has saved the setting. Throws OperationCanceledException
@@ -1867,13 +1879,17 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         var steps = new List<StepOutcome>();
         var cleanup = new ConnectCleanup();
+        request.Timeline?.CoreBegan();
         ReArmIdleRule("a connect was asked for");
         try
         {
+            long mark = request.Timeline?.Mark() ?? -1;
             ConnectResult result = await _connection.ConnectAsync(request.Container, ct);
+            request.Timeline?.Record(SwitchPhase.FirstPass, mark);
             steps.AddRange(result.Steps);
             if (result.Confirmed)
             {
+                NoteConfirmed(request, result, SwitchPath.Direct);
                 return await ConnectedAsync(request, steps, allowed: false, ct);
             }
 
@@ -1887,7 +1903,9 @@ internal sealed partial class BlockCoordinator : IDisposable
                     return Finish(request, OpStatus.Failed, ChangeStillRunningMessage, steps);
                 }
 
+                mark = request.Timeline?.Mark() ?? -1;
                 BootBlockStatus? status = await ReadBlockStatusAsync(ct);
+                request.Timeline?.Record(SwitchPhase.Status, mark);
                 string? refusal = CoordinatorRules.AllowFirstRefusal(status, request.Container);
                 if (refusal is not null)
                 {
@@ -1902,7 +1920,9 @@ internal sealed partial class BlockCoordinator : IDisposable
                 cleanup.BlockAtBoot = status!.BlockAtBootKnown ? status.BlockAtBoot : null;
                 ShowCard(request, AllowingStatus);
                 cleanup.AllowIssued = true;
+                mark = request.Timeline?.Mark() ?? -1;
                 ControllerResult allow = await SendAllowAsync("allow (connect)", steps);
+                request.Timeline?.Record(SwitchPhase.Allow, mark);
                 if (IsSessionEndRefusal(allow))
                 {
                     // Nothing was sent, so there is no allow to put back; whatever else the connect changed still is.
@@ -1916,17 +1936,23 @@ internal sealed partial class BlockCoordinator : IDisposable
                     return await FailConnectAsync(request, cleanup, steps, allow.UserMessage, ct);
                 }
 
+                mark = request.Timeline?.Mark() ?? -1;
                 await ReadBlockStatusAsync(ct);
-                if (!await WaitForSnapshotAsync(request.Container, CoordinatorRules.RenderEndpointPresent, EndpointWait, ct))
+                bool endpointCame = await WaitForSnapshotAsync(request.Container, CoordinatorRules.RenderEndpointPresent, EndpointWait, ct);
+                request.Timeline?.Record(SwitchPhase.Endpoints, mark);
+                if (!endpointCame)
                 {
                     _log.Warn("connect: no render endpoint came back within " + Seconds(EndpointWait) + " of the allow.");
                     return await FailConnectAsync(request, cleanup, steps, DidNotComeBackMessage, ct);
                 }
 
+                mark = request.Timeline?.Mark() ?? -1;
                 result = await _connection.ConnectAsync(request.Container, ct);
+                request.Timeline?.Record(SwitchPhase.Connect, mark);
                 steps.AddRange(result.Steps);
                 if (result.Confirmed)
                 {
+                    NoteConfirmed(request, result, SwitchPath.AllowFirst);
                     return await ConnectedAsync(request, steps, allowed: true, ct);
                 }
             }
@@ -1974,6 +2000,7 @@ internal sealed partial class BlockCoordinator : IDisposable
     private async Task<ToggleReport> FailConnectAsync(ToggleRequest request, ConnectCleanup cleanup, List<StepOutcome> steps, ConnectResult result, CancellationToken ct)
     {
         ConnectCleanUpOutcome outcome = await CleanUpConnectAsync(request, cleanup, steps);
+        NoteBlockedAgain(request, outcome);
         return outcome == ConnectCleanUpOutcome.InUse
             ? await ConnectedAsync(request, steps, allowed: cleanup.AllowIssued, ct)
             : Finish(request, OpStatus.Failed, CoordinatorRules.ConnectFailureMessage(result, blockedAgain: outcome == ConnectCleanUpOutcome.Blocked), steps);
@@ -1982,9 +2009,41 @@ internal sealed partial class BlockCoordinator : IDisposable
     private async Task<ToggleReport> FailConnectAsync(ToggleRequest request, ConnectCleanup cleanup, List<StepOutcome> steps, string message, CancellationToken ct)
     {
         ConnectCleanUpOutcome outcome = await CleanUpConnectAsync(request, cleanup, steps);
+        NoteBlockedAgain(request, outcome);
         return outcome == ConnectCleanUpOutcome.InUse
             ? await ConnectedAsync(request, steps, allowed: cleanup.AllowIssued, ct)
             : Finish(request, OpStatus.Failed, message, steps);
+    }
+
+    // What the timeline says of a connect's clean-up. Only reads what the clean-up already decided.
+    private static void NoteBlockedAgain(ToggleRequest request, ConnectCleanUpOutcome outcome)
+    {
+        if (request.Timeline is not { } timeline)
+        {
+            return;
+        }
+
+        timeline.BlockedAgain = outcome switch
+        {
+            ConnectCleanUpOutcome.Blocked => SwitchBlockedAgain.Yes,
+            ConnectCleanUpOutcome.NodesLeftEnabled => SwitchBlockedAgain.No,
+            _ => SwitchBlockedAgain.NotNeeded,
+        };
+    }
+
+    // A connect attempt confirmed ACTIVE. Render ACTIVE with no request sent to any filter was already so; one the
+    // request was sent for took the path the caller names. The step names are the connect path's own, and the
+    // handover figure is when this call returned, which is when the coordinator first knew.
+    private static void NoteConfirmed(ToggleRequest request, ConnectResult result, SwitchPath sent)
+    {
+        if (request.Timeline is not { } timeline)
+        {
+            return;
+        }
+
+        bool anySent = result.Steps.Any(step => step.Ok && step.Step.StartsWith(KsConnectPath.ReconnectStep, StringComparison.Ordinal));
+        timeline.Path = anySent ? sent : SwitchPath.Already;
+        timeline.MarkActive();
     }
 
     // Render reached ACTIVE: the nodes stay enabled, and protection is checked again (an allow may have brought
@@ -1993,10 +2052,13 @@ internal sealed partial class BlockCoordinator : IDisposable
     {
         ShowCard(request, TrayStatus.CardConnected);
         ReArmIdleRule("the AirPods connected");
+        request.Timeline?.MarkActive();
+        long protectionMark = request.Timeline?.Mark() ?? -1;
         ProtectionRun run;
         try
         {
             run = await RunProtectionAsync(allowed ? ProtectionGoal.Allow : ProtectionGoal.Reverify, Settings.ProtectAudioQuality, request.Place, notice: true, ct);
+            request.Timeline?.Record(SwitchPhase.Protection, protectionMark);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -2046,6 +2108,12 @@ internal sealed partial class BlockCoordinator : IDisposable
         if (!again.Confirmed)
         {
             return await FailConnectAsync(request, cleanup, steps, again, ct);
+        }
+
+        if (request.Timeline is { } assisted)
+        {
+            assisted.Path = SwitchPath.HandsFreeAssisted;
+            assisted.MarkActive();
         }
 
         ShowCard(request, TrayStatus.CardConnected);
@@ -2194,6 +2262,7 @@ internal sealed partial class BlockCoordinator : IDisposable
     private async Task<ToggleReport> DisconnectCoreAsync(ToggleRequest request, CancellationToken ct)
     {
         var steps = new List<StepOutcome>();
+        request.Timeline?.CoreBegan();
         ReArmIdleRule("a disconnect was asked for");
         ConnectResult? result = null;
         ExceptionDispatchInfo? fault = null;
@@ -2204,6 +2273,10 @@ internal sealed partial class BlockCoordinator : IDisposable
             await PauseBeforeOwnLeaveAsync("Disconnect", request.Container, PauseOnLeave.DefaultOwnLeaveCap, ct);
             result = await _connection.DisconnectAsync(request.Container, ct);
             steps.AddRange(result.Steps);
+            if (result.Confirmed)
+            {
+                request.Timeline?.MarkReleased();
+            }
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
@@ -2229,7 +2302,13 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         // Blocking is the at-rest action, so it follows whatever the request returned. It is not cancellable.
+        long blockMark = request.Timeline?.Mark() ?? -1;
         BlockAttempt block = await BlockAfterDisconnectAsync(request, steps);
+        if (block.Issued)
+        {
+            request.Timeline?.Record(SwitchPhase.Block, blockMark);
+        }
+
         fault?.Throw();
         if (cancelled)
         {
@@ -2239,6 +2318,12 @@ internal sealed partial class BlockCoordinator : IDisposable
         DeviceSnapshot? now = await RefreshSnapshotAsync();
         RenderState render = now is null ? RenderState.Unknown : CoordinatorRules.RenderOf(now, request.Container);
         bool disconnected = render == RenderState.NotActive || (render == RenderState.Unknown && result is { Confirmed: true });
+        if (disconnected)
+        {
+            // A release confirmed by the request already stamped this; one only the read shows is stamped now.
+            request.Timeline?.MarkReleased();
+        }
+
         if (!disconnected)
         {
             return Finish(request, OpStatus.Failed, CoordinatorRules.DisconnectFailureMessage(result), steps);
@@ -2260,22 +2345,37 @@ internal sealed partial class BlockCoordinator : IDisposable
             if (status is null)
             {
                 _log.Warn("disconnect: the nodes are not blocked, because the boot block status could not be read.");
+                request.Timeline?.MarkNotAtRest(SwitchTimelineText.ReasonStatusUnreadable);
                 return BlockAttempt.NotIssued;
             }
 
             if (!status.BlockAtBoot || status.State == BlockState.Blocked)
             {
+                NoteAtRestFromRead(request, status);
                 return BlockAttempt.NotIssued;
             }
 
             if (!CoordinatorRules.NodesEnabled(status))
             {
                 _log.Info("disconnect: the nodes read " + status.State + ", so nothing is blocked.");
+                NoteAtRestFromRead(request, status);
                 return BlockAttempt.NotIssued;
             }
 
             ProtectionRun run = await RunBlockSequenceAsync(BlockReason.Disconnect, request.Container, request.Place, CancellationToken.None);
             steps.AddRange(run.Steps);
+
+            // At rest is what a node read says after the block, never what the block reported: run.Status is that
+            // read, and is null when it failed.
+            if (run.Status is { State: BlockState.Blocked })
+            {
+                request.Timeline?.MarkAtRest();
+            }
+            else
+            {
+                request.Timeline?.MarkNotAtRest(run.Status is null ? SwitchTimelineText.ReasonStatusUnreadable : SwitchTimelineText.ReasonBlockDidNotTake);
+            }
+
             if (run.Skipped is { } why)
             {
                 _log.Info("disconnect: the nodes are not blocked now, because " + why + ".");
@@ -2288,7 +2388,39 @@ internal sealed partial class BlockCoordinator : IDisposable
         {
             steps.Add(StepOutcomes.FromHResult("disconnect-block", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false));
             _log.Error("disconnect: the block failed; the nodes may still be enabled.", ex);
+            request.Timeline?.MarkNotAtRest(SwitchTimelineText.ReasonBlockDidNotTake);
             return new BlockAttempt(Issued: true, Took: false, CouldNotBlockMessage);
+        }
+    }
+
+    // No block was sent for a disconnect, so the read taken before it is the whole evidence: at rest only when it
+    // says Blocked, and otherwise for the reason that read gives.
+    private static void NoteAtRestFromRead(ToggleRequest request, BootBlockStatus status)
+    {
+        if (request.Timeline is not { } timeline)
+        {
+            return;
+        }
+
+        if (status.State == BlockState.NotSetUp)
+        {
+            timeline.MarkNotAtRest(SwitchTimelineText.ReasonNotSetUp);
+        }
+        else if (status.State == BlockState.Blocked)
+        {
+            timeline.MarkAtRest();
+        }
+        else if (!status.BlockAtBoot)
+        {
+            timeline.MarkNotAtRest(SwitchTimelineText.ReasonBlockAtBootOff);
+        }
+        else if (status.State == BlockState.Unknown)
+        {
+            timeline.MarkNotAtRest(SwitchTimelineText.ReasonStatusUnreadable);
+        }
+        else
+        {
+            timeline.MarkNotAtRest(SwitchTimelineText.ReasonBlockDidNotTake);
         }
     }
 

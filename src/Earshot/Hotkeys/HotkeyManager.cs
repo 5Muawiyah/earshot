@@ -20,7 +20,7 @@ namespace Earshot.Hotkeys;
 // would reorder the owner's key presses.
 public sealed class HotkeyManager : IDisposable
 {
-    // Base of the hot key ids: 0x4A00 through 0x4A03, one per HotkeyAction, inside the application
+    // Base of the hot key ids: 0x4A00 through 0x4A05, one per HotkeyAction, inside the application
     // range 0x0000 to 0xBFFF that RegisterHotKey requires (0xC000 and above is reserved for shared
     // DLLs, which take theirs from GlobalAddAtom).
     public const int HotkeyIdBase = 0x4A00;
@@ -34,12 +34,19 @@ public sealed class HotkeyManager : IDisposable
     // not be registered as a hot key."
     private const ushort VkF12 = 0x7B;
 
+    internal const string F12RefusedMessage = "F12 is kept by Windows for the debugger, so it cannot be a shortcut.";
+
+    // True for a combination Windows keeps for itself, which is never registered.
+    internal static bool IsReserved(HotkeyCombination combination) => combination.VirtualKey == VkF12;
+
     private static readonly HotkeyAction[] ActionOrder =
     [
         HotkeyAction.ToggleConnection,
         HotkeyAction.ToggleAudioProtection,
         HotkeyAction.ToggleBlockAtBoot,
         HotkeyAction.SpeakStatus,
+        HotkeyAction.SwitchToPc,
+        HotkeyAction.SwitchToPhone,
     ];
 
     private readonly IMessageWindow _window;
@@ -186,10 +193,9 @@ public sealed class HotkeyManager : IDisposable
             return new HotkeyRegistrationOutcome(action, text, HotkeyRegistrationState.TextRejected, 0, parseError);
         }
 
-        if (combination.VirtualKey == VkF12)
+        if (IsReserved(combination))
         {
-            return new HotkeyRegistrationOutcome(action, text, HotkeyRegistrationState.Refused, 0,
-                "F12 is kept by Windows for the debugger, so it cannot be a shortcut.");
+            return new HotkeyRegistrationOutcome(action, text, HotkeyRegistrationState.Refused, 0, F12RefusedMessage);
         }
 
         string canonical = HotkeyText.Format(combination);

@@ -40,7 +40,14 @@ internal readonly record struct CardPlace(CardAnchor Anchor, Point? ClickPoint)
 
 // A connect or disconnect handed to the block coordinator: which container, the name for its cards and
 // where those cards go.
-internal sealed record ToggleRequest(bool Connect, Guid Container, string DeviceName, CardPlace Place);
+//   Trigger   what started it, for the log line of the switch; a caller that says nothing is a click
+//   Timeline  the measurement of this one request, set by the coordinator when it accepts it
+internal sealed record ToggleRequest(bool Connect, Guid Container, string DeviceName, CardPlace Place)
+{
+    public SwitchTrigger Trigger { get; init; } = SwitchTrigger.Click;
+
+    public SwitchTimeline? Timeline { get; init; }
+}
 
 // How a connect or disconnect ended, after every clean-up it needed.
 //   Status       Success when the wanted state was observed; Partial when it was, but a follow-up (protection
@@ -54,6 +61,9 @@ internal sealed record ToggleRequest(bool Connect, Guid Container, string Device
 internal sealed record ToggleReport(bool Connect, OpStatus Status, string UserMessage, IReadOnlyList<StepOutcome> Steps, bool Cancelled)
 {
     public string? CancelledBecause { get; init; }
+
+    // The measurement of this connect or disconnect, set by the coordinator on every report it returns.
+    public SwitchTimeline? Timeline { get; init; }
 
     public bool IsSuccess => Status is OpStatus.Success or OpStatus.AlreadyInState;
 }
