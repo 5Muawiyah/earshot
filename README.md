@@ -53,21 +53,37 @@ then Connect on the card.
 - **Blocks the Hands-Free profile**, on by default, so a browser tab or a game
   cannot drop the AirPods to a narrow voice channel. This turns off the
   AirPods microphone on this PC while it is on.
-- **Hands the AirPods back at shut down and sleep**, on by default, releasing
-  them and blocking the nodes again before this PC can grab them back.
-- **The AirPods widget: a battery gauge on the taskbar, a card, and a low
-  battery alert.** It reads left, right and case battery, charging and where
-  the AirPods are from their own Bluetooth broadcast, not from being
-  connected. It shows a figure only once it has actually read one off the
-  device; today that one-time reading has not been taken yet, so the card
-  says "No reading" and nothing else, and the widget has not had a live run.
-  See [docs/overview.md](docs/overview.md#the-airpods-widget) for what it
-  does and its limits, and [docs/architecture.md](docs/architecture.md#the-airpods-widget)
-  for how it works and what still needs a kernel driver.
-- **v1.1: keyboard shortcuts, spoken status and playing audio from a paired
-  phone.** All three are built, reviewed and off by default, and none has had
-  a live run yet. The hand-back above is built and covered by its own tests,
-  and is in the same position on one point: it has not had a live run either.
+- **Hands the AirPods back at shut down, sleep and Exit.** With **Hand back
+  on shut down, sleep and Exit** ticked (in the menu and on the card's
+  settings page), Earshot lets the AirPods go, confirms it, and blocks the
+  device nodes again before this PC can grab them back. A stuck disconnect
+  still gets the block. The tests cover it against stand-ins; it has not had a
+  live run (tests 17, 18 and 20 are pending).
+- **The AirPods widget.** A gauge on the taskbar (the earbud mark with a ring
+  in your Windows accent colour, and the lower proved bud's number), a card
+  with a settings page behind its gear, and a low battery alert. It listens to
+  the AirPods' own Bluetooth broadcast, so it needs no connection. A battery
+  figure shows only once **Set up battery** has proved that field: open the
+  case by the PC, tell Earshot what your iPhone shows, and do it twice. Until
+  then the gauge shows the earbud mark alone. Set-up cannot prove whether a bud
+  is in the ear or whether the case lid is open, so ear detection, auto-pause
+  and the case-open card stay off. The widget has not had a live run. See
+  [docs/overview.md](docs/overview.md#the-airpods-widget) and
+  [docs/architecture.md](docs/architecture.md#the-airpods-widget).
+- **Shortcuts, on by default.** Ctrl+Alt+Shift+A connects (switches the
+  AirPods to this PC) and Ctrl+Alt+Shift+D disconnects (switches them to the
+  phone). Both can be changed or cleared on the settings page. Nobody has
+  pressed one on a real run yet (test 16 is pending).
+- **Pause when the AirPods leave this PC**, on by default. If this PC was
+  playing to the AirPods when they leave, Earshot pauses the one media session
+  that is playing. It never resumes anything.
+- **Updates.** **Check for updates** is in the menu and on the settings page.
+  **Check automatically** is off by default, because a check contacts GitHub.
+  Nothing downloads until you press Update. See
+  [docs/architecture.md](docs/architecture.md#updates) for what the checksum
+  does and does not protect against.
+- **Spoken status and playing audio from a phone**, both off by default and
+  neither with a live run.
 - **A small background service for the hand-back.** When the Earshot icon has
   been closed or has crashed, nothing in the tray can hand the AirPods back at
   shut down. A Windows service, `EarshotHandBack`, covers that case: at shut
@@ -85,28 +101,32 @@ plain-English tour of the tray.
 
 ## Getting started
 
-1. Get `Earshot-1.1.0-win-x64.zip`. There is no download page: the zip is
-   built from this repository by `tools\build-release.ps1`, which writes it
-   to `artifacts\` and prints its size and SHA-256. Check that hash against
-   the copy you were given before you unzip it, because setup copies these
-   files into Program Files.
+1. Get `Earshot-<version>-win-x64.zip`. The zip is built from this repository
+   by `tools\build-release.ps1`, which writes it to `artifacts\` with a
+   `.sha256` file beside it and prints its size and SHA-256. Check that hash
+   against the copy you were given before you unzip it, because setup copies
+   these files into Program Files.
 2. Unzip it anywhere. You get an `Earshot` folder.
 3. Run `Earshot.exe`. An earbud icon appears in the notification area.
 4. Right click the icon and choose **Set up Earshot...**. Windows shows one
-   administrator prompt. The item only appears while setup is needed.
+   administrator prompt. The item appears before setup, for a damaged
+   install, and when the running copy is newer than the installed one.
 
 Connect, disconnect and the audio protection do not need setup. Only the boot
 block does, because disabling a device node needs administrator rights.
 
 Requirements: Windows 11 on x64, which is what Earshot is built for and
-tested on. The v1.1 build declares no higher minimum than before (the
-published `Earshot.dll` still carries `SupportedOSPlatform("Windows7.0")`).
-Only Play from a phone needs Windows 10 version 2004 (build 19041) or later,
+tested on. Only Play from a phone needs Windows 10 version 2004 (build 19041) or later,
 which every Windows 11 has; on anything older that one menu item is shown
 disabled. Otherwise: the AirPods paired to this PC and connected to it at
 least once, so Windows has created their device nodes; one administrator
 approval, for setup; nothing else to install, because the release is
 self-contained.
+
+Settings are in `%APPDATA%\Earshot\settings.json`. Logs, live-test evidence
+and the widget's claim, set-up records and proof are in
+`%LOCALAPPDATA%\Earshot`. The files the elevated tasks and the service read
+are in `%ProgramData%\Earshot`.
 
 To remove Earshot, turn **Open on startup** off in the menu, close Earshot,
 then run `& "C:\Program Files\Earshot\Earshot.exe" uninstall` from an
