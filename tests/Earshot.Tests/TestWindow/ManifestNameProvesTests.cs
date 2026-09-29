@@ -34,6 +34,7 @@ public sealed class ManifestNameProvesTests
         ["17"] = "Earshot hands the AirPods back before this computer shuts down, and leaves them alone at the next start.",
         ["18"] = "Earshot hands the AirPods back before this computer sleeps, and does not take them back by itself on waking.",
         ["19"] = "The taskbar gauge and its cards work, and nothing on them shows a reading that has not actually been measured yet.",
+        ["20"] = "Even with the Earshot icon closed, the AirPods are handed back before this computer shuts down, and left alone at the next start.",
     };
 
     private static IReadOnlyList<ManifestRow> LoadManifest() =>

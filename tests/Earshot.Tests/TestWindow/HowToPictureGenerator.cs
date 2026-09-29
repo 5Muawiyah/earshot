@@ -27,6 +27,7 @@ internal static class HowToPictureGenerator
         ["bluetooth-connect"] = BluetoothConnect,
         ["airpods-playing"] = AirPodsPlaying,
         ["permission-box"] = PermissionBox,
+        ["task-manager-end-task"] = TaskManagerEndTask,
     };
 
     private static byte[] EarshotIconTaskbar()
@@ -204,6 +205,49 @@ internal static class HowToPictureGenerator
         g.DrawRectangle(pen, no);
         g.DrawString("Yes", font, new SolidBrush(Ink), yes, CentreFormat);
         g.DrawString("No", font, new SolidBrush(Ink), no, CentreFormat);
+
+        return ToPngBytes(bitmap);
+    }
+
+    // Task Manager with one row picked and the End task button beside it: the list is blank lines except the one
+    // that matters, so nothing drawn here can drift out of step with what Windows really shows.
+    private static byte[] TaskManagerEndTask()
+    {
+        const int width = 420, height = 210;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 2);
+        using var font = new Font(FontFamily.GenericSansSerif, 12f);
+        using var ink = new SolidBrush(Ink);
+
+        var window = new Rectangle(16, 12, width - 32, height - 24);
+        g.DrawRectangle(pen, window);
+        g.DrawString("Task Manager", font, ink, window.Left + 12, window.Top + 8);
+        g.DrawLine(pen, window.Left, window.Top + 34, window.Right, window.Top + 34);
+
+        // The button along the top of the list.
+        var endTask = new Rectangle(window.Right - 116, window.Top + 42, 100, 30);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawRectangle(ringPen, endTask);
+        g.DrawString("End task", font, ink, endTask, CentreFormat);
+
+        // The list: a blank line for every program but the one to close, which is named and ringed.
+        int y = window.Top + 80;
+        foreach (string row in new[] { "", "", "Earshot", "" })
+        {
+            var line = new Rectangle(window.Left + 12, y, window.Width - 24, 26);
+            if (row.Length == 0)
+            {
+                g.DrawLine(pen, line.Left + 8, line.Top + 13, line.Left + 150, line.Top + 13);
+            }
+            else
+            {
+                g.DrawRectangle(ringPen, line);
+                g.DrawString(row, font, ink, line.Left + 8, line.Top + 4);
+            }
+
+            y += 28;
+        }
 
         return ToPngBytes(bitmap);
     }

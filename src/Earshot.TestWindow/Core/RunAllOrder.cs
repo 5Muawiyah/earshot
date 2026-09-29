@@ -10,7 +10,7 @@ internal sealed record RunAllItem(string RowNumber, int? Variant)
     internal string Key => Variant is null ? RowNumber : RowNumber + "v" + Variant.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
-// Run all: a guided sequence in launcher order, 01 to 15 then 17 and 18 (16, fast switch, is a
+// Run all: a guided sequence in launcher order, 01 to 15 then 17, 20 and 18 (16, fast switch, is a
 // spec only and is not built), with 10 as five items; 00 is not in it. Restore (00) is the manual
 // escape hatch, never part of the sequence it might need to recover from.
 //
@@ -34,7 +34,7 @@ internal static class RunAllOrder
             items.Add(new RunAllItem("10", variant));
         }
 
-        foreach (string number in new[] { "11", "12", "13", "14", "15", "17", "18" })
+        foreach (string number in new[] { "11", "12", "13", "14", "15", "17", "20", "18" })
         {
             items.Add(new RunAllItem(number, null));
         }

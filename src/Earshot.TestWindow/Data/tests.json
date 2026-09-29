@@ -246,7 +246,8 @@
       "firstHalfOnlyCriteriaIds": [ "connected-first" ],
       "secondHalfOnlyCriteriaIds": [
         "end-session-logged", "handback-started", "handback-disconnect-confirmed", "handback-block-sent",
-        "handback-finished", "nodes-after-boot", "not-paged-at-boot", "heard-handed-back", "shutdown-was-clean"
+        "handback-finished", "nodes-after-boot", "not-paged-at-boot", "heard-handed-back", "shutdown-was-clean",
+        "service-ran"
       ]
     },
     {
@@ -274,6 +275,33 @@
       "settles": "Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.",
       "powerCycleRequirement": "none",
       "maxSilenceSeconds": 900
+    },
+    {
+      "number": "20",
+      "script": "20-ServiceHandBack.ps1",
+      "testId": "20-service-handback",
+      "kind": "power-cycle-full-shutdown",
+      "halves": 2,
+      "name": "Hand back when Earshot is closed",
+      "title": "Hand back by the service when Earshot is not running",
+      "proves": "Even with the Earshot icon closed, the AirPods are handed back before this computer shuts down, and left alone at the next start.",
+      "settles": "Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone.",
+      "powerCycleRequirement": "full-shut-down",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [
+        "connected-first",
+        "tray-gone-still-connected"
+      ],
+      "secondHalfOnlyCriteriaIds": [
+        "nodes-after-boot",
+        "not-paged-at-boot",
+        "heard-handed-back",
+        "service-ran",
+        "service-blocked",
+        "service-in-budget",
+        "shutdown-was-clean",
+        "service-no-error-event"
+      ]
     }
   ]
 }

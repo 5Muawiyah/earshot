@@ -19,7 +19,7 @@ public sealed class ManifestTests
         Manifest.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "tests.json"));
 
     [TestMethod]
-    public void NineteenRowsSummingToTwentySixHalves()
+    public void TwentyRowsSummingToTwentyEightHalves()
     {
         IReadOnlyList<ManifestRow> rows = LoadManifest();
         Assert.AreEqual(Manifest.ExpectedRowCount, rows.Count);
@@ -27,7 +27,7 @@ public sealed class ManifestTests
     }
 
     [TestMethod]
-    public void ScriptsEqualTheNineteenShipped()
+    public void ScriptsEqualTheTwentyShipped()
     {
         string liveTestsRoot = Path.Combine(RepositoryLocator.RepositoryRoot(), "tools", "live-tests");
         string[] shipped = Directory.EnumerateFiles(liveTestsRoot, "*.ps1", SearchOption.TopDirectoryOnly)

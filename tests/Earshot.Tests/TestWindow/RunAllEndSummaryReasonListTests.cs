@@ -44,6 +44,10 @@ public sealed class RunAllEndSummaryReasonListTests
             new ResultJsonFixture("18-handback-on-sleep", "pass").WithCriterion("c1", "pass")
                 .WithFinding("leftAtRest", "yes").WithFinishedUtc("2026-09-21T01:00:00.000Z").Build());
 
+        ResultJsonFixture.WriteTo(System.IO.Path.Combine(liveTestRoot, "20260921T020000Z", "20-service-handback", "result.json"),
+            new ResultJsonFixture("20-service-handback", "pass").WithCriterion("nodes-after-boot", "pass")
+                .WithFinding("leftAtRest", "yes").WithFinishedUtc("2026-09-21T02:00:00.000Z").Build());
+
         int rowFifteenIndex = RunAllOrder.Items.ToList().FindIndex(i => i.RowNumber == "15");
         Assert.AreNotEqual(-1, rowFifteenIndex, "row 15 was not found in Run all's own order.");
         RunAllFile.Write(windowStateRoot, new RunAllRecord

@@ -16,10 +16,10 @@ public sealed class DisplayRowTests
         Manifest.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "tests.json"));
 
     [TestMethod]
-    public void FlattenProducesTwentyThreeRowsEighteenOrdinaryPlusFiveVariants()
+    public void FlattenProducesTwentyFourRowsNineteenOrdinaryPlusFiveVariants()
     {
         IReadOnlyList<DisplayRow> displayRows = DisplayRow.Flatten(Rows());
-        Assert.AreEqual(23, displayRows.Count);
+        Assert.AreEqual(24, displayRows.Count);
     }
 
     [TestMethod]
