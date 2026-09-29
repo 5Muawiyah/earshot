@@ -35,7 +35,8 @@ internal sealed class UpdateTrayHarness : IDisposable
         bool pinned = true,
         bool installedCopy = true,
         Func<IUpdateSource>? sourceFactory = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        UpdateOutcomeSource? outcomeSource = null)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -87,6 +88,7 @@ internal sealed class UpdateTrayHarness : IDisposable
             GaugeCoverProbeFactory = () => new FakeCoverProbe(),
             UpdateSourceFactory = sourceFactory ?? (() => Source),
             UpdateLauncher = Launcher,
+            UpdateOutcome = outcomeSource,
         };
 
         Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,
@@ -140,6 +142,13 @@ internal sealed class UpdateTrayHarness : IDisposable
         System.Windows.Forms.ToolStripMenuItem item = MenuItem(text);
         Assert.IsTrue(item.Available && item.Enabled, text + " cannot be clicked.");
         item.PerformClick();
+    }
+
+    // Runs what was posted to the tray's thread during start-up, such as the card that says how the last update ended.
+    public void Settle()
+    {
+        Application.DoEvents();
+        PumpUntilIdle();
     }
 
     public void PumpUntilIdle() => TrayHarness.PumpUntil(() => !Context.IsWorking, "The tray was still busy after 10 seconds.");

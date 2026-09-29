@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Contracts;
 
-// The hand-back setting defaults on, an older file with no member reads as on, and the value round-trips
+// The hand-back setting defaults off, an older file with no member reads as off, and the value round-trips
 // through the shipped source-generated serialiser without moving SchemaVersion.
 [TestClass]
 public sealed class HandBackSettingsTests : IDisposable
@@ -19,20 +19,20 @@ public sealed class HandBackSettingsTests : IDisposable
     private JsonSettingsStore Open() => new(SettingsPath, _log);
 
     [TestMethod]
-    public void ANewSettingsObjectDefaultsHandBackOn()
+    public void ANewSettingsObjectDefaultsHandBackOff()
     {
-        Assert.IsTrue(new EarshotSettings().HandBackOnShutdownAndSleep);
+        Assert.IsFalse(new EarshotSettings().HandBackOnShutdownAndSleep);
     }
 
     [TestMethod]
-    public void AnOlderFileWithNoHandBackMemberReadsOn()
+    public void AnOlderFileWithNoHandBackMemberReadsOff()
     {
         File.WriteAllText(SettingsPath, "{ \"SchemaVersion\": 1, \"DeviceMatch\": \"Beats\" }");
 
         JsonSettingsStore store = Open();
 
         Assert.AreEqual(SettingsLoadStatus.Loaded, store.LastLoadStatus);
-        Assert.IsTrue(store.Current.HandBackOnShutdownAndSleep);
+        Assert.IsFalse(store.Current.HandBackOnShutdownAndSleep);
         Assert.AreEqual(1, store.Current.SchemaVersion, "The newer-schema rule is untouched by this member.");
     }
 

@@ -569,7 +569,7 @@ function New-FakeSandbox
     }
 
     Set-Content -LiteralPath (Join-Path (Join-Path $SandboxRoot 'roaming') 'Earshot\settings.json') `
-        -Value (@{ ProtectAudioQuality = $true; OpenOnStartup = $true } | ConvertTo-Json) -Encoding UTF8
+        -Value (@{ ProtectAudioQuality = $true; OpenOnStartup = $true; HandBackOnShutdownAndSleep = $true } | ConvertTo-Json) -Encoding UTF8
     Set-Content -LiteralPath (Join-Path (Join-Path $SandboxRoot 'release') 'Earshot.files.json') `
         -Value (@{ files = @() } | ConvertTo-Json) -Encoding UTF8
 }

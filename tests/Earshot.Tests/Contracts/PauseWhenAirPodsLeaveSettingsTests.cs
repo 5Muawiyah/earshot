@@ -40,6 +40,7 @@ public sealed class PauseWhenAirPodsLeaveSettingsTests : IDisposable
     [TestMethod]
     public void FalseRoundTripsThroughTheShippedSerialiser()
     {
+        Open().Update(s => s.HandBackOnShutdownAndSleep = true);
         Open().Update(s => s.PauseWhenAirPodsLeave = false);
 
         JsonSettingsStore reopened = Open();

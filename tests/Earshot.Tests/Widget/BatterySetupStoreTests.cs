@@ -101,6 +101,21 @@ public sealed class BatterySetupStoreTests
         Assert.IsTrue(File.Exists(temp.File("setup\\setup-2026.09.01T00.30.00Z.json")), "A bad record is left where it is.");
     }
 
+    // Load ties a claim to its record, so it reads the same names LoadAll does and no other json file in the folder,
+    // even one that holds a valid record.
+    [TestMethod]
+    public void LoadReadsOnlyARecordsOwnKindOfName()
+    {
+        using var temp = new TempFolder();
+        var store = new BatterySetupStore(temp.File("setup"), new CapturingLog());
+        string name = store.Save(SampleRecord(minutes: 3))!;
+        string valid = File.ReadAllText(temp.File("setup\\" + name));
+        File.WriteAllText(temp.File("setup\\other.json"), valid);
+
+        Assert.IsNotNull(store.Load(name), "A record's own name still loads.");
+        Assert.IsNull(store.Load("other.json"), "A valid record under another name is not one of the set-up records.");
+    }
+
     [TestMethod]
     public void ARecordFolderThatDoesNotExistIsNoRecords()
     {

@@ -207,7 +207,10 @@ internal sealed class DecodeProofStore
         _lastAt = observation.LastAtUtc;
 
         // Proved is worked out again from the count and the times the file holds, never taken as written: a file that
-        // says proved with figures that do not amount to it (a hand edit, a damaged write) proves nothing.
+        // says proved with figures that do not amount to it (a hand edit, a damaged write) proves nothing. A hand-edited
+        // observation whose figures are consistent (enough messages over enough time) is accepted, since nothing here
+        // can tell it from a real one. Nothing reachable depends on that today: auto-pause also needs an in-ear bit,
+        // which set-up cannot prove.
         bool supported = _ownedMessages >= BroadcastProofMessages && _firstAt is { } firstAt && _lastAt is { } lastAt &&
                          lastAt - firstAt >= BroadcastProofSpan;
         if (observation.Proved && !supported)

@@ -88,7 +88,7 @@ internal sealed partial class GateStore
 
     // ---- config.json ----
 
-    // HandBackAtShutdown is optional: a file written before the member existed reads as on. When present it must be a
+    // HandBackAtShutdown is optional: a file written before the member existed reads as off. When present it must be a
     // boolean, and any other member is still refused.
     public GateRead<GateConfig> ReadConfig() => Read<GateConfig>(ConfigFile, "read-config", root =>
     {
@@ -110,7 +110,7 @@ internal sealed partial class GateStore
         {
             SchemaVersion = version,
             BlockAtBoot = root.GetProperty("BlockAtBoot").GetBoolean(),
-            HandBackAtShutdown = !hasHandBack || handBack.GetBoolean(),
+            HandBackAtShutdown = hasHandBack && handBack.GetBoolean(),
         }, null);
     });
 
@@ -445,7 +445,7 @@ internal sealed partial class GateStore
     [GeneratedRegex("^status-[0-9a-f]{32}\\.json$", RegexOptions.CultureInvariant)]
     private static partial Regex StatusName();
 
-    [GeneratedRegex("^(status-[0-9a-f]{32}|config|device|protection|protection-intent)\\.json\\.tmp-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^(status-[0-9a-f]{32}|config|device|protection|protection-intent|update-outcome)\\.json\\.tmp-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
     private static partial Regex TempName();
 
     // ---- shared plumbing ----

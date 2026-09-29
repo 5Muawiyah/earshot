@@ -267,6 +267,9 @@ internal static partial class Program
                     StartedAtLogon = startedAtLogon,
                     DataRootRedirected = paths.IsRedirected,
                     InstalledExePath = paths.InstalledExe,
+                    UpdateOutcome = paths.IsSafeMode || paths.IsRedirected
+                        ? null
+                        : new UpdateOutcomeSource(paths.MachineFolder, Path.Combine(paths.LocalFolder, "update", "outcome-shown.txt")),
                 });
 
                 TrayContext shown = context;

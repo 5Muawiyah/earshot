@@ -1088,7 +1088,7 @@ public sealed class InstallActionsTests
     }
 
     [TestMethod]
-    public void SettingUpWithNoConfigWritesBothSettingsOn()
+    public void SettingUpWithNoConfigWritesBlockOnAndHandBackOff()
     {
         using var h = new Harness();
 
@@ -1096,7 +1096,7 @@ public sealed class InstallActionsTests
 
         GateConfig written = new GateStore(h.Machine).ReadConfig().Value!;
         Assert.IsTrue(written.BlockAtBoot);
-        Assert.IsTrue(written.HandBackAtShutdown);
+        Assert.IsFalse(written.HandBackAtShutdown);
     }
 
     [TestMethod]

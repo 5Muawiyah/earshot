@@ -75,7 +75,7 @@ try
     $ready = Show-Preconditions -Run $run -Preconditions @(
         'Earshot is installed from a release built from the current head, set up, and running in the tray.',
         'Block at boot is on.',
-        'The "Hand back" item in the tray menu is ticked.',
+        'The "Hand back" item in the tray menu is turned on: it is off by default, so tick it first.',
         'The AirPods are paired with this PC and available to connect.',
         'Something that shows in Windows media controls plays on this PC: a music or video player in a browser, or a music app.'
     ) -PhysicalActions @(
@@ -101,14 +101,14 @@ try
 
         Add-Finding -Run $run -Name 'blockAtBootAtExit' -Value (Get-BlockAtBootSetting -Run $run)
 
-        # A member the file does not hold reads as the default, which is on: an older settings file has none.
+        # A member the file does not hold reads as the default, which is off: a new settings file has none.
         $paths = Get-EarshotDataPaths
         $settings = Read-EarshotJsonFile -Run $run -Path $paths.SettingsFile
         $handBackSetting = Get-Field -Object $settings -Name 'HandBackOnShutdownAndSleep'
-        $handBackOn = ($null -eq $handBackSetting -or $handBackSetting -eq $true)
+        $handBackOn = ($handBackSetting -eq $true)
         Add-Criterion -Run $run -Id 'hand-back-on' -Criterion 'The hand-back setting is on, so Exit has something to run.' `
             -Outcome $(if ($handBackOn) { 'pass' } else { 'fail' }) `
-            -Detail $(if ($null -eq $handBackSetting) { 'settings.json holds no HandBackOnShutdownAndSleep member, which reads as the default, on.' } else { 'HandBackOnShutdownAndSleep is ' + $handBackSetting + ' in settings.json.' })
+            -Detail $(if ($null -eq $handBackSetting) { 'settings.json holds no HandBackOnShutdownAndSleep member, which reads as the default, off: tick the menu item first.' } else { 'HandBackOnShutdownAndSleep is ' + $handBackSetting + ' in settings.json.' })
 
         # Read now, so a run with the pause setting off is not blamed for a pause it was told not to make.
         $pauseSetting = Get-Field -Object $settings -Name 'PauseWhenAirPodsLeave'

@@ -14,10 +14,11 @@ public sealed class EarshotSettings
     // BootBlock task (SYSTEM, no user session) must read it and cannot read HKCU/%APPDATA%.
 
     // v1.1: hand back the AirPods (release, then block) at shut down, at sleep and on Exit from the menu while
-    // they are connected to this PC. Defaults on, so an older
-    // settings file with no member reads as on: the owner asked for this as the product's job. SchemaVersion
-    // stays 1; an older file without this member still reads as this build's current schema, not a newer one.
-    public bool   HandBackOnShutdownAndSleep { get; set; } = true;
+    // they are connected to this PC. Defaults off, so a new settings file and an older one with no member read as
+    // off: the owner has not yet said it ships on before the live tests have passed, and an unanswered question
+    // leaves the feature off. A file that holds the member keeps its value. SchemaVersion stays 1; an older file
+    // without this member still reads as this build's current schema, not a newer one.
+    public bool   HandBackOnShutdownAndSleep { get; set; }
 
     // "Check automatically": look for a newer release once a day, after startup. Defaults off, because a check
     // contacts GitHub, so an older settings file with no member reads as off and nothing is contacted until the
@@ -60,8 +61,8 @@ public sealed class GateConfig
 
     // Whether the hand-back service blocks the AirPods at shut down when the tray did not. The service cannot read the
     // user's settings file, so the setting is copied here (sethandback-on and sethandback-off). A file written before
-    // the member existed has none, and reads as on, as the tray's own setting does.
-    public bool HandBackAtShutdown { get; set; } = true;
+    // the member existed has none, and reads as off, as the tray's own setting does.
+    public bool HandBackAtShutdown { get; set; }
 }
 
 // SYSTEM-owned, %ProgramData%\Earshot\device.json. The identity the gate trusts.

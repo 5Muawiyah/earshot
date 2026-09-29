@@ -297,7 +297,7 @@ public sealed class TrayMenuTests
 
             Assert.IsFalse(Item("Disconnect").Enabled);
             Assert.AreEqual(CheckState.Unchecked, Item("Block at boot").CheckState);
-            Assert.AreEqual(CheckState.Checked, Item("Hand back on shut down, sleep and Exit").CheckState, "Default on.");
+            Assert.AreEqual(CheckState.Unchecked, Item("Hand back on shut down, sleep and Exit").CheckState, "Default off.");
             Assert.AreEqual(CheckState.Indeterminate, Item("Protect audio quality").CheckState);
             Assert.IsFalse(Item("Turns off the AirPods microphone").Enabled);
             Assert.IsTrue(Item("Exit").Enabled);

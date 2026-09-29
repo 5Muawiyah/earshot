@@ -338,7 +338,7 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 //   2. create %ProgramData%\Earshot with the protected DACL, read it back and fail closed; a folder that
 //      already existed and fails the check stops install and is left for the user to remove;
 //   3. write device.json (the validated identity) and config.json (BlockAtBoot kept from a valid existing
-//      config, otherwise the default, on);
+//      config, otherwise the default: block on, hand back off);
 //   4. delete any existing \Earshot task folder and its tasks, then create it with its SDDL and read it back;
 //   5. register Gate, Protect and BootBlock, then read back each task's SDDL and XML and fail closed on any
 //      difference, removing the tasks again;

@@ -39,6 +39,10 @@ internal sealed record TrayStartOptions(
 
     public Earshot.Update.IUpdateLauncher? UpdateLauncher { get; init; }
 
+    // Where the tray reads how the last update ended, and which outcome it has already shown, or null to read
+    // none: tests, safe mode and a redirected data root never look at the machine's own folder.
+    public UpdateOutcomeSource? UpdateOutcome { get; init; }
+
     // True when Windows started Earshot from its Run value (--startup).
     public bool StartedAtLogon { get; init; }
 
