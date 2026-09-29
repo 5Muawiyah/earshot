@@ -146,7 +146,8 @@ it is never lost.
 | 09 | shut down while the AirPods are connected to this PC |
 | 10 | one restart per variant, five variants: the fifth signs out and back in rather than restarting |
 | 15 | a restart, to check the delayed file deletion |
-| 17 | a full power down, not a restart: shut down from the Start menu with the AirPods connected and Hand back on |
+| 17 | a full power down, not a restart: shut down from the Start menu with the AirPods connected and Hand back on; the hand-back service must be running, and the test reads what it did |
+| 20 | a full power down, not a restart, with the Earshot icon closed from Task Manager and the AirPods still connected: only the hand-back service can act |
 
 ## Where the evidence goes
 

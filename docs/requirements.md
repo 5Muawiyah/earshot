@@ -63,7 +63,9 @@ against a stand-in.
   Windows gives it no notice at all: a power cut, a held power button, a
   kernel stop error, a forced shutdown such as `shutdown /f`, and the
   battery reaching a critical level all send nothing. Earshot not running
-  (closed, crashed, or not yet started) is the same: nothing can run when
+  (closed, crashed, or not yet started) is covered only in part: the
+  hand-back service can block the nodes at a shut down, but it cannot
+  disconnect the AirPods, and it has not had a live run. Otherwise nothing can run when
   nobody is there to run it. In every one of those cases the nodes are left
   as they were, and the fallback is the boot-time block task, which can lose
   the race against Windows re-paging the AirPods first.

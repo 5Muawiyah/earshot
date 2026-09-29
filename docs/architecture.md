@@ -112,9 +112,23 @@ logged, and the procedure still moves on to the block where it can.
 **What this deliberately does not do.** Nothing runs when Earshot is not
 running, whether it was closed, crashed, or never started; the boot-time
 block described above is the only fallback for that case, and it can lose
-the race. A permanent background service that could hand back the AirPods
-even without the tray running was considered and designed, but is not
-something built.
+the race. The one exception is the hand-back service described next, which
+blocks the AirPods at shut down when the tray is not running.
+
+**The hand-back service.** `EarshotHandBack` runs as the local system account,
+starts with Windows, and accepts only stop, interrogate and pre-shutdown
+notices from Windows. It opens no pipe, socket or window, and standard users
+can query it but not control it. On start it checks that it is running as the
+system account, that its image is inside the install folder, and that the
+install folder and the machine settings folder are not writable by standard
+users; otherwise it stays idle. At pre-shutdown it reads the settings and the
+device from the machine folder only. If Hand back is off, or the AirPods are
+already fully blocked, it makes no call. Otherwise it blocks them through the
+same routine the boot-time task uses, retries a vetoed node once when there is
+room, and writes a status file with each node's code. It never disconnects: that
+needs the tray's session. The work is held to 8,000 ms of the 10,000 ms Windows
+allows. The tray tells it about the Hand back tick by sending the setting to the
+same routine that writes the machine settings.
 
 **The log lines**, all written by one formatter so nothing here drifts from
 what a reader, or a live-test script, actually parses:

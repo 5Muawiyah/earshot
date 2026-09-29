@@ -68,6 +68,14 @@ then Connect on the card.
   phone.** All three are built, reviewed and off by default, and none has had
   a live run yet. The hand-back above is built and covered by its own tests,
   and is in the same position on one point: it has not had a live run either.
+- **A small background service for the hand-back.** When the Earshot icon has
+  been closed or has crashed, nothing in the tray can hand the AirPods back at
+  shut down. A Windows service, `EarshotHandBack`, covers that case: at shut
+  down it checks whether the AirPods are already blocked and, if they are not,
+  blocks them. It does not disconnect them. It does nothing else, takes no
+  requests from any program, and reads its settings only from a folder that
+  standard users cannot write to. Setup installs it and uninstall removes it.
+  It has not had a live run yet.
 
 See [docs/requirements.md](docs/requirements.md) for what each point promises
 and the test that proves it, and [docs/overview.md](docs/overview.md) for a

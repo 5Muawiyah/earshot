@@ -197,6 +197,11 @@ session end in Windows' own terms: every menu item, keyboard shortcut and
 click is refused with its own card while either hold is running, so nothing
 can start a change that would fight what the hand-back is doing.
 
+If the Earshot icon has been closed, a small background service, installed by
+setup and removed by uninstall, blocks the AirPods at shut down instead. It
+cannot disconnect them, so the AirPods may stay connected until the computer
+is off.
+
 For what this does and does not guarantee when the PC is actually shut down,
 see [requirements.md](requirements.md#what-it-does-not-do) and
 [verification.md](verification.md).

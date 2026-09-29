@@ -32,6 +32,8 @@ stays pending until a run on the device has written the evidence for it.
 | Shutdown refusals on a real shutdown | Pending. Covered by the same sitting as the power cycle test (08), since that is a real shutdown |
 | Hand back on shut down while connected (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
 | Hand back on sleep while connected (`tools\live-tests\18-HandBackOnSleep.ps1`) | Pending: no live run yet |
+| Service hand-back with the tray not running (`tools\live-tests\20-ServiceHandBack.ps1`) | Pending: no live run yet |
+| The service finds nothing to do after the tray's hand-back (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
 | The AirPods widget: the taskbar gauge, its card and the case-open card (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet |
 
 ## Live tests
