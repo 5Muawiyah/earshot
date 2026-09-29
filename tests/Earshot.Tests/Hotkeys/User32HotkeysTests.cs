@@ -36,9 +36,11 @@ public sealed class User32HotkeysTests
     }
 
     // A chord no keyboard has and no program asks for: one of F13 to F24, which no keyboard carries, with a random
-    // non-empty set of Alt, Ctrl, Shift and Win, chosen once for the run. Nothing is ever pressed. Two gates running
+    // set of Ctrl, Alt and Shift (Shift alone is refused as a shortcut). Win is left out: with it, a registration made
+    // while another run holds one on its own desktop was seen to fail with no error code at all, which is no answer to
+    // assert on. Each draw is tried before it is relied on. Nothing is ever pressed. Two gates running
     // at the same time on one machine would collide on any one fixed chord (the second registration would be reported
-    // taken, and fail), so each run draws its own from the 180 there are. The two tests below register it for the
+    // taken, and fail), so each run draws its own from the 72 there are. The two tests below register it for the
     // calling thread only (a null window handle makes the hot key the thread's own, and its WM_HOTKEY would go to the
     // thread's queue) and release it before they end, so they run the real RegisterHotKey and UnregisterHotKey and
     // touch nothing another program holds. They are meant for the private desktop the test runs use.
@@ -68,8 +70,13 @@ public sealed class User32HotkeysTests
 
     private static (uint Modifiers, uint Key, string Text) DrawUnusedChord()
     {
-        (string Name, uint Flag)[] all = [("Ctrl", 0x0002), ("Alt", 0x0001), ("Shift", 0x0004), ("Win", 0x0008)];
-        int mask = Random.Shared.Next(1, 16);
+        (string Name, uint Flag)[] all = [("Ctrl", 0x0002), ("Alt", 0x0001), ("Shift", 0x0004)];
+        int mask;
+        do
+        {
+            mask = Random.Shared.Next(1, 8);
+        }
+        while (mask == 4);   // Shift on its own is refused as a shortcut (HotkeyText), so it is never drawn
         int function = Random.Shared.Next(13, 25);
         uint modifiers = 0x4000;
         var text = new List<string>();
@@ -90,8 +97,21 @@ public sealed class User32HotkeysTests
     public void ARealChordNoOneUsesRegistersAndUnregisters()
     {
         var native = new User32Hotkeys();
-        (uint modifiers, uint key, string text) = FreeChord(native);
-        NativeCallResult registered = native.Register(nint.Zero, 0x4AF0, modifiers, key);
+
+        // Another run on this machine can take the chord in the moment between FreeChord's probe and this
+        // registration, so a 1409 here draws again, a few times, before it is a failure.
+        (uint modifiers, uint key, string text) = (0, 0, "");
+        NativeCallResult registered = default;
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            (modifiers, key, text) = FreeChord(native);
+            registered = native.Register(nint.Zero, 0x4AF0, modifiers, key);
+            if (registered.Succeeded || registered.ErrorCode != 1409)
+            {
+                break;
+            }
+        }
+
         try
         {
             Assert.IsTrue(registered.Succeeded, "RegisterHotKey for the chord " + text + " failed with error " + registered.ErrorCode + ".");
@@ -119,20 +139,31 @@ public sealed class User32HotkeysTests
     public void ARealChordRegisteredTwiceIsReportedTakenWithTheRealCode()
     {
         var native = new User32Hotkeys();
-        var settings = new HotkeySettings { Enabled = true, SwitchToPc = FreeChord(native).Text, SwitchToPhone = string.Empty };
         var holderWindow = new FakeMessageWindow { Handle = 0 };
         var pressedWindow = new FakeMessageWindow { Handle = 0 };
-        using var holder = new HotkeyManager(holderWindow, native, new CapturingLog());
         var log = new CapturingLog();
+        using var holder = new HotkeyManager(holderWindow, native, new CapturingLog());
         using var second = new HotkeyManager(pressedWindow, native, log);
 
-        IReadOnlyList<HotkeyRegistrationOutcome> first = holder.Apply(settings);
+        // The first registration of a chord no one uses. Another run on this machine can take it between the probe and
+        // this call, which nothing was registered for, so it is drawn again, a few times.
+        var settings = new HotkeySettings();
+        HotkeyRegistrationOutcome heldOutcome = default!;
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            settings = new HotkeySettings { Enabled = true, SwitchToPc = FreeChord(native).Text, SwitchToPhone = string.Empty };
+            heldOutcome = holder.Apply(settings).Single(o => o.Action == HotkeyAction.SwitchToPc);
+            if (heldOutcome.State != HotkeyRegistrationState.AlreadyHeld)
+            {
+                break;
+            }
+        }
+
         IReadOnlyList<HotkeyRegistrationOutcome> taken = second.Apply(settings);
 
-        HotkeyRegistrationOutcome heldOutcome = first.Single(o => o.Action == HotkeyAction.SwitchToPc);
-        Assert.AreEqual(HotkeyRegistrationState.Registered, heldOutcome.State, "The first registration of a chord no one uses must succeed.");
+        Assert.AreEqual(HotkeyRegistrationState.Registered, heldOutcome.State, "The first registration of a chord no one uses must succeed: " + heldOutcome.Message);
         HotkeyRegistrationOutcome outcome = taken.Single(o => o.Action == HotkeyAction.SwitchToPc);
-        Assert.AreEqual(HotkeyRegistrationState.AlreadyHeld, outcome.State);
+        Assert.AreEqual(HotkeyRegistrationState.AlreadyHeld, outcome.State, outcome.Message);
         Assert.AreEqual(1409, outcome.ErrorCode);
         StringAssert.Contains(outcome.Message, "already in use by another program");
         Assert.IsTrue(log.Has(LogLevel.Debug, "result=failed error=1409"), "The raw Win32 error was not logged.");
