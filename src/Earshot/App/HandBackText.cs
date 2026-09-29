@@ -11,13 +11,41 @@ internal static class HandBackText
     private const string ShutdownPrefix = "Hand-back (shutdown): ";
     private const string SleepPrefix = "Hand-back (sleep): ";
     private const string ResumePrefix = "Hand-back (resume): ";
+    private const string ExitPrefix = "Hand-back (exit): ";
 
-    public static string Prefix(HandBackTrigger trigger) => trigger == HandBackTrigger.SessionEnd ? ShutdownPrefix : SleepPrefix;
+    public static string Prefix(HandBackTrigger trigger) => trigger switch
+    {
+        HandBackTrigger.SessionEnd => ShutdownPrefix,
+        HandBackTrigger.Suspend => SleepPrefix,
+        HandBackTrigger.Exit => ExitPrefix,
+        _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown hand-back trigger."),
+    };
 
-    // Written once, at the first session-end or suspend message reached while the setting is off, so a reader
-    // can tell "off" from "never reached".
-    public static string Off(HandBackTrigger trigger) => "Hand-back: off, so nothing runs for this " +
-        (trigger == HandBackTrigger.SessionEnd ? "session end." : "suspend.");
+    // Written once, at the first session-end or suspend message, or the Exit with the AirPods connected, reached
+    // while the setting is off, so a reader can tell "off" from "never reached".
+    public static string Off(HandBackTrigger trigger) => "Hand-back: off, so nothing runs for this " + trigger switch
+    {
+        HandBackTrigger.SessionEnd => "session end.",
+        HandBackTrigger.Suspend => "suspend.",
+        HandBackTrigger.Exit => "Exit.",
+        _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown hand-back trigger."),
+    };
+
+    // Names the leave in pause on leave's own log line: which hand-back is about to let the AirPods go.
+    public static string LeaveReason(HandBackTrigger trigger) => trigger switch
+    {
+        HandBackTrigger.SessionEnd => "hand-back at shut down",
+        HandBackTrigger.Suspend => "hand-back at sleep",
+        HandBackTrigger.Exit => "hand-back on Exit",
+        _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown hand-back trigger."),
+    };
+
+    // What Exit writes just before it says something to the owner (a block that did not take, a disconnect that did not
+    // confirm, a hand-back cut short), so a reader of the log knows what the card said.
+    public static string ExitWillSay(string notice) => Prefix(HandBackTrigger.Exit) + "Exit will say: " + notice;
+
+    // The reason on the Started line for Exit: what raised it, in words a reader of the log can match to the menu.
+    public const string ExitStartedReason = "Exit";
 
     public static string Started(HandBackTrigger trigger, DateTimeOffset t0, string flagsOrReason, RenderState render, BlockState nodes, bool streamingHeld, bool? blockAtBoot) =>
         Prefix(trigger) + "started at " + Utc(t0) + " (" + flagsOrReason + "); render " + render + "; nodes " + nodes +

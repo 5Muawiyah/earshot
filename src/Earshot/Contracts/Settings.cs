@@ -13,7 +13,8 @@ public sealed class EarshotSettings
     // NOTE: BlockAtBoot is NOT here. Its authority is the SYSTEM-owned GateConfig, because the
     // BootBlock task (SYSTEM, no user session) must read it and cannot read HKCU/%APPDATA%.
 
-    // v1.1: hand back the AirPods (release, then block) at shut down and at sleep. Defaults on, so an older
+    // v1.1: hand back the AirPods (release, then block) at shut down, at sleep and on Exit from the menu while
+    // they are connected to this PC. Defaults on, so an older
     // settings file with no member reads as on: the owner asked for this as the product's job. SchemaVersion
     // stays 1; an older file without this member still reads as this build's current schema, not a newer one.
     public bool   HandBackOnShutdownAndSleep { get; set; } = true;
@@ -22,6 +23,11 @@ public sealed class EarshotSettings
     // contacts GitHub, so an older settings file with no member reads as off and nothing is contacted until the
     // owner asks. A check never downloads or installs anything; that stays behind the owner's own click.
     public bool   CheckForUpdatesAutomatically { get; set; }
+
+    // Pause this PC's playback when the AirPods stop being this PC's output while it was playing to them
+    // (the phone took them, they went out of range, or Earshot let them go). Never resumes on its own. Defaults
+    // on, so an older settings file with no member reads as on. SchemaVersion stays 1.
+    public bool   PauseWhenAirPodsLeave { get; set; } = true;
 
     // v1.1: global keyboard shortcuts. Defaults off with every text empty (Earshot.Hotkeys.HotkeySettings),
     // so an older settings file with no Hotkeys member reads as "off, nothing typed" and nothing is

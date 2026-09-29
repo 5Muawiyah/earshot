@@ -78,12 +78,33 @@ internal enum BlockReason
     Resume,           // the resume check after sleep: the start-up check under another name
 }
 
-// What raised the hand-back: WM_ENDSESSION (shut down, restart or sign-out) or PBT_APMSUSPEND (sleep). Each
-// carries its own budget and its own wording for the log lines.
+// What raised the hand-back: WM_ENDSESSION (shut down, restart or sign-out), PBT_APMSUSPEND (sleep) or Exit from
+// the tray menu while the AirPods are connected to this PC. Each carries its own budget and its own wording for
+// the log lines.
 internal enum HandBackTrigger
 {
     SessionEnd,
     Suspend,
+    Exit,
+}
+
+// How Exit runs the hand-back: the cap for the whole procedure, the part of it the disconnect may take, and
+// whether Play from a phone held a link that Exit has just let go of (only the log line says so).
+internal sealed record ExitHandBackPlan(TimeSpan Budget, TimeSpan DisconnectWait, bool StreamingHeld);
+
+// What a hand-back ended with, kept for Exit: the disconnect's word, and whether the AirPods are now blocked.
+internal sealed record HandBackOutcome(string Disconnect, HandBackBlockOutcome Block, string Detail);
+
+// Where the block of a hand-back stands. Blocked: the gate said so. NotNeeded: none was sent for a reason that
+// leaves nothing enabled by Earshot's doing (Block at boot off, not set up, already blocked, safe mode).
+// NotBlocked: none took, or none was sent for a reason that leaves the nodes enabled. CutShort: the cap passed
+// before the block, or the disconnect that comes first, had finished.
+internal enum HandBackBlockOutcome
+{
+    Blocked,
+    NotNeeded,
+    NotBlocked,
+    CutShort,
 }
 
 // Why the gate refused to move the pin, where the device change can do something about it.

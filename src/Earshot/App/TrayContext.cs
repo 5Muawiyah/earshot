@@ -435,6 +435,7 @@ internal sealed partial class TrayContext : ApplicationContext
         ApplyStreaming();
         WireWidget();
         WireUpdates(options);
+        InitPauseOnLeave();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -569,6 +570,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _registry.Cards.Hide();
         _notifyIconVisibility.Visible = false;
         CloseWidget();
+        ClosePauseOnLeave();
 
         // Every orderly exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
         // registered after one of those. This runs on the UI thread, which owns the window. It does not
@@ -1834,6 +1836,8 @@ internal sealed partial class TrayContext : ApplicationContext
             _blockingCardShown = true;
             place.Show(_registry.Cards, TrayStatus.AppName, BlockingBeforeClosingMessage);
         }
+
+        ShowExitHandBackCard();
     }
 
     private MenuState CurrentMenuState() =>
@@ -2305,7 +2309,7 @@ internal sealed partial class TrayContext : ApplicationContext
             _notifyIconVisibility.Visible = false;
             _picker?.Close();
             _exitPlace = place;
-            _coordinator.BeginShutdown();
+            _coordinator.BeginShutdown(PrepareExitHandBack());
             _lifetime.Cancel();
 
             bool gaveUp = false;

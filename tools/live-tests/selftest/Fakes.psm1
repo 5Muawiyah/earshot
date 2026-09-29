@@ -63,6 +63,10 @@ $script:LogFixtures = @(
     # handback-not-reached, no-sleep-event, repaged-at-wake), which carry none of these generic
     # copies (they count as 0, like declined-start) and inject their own bespoke lines instead.
     [ordered]@{ Pattern = 'Hand-back (shutdown): started at'; Text = 'Hand-back (shutdown): started at 2026-09-22T01:31:42.000Z (WM_ENDSESSION, shutdown or restart); render Active; nodes Allowed; streaming none; Block at boot on' }
+    # The not confirmed shape comes first so the last shutdown disconnect line, the one the scripts read, is the
+    # confirmed one below it; it is here so the real formatter's not confirmed shape is pinned for shut down as it is
+    # for sleep.
+    [ordered]@{ Pattern = 'Hand-back (shutdown): disconnect'; Text = 'Hand-back (shutdown): disconnect S_OK, not confirmed within 1500 ms' }
     [ordered]@{ Pattern = 'Hand-back (shutdown): disconnect'; Text = 'Hand-back (shutdown): disconnect S_OK, confirmed after 37 ms' }
     [ordered]@{ Pattern = 'Hand-back (shutdown): block sent at'; Text = 'Hand-back (shutdown): block sent at 2026-09-22T01:31:42.400Z' }
     [ordered]@{ Pattern = 'Hand-back (shutdown): finished in'; Text = 'Hand-back (shutdown): finished in 303 ms; disconnect confirmed; block Success' }
@@ -73,6 +77,22 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'WM_POWERBROADCAST received: Suspend'; Text = 'WM_POWERBROADCAST received: Suspend (wParam 0x4).' }
     [ordered]@{ Pattern = 'WM_POWERBROADCAST received: ResumeAutomatic'; Text = 'WM_POWERBROADCAST received: ResumeAutomatic (wParam 0x12).' }
     [ordered]@{ Pattern = 'Hand-back (resume):'; Text = 'Hand-back (resume): the nodes were enabled and not in use, so they are blocked now' }
+
+    # test 20: Exit's own hand-back lines, and the pause it makes just before letting go. None, one or two
+    # copies each, like every other generic pattern. Their text is pinned against the real formatters
+    # (HandBackText, PauseOnLeaveText) by LiveTestFieldTests.
+    [ordered]@{ Pattern = 'Hand-back (exit): started at'; Text = 'Hand-back (exit): started at 2026-09-29T14:00:00.000Z (Exit); render Active; nodes Allowed; streaming none; Block at boot on' }
+    [ordered]@{ Pattern = 'Hand-back (exit): disconnect'; Text = 'Hand-back (exit): disconnect S_OK, confirmed after 31 ms' }
+    [ordered]@{ Pattern = 'Hand-back (exit): block sent at'; Text = 'Hand-back (exit): block sent at 2026-09-29T14:00:00.350Z' }
+    [ordered]@{ Pattern = 'Hand-back (exit): finished in'; Text = 'Hand-back (exit): finished in 312 ms; disconnect confirmed; block Success' }
+    [ordered]@{ Pattern = 'before Earshot lets the AirPods go (hand-back on Exit), paused'; Text = 'Pause on leave: before Earshot lets the AirPods go (hand-back on Exit), paused com.example.player in 41 ms; this PC was playing to them.' }
+
+    # test 21: pause on leave's own decision lines. The last one is the same leave as the one before it seen with
+    # nothing playing, so it also holds the "left this PC" words: 21-PauseOnLeave.ps1 reads that pattern and tells
+    # the two shapes apart, which is the trap the pause-declined case is there for.
+    [ordered]@{ Pattern = 'before Earshot lets the AirPods go (Disconnect), paused'; Text = 'Pause on leave: before Earshot lets the AirPods go (Disconnect), paused com.example.player in 38 ms; this PC was playing to them.' }
+    [ordered]@{ Pattern = 'Pause on leave: the AirPods left this PC'; Text = 'Pause on leave: the AirPods left this PC (change seen at 2026-09-29T14:05:00.000Z). Paused com.example.player 8 ms after the change was seen; this PC was playing to them at the last reading, 640 ms before.' }
+    [ordered]@{ Pattern = 'Not paused: this PC was not playing to them'; Text = 'Pause on leave: the AirPods left this PC (change seen at 2026-09-29T14:10:00.000Z). Not paused: this PC was not playing to them (last reading: silent).' }
 
     # test 19: the widget's own log lines. None, one or two copies each, the same as every other
     # generic pattern.
@@ -122,6 +142,8 @@ $script:StartStates = @{
     '17-handback-on-shutdown|resume'     = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '18-handback-on-sleep|first'         = @{ NodeState = 'Blocked'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
     '19-widget|first'                    = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '20-handback-on-exit|first'          = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '21-pause-on-leave|first'            = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
 }
 
 # The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
@@ -189,6 +211,18 @@ $script:Answers = [ordered]@{
     'did the audio keep playing on this pc'                                  = 'yes'
     'with the airpods not connected to this pc, does the card say'           = 'yes'
     'did any small card appear near the taskbar by itself'                   = 'no'
+
+    # test 20: hand back on Exit.
+    'did the sound go back to your phone or stop coming out'                 = 'yes'
+    'did a card say the airpods were being handed back'                      = 'yes'
+
+    # test 21: pause on leave.
+    'pause by itself before you heard it come out of the speakers'           = 'yes'
+    'did any of the music play out of the speakers'                          = 'no'
+    'pause by itself when the phone took the airpods'                        = 'yes'
+    'start playing again by itself'                                          = 'no'
+    'was anything playing on this pc when the phone took the airpods'        = 'no'
+    'did anything on this pc pause, stop or start by itself'                 = 'no'
 }
 
 # What the owner types for a free-text note.
@@ -216,6 +250,7 @@ $script:CaseItemCounts = @{
     'atrest-render-active' = 0; 'atrest-disconnect-declined' = 0; 'atrest-disconnect-not-confirmed' = 0; 'atrest-audio-unreadable' = 0
     'declined-start' = 0
     'handback-cut-short' = 0; 'handback-not-reached' = 0; 'no-sleep-event' = 1; 'repaged-at-wake' = 1
+    'exit-cut-short' = 0; 'pause-declined' = 0
 }
 
 function Initialize-FakeMachine
@@ -229,7 +264,8 @@ function Initialize-FakeMachine
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
-            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
+            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
+            'exit-cut-short', 'pause-declined')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -287,7 +323,8 @@ function New-FakeSandbox
             'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
-            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case
+            'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
+            'exit-cut-short', 'pause-declined')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -386,6 +423,31 @@ function New-FakeSandbox
         $lines = $lines + @([string]$s2 + ' INFO  Hand-back (sleep): disconnect S_OK, not confirmed within 750 ms')
         $index = $index + 1; $s3 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
         $lines = $lines + @([string]$s3 + ' WARN  Hand-back (sleep): cut short at 1500 ms; still running: disconnect, block; block was not sent')
+    }
+
+    # test 20, exit-cut-short: Exit's hand-back ran out of its cap with the block already sent and still running,
+    # and Exit said so. There is no "finished in" line, and there is a "Exit will say" line.
+    if ($Case -eq 'exit-cut-short')
+    {
+        $index = $index + 1; $x1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$x1 + ' INFO  Hand-back (exit): started at ' + $x1 + ' (Exit); render Active; nodes Allowed; streaming none; Block at boot on')
+        $index = $index + 1; $x2 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$x2 + ' INFO  Hand-back (exit): disconnect S_OK, confirmed after 20 ms')
+        $index = $index + 1; $x3 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$x3 + ' INFO  Hand-back (exit): block sent at ' + $x3)
+        $index = $index + 1; $x4 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$x4 + ' WARN  Hand-back (exit): cut short at 4000 ms; still running: block; block was sent at ' + $x3)
+        $index = $index + 1; $x5 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$x5 + ' WARN  Hand-back (exit): Exit will say: Closed before the current change finished. The AirPods may not be blocked.')
+    }
+
+    # test 21, pause-declined: Earshot saw the AirPods leave with nothing playing, so it did not pause, and said so
+    # ("Not paused"). Nothing was paused before its own disconnect either. A reading that counted this line as a
+    # pause, because it holds the same words, would pass the phone leg wrongly; the script has to tell them apart.
+    if ($Case -eq 'pause-declined')
+    {
+        $index = $index + 1; $p1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$p1 + ' INFO  Pause on leave: the AirPods left this PC (change seen at ' + $p1 + '). Not paused: this PC was not playing to them (last reading: silent).')
     }
 
     # A line with no stamp at all and a line no pattern looks for, so reading a log that holds
@@ -1037,6 +1099,24 @@ function Update-FakeWorldForOwnerAction
     param([Parameter(Mandatory = $true)][string]$Text)
 
     $lower = $Text.ToLowerInvariant()
+
+    # test 20 and test 21, ahead of the rules below because their texts also hold "disconnect the airpods" or
+    # "left-click". Choosing Exit hands the AirPods back, and Earshot's own Disconnect lets go and blocks after it:
+    # either way the link is gone and the nodes are blocked. The phone taking the AirPods leaves them off this PC and
+    # the nodes to the idle rule, so only render moves.
+    if ($lower.Contains('choose exit') -or $lower.Contains('choose disconnect'))
+    {
+        $script:World.Render = 'Unplugged'
+        $script:World.NodeState = 'Blocked'
+        return
+    }
+
+    if ($lower.Contains('takes the airpods from this pc'))
+    {
+        $script:World.Render = 'Unplugged'
+        return
+    }
+
     foreach ($away in @('once more', 'stop using', 'disconnect the airpods'))
     {
         if ($lower.Contains($away))

@@ -5,6 +5,7 @@ using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Tray;
+using Earshot.Widget.EarPause;
 
 namespace Earshot.App;
 
@@ -80,7 +81,7 @@ namespace Earshot.App;
 // is not lost when Earshot restarts. The microphone notice is shown once, after the first protect-on that leaves
 // the services protected, whatever started it. It is remembered only once it was on screen: a card nobody clicked
 // for can be held back by Windows, and then the notice follows the next click that leaves protection on.
-internal sealed class BlockCoordinator : IDisposable
+internal sealed partial class BlockCoordinator : IDisposable
 {
     public const string AllowingStatus = "Allowing";
     public const string CouldNotReachDriverMessage = "Could not reach the AirPods audio driver. Try again.";
@@ -220,7 +221,7 @@ internal sealed class BlockCoordinator : IDisposable
     // The two names HandBackAsync's own claim on the exclusive slot uses (see there). HandBackCoreAsync never
     // observes the cancellation a session end sends an operation in flight (_ = ct; in the body passed to
     // RunExclusiveAsync), so cancelling a hand-back this way changes nothing about whether it keeps running.
-    private bool CurrentIsHandBack => _currentName is "hand-back (shutdown)" or "hand-back (sleep)";
+    private bool CurrentIsHandBack => _currentName is "hand-back (shutdown)" or "hand-back (sleep)" || _exitHandBackRunning;
     private Task? _sessionBlock;
     private bool _sessionEnding;
     private bool _sessionBlockIssued;
@@ -405,7 +406,10 @@ internal sealed class BlockCoordinator : IDisposable
     // protection step. Then, unless the nodes are known to be blocked or Block at boot is off, the block before
     // closing runs: it reads the state again and blocks enabled nodes that are not in use. WhenIdleAsync waits for
     // all of it.
-    public void BeginShutdown()
+    //
+    // handBack is how Exit hands the AirPods back when they are connected to this PC (see ExitHandBackAsync): given
+    // by Exit, never by Stop or Dispose, and only acted on with the hand-back setting on.
+    public void BeginShutdown(ExitHandBackPlan? handBack = null)
     {
         if (!MarkClosing())
         {
@@ -417,8 +421,10 @@ internal sealed class BlockCoordinator : IDisposable
             return;
         }
 
+        _exitHandBack = handBack;
+        NoteExitHandBackOff();
         string why = ClosingBlockBlocker();
-        if (why.Length > 0)
+        if (why.Length > 0 && !(ExitHandBackWanted && ExitHandBackApplies))
         {
             _log.Info("Closing: no block before closing, because " + why + ".");
             return;
@@ -1109,6 +1115,12 @@ internal sealed class BlockCoordinator : IDisposable
     // only ever logged by a continuation the caller may no longer be pumping for.
     public async Task HandBackAsync(HandBackTrigger trigger, DateTimeOffset deadline, TimeSpan disconnectWait, bool streamingHeld = false)
     {
+        if (trigger == HandBackTrigger.Exit)
+        {
+            // Exit runs the same procedure as the block before closing (ExitHandBackAsync), never through here.
+            throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Exit does not start a hand-back through HandBackAsync.");
+        }
+
         if (_disposed)
         {
             return;
@@ -1312,7 +1324,12 @@ internal sealed class BlockCoordinator : IDisposable
         RenderState render = CoordinatorRules.RenderOf(_snapshot, container);
         BlockState nodes = _blockStatus?.State ?? BlockState.Unknown;
         bool? blockAtBootKnown = _blockStatus is { BlockAtBootKnown: true } known ? known.BlockAtBoot : (bool?)null;
-        string startedReason = trigger == HandBackTrigger.SessionEnd ? "WM_ENDSESSION" : "PBT_APMSUSPEND";
+        string startedReason = trigger switch
+        {
+            HandBackTrigger.SessionEnd => "WM_ENDSESSION",
+            HandBackTrigger.Suspend => "PBT_APMSUSPEND",
+            _ => HandBackText.ExitStartedReason,
+        };
         _log.Info(HandBackText.Started(trigger, t0, startedReason, render, nodes, streamingHeld, blockAtBootKnown));
         CancelIdleWait("a hand-back is running");
 
@@ -1351,6 +1368,7 @@ internal sealed class BlockCoordinator : IDisposable
         {
             _log.Info(HandBackText.BlockNotSent(trigger, blocker));
             _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, "not sent: " + blocker));
+            RecordHandBack(disconnectOutcome, BlockNotSentOutcome(blocker), "not sent: " + blocker);
             return;
         }
 
@@ -1366,6 +1384,7 @@ internal sealed class BlockCoordinator : IDisposable
             StepOutcome step = StepOutcomes.FromHResult("hand-back-block", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
             _log.Error(HandBackText.Prefix(trigger) + "the block could not be started. " + TrayReport.DescribeStep(step), ex);
             _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, "not sent: " + step.CodeName));
+            RecordHandBack(disconnectOutcome, HandBackBlockOutcome.NotBlocked, "could not be started: " + step.CodeName);
             return;
         }
 
@@ -1393,6 +1412,11 @@ internal sealed class BlockCoordinator : IDisposable
             return "nothing to disconnect";
         }
 
+        // Paused before the disconnect, so the sound does not jump to the speakers as the AirPods go. Bounded to a
+        // share of the disconnect's own wait: a slow media session never holds up the disconnect and block that keep
+        // the AirPods off this PC, and the pause carries on by itself when it runs past its share.
+        await PauseBeforeOwnLeaveAsync(HandBackText.LeaveReason(trigger), container, PauseOnLeave.CapFor(disconnectWait), CancellationToken.None);
+
         DateTimeOffset disconnectStarted = _time.GetUtcNow();
         TimeSpan disconnectRemaining = Remaining(t0 + disconnectWait);
         using var disconnectBudget = new CancellationTokenSource(disconnectRemaining, _time);
@@ -1414,7 +1438,9 @@ internal sealed class BlockCoordinator : IDisposable
         }
         catch (TimeoutException)
         {
+            NoteOwnLeaveEnded(false);
             _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["disconnect"], blockAlreadySentAt));
+            RecordHandBack("cut short", HandBackBlockOutcome.CutShort, "the disconnect had not finished");
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1422,12 +1448,14 @@ internal sealed class BlockCoordinator : IDisposable
             // Never a silent catch: the raw code is recorded and surfaced, and the procedure still goes on to
             // the block, which is the at-rest action and must still run wherever it can.
             StepOutcome step = StepOutcomes.FromHResult("hand-back-disconnect", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
+            NoteOwnLeaveEnded(false);
             _log.Error(HandBackText.Prefix(trigger) + "disconnect failed. " + TrayReport.DescribeStep(step), ex);
             return "failed: " + step.CodeName;
         }
 
         TimeSpan elapsed = _time.GetUtcNow() - disconnectStarted;
         bool confirmed = result is { Confirmed: true };
+        NoteOwnLeaveEnded(confirmed);
         string code = result is null ? "sent" : result.Outcome == ConnectOutcome.Confirmed ? "S_OK" : result.Outcome.ToString();
         _log.Info(HandBackText.Disconnect(trigger, code, confirmed, elapsed));
         return confirmed ? "confirmed" : "not confirmed";
@@ -1486,10 +1514,12 @@ internal sealed class BlockCoordinator : IDisposable
         {
             ControllerResult result = await block.WaitAsync(remaining, _time);
             _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, DescribeBlockOutcome(result)));
+            RecordHandBack(disconnectOutcome, BlockResultOutcome(result), DescribeBlockOutcome(result));
         }
         catch (TimeoutException)
         {
             _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["block"], blockAlreadySentAt));
+            RecordHandBack(disconnectOutcome, HandBackBlockOutcome.CutShort, "the block had not finished");
             Task observe = ObserveHandBackBlockAsync(trigger, block);
             _cutShortBlockInFlight = observe;
             _ = observe;
@@ -1502,6 +1532,7 @@ internal sealed class BlockCoordinator : IDisposable
             StepOutcome step = StepOutcomes.FromHResult("hand-back-block", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
             _log.Error(HandBackText.Prefix(trigger) + "the block faulted. " + TrayReport.DescribeStep(step), ex);
             _log.Info(HandBackText.Finished(trigger, _time.GetUtcNow() - t0, disconnectOutcome, "faulted: " + step.CodeName));
+            RecordHandBack(disconnectOutcome, HandBackBlockOutcome.NotBlocked, "faulted: " + step.CodeName);
         }
     }
 
@@ -2169,6 +2200,8 @@ internal sealed class BlockCoordinator : IDisposable
         bool cancelled = false;
         try
         {
+            // Paused before the disconnect, so the sound does not jump to the speakers when the AirPods go.
+            await PauseBeforeOwnLeaveAsync("Disconnect", request.Container, PauseOnLeave.DefaultOwnLeaveCap, ct);
             result = await _connection.DisconnectAsync(request.Container, ct);
             steps.AddRange(result.Steps);
         }
@@ -2189,6 +2222,7 @@ internal sealed class BlockCoordinator : IDisposable
             _log.Error("disconnect: unexpected error; the block still follows when Block at boot is on.", ex);
         }
 
+        NoteOwnLeaveEnded(result is { Confirmed: true } && !cancelled);
         if (result is { Confirmed: true } && !cancelled)
         {
             ShowCard(request, TrayStatus.CardDisconnected);
@@ -2883,6 +2917,7 @@ internal sealed class BlockCoordinator : IDisposable
 
         _snapshot = snapshot;
         _deviceReadFailed = false;
+        NoteRenderForPauseOnLeave(snapshot);
         if (CoordinatorRules.RenderOf(snapshot, WatchedContainer()) == RenderState.Active)
         {
             ReArmIdleRule("the AirPods are in use");
@@ -3388,6 +3423,15 @@ internal sealed class BlockCoordinator : IDisposable
 
     private async Task<bool> BlockBeforeClosingCoreAsync(CancellationToken ct)
     {
+        // Exit with the AirPods connected to this PC hands them back (release, disconnect, confirm, block) rather
+        // than reading the nodes first: the disconnect is what the owner is waiting to hear. Decided here, once
+        // the operation Exit waited behind has ended, so a connect that reached ACTIVE despite the cancel is
+        // handed back too, and a disconnect that already finished is not repeated.
+        if (await ExitHandBackFirstAsync())
+        {
+            return true;
+        }
+
         BootBlockStatus? status = await ReadBlockStatusAsync(CancellationToken.None);
         if (status is null)
         {
@@ -3419,6 +3463,13 @@ internal sealed class BlockCoordinator : IDisposable
         RenderState render = now is null ? RenderState.Unknown : CoordinatorRules.RenderOf(now, container);
         if (render == RenderState.Active)
         {
+            if (ExitHandBackWanted)
+            {
+                // The AirPods came up between the first look and this one (a connect that finished meanwhile).
+                await ExitHandBackAsync();
+                return true;
+            }
+
             _log.Warn("Closing while the AirPods are in use (render ACTIVE in container " + container.ToString("D") + " at " + Utc(_time.GetUtcNow()) +
                 "): the nodes stay enabled, and nothing blocks them again until Earshot runs again.");
             ClosingNotice = ClosedWhileInUseMessage;
