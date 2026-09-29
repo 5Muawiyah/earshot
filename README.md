@@ -145,6 +145,46 @@ administrator PowerShell (in Command Prompt, leave out the `&`). See
 [docs/architecture.md](docs/architecture.md#setup-and-removal) for what that
 does and how it reports a step it could not finish.
 
+## Install with AI
+
+Copy the prompt below and paste it into any AI chat. It asks whether you want
+to install, update or uninstall, then does the steps or walks you through them.
+
+```
+You are helping me install, update or uninstall Earshot, a Windows tray app for AirPods. Be short and plain, in British English.
+
+First ask me which I want: install, update or uninstall. Wait for my answer.
+
+If you can run commands on my PC, do the steps yourself. If you cannot, give me one step at a time and wait for me to tell you the result before the next.
+
+Rules:
+- Download only from https://github.com/5Muawiyah/earshot/releases/latest . You need two files: Earshot-<version>-win-x64.zip and Earshot-<version>-win-x64.zip.sha256. The checksum file is one line: the zip's SHA-256 in lower case, two spaces, then the zip's name. The release notes on that page print the SHA-256 too.
+- Compute the zip's hash in Windows PowerShell with: Get-FileHash -Algorithm SHA256 <zip>
+- Compare its Hash with the checksum file and with the release notes, ignoring case. Stop unless you computed the hash and it matches both. Do not unzip before then.
+- The checksum shows the download matches what was published. It does not protect against a compromised release or account, because the checksum comes from the same release, and the app is not signed. Say so to me plainly.
+- Then unzip with: Expand-Archive <zip> -DestinationPath <folder> . This gives one folder called Earshot.
+- Never turn off SmartScreen, Defender, Secure Boot or any other protection. Never unblock files in bulk. Never run any other script from the internet.
+- Earshot is not code-signed, so SmartScreen may warn. Tell me plainly: the app is unsigned, and the checksum shows the download matches what was published. Let me decide whether to go on.
+- Before any administrator prompt, tell me one is coming. I approve it myself. Do not try to approve it for me.
+
+Install:
+1. Run Earshot.exe from the unzipped Earshot folder. An earbud icon appears in the notification area. By default the earbud then shows on the taskbar instead, and the tray icon hides once it does.
+2. I right-click the earbud on the taskbar, or the tray icon if that is what shows, and choose "Set up Earshot...". Windows shows one administrator prompt.
+3. Setup copies Earshot into C:\Program Files\Earshot and installs its scheduled tasks and a small Windows service that, when Block at boot and Hand back are both on, blocks the AirPods at shut down if Earshot itself could not.
+
+Update:
+- If the installed Earshot's menu has "Check for updates", the simplest way is that item, then the Update button on the card that opens. It downloads the new release, checks its SHA-256 and shows one administrator prompt.
+- Otherwise do it by hand. Download and check the new release as above. I choose Exit from Earshot's menu. Run the new Earshot.exe from the unzipped folder, then I choose "Set up Earshot..." (it is offered when the running copy is newer than the installed one, or the install is damaged). One administrator prompt.
+
+Uninstall:
+1. I turn "Open on startup" off in Earshot's menu, then choose Exit.
+2. In an administrator PowerShell, run exactly: & "C:\Program Files\Earshot\Earshot.exe" uninstall
+   In Command Prompt, run the same without the &.
+   If C:\Program Files\Earshot\Earshot.exe is missing (a damaged install), run the same command with the Earshot.exe from a release you downloaded and checked as above.
+3. This removes C:\Program Files\Earshot, C:\ProgramData\Earshot, the scheduled tasks and the service. It turns the AirPods' device entries back on, so Windows pages them at boot again. It leaves %APPDATA%\Earshot, which holds my settings, and %LOCALAPPDATA%\Earshot, which holds logs, test evidence and the battery set-up records. If it reports a step it could not finish (for example a folder it will remove at the next restart), tell me exactly what it said.
+4. Ask me before deleting those two folders. Delete them only if I say so.
+```
+
 ## Build and testing
 
 The .NET SDK 10 on Windows x64.
