@@ -10,9 +10,10 @@ namespace Earshot.Tests.Widget;
 public sealed class WidgetCardLayoutTests
 {
     [TestMethod]
-    public void WidthIs320At96Dpi()
+    public void WidthIs360At96DpiLikeEveryOtherView()
     {
-        Assert.AreEqual(320, WidgetCardLayout.WidthFor(96));
+        Assert.AreEqual(360, WidgetCardLayout.WidthFor(96));
+        Assert.AreEqual(360, WidgetCardLayout.Compute(96, showSwitch: false).Width);
     }
 
     [TestMethod]
@@ -22,7 +23,7 @@ public sealed class WidgetCardLayoutTests
     [DataRow(192)]
     public void WidthScalesWithDpi(int dpi)
     {
-        Assert.AreEqual(CardPlacement.Scale(320, dpi), WidgetCardLayout.WidthFor(dpi));
+        Assert.AreEqual(CardPlacement.Scale(360, dpi), WidgetCardLayout.WidthFor(dpi));
     }
 
     [TestMethod]

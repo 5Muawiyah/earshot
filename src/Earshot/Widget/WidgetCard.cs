@@ -9,7 +9,7 @@ namespace Earshot.Widget;
 
 // Which of the card's focusable items has the keyboard focus. There are no child controls, so focus is
 // tracked here and painted as the system focus rectangle.
-internal enum WidgetCardFocus { Button, Switch, SetupButton }
+internal enum WidgetCardFocus { Button, Switch, SetupButton, Gear, UpdateButton }
 
 // Which control of a set-up page has the keyboard focus: the back button, one of a picker's two chevrons or
 // its Charging toggle (Index is the picker, 0 to 2), or a footer button (Index is the button).
@@ -38,7 +38,9 @@ internal sealed record WidgetCardModel(
     DateTimeOffset Now,
     bool ShowSetupButton,   // true while no part has a percent: the grid gives way to "Set up battery"
     WidgetCardView View = WidgetCardView.Main,
-    SetupViewModel? Setup = null)
+    SetupViewModel? Setup = null,
+    string? UpdateVersion = null,     // a check found this newer version: the update line shows
+    CardSettingsValues? Settings = null)
 {
     public static WidgetCardModel Empty { get; } = new(
         WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false),
@@ -71,7 +73,7 @@ internal sealed record WidgetCardModel(
 // (OnKeyDown), no focus rectangle is ever painted (DrawButton/DrawSwitch), and a click that misses both the
 // button and the switch closes it (OnMouseUp) since a notice-mode card is never activated and so never
 // deactivates either.
-internal sealed class WidgetCard : Form
+internal sealed partial class WidgetCard : Form
 {
     // The accent used until something supplies the system's own (AccentSource): the Windows default blue,
     // darker in light mode and lighter in dark mode, since the same light-mode blue reads as too pale against
@@ -97,6 +99,8 @@ internal sealed class WidgetCard : Form
     private bool _leftButtonDownOnButton;
     private bool _leftButtonDownOnSwitch;
     private bool _leftButtonDownOnSetupButton;
+    private bool _leftButtonDownOnGear;
+    private bool _leftButtonDownOnUpdate;
     private SetupTarget? _leftButtonDownOnSetupTarget;
 
     public WidgetCard(ILog log, bool notice = false)
@@ -137,6 +141,12 @@ internal sealed class WidgetCard : Form
 
     // The user activated the "Set up battery" button on the main view (Enter, Space or a mouse click on it).
     public event EventHandler? SetupRequested;
+
+    // The user activated the gear in the title row (Enter, Space or a mouse click on it).
+    public event EventHandler? SettingsRequested;
+
+    // The user activated the "Update" button on the update line (Enter, Space or a mouse click on it).
+    public event EventHandler? UpdateRequested;
 
     // The user pressed a button of a set-up page, or its back button, or Escape.
     public event EventHandler<SetupAction>? SetupActionRequested;
@@ -188,6 +198,48 @@ internal sealed class WidgetCard : Form
 
     private CardColours Colours => CardColours.For(_dark, _palette, AccentSource.AccentFor(lightTheme: !_dark));
 
+    private IAccentColours? _accent;
+    private int _accentRepaints;
+
+    // How many times an accent change asked this card to repaint, for tests.
+    internal int AccentRepaintsForTest => _accentRepaints;
+
+    // Takes the card's accent from the system accent service and repaints the card, open or not, whenever the owner
+    // changes it. The service raises Changed on the UI thread.
+    internal void AttachAccent(IAccentColours accent)
+    {
+        ArgumentNullException.ThrowIfNull(accent);
+        DetachAccent();
+        _accent = accent;
+        AccentSource = new AccentColoursSource(accent);
+        accent.Changed += OnAccentChanged;
+    }
+
+    private void DetachAccent()
+    {
+        if (_accent is { } accent)
+        {
+            accent.Changed -= OnAccentChanged;
+            _accent = null;
+        }
+    }
+
+    private void OnAccentChanged(object? sender, EventArgs e)
+    {
+        _accentRepaints++;
+        Invalidate();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            DetachAccent();
+        }
+
+        base.Dispose(disposing);
+    }
+
     // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for a
     // notice-mode instance regardless of what the model's own Snapshot.Where says. For tests.
     internal string WhereLineText => _notice ? WidgetCopy.CaseOpen : WidgetCopy.Where(_model.Snapshot.Where, _model.OtherDeviceLabel);
@@ -232,7 +284,14 @@ internal sealed class WidgetCard : Form
         _model = model;
         _dpi = dpi > 0 ? dpi : CardPlacement.BaseDpi;
 
-        if (EffectiveView != WidgetCardView.Main && model.Setup is { } setup)
+        if (EffectiveView == WidgetCardView.Settings && model.Settings is { } settingsValues)
+        {
+            RenderSettings(settingsValues);
+            return;
+        }
+
+        _settingsLayout = null;
+        if (EffectiveView is not (WidgetCardView.Main or WidgetCardView.Settings) && model.Setup is { } setup)
         {
             if (_shownView != model.View)
             {
@@ -281,6 +340,16 @@ internal sealed class WidgetCard : Form
             _focus = WidgetCardFocus.Button;
         }
 
+        if (_focus == WidgetCardFocus.UpdateButton && !_mainLayout.ShowUpdateLine)
+        {
+            _focus = WidgetCardFocus.Button;
+        }
+
+        if (_focus == WidgetCardFocus.Gear && _mainLayout.Gear.IsEmpty)
+        {
+            _focus = WidgetCardFocus.Button;
+        }
+
         ClientSize = new Size(layout.Width, layout.Height);
         Invalidate();
     }
@@ -300,7 +369,20 @@ internal sealed class WidgetCard : Form
             buttonWidth = (int)Math.Ceiling(size.Width) + (2 * CardPlacement.Scale(12, _dpi));
         }
 
-        return WidgetCardLayout.Compute(_dpi, model.ShowSwitch, showSetup, showSetup && model.Snapshot.SetupCouldNotRead, buttonWidth);
+        bool showUpdate = model.UpdateVersion is not null && !_notice;
+        int updateButtonWidth = 0;
+        if (showUpdate)
+        {
+            using var font = new Font(_fontFamily, CardPlacement.Scale(12, _dpi), FontStyle.Regular, GraphicsUnit.Pixel);
+            SizeF size = measure.MeasureString(WidgetCopy.UpdateButton, font, int.MaxValue, StringFormat.GenericTypographic);
+            updateButtonWidth = Math.Max(
+                CardPlacement.Scale(WidgetCardLayout.UpdateButtonMinWidthAt96, _dpi),
+                (int)Math.Ceiling(size.Width) + (2 * CardPlacement.Scale(WidgetCardLayout.UpdateButtonPaddingAt96, _dpi)));
+        }
+
+        return WidgetCardLayout.Compute(
+            _dpi, model.ShowSwitch, showSetup, showSetup && model.Snapshot.SetupCouldNotRead, buttonWidth,
+            showGear: !_notice, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth);
     }
 
     private WidgetCardLayout.SetupLayout ComputeSetupLayout(Graphics measure, SetupViewModel setup)
@@ -346,7 +428,30 @@ internal sealed class WidgetCard : Form
             return;
         }
 
+        // Capture has moved on (another window took it, or a modal loop or Alt+Tab cancelled the press): a
+        // press that started here is over, so a later, unrelated button-up must not answer as a click. Neither
+        // message asks the window to release capture itself.
+        // https://learn.microsoft.com/en-us/windows/win32/inputmsg/wm-capturechanged
+        // https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-cancelmode
+        if (m.Msg is NativeMethods.WM_CAPTURECHANGED or WmCancelMode)
+        {
+            ClearPressedFlags();
+        }
+
         base.WndProc(ref m);
+    }
+
+    private const int WmCancelMode = 0x001F;
+
+    private void ClearPressedFlags()
+    {
+        _leftButtonDownOnButton = false;
+        _leftButtonDownOnSwitch = false;
+        _leftButtonDownOnSetupButton = false;
+        _leftButtonDownOnGear = false;
+        _leftButtonDownOnUpdate = false;
+        _leftButtonDownOnSetupTarget = null;
+        _leftButtonDownOnSettingsTarget = null;
     }
 
     protected override void OnDeactivate(EventArgs e)
@@ -355,7 +460,7 @@ internal sealed class WidgetCard : Form
 
         // A set-up page stays open when the card loses focus: the owner reaches for his case and his phone
         // in the middle of it. Escape, Cancel, Back and Done are the ways out.
-        if (!_notice && EffectiveView == WidgetCardView.Main)
+        if (!_notice && EffectiveView is WidgetCardView.Main or WidgetCardView.Settings)
         {
             RequestClose(WidgetCardCloseReason.Deactivated);
         }
@@ -373,6 +478,11 @@ internal sealed class WidgetCard : Form
             case Keys.Up:
             case Keys.Down:
                 return true;
+            case Keys.Left:
+            case Keys.Right:
+            case Keys.Home:
+            case Keys.End:
+                return _editingText || base.IsInputKey(keyData);
             default:
                 return base.IsInputKey(keyData);
         }
@@ -389,7 +499,15 @@ internal sealed class WidgetCard : Form
             return;
         }
 
-        if (EffectiveView != WidgetCardView.Main && _model.Setup is not null)
+        if (OnSettingsPage)
+        {
+            HandleSettingsKey(e.KeyData);
+            e.Handled = true;
+            base.OnKeyDown(e);
+            return;
+        }
+
+        if (EffectiveView is not (WidgetCardView.Main or WidgetCardView.Settings) && _model.Setup is not null)
         {
             HandleSetupKey(e.KeyCode, e.Shift);
             e.Handled = true;
@@ -424,7 +542,13 @@ internal sealed class WidgetCard : Form
     {
         base.OnMouseDown(e);
         ArgumentNullException.ThrowIfNull(e);
-        if (EffectiveView != WidgetCardView.Main && _setupLayout is not null)
+        if (OnSettingsPage)
+        {
+            SettingsMouseDown(e);
+            return;
+        }
+
+        if (EffectiveView is not (WidgetCardView.Main or WidgetCardView.Settings) && _setupLayout is not null)
         {
             _leftButtonDownOnSetupTarget = e.Button == MouseButtons.Left ? HitSetupTarget(e.Location) : null;
             return;
@@ -434,13 +558,21 @@ internal sealed class WidgetCard : Form
         _leftButtonDownOnButton = e.Button == MouseButtons.Left && layout.Button.Contains(e.Location);
         _leftButtonDownOnSwitch = e.Button == MouseButtons.Left && layout.ShowSwitch && layout.Switch.Contains(e.Location);
         _leftButtonDownOnSetupButton = e.Button == MouseButtons.Left && layout.ShowSetupButton && layout.SetupButton.Contains(e.Location);
+        _leftButtonDownOnGear = e.Button == MouseButtons.Left && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
+        _leftButtonDownOnUpdate = e.Button == MouseButtons.Left && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         ArgumentNullException.ThrowIfNull(e);
-        if (EffectiveView != WidgetCardView.Main && _setupLayout is not null)
+        if (OnSettingsPage)
+        {
+            SettingsMouseUp(e);
+            return;
+        }
+
+        if (EffectiveView is not (WidgetCardView.Main or WidgetCardView.Settings) && _setupLayout is not null)
         {
             SetupTarget? down = _leftButtonDownOnSetupTarget;
             _leftButtonDownOnSetupTarget = null;
@@ -462,11 +594,21 @@ internal sealed class WidgetCard : Form
         bool activatesButton = e.Button == MouseButtons.Left && _leftButtonDownOnButton && layout.Button.Contains(e.Location);
         bool activatesSwitch = e.Button == MouseButtons.Left && _leftButtonDownOnSwitch && layout.ShowSwitch && layout.Switch.Contains(e.Location);
         bool activatesSetupButton = e.Button == MouseButtons.Left && _leftButtonDownOnSetupButton && layout.ShowSetupButton && layout.SetupButton.Contains(e.Location);
-        _leftButtonDownOnButton = false;
-        _leftButtonDownOnSwitch = false;
-        _leftButtonDownOnSetupButton = false;
+        bool activatesGear = e.Button == MouseButtons.Left && _leftButtonDownOnGear && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
+        bool activatesUpdate = e.Button == MouseButtons.Left && _leftButtonDownOnUpdate && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
+        ClearPressedFlags();
 
-        if (activatesButton)
+        if (activatesGear)
+        {
+            _focus = WidgetCardFocus.Gear;
+            ActivateFocused();
+        }
+        else if (activatesUpdate)
+        {
+            _focus = WidgetCardFocus.UpdateButton;
+            ActivateFocused();
+        }
+        else if (activatesButton)
         {
             _focus = WidgetCardFocus.Button;
             ActivateFocused();
@@ -513,16 +655,28 @@ internal sealed class WidgetCard : Form
     {
         ArgumentNullException.ThrowIfNull(g);
         g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        // Half: a coordinate names a pixel edge, not a pixel centre. The card sets its strokes on the half pixel
+        // (x + 0.5) so a one pixel outline is one crisp row; under the default offset the same stroke fell across
+        // two rows at half strength, which is what made a thin outline look faint on a dark card.
+        g.PixelOffsetMode = PixelOffsetMode.Half;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(OverrideBackgroundForCaptureOnly ?? (_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background));
 
-        if (EffectiveView != WidgetCardView.Main && _model.Setup is { } setup && _setupLayout is { } setupLayout)
+        if (OnSettingsPage && _model.Settings is { } settingsValues && _settingsLayout is { } settingsLayout)
+        {
+            DrawSettings(g, settingsValues, settingsLayout);
+            return;
+        }
+
+        if (EffectiveView is not (WidgetCardView.Main or WidgetCardView.Settings) && _model.Setup is { } setup && _setupLayout is { } setupLayout)
         {
             DrawSetup(g, setup, setupLayout);
             return;
         }
 
         WidgetCardLayout.Layout layout = _mainLayout;
+        DrawTitleRow(g, layout);
         if (layout.ShowColumns)
         {
             DrawColumnLabel(g, layout.Left.Label, WidgetCopy.LeftLabel);
@@ -540,6 +694,11 @@ internal sealed class WidgetCard : Form
             DrawSetupButton(g, layout);
         }
 
+        if (layout.ShowUpdateLine)
+        {
+            DrawUpdateLine(g, layout);
+        }
+
         DrawButton(g, layout.Button);
         if (layout.ShowSwitch)
         {
@@ -547,17 +706,63 @@ internal sealed class WidgetCard : Form
         }
     }
 
-    // Cycles Button, Switch (when shown), SetupButton (when shown), back to Button. The set-up button sits
-    // above the Connect button on the card, but is the least central of the three, so Tab reaches it last.
+    // "AirPods" at 14 px semibold, and the gear when the view has one.
+    private void DrawTitleRow(Graphics g, WidgetCardLayout.Layout layout)
+    {
+        CardColours colours = Colours;
+        CardPaint.Text(g, WidgetCopy.CardTitle, layout.Title, _fontFamily, CardPlacement.Scale(14, _dpi), bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
+        if (layout.Gear.IsEmpty)
+        {
+            return;
+        }
+
+        CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
+        if (_focus == WidgetCardFocus.Gear && ContainsFocus)
+        {
+            CardPaint.FocusRectangle(g, layout.Gear, colours.Text);
+        }
+    }
+
+    // The line that says a newer version is out, with a 24 px Update button: a divider above it, the caption
+    // left. Nothing here downloads; the button only asks to open the update page.
+    private void DrawUpdateLine(Graphics g, WidgetCardLayout.Layout layout)
+    {
+        CardColours colours = Colours;
+        CardPaint.Divider(g, layout.UpdateLine.Left, layout.UpdateLine.Right, layout.UpdateLine.Top, colours);
+        CardPaint.Text(
+            g, WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption, _fontFamily,
+            CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _fontFamily, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && ContainsFocus);
+    }
+
+    // Cycles Button, Switch (when shown), SetupButton (when shown), UpdateButton (when shown), Gear (when the view
+    // has one), back to Button. The set-up button sits above the Connect button on the card, but is the least
+    // central of the three, so Tab reaches it after them; the update line and the gear come last.
     private void MoveFocus()
     {
-        _focus = _focus switch
+        var order = new List<WidgetCardFocus> { WidgetCardFocus.Button };
+        if (_model.ShowSwitch)
         {
-            WidgetCardFocus.Button when _model.ShowSwitch => WidgetCardFocus.Switch,
-            WidgetCardFocus.Button when _mainLayout.ShowSetupButton => WidgetCardFocus.SetupButton,
-            WidgetCardFocus.Switch when _mainLayout.ShowSetupButton => WidgetCardFocus.SetupButton,
-            _ => WidgetCardFocus.Button,
-        };
+            order.Add(WidgetCardFocus.Switch);
+        }
+
+        if (_mainLayout.ShowSetupButton)
+        {
+            order.Add(WidgetCardFocus.SetupButton);
+        }
+
+        if (_mainLayout.ShowUpdateLine)
+        {
+            order.Add(WidgetCardFocus.UpdateButton);
+        }
+
+        if (!_mainLayout.Gear.IsEmpty)
+        {
+            order.Add(WidgetCardFocus.Gear);
+        }
+
+        int at = order.IndexOf(_focus);
+        _focus = order[(at + 1) % order.Count];
         Invalidate();
     }
 
@@ -572,6 +777,20 @@ internal sealed class WidgetCard : Form
 
             ToggleRequested?.Invoke(this, EventArgs.Empty);
             RequestClose(WidgetCardCloseReason.Action);
+        }
+        else if (_focus == WidgetCardFocus.Gear)
+        {
+            if (!_mainLayout.Gear.IsEmpty)
+            {
+                SettingsRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else if (_focus == WidgetCardFocus.UpdateButton)
+        {
+            if (_mainLayout.ShowUpdateLine)
+            {
+                UpdateRequested?.Invoke(this, EventArgs.Empty);
+            }
         }
         else if (_focus == WidgetCardFocus.SetupButton)
         {
@@ -591,6 +810,7 @@ internal sealed class WidgetCard : Form
 
     private void RequestClose(WidgetCardCloseReason reason)
     {
+        EndEdits(commit: true);
         if (Visible)
         {
             Hide();
@@ -885,29 +1105,18 @@ internal sealed class WidgetCard : Form
         }
     }
 
+    // The switch row: the label, and the design's toggle (accent when on, no fill and a secondary-text outline when
+    // off, so the off track shows on the dark card as well).
     private void DrawSwitch(Graphics g, Rectangle rect)
     {
-        int trackWidth = (int)(rect.Height * 1.8);
+        CardColours colours = Colours;
+        int trackWidth = CardPlacement.Scale(WidgetCardLayout.ToggleWidthAt96, _dpi);
+        int trackHeight = CardPlacement.Scale(WidgetCardLayout.ToggleHeightAt96, _dpi);
         var labelRect = new Rectangle(rect.X, rect.Y, Math.Max(0, rect.Width - trackWidth - 8), rect.Height);
         DrawLine(g, labelRect, WidgetCopy.AutoPauseSwitch, _palette.Status);
 
-        var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - (rect.Height * 3 / 5)) / 2), trackWidth, rect.Height * 3 / 5);
-        using (var trackPath = new GraphicsPath())
-        {
-            AddRoundedRect(trackPath, track, track.Height / 2f);
-            Color trackColour = _model.AutoPauseOn
-                ? Colours.Accent
-                : (_dark ? Color.FromArgb(0x55, 0x55, 0x55) : Color.FromArgb(0xC8, 0xC8, 0xC8));
-            using var trackBrush = new SolidBrush(trackColour);
-            g.FillPath(trackBrush, trackPath);
-        }
-
-        int knobDiameter = Math.Max(1, track.Height - 4);
-        int knobX = _model.AutoPauseOn ? track.Right - knobDiameter - 2 : track.X + 2;
-        using (var knobBrush = new SolidBrush(Color.White))
-        {
-            g.FillEllipse(knobBrush, knobX, track.Y + 2, knobDiameter, knobDiameter);
-        }
+        var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
+        CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi);
 
         if (!_notice && _focus == WidgetCardFocus.Switch && ContainsFocus)
         {
@@ -1159,6 +1368,12 @@ internal sealed class WidgetCard : Form
                 case SetupIcon.Caution:
                     CardPaint.CautionIcon(g, layout.StatusIcon, colours.Caution, _dpi);
                     break;
+                case SetupIcon.Down:
+                    CardPaint.DownIcon(g, layout.StatusIcon, colours.Text, _dpi);
+                    break;
+                case SetupIcon.Shield:
+                    CardPaint.ShieldIcon(g, layout.StatusIcon, colours.Text, _dpi);
+                    break;
             }
 
             CardPaint.Text(g, setup.Status, layout.StatusText, _fontFamily, CardPlacement.Scale(14, _dpi), bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
@@ -1166,6 +1381,11 @@ internal sealed class WidgetCard : Form
             {
                 CardPaint.Wrapped(g, setup.StatusSub, layout.StatusSub, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary);
             }
+        }
+
+        if (setup.ShowProgress && !layout.Progress.IsEmpty)
+        {
+            DrawProgress(g, setup, layout.Progress, colours);
         }
 
         if (setup.Picks is { } picks)
@@ -1182,6 +1402,24 @@ internal sealed class WidgetCard : Form
         var buttons = setup.Buttons.Select(b => (b.Label, b.Primary)).ToList();
         int focusedButton = focusVisible && focus.Kind == SetupTargetKind.Button ? focus.Index : -1;
         SubPageFrame.DrawFooter(g, layout.Frame, buttons, colours, _fontFamily, _dpi, focusedButton);
+    }
+
+    // The download's bar, 4 px, with its percentage 36 wide at the right. While the size is not known the bar has
+    // no fill and there is no figure: a percentage is only ever the download's own.
+    private void DrawProgress(Graphics g, SetupViewModel setup, Rectangle row, CardColours colours)
+    {
+        int textWidth = CardPlacement.Scale(WidgetCardLayout.ProgressTextWidthAt96, _dpi);
+        int gap = CardPlacement.Scale(WidgetCardLayout.ProgressGapAt96, _dpi);
+        int barHeight = CardPlacement.Scale(WidgetCardLayout.ProgressBarHeightAt96, _dpi);
+        var bar = new Rectangle(row.X, row.Y + ((row.Height - barHeight) / 2), Math.Max(1, row.Width - textWidth - gap), barHeight);
+        CardPaint.ProgressBar(g, bar, setup.ProgressPercent ?? 0, colours);
+        if (setup.ProgressPercent is { } percent)
+        {
+            var textRect = new Rectangle(row.Right - textWidth, row.Y, textWidth, row.Height);
+            CardPaint.Text(
+                g, percent.ToString(System.Globalization.CultureInfo.InvariantCulture) + "%", textRect, _fontFamily, CardPlacement.Scale(12, _dpi),
+                bold: false, colours.TextSecondary, StringAlignment.Far, StringAlignment.Center);
+        }
     }
 
     private void DrawPicker(Graphics g, WidgetCardLayout.PickerLayout picker, string label, int value, bool charging, CardColours colours, int index, SetupTarget? focus)

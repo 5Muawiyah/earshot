@@ -24,7 +24,11 @@ internal sealed record WidgetCardPresenterCallbacks(
     Action<CardPlace> RequestToggle,
     Action<bool, CardPlace> SetAutoPause,
     Func<CancellationToken, Task<BatterySetupListen>> ListenForSetup,
-    Func<BatterySetupListen, BatterySetupPicks, BatterySetupResult> CompleteSetup);
+    Func<BatterySetupListen, BatterySetupPicks, BatterySetupResult> CompleteSetup,
+    Func<GaugePosition>? GaugePosition = null)   // where the gauge sits, so the card follows it; the right end when null
+{
+    public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
+}
 
 // Owns the WidgetCard instance's lifecycle: creates it lazily, places it above the gauge (or a fallback
 // point when the gauge is hidden), shows it activated, re-renders on IWidgetStatus.Changed, refreshes the
@@ -35,6 +39,11 @@ internal sealed record WidgetCardPresenterCallbacks(
 // SystemInformation.DoubleClickTime of the card closing through a genuine deactivation (losing focus to some
 // other real window) does not reopen it, so dismissing the card by clicking elsewhere and then happening to
 // also click the gauge does not immediately flicker it back open.
+//
+// It also opens the settings page (from the gear) and the update page (from the update line, or from the settings
+// row that checks): the values come from the host each time the card is drawn, every change goes through the host,
+// and the update page follows the update flow's own state. The update line's button is the one place a download
+// is started from.
 //
 // It also drives the battery set-up on the card: listening (the service's listen, with a spinner that turns
 // on a 100 ms timer only while listening), the pickers, the result. A set-up page stays open when the card
@@ -54,6 +63,7 @@ internal sealed class WidgetCardPresenter : IDisposable
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _time;
     private readonly ILog _log;
+    private readonly IWidgetCardHost? _host;
 
     private WidgetCard? _card;
     private ITimer? _refreshTimer;
@@ -70,7 +80,15 @@ internal sealed class WidgetCardPresenter : IDisposable
     private BatterySetupPicks _picks = BatterySetupPicks.Default;
     private int _spinnerFrame;
 
-    public WidgetCardPresenter(Func<WidgetCard> createCard, WidgetCardPresenterCallbacks callbacks, Action<Action> uiPost, TimeProvider time, ILog log)
+    // Where Back on the update page goes: the settings page when it was opened from there, else the main view.
+    private WidgetCardView _updateFrom = WidgetCardView.Main;
+
+    // The reason a typed shortcut was refused, shown on its row until the next change or until the page closes.
+    private (CardShortcut Shortcut, string Reason)? _shortcutNote;
+
+    public WidgetCardPresenter(
+        Func<WidgetCard> createCard, WidgetCardPresenterCallbacks callbacks, Action<Action> uiPost, TimeProvider time, ILog log,
+        IWidgetCardHost? host = null)
     {
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(callbacks);
@@ -82,6 +100,11 @@ internal sealed class WidgetCardPresenter : IDisposable
         _uiPost = uiPost;
         _time = time;
         _log = log;
+        _host = host;
+        if (_host is not null)
+        {
+            _host.UpdateChanged += OnHostUpdateChanged;
+        }
     }
 
     // True while the card is on screen. For tests; the UI thread only.
@@ -131,6 +154,11 @@ internal sealed class WidgetCardPresenter : IDisposable
         }
 
         _disposed = true;
+        if (_host is not null)
+        {
+            _host.UpdateChanged -= OnHostUpdateChanged;
+        }
+
         StopRefreshTimer();
         CancelSetup();
         if (_card is not null)
@@ -150,10 +178,17 @@ internal sealed class WidgetCardPresenter : IDisposable
 
         if (_card is { IsDisposed: false, Visible: true })
         {
+            if (_view == WidgetCardView.Settings)
+            {
+                // The settings page closes on a second gauge click, as the main view does.
+                HideOnUiThread();
+                return;
+            }
+
             if (_view != WidgetCardView.Main)
             {
-                // A set-up page is open: a second gauge click does not close it, so a stray click on the way
-                // to the owner's case does not lose the step.
+                // A set-up or update page is open: a second gauge click does not close it, so a stray click on
+                // the way to the owner's case does not lose the step.
                 return;
             }
 
@@ -217,7 +252,7 @@ internal sealed class WidgetCardPresenter : IDisposable
     {
         Size cardSize = card.ClientSize;
         Rectangle workArea = Screen.FromPoint(anchor.Location).WorkingArea;
-        return WidgetCardPlacement.Above(anchor, cardSize, workArea, _callbacks.Dpi());
+        return WidgetCardPlacement.Above(anchor, cardSize, workArea, _callbacks.Dpi(), _callbacks.CurrentGaugePosition);
     }
 
     private void HideOnUiThread()
@@ -233,15 +268,36 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     private void RefreshOnUiThread()
     {
-        if (_card is not { IsDisposed: false, Visible: true } card)
-        {
-            return;
-        }
-
-        card.Render(BuildModel(), _callbacks.Dpi());
+        RenderKeepingBottom();
+        SyncSpinner();
     }
 
-    private WidgetCardModel BuildModel() => BuildModel(_callbacks, _time, _view, _setup);
+    private WidgetCardModel BuildModel()
+    {
+        SetupViewModel? setup = _view == WidgetCardView.Update ? UpdatePage() : _setup;
+        WidgetCardModel model = BuildModel(_callbacks, _time, _view, setup);
+        return model with
+        {
+            UpdateVersion = _host?.AvailableUpdateVersion(),
+            Settings = _view == WidgetCardView.Settings ? ReadSettings() : null,
+        };
+    }
+
+    // The update page, from the update flow's own state: the same words the tray's messages use.
+    private SetupViewModel UpdatePage() => _host!.UpdatePage(_spinnerFrame);
+
+    private CardSettingsValues ReadSettings()
+    {
+        CardSettingsValues values = _host!.ReadSettings();
+        if (_shortcutNote is { } note)
+        {
+            values = note.Shortcut == CardShortcut.Connect
+                ? values with { ConnectFailure = note.Reason }
+                : values with { DisconnectFailure = note.Reason };
+        }
+
+        return values;
+    }
 
     // Shared with CaseOpenCardPresenter, which renders the exact same three columns from the exact same
     // callbacks for its own WidgetCard(notice: true) instance; only the Where line differs, and WidgetCard
@@ -286,6 +342,9 @@ internal sealed class WidgetCardPresenter : IDisposable
         _card.SetupRequested += OnSetupRequested;
         _card.SetupActionRequested += OnSetupAction;
         _card.SetupPicksChanged += OnSetupPicksChanged;
+        _card.SettingsRequested += OnSettingsRequested;
+        _card.UpdateRequested += OnUpdateRequested;
+        _card.SettingChanged += OnSettingChanged;
         _card.CloseRequested += OnCardClosed;
         return _card;
     }
@@ -297,6 +356,9 @@ internal sealed class WidgetCardPresenter : IDisposable
         card.SetupRequested -= OnSetupRequested;
         card.SetupActionRequested -= OnSetupAction;
         card.SetupPicksChanged -= OnSetupPicksChanged;
+        card.SettingsRequested -= OnSettingsRequested;
+        card.UpdateRequested -= OnUpdateRequested;
+        card.SettingChanged -= OnSettingChanged;
         card.CloseRequested -= OnCardClosed;
     }
 
@@ -309,8 +371,157 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     private void OnSetupPicksChanged(object? sender, BatterySetupPicks picks) => _picks = picks;
 
+    // ---- The settings page and the update page
+
+    private void OnSettingsRequested(object? sender, EventArgs e)
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        _view = WidgetCardView.Settings;
+        _shortcutNote = null;
+        RenderKeepingBottom();
+    }
+
+    // The update line's Update button: the one path that starts a download. The page opens at once and follows
+    // the flow, which begins with the download.
+    private void OnUpdateRequested(object? sender, EventArgs e)
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        _updateFrom = WidgetCardView.Main;
+        _view = WidgetCardView.Update;
+        _spinnerFrame = 0;
+        RenderKeepingBottom();
+        _host.StartUpdate();
+        SyncSpinner();
+    }
+
+    private void OnHostUpdateChanged(object? sender, EventArgs e) => _uiPost(RefreshOnUiThread);
+
+    private void OnSettingChanged(object? sender, SettingChange change)
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        CardPlace place = _place;
+        switch (change)
+        {
+            case PositionChange position:
+                _host.SetGaugePosition(position.Value, place);
+                break;
+            case TextChange text:
+                _host.SetOtherDeviceLabel(text.Value, place);
+                break;
+            case ThresholdChange threshold:
+                _host.SetLowBatteryPercent(threshold.Percent, place);
+                break;
+            case ToggleChange toggle:
+                ApplyToggle(toggle, place);
+                break;
+            case ShortcutChange shortcut:
+                string? reason = _host.SetShortcut(shortcut.Shortcut, shortcut.Key, shortcut.Control, shortcut.Alt, shortcut.Shift, place);
+                _shortcutNote = reason is null ? null : (shortcut.Shortcut, reason);
+                break;
+            case ShortcutClear clear:
+                _host.ClearShortcut(clear.Shortcut, place);
+                _shortcutNote = null;
+                break;
+            case CheckRequest:
+                // A check and nothing more: the result shows on the update page. Nothing downloads.
+                _updateFrom = WidgetCardView.Settings;
+                _view = WidgetCardView.Update;
+                _spinnerFrame = 0;
+                _host.CheckForUpdates();
+                break;
+        }
+
+        if (_view is WidgetCardView.Settings or WidgetCardView.Update)
+        {
+            RenderKeepingBottom();
+            SyncSpinner();
+        }
+    }
+
+    private void ApplyToggle(ToggleChange toggle, CardPlace place)
+    {
+        switch (toggle.Row)
+        {
+            case SettingsRowId.PauseBud:
+                _host!.SetPauseWhenBudComesOut(toggle.On, place);
+                break;
+            case SettingsRowId.PauseLeave:
+                _host!.SetPauseWhenAirPodsLeave(toggle.On, place);
+                break;
+            case SettingsRowId.CaseCard:
+                _host!.SetCaseOpenCard(toggle.On, place);
+                break;
+            case SettingsRowId.LeftClick:
+                _host!.SetLeftClickConnects(toggle.On, place);
+                break;
+            case SettingsRowId.HandBack:
+                _host!.SetHandBack(toggle.On, place);
+                break;
+            case SettingsRowId.CheckAutomatically:
+                _host!.SetCheckAutomatically(toggle.On, place);
+                break;
+        }
+    }
+
+    // Back on the settings page and on the update page, and the update page's own buttons.
+    private void OnSubPageAction(SetupAction action)
+    {
+        if (_view == WidgetCardView.Settings)
+        {
+            if (action == SetupAction.Back)
+            {
+                _view = WidgetCardView.Main;
+                _shortcutNote = null;
+                RenderKeepingBottom();
+            }
+
+            return;
+        }
+
+        switch (action)
+        {
+            case SetupAction.Back:
+                _view = _updateFrom == WidgetCardView.Settings ? WidgetCardView.Settings : WidgetCardView.Main;
+                StopSpinnerTimer();
+                RenderKeepingBottom();
+                break;
+            case SetupAction.Cancel:
+                _host?.CancelUpdate();
+                break;
+            case SetupAction.TryAgain:
+                _host?.TryUpdateAgain();
+                break;
+            case SetupAction.Update:
+                _host?.StartUpdate();
+                break;
+            case SetupAction.Check:
+                _host?.CheckForUpdates();
+                break;
+        }
+
+        SyncSpinner();
+    }
+
     private void OnSetupAction(object? sender, SetupAction action)
     {
+        if (_view is WidgetCardView.Settings or WidgetCardView.Update)
+        {
+            OnSubPageAction(action);
+            return;
+        }
+
         switch (action)
         {
             case SetupAction.Cancel:
@@ -332,6 +543,12 @@ internal sealed class WidgetCardPresenter : IDisposable
         if (reason == WidgetCardCloseReason.Deactivated)
         {
             _closedByDeactivateAtTimestamp = _time.GetTimestamp();
+        }
+
+        if (_view == WidgetCardView.Settings)
+        {
+            _view = WidgetCardView.Main;
+            _shortcutNote = null;
         }
 
         StopRefreshTimer();
@@ -436,6 +653,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         _view = WidgetCardView.Main;
         _setup = null;
         _listen = null;
+        _shortcutNote = null;
     }
 
     private void CancelListenOnly()
@@ -449,7 +667,12 @@ internal sealed class WidgetCardPresenter : IDisposable
         }
     }
 
-    private void RenderSetup()
+    private void RenderSetup() => RenderKeepingBottom();
+
+    // Draws the card again from the current model. A page's height changes with what it holds (the step, a
+    // caption, a row's note), so the card keeps its bottom edge where it was and grows upward from the gauge
+    // instead of into the taskbar.
+    private void RenderKeepingBottom()
     {
         if (_card is not { IsDisposed: false, Visible: true } card)
         {
@@ -459,8 +682,6 @@ internal sealed class WidgetCardPresenter : IDisposable
         Rectangle before = card.Bounds;
         card.Render(BuildModel(), _callbacks.Dpi());
 
-        // The page's height changes with the step; the card keeps its bottom edge where it was, so it grows
-        // upward from the gauge instead of into the taskbar.
         Size size = card.ClientSize;
         if (size != before.Size)
         {
@@ -472,6 +693,13 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     private void AdvanceSpinner()
     {
+        if (_view == WidgetCardView.Update)
+        {
+            _spinnerFrame = (_spinnerFrame + 1) % SetupViewModel.SpinnerFrames;
+            _card?.SetSpinnerFrame(_spinnerFrame);
+            return;
+        }
+
         if (_view != WidgetCardView.SetupListening || _setup is null)
         {
             return;
@@ -480,6 +708,25 @@ internal sealed class WidgetCardPresenter : IDisposable
         _spinnerFrame = (_spinnerFrame + 1) % SetupViewModel.SpinnerFrames;
         _setup = _setup with { SpinnerFrame = _spinnerFrame };
         _card?.SetSpinnerFrame(_spinnerFrame);
+    }
+
+    // The update page turns its spinner only while the flow is checking; the timer stops the moment it is not.
+    private void SyncSpinner()
+    {
+        if (_view != WidgetCardView.Update)
+        {
+            return;
+        }
+
+        bool spinning = _host is not null && _card is { IsDisposed: false, Visible: true } && UpdatePage().Icon == SetupIcon.Spinner;
+        if (spinning && _spinnerTimer is null)
+        {
+            StartSpinnerTimer();
+        }
+        else if (!spinning)
+        {
+            StopSpinnerTimer();
+        }
     }
 
     private void StartSpinnerTimer()
