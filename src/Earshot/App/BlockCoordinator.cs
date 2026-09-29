@@ -5,6 +5,7 @@ using Earshot.AudioProtection;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Tray;
+using Earshot.Widget.EarPause;
 
 namespace Earshot.App;
 
@@ -1411,6 +1412,11 @@ internal sealed partial class BlockCoordinator : IDisposable
             return "nothing to disconnect";
         }
 
+        // Paused before the disconnect, so the sound does not jump to the speakers as the AirPods go. Bounded to a
+        // share of the disconnect's own wait: a slow media session never holds up the disconnect and block that keep
+        // the AirPods off this PC, and the pause carries on by itself when it runs past its share.
+        await PauseBeforeOwnLeaveAsync(HandBackText.LeaveReason(trigger), container, PauseOnLeave.CapFor(disconnectWait), CancellationToken.None);
+
         DateTimeOffset disconnectStarted = _time.GetUtcNow();
         TimeSpan disconnectRemaining = Remaining(t0 + disconnectWait);
         using var disconnectBudget = new CancellationTokenSource(disconnectRemaining, _time);
@@ -1432,6 +1438,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
         catch (TimeoutException)
         {
+            NoteOwnLeaveEnded(false);
             _log.Warn(HandBackText.CutShort(trigger, _time.GetUtcNow() - t0, ["disconnect"], blockAlreadySentAt));
             RecordHandBack("cut short", HandBackBlockOutcome.CutShort, "the disconnect had not finished");
             return null;
@@ -1441,12 +1448,14 @@ internal sealed partial class BlockCoordinator : IDisposable
             // Never a silent catch: the raw code is recorded and surfaced, and the procedure still goes on to
             // the block, which is the at-rest action and must still run wherever it can.
             StepOutcome step = StepOutcomes.FromHResult("hand-back-disconnect", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
+            NoteOwnLeaveEnded(false);
             _log.Error(HandBackText.Prefix(trigger) + "disconnect failed. " + TrayReport.DescribeStep(step), ex);
             return "failed: " + step.CodeName;
         }
 
         TimeSpan elapsed = _time.GetUtcNow() - disconnectStarted;
         bool confirmed = result is { Confirmed: true };
+        NoteOwnLeaveEnded(confirmed);
         string code = result is null ? "sent" : result.Outcome == ConnectOutcome.Confirmed ? "S_OK" : result.Outcome.ToString();
         _log.Info(HandBackText.Disconnect(trigger, code, confirmed, elapsed));
         return confirmed ? "confirmed" : "not confirmed";
@@ -2191,6 +2200,8 @@ internal sealed partial class BlockCoordinator : IDisposable
         bool cancelled = false;
         try
         {
+            // Paused before the disconnect, so the sound does not jump to the speakers when the AirPods go.
+            await PauseBeforeOwnLeaveAsync("Disconnect", request.Container, PauseOnLeave.DefaultOwnLeaveCap, ct);
             result = await _connection.DisconnectAsync(request.Container, ct);
             steps.AddRange(result.Steps);
         }
@@ -2211,6 +2222,7 @@ internal sealed partial class BlockCoordinator : IDisposable
             _log.Error("disconnect: unexpected error; the block still follows when Block at boot is on.", ex);
         }
 
+        NoteOwnLeaveEnded(result is { Confirmed: true } && !cancelled);
         if (result is { Confirmed: true } && !cancelled)
         {
             ShowCard(request, TrayStatus.CardDisconnected);
@@ -2905,6 +2917,7 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         _snapshot = snapshot;
         _deviceReadFailed = false;
+        NoteRenderForPauseOnLeave(snapshot);
         if (CoordinatorRules.RenderOf(snapshot, WatchedContainer()) == RenderState.Active)
         {
             ReArmIdleRule("the AirPods are in use");

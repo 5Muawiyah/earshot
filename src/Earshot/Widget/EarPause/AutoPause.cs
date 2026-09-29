@@ -101,41 +101,22 @@ internal sealed class AutoPause
             return false;
         }
 
-        IReadOnlyList<MediaSessionView> sessions = await _sessions.ReadAsync(ct).ConfigureAwait(false);
-        List<MediaSessionView> playing = new();
-        foreach (MediaSessionView session in sessions)
-        {
-            if (session.PlaybackStatus == MediaPlaybackState.Playing && session.IsPauseEnabled)
-            {
-                playing.Add(session);
-            }
-        }
-
         // Two or more Playing: the system's own "current" session is not necessarily the one rendering to
         // the AirPods, so none is paused, and that is logged rather than guessed at.
-        if (playing.Count == 0)
+        SessionPauseResult result = await SessionPause.PauseTheOnePlayingAsync(_sessions, ct).ConfigureAwait(false);
+        switch (result.Outcome)
         {
-            return false;
+            case SessionPauseOutcome.NoneToPause:
+                return false;
+            case SessionPauseOutcome.Ambiguous:
+                _log.Info("Auto-pause: " + result.PlayingCount + " sessions are playing, so none was paused.");
+                return false;
+            case SessionPauseOutcome.Paused:
+                _log.Info("Auto-pause paused " + result.AppId + ".");
+                return true;
+            default:
+                _log.Warn("Auto-pause could not pause " + result.AppId + ".");
+                return false;
         }
-
-        if (playing.Count > 1)
-        {
-            _log.Info("Auto-pause: " + playing.Count + " sessions are playing, so none was paused.");
-            return false;
-        }
-
-        MediaSessionView chosen = playing[0];
-        bool paused = await _sessions.TryPauseAsync(chosen.SessionId, ct).ConfigureAwait(false);
-        string appId = chosen.SourceAppUserModelId ?? "(unknown)";
-        if (paused)
-        {
-            _log.Info("Auto-pause paused " + appId + ".");
-        }
-        else
-        {
-            _log.Warn("Auto-pause could not pause " + appId + ".");
-        }
-
-        return paused;
     }
 }

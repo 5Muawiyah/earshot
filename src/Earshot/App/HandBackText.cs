@@ -31,6 +31,15 @@ internal static class HandBackText
         _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown hand-back trigger."),
     };
 
+    // Names the leave in pause on leave's own log line: which hand-back is about to let the AirPods go.
+    public static string LeaveReason(HandBackTrigger trigger) => trigger switch
+    {
+        HandBackTrigger.SessionEnd => "hand-back at shut down",
+        HandBackTrigger.Suspend => "hand-back at sleep",
+        HandBackTrigger.Exit => "hand-back on Exit",
+        _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown hand-back trigger."),
+    };
+
     // The reason on the Started line for Exit: what raised it, in words a reader of the log can match to the menu.
     public const string ExitStartedReason = "Exit";
 

@@ -19,6 +19,11 @@ public sealed class EarshotSettings
     // stays 1; an older file without this member still reads as this build's current schema, not a newer one.
     public bool   HandBackOnShutdownAndSleep { get; set; } = true;
 
+    // Pause this PC's playback when the AirPods stop being this PC's output while it was playing to them
+    // (the phone took them, they went out of range, or Earshot let them go). Never resumes on its own. Defaults
+    // on, so an older settings file with no member reads as on. SchemaVersion stays 1.
+    public bool   PauseWhenAirPodsLeave { get; set; } = true;
+
     // v1.1: global keyboard shortcuts. Defaults off with every text empty (Earshot.Hotkeys.HotkeySettings),
     // so an older settings file with no Hotkeys member reads as "off, nothing typed" and nothing is
     // registered until the owner asks.

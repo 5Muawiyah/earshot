@@ -422,6 +422,7 @@ internal sealed partial class TrayContext : ApplicationContext
         ApplyVoiceOver();
         ApplyStreaming();
         WireWidget();
+        InitPauseOnLeave();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
     }
@@ -556,6 +557,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _registry.Cards.Hide();
         _notifyIconVisibility.Visible = false;
         CloseWidget();
+        ClosePauseOnLeave();
 
         // Every orderly exit path runs through here (ExitThreadCore, Dispose), so a shortcut is never left
         // registered after one of those. This runs on the UI thread, which owns the window. It does not
