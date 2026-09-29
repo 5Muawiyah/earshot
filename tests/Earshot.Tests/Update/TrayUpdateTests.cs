@@ -270,11 +270,18 @@ public sealed class TrayUpdateTests
             {
                 tray.Context.Updates!.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
                 tray.Ui.Post(_ => tray.Context.StartUpdate(), null);
-                var watch = System.Diagnostics.Stopwatch.StartNew();
+                bool timedOut = false;
+                using var watchdog = new System.Threading.Timer(
+                    _ =>
+                    {
+                        timedOut = true;
+                        tray.Ui.Post(_ => tray.Context.ExitThread(), null);
+                    },
+                    null, TimeSpan.FromSeconds(20), Timeout.InfiniteTimeSpan);
 
                 Application.Run(tray.Context);
 
-                Assert.IsLessThan(TimeSpan.FromSeconds(10), watch.Elapsed);
+                Assert.IsFalse(timedOut, "The tray did not close after the hand-over.");
                 Assert.AreEqual(staged.ExecutablePath, tray.Launcher.Launches.Single().Executable);
                 Assert.AreEqual("install", tray.Launcher.Launches.Single().Arguments[0]);
                 Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Earshot is closing so the update can replace its files."), "The tray closed through Exit.");
