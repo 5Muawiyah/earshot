@@ -19,7 +19,11 @@ internal sealed record TaskbarLayout(
     int Dpi,
     int NotificationState,     // Shell.QUNS_*
     bool Covered,               // WindowFromPoint at the probe point returns a monitor-sized window that is not Shell_TrayWnd
-    bool? GaugeCentreIsGauge); // null when no gauge is currently shown; else whether WindowFromPoint at its centre is the gauge
+    bool? GaugeCentreIsGauge,  // null when no gauge is currently shown; else whether WindowFromPoint at its centre is the gauge
+    Rectangle? NotificationArea = null,        // the bounds of the notification area's own elements (the tray chevron, icons, clock); null when none was identified
+    WindowIdentity? CoveringWindow = null,     // the window found at the probe point when Covered
+    WindowIdentity? WindowAtGaugeCentre = null, // the window found at the shown gauge's centre when GaugeCentreIsGauge is false
+    WindowIdentity? Foreground = null);        // the foreground window at the time of the read
 
 // Why a read failed, and the raw step. Every case maps to one of GaugeController's Hidden reasons.
 internal enum TaskbarReadFailureStep { NoTaskbar, TaskbarRect, Occupants, Notification, Dpi, GaugeProbe }

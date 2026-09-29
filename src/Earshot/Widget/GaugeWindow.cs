@@ -2,7 +2,6 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
-using Earshot.Tray;
 
 namespace Earshot.Widget;
 
@@ -122,24 +121,22 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         return StepOutcomes.FromWin32(Step, 0);
     }
 
-    public void HideWindow()
+    // Hides the window. The result is the raw SetWindowPos outcome (success when there was nothing to hide);
+    // the controller writes it into the hide event with the reason, so this method logs nothing itself.
+    public StepOutcome HideWindow()
     {
+        const string Step = "set-window-pos:hide-gauge";
         if (!_shown || !IsHandleCreated)
         {
-            return;
+            return StepOutcomes.FromWin32(Step, 0);
         }
 
         _shown = false;
         bool ok = NativeMethods.SetWindowPos(Handle, 0, 0, 0, 0, 0,
             NativeMethods.SWP_HIDEWINDOW | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER);
-        // _shown still moves to false either way: the caller (GaugeController's own Hidden/Off transitions)
-        // has already decided the gauge must not be treated as shown any more regardless of whether the
-        // window itself actually disappeared, the same way ShowAt and Raise above record their own raw code
-        // rather than staying silent about one (AppBarRegistration.Dispose's own ABM_REMOVE fix uses the
-        // same Debug-on-success, Warn-on-failure split for exactly the same reason).
-        StepOutcome outcome = StepOutcomes.FromWin32("set-window-pos:hide-gauge",
-            ok ? 0 : unchecked((uint)Marshal.GetLastPInvokeError()), ok: ok);
-        _log.Write(ok ? LogLevel.Debug : LogLevel.Warn, "Gauge: " + TrayReport.DescribeStep(outcome));
+        // _shown moves to false either way: the controller has already decided the gauge is not shown
+        // whether or not the window itself actually disappeared.
+        return StepOutcomes.FromWin32(Step, ok ? 0 : unchecked((uint)Marshal.GetLastPInvokeError()), ok: ok);
     }
 
     protected override void WndProc(ref Message m)

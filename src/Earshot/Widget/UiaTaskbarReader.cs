@@ -54,23 +54,33 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
         Rectangle monitorBounds = MonitorBoundsFor(taskbar);
         TaskbarEdge edge = CardPlacement.EdgeOf(taskbar, monitorBounds);
 
+        // Explorer owns Shell_TrayWnd, so "belongs to Explorer" below means "same process as the taskbar".
+        uint explorerProcess = GaugeWindowIdentityReader.ProcessOf(trayHandle);
+
         Point probe = ProbePoint(taskbar);
         nint atProbe = NativeMethods.WindowFromPoint(new POINT { x = probe.X, y = probe.Y });
         bool covered = atProbe != 0 && atProbe != trayHandle && IsMonitorSized(atProbe, monitorBounds);
+        WindowIdentity? coveringWindow = covered ? GaugeWindowIdentityReader.Read(RootOf(atProbe), explorerProcess) : null;
 
         bool? gaugeCentreIsGauge = null;
+        WindowIdentity? windowAtGaugeCentre = null;
         if (shownGauge is { } gauge)
         {
             Point centre = new(gauge.Bounds.X + (gauge.Bounds.Width / 2), gauge.Bounds.Y + (gauge.Bounds.Height / 2));
             nint atCentre = NativeMethods.WindowFromPoint(new POINT { x = centre.X, y = centre.Y });
-            nint rootAtCentre = NativeMethods.GetAncestor(atCentre, NativeMethods.GA_ROOT);
-            nint effective = rootAtCentre != 0 ? rootAtCentre : atCentre;
+            nint effective = RootOf(atCentre);
             gaugeCentreIsGauge = atCentre == gauge.Handle || effective == gauge.Handle;
+            if (gaugeCentreIsGauge == false)
+            {
+                windowAtGaugeCentre = GaugeWindowIdentityReader.Read(effective, explorerProcess);
+            }
         }
 
         var layout = new TaskbarLayout(
             trayHandle, taskbar, edge, autoHide, monitorBounds, occupied, startButton,
-            (int)(dpi > 0 ? dpi : CardPlacement.BaseDpi), quns, covered, gaugeCentreIsGauge);
+            (int)(dpi > 0 ? dpi : CardPlacement.BaseDpi), quns, covered, gaugeCentreIsGauge,
+            CoveringWindow: coveringWindow, WindowAtGaugeCentre: windowAtGaugeCentre,
+            Foreground: GaugeWindowIdentityReader.Foreground(explorerProcess));
         return ITaskbarReader.Result.Ok(layout);
     }
 
@@ -328,6 +338,13 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     // rather than a point inside wherever the gauge will actually be placed.
     private static Point ProbePoint(Rectangle taskbar) =>
         new(taskbar.Left + (taskbar.Width / 2), taskbar.Top + (taskbar.Height / 2));
+
+    // The root owner of a window, or the window itself when it has none.
+    private static nint RootOf(nint hwnd)
+    {
+        nint root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+        return root != 0 ? root : hwnd;
+    }
 
     private static bool IsMonitorSized(nint hwnd, Rectangle monitorBounds)
     {

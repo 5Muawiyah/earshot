@@ -49,7 +49,9 @@ internal interface IGaugeSurface : IDisposable
     // opened after it.
     StepOutcome Raise();
 
-    void HideWindow();
+    // SetWindowPos(SWP_HIDEWINDOW | SWP_NOACTIVATE | ...). The outcome is success when there was nothing to
+    // hide.
+    StepOutcome HideWindow();
 }
 
 // What the controller needs from the tray icon. TrayContext's own NotifyIcon satisfies this directly.
@@ -82,8 +84,8 @@ internal sealed class GaugeController : IDisposable
     private GaugeState _state = new GaugeState.Off();
     private long _shownSinceTimestamp;
     private bool _iconHiddenForShown;
-    private HiddenReason? _lastLoggedReason;
-    private int? _lastLoggedCode;
+    private string? _lastHideReason;
+    private int? _lastHideCode;
     private bool _disposed;
 
     public GaugeController(Func<IGaugeSurface> createSurface, ITrayIconVisibility trayIcon, Func<GaugeControllerSettings> settings, ILog log, TimeProvider time)
@@ -123,37 +125,43 @@ internal sealed class GaugeController : IDisposable
         GaugeControllerSettings settings = _settings();
         if (!settings.Enabled)
         {
-            TransitionOff();
+            TransitionOff(GaugeReasons.SettingOff);
             return;
         }
 
         if (result.Failure is { } failure)
         {
-            TransitionHidden(failure.Step == TaskbarReadFailureStep.NoTaskbar ? HiddenReason.NoTaskbar : HiddenReason.ReadFailed, failure.Outcome);
+            bool noTaskbar = failure.Step == TaskbarReadFailureStep.NoTaskbar;
+            TransitionHidden(
+                noTaskbar ? HiddenReason.NoTaskbar : HiddenReason.ReadFailed,
+                noTaskbar ? GaugeReasons.NoTaskbar : GaugeReasons.ReadFailed,
+                new HideContext { Failure = failure.Outcome, Detail = "step=" + failure.Step });
             return;
         }
 
         TaskbarLayout layout = result.Layout!;
         if (layout.NotificationState is Shell.QUNS_BUSY or Shell.QUNS_RUNNING_D3D_FULL_SCREEN or Shell.QUNS_PRESENTATION_MODE)
         {
-            TransitionHidden(HiddenReason.NotificationState, null);
+            TransitionHidden(HiddenReason.NotificationState, GaugeReasons.FullScreenState,
+                new HideContext { Detail = "quns=" + layout.NotificationState, Foreground = layout.Foreground });
             return;
         }
 
         if (layout.Covered)
         {
-            TransitionHidden(HiddenReason.Covered, null);
+            TransitionHidden(HiddenReason.Covered, GaugeReasons.Covered,
+                new HideContext { Window = layout.CoveringWindow, Foreground = layout.Foreground });
             return;
         }
 
         Rectangle? placed = GaugePlacement.Place(layout, GaugeRenderer.WidthFor(layout.Dpi));
         if (placed is not { } bounds)
         {
-            TransitionHidden(HiddenReason.NoFreeSpace, null);
+            TransitionHidden(HiddenReason.NoFreeSpace, GaugeReasons.NoFreeSpace, new HideContext { Foreground = layout.Foreground });
             return;
         }
 
-        ShowOrMove(bounds, layout.GaugeCentreIsGauge);
+        ShowOrMove(bounds, layout);
         CheckIconDebounce();
     }
 
@@ -173,12 +181,12 @@ internal sealed class GaugeController : IDisposable
             return;
         }
 
-        TransitionHiddenNoLog(HiddenReason.NotificationState);
+        TransitionHidden(HiddenReason.NotificationState, GaugeReasons.FullScreenAppNotified, new HideContext());
     }
 
     // The owner turned the setting off, or Enabled was already false: watcher stopped, icon shown,
     // window disposed. Idempotent.
-    public void TurnOff() => TransitionOff();
+    public void TurnOff() => TransitionOff(GaugeReasons.SettingOff);
 
     public void Dispose()
     {
@@ -187,26 +195,45 @@ internal sealed class GaugeController : IDisposable
             return;
         }
 
+        if (_state is GaugeState.Shown shown)
+        {
+            LogHide(GaugeReasons.Disposed, new HideContext(), surfaceOutcome: null, _state, shown.Bounds, ShownFor());
+        }
+
         _disposed = true;
         DisposeSurface();
     }
 
-    private void ShowOrMove(Rectangle bounds, bool? gaugeCentreIsGauge)
+    private void ShowOrMove(Rectangle bounds, TaskbarLayout layout)
     {
         IGaugeSurface surface = EnsureSurface();
         bool wasShown = _state is GaugeState.Shown;
         Rectangle? previous = wasShown ? ((GaugeState.Shown)_state).Bounds : null;
+        GaugeEvent? pending;
+        GaugeEvent? cover = null;
 
         StepOutcome outcome;
         if (!wasShown)
         {
             outcome = surface.ShowAt(bounds);
+            pending = NewEvent(GaugeEventKind.Show, GaugeReasons.Placed) with
+            {
+                Bounds = bounds,
+                Foreground = layout.Foreground,
+                Detail = "was=" + WasName(),
+            };
         }
         else if (previous != bounds)
         {
             outcome = surface.MoveTo(bounds);
+            pending = NewEvent(GaugeEventKind.Move, GaugeReasons.LayoutChanged) with
+            {
+                Bounds = bounds,
+                From = previous,
+                ShownFor = ShownFor(),
+            };
         }
-        else if (gaugeCentreIsGauge == false)
+        else if (layout.GaugeCentreIsGauge == false)
         {
             // Nothing moved, but the read's own WindowFromPoint check at the gauge's own centre (the
             // reader's GaugeCentreIsGauge) found something else there instead of the gauge itself: the
@@ -216,7 +243,21 @@ internal sealed class GaugeController : IDisposable
             // gauge invisible under whatever now sits there; Raise puts it back on top without moving or
             // resizing it. False, not just "not true": a genuinely unreadable point (no gauge was shown for
             // this read to check) is null, never treated as covered.
+            cover = NewEvent(GaugeEventKind.Cover, GaugeReasons.WindowOverGauge) with
+            {
+                Bounds = bounds,
+                ShownFor = ShownFor(),
+                Window = layout.WindowAtGaugeCentre,
+                Foreground = layout.Foreground,
+            };
             outcome = surface.Raise();
+            pending = NewEvent(GaugeEventKind.Raise, GaugeReasons.CoveredAtCentre) with
+            {
+                Bounds = bounds,
+                ShownFor = ShownFor(),
+                Window = layout.WindowAtGaugeCentre,
+                Foreground = layout.Foreground,
+            };
         }
         else
         {
@@ -225,16 +266,25 @@ internal sealed class GaugeController : IDisposable
             return;
         }
 
+        if (cover is not null)
+        {
+            GaugeEventLog.Write(_log, cover);
+        }
+
         if (!outcome.Ok)
         {
-            LogFailureOnce(HiddenReason.WindowFailed, outcome);
+            GaugeEventLog.Write(_log, pending with { Failure = outcome });
             DisposeSurface();
-            TransitionHiddenNoLog(HiddenReason.WindowFailed);
+            TransitionHidden(HiddenReason.WindowFailed, GaugeReasons.WindowFailed, new HideContext { Failure = outcome, AlreadyLoggedFailure = true, SurfaceGone = true });
             return;
         }
 
+        GaugeEventLog.Write(_log, pending);
+
         bool enteringShown = _state is not GaugeState.Shown;
         _state = new GaugeState.Shown(bounds);
+        _lastHideReason = null;
+        _lastHideCode = null;
         if (enteringShown)
         {
             _shownSinceTimestamp = _time.GetTimestamp();
@@ -253,51 +303,110 @@ internal sealed class GaugeController : IDisposable
         }
     }
 
-    private void TransitionHidden(HiddenReason reason, StepOutcome? outcome)
+    // What a hide adds to its log line beyond the reason.
+    private sealed class HideContext
     {
-        if (outcome is { } o)
-        {
-            LogFailureOnce(reason, o);
-        }
+        public StepOutcome? Failure { get; init; }
 
-        TransitionHiddenNoLog(reason);
+        public WindowIdentity? Window { get; init; }
+
+        public WindowIdentity? Foreground { get; init; }
+
+        public string? Detail { get; init; }
+
+        // The failing step was already written by the caller (a window call that failed), so the hide line
+        // does not write it a second time.
+        public bool AlreadyLoggedFailure { get; init; }
+
+        // The surface was disposed by the caller, so there is nothing left to hide.
+        public bool SurfaceGone { get; init; }
     }
 
-    private void TransitionHiddenNoLog(HiddenReason reason)
+    private void TransitionHidden(HiddenReason reason, string logReason, HideContext context)
     {
-        bool leavingShown = _state is GaugeState.Shown;
+        GaugeState previous = _state;
+        bool alreadyThisReason = previous is GaugeState.Hidden hidden && hidden.Reason == reason &&
+            string.Equals(_lastHideReason, logReason, StringComparison.Ordinal) && _lastHideCode == context.Failure?.Code;
+        Rectangle? shownBounds = previous is GaugeState.Shown shown ? shown.Bounds : null;
+        TimeSpan? shownFor = previous is GaugeState.Shown ? ShownFor() : null;
+
         _state = new GaugeState.Hidden(reason);
         _iconHiddenForShown = false;
-        if (leavingShown || _trayIcon is not null)
-        {
-            _trayIcon!.Visible = true;
-        }
+        _trayIcon.Visible = true;
 
-        _surface?.HideWindow();
+        StepOutcome? surfaceOutcome = context.SurfaceGone ? null : _surface?.HideWindow();
+
+        // One line per change: leaving Shown, or a different reason from the one already recorded. A poll
+        // that finds the same hidden state again writes nothing.
+        if (!alreadyThisReason)
+        {
+            LogHide(logReason, context, surfaceOutcome, previous, shownBounds, shownFor);
+            _lastHideReason = logReason;
+            _lastHideCode = context.Failure?.Code;
+        }
     }
 
-    private void TransitionOff()
+    private void TransitionOff(string logReason)
     {
         // Always sets the icon visible and disposes any surface, even when already Off: the constructor
         // starts in Off before any layout is ever applied, so an "already there" guard here would leave
         // the icon in whatever state the caller set it to before the first call.
+        GaugeState previous = _state;
+        if (previous is not GaugeState.Off)
+        {
+            Rectangle? shownBounds = previous is GaugeState.Shown shown ? shown.Bounds : null;
+            TimeSpan? shownFor = previous is GaugeState.Shown ? ShownFor() : null;
+            StepOutcome? surfaceOutcome = _surface?.HideWindow();
+            LogHide(logReason, new HideContext(), surfaceOutcome, previous, shownBounds, shownFor);
+        }
+
         _state = new GaugeState.Off();
+        _lastHideReason = null;
+        _lastHideCode = null;
         _trayIcon.Visible = true;
         DisposeSurface();
     }
 
-    private void LogFailureOnce(HiddenReason reason, StepOutcome outcome)
+    private void LogHide(string logReason, HideContext context, StepOutcome? surfaceOutcome, GaugeState? previous, Rectangle? shownBounds, TimeSpan? shownFor)
     {
-        if (_lastLoggedReason == reason && _lastLoggedCode == outcome.Code)
+        StepOutcome? failure = context.AlreadyLoggedFailure ? null : context.Failure;
+        if (failure is null && surfaceOutcome is { Ok: false })
         {
-            _log.Write(LogLevel.Debug, "Gauge " + reason + ": " + outcome.CodeName + " (repeat).");
-            return;
+            failure = surfaceOutcome;
         }
 
-        _lastLoggedReason = reason;
-        _lastLoggedCode = outcome.Code;
-        _log.Error("Gauge " + reason + ": " + outcome.CodeName + " (" + outcome.Code + ") " + outcome.Detail);
+        string? detail = context.Detail;
+        if (previous is GaugeState.Hidden was)
+        {
+            detail = (detail is null ? "" : detail + " ") + "was=hidden:" + was.Reason;
+        }
+
+        if (string.IsNullOrEmpty(detail))
+        {
+            detail = failure?.Detail;
+        }
+
+        GaugeEventLog.Write(_log, NewEvent(GaugeEventKind.Hide, logReason) with
+        {
+            ShownFor = shownFor,
+            Bounds = shownBounds,
+            Window = context.Window,
+            Foreground = context.Foreground,
+            Failure = failure,
+            Detail = detail,
+        });
     }
+
+    private GaugeEvent NewEvent(GaugeEventKind kind, string reason) => new(kind, reason, _time.GetUtcNow());
+
+    private TimeSpan ShownFor() => _time.GetElapsedTime(_shownSinceTimestamp);
+
+    private string WasName() => _state switch
+    {
+        GaugeState.Hidden hidden => "hidden:" + hidden.Reason,
+        GaugeState.Off => "off",
+        _ => "shown",
+    };
 
     private IGaugeSurface EnsureSurface()
     {

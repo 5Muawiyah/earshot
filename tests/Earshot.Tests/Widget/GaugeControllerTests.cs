@@ -38,7 +38,11 @@ internal sealed class FakeGaugeSurface : IGaugeSurface
         return new StepOutcome("raise", true, 0, "S_OK", null);
     }
 
-    public void HideWindow() => Calls.Add("HideWindow");
+    public StepOutcome HideWindow()
+    {
+        Calls.Add("HideWindow");
+        return new StepOutcome("hide-window", true, 0, "S_OK", null);
+    }
 
     public void Dispose() => IsDisposed = true;
 

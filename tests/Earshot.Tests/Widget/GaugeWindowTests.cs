@@ -179,11 +179,11 @@ public sealed class GaugeWindowTests
             Assert.IsTrue(shown.Ok, "ShowAt: " + shown.CodeName + " " + shown.Detail);
             Application.DoEvents();
 
-            gauge.HideWindow();
+            Earshot.Contracts.StepOutcome hidden = gauge.HideWindow();
 
-            Assert.IsTrue(log.Has(LogLevel.Debug, "Gauge: set-window-pos:hide-gauge"),
-                "HideWindow's own SetWindowPos outcome must reach the log: " +
-                string.Join(" | ", log.Entries.Select(e => e.Level + ":" + e.Message)));
+            Assert.IsTrue(hidden.Ok, "HideWindow: " + hidden.CodeName + " " + hidden.Detail);
+            Assert.AreEqual("set-window-pos:hide-gauge", hidden.Step,
+                "HideWindow's own SetWindowPos outcome must come back to the controller, which writes it into the hide line.");
         });
     }
 
