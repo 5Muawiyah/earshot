@@ -103,6 +103,7 @@ it for a test that does not take it rather than dropping it quietly:
 | `-WatchSeconds 120` | 03 | How long to watch for Windows paging the AirPods after an allow. |
 | `-WatchMinutes 10` | 13 | How long to wait for the idle rule to block the nodes again. |
 | `-PhoneAddress`, `-SpeakerAddress` | 14 | The addresses to try. Without them the test lists the ones it can see and asks which is which. |
+| `-Rounds 3` | 16 | How many rounds of switching each way. A choice of how long the sitting is, not a measurement. |
 | `-OfferUninstall` | 00 | Offer a full uninstall at the end of the restore. |
 
 The tests are numbered riskiest first. Test 08 is the acceptance test the whole
@@ -147,6 +148,31 @@ it is never lost.
 | 10 | one restart per variant, five variants: the fifth signs out and back in rather than restarting |
 | 15 | a restart, to check the delayed file deletion |
 | 17 | a full power down, not a restart: shut down from the Start menu with the AirPods connected and Hand back on |
+
+## Test 16: switching between the phone and this PC
+
+One half, no restart, and it takes a while. It switches the AirPods to this PC and to the phone,
+each way, `-Rounds` times (three unless you say otherwise): the first round by left-clicking the
+Earshot icon, the rest by the two switch shortcuts (Ctrl+Alt+Shift+A to this PC and
+Ctrl+Alt+Shift+D to the phone, unless you changed them). After the rounds there is one more
+switch to this PC, an optional leg that measures the direct path (the phone takes the AirPods
+from this PC and you switch straight back), and one switch to the phone with nothing playing on
+the phone. The last thing you do is always a switch to the phone.
+
+Earshot measures every switch itself and writes one line for it (`Switch to-pc:` or `Switch
+to-phone:`), with the phases the handover went through. The test asks you what you heard and
+whether the wait was acceptable before it shows you any figure, then reads the line and records
+both. It also reads the nodes itself after every switch to the phone rather than trusting the
+line's word for it. The time from Earshot letting the AirPods go to you hearing the phone in them
+is your observation, includes your reaction time, and is recorded under a name that says so.
+
+This may be the first time the shortcuts are pressed for real. The finding
+`firstRealPressOfShortcuts` says whether it was, from Earshot's log and from your own answer.
+
+The lines come from one formatter (`SwitchTimelineText`), and the test project pins the fake log
+against it and runs the script's own functions over the real lines, over lines with a mangled
+figure (which must read as nothing, never as 0), and over settings files (which must read the way
+Earshot's own settings store reads them), in a Windows PowerShell 5.1 process.
 
 ## Tests 20 and 21: Exit and pause on leave
 
@@ -208,6 +234,7 @@ recorded that way rather than guessed at.
 | 13 | The value of the idle grace window. |
 | 14 | That a phone can never be pinned as the device Earshot disables. |
 | 15 | Whether uninstall reverses everything and install passes its own checks. |
+| 16 | How long a handover takes each way on the real AirPods, which path each switch to this PC took, whether the phone takes the AirPods back by itself, whether this PC is at rest after every switch to the phone, whether protection survives switching, and the first real press of a registered shortcut. |
 | 17 | Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone. |
 | 18 | Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes. |
 | 19 | Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure. |
