@@ -6,6 +6,9 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class OwnershipRuleTests
 {
+    // A table whose only proved part is the case nibble, so the case takes part in the battery check.
+    private static readonly ProximityDecodeTable CaseProved = ProximityDecodeTable.Unproved with { CaseNibbleProved = true };
+
     private static readonly DateTimeOffset ClaimedAt = new(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Now = new(2026, 9, 27, 1, 0, 0, TimeSpan.Zero);
 
@@ -61,7 +64,7 @@ public sealed class OwnershipRuleTests
         WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 2, ClaimedAt));
         ProximityMessage m = Message(batteryB: 0x09); // case jumps from 2 to 9, not charging
 
-        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, CaseProved, rssi: -50));
 
         Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
     }
@@ -108,7 +111,7 @@ public sealed class OwnershipRuleTests
         WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
         ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x07); // case 5 -> 7, no charging bit proved
 
-        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, CaseProved, rssi: -50));
 
         Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
     }
@@ -116,7 +119,7 @@ public sealed class OwnershipRuleTests
     [TestMethod]
     public void HigherByMoreThanOneStepPassesOnlyWhileThatPartChargesWithTheBitProved()
     {
-        var table = ProximityDecodeTable.Unproved with { CaseChargingBit = 4 };
+        var table = CaseProved with { CaseChargingBit = 4 };
         WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
         ProximityMessage m = Message(batteryA: 0x00, batteryB: 0b0001_0111); // case nibble 7, bit 4 (charging) set
 
@@ -173,7 +176,7 @@ public sealed class OwnershipRuleTests
         WidgetClaim claim = Claim(last: new OwnedBattery(0, 0, 5, ClaimedAt));
         ProximityMessage m = Message(batteryA: 0x00, batteryB: 0x09); // case 5 -> 9, no charging bit proved
 
-        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, rssi: -50));
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(m), claim, CaseProved, rssi: -50));
 
         Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, result.Verdict);
         Assert.IsNull(result.UpdatedLast);
@@ -303,19 +306,19 @@ public sealed class OwnershipRuleTests
         Assert.AreEqual(0, result.UpdatedLast!.NibbleLow);
     }
 
-    // A doubted case decodes to nothing, so it is never compared with the claim's: a case that jumped is not a
-    // reason to refuse a reading whose buds are consistent.
+    // A case that is not proved decodes to nothing, so it is never compared with the claim's: a case that jumped is
+    // not a reason to refuse a reading whose buds are consistent. Once it is proved the jump is refused.
     [TestMethod]
-    public void ADoubtedCaseIsNotCompared()
+    public void AnUnprovedCaseIsNotCompared()
     {
         var last = new OwnedBattery(5, 6, 2, ClaimedAt);
         ProximityMessage jumped = Message(batteryA: 0x65, batteryB: 0x09);   // the case nibble went 2 -> 9
 
-        OwnershipResult undoubted = OwnershipRule.Evaluate(Input(Ok(jumped), Claim(last: last)));
-        OwnershipResult doubted = OwnershipRule.Evaluate(Input(Ok(jumped), Claim(last: last), ProximityDecodeTable.Unproved with { CaseNibbleDoubted = true }));
+        OwnershipResult proved = OwnershipRule.Evaluate(Input(Ok(jumped), Claim(last: last), ProximityDecodeTable.Unproved with { CaseNibbleProved = true }));
+        OwnershipResult unproved = OwnershipRule.Evaluate(Input(Ok(jumped), Claim(last: last)));
 
-        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, undoubted.Verdict, "Sanity: with the case trusted the jump is refused.");
-        Assert.AreEqual(OwnershipVerdict.Owned, doubted.Verdict, "With the case doubted it is not compared.");
-        Assert.AreEqual(2, doubted.UpdatedLast!.Case, "The last known case value is kept, not replaced by a value nobody believes.");
+        Assert.AreEqual(OwnershipVerdict.BatteryInconsistent, proved.Verdict, "Sanity: with the case proved the jump is refused.");
+        Assert.AreEqual(OwnershipVerdict.Owned, unproved.Verdict, "With the case unproved it is not compared.");
+        Assert.AreEqual(2, unproved.UpdatedLast!.Case, "The last known case value is kept, not replaced by a value nobody has proved.");
     }
 }

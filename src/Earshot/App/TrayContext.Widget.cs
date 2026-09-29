@@ -47,6 +47,7 @@ internal sealed partial class TrayContext
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
     private readonly Func<ICardEnvironment>? _cardEnvironmentFactory;
     private readonly Func<IForegroundChangeSource>? _foregroundChangeSourceFactory;
+    private readonly Func<IGaugeCoverProbe>? _gaugeCoverProbeFactory;
     private IForegroundChangeSource? _foregroundSource;
 
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
@@ -165,7 +166,7 @@ internal sealed partial class TrayContext
                 ReadGaugeControllerSettings,
                 _log,
                 _time,
-                new WindowCoverProbe(),
+                _gaugeCoverProbeFactory?.Invoke() ?? new WindowCoverProbe(),
                 _registry.UiPost);
             controller.CardRequested += OnWidgetCardRequested;
             controller.ToggleRequested += (_, _) => StartToggle();
@@ -360,6 +361,30 @@ internal sealed partial class TrayContext
         {
             presenter.RequestSetup(gaugeBounds: null, _cursorPosition());
         }
+    }
+
+    // The update page on the widget card, above the gauge when it is shown, else near the cursor, for a check that found a
+    // newer version: the Update button is on that page. False when there is no card to show it on (the widget is off),
+    // and the caller says the result on the message card instead.
+    internal bool RequestUpdatePageFromWidget()
+    {
+        if (_closing || _widgetStatus is null || _widgetCardCallbacks is null)
+        {
+            return false;
+        }
+
+        _caseOpenCardPresenter?.Hide();
+        WidgetCardPresenter presenter = EnsureWidgetCardPresenter();
+        if (GaugeBoundsIfShown() is { } bounds)
+        {
+            presenter.RequestUpdatePage(bounds, bounds.Location);
+        }
+        else
+        {
+            presenter.RequestUpdatePage(gaugeBounds: null, _cursorPosition());
+        }
+
+        return true;
     }
 
     private Task<BatterySetupListen> ListenForSetupFromCard(CancellationToken ct)

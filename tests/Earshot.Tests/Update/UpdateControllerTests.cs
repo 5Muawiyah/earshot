@@ -15,13 +15,17 @@ public sealed class UpdateControllerTests
     private sealed class Rig : IDisposable
     {
         private readonly TempFolder _temp = new();
-        private readonly List<StagedUpdate> _made = new();
 
-        public Rig(bool pinned = true, string? unavailable = null)
+        public const string InstalledExe = @"C:\Program Files\Earshot\Earshot.exe";
+
+        public const int TrayPid = 4321;
+
+        public Rig(bool pinned = true, string? unavailable = null, bool installedCopy = true)
         {
             Controller = new UpdateController(
                 Source, Launcher,
                 () => pinned ? new HandoverIdentity(TestUsers.Sid, "0A1B2C3D4E8C", new Guid("5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13")) : null,
+                () => installedCopy ? new HandoverTarget(InstalledExe, TrayPid) : null,
                 () => unavailable, Installed, Log);
             Controller.Changed += (_, _) => Stages.Add(Controller.View);
         }
@@ -44,34 +48,17 @@ public sealed class UpdateControllerTests
 
         public UpdateStage[] Seen => Stages.Select(s => s.Stage).ToArray();
 
-        // Two files in a staging folder, the program held open the way a real staged update is.
+        // A staging folder holding a zip, the way a real download leaves it.
         public StagedUpdate Stage(string version = "1.2.0")
         {
             string work = Path.Combine(StagingRoot, "u" + Guid.NewGuid().ToString("N")[..8]);
-            string app = Path.Combine(work, "app");
-            Directory.CreateDirectory(app);
-            string exe = Path.Combine(app, "Earshot.exe");
-            File.WriteAllText(exe, "program");
-            File.WriteAllText(Path.Combine(app, "Earshot.files.json"), "{}");
-            var held = new List<FileStream>
-            {
-                new(exe, FileMode.Open, FileAccess.Read, FileShare.Read),
-                new(Path.Combine(app, "Earshot.files.json"), FileMode.Open, FileAccess.Read, FileShare.Read),
-            };
-            var staged = new StagedUpdate(ReleaseVersion.TryParse(version, out ReleaseVersion v) ? v : default, work, app, exe, held, Log);
-            _made.Add(staged);
-            return staged;
+            Directory.CreateDirectory(work);
+            string zip = Path.Combine(work, UpdateService.ZipFileName);
+            File.WriteAllText(zip, "zip");
+            return new StagedUpdate(ReleaseVersion.TryParse(version, out ReleaseVersion v) ? v : default, work, zip, new string('A', 64), Log);
         }
 
-        public void Dispose()
-        {
-            foreach (StagedUpdate staged in _made)
-            {
-                staged.Dispose();
-            }
-
-            _temp.Dispose();
-        }
+        public void Dispose() => _temp.Dispose();
     }
 
     private static void FoundNewer(Rig rig, string version = "1.2.0") =>
@@ -197,7 +184,7 @@ public sealed class UpdateControllerTests
     }
 
     [TestMethod]
-    public async Task UpdateDownloadsThenHandsOverTheStagedProgramWithTheSetupVerbAndTheHeldFiles()
+    public async Task UpdateDownloadsThenHandsTheVerifiedZipToTheInstalledProgramWithTheUpdateVerb()
     {
         using var rig = new Rig();
         rig.WatchHandover();
@@ -210,30 +197,43 @@ public sealed class UpdateControllerTests
             progress.Report(new UpdateProgress(100, 100));
             return Task.FromResult(UpdateDownloadResult.Success(staged));
         };
-        bool heldDuringLaunch = false;
-        rig.Launcher.DuringLaunch = exe =>
-        {
-            Assert.ThrowsExactly<IOException>(() => File.WriteAllText(exe, "swapped"), "The staged program cannot be replaced while it is handed over.");
-            heldDuringLaunch = true;
-        };
         await rig.Controller.CheckAsync(CancellationToken.None);
 
         await rig.Controller.UpdateAsync(CancellationToken.None);
 
         (string exe, string[] arguments, string workingDirectory) = rig.Launcher.Launches.Single();
-        Assert.AreEqual(staged.ExecutablePath, exe, "The staged Earshot.exe is what starts, not the installed one.");
-        CollectionAssert.AreEqual(new[] { "install", TestUsers.Sid, "0A1B2C3D4E8C", "5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13" }, arguments);
-        Assert.AreEqual(staged.AppFolder, workingDirectory);
-        Assert.IsTrue(heldDuringLaunch);
+        Assert.AreEqual(Rig.InstalledExe, exe, "The installed, administrator-owned Earshot.exe is what starts, never a file in the staging folder.");
+        CollectionAssert.AreEqual(
+            new[] { "update", staged.ZipPath, staged.ZipSha256, "4321", TestUsers.Sid, "0A1B2C3D4E8C", "5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13" }, arguments);
+        Assert.AreEqual(Environment.SystemDirectory, workingDirectory, "Not a folder the install replaces.");
         Assert.AreEqual(1, rig.HandedOverRaised, "The tray is told once, so it can close.");
-        Assert.AreSame(staged, rig.Controller.HandedOverUpdate, "The files stay held after the hand-over, until this program ends.");
         CollectionAssert.AreEqual(
             new[] { UpdateStage.Checking, UpdateStage.Available, UpdateStage.Downloading, UpdateStage.HandingOver },
             rig.Seen.Where((stage, i) => i == 0 || rig.Seen[i - 1] != stage).ToArray());
         Assert.AreEqual(50, rig.Stages.First(s => s.ProgressPercent == 50).ProgressPercent);
         Assert.AreEqual("Approve the Windows prompt", rig.Controller.View.Status);
         Assert.AreEqual("Installing 1.2.0", rig.Controller.View.Sub);
-        Assert.IsTrue(Directory.Exists(staged.WorkFolder), "A handed-over update is not deleted: the elevated program is running from it.");
+        Assert.IsTrue(Directory.Exists(staged.WorkFolder), "A handed-over update is not deleted: the elevated program reads the zip from it.");
+    }
+
+    [TestMethod]
+    public async Task AProgramThatIsNotTheInstalledCopyDoesNotOfferUpdateAndSaysToSetUpFirst()
+    {
+        using var rig = new Rig(installedCopy: false);
+        FoundNewer(rig);
+
+        await rig.Controller.CheckAsync(CancellationToken.None);
+
+        Assert.AreEqual(UpdateStage.Available, rig.Controller.Stage);
+        Assert.IsEmpty(rig.Controller.View.Buttons, "No Update button is offered.");
+        Assert.AreEqual("Set up Earshot first, then update.", rig.Controller.View.Notice);
+        Assert.AreEqual("Set up Earshot first, then update.", rig.Controller.View.CardText);
+
+        await rig.Controller.UpdateAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, rig.Source.DownloadCalls, "Nothing is downloaded for an update that cannot be handed over.");
+        Assert.IsEmpty(rig.Launcher.Launches);
+        Assert.AreEqual("Set up Earshot first, then update.", rig.Controller.View.Notice);
     }
 
     [TestMethod]
@@ -319,7 +319,6 @@ public sealed class UpdateControllerTests
         Assert.AreEqual(UpdateCopy.PromptDeclinedNotice, rig.Controller.View.Notice);
         Assert.AreEqual(0, rig.HandedOverRaised, "Earshot stays open when the prompt was declined.");
         Assert.IsFalse(Directory.Exists(staged.WorkFolder), "The unused download is deleted.");
-        Assert.IsNull(rig.Controller.HandedOverUpdate);
     }
 
     [TestMethod]

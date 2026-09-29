@@ -52,6 +52,8 @@ public sealed record BatterySetupPicks(
     private static bool IsStep(int value) => value is >= 0 and <= 100 && value % 10 == 0;
 }
 
-public enum BatterySetupResultStatus { CaseSetUp, BatterySetUp, CaseSetUpBudsSame, CouldNotRead }
+// SavedNeedsAnother: the record is kept and read, but one record proves nothing, so nothing is shown yet.
+// NotSaved: the record could not be written, so nothing was proved or claimed.
+public enum BatterySetupResultStatus { CaseSetUp, BatterySetUp, CaseSetUpBudsSame, SavedNeedsAnother, NotSaved, CouldNotRead }
 
 public sealed record BatterySetupResult(BatterySetupResultStatus Status, string RecordFileName, DecodeProofResult Proof);

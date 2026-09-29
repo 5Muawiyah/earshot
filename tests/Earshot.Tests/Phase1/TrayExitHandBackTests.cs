@@ -121,10 +121,11 @@ public sealed class TrayExitHandBackTests
         });
     }
 
-    // A hand-back that runs out of its cap leaves Exit in bounded time, says the change did not finish, and never sends
-    // the block it never got to.
+    // A disconnect that runs out of the cap leaves Exit in bounded time, and the block is still sent: Exit has no Windows
+    // deadline to keep, and the block is what keeps this PC off the AirPods at rest. The card says the AirPods did not
+    // disconnect, but are blocked.
     [TestMethod]
-    public void ExitWhoseDisconnectNeverReturnsIsCutShortAndSaysSo()
+    public void ExitWhoseDisconnectNeverReturnsIsCutShortAndStillSendsTheBlock()
     {
         StaThread.Run(() =>
         {
@@ -138,8 +139,9 @@ public sealed class TrayExitHandBackTests
             Assert.IsLessThan(TimeSpan.FromSeconds(10), watch.Elapsed, "Exit waited on a disconnect that never came back.");
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "Hand-back (exit): cut short at"));
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "still running: disconnect"));
-            Assert.IsEmpty(tray.Block.Calls.Where(c => c == "block"), "The block was sent after a disconnect that never confirmed within the cap.");
-            CollectionAssert.Contains(tray.Cards.Statuses, BlockCoordinator.ClosedBeforeChangeEndedMessage);
+            Assert.HasCount(1, tray.Block.Calls.Where(c => c == "block").ToList(), "The block was not sent after a disconnect that never came back.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "so the block is sent anyway"));
+            CollectionAssert.Contains(tray.Cards.Statuses, BlockCoordinator.ExitNotDisconnectedBlockedMessage);
         });
     }
 

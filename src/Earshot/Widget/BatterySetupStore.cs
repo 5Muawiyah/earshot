@@ -84,50 +84,73 @@ internal sealed class BatterySetupStore
         Array.Sort(files, StringComparer.Ordinal);
         foreach (string file in files)
         {
-            string name = Path.GetFileName(file);
-            byte[] bytes;
-            try
+            if (TryRead(file) is { } record)
             {
-                bytes = File.ReadAllBytes(file);
+                records.Add(record);
             }
-            catch (IOException ex)
-            {
-                _log.Warn("A battery set-up record could not be read and is skipped (0x" + ex.HResult.ToString("X8") + "): " + name);
-                continue;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                _log.Warn("A battery set-up record could not be read and is skipped (0x" + ex.HResult.ToString("X8") + "): " + name);
-                continue;
-            }
-
-            BatterySetupRecord? record;
-            try
-            {
-                record = JsonSerializer.Deserialize(bytes, SetupJsonContext.Default.BatterySetupRecord);
-            }
-            catch (JsonException ex)
-            {
-                _log.Warn("A battery set-up record is not valid and is skipped (" + ex.Message + "): " + name);
-                continue;
-            }
-
-            if (record is null)
-            {
-                _log.Warn("A battery set-up record holds null and is skipped: " + name);
-                continue;
-            }
-
-            string? problem = record.Problem();
-            if (problem is not null)
-            {
-                _log.Warn("A battery set-up record is skipped because of " + problem + ": " + name);
-                continue;
-            }
-
-            records.Add(record);
         }
 
         return records;
+    }
+
+    // One record by file name, read and validated like every other, or null (logged) when there is no such file
+    // or it cannot be used. The name is a file name and nothing else: a path never leaves the folder.
+    public BatterySetupRecord? Load(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Length > 128 || Path.GetFileName(fileName) != fileName ||
+            !fileName.EndsWith(".json", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string path = Path.Combine(_folder, fileName);
+        return File.Exists(path) ? TryRead(path) : null;
+    }
+
+    // The record in a file, or null with the reason logged and the file left where it is.
+    private BatterySetupRecord? TryRead(string file)
+    {
+        string name = Path.GetFileName(file);
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(file);
+        }
+        catch (IOException ex)
+        {
+            _log.Warn("A battery set-up record could not be read and is skipped (0x" + ex.HResult.ToString("X8") + "): " + name);
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn("A battery set-up record could not be read and is skipped (0x" + ex.HResult.ToString("X8") + "): " + name);
+            return null;
+        }
+
+        BatterySetupRecord? record;
+        try
+        {
+            record = JsonSerializer.Deserialize(bytes, SetupJsonContext.Default.BatterySetupRecord);
+        }
+        catch (JsonException ex)
+        {
+            _log.Warn("A battery set-up record is not valid and is skipped (" + ex.Message + "): " + name);
+            return null;
+        }
+
+        if (record is null)
+        {
+            _log.Warn("A battery set-up record holds null and is skipped: " + name);
+            return null;
+        }
+
+        string? problem = record.Problem();
+        if (problem is not null)
+        {
+            _log.Warn("A battery set-up record is skipped because of " + problem + ": " + name);
+            return null;
+        }
+
+        return record;
     }
 }

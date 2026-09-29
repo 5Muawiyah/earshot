@@ -80,15 +80,26 @@ internal sealed class ForegroundChangeHook : IForegroundChangeSource
         nint callback = (nint)(delegate* unmanaged<nint, uint, nint, int, int, uint, uint, void>)&Callback;
         nint handle = NativeMethods.SetWinEventHook(
             NativeMethods.EVENT_SYSTEM_FOREGROUND, NativeMethods.EVENT_SYSTEM_FOREGROUND, 0, callback, 0, 0, _flags);
+        // Read before anything else can change it.
+        uint error = unchecked((uint)Marshal.GetLastPInvokeError());
+        StepOutcome outcome = InstallOutcome(handle, error);
         if (handle == 0)
         {
-            return StepOutcomes.FromWin32(Step, unchecked((uint)Marshal.GetLastPInvokeError()));
+            return outcome;
         }
 
         _handle = handle;
         Hooks[handle] = this;
-        return StepOutcomes.FromWin32(Step, 0);
+        return outcome;
     }
+
+    // SetWinEventHook returns zero for a hook that was not set, and that is a failure whatever GetLastError holds:
+    // the documentation names no error for it, and a stale zero there would otherwise read as success.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook
+    internal static StepOutcome InstallOutcome(nint handle, uint lastError) =>
+        handle == 0
+            ? StepOutcomes.FromWin32("set-win-event-hook:foreground", lastError, lastError == 0 ? "SetWinEventHook returned no hook and no error code." : null, ok: false)
+            : StepOutcomes.FromWin32("set-win-event-hook:foreground", 0);
 
     // Unhooks. UnhookWinEvent must run on the installing thread; a call from any other thread is logged and
     // still attempted, since a hook left behind is worse than a refused call.

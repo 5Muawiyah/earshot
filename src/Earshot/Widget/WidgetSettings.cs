@@ -41,7 +41,7 @@ public sealed record WidgetSettings
     // (WidgetCopy.OnElsewhere) for an owner who clears it.
     public string OtherDeviceLabel { get; set; } = "iPhone";
 
-    public bool AutoPause { get; set; } = true;                // acts only once the gate constant is true
+    public bool AutoPause { get; set; } = true;                // acts only once the in-ear field is proved, which a set-up cannot do yet
 
     public bool LowBatteryAlert { get; set; } = true;          // an addition: an off switch beside the threshold
 

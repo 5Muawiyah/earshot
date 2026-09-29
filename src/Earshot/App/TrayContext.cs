@@ -98,7 +98,7 @@ internal sealed record TrayStartOptions(
     // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
     // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
     // widget-enabled tray-level test injects a fake instead, so GaugeController's own fallback logic
-    // (TransitionOff and TransitionHiddenNoLog both set Visible=true unconditionally, by design) never makes
+    // (TransitionOff and TransitionHidden both set Visible=true unconditionally, by design) never makes
     // the real tray icon visible, overriding ShowIcon=false.
     public Func<ITrayIconVisibility>? TrayIconVisibilityFactory { get; init; }
 
@@ -113,6 +113,11 @@ internal sealed record TrayStartOptions(
     // raises the taskbar over it. Null (the default) means "the real hook" (ForegroundChangeHook); a
     // widget-enabled tray-level test injects a fake instead, so no test hooks the desktop.
     public Func<IForegroundChangeSource>? ForegroundChangeSourceFactory { get; init; }
+
+    // Builds what looks at the window over the gauge's centre after a foreground change. Null (the default) means
+    // "the real one" (WindowCoverProbe); a widget-enabled tray-level test injects a fake, so no test asks the desktop
+    // what is at a point on it.
+    public Func<IGaugeCoverProbe>? GaugeCoverProbeFactory { get; init; }
 
     // How long closing waits for the streaming connection to be let go before the process ends anyway.
     public TimeSpan StreamingShutdownWait { get; init; } = TrayContext.DefaultStreamingShutdownWait;
@@ -265,6 +270,11 @@ internal sealed partial class TrayContext : ApplicationContext
     private bool _toggleConnect;
     private long _toggleClickedAt;
     private bool _toggleSuperseded;
+
+    // While a newer press waits for the toggle in flight to end (_toggleSuperseded), the direction and trigger of the
+    // latest shortcut press: the last press wins, so it is what runs once the wait is over.
+    private bool _supersedeNext;
+    private SwitchTrigger _supersedeTrigger;
     private string? _toggleCancelReason;
     private TaskCompletionSource? _toggleDone;
     private int _operationsInFlight;
@@ -366,6 +376,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _cardEnvironmentFactory = options.CardEnvironmentFactory;
         _foregroundChangeSourceFactory = options.ForegroundChangeSourceFactory;
+        _gaugeCoverProbeFactory = options.GaugeCoverProbeFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;
         _disconnectHandBackWait = options.DisconnectHandBackWait;
@@ -675,6 +686,17 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             if (!SupersedesInFlightToggle(wanted, clickedAt))
             {
+                if (wanted is { } latest && _toggleSuperseded)
+                {
+                    // A shortcut pressed while an earlier press waits for the toggle in flight to end: the last press
+                    // wins, so it replaces the direction that is waiting, and the card says what will happen.
+                    _supersedeNext = latest;
+                    _supersedeTrigger = trigger;
+                    _log.Info("Shortcut: the switch to " + (latest ? "this PC" : "the phone") + " replaces the one waiting.");
+                    ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), FinishingFirstMessage, place);
+                    return;
+                }
+
                 _log.Write(LogLevel.Debug, "Click ignored: a connect or disconnect is already in flight.");
                 return;
             }
@@ -703,6 +725,8 @@ internal sealed partial class TrayContext : ApplicationContext
 
         TaskCompletionSource? done = _toggleDone;
         _toggleSuperseded = true;
+        _supersedeNext = connect;
+        _supersedeTrigger = trigger;
         _toggleCancelReason = "a newer click asked to " + next;
         _log.Info("Click: the " + (connect ? "disconnect" : "connect") + " in flight is cancelled, and a " + next + " follows once it has finished.");
         ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), FinishingFirstMessage, place);
@@ -725,7 +749,8 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        await RunToggleAsync(place, clickedAt, connect, viaHotkey, trigger);
+        // What runs is the latest press, which may have replaced the one that started the wait.
+        await RunToggleAsync(place, clickedAt, _supersedeNext, viaHotkey, _supersedeTrigger);
     }
 
     // connect: the intent a newer click asked for, or null to take it from the device state.
@@ -1099,6 +1124,11 @@ internal sealed partial class TrayContext : ApplicationContext
                 problems.Add(outcome);
             }
         }
+
+        // A settings page that is open read the outcomes before this registration ran (a save raises Changed first and
+        // this runs after it), so a chord another program holds would show as fine until the card next refreshed on its
+        // own, up to 30 s later. The card is told now that the outcomes are in.
+        RaiseCardUpdateChanged();
 
         string signature = string.Join("\n", problems.Select(p => p.Action + "|" + p.State + "|" + p.ErrorCode.ToString(CultureInfo.InvariantCulture) + "|" + p.RequestedText));
         if (signature == _hotkeyProblemsShown)

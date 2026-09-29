@@ -17,14 +17,20 @@ namespace Earshot.App;
 // after startup. It only checks. It shows a card once for each version it finds, and never downloads.
 //
 // When the hand-over has started the administrator prompt's program, this program closes through the same orderly
-// Exit as the menu's, because that program replaces the install folder and cannot while this one runs from it: a
-// process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail.
+// Exit as the menu's, because the install replaces the install folder and cannot while this one runs from it: a
+// process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail. The
+// program the prompt starts is the installed Earshot.exe, and it waits for this process to end (by its id) before it
+// touches that folder. So Update is only offered to the tray that is the installed copy.
 internal sealed partial class TrayContext
 {
     private Func<IUpdateSource>? _updateSourceFactory;
     private bool _updateDataRootRedirected;
     private IUpdateLauncher? _updateLauncher;
     private UpdateController? _updates;
+    private readonly Lock _updatesGate = new();
+    private string? _updateInstalledExe;
+    private string? _updateRunningExe;
+    private Func<string, bool> _updateFileExists = File.Exists;
     private Task? _updateAutoTask;
     private ReleaseVersion? _updateAnnounced;
 
@@ -41,6 +47,9 @@ internal sealed partial class TrayContext
         _updateSourceFactory = options.UpdateSourceFactory;
         _updateLauncher = options.UpdateLauncher;
         _updateDataRootRedirected = options.DataRootRedirected;
+        _updateInstalledExe = options.InstalledExePath;
+        _updateRunningExe = options.ExePath;
+        _updateFileExists = options.FileExists;
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
         RemoveStaleUpdateStaging();
@@ -66,26 +75,49 @@ internal sealed partial class TrayContext
 
     private static string UpdateStampFile() => Path.Combine(UpdateStagingRoot(), "last-check.txt");
 
+    // Called from the UI thread and from the daily check's own thread, so the one controller is made under a lock: two
+    // callers must never each build one, or a check and an update would run on different controllers.
     private UpdateController? EnsureUpdates()
     {
-        if (_updates is not null)
+        lock (_updatesGate)
         {
-            return _updates;
-        }
+            if (_updates is not null)
+            {
+                return _updates;
+            }
 
-        ReleaseVersion? running = ReleaseVersion.Running(typeof(TrayContext).Assembly);
-        if (running is null)
+            ReleaseVersion? running = ReleaseVersion.Running(typeof(TrayContext).Assembly);
+            if (running is null)
+            {
+                _log.Error("Update: this program does not report a version it can read, so it cannot check for updates.");
+                return null;
+            }
+
+            IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, running.Value, UpdateStagingRoot());
+            var controller = new UpdateController(
+                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, running.Value, _log);
+            controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
+            controller.Changed += (_, _) => RaiseCardUpdateChanged();
+            _updates = controller;
+            return controller;
+        }
+    }
+
+    // The installed Earshot.exe and this process's id, or null when this program is not the installed copy: not set up
+    // (no file at the installed path), or started from another folder. An update installs over the installed copy and
+    // is started from it, so only the tray that runs from it can hand over.
+    private HandoverTarget? CurrentHandoverTarget()
+    {
+        string? installed = _updateInstalledExe;
+        string? running = _updateRunningExe;
+        if (installed is null || running is null || !_updateFileExists(installed))
         {
-            _log.Error("Update: this program does not report a version it can read, so it cannot check for updates.");
             return null;
         }
 
-        IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, running.Value, UpdateStagingRoot());
-        var controller = new UpdateController(source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, UpdateUnavailableReason, running.Value, _log);
-        controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
-        controller.Changed += (_, _) => RaiseCardUpdateChanged();
-        _updates = controller;
-        return controller;
+        return string.Equals(Path.GetFullPath(installed), Path.GetFullPath(running), StringComparison.OrdinalIgnoreCase)
+            ? new HandoverTarget(installed, Environment.ProcessId)
+            : null;
     }
 
     // The pinned device and the signed-in user, in the form install checks; null before setup has a device.
@@ -128,6 +160,15 @@ internal sealed partial class TrayContext
         }
 
         await updates.CheckAsync(_lifetime.Token);
+
+        // A newer version opens the card's update page, the way "Set up battery" opens the card, so the Update button
+        // is reachable from the menu. Any other result, or no card to show it on, is the short message card.
+        if (updates.Stage == UpdateStage.Available && RequestUpdatePageFromWidget())
+        {
+            _registry.Cards.Hide();
+            return;
+        }
+
         ShowUpdateResult(updates.View, place);
     }
 
@@ -213,7 +254,8 @@ internal sealed partial class TrayContext
             new FileUpdateCheckStamp(UpdateStampFile(), _log),
             AutomaticCheckAsync,
             UpdateAutoCheck.StartupDelay,
-            UpdateAutoCheck.PollInterval);
+            UpdateAutoCheck.PollInterval,
+            _log);
         _updateAutoTask = Task.Run(() => auto.RunAsync(_lifetime.Token));
     }
 

@@ -22,6 +22,8 @@ public sealed class TraySwitchTests
 
     private static readonly bool[] ConnectThenDisconnect = [true, false];
 
+    private static readonly bool[] ConnectTwice = [true, true];
+
     private static void Press(TrayHarness tray, HotkeyAction action)
     {
         tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(action));
@@ -185,6 +187,40 @@ public sealed class TraySwitchTests
             Assert.IsTrue(secondStartedAfterFirstEnded, "The second direction started before the first had ended.");
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Switch to-pc: cancelled (trigger shortcut-to-pc,"));
             Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.StartsWith("Switch to-phone: released after", StringComparison.Ordinal)));
+        });
+    }
+
+    // To this PC, to the phone, to this PC again while the switch to the phone waits for the connect to end: the last
+    // press wins. It used to be dropped with only a debug line, so the PC ended up disconnected.
+    [TestMethod]
+    public void AThirdPressWhileTheSecondWaitsReplacesItAndTheLastPressWins()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
+            int connects = 0;
+            tray.Connection.OnConnect = token =>
+            {
+                if (++connects > 1)
+                {
+                    return Task.FromResult(new ConnectResult(ConnectOutcome.Confirmed, "Connected", []));
+                }
+
+                var waiting = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                token.Register(() => waiting.TrySetCanceled(token));
+                return waiting.Task;
+            };
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.SwitchToPc));
+            TrayHarness.PumpUntil(() => tray.Connection.Calls.Count == 1, "The first press never reached the controller.");
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.SwitchToPhone));
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.SwitchToPc));
+            tray.PumpUntilIdle();
+
+            CollectionAssert.AreEqual(ConnectTwice, tray.Connection.Calls.Select(c => c.Connect).ToArray(),
+                "The last press was to this PC, so the PC is connected and no disconnect went out.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Shortcut: the switch to this PC replaces the one waiting."), "The replaced press is said in the log.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Switch to-pc: active after"), "The winning switch is measured.");
         });
     }
 
@@ -375,6 +411,31 @@ public sealed class TraySwitchTests
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "Hotkey SwitchToPc: Ctrl+Alt+Shift+A is already in use by another program"));
             Assert.IsTrue(tray.Log.Has(LogLevel.Debug, "RegisterHotKey id=0x4A04 modifiers=0x4007 vk=0x41 result=failed error=1409"), "The raw error was not logged.");
             Assert.IsTrue(tray.Log.Has(LogLevel.Debug, "RegisterHotKey id=0x4A05 modifiers=0x4007 vk=0x44 result=ok"), "The other shortcut must still be set.");
+        });
+    }
+
+    // The settings page reads the registration's outcomes when it refreshes. A save raises Changed before the shortcuts
+    // are registered again, so the card has to be told when the result is in, or a taken chord shows as fine for up to
+    // 30 s. The handler reads the outcome at the moment it is told, as the page does.
+    [TestMethod]
+    public void TheCardIsToldWhenTheRegistrationResultIsInSoATakenChordShowsAtOnce()
+    {
+        StaThread.Run(() =>
+        {
+            var native = new FakeNativeHotkeys();
+            using var tray = new TrayHarness(nativeHotkeys: native);
+            tray.PumpUntilIdle();
+            var seen = new List<string?>();
+            tray.Context.CardUpdateChanged += (_, _) =>
+                seen.Add(tray.Context.HotkeyBindings(tray.Settings.Current.Hotkeys).FailureMessage(HotkeyAction.SwitchToPhone));
+            native.SetResult(ToPhoneId, NativeCallResult.Failure(1409));
+
+            tray.Settings.Update(s => s.Hotkeys.SetText(HotkeyAction.SwitchToPhone, "Ctrl+Alt+Shift+K"));
+            tray.PumpUntilIdle();
+
+            Assert.IsNotEmpty(seen, "The card was never told the registration had run.");
+            Assert.IsNotNull(seen[^1], "The card was told before the taken chord was known.");
+            StringAssert.Contains(seen[^1], "already in use");
         });
     }
 

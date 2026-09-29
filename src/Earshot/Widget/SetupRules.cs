@@ -17,4 +17,12 @@ public static class SetupRules
     // The threshold sits this far under the weakest message the owner's own case sent, so the same case in
     // the same place stays readable and anything much further away is rejected.
     public const int SignalMarginDb = 10;
+
+    // The weakest signal a record or a claim may hold, and so the floor of the threshold: a figure below it is not a
+    // signal a set-up could have measured.
+    public const int WeakestSignalDbm = -127;
+
+    // The threshold a set-up derives from the weakest message its candidate sent, never above the weakest message and
+    // never below WeakestSignalDbm. A claim whose threshold is anything else was not made by a set-up.
+    public static int ThresholdFor(int weakestDbm) => Math.Max(WeakestSignalDbm, weakestDbm - SignalMarginDb);
 }

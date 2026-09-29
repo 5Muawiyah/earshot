@@ -58,6 +58,39 @@ public sealed class BatterySetupFlowTests : IDisposable
         Assert.AreEqual(0, _clock.TimersCreated, "It never started waiting.");
     }
 
+    // Bluetooth goes off, or the machine sleeps, while the window is open: the watcher stops, so what the window
+    // heard says nothing about whether the AirPods are near. The answer is "Bluetooth is off", not "Couldn't find
+    // your AirPods", and it does not wait for the rest of the window.
+    [TestMethod]
+    public async Task AWatcherThatStopsMidWindowIsBluetoothOffNotNotFound()
+    {
+        Task<BatterySetupListen> task = BatterySetupFlow.ListenAsync(_source, _clock, Window, _log, CancellationToken.None);
+        SendMany(1, -50, -50, -50);
+        _source.State = AdvertisementSourceState.Stopped;
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
+
+        BatterySetupListen listen = await task;
+
+        Assert.AreEqual(BatterySetupListenStatus.WatcherNotStarted, listen.Status);
+        Assert.AreEqual(WidgetCopy.SetupBluetoothOff, listen.Message);
+        Assert.IsNull(listen.Candidate, "What a deaf window heard is not evidence.");
+        Assert.IsTrue(_log.Has(Earshot.Contracts.LogLevel.Warn, "the watcher stopped while listening: RadioNotAvailable (1)"));
+        Assert.AreEqual(0, _source.ReceivedHandlerCount, "The listener let go.");
+    }
+
+    [TestMethod]
+    public async Task AWatcherThatIsNoLongerStartedAtTheEndOfTheWindowIsBluetoothOffToo()
+    {
+        BatterySetupListen listen = await RunAsync(() =>
+        {
+            SendMany(1, -50, -50, -50);
+            _source.State = AdvertisementSourceState.Stopped;
+        });
+
+        Assert.AreEqual(BatterySetupListenStatus.WatcherNotStarted, listen.Status);
+        Assert.AreEqual(WidgetCopy.SetupBluetoothOff, listen.Message);
+    }
+
     [TestMethod]
     public async Task NothingInTheWindowIsNotFound()
     {
@@ -167,7 +200,9 @@ public sealed class BatterySetupFlowTests : IDisposable
     {
         BatterySetupListen listen = await RunAsync(() => SendMany(1, -125, -120, -122));
 
-        Assert.AreEqual(sbyte.MinValue, listen.Candidate!.ThresholdDbm);
+        // The floor is the weakest signal a record or a claim may hold (SetupRules.WeakestSignalDbm), so the record a
+        // set-up writes is one it can read back.
+        Assert.AreEqual((sbyte)SetupRules.WeakestSignalDbm, listen.Candidate!.ThresholdDbm);
     }
 
     // A stranger that would pass the run-time signal check right now makes the threshold useless.

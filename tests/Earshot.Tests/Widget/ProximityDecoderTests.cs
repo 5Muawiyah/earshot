@@ -13,11 +13,17 @@ public sealed class ProximityDecoderTests
         new(ModelHigh: 0xEE, ModelLow: 0xEE, Status: status, BatteryA: batteryA, BatteryB: batteryB, Lid: lid, Colour: 0xEE, Reserved: 0x00);
 
     [TestMethod]
-    public void WithTheUnprovedTableOnlyTheCaseNibbleIsDecoded()
+    public void WithTheUnprovedTableNothingIsDecodedAndOnlyAProvedCaseNibbleIs()
     {
         ProximityMessage m = Message(batteryA: 0x53, batteryB: 0x07, lid: 0x02);
 
-        DecodedReading reading = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved, At);
+        DecodedReading unproved = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved, At);
+        Assert.IsNull(unproved.Case.Percent, "An unproved case nibble is not read.");
+        Assert.IsNull(unproved.Case.ReadAt);
+        Assert.IsNull(unproved.Left.Percent);
+        Assert.IsNull(unproved.Right.Percent);
+
+        DecodedReading reading = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved with { CaseNibbleProved = true }, At);
 
         Assert.IsNull(reading.Left.Percent);
         Assert.IsNull(reading.Left.Charging);
@@ -32,11 +38,11 @@ public sealed class ProximityDecoderTests
     }
 
     [TestMethod]
-    public void TheCaseNibbleNeedsNoTable()
+    public void TheCaseNibbleIsReadOnceItIsProvedAndNeedsNothingElse()
     {
         ProximityMessage m = Message(batteryB: 0x39); // low nibble 0x9 = 90%
 
-        DecodedReading reading = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved, At);
+        DecodedReading reading = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved with { CaseNibbleProved = true }, At);
 
         Assert.AreEqual(90, reading.Case.Percent);
         Assert.AreEqual(At, reading.Case.ReadAt);
@@ -73,7 +79,7 @@ public sealed class ProximityDecoderTests
     [TestMethod]
     public void ChargingBitsFollowTheTable()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { CaseChargingBit = 0, RightChargingBit = 1, LeftChargingBit = 2 };
+        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { CaseNibbleProved = true, CaseChargingBit = 0, RightChargingBit = 1, LeftChargingBit = 2 };
         ProximityMessage m = Message(batteryB: 0b0000_0101); // bits 0 and 2 set: case and left charging
 
         DecodedReading reading = ProximityDecoder.Decode(m, table, At);
@@ -127,7 +133,7 @@ public sealed class ProximityDecoderTests
     [TestMethod]
     public void ReadAtIsSetOnlyForAKnownPercent()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, CaseNibbleProved = true };
         ProximityMessage m = Message(batteryA: 0xF3, batteryB: 0x07); // right unknown, left known, case known
 
         DecodedReading reading = ProximityDecoder.Decode(m, table, At);
@@ -137,19 +143,21 @@ public sealed class ProximityDecoderTests
         Assert.AreEqual(At, reading.Case.ReadAt);
     }
 
-    // The owner's own set-ups contradicted the documented case nibble twice with nothing in its favour: it
-    // decodes to no case at all, as if it had never been read.
+    // The owner's own set-ups have not agreed with the case nibble twice: it decodes to no case at all, as if it
+    // had never been read, and so is neither shown nor charged.
     [TestMethod]
-    public void ADoubtedCaseDecodesNoCase()
+    public void AnUnprovedCaseDecodesNoCase()
     {
         ProximityMessage m = Message(batteryA: 0x53, batteryB: 0x37);
-        ProximityDecodeTable doubted = ProximityDecodeTable.Unproved with { CaseNibbleDoubted = true, CaseChargingBit = 4 };
+        ProximityDecodeTable unproved = ProximityDecodeTable.Unproved with { CaseChargingBit = 4 };
 
-        DecodedReading reading = ProximityDecoder.Decode(m, doubted, At);
+        DecodedReading reading = ProximityDecoder.Decode(m, unproved, At);
 
         Assert.IsNull(reading.Case.Percent);
-        Assert.IsNull(reading.Case.Charging, "A doubted case is not shown as charging either.");
+        Assert.IsNull(reading.Case.Charging, "An unproved case is not shown as charging either.");
         Assert.IsNull(reading.Case.ReadAt, "No read time for a value that is not shown.");
-        Assert.AreEqual(70, ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved with { CaseChargingBit = 4 }, At).Case.Percent, "Sanity: undoubted, the same message reads 70.");
+        DecodedReading proved = ProximityDecoder.Decode(m, unproved with { CaseNibbleProved = true }, At);
+        Assert.AreEqual(70, proved.Case.Percent, "Sanity: proved, the same message reads 70.");
+        Assert.AreEqual(true, proved.Case.Charging);
     }
 }

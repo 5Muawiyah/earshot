@@ -138,6 +138,11 @@ internal sealed class WidgetCardPresenter : IDisposable
     public void RequestSetup(Rectangle? gaugeBounds, Point fallbackPoint) =>
         _uiPost(() => RequestSetupOnUiThread(gaugeBounds, fallbackPoint));
 
+    // Opens the card at the update page (or switches an open card to it), placed the same way a gauge click places the
+    // card. From the tray menu's "Check for updates" once a newer version is found, so the Update button is there.
+    public void RequestUpdatePage(Rectangle? gaugeBounds, Point fallbackPoint) =>
+        _uiPost(() => RequestUpdatePageOnUiThread(gaugeBounds, fallbackPoint));
+
     // Forces the card to hide, for example when a settings change turns the widget off.
     public void Hide() => _uiPost(HideOnUiThread);
 
@@ -232,6 +237,30 @@ internal sealed class WidgetCardPresenter : IDisposable
         _setup = SetupViewModel.Listening();
         ShowAt(gaugeBounds, fallbackPoint);
         StartListening();
+    }
+
+    private void RequestUpdatePageOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint)
+    {
+        if (_disposed || _host is null)
+        {
+            return;
+        }
+
+        // A set-up listening on the card gives way to the update page.
+        CancelSetup();
+        _updateFrom = WidgetCardView.Main;
+        _view = WidgetCardView.Update;
+        _spinnerFrame = 0;
+        if (_card is { IsDisposed: false, Visible: true })
+        {
+            RenderKeepingBottom();
+        }
+        else
+        {
+            ShowAt(gaugeBounds, fallbackPoint);
+        }
+
+        SyncSpinner();
     }
 
     private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint)

@@ -113,9 +113,10 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'Widget watcher start:'; Text = 'Widget watcher start: start Started.' }
     [ordered]@{ Pattern = 'Widget watcher stopped:'; Text = 'Widget watcher stopped: RadioNotAvailable (1).' }
     [ordered]@{ Pattern = 'Widget counters:'; Text = 'Widget counters: watcher=Started allSections=4 apple=4 other=0 items=4 ok=4 truncated=0 unknownForm=0 owned=0 noClaim=4 modelOrColourMismatch=0 signalBelowThreshold=0 nibbleOrderMismatch=0 batteryUnreadable=0 batteryInconsistent=0 unknownFormShapes=[]' }
+    [ordered]@{ Pattern = 'Gauge raised:'; Text = 'Gauge raised: Shell_TrayWnd (Explorer) was over it after a foreground change to Windows.UI.Core.CoreWindow.' }
+    [ordered]@{ Pattern = 'Gauge left under'; Text = 'Gauge left under Windows.UI.Core.CoreWindow after a foreground change: not the taskbar.' }
     [ordered]@{ Pattern = 'AirPods claimed:'; Text = 'AirPods claimed: model and colour recorded, signal threshold -60 dBm.' }
     [ordered]@{ Pattern = 'Claim not made:'; Text = 'Claim not made: No AirPods seen. Open the case next to the PC and try again.' }
-    [ordered]@{ Pattern = 'Auto-pause is waiting for phase 0'; Text = 'Auto-pause is waiting for phase 0 to confirm the broadcast continues while playing from this PC.' }
     [ordered]@{ Pattern = 'Auto-pause paused'; Text = 'Auto-pause paused com.example.player.' }
     [ordered]@{ Pattern = 'connect: '; Text = 'connect: Success. Connected.' }
 )
@@ -209,9 +210,12 @@ $script:Answers = [ordered]@{
     'did the list show your airpods and your phone'    = 'yes'
     'were devices that are not present now shown'      = 'yes'
     'did the first half install earshot again'         = 'yes'
+    'had this pc gone to sleep since earshot was installed'   = 'no'
 
     # test 19: the widget.
-    'does the gauge sit just to the right'                                   = 'yes'
+    'is the gauge at the right end of the taskbar'                           = 'yes'
+    'is the gauge now just after the last taskbar button'                    = 'yes'
+    'through all of that, did the gauge stay visible'                        = 'yes'
     'did the gauge move right to make room'                                  = 'yes'
     'does the gauge sit beside the taskbar buttons'                          = 'yes'
     'does the gauge follow the buttons again'                                = 'yes'
@@ -224,7 +228,10 @@ $script:Answers = [ordered]@{
     'is there a "set up battery" item in the menu'                           = 'yes'
     'is that item available to click'                                        = 'yes'
     'did the card go through the three steps'                                = 'yes'
-    'if the card now shows a battery percentage'                             = 'yes'
+    'compare the card with what your iphone shows now'                       = 'yes'
+    'is there a ring round the earbud mark'                                  = 'yes'
+    'was the ring filled in your windows accent colour'                      = 'yes'
+    'more than an hour after the airpods were last heard'                    = 'yes'
     'does the card say "no reading" for the battery'                         = 'yes'
     'does the "where" line on the card say "on this pc"'                     = 'yes'
     'did the audio keep playing on this pc'                                  = 'yes'

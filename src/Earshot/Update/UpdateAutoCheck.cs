@@ -80,14 +80,17 @@ internal sealed class UpdateAutoCheck
     private readonly Func<CancellationToken, Task> _check;
     private readonly TimeSpan _startupDelay;
     private readonly TimeSpan _poll;
+    private readonly ILog _log;
 
     public UpdateAutoCheck(
-        TimeProvider time, Func<bool> enabled, IUpdateCheckStamp stamp, Func<CancellationToken, Task> check, TimeSpan startupDelay, TimeSpan poll)
+        TimeProvider time, Func<bool> enabled, IUpdateCheckStamp stamp, Func<CancellationToken, Task> check, TimeSpan startupDelay, TimeSpan poll, ILog log)
     {
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(enabled);
         ArgumentNullException.ThrowIfNull(stamp);
         ArgumentNullException.ThrowIfNull(check);
+        ArgumentNullException.ThrowIfNull(log);
+        _log = log;
         _time = time;
         _enabled = enabled;
         _stamp = stamp;
@@ -101,7 +104,8 @@ internal sealed class UpdateAutoCheck
     internal static bool IsDue(DateTimeOffset? last, DateTimeOffset now) =>
         last is null || now - last.Value >= Interval || last.Value - now > Interval;
 
-    // Runs until cancelled.
+    // Runs until cancelled, or until something it did not expect ends it, which is logged: the loop runs on a pool thread
+    // that nobody awaits, so an exception it let go would end the daily checks with nothing to say why.
     public async Task RunAsync(CancellationToken ct)
     {
         try
@@ -121,6 +125,10 @@ internal sealed class UpdateAutoCheck
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // The program is closing.
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Update: the daily check ended after an unexpected " + ex.GetType().Name + ", so no more automatic checks are made until Earshot is restarted.", ex);
         }
     }
 }

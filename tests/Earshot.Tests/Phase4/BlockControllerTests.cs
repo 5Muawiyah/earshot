@@ -791,6 +791,12 @@ public sealed class BlockControllerTests
         h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.FolderNotSecure, StepOutcomes.FromWin32("runas", 0));
         Assert.AreEqual(BlockController.SetupUnsafeFolderMessage, (await h.Controller.RunSetupAsync()).UserMessage);
 
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.Partial, StepOutcomes.FromWin32("runas", 0));
+        ControllerResult partial = await h.Controller.RunSetupAsync();
+        Assert.AreEqual(BlockController.SetupHandBackNotSetUpMessage, partial.UserMessage, "A Partial exit says what is missing, not that setup failed.");
+        Assert.AreEqual("Earshot is set up, but the shut-down hand-back could not be set up. Try again.", partial.UserMessage);
+        Assert.AreEqual(OpStatus.Partial, partial.Status);
+
         h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.NotAudioSink, StepOutcomes.FromWin32("runas", 0));
         Assert.AreEqual(BlockController.NotAudioSinkMessage, (await h.Controller.RunSetupAsync()).UserMessage, "A phone is never set up.");
 

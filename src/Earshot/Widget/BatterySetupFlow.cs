@@ -80,11 +80,27 @@ internal static class BatterySetupFlow
             }
         }
 
+        // The watcher is watched too: Bluetooth going off, or the machine sleeping, stops it part way through the
+        // window, and a window that heard nothing because it was deaf is not "Couldn't find your AirPods".
+        using var stoppedWindow = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        AdvertisementSourceStopped? stopped = null;
+
+        void OnStopped(object? sender, AdvertisementSourceStopped e)
+        {
+            stopped = e;
+            stoppedWindow.Cancel();
+        }
+
         log.Info("Battery set-up: listening for " + ((int)window.TotalSeconds).ToString(CultureInfo.InvariantCulture) + " s.");
         source.Received += OnReceived;
+        source.Stopped += OnStopped;
         try
         {
-            await Task.Delay(window, time, ct).ConfigureAwait(false);
+            await Task.Delay(window, time, stoppedWindow.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && stopped is not null)
+        {
+            return WatcherStoppedWhileListening(stopped, started, time.GetUtcNow(), log);
         }
         catch (OperationCanceledException)
         {
@@ -93,6 +109,14 @@ internal static class BatterySetupFlow
         finally
         {
             source.Received -= OnReceived;
+            source.Stopped -= OnStopped;
+        }
+
+        // A watcher that ended without saying so (a state read is all that is left to go on) heard nothing for
+        // some part of the window too.
+        if (source.State != AdvertisementSourceState.Started)
+        {
+            return WatcherStoppedWhileListening(null, started, time.GetUtcNow(), log);
         }
 
         DateTimeOffset ended = time.GetUtcNow();
@@ -103,6 +127,16 @@ internal static class BatterySetupFlow
         }
 
         return Decide(senders, appleSections, proximityItems, started, ended, log);
+    }
+
+    // The window ended because the watcher stopped, with the raw code in the log.
+    private static BatterySetupListen WatcherStoppedWhileListening(AdvertisementSourceStopped? stopped, DateTimeOffset started, DateTimeOffset ended, ILog log)
+    {
+        log.Warn(
+            "Battery set-up: the watcher stopped while listening" +
+            (stopped is null ? " (its state is no longer Started)" : ": " + stopped.ErrorName + " (" + stopped.ErrorCode.ToString(CultureInfo.InvariantCulture) + ")") +
+            ", so nothing was claimed.");
+        return Failed(BatterySetupListenStatus.WatcherNotStarted, WidgetCopy.SetupBluetoothOff, started, ended, 0, 0, []);
     }
 
     private static BatterySetupListen Decide(
@@ -128,7 +162,7 @@ internal static class BatterySetupFlow
         var best = candidates[0];
         sbyte min = best.Samples.Min(s => s.Rssi);
         sbyte max = best.Samples.Max(s => s.Rssi);
-        sbyte threshold = (sbyte)Math.Max(sbyte.MinValue, min - SetupRules.SignalMarginDb);
+        sbyte threshold = (sbyte)SetupRules.ThresholdFor(min);
         int okCount = best.Samples.Count(s => s.Status == ProximityParseStatus.Ok);
         var others = senders.Where(p => p.Key != best.Tag).Select(p => p.Value).ToList();
         int? runnerUpMedian = candidates.Count > 1 ? candidates[1].Median : null;

@@ -48,8 +48,8 @@ internal static class WidgetCopy
     public const string SettingsHandBack = Earshot.Tray.MenuModel.HandBackOnShutdownAndSleep;
     public const string SettingsShortcuts = "Shortcuts";
     public const string SettingsUpdates = "Updates";
-    public const string SettingsWaitsOnInEar = "Needs battery set-up to prove the in-ear field.";
-    public const string SettingsWaitsOnLid = "Needs battery set-up to prove the lid field.";
+    public const string SettingsWaitsOnInEar = "Earshot cannot yet tell when a bud is in your ear.";
+    public const string SettingsWaitsOnLid = "Earshot cannot yet tell when the case lid is open.";
     public const string ShortcutNotSet = "Not set";
     public const string ShortcutPressKeys = "Press keys";
     public const string ShortcutClear = "Clear";
@@ -77,6 +77,10 @@ internal static class WidgetCopy
     public const string SetupCaseSetUp = "Case battery set up";
     public const string SetupRepeatForBuds = "To set up the buds, try again when they show different levels.";
     public const string SetupBudsReadTheSame = "Both buds read the same. Try again when they differ.";
+    public const string SetupSaved = "Set-up saved";
+    public const string SetupNotSaved = "Couldn't save the set-up";
+    public const string SetupNotSavedSub = "Nothing was changed. Try again.";
+    public const string SetupNeedsAnother = "Set up once more to confirm it. The battery shows once it is confirmed.";
     public const string SetupCouldNotRead = "Couldn't read your AirPods' battery";
     public const string SetupCapturesKept = "What was seen is kept on this PC.";
     public const string SetupCannotReadYet = "Your AirPods' battery could not be read yet.";

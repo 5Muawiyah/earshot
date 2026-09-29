@@ -10,10 +10,6 @@ public static class WidgetTiming
     // How long the battery set-up listens for the owner's case before deciding.
     public static readonly TimeSpan SetupListenWindow = TimeSpan.FromSeconds(20);
 
-    // A battery reading older than this counts as no recent reading: the gauge shows no ring and no number.
-    // The card still shows the last values with their read time.
-    public static readonly TimeSpan BatteryRecentWindow = TimeSpan.FromHours(1);
-
     public static readonly TimeSpan WatcherRetryDelay = TimeSpan.FromSeconds(30);
 
     public static readonly TimeSpan WatcherRetryLimit = TimeSpan.FromMinutes(15);

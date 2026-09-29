@@ -1525,6 +1525,14 @@ internal sealed class TrayHarness : IDisposable
                 LastForegroundSource = source;
                 return source;
             },
+            // A fake, never the real WindowCoverProbe: a widget-enabled TrayContext test must never ask the desktop
+            // which window is at a point on it (ForegroundChangeHookTests proves none builds a real one).
+            GaugeCoverProbeFactory = () =>
+            {
+                var probe = new FakeCoverProbe();
+                LastCoverProbe = probe;
+                return probe;
+            },
             CardEnvironmentFactory = cardEnvironmentFactory,
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
         };
@@ -1600,6 +1608,10 @@ internal sealed class TrayHarness : IDisposable
     // The fake foreground change source the widget's gauge pipeline built last (null until it has built one),
     // so a test can see it installed and disposed and raise a foreground change through it.
     public FakeForegroundChangeSource? LastForegroundSource { get; private set; }
+
+    // The fake cover probe the gauge's controller was built with (null until the gauge pipeline exists), so a test can
+    // say what is over the gauge and see whether the controller asked.
+    public FakeCoverProbe? LastCoverProbe { get; private set; }
 
     public ServiceRegistry Registry { get; }
 

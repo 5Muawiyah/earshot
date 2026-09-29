@@ -26,6 +26,7 @@ internal static class UpdateCopy
     // Notices for an update that stayed where it was: the person's own choice, or something to do first.
     public const string PromptDeclinedNotice = "The Windows prompt was declined, so nothing was changed.";
     public const string NotPinnedNotice = "Choose your AirPods first, then update.";
+    public const string SetUpFirstNotice = "Set up Earshot first, then update.";
 
     public static string AvailableStatus(ReleaseVersion version) => "Version " + version + " is available";
 
@@ -98,7 +99,8 @@ internal sealed record UpdateViewModel(
         ReleaseVersion? available,
         int? progressPercent,
         string? reason,
-        string? notice)
+        string? notice,
+        bool updateOffered = true)
     {
         string title = UpdateCopy.Title;
         ReleaseVersion target = available ?? installed;
@@ -109,7 +111,7 @@ internal sealed record UpdateViewModel(
             UpdateStage.Checking => new(stage, title, UpdateIcon.Spinner, UpdateCopy.CheckingStatus, UpdateCopy.InstalledSub(installed), null, null, null, None),
             UpdateStage.UpToDate => new(stage, title, UpdateIcon.Check, UpdateCopy.UpToDateStatus, UpdateCopy.CurrentSub(installed), null, null, null, None),
             UpdateStage.Available => new(stage, title, UpdateIcon.Down, UpdateCopy.AvailableStatus(target), UpdateCopy.InstalledSub(installed), null, notice, null,
-                [new UpdateButton(UpdateButtonRole.Update, UpdateCopy.UpdateButton, Primary: true)]),
+                updateOffered ? [new UpdateButton(UpdateButtonRole.Update, UpdateCopy.UpdateButton, Primary: true)] : None),
             UpdateStage.Downloading => new(stage, title, UpdateIcon.Down, UpdateCopy.DownloadingStatus(target), null, null, null, progressPercent,
                 [new UpdateButton(UpdateButtonRole.Cancel, UpdateCopy.CancelButton, Primary: false)]),
             UpdateStage.CheckFailed => new(stage, title, UpdateIcon.Caution, UpdateCopy.CheckFailedStatus, UpdateCopy.InstalledSub(installed), reason, null, null,

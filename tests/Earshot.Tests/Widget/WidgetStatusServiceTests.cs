@@ -66,6 +66,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
         return new DecodeProofStore(_temp.File("setup"), _temp.File("proof.json"), _log, _clock);
     }
 
+    // A table whose only proved part is the case nibble, so a reading has a figure to show without a bud order. The
+    // tests that are about what an unproved table shows say so with ProximityDecodeTable.Unproved itself.
+    private static readonly ProximityDecodeTable CaseProved = ProximityDecodeTable.Unproved with { CaseNibbleProved = true };
+
     // table is what the decoder reads unless a proof store is given, in which case the store's own table is
     // what it reads, exactly as production does.
     private WidgetStatusService NewService(
@@ -74,7 +78,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         var service = new WidgetStatusService(
             () => _source, store, _settings, _deviceMonitor, () => null, _log,
             action => { Interlocked.Increment(ref _posts); action(); }, _clock,
-            () => proof?.Table ?? table ?? ProximityDecodeTable.Unproved, () => proof?.BroadcastsWhilePlayingFromThisPc ?? broadcasts, proof);
+            () => proof?.Table ?? table ?? CaseProved, () => proof?.BroadcastsWhilePlayingFromThisPc ?? broadcasts, proof);
         service.Changed += (sender, e) => { lock (_changedEvents) { _changedEvents.Add(e); } };
         service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
         service.OwnedReadingApplied += (sender, e) => { lock (_ownedReadingEvents) { _ownedReadingEvents.Add(e); } };
@@ -105,7 +109,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
     // The production constructor reads the proof store's table, not a constant, so nothing composing this
     // service can wire up anything but what the owner's own set-ups proved. With no records that is the
-    // unproved table: only the case nibble is ever decoded. (ProximityDecodeTable.Current is gone from the
+    // unproved table: nothing is decoded, the case nibble included. (ProximityDecodeTable.Current is gone from the
     // build, which is the compile-time half of this proof.)
     [TestMethod]
     public void TheTableComesFromTheProofStoreNotAConstant()
@@ -121,7 +125,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         Assert.IsNull(service.Current.Left.Percent, "With nothing proved, bud nibbles must not decode.");
         Assert.IsNull(service.Current.Right.Percent);
-        Assert.AreEqual(50, service.Current.Case.Percent, "The case nibble needs no table and must still decode.");
+        Assert.IsNull(service.Current.Case.Percent, "With nothing proved the case nibble is not decoded either.");
         service.Dispose();
     }
 
@@ -186,7 +190,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AnOwnedFreshReadingWithABudInEarWhileNotOnThisPcIsElsewhere()
     {
-        var table = ProximityDecodeTable.Unproved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
+        var table = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
         store.Save(SampleClaim());
         using WidgetStatusService service = NewService(store, table);
@@ -200,7 +204,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AnOwnedFreshReadingWithNoBudInEarIsNotInUse()
     {
-        var table = ProximityDecodeTable.Unproved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
+        var table = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
         store.Save(SampleClaim());
         using WidgetStatusService service = NewService(store, table);
@@ -227,7 +231,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AStaleReadingLeavesWhereUnknownAndEarStateNull()
     {
-        var table = ProximityDecodeTable.Unproved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
+        var table = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
         store.Save(SampleClaim());
         using WidgetStatusService service = NewService(store, table);
@@ -313,7 +317,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void BatteryReadAtIsTheOldestKnownPart()
     {
-        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        var table = CaseProved with { HighNibbleIsRight = true };
         var store = NewClaimStore();
         store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
@@ -371,7 +375,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ForgetClaimClearsEveryReadingAndEarState()
     {
-        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
+        var table = CaseProved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
         var store = NewClaimStore();
         store.Save(SampleClaim(nibblesAreNamedOrder: true));
         using WidgetStatusService service = NewService(store, table);
@@ -399,7 +403,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var store = NewClaimStore();
         store.Save(SampleClaim());
-        DecodeProofStore proof = NewProof();
+        // Two earlier records prove the case and, with both buds reading the same, nothing about the buds.
+        DecodeProofStore proof = NewProof(
+            SetupRecordFixtures.Record(SetupRecordFixtures.Message(5, 5), SetupRecordFixtures.Picks(50, 50), minutes: 5),
+            SetupRecordFixtures.Record(SetupRecordFixtures.Message(5, 5), SetupRecordFixtures.Picks(50, 50), minutes: 6));
         using WidgetStatusService service = NewService(store, proof: proof);
         service.Start();
         _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05));
@@ -415,6 +422,47 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNull(snapshot.Left.InEar, "A redone set-up must not keep the old ear state.");
         Assert.IsNull(snapshot.Right.InEar);
         Assert.IsNull(snapshot.EarReadAt);
+    }
+
+    // The record cannot be written (here, a file stands where its folder should be): the proof and the claim are not
+    // touched, the card is told plainly, and nothing is reported as set up.
+    [TestMethod]
+    public async Task ASetupWhoseRecordCannotBeSavedChangesNeitherTheProofNorTheClaimAndSaysSo()
+    {
+        var store = NewClaimStore();
+        DecodeProofStore proof = NewProof();
+        using WidgetStatusService service = NewService(store, proof: proof);
+        service.Start();
+        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
+        File.WriteAllText(_temp.File("setup"), "a file where the folder should be");
+
+        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80, box: 50));
+
+        Assert.AreEqual(BatterySetupResultStatus.NotSaved, result.Status);
+        Assert.IsEmpty(proof.Records, "A record that was not written is not counted.");
+        Assert.IsNull(store.Current, "No claim names a record that is not there.");
+        Assert.IsFalse(service.Current.ClaimExists);
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "could not be saved, so the proof and the claim were left as they were"));
+        Assert.IsFalse(_log.Has(LogLevel.Info, "Battery set-up saved:"), "It must not log a save that did not happen.");
+    }
+
+    // The claim store keeps only the newer of two claims, so a set-up must never lose to the claim before it, even
+    // when the clock reads earlier than that claim's date or the same: the new claim's date is one second past the old.
+    [TestMethod]
+    public async Task ARepeatSetupWithTheClockAtOrBeforeTheOldClaimsDateStillReplacesIt()
+    {
+        var store = NewClaimStore();
+        DateTimeOffset oldDate = _clock.GetUtcNow().AddHours(1);
+        store.Save(SampleClaim() with { ClaimedAtUtc = oldDate, SetupRecord = "setup-older.json" });
+        DecodeProofStore proof = NewProof();
+        using WidgetStatusService service = NewService(store, proof: proof);
+        service.Start();
+        BatterySetupListen listen = await ListenAsync(service, batteryB: 0x05);
+
+        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(50, 50, 50));
+
+        Assert.AreEqual(result.RecordFileName, store.Current!.SetupRecord, "The new claim replaced the older one.");
+        Assert.AreEqual(oldDate.AddSeconds(1), store.Current.ClaimedAtUtc, "Its date is one second past the older claim's.");
     }
 
     // Runs one real listening window over the test's fake source: enough messages from one sender, the newest a
@@ -687,7 +735,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void CaseOpenedIsRaisedOnlyForAnOwnedAdvertisement()
     {
-        var table = ProximityDecodeTable.Unproved with { LidOpenBit = 0 };
+        var table = CaseProved with { LidOpenBit = 0 };
         var store = NewClaimStore();
         store.Save(SampleClaim());
         using WidgetStatusService service = NewService(store, table);
@@ -705,7 +753,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void CaseOpenedIsRaisedOncePerEdgeOrCounterChange()
     {
-        var table = ProximityDecodeTable.Unproved with { LidOpenBit = 0 };
+        var table = CaseProved with { LidOpenBit = 0 };
         var store = NewClaimStore();
         store.Save(SampleClaim());
         using WidgetStatusService service = NewService(store, table);
@@ -725,7 +773,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void CaseOpenedIsNotRaisedByTheFirstReadingWithTheLidCounterBaseline()
     {
-        var table = ProximityDecodeTable.Unproved with { LidCounterMask = 0xFF };
+        var table = CaseProved with { LidCounterMask = 0xFF };
         var store = NewClaimStore();
         store.Save(SampleClaim());
         using WidgetStatusService service = NewService(store, table);
@@ -751,7 +799,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ChangedAndCaseOpenedAreRaisedThroughUiPost()
     {
-        var table = ProximityDecodeTable.Unproved with { LidOpenBit = 0 };
+        var table = CaseProved with { LidOpenBit = 0 };
         var store = NewClaimStore();
         store.Save(SampleClaim());
         var queue = new Queue<Action>();
@@ -1144,18 +1192,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
         var service = NewService(store, proof: proof);
         service.Start();
 
-        Task<BatterySetupListen> listening = service.ListenForSetupAsync(CancellationToken.None);
-        for (int i = 0; i < 4; i++)
-        {
-            _source.Raise(new AdvertisementSample(
-                ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x05), -60, _clock.GetUtcNow(), SenderTag: 1));
-        }
+        BatterySetupListen listen = await ListenAsync(service, batteryB: 0x05);   // the owner's case was heard
 
-        service.Close(); // closes while the listening window is still open
+        service.Close(); // closes while the owner is still choosing what the iPhone shows
         int changedBeforeCompletion = _changedEvents.Count;
 
-        _clock.Advance(WidgetTiming.SetupListenWindow);
-        BatterySetupListen listen = await listening;
         service.CompleteSetup(listen, SetupRecordFixtures.Picks(50, 50, 50));
 
         Assert.IsFalse(service.Current.ClaimExists, "A set-up completing after Close must not be applied to the closed service.");
@@ -1170,7 +1211,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     {
         var store = NewClaimStore();
         store.Save(SampleClaim()); // NibblesAreNamedOrder defaults to false: wire order
-        var table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
+        var table = CaseProved with { HighNibbleIsRight = true };
         using WidgetStatusService service = NewService(store, table: table);
         service.Start();
 
@@ -1549,7 +1590,8 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual((sbyte)-70, store.Current.SignalThresholdDbm, "Ten decibels under the weakest message (-60).");
         Assert.AreEqual((sbyte)-60, store.Current.SignalMinDbm);
         Assert.AreEqual(4, store.Current.SignalSamples);
-        Assert.AreEqual(BatterySetupResultStatus.CaseSetUp, result.Status, "The order is discriminated once and still unproved.");
+        Assert.AreEqual(BatterySetupResultStatus.SavedNeedsAnother, result.Status, "One record proves neither the order nor the case, so nothing is called set up.");
+        Assert.IsNull(service.Current.Case.Percent, "And nothing is shown yet.");
         Assert.HasCount(1, proof.Records);
         Assert.IsTrue(service.Current.ClaimExists);
         Assert.IsTrue(_log.Has(LogLevel.Info, "Battery set-up saved: " + result.RecordFileName));
@@ -1560,7 +1602,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public async Task CompleteSetupAppliesTheFirstReadingAndRaisesOwnedReadingApplied()
     {
         var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
+        DecodeProofStore proof = NewProof(SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4, caseNibble: 7), SetupRecordFixtures.Picks(40, 80, box: 70), minutes: 5));
         using WidgetStatusService service = NewService(store, proof: proof);
         service.Start();
         BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x07);
@@ -1568,7 +1610,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80, 70));
 
-        Assert.AreEqual(70, service.Current.Case.Percent, "The case reads at once, without waiting for a second message.");
+        Assert.AreEqual(70, service.Current.Case.Percent, "The second agreeing record proves the case, which reads at once, without waiting for a further message.");
         Assert.HasCount(1, _ownedReadingEvents, "The first reading is an owned reading like any other.");
         Assert.AreEqual(70, _ownedReadingEvents[0].Reading.Case.Percent);
         Assert.IsNotNull(service.Current.BatteryReadAt);
@@ -1598,7 +1640,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public async Task ASetupWhoseBudsReadTheSameSaysToRepeatItWhenTheyDiffer()
     {
         var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
+        DecodeProofStore proof = NewProof(SetupRecordFixtures.Record(SetupRecordFixtures.Message(6, 6), SetupRecordFixtures.Picks(60, 60), minutes: 5));
         using WidgetStatusService service = NewService(store, proof: proof);
         service.Start();
 
@@ -1674,6 +1716,51 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsTrue(service.Current.SetupCouldNotRead);
     }
 
+    // A reading that could be read but is not proved yet is saved and asks for one more, so the owner is not told
+    // it read nothing when the fault is only that one record cannot prove anything.
+    [TestMethod]
+    public async Task ASetupWhoseReadingIsNotProvedYetSaysItIsSavedAndNeedsAnother()
+    {
+        var store = NewClaimStore();
+        DecodeProofStore proof = NewProof();
+        using WidgetStatusService service = NewService(store, proof: proof);
+        service.Start();
+        BatterySetupListen first = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
+
+        BatterySetupResult one = service.CompleteSetup(first, SetupRecordFixtures.Picks(40, 80, box: 50));
+
+        Assert.AreEqual(BatterySetupResultStatus.SavedNeedsAnother, one.Status);
+        Assert.IsNull(service.Current.Case.Percent, "One agreeing record does not prove the case, so the card shows nothing.");
+        Assert.IsTrue(service.Current.SetupCouldNotRead, "The card still offers set-up, since nothing can be shown yet.");
+
+        BatterySetupListen second = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
+        BatterySetupResult two = service.CompleteSetup(second, SetupRecordFixtures.Picks(40, 80, box: 50));
+
+        Assert.AreNotEqual(BatterySetupResultStatus.SavedNeedsAnother, two.Status);
+        Assert.AreEqual(50, service.Current.Case.Percent, "The second agreeing record proves the case, and it is shown.");
+    }
+
+    // The owner's own pick contradicts what the case nibble reads: the case is not shown, and the set-up says it
+    // could not read the battery rather than that it needs another.
+    [TestMethod]
+    public async Task ASetupWhoseCasePickContradictsTheReadingShowsNoCaseAndSaysItCouldNotRead()
+    {
+        var store = NewClaimStore();
+        DecodeProofStore proof = NewProof(
+            SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4), SetupRecordFixtures.Picks(40, 80), minutes: 5),
+            SetupRecordFixtures.Record(SetupRecordFixtures.Message(6, 9), SetupRecordFixtures.Picks(90, 60), minutes: 6));
+        Assert.IsTrue(proof.Table.CaseNibbleProved, "Sanity: two agreeing records prove the case.");
+        using WidgetStatusService service = NewService(store, proof: proof);
+        service.Start();
+        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
+
+        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80, box: 90));
+
+        Assert.IsFalse(proof.Table.CaseNibbleProved, "A record that disagrees takes the proof away.");
+        Assert.IsNull(service.Current.Case.Percent);
+        Assert.AreEqual(BatterySetupResultStatus.BatterySetUp, result.Status, "The buds are proved and shown, so the battery is set up.");
+    }
+
     // Picks are evidence only: whatever the owner picked, what the card shows is what the advertisement says.
     [TestMethod]
     public async Task PickerValuesNeverReachTheSnapshot()
@@ -1693,7 +1780,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         WidgetSnapshot snapshot = service.Current;
         Assert.AreEqual(30, snapshot.Left.Percent, "The nibbles are 6 and 3: the low one is the left bud, whatever was picked.");
         Assert.AreEqual(60, snapshot.Right.Percent);
-        Assert.AreEqual(40, snapshot.Case.Percent);
+        Assert.IsNull(snapshot.Case.Percent, "The picked 100 contradicts the case nibble, which takes the case's proof away; the pick itself is never shown.");
         Assert.IsNull(snapshot.Left.Charging, "A charging toggle is evidence too: nothing is shown as charging until a bit is proved.");
         Assert.IsNull(snapshot.Right.Charging);
         Assert.IsNull(snapshot.Case.Charging);
@@ -1774,7 +1861,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public void AutoPauseAvailableReadsTheInjectedObservationAndTheInEarBits()
     {
         var store = NewClaimStore();
-        var withInEar = ProximityDecodeTable.Unproved with { LeftInEarBit = 0, RightInEarBit = 1 };
+        var withInEar = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1 };
 
         using WidgetStatusService observed = NewService(store, withInEar, broadcasts: true);
         using WidgetStatusService notObserved = NewService(store, withInEar, broadcasts: null);
@@ -1826,18 +1913,6 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         Assert.AreEqual(true, service.BroadcastObserved(), "The production constructor reads the store's observation.");
         Assert.IsFalse(service.Current.AutoPauseAvailable, "Still off: no in-ear bit is proved, and none can be by a set-up.");
-    }
-
-    [TestMethod]
-    public void BatteryIsRecentTurnsFalseAfterOneHour()
-    {
-        DateTimeOffset readAt = new(2026, 9, 29, 12, 0, 0, TimeSpan.Zero);
-        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { BatteryReadAt = readAt };
-
-        Assert.IsTrue(snapshot.BatteryIsRecent(readAt.AddMinutes(59)), "59 minutes: recent.");
-        Assert.IsTrue(snapshot.BatteryIsRecent(readAt.AddMinutes(60)), "Exactly an hour is still recent.");
-        Assert.IsFalse(snapshot.BatteryIsRecent(readAt.AddMinutes(61)), "61 minutes: no recent reading.");
-        Assert.IsFalse(WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true).BatteryIsRecent(readAt), "No reading at all is not recent.");
     }
 
     // Every line the set-up logs carries numbers, statuses and a file name: no byte, no model or colour byte, no tag.

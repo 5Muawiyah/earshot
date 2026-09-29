@@ -13,6 +13,10 @@
     sleep, whether the block completes before sleep or after wake, and whether this computer takes
     the AirPods back when it wakes.
 
+    This may be the first time this computer sleeps with Earshot installed. The test records
+    whether it was, from Earshot's log and from your own answer, in the finding
+    firstSleepWithEarshotInstalled.
+
 .PARAMETER ExePath
     Earshot.exe: the installed copy or an unzipped release.
 
@@ -120,6 +124,22 @@ try
 
     if ($ready)
     {
+        $testStartUtc = (Get-Date).ToUniversalTime()
+
+        # ---- Is this the first sleep? ----
+        Write-Section -Run $run -Title 'Is this the first sleep with Earshot installed?'
+        $suspendsAll = Get-EarshotLogLines -Run $run -Pattern 'WM_POWERBROADCAST received: Suspend'
+        $suspendsSince = Get-EarshotLogLines -Run $run -Pattern 'WM_POWERBROADCAST received: Suspend' -SinceUtc $testStartUtc
+        $suspendsLoggedBefore = @($suspendsAll).Count - @($suspendsSince).Count
+        $sleptBeforeOwnerSaid = Read-Answer -Run $run -Question 'Before this test, had this PC gone to sleep since Earshot was installed?'
+        $firstSleep = 'unknown'
+        if ($suspendsLoggedBefore -gt 0) { $firstSleep = 'no' }
+        elseif ($sleptBeforeOwnerSaid -eq 'no') { $firstSleep = 'yes' }
+        elseif ($sleptBeforeOwnerSaid -eq 'yes') { $firstSleep = 'no' }
+        Write-Line -Run $run -Text ('Sleeps in the log before this test: ' + $suspendsLoggedBefore + '. You said: ' + $sleptBeforeOwnerSaid + '. So this is ' + $(if ($firstSleep -eq 'yes') { 'the first sleep with Earshot installed' } elseif ($firstSleep -eq 'no') { 'not the first sleep' } else { 'not known to be the first sleep' }) + '.')
+        Add-Finding -Run $run -Name 'firstSleepWithEarshotInstalled' -Value $firstSleep `
+            -Detail ('yes when Earshot''s log holds no earlier sleep (' + $suspendsLoggedBefore + ' found) and you said this computer had not slept since it was installed; a log that has rolled over cannot show older sleeps')
+
         Write-Section -Run $run -Title 'Connect and confirm'
         Wait-Owner -Run $run -Text 'Left-click the Earshot icon, then Connect on the card, to connect the AirPods to this PC, and play something so they stay in use.'
         $audioBefore = Get-AudioState -Run $run -Label 'audio-connected'

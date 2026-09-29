@@ -45,7 +45,9 @@ internal static partial class CompositionRoot
         // Connection, Block and Protection are wrapped on assignment.
         r.MediaSessions = new WindowsMediaSessions(r.Log);
 
-        var claimStore = new ClaimStore(Paths.Current.WidgetClaimFile, r.Log);
+        // A claim is trusted only with the set-up record it names beside it and agreeing with it.
+        var setupRecords = new BatterySetupStore(WidgetSetupFolder(Paths.Current), r.Log);
+        var claimStore = new ClaimStore(Paths.Current.WidgetClaimFile, r.Log, setupRecords.Load);
 
         // The decode table comes from the set-up records under the widget folder and nowhere else: there is
         // no constant to read, so what is proved is exactly what the owner's own set-ups proved.

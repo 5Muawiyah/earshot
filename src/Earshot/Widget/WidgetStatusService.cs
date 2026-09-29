@@ -372,8 +372,16 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             listen.AppleSectionsSeen, listen.ProximityItemsSeen, candidate, listen.OtherSenders, picks);
 
         string? saved = proof.Setups.Save(record);
+        if (saved is null)
+        {
+            // Without the record on disk the proof would count a set-up that is gone at the next start, and a claim
+            // would name a record nobody can read: neither is updated, and the owner is told plainly.
+            _log.Warn("Battery set-up: the record " + record.FileName + " could not be saved, so the proof and the claim were left as they were.");
+            return new BatterySetupResult(BatterySetupResultStatus.NotSaved, record.FileName, proof.Result);
+        }
+
         _log.Info(
-            "Battery set-up saved: " + (saved ?? record.FileName) + "; picks L " + picks.Left + " R " + picks.Right + " Case " + picks.Case +
+            "Battery set-up saved: " + saved + "; picks L " + picks.Left + " R " + picks.Right + " Case " + picks.Case +
             ", charging " + YesNo(picks.LeftCharging) + "/" + YesNo(picks.RightCharging) + "/" + YesNo(picks.CaseCharging) + ".");
 
         proof.AddRecord(record);
@@ -438,8 +446,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             ApplyOwnedMessage(message, candidate.RssiMedian, listen.EndedAtUtc);
             lock (_gate)
             {
-                // A set-up that leaves nothing to show (the case unreadable or doubted, the buds unproved) is
-                // said to have read nothing, never "battery set up".
+                // A set-up that leaves nothing to show (the case and the buds not proved yet) never says "battery set
+                // up": it says the record is kept and, unless the case reading was contradicted, that it needs another.
                 nothingShown = _left.Percent is null && _right.Percent is null && _case.Percent is null;
                 _setupCouldNotRead = nothingShown;
             }
@@ -449,7 +457,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         if (nothingShown)
         {
-            return new BatterySetupResult(BatterySetupResultStatus.CouldNotRead, record.FileName, result);
+            // Another record helps only when this one could be read and simply is not enough yet. A case nibble this
+            // message does not carry, or one the owner's picks contradict, is a set-up that read nothing.
+            bool needsAnother = BatteryNibble.ToPercent(message.BatteryB & 0x0F) is not null &&
+                                result.Fields[DecodeField.CaseNibble].Status != FieldProofStatus.Withdrawn;
+            return new BatterySetupResult(
+                needsAnother ? BatterySetupResultStatus.SavedNeedsAnother : BatterySetupResultStatus.CouldNotRead, record.FileName, result);
         }
 
         BatterySetupResultStatus status = table.HighNibbleIsRight is not null

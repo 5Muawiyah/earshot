@@ -13,7 +13,7 @@ public enum ProximityParseStatus
 }
 
 // The documented fields, raw. Nothing here says which nibble is which bud or what a bit means: that is
-// ProximityDecodeTable's job, once phase 0 has proved it.
+// ProximityDecodeTable's job, once the owner's battery set-ups have proved it.
 public readonly record struct ProximityMessage(
     byte ModelHigh, byte ModelLow,  // the two model bytes in wire order
     byte Status,

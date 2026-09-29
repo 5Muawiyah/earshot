@@ -60,6 +60,11 @@ internal static class HandBackText
 
     public static string BlockSentAt(HandBackTrigger trigger, DateTimeOffset t1) => Prefix(trigger) + "block sent at " + Utc(t1);
 
+    // Exit only: the disconnect had not come back by the cap, and the block is sent anyway because nothing at Exit is
+    // waiting on a deadline and the block is what keeps the AirPods off this PC.
+    public static string ExitBlockAfterStuckDisconnect() =>
+        Prefix(HandBackTrigger.Exit) + "the disconnect had not finished by the cap, so the block is sent anyway";
+
     public static string BlockNotSent(HandBackTrigger trigger, string reason) => Prefix(trigger) + "block not sent: " + reason;
 
     // The block already queued at the query came back Failed or Partial (and is not one the gate may still land),

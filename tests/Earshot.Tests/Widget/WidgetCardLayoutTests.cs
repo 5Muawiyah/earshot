@@ -210,7 +210,8 @@ public sealed class WidgetCardLayoutTests
         [
             SetupViewModel.Listening(), PickPage(),
             SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp), SetupViewModel.Done(BatterySetupResultStatus.CaseSetUp),
-            SetupViewModel.Done(BatterySetupResultStatus.CaseSetUpBudsSame), SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead),
+            SetupViewModel.Done(BatterySetupResultStatus.CaseSetUpBudsSame), SetupViewModel.Done(BatterySetupResultStatus.SavedNeedsAnother), SetupViewModel.Done(BatterySetupResultStatus.NotSaved),
+            SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead),
             SetupViewModel.Failed(BatterySetupListenStatus.NotFound), SetupViewModel.Failed(BatterySetupListenStatus.Ambiguous),
             SetupViewModel.Failed(BatterySetupListenStatus.WatcherNotStarted),
         ];

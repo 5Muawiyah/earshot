@@ -50,7 +50,7 @@ internal readonly record struct UpdateProgress(long Received, long? Total)
     public int? Percent => Total is > 0 ? (int)Math.Min(100, Received * 100 / Total.Value) : null;
 }
 
-// A verified download, unpacked and held, or the reason there is none. Exactly one of the two is set.
+// A verified download (the zip, and the hash it matched), or the reason there is none. Exactly one of the two is set.
 internal sealed record UpdateDownloadResult(StagedUpdate? Staged, UpdateFailure? Failure)
 {
     public static UpdateDownloadResult Success(StagedUpdate staged) => new(staged, null);

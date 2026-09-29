@@ -11,7 +11,7 @@ public sealed class ProgramDispatchTests
 {
     private const string Nonce = "0123456789abcdef0123456789abcdef";
 
-    private static readonly string[] ExpectedPrivilegedModes = ["gate", "gate-protect", "install", "uninstall", "service"];
+    private static readonly string[] ExpectedPrivilegedModes = ["gate", "gate-protect", "install", "uninstall", "update", "service"];
 
     private static Paths PathsWith(string? dataRoot, string? safeMode) =>
         Paths.FromEnvironment(name => name switch
@@ -27,6 +27,7 @@ public sealed class ProgramDispatchTests
     [DataRow("gate-protect", "protect-on", Nonce)]
     [DataRow("install", "S-1-5-21-1-2-3-1001", "0A1B2C3D4E8C", "5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13")]
     [DataRow("uninstall")]
+    [DataRow("update", @"C:\Users\x\update.zip", "AAAA", "1", "S-1-5-21-1-2-3-1001", "0A1B2C3D4E8C", "5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13")]
     [DataRow("service")]
     public void SafeModeRefusesPrivilegedModesBeforeDispatch(params string[] args)
     {
@@ -45,6 +46,7 @@ public sealed class ProgramDispatchTests
     [DataRow("gate-protect", "protect-off", Nonce)]
     [DataRow("install", "S-1-5-21-1-2-3-1001", "0A1B2C3D4E8C", "5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13")]
     [DataRow("uninstall")]
+    [DataRow("update", @"C:\Users\x\update.zip", "AAAA", "1", "S-1-5-21-1-2-3-1001", "0A1B2C3D4E8C", "5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13")]
     [DataRow("service")]
     public void ADataRootRefusesPrivilegedModesEvenOutsideSafeMode(params string[] args)
     {

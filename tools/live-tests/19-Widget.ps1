@@ -3,11 +3,12 @@
     The AirPods widget: the taskbar gauge, its card, and the case-open card.
 
 .DESCRIPTION
-    Phase 0 has not run on this hardware yet: the decode table
-    (Earshot.Widget.ProximityDecodeTable.Current) ships Unproved, so every reading that would depend
-    on it (battery, charging, in-ear, the case-open card, the low battery alert, auto-pause) must
-    honestly show nothing rather than a guessed figure until battery set-up has proved it. This test
-    checks that it does.
+    Earshot shows a battery figure only for a part that battery set-up has confirmed: two set-ups in
+    which what the AirPods broadcast agreed with what the iPhone showed. Until then every reading that
+    depends on that (battery, charging, the low battery alert) must honestly show nothing rather than a
+    guessed figure. Set-up cannot confirm whether a bud is in the ear or whether the case lid is open,
+    so auto-pause and the case-open card stay off. This test checks all of that, and that once a
+    set-up has been done any figure shown agrees with the iPhone.
 
     Battery set-up is how those readings get proved. "Set up battery" is on the card and in the tray
     menu. It has three steps: open your AirPods case next to this PC, say what your iPhone shows with
@@ -16,15 +17,18 @@
     while Bluetooth is on. The last half runs the set-up once and asks what the card said, after
     every check that needs the card to show nothing has already been answered.
 
-    Everything that does not depend on the claim or the decode table is exercised for real: the
-    gauge's placement, its following the taskbar, its fallback under a full screen application, its
-    re-attach after Explorer restarts, its redraw at a new DPI and in light and dark mode, its click
-    behaviour, the card's "where" line (on this PC comes from Core Audio alone, never the
-    advertisement), the watcher's own start and stop, the notification shortcut, and that nothing
+    Everything that does not depend on a confirmed battery reading is exercised for real: the
+    gauge's two positions (at the right end, 8 pixels left of the notification area, by default; next
+    to the apps, 4 pixels after the last button), its following the taskbar, its staying visible and on
+    top when Start, a flyout or a taskbar click comes and goes, its fallback under a full screen
+    application, its re-attach after Explorer restarts, its redraw at a new DPI and in light and dark
+    mode, its click behaviour, the card's "where" line (on this PC comes from Core Audio alone, never
+    the advertisement), the watcher's own start and stop, the notification shortcut, and that nothing
     here ever connects the AirPods by itself.
 
-    It settles whether the gauge and its cards work as built today, and whether every reading that
-    is not yet provable honestly says so rather than showing a figure nobody measured.
+    It settles whether the gauge and its cards work as built today, whether every reading that is not
+    yet confirmed honestly says so rather than showing a figure nobody measured, and whether a figure
+    that is shown agrees with the iPhone.
 
 .PARAMETER ExePath
     Earshot.exe: the installed copy or an unzipped release.
@@ -89,7 +93,7 @@ try
         'The AirPods are paired with this PC and available to connect.'
     ) -PhysicalActions @(
         'This is a long sitting. It watches the taskbar, restarts Explorer once, changes display scaling and light/dark mode and back, opens your AirPods case near the PC, and turns Bluetooth off and on. Nothing here is destructive, and every step says what it does before it asks.',
-        'Several checks below expect the card to say "No reading", "Not seen yet" or show nothing at all. That is the correct, honest answer while phase 0 is outstanding: it is not a bug, and a check on this only fails if the card shows a figure nobody measured.'
+        'Several checks below expect the card to say "No reading", "Not seen yet" or show nothing at all. That is the correct, honest answer until battery set-up has confirmed a reading: it is not a bug, and a check on this only fails if the card shows a figure nobody measured.'
     )
 
     if ($ready)
@@ -117,16 +121,23 @@ try
         # =============================================================== the gauge and its cards
 
         Write-Section -Run $run -Title 'Gauge placement'
+        $gaugePositionAtStart = Get-FieldPath -Object $settings -Path @('Widget', 'GaugePosition')
+        Add-Finding -Run $run -Name 'gaugePositionAtStart' -Value $gaugePositionAtStart -Detail 'Widget.GaugePosition read from settings.json'
+        Wait-Owner -Run $run -Text 'Left-click the Earshot icon or the gauge to open the card, click the gear, and check that "Gauge position" is set to "Right end". Then close the card.'
         Write-Line -Run $run -Text 'Look at the taskbar near the clock.'
-        $placementAnswer = Read-Answer -Run $run -Question 'Does the gauge sit just to the right of the last taskbar button, with about 24 pixels of clear space and no button underneath it, and does clicking the free taskbar space beside it still do what it did before Earshot was installed?'
-        Add-Criterion -Run $run -Id 'gauge-placement' -Criterion 'The gauge sits clear of every taskbar button and does not intercept a click meant for the taskbar.' `
+        $placementAnswer = Read-Answer -Run $run -Question 'Is the gauge at the right end of the taskbar, just left of the notification area (the small arrow and icons beside the clock), with a small gap of about 8 pixels and no icon underneath it, and does clicking the free taskbar space beside it still do what it did before Earshot was installed?'
+        Add-Criterion -Run $run -Id 'gauge-placement' -Criterion 'By default the gauge sits at the right end of the taskbar, 8 pixels left of the notification area, clear of every taskbar item, and does not intercept a click meant for the taskbar.' `
             -Outcome $(if ($placementAnswer -eq 'yes') { 'pass' } elseif ($placementAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $placementAnswer + '.')
+
+        Write-Section -Run $run -Title 'Next to apps'
+        Wait-Owner -Run $run -Text 'Open the card, click the gear, set "Gauge position" to "Next to apps", then close the card.'
+        $nextToAppsAnswer = Read-Answer -Run $run -Question 'Is the gauge now just after the last taskbar button, with a small gap of about 4 pixels and no button underneath it?'
 
         Write-Section -Run $run -Title 'The gauge follows the taskbar buttons'
         Wait-Owner -Run $run -Text 'Open another app (anything pinned or running) so a new button appears on the taskbar, then close it again.'
         $followsButtonsAnswer = Read-Answer -Run $run -Question 'Did the gauge move right to make room for the new button, within about a second, and move back once you closed it?'
-        Add-Criterion -Run $run -Id 'gauge-follows-buttons' -Criterion 'The gauge re-measures and moves when the taskbar buttons change.' `
+        Add-Criterion -Run $run -Id 'gauge-follows-buttons' -Criterion 'With the gauge next to the apps, it re-measures and moves when the taskbar buttons change.' `
             -Outcome $(if ($followsButtonsAnswer -eq 'yes') { 'pass' } elseif ($followsButtonsAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $followsButtonsAnswer + '.')
 
@@ -135,9 +146,32 @@ try
         $alignLeftAnswer = Read-Answer -Run $run -Question 'With alignment set to Left, does the gauge sit beside the taskbar buttons rather than out on its own?'
         Wait-Owner -Run $run -Text 'Set taskbar alignment back to Centre.'
         $alignCentreAnswer = Read-Answer -Run $run -Question 'Back at Centre, does the gauge follow the buttons again?'
-        Add-Criterion -Run $run -Id 'gauge-follows-alignment' -Criterion 'The gauge follows the taskbar whether it is left-aligned or centred.' `
+        Add-Criterion -Run $run -Id 'gauge-follows-alignment' -Criterion 'With the gauge next to the apps, it follows the taskbar whether it is left-aligned or centred.' `
             -Outcome $(if ($alignLeftAnswer -eq 'yes' -and $alignCentreAnswer -eq 'yes') { 'pass' } elseif ($alignLeftAnswer -eq 'unsure' -or $alignCentreAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('Left: ' + $alignLeftAnswer + '. Centre: ' + $alignCentreAnswer + '.')
+
+        Wait-Owner -Run $run -Text 'Open the card, click the gear, set "Gauge position" back to "Right end", then close the card.'
+        $rightEndAgainAnswer = Read-Answer -Run $run -Question 'Back at Right end, is the gauge at the right end of the taskbar again, just left of the notification area?'
+        Add-Criterion -Run $run -Id 'gauge-next-to-apps' -Criterion 'The Gauge position setting moves the gauge next to the apps, 4 pixels after the last button, and back to the right end.' `
+            -Outcome $(if ($nextToAppsAnswer -eq 'yes' -and $rightEndAgainAnswer -eq 'yes') { 'pass' } elseif ($nextToAppsAnswer -eq 'unsure' -or $rightEndAgainAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('Next to apps: ' + $nextToAppsAnswer + '. Back at the right end: ' + $rightEndAgainAnswer + '.')
+
+        Write-Section -Run $run -Title 'The gauge stays on top'
+        $onTopStartUtc = (Get-Date).ToUniversalTime()
+        Wait-Owner -Run $run -Text 'Open the Start menu and close it. Click the clock to open its flyout and close it. Click an empty part of the taskbar. Do each of the three a couple of times.'
+        $onTopAnswer = Read-Answer -Run $run -Question 'Through all of that, did the gauge stay visible and on top of the taskbar, or come straight back, with no time where it was gone and stayed gone?'
+        $raisedLines = Get-EarshotLogLines -Run $run -Pattern 'Gauge raised:' -SinceUtc $onTopStartUtc
+        $leftUnderLines = Get-EarshotLogLines -Run $run -Pattern 'Gauge left under' -SinceUtc $onTopStartUtc
+        Write-Line -Run $run -Text ('  ' + @($raisedLines).Count + ' "Gauge raised" line(s), ' + @($leftUnderLines).Count + ' "Gauge left under" line(s) in the app log during that step.')
+        Add-Finding -Run $run -Name 'gaugeRaisedLines' -Value @($raisedLines).Count -Detail 'Log lines saying the gauge was put back on top while Start, a flyout and taskbar clicks came and went'
+        Add-Finding -Run $run -Name 'gaugeLeftUnderLines' -Value @($leftUnderLines).Count -Detail 'Log lines saying another window was over the gauge and it was left there'
+        Add-Criterion -Run $run -Id 'gauge-stays-on-top' -Criterion 'The gauge stays visible and on top when Start, a flyout or a taskbar click comes and goes, and the app log shows what covered it and when it was raised.' `
+            -Outcome $(if ($onTopAnswer -eq 'no') { 'fail' } elseif ($onTopAnswer -eq 'unsure') { 'inconclusive' } elseif (@($raisedLines).Count -gt 0 -or @($leftUnderLines).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
+            -Detail $(
+                if ($onTopAnswer -eq 'no') { 'You answered no: the gauge was gone and stayed gone, which is the fault this check exists to catch.' }
+                elseif ($onTopAnswer -eq 'unsure') { 'You answered unsure.' }
+                elseif (@($raisedLines).Count -gt 0 -or @($leftUnderLines).Count -gt 0) { 'You answered yes; the log shows ' + @($raisedLines).Count + ' raise(s) and ' + @($leftUnderLines).Count + ' cover(s) left alone.' }
+                else { 'You answered yes, but the log shows nothing covered the gauge during the step, so the put-back was not exercised. Try again and open Start with the gauge in view.' })
 
         Write-Section -Run $run -Title 'The gauge follows auto-hide'
         Wait-Owner -Run $run -Text 'In the same Taskbar settings, turn on "Automatically hide the taskbar", then move the mouse away from the bottom of the screen so it slides away, then move it back down.'
@@ -227,24 +261,24 @@ try
         Write-Section -Run $run -Title 'Half C: battery, honestly'
         Wait-Owner -Run $run -Text 'Left-click the Earshot icon or the gauge to open the card.'
         $batteryAnswer = Read-Answer -Run $run -Question 'Does the card say "No reading" for the battery, never a percentage, and show nothing at all for charging or in-ear state?'
-        Add-Criterion -Run $run -Id 'battery-honestly-not-shown' -Criterion 'Before battery set-up, with an unproved decode table, the card never shows a battery figure, charging state or in-ear state it has not actually read.' `
+        Add-Criterion -Run $run -Id 'battery-honestly-not-shown' -Criterion 'Before a battery reading is confirmed, the card never shows a battery figure, charging state or in-ear state it has not actually read.' `
             -Outcome $(if ($batteryAnswer -eq 'yes') { 'pass' } elseif ($batteryAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $batteryAnswer + '. A "yes" here is the correct, honest state before battery set-up has proved anything; a "no" (a figure was shown) would mean something invented a reading, which is a real defect.')
 
         Write-Section -Run $run -Title 'Half E: where, connected'
         Wait-Owner -Run $run -Text 'Connect the AirPods to this PC: left-click the Earshot icon or the gauge, then click Connect on the card.'
         $whereThisPcAnswer = Read-Answer -Run $run -Question 'With the AirPods connected to this PC, does the "where" line on the card say "On this PC"?'
-        Add-Criterion -Run $run -Id 'where-this-pc' -Criterion 'The card reads "on this PC" from Core Audio alone, which needs no set-up and no decode table.' `
+        Add-Criterion -Run $run -Id 'where-this-pc' -Criterion 'The card reads "on this PC" from Core Audio alone, which needs no set-up.' `
             -Outcome $(if ($whereThisPcAnswer -eq 'yes') { 'pass' } elseif ($whereThisPcAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $whereThisPcAnswer + '.')
 
         Write-Section -Run $run -Title 'Half H: auto-pause, while it can still be exercised'
         Write-Line -Run $run -Text 'The AirPods are already connected and playing from the connect step above.'
         Wait-Owner -Run $run -Text 'Make sure something is playing from this PC through the AirPods, then take one bud out of your ear.'
-        $autoPauseAnswer = Read-Answer -Run $run -Question 'Did the audio keep playing on this PC (auto-pause must not act yet, because phase 0 has not proved the broadcast keeps arriving while playing from this PC)?'
-        Add-Criterion -Run $run -Id 'auto-pause-inert' -Criterion 'Auto-pause never acts while its own phase 0 gate is unproved.' `
+        $autoPauseAnswer = Read-Answer -Run $run -Question 'Did the audio keep playing on this PC (auto-pause must not act, because Earshot cannot yet tell when a bud is out of your ear)?'
+        Add-Criterion -Run $run -Id 'auto-pause-inert' -Criterion 'Auto-pause never acts while nothing can tell when a bud is out of the ear.' `
             -Outcome $(if ($autoPauseAnswer -eq 'yes') { 'pass' } elseif ($autoPauseAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $autoPauseAnswer + '. "Yes" (it kept playing) is the correct, honest state before phase 0.')
+            -Detail ('You answered ' + $autoPauseAnswer + '. "Yes" (it kept playing) is the correct, honest state: Earshot cannot yet tell when a bud is in the ear.')
 
         Write-Section -Run $run -Title 'Half E: where, not connected'
         Wait-Owner -Run $run -Text 'Disconnect the AirPods from this PC again: left-click the Earshot icon or the gauge, then click Disconnect on the card.'
@@ -259,9 +293,9 @@ try
         $caseCardAnswer = Read-Answer -Run $run -Question 'Did any small card appear near the taskbar by itself, without you clicking anything?'
         $toggleLines = Get-EarshotLogLines -Run $run -Pattern 'connect: ' -SinceUtc $caseOpenUtc
         Add-Finding -Run $run -Name 'caseOpenToggleLinesSeen' -Value @($toggleLines).Count
-        Add-Criterion -Run $run -Id 'case-open-card-honestly-not-shown' -Criterion 'Without a proved reading (no battery set-up, and no proved lid signal), the case-open card correctly stays silent rather than showing an unproved reading.' `
+        Add-Criterion -Run $run -Id 'case-open-card-honestly-not-shown' -Criterion 'While nothing can tell when the case lid is open, the case-open card correctly stays silent rather than showing an unproved reading.' `
             -Outcome $(if ($caseCardAnswer -eq 'no') { 'pass' } elseif ($caseCardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $caseCardAnswer + '. "No" is the correct, honest state before battery set-up and phase 0 prove the lid signal; "yes" would mean a card appeared for a set of AirPods this build cannot yet confirm are the owner''s.')
+            -Detail ('You answered ' + $caseCardAnswer + '. "No" is the correct, honest state: Earshot cannot yet tell when the case lid is open; "yes" would mean a card appeared for a set of AirPods this build cannot yet confirm are the owner''s.')
         Add-Criterion -Run $run -Id 'case-open-no-auto-connect' -Criterion 'Opening the case never connects the AirPods by itself, whether or not a card appeared.' `
             -Outcome $(if (@($toggleLines).Count -eq 0) { 'pass' } else { 'fail' }) `
             -Detail ([string]@($toggleLines).Count + ' connect or disconnect line(s) logged since the case was opened; there should be none.')
@@ -292,17 +326,41 @@ try
             -Outcome 'inconclusive' `
             -Detail 'The latch is only ever fed a reading Earshot has confirmed is the owner''s own AirPods and has proved, and this test does not prove one, so this cannot be exercised for real yet.'
 
-        Write-Section -Run $run -Title 'Half I: battery set-up, run once'
+        Write-Section -Run $run -Title 'Half I: battery set-up, run twice'
         Wait-Owner -Run $run -Text 'Click the Earshot icon to open the card, then click Set up battery. When the card asks you to open your AirPods case, open it next to this computer.'
         Wait-Owner -Run $run -Text 'The card now asks what your iPhone shows. Pick the nearest 10 for each part (if it ends in 5, pick the lower), then click Save.'
+        Wait-Owner -Run $run -Text 'Set up battery a second time in the same way, with the case open next to this computer and the picks matching what your iPhone shows now. One set-up is never enough to show a figure.'
         $setupStepsAnswer = Read-Answer -Run $run -Question 'Did the card go through the three steps: open the case, pick what your iPhone shows, then a result? Answer no if it stopped early and said it could not find your AirPods.'
         Add-Criterion -Run $run -Id 'battery-setup-flow' -Criterion 'Battery set-up goes through its three steps and ends on a result.' `
             -Outcome $(if ($setupStepsAnswer -eq 'yes') { 'pass' } else { 'inconclusive' }) `
             -Detail ('You answered ' + $setupStepsAnswer + '. A "no" is not a defect on its own: the set-up says it could not find your AirPods when it heard none, which depends on the case being open next to this computer.')
-        $setupHonestAnswer = Read-Answer -Run $run -Question 'If the card now shows a battery percentage, is it only for a part the set-up said it had set up, with nothing shown for a part it could not read?'
-        Add-Criterion -Run $run -Id 'battery-setup-honest-result' -Criterion 'After battery set-up, the card shows a battery figure only for a part the set-up proved, and nothing for a part it could not read.' `
+        $setupHonestAnswer = Read-Answer -Run $run -Question 'Compare the card with what your iPhone shows now. Does every battery figure the card shows agree with the iPhone (give or take one step of 10), with nothing shown for a part Earshot could not read?'
+        Add-Criterion -Run $run -Id 'battery-setup-honest-result' -Criterion 'After battery set-up, every battery figure the card shows agrees with the iPhone, and nothing is shown for a part that could not be read.' `
             -Outcome $(if ($setupHonestAnswer -eq 'yes') { 'pass' } elseif ($setupHonestAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $setupHonestAnswer + '. A "no" would mean a figure was shown that the set-up had not proved, which is a real defect.')
+            -Detail ('You answered ' + $setupHonestAnswer + '. A "no" would mean a figure was shown that disagrees with the iPhone, or one for a part that was not confirmed, which is a real defect.')
+
+        Write-Section -Run $run -Title 'The ring and its colour'
+        $ringAnswer = Read-Answer -Run $run -Question 'Is there a ring round the earbud mark on the gauge? (It appears only once both buds have been confirmed, so no ring is a fine answer before that.)'
+        $accentAnswer = 'unsure'
+        if ($ringAnswer -eq 'yes')
+        {
+            Wait-Owner -Run $run -Text 'Open Windows Settings, click Personalisation, click Colours, choose a different accent colour, then look at the gauge. Choose your usual accent colour again afterwards.'
+            $accentAnswer = Read-Answer -Run $run -Question 'Was the ring filled in your Windows accent colour, and did it change to the new one when you changed it?'
+        }
+
+        Add-Finding -Run $run -Name 'gaugeRingShown' -Value $ringAnswer -Detail 'Whether the gauge showed a ring after the two set-ups'
+        Add-Criterion -Run $run -Id 'gauge-ring-accent' -Criterion 'The gauge ring is filled in the Windows accent colour and follows it when it changes.' `
+            -Outcome $(if ($ringAnswer -ne 'yes') { 'inconclusive' } elseif ($accentAnswer -eq 'yes') { 'pass' } elseif ($accentAnswer -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail $(
+                if ($ringAnswer -ne 'yes') { 'There was no ring (you answered ' + $ringAnswer + '), so nothing here could be looked at. Both buds need confirming first, which takes two set-ups at different bud levels.' }
+                else { 'You answered ' + $accentAnswer + ' about the accent colour.' })
+
+        Write-Section -Run $run -Title 'A reading older than an hour'
+        Wait-Owner -Run $run -Text 'Put the AirPods in the case and close it, or take them away from this computer, and leave them for over an hour. Then hover over the gauge. If you cannot wait, answer "not sure" below.'
+        $staleAnswer = Read-Answer -Run $run -Question 'More than an hour after the AirPods were last heard, does the gauge show only the earbud mark, with no ring and no number, and does hovering say "No recent reading"?'
+        Add-Criterion -Run $run -Id 'gauge-reading-older-than-an-hour' -Criterion 'A battery reading older than one hour counts as no recent reading: the gauge shows only the earbud mark and says so.' `
+            -Outcome $(if ($staleAnswer -eq 'yes') { 'pass' } elseif ($staleAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $staleAnswer + '. "Not sure" is the honest answer when you did not wait the hour.')
 
         Save-EarshotLog -Run $run
     }

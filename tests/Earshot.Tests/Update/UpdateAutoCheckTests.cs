@@ -47,11 +47,13 @@ public sealed class UpdateAutoCheckTests
             {
                 Interlocked.Increment(ref _checks);
                 return Task.CompletedTask;
-            }, TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(30));
+            }, TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(30), Log);
             Run = Task.Run(() => auto.RunAsync(_cancel.Token));
         }
 
         public ManualTimeProvider Time { get; } = new();
+
+        public CapturingLog Log { get; } = new();
 
         public MemoryStamp Stamp { get; } = new();
 
@@ -272,6 +274,31 @@ public sealed class UpdateAutoCheckTests
         loop.Dispose();
 
         Assert.IsTrue(loop.Run.IsCompletedSuccessfully, "Cancelling ends the loop quietly.");
+    }
+
+    private sealed class ThrowingStamp : IUpdateCheckStamp
+    {
+        public DateTimeOffset? Read() => throw new InvalidOperationException("the stamp could not be read");
+
+        public void Write(DateTimeOffset when)
+        {
+        }
+    }
+
+    // The loop runs on a pool thread nobody awaits. Something it did not expect ends it, and that is said in the log
+    // with the exception, instead of the daily checks stopping in silence.
+    [TestMethod]
+    public void AnExceptionThatEndsTheLoopIsLoggedWithItsType()
+    {
+        var time = new ManualTimeProvider();
+        var log = new CapturingLog();
+        var auto = new UpdateAutoCheck(time, () => true, new ThrowingStamp(), _ => Task.CompletedTask, TimeSpan.Zero, TimeSpan.FromMinutes(30), log);
+
+        Task run = Task.Run(() => auto.RunAsync(CancellationToken.None));
+        Assert.IsTrue(run.Wait(TimeSpan.FromSeconds(10)), "The loop did not end.");
+
+        Assert.IsTrue(log.Has(LogLevel.Error, "InvalidOperationException"), "The loop ended without saying why.");
+        Assert.IsTrue(log.Has(LogLevel.Error, "no more automatic checks"));
     }
 
     // ----- the stamp file -----
