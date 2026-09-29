@@ -87,7 +87,25 @@ public sealed class GaugeRendererTests
 
         Assert.AreEqual(width, bitmap.Width);
         Assert.AreEqual(height, bitmap.Height);
-        Assert.AreEqual(width, GaugeRenderer.WidthFor(dpi));
+        Assert.AreEqual(width, GaugeLayout.For(dpi).Width);
+    }
+
+    // Every caller now says what time it is (the reading's age is drawn from it), so no overload may take a
+    // snapshot and quietly read the clock itself, and the width comes from GaugeLayout, not a second route.
+    [TestMethod]
+    public void NoRenderOverloadTakesASnapshotWithoutATimeAndThereIsNoSecondWidthRoute()
+    {
+        const System.Reflection.BindingFlags all =
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+        string[] offenders = typeof(GaugeRenderer).GetMethods(all)
+            .Where(m => m.Name == "Render"
+                && m.GetParameters().Any(p => p.ParameterType == typeof(WidgetSnapshot))
+                && !m.GetParameters().Any(p => p.ParameterType == typeof(DateTimeOffset)))
+            .Select(m => m.ToString() ?? m.Name)
+            .ToArray();
+
+        Assert.AreEqual(0, offenders.Length, "Render overloads that read the clock themselves: " + string.Join("; ", offenders));
+        Assert.IsNull(typeof(GaugeRenderer).GetMethod("WidthFor", all), "GaugeLayout.For(dpi).Width is the one way to get the width.");
     }
 
     // ---- The ring ----

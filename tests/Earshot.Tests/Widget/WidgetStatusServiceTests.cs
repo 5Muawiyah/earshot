@@ -933,6 +933,78 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher, "A failing first start must still have scheduled a retry.");
     }
 
+    // With Bluetooth off the real watcher's Start throws (0x800710DF) instead of raising Stopped with
+    // RadioNotAvailable. The service must show the same state as for that Stopped event, log the raw code,
+    // report the set-up as unavailable, and keep retrying on the doubling schedule until Bluetooth is on.
+    [TestMethod]
+    public void AStartThatFailsBecauseBluetoothIsOffShowsAsRadioNotAvailableAndKeepsRetrying()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
+
+        service.Start();
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(WidgetWatcherState.Stopped, snapshot.Watcher);
+        Assert.AreEqual(1, snapshot.WatcherErrorCode, "The same code a Stopped(RadioNotAvailable) carries.");
+        Assert.AreEqual("RadioNotAvailable", snapshot.WatcherErrorName);
+        Assert.IsFalse(service.SetupAvailable, "The set-up needs the watcher, so it must say Bluetooth is off.");
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "0x800710DF"), "The raw code must be in the log.");
+
+        // The same state as the event path, field for field.
+        _source = new FakeAdvertisementSource();
+        using WidgetStatusService other = NewService(store);
+        other.Start();
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
+        Assert.AreEqual(other.Current.WatcherErrorCode, snapshot.WatcherErrorCode);
+        Assert.AreEqual(other.Current.WatcherErrorName, snapshot.WatcherErrorName);
+        Assert.AreEqual(other.Current.Watcher, snapshot.Watcher);
+    }
+
+    [TestMethod]
+    public void ABluetoothOffStartIsRetriedOnTheDoublingScheduleAndRecoversWhenBluetoothComesOn()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
+        service.Start();
+        int starts = _source.StartCalls;
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay - TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts, _source.StartCalls, "Too early for the first retry.");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The first retry must run at the retry delay.");
+        Assert.AreEqual(WidgetWatcherState.Stopped, service.Current.Watcher);
+        Assert.AreEqual("RadioNotAvailable", service.Current.WatcherErrorName, "Every retry keeps the radio-off state.");
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 2 - TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The second retry waits twice as long.");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 2, _source.StartCalls);
+
+        _source.StartResult = null; // Bluetooth is now on
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 4);
+
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+        Assert.IsNull(service.Current.WatcherErrorCode, "A successful start clears the radio-off error.");
+        Assert.IsTrue(service.SetupAvailable);
+    }
+
+    // Any other failing code is still shown as itself, not as Bluetooth being off.
+    [TestMethod]
+    public void AStartThatFailsForAnotherReasonIsNotShownAsBluetoothOff()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        _source.StartResult = () => StepOutcomes.FromHResult("fake-start", unchecked((int)0x800710DE), detail: "COMException", ok: false);
+
+        service.Start();
+
+        Assert.AreEqual(unchecked((int)0x800710DE), service.Current.WatcherErrorCode);
+        Assert.AreNotEqual("RadioNotAvailable", service.Current.WatcherErrorName);
+    }
+
     // Retry gaps, second half: a retry that was already dequeued from the thread pool when Suspend ran
     // (disposing a timer never stops a callback already in flight) must not start the watcher during
     // suspend. OnRetryDue is called directly to stand in for that already-running callback, since the fake
@@ -1195,6 +1267,60 @@ public sealed class WidgetStatusServiceTests : IDisposable
             "The exception's own code must be logged.");
     }
 
+    // The retry timer is one-shot, so a callback that throws used to leave nothing armed: the log said it
+    // would try again and it never did. Two throwing cycles, then a working one, prove it keeps trying on
+    // the doubling schedule and recovers.
+    [TestMethod]
+    public void AThrowingRetryIsArmedAgainOnTheDoublingScheduleAndRecoversOnceItWorks()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)); // arms the first retry
+        int starts = _source.StartCalls;
+        _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay);
+        Assert.AreEqual(starts + 1, _source.StartCalls, "First cycle: the retry runs and throws.");
+        Assert.AreEqual(1, RetryErrorCount());
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 2 - TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The next attempt waits twice as long.");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 2, _source.StartCalls, "Second cycle: a throwing callback must have armed it again.");
+        Assert.AreEqual(2, RetryErrorCount());
+
+        _source.StateOverride = null;
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 4);
+
+        Assert.AreEqual(starts + 3, _source.StartCalls, "Third cycle: still armed.");
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _clock.Advance(WidgetTiming.WatcherRetryLimit * 2);
+        Assert.AreEqual(starts + 3, _source.StartCalls, "Once the watcher runs, nothing is left armed.");
+    }
+
+    // A throw that lands after Suspend must not arm anything: Resume starts the watcher itself.
+    [TestMethod]
+    public void AThrowingRetryDoesNotArmAgainWhileSuspended()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
+        _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
+        service.Suspend();
+        _source.StateOverride = null;
+        int starts = _source.StartCalls;
+
+        _clock.Advance(WidgetTiming.WatcherRetryLimit * 2);
+
+        Assert.AreEqual(starts, _source.StartCalls, "Nothing starts the watcher while suspended.");
+    }
+
+    private int RetryErrorCount() =>
+        _log.Entries.Count(e => e.Level == Earshot.Contracts.LogLevel.Error && e.Message.Contains("0x80070005", StringComparison.OrdinalIgnoreCase));
+
     [TestMethod]
     public void RefreshTriesOnceAtOnce()
     {
@@ -1224,8 +1350,15 @@ public sealed class WidgetStatusServiceTests : IDisposable
     // The hex-only shapes above never covered a decimal dump of a section (a comma-separated run of byte
     // values, 0-255, five or more in a row - the same width as the hex run above, since a raw section is at
     // least 5 bytes here).
+    //
+    // The last shape is base64 (Convert.ToBase64String), which is what a dump of a section looks like when
+    // someone reaches for the shortest text form: eight or more characters from the base64 alphabet, or seven
+    // followed by "=" padding (a 5-byte section is seven characters and one "="), with at least one digit, one
+    // capital and one lower-case letter. Ordinary log words are letters only, or carry a digit only after an
+    // "=" (a counter), so they do not match; a real encoded run of that length has all three almost always.
     private static readonly Regex ForbiddenByteRun = new(
-        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b|(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){4,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b",
+        @"[0-9A-F]{5,}|([0-9A-F]{2}[:\- ]){2,}[0-9A-F]{2}|\b\d{12}\b|(?:\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b[,\s]+){4,}\b(?:25[0-5]|2[0-4]\d|1\d\d|\d\d?)\b" +
+        @"|(?<![A-Za-z0-9+/])(?=[A-Za-z0-9+/]*[0-9])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])(?:[A-Za-z0-9+/]{7,}={1,2}|[A-Za-z0-9+/]{8,})",
         RegexOptions.CultureInvariant);
 
     // The regex missed a run of hex bytes separated by plain spaces (BitConverter.ToString's own separator
@@ -1240,6 +1373,31 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public void ForbiddenByteRunCatchesADecimalDumpOfASection()
     {
         Assert.IsTrue(ForbiddenByteRun.IsMatch("raw bytes 6, 32, 33, 34, 35, 36 read"), "A decimal dump of a section must be caught.");
+    }
+
+    // A section logged as base64 (Convert.ToBase64String) is as much a dump of bytes as the hex and decimal
+    // shapes above, and none of them matched it. The samples are built at run time from arithmetic, so no
+    // literal payload sits in this file.
+    [TestMethod]
+    [DataRow(5)]
+    [DataRow(9)]
+    [DataRow(17)]
+    [DataRow(24)]
+    public void ForbiddenByteRunCatchesABase64DumpOfASection(int length)
+    {
+        byte[] section = Enumerable.Range(0, length).Select(i => (byte)(31 + (i * 37 % 200))).ToArray();
+        string dump = Convert.ToBase64String(section);
+
+        Assert.IsTrue(ForbiddenByteRun.IsMatch("section " + dump + " read"), "A base64 dump of a " + length + "-byte section (" + dump + ") must be caught.");
+    }
+
+    // Ordinary log words and the widget's own counters names are runs of letters from the base64 alphabet
+    // too; only a run that also has a digit and both cases reads as encoded bytes.
+    [TestMethod]
+    public void ForbiddenByteRunLeavesOrdinaryWordsAlone()
+    {
+        Assert.IsFalse(ForbiddenByteRun.IsMatch("Widget counters: watcher=Started signalBelowThreshold=0 batteryInconsistent=0 modelOrColourMismatch=0"));
+        Assert.IsFalse(ForbiddenByteRun.IsMatch("Widget watcher start: watcher-start ERROR_DEVICE_NOT_AVAILABLE (Bluetooth is off)."));
     }
 
     [TestMethod]
@@ -1283,14 +1441,21 @@ public sealed class WidgetStatusServiceTests : IDisposable
         int baseline = _log.Entries.Count;
         service.Start();
 
-        _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), Rssi: -60, _clock.GetUtcNow(), SenderTag: 1));
+        byte[] payload = WidgetFixtures.UnknownSeventeenByteForm();
+        _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, payload, Rssi: -60, _clock.GetUtcNow(), SenderTag: 1));
         _clock.Advance(WidgetTiming.CountersLogInterval);
+
+        // The exact text a base64 dump of this very payload (whole, or without its first byte) would be.
+        string asBase64 = Convert.ToBase64String(payload);
+        string withoutPrefix = Convert.ToBase64String(payload.AsSpan(1));
 
         List<LogEntry> widgetEntries = _log.Entries.Skip(baseline).ToList();
         Assert.IsTrue(widgetEntries.Count > 0, "The widget must have logged something to check.");
         foreach (LogEntry entry in widgetEntries)
         {
             Assert.IsFalse(ForbiddenByteRun.IsMatch(entry.Message), "A log line on the unknown-form path carried something that looks like raw bytes: " + entry.Message);
+            Assert.IsFalse(entry.Message.Contains(asBase64, StringComparison.Ordinal), "A log line carried the payload as base64: " + entry.Message);
+            Assert.IsFalse(entry.Message.Contains(withoutPrefix, StringComparison.Ordinal), "A log line carried the payload's body as base64: " + entry.Message);
         }
     }
 

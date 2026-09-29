@@ -92,15 +92,12 @@ internal sealed class OtherDeviceNameForm : Form
         CaptionText = caption.Text;
     }
 
-    // The typed label, trimmed and capped again defensively: TextBox.MaxLength stops a person typing or
-    // pasting past it, but does not touch text assigned to Text programmatically, so a caller (or a test)
-    // that sets a longer value directly must still get one that fits the setting it is going into. There
-    // is no "unusable" state to refuse here: an empty label is a valid choice (WidgetCopy.OnElsewhere falls
-    // back to "On another device" for it), so the caller reads this only once ShowDialog() has returned OK,
-    // the same convention DevicePickerForm.Choice() follows.
-    internal string Label()
-    {
-        string text = _name.Text.Trim();
-        return text.Length > WidgetSettings.MaxOtherDeviceLabelLength ? text[..WidgetSettings.MaxOtherDeviceLabelLength] : text;
-    }
+    // The typed label, cleaned exactly as the settings store cleans it (control, format and separator
+    // characters removed, trimmed, cut at a text element): TextBox.MaxLength stops a person typing or
+    // pasting past the cap, but does not touch text assigned to Text programmatically, and a paste can
+    // carry characters the store would remove, so what leaves the form is already what the store will keep.
+    // There is no "unusable" state to refuse here: an empty label is a valid choice (WidgetCopy.OnElsewhere
+    // falls back to "On another device" for it), so the caller reads this only once ShowDialog() has
+    // returned OK, the same convention DevicePickerForm.Choice() follows.
+    internal string Label() => WidgetSettings.CleanedLabel(_name.Text);
 }

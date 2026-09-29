@@ -632,8 +632,19 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             // A failed start's own error must stand, not be discarded the way it used to be here - a
             // Stopped event is not coming to carry it, since none was ever raised for this attempt.
-            _watcherErrorCode = step.Code;
-            _watcherErrorName = step.CodeName;
+            if (AdvertisementSourceCodes.IsRadioOff(step))
+            {
+                // Bluetooth is off: shown as the RadioNotAvailable a Stopped event would have carried, so
+                // the card, the set-up and the retry treat both the same way. The raw code stays in the log
+                // line below and in the step.
+                _watcherErrorCode = AdvertisementSourceCodes.RadioNotAvailableCode;
+                _watcherErrorName = AdvertisementSourceCodes.RadioNotAvailableName;
+            }
+            else
+            {
+                _watcherErrorCode = step.Code;
+                _watcherErrorName = step.CodeName;
+            }
         }
 
         LogStepLocked("start", step);
@@ -1063,8 +1074,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     // Runs on a real timer thread when the real advertisement source is live: an unhandled exception there
     // (a COM property on the watcher throwing, for instance) would otherwise end the whole process, so the
-    // entire attempt is caught. The raw code is logged, never swallowed, and the retry is left armed at its
-    // current delay so the doubling schedule simply tries again rather than stopping forever.
+    // entire attempt is caught. The raw code is logged, never swallowed, and the catch arms the next attempt
+    // on the doubling schedule (the timer is one-shot, so it would otherwise stop trying for good).
     //
     // A retry that was queued before Suspend must not start the watcher during suspend. Suspend cancels the
     // timer under the same lock this checks _suspended and _source in, so whichever of the two runs first is
@@ -1150,6 +1161,18 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         catch (Exception ex)
         {
             _log.Error("Widget watcher retry failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+
+            // The timer is one-shot, so nothing else would ever try again: arm the next attempt here, as any
+            // other failed attempt does, unless something has since stopped, suspended or replaced the source.
+            lock (_gate)
+            {
+                if (!_closed && !_suspended && !_stopRequested && ReferenceEquals(_source, source))
+                {
+                    _retryDelay = _retryDelay <= TimeSpan.Zero ? WidgetTiming.WatcherRetryDelay : Min(_retryDelay * 2, WidgetTiming.WatcherRetryLimit);
+                    ArmRetryTimerLocked();
+                }
+            }
+
             return;
         }
 

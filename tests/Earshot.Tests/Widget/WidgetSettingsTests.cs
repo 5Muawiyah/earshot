@@ -145,6 +145,119 @@ public sealed class WidgetSettingsTests : IDisposable
         Assert.IsTrue(notes.Any(n => n.Step == "clamp:OtherDeviceLabel"));
     }
 
+    // Characters that make a label read as something other than its own text, or as empty, given as code
+    // points so the source shows exactly which one each row is (and no invisible character sits in this
+    // file). The tag character is outside the Basic Multilingual Plane, a surrogate pair in UTF-16, which a
+    // per-char scan cannot see.
+    [TestMethod]
+    [DataRow(0x200E, "left-to-right mark")]
+    [DataRow(0x200F, "right-to-left mark")]
+    [DataRow(0x061C, "Arabic letter mark")]
+    [DataRow(0x202A, "left-to-right embedding")]
+    [DataRow(0x202E, "right-to-left override")]
+    [DataRow(0x2066, "left-to-right isolate")]
+    [DataRow(0x2069, "pop directional isolate")]
+    [DataRow(0x2028, "line separator")]
+    [DataRow(0x2029, "paragraph separator")]
+    [DataRow(0xFEFF, "byte order mark")]
+    [DataRow(0x200B, "zero width space")]
+    [DataRow(0x200C, "zero width non-joiner")]
+    [DataRow(0x200D, "zero width joiner")]
+    [DataRow(0x2060, "word joiner")]
+    [DataRow(0x00AD, "soft hyphen")]
+    [DataRow(0x0007, "bell")]
+    [DataRow(0xE0041, "tag latin capital letter a")]
+    public void TheLabelRemovesFormatAndSeparatorCharacters(int codePoint, string name)
+    {
+        string character = char.ConvertFromUtf32(codePoint);
+        var settings = WidgetSettings.Default with { OtherDeviceLabel = "Sam" + character + "'s" + character + " phone" };
+
+        WidgetSettings clamped = settings.Clamped(out IReadOnlyList<StepOutcome> notes);
+
+        Assert.AreEqual("Sam's phone", clamped.OtherDeviceLabel, name + " must be removed.");
+        Assert.IsTrue(notes.Any(n => n.Step == "clamp:OtherDeviceLabel"), name + " must be recorded as a cleaning.");
+    }
+
+    // A label made only of such characters ends up empty, which is a valid choice (the card then says "On
+    // another device"), never a blank that reads as a name.
+    [TestMethod]
+    public void ALabelOfOnlyInvisibleCharactersBecomesEmpty()
+    {
+        string invisible = char.ConvertFromUtf32(0x200B) + char.ConvertFromUtf32(0x200E) + char.ConvertFromUtf32(0xFEFF) + char.ConvertFromUtf32(0x2028);
+        var settings = WidgetSettings.Default with { OtherDeviceLabel = invisible };
+
+        Assert.AreEqual("", settings.Clamped(out _).OtherDeviceLabel);
+    }
+
+    // The cap is cut on a text element, never inside a surrogate pair or between a letter and its
+    // combining mark. A cut at exactly 40 UTF-16 units would leave half an emoji here.
+    [TestMethod]
+    public void TheLabelIsNeverCutInsideASurrogatePair()
+    {
+        string smile = char.ConvertFromUtf32(0x1F600); // two UTF-16 units
+        var settings = WidgetSettings.Default with { OtherDeviceLabel = new string('x', 39) + smile + "y" };
+
+        string label = settings.Clamped(out _).OtherDeviceLabel;
+
+        Assert.AreEqual(new string('x', 39), label, "The emoji would straddle the cap, so it is left out whole.");
+        AssertNoLoneSurrogate(label);
+
+        // An emoji that fits is kept whole.
+        var fits = WidgetSettings.Default with { OtherDeviceLabel = new string('x', 38) + smile + "y" };
+        Assert.AreEqual(new string('x', 38) + smile, fits.Clamped(out _).OtherDeviceLabel);
+    }
+
+    [TestMethod]
+    public void TheLabelIsNeverCutBetweenALetterAndItsCombiningMark()
+    {
+        string accented = "e" + char.ConvertFromUtf32(0x0301); // one text element, two UTF-16 units
+        var settings = WidgetSettings.Default with { OtherDeviceLabel = new string('x', 39) + accented };
+
+        string label = settings.Clamped(out _).OtherDeviceLabel;
+
+        Assert.AreEqual(new string('x', 39), label, "A cut at 40 units would keep the 'e' and drop its accent.");
+    }
+
+    [TestMethod]
+    public void ALoneSurrogateIsRemovedNotTurnedIntoAReplacementCharacter()
+    {
+        string lone = ((char)0xD83D).ToString(); // a high surrogate with no low half after it
+        var settings = WidgetSettings.Default with { OtherDeviceLabel = "Sam" + lone };
+
+        Assert.AreEqual("Sam", settings.Clamped(out _).OtherDeviceLabel);
+    }
+
+    [TestMethod]
+    public void CleaningALabelTwiceChangesNothingTheSecondTime()
+    {
+        string mark = char.ConvertFromUtf32(0x200E);
+        string smile = char.ConvertFromUtf32(0x1F600);
+        var settings = WidgetSettings.Default with { OtherDeviceLabel = "  " + mark + "A" + char.ConvertFromUtf32(0x0301) + new string('y', 50) + smile + "  " };
+
+        WidgetSettings once = settings.Clamped(out _);
+        WidgetSettings twice = once.Clamped(out IReadOnlyList<StepOutcome> secondNotes);
+
+        Assert.AreEqual(once.OtherDeviceLabel, twice.OtherDeviceLabel);
+        Assert.IsFalse(secondNotes.Any(n => n.Step == "clamp:OtherDeviceLabel"), "A clean label must not be recorded as cleaned again.");
+        Assert.IsTrue(once.OtherDeviceLabel.Length <= WidgetSettings.MaxOtherDeviceLabelLength);
+    }
+
+    private static void AssertNoLoneSurrogate(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]))
+            {
+                Assert.IsTrue(i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]), "A high surrogate at " + i + " has no low half.");
+                i++;
+            }
+            else
+            {
+                Assert.IsFalse(char.IsLowSurrogate(text[i]), "A low surrogate at " + i + " has no high half.");
+            }
+        }
+    }
+
     // WidgetSettings.Clamped had no caller in production before this fix: a settings.json a stale build or
     // a hand edit left with a control character, a bidi override, an over-length label or an off-list
     // threshold loaded exactly as written and reached the card unchanged.

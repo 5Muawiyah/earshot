@@ -38,8 +38,6 @@ internal static class GaugeRenderer
     private const float BoltGridWidth = 9f;
     private const float BoltGridHeight = 12f;
 
-    public static int WidthFor(int dpi) => GaugeLayout.For(dpi).Width;
-
     // The gauge for a snapshot at a moment: the content the snapshot gives, drawn in the palette for the
     // theme the ink says (a dark ink is the light theme). height is the taskbar's own thickness, which the
     // gauge no longer depends on (the window is a fixed size, centred by the placement); it stays in the
@@ -55,10 +53,6 @@ internal static class GaugeRenderer
         GaugePalette palette = GaugePalette.Create(light, accentColour, highContrast: false, ink);
         return Render(GaugeContent.From(snapshot, now, settings ?? GaugeDisplaySettings.Default), palette, GaugeLayout.For(dpi), hover, fontFamily);
     }
-
-    // The gauge as an older caller asks for it: no time given, so the time now.
-    public static Bitmap Render(WidgetSnapshot snapshot, int dpi, int height, Color ink, bool hover, string fontFamily) =>
-        Render(snapshot, DateTimeOffset.UtcNow, dpi, height, ink, hover, fontFamily);
 
     // The gauge bitmap, layout.Width x layout.Height, Format32bppPArgb so it can go straight to
     // UpdateLayeredWindow. The caller disposes it.

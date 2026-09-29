@@ -15,6 +15,9 @@ namespace Earshot.Widget;
 public sealed record WidgetSettings
 {
     public const int DefaultLowBatteryThresholdPercent = 20;
+    // A design choice, not a platform limit: 40 UTF-16 units keeps the card's "On your <label>" line and the
+    // gauge tooltip to one short line. It is counted in the unit TextBox.MaxLength counts and cut on a text
+    // element boundary (CleanedLabel), so a longer label is shortened, never split mid-character.
     public const int MaxOtherDeviceLabelLength = 40;
 
     // The data pipeline: the BLE watcher, and everything that reads from it (the gauge, the card, the low
@@ -61,7 +64,7 @@ public sealed record WidgetSettings
         this with { Enabled = ShowOnTaskbar || LowBatteryAlert || CaseOpenCard || AutoPause };
 
     // A threshold that is not a multiple of 10 or is outside 10 to 90 (the same list the menu itself
-    // offers) becomes the default and is recorded; the label has its control characters and bidi override
+    // offers) becomes the default and is recorded; the label has its control, format and separator
     // characters removed, is trimmed, is cut at MaxOtherDeviceLabelLength, and is recorded when any of that
     // changed it. Nothing here makes JsonSettingsStore.Validate fail: a bad value is corrected in place,
     // never rejected outright, since a settings write must never fail just because the label field carried
@@ -69,6 +72,7 @@ public sealed record WidgetSettings
     public WidgetSettings Clamped(out IReadOnlyList<StepOutcome> notes)
     {
         var list = new List<StepOutcome>();
+
         int threshold = LowBatteryThresholdPercent;
         if (threshold is < 10 or > 90 || threshold % 10 != 0)
         {
@@ -101,29 +105,80 @@ public sealed record WidgetSettings
         return result;
     }
 
-    // The Unicode bidirectional formatting characters that can make a label read as something other than
-    // its own text (a right-to-left override made to disguise a file extension is the classic example):
-    // LRE, RLE, PDF, LRO, RLO (U+202A-U+202E) and the newer isolates LRI, RLI, FSI, PDI (U+2066-U+2069).
+    // Whether a character may stay in the label. Control characters (Cc), and every character in the
+    // Unicode categories Format (Cf), Line separator (Zl) and Paragraph separator (Zp) go. Cf is what
+    // holds the marks that make a label read as something other than its own text or as empty: the
+    // bidirectional marks and overrides (U+200E, U+200F, U+061C, U+202A-U+202E, U+2066-U+2069), the
+    // zero-width characters (U+200B-U+200D, U+2060), the byte order mark (U+FEFF) and the tag characters.
+    // Zl and Zp are U+2028 and U+2029. Tested on the whole code point, so a Format character outside the
+    // Basic Multilingual Plane is caught too.
     // https://www.unicode.org/reports/tr9/#Explicit_Directional_Formatting_Characters
-    private static bool IsBidiOverride(char c) => c is (>= '‪' and <= '‮') or (>= '⁦' and <= '⁩');
+    // https://www.unicode.org/reports/tr44/#General_Category_Values
+    private static bool IsRemovedFromLabel(Rune rune) => Rune.GetUnicodeCategory(rune) is
+        UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
+
+    // The label as the card may show it. Also what the name form returns, so the form and the store agree.
+    internal static string CleanedLabel(string? label)
+    {
+        string text = label ?? "";
+        var builder = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            Rune rune;
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                rune = new Rune(text[i], text[i + 1]);
+                i++;
+            }
+            else if (char.IsSurrogate(text[i]))
+            {
+                continue; // a lone half of a pair is not a character
+            }
+            else
+            {
+                rune = new Rune(text[i]);
+            }
+
+            if (!IsRemovedFromLabel(rune))
+            {
+                builder.Append(rune.ToString());
+            }
+        }
+
+        return CutAtTextElement(builder.ToString().Trim(), MaxOtherDeviceLabelLength);
+    }
+
+    // Keeps whole text elements (a letter with its combining marks, an emoji sequence, a surrogate pair)
+    // while the total stays within maxUtf16Units, so nothing is ever cut in the middle of one. Counted in
+    // UTF-16 units, the unit TextBox.MaxLength counts, so the name form's own cap and this one agree. An
+    // element that alone is longer than the cap is left out whole.
+    private static string CutAtTextElement(string text, int maxUtf16Units)
+    {
+        if (text.Length <= maxUtf16Units)
+        {
+            return text;
+        }
+
+        int kept = 0;
+        TextElementEnumerator elements = StringInfo.GetTextElementEnumerator(text);
+        while (elements.MoveNext())
+        {
+            string element = elements.GetTextElement();
+            if (kept + element.Length > maxUtf16Units)
+            {
+                break;
+            }
+
+            kept += element.Length;
+        }
+
+        return text[..kept].TrimEnd();
+    }
 
     private static string CleanLabel(string label, List<StepOutcome> notes)
     {
         string original = label ?? "";
-        var builder = new StringBuilder(original.Length);
-        foreach (char c in original)
-        {
-            if (!char.IsControl(c) && !IsBidiOverride(c))
-            {
-                builder.Append(c);
-            }
-        }
-
-        string cleaned = builder.ToString().Trim();
-        if (cleaned.Length > MaxOtherDeviceLabelLength)
-        {
-            cleaned = cleaned[..MaxOtherDeviceLabelLength];
-        }
+        string cleaned = CleanedLabel(original);
 
         if (!string.Equals(cleaned, original, StringComparison.Ordinal))
         {

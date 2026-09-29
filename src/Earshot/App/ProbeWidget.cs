@@ -31,15 +31,17 @@ namespace Earshot;
 // the finished layout, not a claim about what the widget shows on the owner's own hardware.
 //
 // The card's window handle, if RenderContent's caller ever created one at all, is never shown, so
-// DwmExtendFrameIntoClientArea's translucent Mica backdrop is never actually composited by the desktop:
-// WidgetCard.RenderContent clears to fully transparent whenever _dwmBackdropOk reads true regardless,
-// which it does even without a handle, and painting straight onto an already-opaque destination bitmap
-// bakes that to opaque black with no alpha left to recover afterwards. RenderProbeWidgetCard below instead
-// sets the card's own OverrideBackgroundForCaptureOnly before calling Render, so RenderContent clears to a
-// solid colour directly, in the same colour DWM's own transient material measures at (measured locally,
-// not a citation): #545454 for
-// the dark theme, #D3D3D3 for the light one, so a light-theme capture is not just pale content on what
-// would otherwise be an opaque black square.
+// the transient backdrop the card asks DWM for (DwmExtendFrameIntoClientArea with a transient window
+// backdrop) is never actually composited by the desktop: WidgetCard.RenderContent clears to fully
+// transparent whenever _dwmBackdropOk reads true regardless, which it does even without a handle, and
+// painting straight onto an already-opaque destination bitmap bakes that to opaque black with no alpha
+// left to recover afterwards. RenderProbeWidgetCard below instead sets the card's own
+// OverrideBackgroundForCaptureOnly before calling Render, so RenderContent clears to a solid colour
+// directly. The colours are one sample each, read off the screen on this PC and not a citation, and the
+// backdrop is translucent, so what a desktop really shows behind the card changes with the wallpaper and
+// the theme: #545454 was read for the dark theme and #D3D3D3 for the light one. They stand in so a
+// light-theme capture is not just pale content on what would otherwise be an opaque black square; they
+// are not the backdrop's colour.
 internal static partial class Program
 {
     internal static readonly IReadOnlyList<uint> ProbeWidgetDpis = [96, 120, 144];
@@ -50,10 +52,11 @@ internal static partial class Program
         ("light-taskbar-black-ink", Color.Black),
     ];
 
-    // The transient material colour DWM actually measures at, sampled locally rather than assumed: dark
-    // theme's Mica/Acrylic backdrop reads #545454, light theme's reads #D3D3D3. Used only to give an
-    // offscreen, never-composited card capture a readable, theme-appropriate background; never drawn by
-    // the real, on-screen card, which gets the real translucent backdrop DWM itself composites.
+    // One sample of the transient backdrop's colour per theme, read off the screen on this PC (dark theme
+    // #545454, light theme #D3D3D3), not a property of the material: the backdrop is translucent and shows
+    // the wallpaper through. Used only to give an offscreen, never-composited card capture a readable,
+    // theme-appropriate background; never drawn by the real, on-screen card, which gets the real backdrop
+    // DWM itself composites.
     internal static readonly Color DarkThemeBackdrop = Color.FromArgb(0x54, 0x54, 0x54);
     internal static readonly Color LightThemeBackdrop = Color.FromArgb(0xD3, 0xD3, 0xD3);
 
@@ -122,12 +125,12 @@ internal static partial class Program
             {
                 foreach ((string inkName, Color ink) in ProbeWidgetInks)
                 {
-                    int width = GaugeRenderer.WidthFor((int)dpi);
+                    int width = GaugeLayout.For((int)dpi).Width;
                     int height = (int)Math.Round(48 * dpi / 96.0);
                     string name = string.Create(CultureInfo.InvariantCulture,
                         $"gauge-{snapshotName}-{dpi}dpi-{width}x{height}-{inkName}.png");
                     string path = Path.Combine(folder, name);
-                    files.Add(RenderProbeWidget(snapshotName, snapshot, dpi, height, inkName, ink, fontFamily, path));
+                    files.Add(RenderProbeWidget(snapshotName, snapshot, now, dpi, height, inkName, ink, fontFamily, path));
                 }
             }
         }
@@ -165,11 +168,12 @@ internal static partial class Program
     }
 
     private static ProbeWidgetFile RenderProbeWidget(
-        string snapshotName, WidgetSnapshot snapshot, uint dpi, int height, string inkName, Color ink, string fontFamily, string path)
+        string snapshotName, WidgetSnapshot snapshot, DateTimeOffset now, uint dpi, int height, string inkName, Color ink,
+        string fontFamily, string path)
     {
         try
         {
-            using Bitmap bitmap = GaugeRenderer.Render(snapshot, (int)dpi, height, ink, hover: false, fontFamily);
+            using Bitmap bitmap = GaugeRenderer.Render(snapshot, now, (int)dpi, height, ink, hover: false, fontFamily);
             bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
             var info = new FileInfo(path);
             return new ProbeWidgetFile(snapshotName, dpi, inkName, path, (int)info.Length, null);

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using Earshot.Contracts;
@@ -157,6 +158,13 @@ internal sealed class WinRtAdvertisementSource : IAdvertisementSource
                 _watcher = watcher;
                 watcher.Start();
                 return StepOutcomes.FromHResult(StartStep, 0, detail: "status " + watcher.Status);
+            }
+            catch (COMException ex) when (ex.HResult == AdvertisementSourceCodes.RadioOffHResult)
+            {
+                // Bluetooth is off. Start throws here rather than raising Stopped with RadioNotAvailable, so
+                // no event is coming to carry the reason. Not a silent catch: the step carries the raw code,
+                // and the service logs it and retries as it does for RadioNotAvailable.
+                return AdvertisementSourceCodes.RadioOff(StartStep);
             }
             catch (Exception ex)
             {

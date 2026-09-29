@@ -35,6 +35,16 @@ public sealed class WinRtAdvertisementSourceBindingTests
 
         if (!await WaitForStartedAsync(source))
         {
+            // The documented outcome with the Bluetooth radio switched off: Start itself throws a COMException
+            // (HRESULT 0x800710DF, ERROR_DEVICE_NOT_AVAILABLE) rather than raising Stopped with
+            // RadioNotAvailable. The literal is written here, not read from the product's constant, so the
+            // raw code is proved rather than compared with itself.
+            if (startStep.Code == unchecked((int)0x800710DF))
+            {
+                AssertBluetoothOffStart(startStep, source);
+                return;
+            }
+
             AdvertisementSourceStopped? stopped = stoppedTcs.Task.IsCompleted ? stoppedTcs.Task.Result : null;
 
             // Inconclusive only when the reason is that no radio (or no watcher support at all on this build)
@@ -96,6 +106,17 @@ public sealed class WinRtAdvertisementSourceBindingTests
         bool started = await WaitForStartedAsync(source);
         if (!started)
         {
+            // Bluetooth off: Start reported the documented code, the source is not running, and Stop on it
+            // still answers with a recorded step (it must not throw or leave the source half-stopped).
+            if (startStep.Code == unchecked((int)0x800710DF))
+            {
+                AssertBluetoothOffStart(startStep, source);
+                StepOutcome stopStep = source.Stop();
+                Assert.AreEqual("watcher-stop", stopStep.Step, "Stop after a refused Start must still be a recorded step.");
+                Assert.AreNotEqual(AdvertisementSourceState.Started, source.State);
+                return;
+            }
+
             // Inconclusive only for genuinely no watcher support on this build; anything else is a real
             // failure Stop cannot be meaningfully exercised against either, but for its own, different reason.
             if (!startStep.Ok && startStep.Code != Earshot.Contracts.NativeCodes.NotAvailable)
@@ -141,6 +162,31 @@ public sealed class WinRtAdvertisementSourceBindingTests
         Assert.AreEqual(Earshot.Contracts.NativeCodes.NotAttempted, step.Code,
             "Start after Dispose must record a refusal, not attempt a native call.");
     }
+
+    private static void AssertBluetoothOffStart(StepOutcome startStep, WinRtAdvertisementSource source)
+    {
+        Assert.IsFalse(startStep.Ok, "A Start that threw because Bluetooth is off is not a success.");
+        Assert.AreEqual(unchecked((int)0x800710DF), startStep.Code, "The raw code must be kept.");
+        Assert.AreEqual("ERROR_DEVICE_NOT_AVAILABLE", startStep.CodeName);
+        Assert.IsNotNull(startStep.Detail);
+        StringAssert.Contains(startStep.Detail, "Bluetooth is off");
+        StringAssert.Contains(startStep.Detail, "0x800710DF", "The raw code must be in the detail as well, for the log.");
+        Assert.AreNotEqual(AdvertisementSourceState.Started, source.State, "A source whose Start threw must not read as running.");
+        Assert.IsTrue(AdvertisementSourceCodes.IsRadioOff(startStep));
+    }
+
+    // The service shows a Start that threw with Bluetooth off exactly as it shows a Stopped event carrying
+    // RadioNotAvailable, so the two constants it uses must be the real enum's own value and name.
+    [TestMethod]
+    [SupportedOSPlatform("windows10.0.19041.0")]
+    public void TheRadioNotAvailableConstantsAreTheEnumsOwnValueAndName()
+    {
+        // Through a helper, so the analyser does not fold two compile-time constants into an always-true check.
+        AssertSame((int)Windows.Devices.Bluetooth.BluetoothError.RadioNotAvailable, AdvertisementSourceCodes.RadioNotAvailableCode);
+        AssertSame(Windows.Devices.Bluetooth.BluetoothError.RadioNotAvailable.ToString(), AdvertisementSourceCodes.RadioNotAvailableName);
+    }
+
+    private static void AssertSame<T>(T expected, T actual) => Assert.AreEqual(expected, actual);
 
     // Start() returns as soon as the request is issued; the watcher's own Status can take a short moment
     // to read Started afterwards, so this polls briefly rather than deciding "did not start" on one read.
