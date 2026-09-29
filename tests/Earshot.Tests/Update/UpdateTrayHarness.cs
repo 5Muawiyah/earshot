@@ -33,7 +33,9 @@ internal sealed class UpdateTrayHarness : IDisposable
         Action<EarshotSettings>? settings = null,
         Action<FakeUpdateSource>? source = null,
         bool pinned = true,
-        bool installedCopy = true)
+        bool installedCopy = true,
+        Func<IUpdateSource>? sourceFactory = null,
+        TimeProvider? time = null)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -77,11 +79,13 @@ internal sealed class UpdateTrayHarness : IDisposable
             NativeHotkeys = new FakeNativeHotkeys(),
             VoiceEngineFactory = () => new Earshot.Tests.Voice.FakeSpeechEngine(),
             StreamingPlatformFactory = _ => new Earshot.Tests.Streaming.FakeStreamingPlatform(),
-            Time = UpdateClock,
+            Time = time ?? UpdateClock,
             AdvertisementSourceFactory = () => new FakeAdvertisementSource(),
             TaskbarReaderFactory = () => new FakeTaskbarReader(),
             TrayIconVisibilityFactory = () => new FakeTrayIcon(),
-            UpdateSourceFactory = () => Source,
+            ForegroundChangeSourceFactory = () => new FakeForegroundChangeSource(),
+            GaugeCoverProbeFactory = () => new FakeCoverProbe(),
+            UpdateSourceFactory = sourceFactory ?? (() => Source),
             UpdateLauncher = Launcher,
         };
 

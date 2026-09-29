@@ -160,6 +160,15 @@ internal sealed partial class TrayContext
         }
 
         await updates.CheckAsync(_lifetime.Token);
+
+        // A newer version opens the card's update page, the way "Set up battery" opens the card, so the Update button
+        // is reachable from the menu. Any other result, or no card to show it on, is the short message card.
+        if (updates.Stage == UpdateStage.Available && RequestUpdatePageFromWidget())
+        {
+            _registry.Cards.Hide();
+            return;
+        }
+
         ShowUpdateResult(updates.View, place);
     }
 
@@ -245,7 +254,8 @@ internal sealed partial class TrayContext
             new FileUpdateCheckStamp(UpdateStampFile(), _log),
             AutomaticCheckAsync,
             UpdateAutoCheck.StartupDelay,
-            UpdateAutoCheck.PollInterval);
+            UpdateAutoCheck.PollInterval,
+            _log);
         _updateAutoTask = Task.Run(() => auto.RunAsync(_lifetime.Token));
     }
 

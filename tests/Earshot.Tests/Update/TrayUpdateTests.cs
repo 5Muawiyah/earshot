@@ -249,6 +249,48 @@ public sealed class TrayUpdateTests
         });
     }
 
+    // The daily check runs on its own thread and the card on the UI thread, and both ask for the controller. Two
+    // callers must never each build one: a check and an update would then run on different controllers. The first
+    // caller is held inside the source factory while a second asks, so a tray that builds without a lock builds twice.
+    [TestMethod]
+    public void TwoThreadsAskingForTheUpdateControllerAtOnceShareOne()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            int built = 0;
+            using var firstInside = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            using var tray = new UpdateTrayHarness(sourceFactory: () =>
+            {
+                if (Interlocked.Increment(ref built) == 1)
+                {
+                    firstInside.Set();
+                    release.Wait(TimeSpan.FromSeconds(5));
+                }
+
+                return new FakeUpdateSource();
+            });
+            UpdateController? first = null;
+            UpdateController? second = null;
+            var one = new Thread(() => first = tray.Context.Updates);
+            var two = new Thread(() => second = tray.Context.Updates);
+
+            one.Start();
+            Assert.IsTrue(firstInside.Wait(TimeSpan.FromSeconds(5)), "The first caller never reached the source factory.");
+            two.Start();
+            Thread.Sleep(300);
+            release.Set();
+            one.Join();
+            two.Join();
+
+            Assert.AreEqual(1, built, "A second controller, and a second source, was built.");
+            Assert.IsNotNull(first);
+            Assert.AreSame(first, second);
+        });
+    }
+
     // ----- the hand-over -----
 
     [TestMethod]
@@ -288,6 +330,48 @@ public sealed class TrayUpdateTests
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Earshot is closing so the update can replace its files."), "The tray closed through Exit.");
             Assert.AreEqual(1, tray.Cards.Hides);
             Assert.AreEqual(1, tray.Source.DownloadCalls);
+        });
+    }
+
+    // The menu's "Check for updates" with the widget on: a newer version opens the card's update page, the way "Set up
+    // battery" opens the card, so the Update button can be reached from the menu. It used to leave only a message card.
+    [TestMethod]
+    public void TheMenusCheckThatFindsANewerVersionOpensTheCardsUpdatePage()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true },
+                source: s => FoundNewer(s), time: new Earshot.Tests.Streaming.TestTimeProvider());
+            tray.PumpUntilIdle();
+
+            tray.ClickMenu("Check for updates");
+            tray.PumpUntilIdle();
+            UpdateTrayHarness.PumpUntil(() => tray.Context.WidgetCardIsShownForTest, "The card never opened for the newer version.");
+
+            Assert.AreEqual(Earshot.Widget.WidgetCardView.Update, tray.Context.WidgetCardViewForTest, "The update page is what the card shows.");
+            Assert.AreEqual(0, tray.Source.DownloadCalls, "Opening the page downloads nothing: only the Update button does.");
+        });
+    }
+
+    [TestMethod]
+    public void TheMenusCheckThatFindsNothingNewStaysAMessageCard()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true }, time: new Earshot.Tests.Streaming.TestTimeProvider());
+            tray.PumpUntilIdle();
+
+            tray.ClickMenu("Check for updates");
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Context.WidgetCardIsShownForTest, "Up to date: the short message card says so.");
+            Assert.AreEqual("You're up to date", tray.Cards.Shown[^1].Content.Title);
         });
     }
 

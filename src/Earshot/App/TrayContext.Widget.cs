@@ -363,6 +363,30 @@ internal sealed partial class TrayContext
         }
     }
 
+    // The update page on the widget card, above the gauge when it is shown, else near the cursor, for a check that found a
+    // newer version: the Update button is on that page. False when there is no card to show it on (the widget is off),
+    // and the caller says the result on the message card instead.
+    internal bool RequestUpdatePageFromWidget()
+    {
+        if (_closing || _widgetStatus is null || _widgetCardCallbacks is null)
+        {
+            return false;
+        }
+
+        _caseOpenCardPresenter?.Hide();
+        WidgetCardPresenter presenter = EnsureWidgetCardPresenter();
+        if (GaugeBoundsIfShown() is { } bounds)
+        {
+            presenter.RequestUpdatePage(bounds, bounds.Location);
+        }
+        else
+        {
+            presenter.RequestUpdatePage(gaugeBounds: null, _cursorPosition());
+        }
+
+        return true;
+    }
+
     private Task<BatterySetupListen> ListenForSetupFromCard(CancellationToken ct)
     {
         if (_widgetStatus is { } status)
