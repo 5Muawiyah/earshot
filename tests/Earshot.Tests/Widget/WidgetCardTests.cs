@@ -1060,8 +1060,14 @@ public sealed class WidgetCardTests
             card.Render(Model(Snapshot(), showSetupButton: true), 96);
             card.Activate();
             Application.DoEvents();
+            bool cardWasActive = GetActiveWindow() == card.Handle;
             other.Activate();
             Application.DoEvents();
+
+            // The same check for the second round: a desktop that stops moving activation between the test's own
+            // windows (a hosted runner's did) cannot show the main view closing.
+            if (!cardWasActive || GetActiveWindow() != other.Handle)
+                Assert.Inconclusive("This desktop did not move activation to the card and back to the other window a second time.");
 
             CollectionAssert.AreEqual(new[] { WidgetCardCloseReason.Deactivated }, reasons, "The main view still closes on deactivation.");
         });
