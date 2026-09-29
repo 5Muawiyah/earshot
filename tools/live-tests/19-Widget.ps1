@@ -4,19 +4,17 @@
 
 .DESCRIPTION
     Phase 0 has not run on this hardware yet: the decode table
-    (Earshot.Widget.ProximityDecodeTable.Current) ships Unproved and the claim signal threshold
-    (Earshot.Widget.WidgetDefaults.SignalThresholdDbm) is null, so nothing in this build can claim
-    the owner's AirPods from their advertisement, and every reading that would depend on that claim
-    (battery, charging, in-ear, the case-open card, the low battery alert, auto-pause) must honestly
-    show nothing rather than a guessed figure. This test checks that it does.
+    (Earshot.Widget.ProximityDecodeTable.Current) ships Unproved, so every reading that would depend
+    on it (battery, charging, in-ear, the case-open card, the low battery alert, auto-pause) must
+    honestly show nothing rather than a guessed figure until battery set-up has proved it. This test
+    checks that it does.
 
-    It also found, while it was being written, that nothing in the running application called
-    IWidgetStatus.ClaimAsync: WidgetStatusService.ClaimAsync existed and was exercised by the unit
-    tests, but no menu item, card button or hotkey in Earshot.App or Earshot.Widget ever called it.
-    A tray menu item, "Make these my AirPods", now does, but it is disabled with its own one-line
-    reason for as long as the signal threshold above stays unproved: never enabled on a guess. Half
-    B, below, checks the trigger is there and reads correctly disabled, still separately inconclusive
-    on whether a claim can actually be completed, since that still needs phase 0 done.
+    Battery set-up is how those readings get proved. "Set up battery" is on the card and in the tray
+    menu. It has three steps: open your AirPods case next to this PC, say what your iPhone shows with
+    three pickers, and a result, or "Couldn't find your AirPods" when nothing was heard. The picker
+    values are evidence, never a displayed reading. Half B checks the item is there and available
+    while Bluetooth is on. The last half runs the set-up once and asks what the card said, after
+    every check that needs the card to show nothing has already been answered.
 
     Everything that does not depend on the claim or the decode table is exercised for real: the
     gauge's placement, its following the taskbar, its fallback under a full screen application, its
@@ -211,32 +209,32 @@ try
             -Outcome $(if ($null -eq $newestCounterLine) { 'inconclusive' } elseif ($appleSections -gt 0 -and $proximityItems -gt 0) { 'pass' } else { 'fail' }) `
             -Detail $(if ($null -eq $newestCounterLine) { 'No "Widget counters:" line was logged in the wait; either nothing Apple was nearby or the watcher is not running.' } else { 'allSections=' + $allSections + ' apple=' + $appleSections + ' items=' + $proximityItems + '.' })
 
-        Write-Section -Run $run -Title 'Half B: the claim'
-        $claimTriggerAnswer = Read-Answer -Run $run -Question 'Right-click the Earshot tray icon: is there a "Make these my AirPods" item in the menu?'
-        $claimEnabledAnswer = if ($claimTriggerAnswer -eq 'yes') { Read-Answer -Run $run -Question 'Is that item greyed out (disabled), with a reason in brackets after its name?' } else { 'unsure' }
+        Write-Section -Run $run -Title 'Half B: battery set-up is reachable'
+        $setupInMenuAnswer = Read-Answer -Run $run -Question 'Right-click the Earshot tray icon: is there a "Set up battery" item in the menu?'
+        $setupAvailableAnswer = if ($setupInMenuAnswer -eq 'yes') { Read-Answer -Run $run -Question 'With Bluetooth on, is that item available to click, not greyed out and with no reason in brackets after its name?' } else { 'unsure' }
         $claimNow = Read-EarshotJsonFile -Run $run -Path $claimPath
-        Add-Finding -Run $run -Name 'claimFlowWiredToUi' -Value $(if ($claimTriggerAnswer -eq 'yes') { 'yes' } else { 'no' }) `
-            -Detail 'IWidgetStatus.ClaimAsync exists on WidgetStatusService and is wired to a tray menu item, "Make these my AirPods". It must read disabled, with its own one-line reason, for as long as phase 0 has not proved a signal threshold: WidgetDefaults.SignalThresholdDbm still ships null on this build.'
+        Add-Finding -Run $run -Name 'batterySetupInMenu' -Value $(if ($setupInMenuAnswer -eq 'yes') { 'yes' } else { 'no' }) `
+            -Detail 'The tray menu holds "Set up battery". It reads "Set up battery (Bluetooth is off)" and is greyed out while the watcher is not running, and is available otherwise.'
         Add-Finding -Run $run -Name 'claimFileExistsAfterCheck' -Value $(if ($null -eq $claimNow) { 'no' } else { 'yes' }) -Detail $claimPath
-        Add-Criterion -Run $run -Id 'claim-flow-reachable' -Criterion 'The claim trigger is in the running application, and reads correctly disabled for as long as phase 0 has not proved a signal threshold.' `
-            -Outcome $(if ($claimTriggerAnswer -ne 'yes') { 'fail' } elseif ($claimEnabledAnswer -eq 'yes') { 'pass' } elseif ($claimEnabledAnswer -eq 'no') { 'fail' } else { 'inconclusive' }) `
+        Add-Criterion -Run $run -Id 'battery-setup-reachable' -Criterion 'Battery set-up is in the running application, and is available while Bluetooth is on.' `
+            -Outcome $(if ($setupInMenuAnswer -ne 'yes') { 'fail' } elseif ($setupAvailableAnswer -eq 'yes') { 'pass' } elseif ($setupAvailableAnswer -eq 'no') { 'fail' } else { 'inconclusive' }) `
             -Detail $(
-                if ($claimTriggerAnswer -ne 'yes') { 'You answered ' + $claimTriggerAnswer + ': the trigger should be in the tray menu ("Make these my AirPods") even before phase 0 is done, only disabled. A missing trigger is a real defect.' }
-                elseif ($claimEnabledAnswer -eq 'yes') { 'Found, and correctly disabled: this build cannot honestly make a claim yet (phase 0 has not proved a signal threshold), and the trigger does not offer one it cannot keep. Actually completing a claim still needs phase 0''s own sitting.' }
-                elseif ($claimEnabledAnswer -eq 'no') { 'The item is enabled, but phase 0 has not proved a signal threshold on this build: it should read disabled. This is a real defect, not an inconclusive result.' }
-                else { 'You answered ' + $claimEnabledAnswer + ' on whether it reads disabled.' })
+                if ($setupInMenuAnswer -ne 'yes') { 'You answered ' + $setupInMenuAnswer + ': "Set up battery" should always be in the tray menu. A missing item is a real defect.' }
+                elseif ($setupAvailableAnswer -eq 'yes') { 'Found and available: battery set-up can be started.' }
+                elseif ($setupAvailableAnswer -eq 'no') { 'The item is greyed out although Bluetooth is on: it should be available. This is a real defect, not an inconclusive result.' }
+                else { 'You answered ' + $setupAvailableAnswer + ' on whether it is available.' })
 
         Write-Section -Run $run -Title 'Half C: battery, honestly'
         Wait-Owner -Run $run -Text 'Left-click the Earshot icon or the gauge to open the card.'
         $batteryAnswer = Read-Answer -Run $run -Question 'Does the card say "No reading" for the battery, never a percentage, and show nothing at all for charging or in-ear state?'
-        Add-Criterion -Run $run -Id 'battery-honestly-not-shown' -Criterion 'With no claim and an unproved decode table, the card never shows a battery figure, charging state or in-ear state it has not actually read.' `
+        Add-Criterion -Run $run -Id 'battery-honestly-not-shown' -Criterion 'Before battery set-up, with an unproved decode table, the card never shows a battery figure, charging state or in-ear state it has not actually read.' `
             -Outcome $(if ($batteryAnswer -eq 'yes') { 'pass' } elseif ($batteryAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $batteryAnswer + '. A "yes" here is the correct, honest state before phase 0; a "no" (a figure was shown) would mean something invented a reading, which is a real defect.')
+            -Detail ('You answered ' + $batteryAnswer + '. A "yes" here is the correct, honest state before battery set-up has proved anything; a "no" (a figure was shown) would mean something invented a reading, which is a real defect.')
 
         Write-Section -Run $run -Title 'Half E: where, connected'
         Wait-Owner -Run $run -Text 'Connect the AirPods to this PC: left-click the Earshot icon or the gauge, then click Connect on the card.'
         $whereThisPcAnswer = Read-Answer -Run $run -Question 'With the AirPods connected to this PC, does the "where" line on the card say "On this PC"?'
-        Add-Criterion -Run $run -Id 'where-this-pc' -Criterion 'The card reads "on this PC" from Core Audio alone, which needs no claim and no decode table.' `
+        Add-Criterion -Run $run -Id 'where-this-pc' -Criterion 'The card reads "on this PC" from Core Audio alone, which needs no set-up and no decode table.' `
             -Outcome $(if ($whereThisPcAnswer -eq 'yes') { 'pass' } elseif ($whereThisPcAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $whereThisPcAnswer + '.')
 
@@ -251,7 +249,7 @@ try
         Write-Section -Run $run -Title 'Half E: where, not connected'
         Wait-Owner -Run $run -Text 'Disconnect the AirPods from this PC again: left-click the Earshot icon or the gauge, then click Disconnect on the card.'
         $whereNotConnectedAnswer = Read-Answer -Run $run -Question 'With the AirPods not connected to this PC, does the card say "Not seen yet" rather than guessing whether they are on your phone or in the case?'
-        Add-Criterion -Run $run -Id 'where-not-connected-honest' -Criterion 'Without a claim, the card never guesses "on your phone" or "in the case": it says "Not seen yet".' `
+        Add-Criterion -Run $run -Id 'where-not-connected-honest' -Criterion 'Before battery set-up, the card never guesses "on your phone" or "in the case": it says "Not seen yet".' `
             -Outcome $(if ($whereNotConnectedAnswer -eq 'yes') { 'pass' } elseif ($whereNotConnectedAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $whereNotConnectedAnswer + '.')
 
@@ -261,9 +259,9 @@ try
         $caseCardAnswer = Read-Answer -Run $run -Question 'Did any small card appear near the taskbar by itself, without you clicking anything?'
         $toggleLines = Get-EarshotLogLines -Run $run -Pattern 'connect: ' -SinceUtc $caseOpenUtc
         Add-Finding -Run $run -Name 'caseOpenToggleLinesSeen' -Value @($toggleLines).Count
-        Add-Criterion -Run $run -Id 'case-open-card-honestly-not-shown' -Criterion 'Without an owned reading (no claim, and no proved lid signal), the case-open card correctly stays silent rather than showing an unproved reading.' `
+        Add-Criterion -Run $run -Id 'case-open-card-honestly-not-shown' -Criterion 'Without a proved reading (no battery set-up, and no proved lid signal), the case-open card correctly stays silent rather than showing an unproved reading.' `
             -Outcome $(if ($caseCardAnswer -eq 'no') { 'pass' } elseif ($caseCardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $caseCardAnswer + '. "No" is the correct, honest state before a claim exists and phase 0 proves the lid signal; "yes" would mean a card appeared for a set of AirPods this build cannot yet confirm are the owner''s.')
+            -Detail ('You answered ' + $caseCardAnswer + '. "No" is the correct, honest state before battery set-up and phase 0 prove the lid signal; "yes" would mean a card appeared for a set of AirPods this build cannot yet confirm are the owner''s.')
         Add-Criterion -Run $run -Id 'case-open-no-auto-connect' -Criterion 'Opening the case never connects the AirPods by itself, whether or not a card appeared.' `
             -Outcome $(if (@($toggleLines).Count -eq 0) { 'pass' } else { 'fail' }) `
             -Detail ([string]@($toggleLines).Count + ' connect or disconnect line(s) logged since the case was opened; there should be none.')
@@ -290,9 +288,21 @@ try
         Add-Criterion -Run $run -Id 'notification-shortcut-exists' -Criterion 'The Start menu shortcut a toast needs to name Earshot has been written.' `
             -Outcome $(if ($shortcutExists) { 'pass' } else { 'fail' }) `
             -Detail $(if ($shortcutExists) { 'Found at ' + $shortcutPath + '.' } else { 'Not found at ' + $shortcutPath + '.' })
-        Add-Criterion -Run $run -Id 'low-battery-alert-fires' -Criterion 'The alert fires once a claimed part first reads at or below the threshold, and does not repeat.' `
+        Add-Criterion -Run $run -Id 'low-battery-alert-fires' -Criterion 'The alert fires once a part with a proved reading first reads at or below the threshold, and does not repeat.' `
             -Outcome 'inconclusive' `
-            -Detail 'The latch is only ever fed a reading Earshot has confirmed is the owner''s own AirPods, and the check above found no way to make a claim in this build, so this cannot be exercised for real yet.'
+            -Detail 'The latch is only ever fed a reading Earshot has confirmed is the owner''s own AirPods and has proved, and this test does not prove one, so this cannot be exercised for real yet.'
+
+        Write-Section -Run $run -Title 'Half I: battery set-up, run once'
+        Wait-Owner -Run $run -Text 'Click the Earshot icon to open the card, then click Set up battery. When the card asks you to open your AirPods case, open it next to this computer.'
+        Wait-Owner -Run $run -Text 'The card now asks what your iPhone shows. Pick the nearest 10 for each part (if it ends in 5, pick the lower), then click Save.'
+        $setupStepsAnswer = Read-Answer -Run $run -Question 'Did the card go through the three steps: open the case, pick what your iPhone shows, then a result? Answer no if it stopped early and said it could not find your AirPods.'
+        Add-Criterion -Run $run -Id 'battery-setup-flow' -Criterion 'Battery set-up goes through its three steps and ends on a result.' `
+            -Outcome $(if ($setupStepsAnswer -eq 'yes') { 'pass' } else { 'inconclusive' }) `
+            -Detail ('You answered ' + $setupStepsAnswer + '. A "no" is not a defect on its own: the set-up says it could not find your AirPods when it heard none, which depends on the case being open next to this computer.')
+        $setupHonestAnswer = Read-Answer -Run $run -Question 'If the card now shows a battery percentage, is it only for a part the set-up said it had set up, with nothing shown for a part it could not read?'
+        Add-Criterion -Run $run -Id 'battery-setup-honest-result' -Criterion 'After battery set-up, the card shows a battery figure only for a part the set-up proved, and nothing for a part it could not read.' `
+            -Outcome $(if ($setupHonestAnswer -eq 'yes') { 'pass' } elseif ($setupHonestAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $setupHonestAnswer + '. A "no" would mean a figure was shown that the set-up had not proved, which is a real defect.')
 
         Save-EarshotLog -Run $run
     }

@@ -68,7 +68,7 @@ public sealed class ManifestNameProvesTests
     public void Row01sNameMatchesTheCoordinatorsOwnExample()
     {
         ManifestRow row01 = LoadManifest().Single(r => r.Number == "01");
-        Assert.AreEqual("Connect with one click", row01.Name);
+        Assert.AreEqual("Connect the AirPods", row01.Name);
     }
 
     [TestMethod]

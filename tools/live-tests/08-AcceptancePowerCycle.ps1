@@ -294,15 +294,15 @@ try
         Add-Finding -Run $run -Name 'taskbarCreatedSeen' -Value @($themeLines).Count `
             -Detail 'restart Explorer from Task Manager to raise one, and the icon should come straight back'
 
-        $focus = Read-Answer -Run $run -Question 'When the card appeared, did your keyboard focus stay where it was, in whatever you were typing in?'
-        Add-Criterion -Run $run -Id 'card-no-focus' -Criterion 'The card never takes keyboard focus.' `
+        $focus = Read-Answer -Run $run -Question 'When a small notice card appeared by itself near the tray (the one that says Connecting or Connected), did your keyboard focus stay where it was, in whatever you were typing in? The card you open with a left click is meant to take focus, so leave that one out.'
+        Add-Criterion -Run $run -Id 'card-no-focus' -Criterion 'A notice card that appears by itself never takes keyboard focus.' `
             -Outcome $(if ($focus -eq 'yes') { 'pass' } elseif ($focus -eq 'no') { 'fail' } else { 'inconclusive' }) `
             -Detail ('You answered ' + $focus + '.')
 
         Write-Section -Run $run -Title 'Clicking, the menu and closing'
-        Wait-Owner -Run $run -Text 'Click the tray icon a few ways: one click, a fast double click, then a right click. Watch what each one does.'
-        $onceOnly = Read-Answer -Run $run -Question 'Did a fast double click still toggle only once, rather than connecting and disconnecting again?'
-        Add-Criterion -Run $run -Id 'click-once' -Criterion 'A fast double click toggles once, not twice.' `
+        Wait-Owner -Run $run -Text 'Click the tray icon a few ways: one left click, a fast double left click, then a right click. Watch what each one does.'
+        $onceOnly = Read-Answer -Run $run -Question 'Did a fast double click leave the AirPods as they were, neither connecting nor disconnecting them?'
+        Add-Criterion -Run $run -Id 'click-once' -Criterion 'A fast double click connects nothing and disconnects nothing, with Left click connects off.' `
             -Outcome $(if ($onceOnly -eq 'yes') { 'pass' } elseif ($onceOnly -eq 'no') { 'fail' } else { 'inconclusive' }) `
             -Detail ('You answered ' + $onceOnly + '.')
 

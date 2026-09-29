@@ -158,7 +158,7 @@ try
             if ((Show-EndpointStates -Run $run -Label 'audio-before-all').Render -eq 'Active')
             {
                 $all = Invoke-KsStep -Run $run -Label 'ks-disconnect-all' -Action 'disconnect' -Filter 'all' `
-                    -Consequence 'Sends the disconnect to every filter, which is what the application does on a left click.'
+                    -Consequence 'Sends the disconnect to every filter, which is what the application does when you choose Disconnect.'
                 $afterAll = Show-EndpointStates -Run $run -Label 'audio-after-all'
                 if ($null -ne $all)
                 {
@@ -223,7 +223,7 @@ finally
     # The block-alone-drops-a-link leg above allows the nodes again on purpose, so the closing
     # check's offer would reverse that: say so plainly, the same as 00-Restore.ps1.
     $atRestConsequence = 'Blocks the AirPods Bluetooth nodes again, reversing the allow this run just made. Until they ' +
-        'are allowed again (a left click in the tray, or 05-Allow.ps1), they will not connect to this PC. Declining ' +
+        'are allowed again (Connect on the card from the tray icon, or 05-Allow.ps1), they will not connect to this PC. Declining ' +
         'leaves the nodes allowed, which is what this run''s own steps set out to do.'
     $overall = Complete-LiveTestRun -Run $run -AtRestConsequence $atRestConsequence
     Write-Host ('Test 02 finished: ' + $overall)

@@ -101,8 +101,9 @@ public sealed class HowToBlockTests
         // Test 20 (Exit) adds 11 (five preconditions, three actions, one instruction and two questions) and
         // test 21 (pause on leave) adds 16 (five preconditions, three actions, two instructions and six
         // questions): 211. Test 16 (switching) adds 19 (six preconditions, three actions, four instructions and
-        // six questions): 230.
-        const int expectedMissingCount = 230;
+        // six questions): 230. Test 19's set-up questions replace two claim questions and add a step and two more
+        // questions, three more with no how-to block: 233.
+        const int expectedMissingCount = 233;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +

@@ -448,7 +448,7 @@ internal static class Copy
     // The status line, in plain words. Every one of these has a technical twin MainForm still
     // shows with technical details on (a TestId, a script name, an exit code or a raw path);
     // these never carry any of the four, following the same shape the owner asked for: "Running:
-    // Connect with one click", "Finished: ...", "Waiting for you to shut the computer down".
+    // Connect the AirPods", "Finished: ...", "Waiting for you to shut the computer down".
     internal static string PlainRunningStatus(string testName, bool isResume) =>
         "Running: " + testName + (isResume ? ", the second half" : string.Empty);
 
@@ -525,7 +525,7 @@ internal static class Copy
 
     internal const string HomeIntroWhatEarshotDoes =
         "Earshot stops this computer grabbing your AirPods off your phone when it starts up, and lets " +
-        "you connect or disconnect them with one click on its icon near the clock.";
+        "you connect or disconnect them from the card that opens when you click its icon near the clock.";
 
     internal const string HomeIntroWhatTheseTestsAreFor =
         "These tests check that this computer is doing that properly.";

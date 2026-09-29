@@ -218,7 +218,7 @@ finally
     # so the closing check's offer would reverse that: this consequence text says so plainly,
     # rather than reusing the generic wording every other script gets.
     $atRestConsequence = 'Blocks the AirPods Bluetooth nodes again, reversing the allow this run just made. Until they ' +
-        'are allowed again (a left click in the tray, or 05-Allow.ps1), they will not connect to this PC. Declining ' +
+        'are allowed again (Connect on the card from the tray icon, or 05-Allow.ps1), they will not connect to this PC. Declining ' +
         'leaves the nodes allowed, which is what this run''s own steps set out to do.'
     $overall = Complete-LiveTestRun -Run $run -AtRestConsequence $atRestConsequence
     Write-Host ('Restore finished: ' + $overall)

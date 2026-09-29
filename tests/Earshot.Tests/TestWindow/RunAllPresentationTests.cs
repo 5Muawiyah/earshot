@@ -30,7 +30,7 @@ public sealed class RunAllPresentationTests
             Assert.AreEqual("01", form.ActiveRowNumberForTests);
 
             Assert.IsTrue(form.RunAllProgressVisibleForTests, "no progress line was shown while Run all was under way.");
-            Assert.AreEqual("Test 1 of " + RunAllOrder.Items.Count + ": Connect with one click", form.RunAllProgressTextForTests);
+            Assert.AreEqual("Test 1 of " + RunAllOrder.Items.Count + ": Connect the AirPods", form.RunAllProgressTextForTests);
         });
     }
 

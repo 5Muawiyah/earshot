@@ -169,7 +169,7 @@ public sealed class NoBannedWordsInPlainModeTests
         yield return (nameof(Copy.FastStartupSentence), Copy.FastStartupSentence("unknown"));
         yield return (nameof(Copy.RunAllStoppedForPowerCycle), Copy.RunAllStoppedForPowerCycle("08"));
         yield return (nameof(Copy.RunAllStoppedForFailure), Copy.RunAllStoppedForFailure("08"));
-        yield return (nameof(Copy.RunAllProgressLine), Copy.RunAllProgressLine(1, 19, "Connect with one click"));
+        yield return (nameof(Copy.RunAllProgressLine), Copy.RunAllProgressLine(1, 19, "Connect the AirPods"));
         yield return (nameof(Copy.RunAllSummarySentence), Copy.RunAllSummarySentence(3, 1, 1, 1));
         yield return (nameof(Copy.PlainCheckSummarySentence), Copy.PlainCheckSummarySentence(4, 0, 0));
         yield return (nameof(Copy.PlainCheckSummarySentence), Copy.PlainCheckSummarySentence(5, 2, 1));
@@ -183,13 +183,13 @@ public sealed class NoBannedWordsInPlainModeTests
         // The second plain pass's own status-line builders (MainForm._statusLabel /
         // _runAllStatusLabel), called with representative arguments the same way the methods above
         // already are.
-        yield return (nameof(Copy.PlainRunningStatus), Copy.PlainRunningStatus("Connect with one click", isResume: false));
+        yield return (nameof(Copy.PlainRunningStatus), Copy.PlainRunningStatus("Connect the AirPods", isResume: false));
         yield return (nameof(Copy.PlainRunningStatus), Copy.PlainRunningStatus("Full shut down and start", isResume: true));
-        yield return (nameof(Copy.PlainFinishedStatus), Copy.PlainFinishedStatus("Connect with one click", Copy.PlainPassed));
+        yield return (nameof(Copy.PlainFinishedStatus), Copy.PlainFinishedStatus("Connect the AirPods", Copy.PlainPassed));
         yield return (nameof(Copy.PlainFinishedStatus), Copy.PlainFinishedStatus("Battery reading, connected or not", Copy.PlainFailed));
-        yield return (nameof(Copy.PlainRunCrashedStatus), Copy.PlainRunCrashedStatus("Connect with one click"));
-        yield return (nameof(Copy.PlainNoReadableResultStatus), Copy.PlainNoReadableResultStatus("Connect with one click"));
-        yield return (nameof(Copy.PlainCouldNotStartStatus), Copy.PlainCouldNotStartStatus("Connect with one click"));
+        yield return (nameof(Copy.PlainRunCrashedStatus), Copy.PlainRunCrashedStatus("Connect the AirPods"));
+        yield return (nameof(Copy.PlainNoReadableResultStatus), Copy.PlainNoReadableResultStatus("Connect the AirPods"));
+        yield return (nameof(Copy.PlainCouldNotStartStatus), Copy.PlainCouldNotStartStatus("Connect the AirPods"));
 
         // Shown unconditionally, never gated by the technical-details toggle (a row's own detail
         // text, and the status line for a refused or noted power-cycle start): never previously

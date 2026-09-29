@@ -224,7 +224,7 @@ try
             }
 
             $allOn = Invoke-KsStep -Run $run -Label 'ks-reconnect-all-protected' -Action 'reconnect' -Filter 'all' `
-                -Consequence 'Sends the reconnect to every filter that is there, which is what the application does on a left click.'
+                -Consequence 'Sends the reconnect to every filter that is there, which is what the application does when you choose Connect.'
             if ($null -ne $allOn)
             {
                 Add-Criterion -Run $run -Id 'K1-all-protected' -Criterion 'Sending to every filter connects with protection on.' `
