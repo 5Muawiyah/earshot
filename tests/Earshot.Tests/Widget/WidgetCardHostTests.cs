@@ -49,7 +49,7 @@ public sealed class WidgetCardHostTests
             Assert.IsFalse(values.CheckAutomatically, "No automatic checks by default.");
             Assert.AreEqual("Ctrl+Alt+Shift+A", values.ConnectChord);
             Assert.AreEqual("Ctrl+Alt+Shift+D", values.DisconnectChord);
-            Assert.AreEqual("1.1.0", values.InstalledVersion);
+            Assert.AreEqual(Earshot.Update.ReleaseVersion.Running(typeof(Earshot.Update.ReleaseVersion).Assembly)!.Value.ToString(), values.InstalledVersion);
             Assert.IsTrue(values.InEarProofMissing, "No in-ear field has been proved.");
             Assert.IsTrue(values.LidProofMissing, "No lid field has been proved.");
         });

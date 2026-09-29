@@ -88,7 +88,7 @@ public sealed class TrayUpdateTests
             Assert.HasCount(2, tray.Cards.Shown);
             Assert.AreEqual("Checking for updates", tray.Cards.Shown[0].Content.Status);
             Assert.AreEqual("Version 1.2.0 is available", tray.Cards.Shown[1].Content.Title);
-            Assert.AreEqual("Version 1.1.0 installed", tray.Cards.Shown[1].Content.Status);
+            Assert.AreEqual($"Version {ReleaseVersion.Running(typeof(ReleaseVersion).Assembly)!.Value.ToString()} installed", tray.Cards.Shown[1].Content.Status);
             Assert.IsTrue(tray.Cards.Shown.All(c => c.Anchor == CardAnchor.NearCursor), "Shown where the click was, like the other menu results.");
         });
     }
@@ -106,7 +106,7 @@ public sealed class TrayUpdateTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual("You're up to date", tray.Cards.Shown[^1].Content.Title);
-            Assert.AreEqual("Version 1.1.0", tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual($"Version {ReleaseVersion.Running(typeof(ReleaseVersion).Assembly)!.Value.ToString()}", tray.Cards.Shown[^1].Content.Status);
         });
     }
 
