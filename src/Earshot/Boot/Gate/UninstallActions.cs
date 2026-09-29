@@ -3,6 +3,7 @@ using Earshot.AudioProtection;
 using Earshot.AudioProtection.Gate;
 using Earshot.Contracts;
 using Earshot.Interop;
+using Earshot.Service;
 
 namespace Earshot.Boot.Gate;
 
@@ -40,6 +41,10 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 //   4. once both finished, and still inside both locks, delete device.json, config.json, protection.json and
 //      protection-intent.json, so no later gate run has an identity or a setting to act on;
 //   5. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder;
+//      then stop and delete the hand-back service, in both cases, before the install folder is removed: the service
+//      runs from that folder, so once it has stopped the folder can be deleted now instead of at the next restart. The
+//      service reads the same run lock as every elevated run, which this uninstall holds until the machine folder is
+//      gone, so a shut down that starts meanwhile finds it held, or finds no config.json, and changes nothing;
 //   6. remove %ProgramData%\Earshot, unless step 2 or 3 did not finish (or the run lock could not be entered):
 //      then device.json and protection.json are the only record of what to allow and turn back on, so the
 //      folder (still protected) is kept with those two files and everything else in it is removed, and
@@ -74,6 +79,7 @@ internal sealed class UninstallActions
     public static readonly TimeSpan LockWait = TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(15);
 
     private readonly IBluetoothServiceApi? _bluetooth;
+    private readonly IServiceControl? _service;
 
     // The files kept when a node or a service could not be restored.
     internal static readonly IReadOnlySet<string> KeptRecords =
@@ -85,15 +91,16 @@ internal sealed class UninstallActions
     // not available. Program passes the mutex and the real Bluetooth API.
     public UninstallActions(
         InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log,
-        IGateRunLock? runLock = null, IBluetoothServiceApi? bluetooth = null)
-        : this(layout, folders, nodes, tasks, rebootDelete, log, runLock, DeviceChangeLock.SleepAndContinue, LockWait, bluetooth)
+        IGateRunLock? runLock = null, IBluetoothServiceApi? bluetooth = null, IServiceControl? service = null)
+        : this(layout, folders, nodes, tasks, rebootDelete, log, runLock, DeviceChangeLock.SleepAndContinue, LockWait, bluetooth, service)
     {
     }
 
     // For tests: the wait between device change lock attempts and how long to wait.
     internal UninstallActions(
         InstallLayout layout, IFolderSecurity folders, INodeApi nodes, ITaskRegistrar tasks, IRebootDelete rebootDelete, ILog log,
-        IGateRunLock? runLock, Func<TimeSpan, bool> wait, TimeSpan lockWait, IBluetoothServiceApi? bluetooth = null)
+        IGateRunLock? runLock, Func<TimeSpan, bool> wait, TimeSpan lockWait, IBluetoothServiceApi? bluetooth = null,
+        IServiceControl? service = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(folders);
@@ -113,9 +120,12 @@ internal sealed class UninstallActions
         _wait = wait;
         _lockWait = lockWait;
         _bluetooth = bluetooth;
+        _service = service;
     }
 
     internal IGateRunLock RunLock => _runLock;
+
+    internal IServiceControl? Service => _service;
 
     // As in install, an unexpected failure is logged and returned with the steps taken so far.
     public InstallResult Run()
@@ -157,6 +167,7 @@ internal sealed class UninstallActions
             }
 
             complete &= RemoveTasks(steps);
+            complete &= RemoveService(steps);
 
             if (machineExists)
             {
@@ -228,6 +239,7 @@ internal sealed class UninstallActions
 
         complete &= nodesRestored && servicesRestored;
         complete &= RemoveTasks(steps);
+        complete &= RemoveService(steps);
 
         if (!runLockHeld)
         {
@@ -420,6 +432,12 @@ internal sealed class UninstallActions
         steps.Add(StepOutcomes.FromHResult("task-folder-delete", folderHr, ok: folderGone));
         return ok && folderGone;
     }
+
+    // Stops and deletes the hand-back service. A service that will not stop is still deleted, and goes when the computer
+    // restarts, but the result is partial. Without a service control (the tests that are not about the service) there is
+    // nothing to remove.
+    private bool RemoveService(List<StepOutcome> steps) =>
+        _service is null || ServiceRemoval.Remove(_service, _wait, steps);
 
     private bool RemoveInstallFolder(List<StepOutcome> steps)
     {

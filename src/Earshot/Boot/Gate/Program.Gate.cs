@@ -6,6 +6,7 @@ using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Service;
 
 namespace Earshot;
 
@@ -158,7 +159,7 @@ internal static partial class Program
             {
                 // Task Scheduler COM runs on an MTA thread, as it does in the tray.
                 using var worker = new SystemWorker(log);
-                return worker.RunAsync(_ => new InstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log, new BluetoothServiceReader()).Run(request))
+                return worker.RunAsync(_ => CreateInstallActions(layout, log).Run(request))
                     .GetAwaiter().GetResult();
             }));
         }
@@ -181,7 +182,7 @@ internal static partial class Program
             ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
             {
                 using var worker = new SystemWorker(log);
-                return worker.RunAsync(_ => new UninstallActions(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(), new BluetoothServiceApi()).Run())
+                return worker.RunAsync(_ => CreateUninstallActions(layout, log).Run())
                     .GetAwaiter().GetResult();
             }));
         }
@@ -190,6 +191,16 @@ internal static partial class Program
             log.FlushTo(MachineLog(paths, new NtfsFolderSecurity(), out string whyNot), whyNot);
         }
     }
+
+    // What install and uninstall run with: the real devices, tasks and folders, and the real service control manager, so
+    // the hand-back service is stopped and registered by setup and stopped and deleted by uninstall.
+    internal static InstallActions CreateInstallActions(InstallLayout layout, ILog log) =>
+        new(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log, new BluetoothServiceReader(),
+            new WindowsServiceControl());
+
+    internal static UninstallActions CreateUninstallActions(InstallLayout layout, ILog log) =>
+        new(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(),
+            new BluetoothServiceApi(), new WindowsServiceControl());
 
     // The actions record their own failures; this is the last resort for anything around them (the worker, the
     // COM connection, a token read), so an elevated mode never ends without a line in the log.
