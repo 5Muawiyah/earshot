@@ -8,21 +8,34 @@ namespace Earshot.Boot.Gate;
 // window, not a measurement: Windows waits 10,000 ms for a service that handles the pre-shutdown control (its
 // documented default since Windows 10 build 15063), so the work stops 2,000 ms short of that, which leaves room for
 // the status file, the prune, the log and the report that the service has stopped.
+//
+// The block itself is never cut short (a disable already sent stays sent), so the waits that come before it are sized to
+// leave it room. Its length is known from one sample only: two runs on the owner's PC took 5,460 and 5,429 ms when a
+// driver refused one node while the AirPods were playing, and about 300 ms when nothing was playing. BlockReserve is that
+// sample rounded up. It is a sample, not a limit: a driver that takes longer to refuse a node would take the run past
+// its budget, and nothing here can prevent that. What is sized is everything that is not the block, so that the two lock
+// waits together never take more than Total minus BlockReserve, whichever of them takes it, and the block that follows
+// finishes inside Total when it takes no longer than the sample.
 // https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_preshutdown_info
 internal static class PreshutdownBudget
 {
     public static readonly TimeSpan Total = TimeSpan.FromMilliseconds(8_000);
 
-    // A gate run the tray started may still hold the run lock while it blocks the same nodes, which takes about a third
-    // of a second when nothing is playing and about five and a half seconds when a driver refuses one node.
-    public static readonly TimeSpan RunLockWait = TimeSpan.FromMilliseconds(5_000);
+    // Left for the block itself when the locks are waited for. The sample described above, rounded up.
+    public static readonly TimeSpan BlockReserve = TimeSpan.FromMilliseconds(5_500);
 
-    // Left for the block itself when the device change lock is waited for.
-    public static readonly TimeSpan BlockReserve = TimeSpan.FromMilliseconds(1_000);
+    // What the two lock waits may take between them.
+    public static readonly TimeSpan WaitBudget = Total - BlockReserve;
 
-    // One more try at a node a driver refused to let go, and the time that must still be left for it to be worth it.
+    // A gate run the tray started may still hold the run lock while it blocks the same nodes. Waiting for it may take the
+    // whole of the wait budget and no more.
+    public static readonly TimeSpan RunLockWait = WaitBudget;
+
+    // One more try at a node a driver refused to let go, and the time that must still be left for it to be worth it: the
+    // delay, then a block of the length the reserve allows for, so a second try that is refused again still ends inside
+    // the budget.
     public static readonly TimeSpan VetoRetryDelay = TimeSpan.FromMilliseconds(1_000);
-    public static readonly TimeSpan VetoRetryRoom = TimeSpan.FromMilliseconds(2_000);
+    public static readonly TimeSpan VetoRetryRoom = VetoRetryDelay + BlockReserve;
 }
 
 // What a shut-down block did, for the service's log. Steps is what was written to the status file.
@@ -100,8 +113,8 @@ internal sealed partial class GateActions
 
         DateTimeOffset started = deadline - PreshutdownBudget.Total;
         var steps = new List<StepOutcome>();
-        TimeSpan runWait = Lesser(PreshutdownBudget.RunLockWait, Remaining(deadline));
-        bool runWaitCutShort = Remaining(deadline) < PreshutdownBudget.RunLockWait;
+        TimeSpan runWait = Lesser(PreshutdownBudget.RunLockWait, Waitable(deadline));
+        bool runWaitCutShort = Waitable(deadline) < PreshutdownBudget.RunLockWait;
         using IDisposable? held = _runLock.TryEnter(runWait, steps);
 
         if (!FolderIsSecure(steps))
@@ -252,7 +265,7 @@ internal sealed partial class GateActions
 
     private void BlockNodes(PreshutdownDecision decision, List<StepOutcome> steps, DeviceIdentity identity, DateTimeOffset deadline)
     {
-        TimeSpan changeWait = Lesser(DeviceChangeLock.NodeChangeLockTimeout, Greater(TimeSpan.Zero, Remaining(deadline) - PreshutdownBudget.BlockReserve));
+        TimeSpan changeWait = Lesser(DeviceChangeLock.NodeChangeLockTimeout, Waitable(deadline));
         using DeviceChangeLock? changing = DeviceChangeLock.TryAcquire(_store.Folder, DeviceChangeLockAccess.For(_nodes), changeWait, LockWait, steps);
         if (changing is null)
         {
@@ -310,6 +323,9 @@ internal sealed partial class GateActions
         decision.State = ReadState(identity);
         decision.Reason = "block sent";
     }
+
+    // What may still be spent waiting for a lock: what remains of the budget, less the room the block needs.
+    private TimeSpan Waitable(DateTimeOffset deadline) => Greater(TimeSpan.Zero, Remaining(deadline) - PreshutdownBudget.BlockReserve);
 
     private TimeSpan Remaining(DateTimeOffset deadline)
     {
