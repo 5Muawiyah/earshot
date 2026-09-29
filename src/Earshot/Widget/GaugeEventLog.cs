@@ -4,127 +4,94 @@ using Earshot.Contracts;
 
 namespace Earshot.Widget;
 
-// The kinds of thing the gauge does that an owner might see as a flicker.
-internal enum GaugeEventKind { Show, Move, Hide, Cover, Raise }
-
-// The stable reason names. A name is written into the log and read by a person hunting a flicker, so a
-// name never changes meaning; a new cause gets a new name.
-internal static class GaugeReasons
-{
-    // Hide.
-    public const string SettingOff = "setting-off";
-    public const string Disposed = "disposed";
-    public const string NoTaskbar = "no-taskbar";
-    public const string ReadFailed = "read-failed";
-    public const string FullScreenState = "full-screen-state";
-    public const string FullScreenAppNotified = "full-screen-app-notified";
-    public const string Covered = "covered";
-    public const string NoFreeSpace = "no-free-space";
-    public const string WindowFailed = "window-failed";
-
-    // Show and move.
-    public const string Placed = "placed";
-    public const string LayoutChanged = "layout-changed";
-
-    // Cover and raise.
-    public const string WindowOverGauge = "window-over-gauge";
-    public const string CoveredAtCentre = "covered-at-centre";
-}
-
-// One line's worth of what happened. Optional parts are written only when set.
-internal sealed record GaugeEvent(GaugeEventKind Kind, string Reason, DateTimeOffset At)
-{
-    public Rectangle? Bounds { get; init; }
-
-    // The rectangle before a move.
-    public Rectangle? From { get; init; }
-
-    // How long the gauge had been on screen when it hid, moved or was covered.
-    public TimeSpan? ShownFor { get; init; }
-
-    // The window that covers the gauge or the taskbar. Class and Explorer ownership only, never a title.
-    public WindowIdentity? Window { get; init; }
-
-    // The foreground window at the time.
-    public WindowIdentity? Foreground { get; init; }
-
-    // A failed step, when the event came from one.
-    public StepOutcome? Failure { get; init; }
-
-    public string? Detail { get; init; }
-}
-
-// Formats and writes gauge events: one line each, the prefix "Gauge:" first, then key=value fields in a
-// fixed order so a line can be searched and compared.
+// What the gauge writes to the log every time it shows, moves, hides or is put back on top, so a day of use
+// leaves the cause of any flicker in the file. One line per event; every line starts "Gauge " and names its
+// reason. The log adds the time to each line, so a line carries none of its own.
 //
-//   Gauge: <kind> reason=<reason> t=<UTC, ms> [bounds=x,y,WxH] [from=x,y,WxH] [shown_ms=n]
-//          [window.class=C window.explorer=true|false] [fg.class=C fg.explorer=true|false]
-//          [code=n name=NAME] [detail=text to the end of the line]
+// A window is only ever named by its class, never its title (a title can carry a document name or a chat
+// participant). A window that belongs to Explorer says so after the class.
+//
+// The wording is pinned by GaugeEventLogTests; a person searching the log for one of these has to be able to
+// rely on it.
 internal static class GaugeEventLog
 {
-    public const string Prefix = "Gauge:";
+    public const string Prefix = "Gauge ";
 
-    public static string Format(GaugeEvent e)
+    // Why the gauge came back on screen.
+    public const string ShownFirstLayout = "first layout";
+    public const string ShownTaskbarBack = "taskbar back";
+    public const string ShownFullScreenClosed = "full-screen app closed";
+    public const string ShownFreeSpaceBack = "free space back";
+    public const string ShownReadRecovered = "read recovered";
+    public const string ShownUncovered = "taskbar uncovered";
+    public const string ShownWindowRecreated = "window recreated";
+
+    public static string Shown(Rectangle bounds, string reason) => "Gauge shown at " + Rect(bounds) + " (" + reason + ").";
+
+    public static string Moved(Rectangle bounds) => "Gauge moved to " + Rect(bounds) + ".";
+
+    public static string Hidden(string reason) => "Gauge hidden (" + reason + ").";
+
+    public static string HiddenNoTaskbar() => Hidden("NoTaskbar");
+
+    public static string HiddenReadFailed(string step, StepOutcome outcome, int consecutiveFailures)
     {
-        ArgumentNullException.ThrowIfNull(e);
-        var sb = new StringBuilder(Prefix);
-        sb.Append(' ').Append(e.Kind.ToString().ToLowerInvariant());
-        sb.Append(" reason=").Append(Token(e.Reason));
-        sb.Append(" t=").Append(e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
-        if (e.Bounds is { } bounds)
-        {
-            sb.Append(" bounds=").Append(Rect(bounds));
-        }
-
-        if (e.From is { } from)
-        {
-            sb.Append(" from=").Append(Rect(from));
-        }
-
-        if (e.ShownFor is { } shown)
-        {
-            sb.Append(" shown_ms=").Append(((long)shown.TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
-        }
-
-        AppendWindow(sb, "window", e.Window);
-        AppendWindow(sb, "fg", e.Foreground);
-        if (e.Failure is { } failure)
-        {
-            sb.Append(" code=").Append(failure.Code.ToString(CultureInfo.InvariantCulture));
-            sb.Append(" name=").Append(Token(failure.CodeName));
-            sb.Append(" step=").Append(Token(failure.Step));
-        }
-
-        if (!string.IsNullOrWhiteSpace(e.Detail))
-        {
-            sb.Append(" detail=").Append(OneLine(e.Detail));
-        }
-
-        return sb.ToString();
+        ArgumentNullException.ThrowIfNull(outcome);
+        return Hidden("ReadFailed " + step + " " + outcome.CodeName + " (" + Number(outcome.Code) + ") after " +
+            Number(consecutiveFailures) + " consecutive failures");
     }
 
-    // A failed step is an Error the first time it is written (the controller does not repeat it); every
-    // other event is Info.
-    public static void Write(ILog log, GaugeEvent e)
+    public static string HiddenNoFreeSpace() => Hidden("NoFreeSpace");
+
+    public static string HiddenCovered(WindowIdentity? window) => Hidden("Covered by " + Describe(window));
+
+    public static string HiddenNotificationState(string quns) => Hidden("NotificationState " + quns);
+
+    public static string HiddenFullScreenNotified() => Hidden("FullScreenNotified");
+
+    public static string HiddenWindowFailed(StepOutcome outcome)
     {
-        ArgumentNullException.ThrowIfNull(log);
-        ArgumentNullException.ThrowIfNull(e);        log.Write(e.Failure is { Ok: false } ? LogLevel.Error : LogLevel.Info, Format(e));
+        ArgumentNullException.ThrowIfNull(outcome);
+        return Hidden("WindowFailed " + outcome.CodeName + " (" + Number(outcome.Code) + ")");
     }
 
-    private static void AppendWindow(StringBuilder sb, string key, WindowIdentity? window)
+    public static string HiddenSettingOff() => Hidden("SettingOff");
+
+    public static string KeptAfterFailedRead(Rectangle bounds, string step, StepOutcome outcome, int failures, int tolerance)
     {
-        if (window is { } w)
-        {
-            sb.Append(' ').Append(key).Append(".class=").Append(Token(w.ClassName));
-            sb.Append(' ').Append(key).Append(".explorer=").Append(w.BelongsToExplorer ? "true" : "false");
-        }
+        ArgumentNullException.ThrowIfNull(outcome);
+        return "Gauge kept at " + Rect(bounds) + " after a failed read (" + step + " " + outcome.CodeName + " (" +
+            Number(outcome.Code) + "), " + Number(failures) + " of " + Number(tolerance) + ").";
     }
 
-    private static string Rect(Rectangle r) =>
-        string.Create(CultureInfo.InvariantCulture, $"{r.X},{r.Y},{r.Width}x{r.Height}");
+    public static string RaisedAfterForegroundChange(WindowIdentity? over, string foregroundClass) =>
+        "Gauge raised: " + Describe(over) + " was over it after a foreground change to " + Token(foregroundClass) + ".";
 
-    // A single token: letters, digits and . _ : $ # - only, so a class name or a code name can never carry a
-    // space or an equals sign into the next field.
+    public static string RaisedByPoll(WindowIdentity? over) => "Gauge raised: the poll found " + Describe(over) + " over it.";
+
+    public static string LeftUnder(string overClass) =>
+        "Gauge left under " + Token(overClass) + " after a foreground change: not the taskbar.";
+
+    public static string RaiseSkippedRateLimit() => "Gauge raise skipped: another was made under 250 ms ago.";
+
+    public static string RaiseCapReached() => "Gauge raise cap reached; waiting for a poll to confirm.";
+
+    public static string PlacementFailed(PlacementFailure failure) => "Gauge placement found no room: " + failure + ".";
+
+    // "x,y WxH" in physical pixels.
+    public static string Rect(Rectangle r) =>
+        string.Create(CultureInfo.InvariantCulture, $"{r.X},{r.Y} {r.Width}x{r.Height}");
+
+    // A window's class, with "(Explorer)" after it when Explorer owns it; "an unknown window" when there is
+    // nothing to say.
+    public static string Describe(WindowIdentity? window) => window is { } w
+        ? Token(w.ClassName) + (w.BelongsToExplorer ? " (Explorer)" : "")
+        : "an unknown window";
+
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    // A class name, cut to letters, digits and . _ : $ # - so no character in it can end the sentence or
+    // start another field.
     private static string Token(string? value)
     {
         if (string.IsNullOrEmpty(value))
@@ -139,16 +106,5 @@ internal static class GaugeEventLog
         }
 
         return sb.ToString();
-    }
-
-    private static string OneLine(string value)
-    {
-        var sb = new StringBuilder(value.Length);
-        foreach (char c in value)
-        {
-            sb.Append(char.IsControl(c) ? ' ' : c);
-        }
-
-        return sb.ToString().Trim();
     }
 }

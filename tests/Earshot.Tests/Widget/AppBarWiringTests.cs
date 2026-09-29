@@ -53,7 +53,7 @@ public sealed class AppBarWiringTests
 
             GaugeState? state = tray.Context.WidgetGaugeStateForTest;
             Assert.IsInstanceOfType<GaugeState.Hidden>(state, "ABN_FULLSCREENAPP opening must hide the gauge at once.");
-            Assert.AreEqual(HiddenReason.NotificationState, ((GaugeState.Hidden)state!).Reason);
+            Assert.AreEqual(HiddenReason.FullScreenNotified, ((GaugeState.Hidden)state!).Reason);
         });
     }
 

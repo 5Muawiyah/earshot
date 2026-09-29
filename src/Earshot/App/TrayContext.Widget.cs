@@ -297,7 +297,7 @@ internal sealed partial class TrayContext
     private GaugeControllerSettings ReadGaugeControllerSettings()
     {
         WidgetSettings widget = _registry.Settings.Current.Widget;
-        return new GaugeControllerSettings(widget.ShowOnTaskbar, widget.LeftClickConnects);
+        return new GaugeControllerSettings(widget.ShowOnTaskbar, widget.LeftClickConnects, widget.GaugePosition);
     }
 
     // Called from TaskbarWatcher's own worker thread (the Func<ShownGauge?> its constructor takes). Reads
@@ -357,7 +357,10 @@ internal sealed partial class TrayContext
     {
         if (_gaugeController?.State is GaugeState.Shown shown && _gaugeWindow is { IsDisposed: false } window && _widgetTheme is not null)
         {
-            window.Render(_widgetSnapshotCache, _widgetLayoutDpi, shown.Bounds, _widgetTheme.Ink(), hover: false, MessageBoxFontFamily());
+            WidgetSettings widget = _registry.Settings.Current.Widget;
+            window.Render(
+                _widgetSnapshotCache, _time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel),
+                _widgetLayoutDpi, shown.Bounds, _widgetTheme.Ink(), MessageBoxFontFamily());
         }
     }
 

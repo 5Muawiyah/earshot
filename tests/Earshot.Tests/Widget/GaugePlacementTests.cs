@@ -6,192 +6,301 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// GaugePlacement pure maths. Fixtures mirror a real Windows 11 taskbar layout: Start 762..807, task
-// buttons 44 px wide from 807, the notification area from 1678, bar 0,1032,1920,48 at 96 DPI.
+// GaugePlacement over synthetic taskbars: pure rectangles in, a rectangle or a reason out. No window, no
+// taskbar read.
 [TestClass]
 public sealed class GaugePlacementTests
 {
-    private static readonly Rectangle Bar96 = new(0, 1032, 1920, 48);
-    private static readonly Rectangle Monitor = new(0, 0, 1920, 1080);
-    private static readonly Rectangle Start = new(762, 1032, 45, 48);
+    private static readonly Rectangle Screen1080 = new(0, 0, 1920, 1080);
 
-    private static List<Rectangle> Buttons(int count, int startX = 807, int width = 44) =>
-        Enumerable.Range(0, count).Select(i => new Rectangle(startX + (i * width), 1032, width, 48)).ToList();
-
-    private static TaskbarLayout Layout(Rectangle bar, IReadOnlyList<Rectangle> occupied, Rectangle? start, int dpi = 96, bool autoHide = false, TaskbarEdge edge = TaskbarEdge.Bottom, Rectangle? monitor = null) =>
-        new(0, bar, edge, autoHide, monitor ?? Monitor, occupied, start, dpi, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null);
-
-    [TestMethod]
-    public void TheMachineLayoutPlacesTheGaugeRightOfTheLastButton()
+    // A bottom taskbar of the given thickness on the 1920 x 1080 screen, with the Start button and
+    // appButtons task buttons starting at appsLeft (each buttonWidth wide), and a notification area whose
+    // left edge is trayLeft.
+    private static TaskbarLayout Layout(
+        int dpi, int thickness, int appsLeft, int appButtons, int buttonWidth, int? trayLeft, bool chevron = true,
+        TaskbarEdge edge = TaskbarEdge.Bottom, bool autoHide = false, int? taskbarTop = null, IEnumerable<Rectangle>? extra = null)
     {
-        List<Rectangle> occupied = [Start, .. Buttons(8), new Rectangle(1678, 1032, 242, 48)];
-        TaskbarLayout layout = Layout(Bar96, occupied, Start);
-        Rectangle? placed = GaugePlacement.Place(layout, GaugeRenderer.WidthFor(96));
-        Assert.AreEqual(new Rectangle(1183, 1032, GaugeRenderer.WidthFor(96), 48), placed);
-    }
-
-    [TestMethod]
-    public void ALeftAlignedTaskbarPlacesTheGaugeAfterTheLastButton()
-    {
-        Rectangle start = new(0, 1032, 45, 48);
-        List<Rectangle> occupied = [start, .. Buttons(8, startX: 45), new Rectangle(1678, 1032, 242, 48)];
-        TaskbarLayout layout = Layout(Bar96, occupied, start);
-        Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.IsNotNull(placed);
-        Assert.AreEqual(45 + (8 * 44) + 24, placed!.Value.X);
-    }
-
-    [TestMethod]
-    public void NoFreeSpaceHidesTheGauge()
-    {
-        // Buttons run all the way to 1580, tray starts at 1678: the 98 px gap is narrower than 24+88+24.
-        List<Rectangle> occupied = [Start, .. Buttons(count: (1580 - 807) / 44), new Rectangle(1678, 1032, 242, 48)];
-        TaskbarLayout layout = Layout(Bar96, occupied, Start);
-        Assert.IsNull(GaugePlacement.Place(layout, 88));
-    }
-
-    [TestMethod]
-    public void MissingStartUsesTheFirstIntervalsEnd()
-    {
-        List<Rectangle> occupied = [.. Buttons(8), new Rectangle(1678, 1032, 242, 48)];
-        TaskbarLayout layout = Layout(Bar96, occupied, start: null);
-        Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.IsNotNull(placed);
-        Assert.AreEqual(807 + (8 * 44) + 24, placed!.Value.X);
-    }
-
-    [TestMethod]
-    public void NoOccupantsAtAllHidesTheGauge()
-    {
-        // An empty read means the layout is unknown, not that the whole taskbar is free: there is no
-        // Start button and no "first merged interval" to anchor L on, so no placement is defensible.
-        TaskbarLayout layout = Layout(Bar96, [], start: null);
-        Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.IsNull(placed);
-    }
-
-    [TestMethod]
-    public void ResultNeverIntersectsAnOccupant()
-    {
-        List<Rectangle> occupied = [Start, .. Buttons(8), new Rectangle(1678, 1032, 242, 48)];
-        TaskbarLayout layout = Layout(Bar96, occupied, Start);
-        Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.IsNotNull(placed);
-        foreach (Rectangle o in occupied)
+        int top = taskbarTop ?? (1080 - thickness);
+        var bar = new Rectangle(0, top, 1920, thickness);
+        var occupied = new List<Rectangle>();
+        var start = new Rectangle(appsLeft, top, buttonWidth, thickness);
+        occupied.Add(start);
+        for (int i = 0; i < appButtons; i++)
         {
-            Assert.IsFalse(placed!.Value.IntersectsWith(o), "The gauge must never cover an occupant.");
+            occupied.Add(new Rectangle(appsLeft + ((i + 1) * buttonWidth), top, buttonWidth, thickness));
         }
-    }
 
-    [TestMethod]
-    [DataRow(96)]
-    [DataRow(120)]
-    [DataRow(144)]
-    [DataRow(192)]
-    public void HigherDpiScalesTheClearanceAndTheGaugeSize(int dpi)
-    {
-        int scale(int at96) => CardPlacement.Scale(at96, dpi);
-        int barHeight = scale(48);
-        Rectangle bar = new(0, 1032 - (barHeight - 48), scale(1920), barHeight);
-        Rectangle start = new(scale(762), bar.Y, scale(45), barHeight);
-        List<Rectangle> occupied = [start, .. Buttons(8, startX: scale(807), width: scale(44)).Select(r => new Rectangle(r.X, bar.Y, r.Width, barHeight)), new Rectangle(scale(1678), bar.Y, scale(242), barHeight)];
-        TaskbarLayout layout = Layout(bar, occupied, start, dpi, monitor: new Rectangle(0, 0, scale(1920), 1080));
-        int gaugeLong = GaugeRenderer.WidthFor(dpi);
-        Rectangle? placed = GaugePlacement.Place(layout, gaugeLong);
-        Assert.IsNotNull(placed);
-        Assert.AreEqual(scale(1159) + scale(24), placed!.Value.X);
-        Assert.AreEqual(gaugeLong, placed.Value.Width);
-        Assert.AreEqual(bar.Height, placed.Value.Height);
-    }
-
-    [TestMethod]
-    public void AVerticalLeftTaskbarPlacesAlongY()
-    {
-        Rectangle bar = new(0, 0, 62, 1080);
-        Rectangle start = new(0, 0, 62, 45);
-        Rectangle button = new(0, 45, 62, 300);
-        Rectangle tray = new(0, 900, 62, 180);
-        TaskbarLayout layout = Layout(bar, [start, button, tray], start, edge: TaskbarEdge.Left, monitor: new Rectangle(0, 0, 1920, 1080));
-        Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.IsNotNull(placed);
-        Assert.AreEqual(345 + 24, placed!.Value.Y);
-        Assert.AreEqual(bar.Width, placed.Value.Width);
-        Assert.AreEqual(88, placed.Value.Height);
-    }
-
-    [TestMethod]
-    public void ATopTaskbarPlacesAlongX()
-    {
-        Rectangle bar = new(0, 0, 1920, 48);
-        Rectangle start = new(762, 0, 45, 48);
-        List<Rectangle> occupied = [start, .. Buttons(8).Select(r => new Rectangle(r.X, 0, r.Width, 48))];
-        TaskbarLayout layout = Layout(bar, occupied, start, edge: TaskbarEdge.Top);
-        Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.IsNotNull(placed);
-        Assert.AreEqual(1159 + 24, placed!.Value.X);
-    }
-
-    [TestMethod]
-    public void AutoHiddenTaskbarSlidAwayHidesTheGauge()
-    {
-        // The reported rectangle lies almost entirely below the display, the way ABM_GETTASKBARPOS
-        // reports an auto-hidden taskbar (CardPlacement's own comment on the same undocumented shape).
-        Rectangle bar = Rectangle.FromLTRB(0, 1078, 1920, 1126);
-        TaskbarLayout layout = Layout(bar, [], null, autoHide: true);
-        Assert.IsNull(GaugePlacement.Place(layout, 88));
-    }
-
-    [TestMethod]
-    public void AutoHiddenTaskbarSlidInPlacesNormally()
-    {
-        Rectangle bar = Bar96;
-        List<Rectangle> occupied = [Start, .. Buttons(8), new Rectangle(1678, 1032, 242, 48)];
-        TaskbarLayout layout = Layout(bar, occupied, Start, autoHide: true);
-        Rectangle? placed = GaugePlacement.Place(layout, 88);
-        Assert.IsNotNull(placed);
-        Assert.AreEqual(1183, placed!.Value.X);
-    }
-
-    // Property test: over many random layouts, the result never intersects an occupant and never
-    // leaves the taskbar rectangle. house rule: a static scan proves nothing; this runs the real
-    // algorithm against generated input.
-    [TestMethod]
-    public void PropertyResultNeverIntersectsOrLeavesTheTaskbar()
-    {
-        var random = new Random(20260927);
-        for (int trial = 0; trial < 500; trial++)
+        Rectangle? area = null;
+        if (trayLeft is { } tl)
         {
-            int barWidth = random.Next(400, 3000);
-            Rectangle bar = new(0, 1032, barWidth, 48);
-            var occupied = new List<Rectangle>();
-            int cursor = random.Next(0, 60);
-            int count = random.Next(0, 12);
-            Rectangle? start = null;
-            for (int i = 0; i < count && cursor < barWidth - 20; i++)
+            // The notification area's own buttons, each a little apart, the way the shell lays them out.
+            int x = tl;
+            int step = 4 * thickness / 48;
+            if (chevron)
             {
-                int width = random.Next(20, 60);
-                var rect = new Rectangle(cursor, 1032, width, 48);
-                occupied.Add(rect);
-                if (i == 0 && random.Next(2) == 0)
-                {
-                    start = rect;
-                }
-
-                cursor += width + random.Next(0, 3);
+                occupied.Add(new Rectangle(x, top, 32 * thickness / 48, thickness));
+                x += (32 * thickness / 48) + step;
             }
 
-            TaskbarLayout layout = Layout(bar, occupied, start);
-            Rectangle? placed = GaugePlacement.Place(layout, 88);
-            if (placed is not { } rect2)
+            occupied.Add(new Rectangle(x, top, 24 * thickness / 48, thickness));
+            occupied.Add(new Rectangle(x + (28 * thickness / 48), top, 70 * thickness / 48, thickness));
+            occupied.Add(new Rectangle(1920 - (12 * thickness / 48), top, 12 * thickness / 48, thickness));
+            area = Rectangle.FromLTRB(tl, top, 1920, top + thickness);
+        }
+
+        if (extra is not null)
+        {
+            occupied.AddRange(extra);
+        }
+
+        return new TaskbarLayout(
+            0, bar, edge, autoHide, Screen1080, occupied, start, dpi, Shell.QUNS_ACCEPTS_NOTIFICATIONS,
+            Covered: false, GaugeCentreIsGauge: null, NotificationArea: area);
+    }
+
+    private static Rectangle PlacedRect(PlacementResult result)
+    {
+        Assert.IsNotNull(result.Bounds, "Expected a placement, got " + result.Failure);
+        Assert.AreEqual(PlacementFailure.None, result.Failure);
+        return result.Bounds.Value;
+    }
+
+    // ---- Right end (the default) ----
+
+    [TestMethod]
+    public void TheRightEndPutsTheGaugeEightPixelsLeftOfTheChevron()
+    {
+        TaskbarLayout layout = Layout(96, 48, 806, 6, 44, trayLeft: 1738);
+
+        Rectangle r = PlacedRect(GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.RightEnd));
+
+        Assert.AreEqual(new Rectangle(1738 - 8 - 74, 1032 + 4, 74, 40), r);
+    }
+
+    [TestMethod]
+    public void WithoutTheChevronTheGaugeSitsBesideTheFirstTrayIcon()
+    {
+        TaskbarLayout withChevron = Layout(96, 48, 806, 6, 44, trayLeft: 1738, chevron: true);
+        TaskbarLayout without = Layout(96, 48, 806, 6, 44, trayLeft: 1770, chevron: false);
+
+        Rectangle a = PlacedRect(GaugePlacement.Place(withChevron, GaugeLayout.For(96), GaugePosition.RightEnd));
+        Rectangle b = PlacedRect(GaugePlacement.Place(without, GaugeLayout.For(96), GaugePosition.RightEnd));
+
+        Assert.AreEqual(1738 - 8 - 74, a.Left);
+        Assert.AreEqual(1770 - 8 - 74, b.Left);
+        Assert.AreEqual(8, 1770 - b.Right, "Eight pixels between the gauge and the first tray icon.");
+    }
+
+    [TestMethod]
+    public void ANotificationAreaThatGrowsMovesTheGaugeLeftWithIt()
+    {
+        Rectangle before = PlacedRect(GaugePlacement.Place(Layout(96, 48, 806, 6, 44, trayLeft: 1738), GaugeLayout.For(96), GaugePosition.RightEnd));
+        Rectangle after = PlacedRect(GaugePlacement.Place(Layout(96, 48, 806, 6, 44, trayLeft: 1690), GaugeLayout.For(96), GaugePosition.RightEnd));
+
+        Assert.AreEqual(before.Left - 48, after.Left);
+        Assert.AreEqual(1690 - 8, after.Right);
+    }
+
+    [TestMethod]
+    public void TaskButtonsThatGrowIntoTheGaugeLeaveNoRoom()
+    {
+        // Eight buttons from 806 end at 806 + 9 x 44 = 1202; twelve more make them reach 1730, over the gauge.
+        TaskbarLayout fits = Layout(96, 48, 806, 8, 44, trayLeft: 1738);
+        TaskbarLayout grown = Layout(96, 48, 806, 21, 44, trayLeft: 1738);
+
+        Assert.AreEqual(PlacementFailure.None, GaugePlacement.Place(fits, GaugeLayout.For(96), GaugePosition.RightEnd).Failure);
+        PlacementResult result = GaugePlacement.Place(grown, GaugeLayout.For(96), GaugePosition.RightEnd);
+
+        Assert.IsNull(result.Bounds);
+        Assert.AreEqual(PlacementFailure.NoRoom, result.Failure);
+    }
+
+    [TestMethod]
+    public void ButtonsThatJustTouchTheGaugeAreOverlapAndButtonsOnePixelShortAreNot()
+    {
+        GaugeLayout gauge = GaugeLayout.For(96);
+        int gaugeLeft = 1738 - 8 - 74; // 1656
+
+        // The last button ends exactly at the gauge's left edge: no overlap.
+        var touching = new Rectangle(gaugeLeft - 44, 1032, 44, 48);
+        // One pixel further: overlap.
+        var overlapping = new Rectangle(gaugeLeft - 43, 1032, 44, 48);
+
+        Assert.AreEqual(PlacementFailure.None, GaugePlacement.Place(Layout(96, 48, 806, 0, 44, trayLeft: 1738, extra: [touching]), gauge, GaugePosition.RightEnd).Failure);
+        Assert.AreEqual(PlacementFailure.NoRoom, GaugePlacement.Place(Layout(96, 48, 806, 0, 44, trayLeft: 1738, extra: [overlapping]), gauge, GaugePosition.RightEnd).Failure);
+    }
+
+    [TestMethod]
+    public void WithNoNotificationAreaIdentifiedTheRightEndHasNothingToMeasureFrom()
+    {
+        TaskbarLayout layout = Layout(96, 48, 806, 6, 44, trayLeft: null);
+
+        PlacementResult result = GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.RightEnd);
+
+        Assert.IsNull(result.Bounds);
+        Assert.AreEqual(PlacementFailure.NoAnchor, result.Failure);
+    }
+
+    // ---- Next to apps ----
+
+    [TestMethod]
+    public void NextToAppsPutsTheGaugeFourPixelsAfterTheLastButton()
+    {
+        TaskbarLayout layout = Layout(96, 48, 806, 6, 44, trayLeft: 1738);
+        int lastRight = 806 + (7 * 44);
+
+        Rectangle r = PlacedRect(GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.NextToApps));
+
+        Assert.AreEqual(new Rectangle(lastRight + 4, 1036, 74, 40), r);
+    }
+
+    [TestMethod]
+    public void NextToAppsFollowsAButtonBeingAddedAndRemoved()
+    {
+        Rectangle six = PlacedRect(GaugePlacement.Place(Layout(96, 48, 806, 6, 44, trayLeft: 1738), GaugeLayout.For(96), GaugePosition.NextToApps));
+        Rectangle seven = PlacedRect(GaugePlacement.Place(Layout(96, 48, 806, 7, 44, trayLeft: 1738), GaugeLayout.For(96), GaugePosition.NextToApps));
+        Rectangle five = PlacedRect(GaugePlacement.Place(Layout(96, 48, 806, 5, 44, trayLeft: 1738), GaugeLayout.For(96), GaugePosition.NextToApps));
+
+        Assert.AreEqual(six.Left + 44, seven.Left);
+        Assert.AreEqual(six.Left - 44, five.Left);
+    }
+
+    [TestMethod]
+    public void NextToAppsWithNoRoomBeforeTheNotificationAreaHasNoPlacement()
+    {
+        // The last button ends at 1686; the gauge would run from 1690 to 1764, across the tray at 1738.
+        TaskbarLayout layout = Layout(96, 48, 806, 19, 44, trayLeft: 1738);
+
+        PlacementResult result = GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.NextToApps);
+
+        Assert.IsNull(result.Bounds);
+        Assert.AreEqual(PlacementFailure.NoRoom, result.Failure);
+    }
+
+    [TestMethod]
+    public void TheTwoPositionsGiveDifferentRectanglesThatDoNotOverlap()
+    {
+        TaskbarLayout layout = Layout(96, 48, 806, 6, 44, trayLeft: 1738);
+
+        Rectangle apps = PlacedRect(GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.NextToApps));
+        Rectangle right = PlacedRect(GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.RightEnd));
+
+        Assert.IsLessThan(right.Left, apps.Left);
+        Assert.IsFalse(apps.IntersectsWith(right));
+    }
+
+    // ---- Three scales ----
+
+    [TestMethod]
+    [DataRow(96, 48, 1738, 8, 4, 4)]
+    [DataRow(120, 60, 1690, 10, 5, 5)]
+    [DataRow(144, 72, 1650, 12, 6, 6)]
+    public void BothPositionsAreRightAtEveryScale(int dpi, int thickness, int trayLeft, int gapToTray, int topOffset, int gapAfterApps)
+    {
+        GaugeLayout gauge = GaugeLayout.For(dpi);
+        TaskbarLayout layout = Layout(dpi, thickness, 806, 6, thickness - 4, trayLeft);
+        int top = 1080 - thickness;
+        int lastRight = 806 + (7 * (thickness - 4));
+
+        Rectangle right = PlacedRect(GaugePlacement.Place(layout, gauge, GaugePosition.RightEnd));
+        Rectangle apps = PlacedRect(GaugePlacement.Place(layout, gauge, GaugePosition.NextToApps));
+
+        Assert.AreEqual(new Rectangle(trayLeft - gapToTray - gauge.Width, top + topOffset, gauge.Width, gauge.Height), right);
+        Assert.AreEqual(new Rectangle(lastRight + gapAfterApps, top + topOffset, gauge.Width, gauge.Height), apps);
+    }
+
+    // ---- Refusals ----
+
+    [TestMethod]
+    public void NoOccupantsMeansNothingToMeasureFrom()
+    {
+        TaskbarLayout layout = Layout(96, 48, 806, 0, 44, trayLeft: 1738) with { Occupied = [] };
+
+        PlacementResult result = GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.RightEnd);
+
+        Assert.AreEqual(PlacementFailure.NoAnchor, result.Failure);
+    }
+
+    [TestMethod]
+    public void AnAutoHiddenTaskbarThatHasSlidAwayHasNoPlacementAndOneThatSlidInDoes()
+    {
+        // The bar's top is at the bottom of the screen with only 4 px showing.
+        TaskbarLayout away = Layout(96, 48, 806, 6, 44, trayLeft: 1738, autoHide: true, taskbarTop: 1076);
+        TaskbarLayout slidIn = Layout(96, 48, 806, 6, 44, trayLeft: 1738, autoHide: true);
+
+        Assert.AreEqual(PlacementFailure.AutoHiddenAway, GaugePlacement.Place(away, GaugeLayout.For(96), GaugePosition.RightEnd).Failure);
+        Assert.AreEqual(PlacementFailure.None, GaugePlacement.Place(slidIn, GaugeLayout.For(96), GaugePosition.RightEnd).Failure);
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void AVerticalTaskbarIsNotSupported(bool onTheLeft)
+    {
+        TaskbarEdge edge = onTheLeft ? TaskbarEdge.Left : TaskbarEdge.Right;
+        TaskbarLayout layout = Layout(96, 48, 806, 6, 44, trayLeft: 1738, edge: edge);
+
+        PlacementResult result = GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.RightEnd);
+
+        Assert.IsNull(result.Bounds);
+        Assert.AreEqual(PlacementFailure.UnsupportedEdge, result.Failure);
+    }
+
+    [TestMethod]
+    public void ATaskbarTooNarrowForTheGaugeHasNoPlacement()
+    {
+        TaskbarLayout layout = Layout(96, 48, 806, 6, 44, trayLeft: 1738) with { Taskbar = new Rectangle(0, 1032, 60, 48) };
+
+        Assert.AreEqual(PlacementFailure.OutsideTaskbar, GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.RightEnd).Failure);
+    }
+
+    [TestMethod]
+    public void ATopTaskbarPlacesTheGaugeOnItsOwnShortAxis()
+    {
+        TaskbarLayout layout = Layout(96, 48, 806, 6, 44, trayLeft: 1738, edge: TaskbarEdge.Top, taskbarTop: 0);
+
+        Rectangle r = PlacedRect(GaugePlacement.Place(layout, GaugeLayout.For(96), GaugePosition.RightEnd));
+
+        Assert.AreEqual(4, r.Top);
+    }
+
+    // The invariant over random layouts: a result never touches an occupant, never leaves the taskbar and
+    // never crosses into the notification area.
+    [TestMethod]
+    public void ARandomLayoutNeverGivesARectangleThatTouchesAnythingOrLeavesTheTaskbar()
+    {
+        var random = new Random(20260929);
+        int placed = 0;
+        for (int i = 0; i < 400; i++)
+        {
+            int dpi = new[] { 96, 120, 144 }[random.Next(3)];
+            int thickness = 48 * dpi / 96;
+            int buttonWidth = thickness - 4;
+            int trayLeft = random.Next(1200, 1800);
+            TaskbarLayout layout = Layout(dpi, thickness, random.Next(0, 900), random.Next(0, 24), buttonWidth, trayLeft, chevron: random.Next(2) == 0);
+            GaugePosition position = random.Next(2) == 0 ? GaugePosition.RightEnd : GaugePosition.NextToApps;
+
+            PlacementResult result = GaugePlacement.Place(layout, GaugeLayout.For(dpi), position);
+
+            if (result.Bounds is not { } rect)
             {
+                Assert.AreNotEqual(PlacementFailure.None, result.Failure);
                 continue;
             }
 
-            Assert.IsTrue(bar.Contains(rect2), "trial " + trial + ": result must stay inside the taskbar.");
-            foreach (Rectangle o in occupied)
-            {
-                Assert.IsFalse(rect2.IntersectsWith(o), "trial " + trial + ": result must never intersect an occupant.");
-            }
+            placed++;
+            Assert.IsTrue(layout.Taskbar.Contains(rect), "Left the taskbar: " + rect);
+            Assert.IsFalse(layout.Occupied.Any(o => o.IntersectsWith(rect)), "Touches an occupant: " + rect);
+            Assert.IsLessThanOrEqualTo(layout.NotificationArea!.Value.Left, rect.Right, "Crosses into the notification area: " + rect);
         }
+
+        Assert.IsGreaterThan(100, placed, "The random layouts must place often enough for the invariant to mean something.");
+    }
+
+    [TestMethod]
+    public void GapsAreScaledWithCardPlacementScale()
+    {
+        Assert.AreEqual(12, CardPlacement.Scale(GaugePlacement.GapToNotificationAreaAt96, 144));
+        Assert.AreEqual(6, CardPlacement.Scale(GaugePlacement.GapAfterAppsAt96, 144));
     }
 }

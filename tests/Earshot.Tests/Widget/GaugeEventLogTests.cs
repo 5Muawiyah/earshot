@@ -1,316 +1,68 @@
 using System.Drawing;
-using System.Text.RegularExpressions;
+using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Popup;
 using Earshot.Widget;
-using System.Windows.Forms;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// Every hide, show, move, cover and raise of the gauge writes one line in a fixed format, so a day of use
-// leaves evidence of what made it flicker. The format is pinned here; the controller tests below drive every
-// path that hides the gauge and check the reason each one names.
+// Every hide, show, move and raise of the gauge writes one line with its reason, so a day of use leaves the
+// cause of any flicker in the log. The wording is pinned here; the controller tests drive every path that
+// hides the gauge and check the reason each one names, and that nothing but a class ever names a window.
 [TestClass]
 public sealed class GaugeEventLogTests
 {
-    private const string StartOfClock = "2026-09-19T12:00:00.000Z";
-
     private static readonly Rectangle Bar = new(0, 1032, 1920, 48);
     private static readonly Rectangle Start = new(762, 1032, 45, 48);
 
     private static readonly WindowIdentity Chrome = new("Chrome_WidgetWin_1", BelongsToExplorer: false);
     private static readonly WindowIdentity ShellCore = new("Windows.UI.Core.CoreWindow", BelongsToExplorer: true);
 
-    [TestMethod]
-    public void AHideLineHasAFixedShape()
-    {
-        var e = new GaugeEvent(GaugeEventKind.Hide, GaugeReasons.Covered, new DateTimeOffset(2026, 9, 29, 14, 36, 12, 345, TimeSpan.Zero))
-        {
-            Bounds = new Rectangle(1183, 1032, 74, 40),
-            ShownFor = TimeSpan.FromMilliseconds(4200),
-            Window = ShellCore,
-            Foreground = Chrome,
-            Detail = "quns=3",
-        };
+    // ---- The wording ----
 
+    [TestMethod]
+    public void EveryLineHasAFixedWording()
+    {
+        var r = new Rectangle(1596, 1036, 74, 40);
+        StepOutcome failed = new("uia:find-all-build-cache", false, unchecked((int)0x80004005), "E_FAIL", "unspecified");
+        StepOutcome window = new("set-window-pos:show-gauge", false, 1400, "ERROR_INVALID_WINDOW_HANDLE", null);
+
+        Assert.AreEqual("Gauge shown at 1596,1036 74x40 (first layout).", GaugeEventLog.Shown(r, GaugeEventLog.ShownFirstLayout));
+        Assert.AreEqual("Gauge moved to 1596,1036 74x40.", GaugeEventLog.Moved(r));
+        Assert.AreEqual("Gauge hidden (NoTaskbar).", GaugeEventLog.HiddenNoTaskbar());
         Assert.AreEqual(
-            "Gauge: hide reason=covered t=2026-09-29T14:36:12.345Z bounds=1183,1032,74x40 shown_ms=4200 " +
-            "window.class=Windows.UI.Core.CoreWindow window.explorer=true fg.class=Chrome_WidgetWin_1 fg.explorer=false detail=quns=3",
-            GaugeEventLog.Format(e));
+            "Gauge hidden (ReadFailed Occupants E_FAIL (" + failed.Code + ") after 3 consecutive failures).",
+            GaugeEventLog.HiddenReadFailed("Occupants", failed, 3));
+        Assert.AreEqual("Gauge hidden (NoFreeSpace).", GaugeEventLog.HiddenNoFreeSpace());
+        Assert.AreEqual("Gauge hidden (Covered by Chrome_WidgetWin_1).", GaugeEventLog.HiddenCovered(Chrome));
+        Assert.AreEqual("Gauge hidden (Covered by Windows.UI.Core.CoreWindow (Explorer)).", GaugeEventLog.HiddenCovered(ShellCore));
+        Assert.AreEqual("Gauge hidden (NotificationState QUNS_BUSY).", GaugeEventLog.HiddenNotificationState("QUNS_BUSY"));
+        Assert.AreEqual("Gauge hidden (FullScreenNotified).", GaugeEventLog.HiddenFullScreenNotified());
+        Assert.AreEqual("Gauge hidden (WindowFailed ERROR_INVALID_WINDOW_HANDLE (1400)).", GaugeEventLog.HiddenWindowFailed(window));
+        Assert.AreEqual("Gauge hidden (SettingOff).", GaugeEventLog.HiddenSettingOff());
+        Assert.AreEqual(
+            "Gauge kept at 1596,1036 74x40 after a failed read (Occupants E_FAIL (" + failed.Code + "), 1 of 3).",
+            GaugeEventLog.KeptAfterFailedRead(r, "Occupants", failed, 1, 3));
+        Assert.AreEqual(
+            "Gauge raised: Shell_TrayWnd (Explorer) was over it after a foreground change to Chrome_WidgetWin_1.",
+            GaugeEventLog.RaisedAfterForegroundChange(new WindowIdentity("Shell_TrayWnd", true), "Chrome_WidgetWin_1"));
+        Assert.AreEqual("Gauge raised: the poll found Chrome_WidgetWin_1 over it.", GaugeEventLog.RaisedByPoll(Chrome));
+        Assert.AreEqual("Gauge raised: the poll found an unknown window over it.", GaugeEventLog.RaisedByPoll(null));
+        Assert.AreEqual("Gauge left under Chrome_WidgetWin_1 after a foreground change: not the taskbar.", GaugeEventLog.LeftUnder("Chrome_WidgetWin_1"));
+        Assert.AreEqual("Gauge raise cap reached; waiting for a poll to confirm.", GaugeEventLog.RaiseCapReached());
     }
 
     [TestMethod]
-    public void AMoveLineCarriesTheOldRectangleAndAFailureCarriesItsRawCode()
+    public void ATitleShapedValueCannotBreakTheSentence()
     {
-        var move = new GaugeEvent(GaugeEventKind.Move, GaugeReasons.LayoutChanged, new DateTimeOffset(2026, 9, 29, 14, 36, 12, 0, TimeSpan.Zero))
-        {
-            Bounds = new Rectangle(1200, 1036, 74, 40),
-            From = new Rectangle(1183, 1036, 74, 40),
-        };
-        Assert.AreEqual(
-            "Gauge: move reason=layout-changed t=2026-09-29T14:36:12.000Z bounds=1200,1036,74x40 from=1183,1036,74x40",
-            GaugeEventLog.Format(move));
-
-        var failed = new GaugeEvent(GaugeEventKind.Show, GaugeReasons.Placed, new DateTimeOffset(2026, 9, 29, 14, 36, 12, 0, TimeSpan.Zero))
-        {
-            Failure = new StepOutcome("set-window-pos:show-gauge", false, 1400, "ERROR_INVALID_WINDOW_HANDLE", "the handle is gone"),
-        };
-        Assert.AreEqual(
-            "Gauge: show reason=placed t=2026-09-29T14:36:12.000Z code=1400 name=ERROR_INVALID_WINDOW_HANDLE step=set-window-pos:show-gauge",
-            GaugeEventLog.Format(failed));
-    }
-
-    [TestMethod]
-    public void ATitleShapedValueCannotBreakTheLineIntoExtraFields()
-    {
-        var e = new GaugeEvent(GaugeEventKind.Cover, GaugeReasons.WindowOverGauge, new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero))
-        {
-            Window = new WindowIdentity("Evil class reason=fake\r\nGauge: hide", BelongsToExplorer: false),
-        };
-
-        string line = GaugeEventLog.Format(e);
+        string line = GaugeEventLog.HiddenCovered(new WindowIdentity("Evil class (fake).\r\nGauge hidden", BelongsToExplorer: false));
 
         Assert.DoesNotContain("\n", line);
         Assert.DoesNotContain("\r", line);
-        Assert.AreEqual(1, Regex.Count(line, " reason="), "Only one reason field: " + line);
-        Assert.AreEqual(1, Regex.Count(line, " window.explorer="), "Only one window.explorer field: " + line);
-        StringAssert.Matches(line, new Regex(@" window\.class=Evil_class_reason_fake__Gauge:_hide window\.explorer=false$"));
-    }
-
-    private static TaskbarLayout FreeSpace() =>
-        new(0, Bar, TaskbarEdge.Bottom, false, new Rectangle(0, 0, 1920, 1080),
-            [Start, new Rectangle(807, 1032, 44, 48), new Rectangle(1678, 1032, 242, 48)], Start,
-            96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
-            NotificationArea: new Rectangle(1678, 1032, 242, 48));
-
-    private sealed class Rig
-    {
-        public FakeGaugeSurface Surface { get; } = new();
-
-        public FakeTrayIcon Icon { get; } = new();
-
-        public Streaming.TestTimeProvider Time { get; } = new();
-
-        public CapturingLog Log { get; } = new();
-
-        public bool Enabled { get; set; } = true;
-
-        public GaugeController Controller { get; }
-
-        public Rig()
-        {
-            Controller = new GaugeController(() => Surface, Icon, () => new GaugeControllerSettings(Enabled, LeftClickConnects: false), Log, Time);
-        }
-
-        public void Layout(TaskbarLayout layout) => Controller.OnLayout(ITaskbarReader.Result.Ok(layout));
-
-        public List<string> Lines() =>
-            Log.Entries.Select(e => e.Message).Where(m => m.StartsWith(GaugeEventLog.Prefix, StringComparison.Ordinal)).ToList();
-
-        public string OnlyLine(string kindAndReason)
-        {
-            List<string> found = Lines().Where(l => l.StartsWith("Gauge: " + kindAndReason + " ", StringComparison.Ordinal)).ToList();
-            Assert.HasCount(1, found, "Expected exactly one '" + kindAndReason + "' line. Log: " + string.Join(" | ", Lines()));
-            return found[0];
-        }
-    }
-
-    [TestMethod]
-    public void EveryLineStartsWithThePrefixAndCarriesATimestamp()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = Chrome });
-
-        Assert.IsNotEmpty(rig.Lines());
-        foreach (string line in rig.Lines())
-        {
-            StringAssert.StartsWith(line, "Gauge: ");
-            StringAssert.Matches(line, new Regex(@" t=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z"));
-        }
-    }
-
-    [TestMethod]
-    public void ShowingTheGaugeWritesAShowLineWithItsBounds()
-    {
-        var rig = new Rig();
-
-        rig.Layout(FreeSpace());
-
-        string line = rig.OnlyLine("show reason=placed");
-        StringAssert.Contains(line, " t=" + StartOfClock);
-        StringAssert.Matches(line, new Regex(@" bounds=\d+,\d+,\d+x\d+"));
-        StringAssert.Contains(line, "was=off");
-    }
-
-    [TestMethod]
-    public void ACoveredTaskbarWritesOneCoveredLineNamingTheWindowClassAndExplorerOwnership()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        rig.Time.Advance(TimeSpan.FromSeconds(3));
-
-        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = Chrome, Foreground = ShellCore });
-        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = Chrome, Foreground = ShellCore });
-
-        string line = rig.OnlyLine("hide reason=covered");
-        StringAssert.Contains(line, "shown_ms=3000");
-        StringAssert.Contains(line, "window.class=Chrome_WidgetWin_1 window.explorer=false");
-        StringAssert.Contains(line, "fg.class=Windows.UI.Core.CoreWindow fg.explorer=true");
-    }
-
-    [TestMethod]
-    public void AFullScreenStateNamesItsNotificationCode()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-
-        rig.Layout(FreeSpace() with { NotificationState = Shell.QUNS_RUNNING_D3D_FULL_SCREEN });
-
-        string line = rig.OnlyLine("hide reason=full-screen-state");
-        StringAssert.Contains(line, "quns=" + Shell.QUNS_RUNNING_D3D_FULL_SCREEN);
-    }
-
-    [TestMethod]
-    public void TheAppBarNotificationFastPathHasItsOwnReason()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-
-        rig.Controller.NotifyFullScreenApp(opening: true);
-
-        rig.OnlyLine("hide reason=full-screen-app-notified");
-    }
-
-    [TestMethod]
-    public void ATaskbarReadFailureNamesTheStepAndCarriesTheRawCode()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        StepOutcome outcome = StepOutcomes.FromHResult("uia:find-all-build-cache", unchecked((int)0x80004005));
-
-        rig.Controller.OnLayout(ITaskbarReader.Result.Fail(new TaskbarReadFailure(TaskbarReadFailureStep.Occupants, outcome)));
-        rig.Controller.OnLayout(ITaskbarReader.Result.Fail(new TaskbarReadFailure(TaskbarReadFailureStep.Occupants, outcome)));
-
-        string line = rig.OnlyLine("hide reason=read-failed");
-        StringAssert.Contains(line, "step=uia:find-all-build-cache");
-        StringAssert.Contains(line, "detail=step=Occupants");
-        Assert.AreEqual(1, rig.Log.Entries.Count(e => e.Level == LogLevel.Error), "A repeat of the same failure is not a second Error.");
-    }
-
-    [TestMethod]
-    public void NoTaskbarIsItsOwnReason()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-
-        rig.Controller.OnLayout(ITaskbarReader.Result.Fail(new TaskbarReadFailure(
-            TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false))));
-
-        rig.OnlyLine("hide reason=no-taskbar");
-    }
-
-    [TestMethod]
-    public void NoFreeSpaceIsItsOwnReason()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        var tight = FreeSpace() with
-        {
-            Occupied = [Start, new Rectangle(807, 1032, 800, 48), new Rectangle(1678, 1032, 242, 48)],
-        };
-
-        rig.Layout(tight);
-
-        rig.OnlyLine("hide reason=no-free-space");
-    }
-
-    [TestMethod]
-    public void AFailedShowIsWrittenOnceWithItsCodeAndThenHidesAsWindowFailed()
-    {
-        var rig = new Rig();
-        rig.Surface.NextShowAtResult = StepOutcomes.FromWin32("set-window-pos:show-gauge", 1400);
-
-        rig.Layout(FreeSpace());
-
-        string show = rig.OnlyLine("show reason=placed");
-        StringAssert.Contains(show, "code=1400");
-        StringAssert.Contains(show, "step=set-window-pos:show-gauge");
-        string hide = rig.OnlyLine("hide reason=window-failed");
-        Assert.DoesNotContain("code=1400", hide, "The failing step is written once, on the show line.");
-    }
-
-    [TestMethod]
-    public void TurningTheSettingOffWritesOneLineAndAnIdleOffWritesNone()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        rig.Enabled = false;
-
-        rig.Layout(FreeSpace());
-        rig.Layout(FreeSpace());
-
-        rig.OnlyLine("hide reason=setting-off");
-    }
-
-    [TestMethod]
-    public void DisposingWhileShownWritesADisposedLine()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-
-        rig.Controller.Dispose();
-
-        rig.OnlyLine("hide reason=disposed");
-    }
-
-    [TestMethod]
-    public void MovingTheGaugeWritesAMoveLineWithTheOldRectangle()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-
-        rig.Layout(FreeSpace() with { Occupied = [Start, new Rectangle(807, 1032, 88, 48), new Rectangle(1678, 1032, 242, 48)] });
-
-        Assert.IsTrue(rig.Surface.Calls.Any(c => c.StartsWith("MoveTo", StringComparison.Ordinal)), "Sanity: the wider button moved the gauge.");
-        string line = rig.OnlyLine("move reason=layout-changed");
-        StringAssert.Matches(line, new Regex(@" from=\d+,\d+,\d+x\d+"));
-    }
-
-    [TestMethod]
-    public void AWindowOverTheGaugeWritesACoverLineThenARaiseLineAndAConfirmingReadWritesNothing()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        int before = rig.Lines().Count;
-
-        rig.Layout(FreeSpace() with { GaugeCentreIsGauge = true });
-        Assert.AreEqual(before, rig.Lines().Count, "A read that confirms the gauge is on top is not an event.");
-
-        rig.Layout(FreeSpace() with { GaugeCentreIsGauge = false, WindowAtGaugeCentre = ShellCore, Foreground = Chrome });
-
-        IReadOnlyList<string> lines = rig.Lines();
-        Assert.HasCount(before + 2, lines);
-        StringAssert.StartsWith(lines[^2], "Gauge: cover reason=window-over-gauge ");
-        StringAssert.Contains(lines[^2], "window.class=Windows.UI.Core.CoreWindow window.explorer=true");
-        StringAssert.StartsWith(lines[^1], "Gauge: raise reason=covered-at-centre ");
-        StringAssert.Contains(lines[^1], "fg.class=Chrome_WidgetWin_1 fg.explorer=false");
-    }
-
-    [TestMethod]
-    public void ShowingAgainAfterAHideRecordsWhatItWasHiddenFor()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = Chrome });
-
-        rig.Layout(FreeSpace());
-
-        List<string> shows = rig.Lines().Where(l => l.StartsWith("Gauge: show ", StringComparison.Ordinal)).ToList();
-        Assert.HasCount(2, shows);
-        StringAssert.Contains(shows[1], "was=hidden:Covered");
+        Assert.DoesNotContain(" (fake)", line);
+        Assert.AreEqual("Gauge hidden (Covered by Evil_class__fake_.__Gauge_hidden).", line);
     }
 
     // The real helper against a real window (a hidden, never-shown STATIC control), not a fake: its class
@@ -339,5 +91,225 @@ public sealed class GaugeEventLogTests
         {
             window.DestroyHandle();
         }
+    }
+
+    // ---- The controller writes them ----
+
+    private static TaskbarLayout FreeSpace() =>
+        new(0, Bar, TaskbarEdge.Bottom, false, new Rectangle(0, 0, 1920, 1080),
+            [Start, new Rectangle(807, 1032, 44, 48), new Rectangle(1678, 1032, 242, 48)], Start,
+            96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
+            NotificationArea: new Rectangle(1678, 1032, 242, 48));
+
+    private sealed class Rig
+    {
+        public FakeGaugeSurface Surface { get; } = new();
+
+        public FakeTrayIcon Icon { get; } = new();
+
+        public Streaming.TestTimeProvider Time { get; } = new();
+
+        public CapturingLog Log { get; } = new();
+
+        public bool Enabled { get; set; } = true;
+
+        public GaugePosition Position { get; set; } = GaugePosition.RightEnd;
+
+        public GaugeController Controller { get; }
+
+        public Rig()
+        {
+            Controller = new GaugeController(
+                () => Surface, Icon, () => new GaugeControllerSettings(Enabled, LeftClickConnects: false, Position), Log, Time);
+        }
+
+        public void Layout(TaskbarLayout layout) => Controller.OnLayout(ITaskbarReader.Result.Ok(layout));
+
+        public void Fail(TaskbarReadFailureStep step, string name = "E_FAIL") =>
+            Controller.OnLayout(ITaskbarReader.Result.Fail(new TaskbarReadFailure(step, new StepOutcome("uia:" + step, false, 1, name, null))));
+
+        public List<string> Lines() =>
+            Log.Entries.Select(e => e.Message).Where(m => m.StartsWith(GaugeEventLog.Prefix, StringComparison.Ordinal)).ToList();
+
+        public string OnlyLine(string startsWith)
+        {
+            List<string> found = Lines().Where(l => l.StartsWith(startsWith, StringComparison.Ordinal)).ToList();
+            Assert.HasCount(1, found, "Expected exactly one line starting '" + startsWith + "'. Log: " + string.Join(" | ", Lines()));
+            return found[0];
+        }
+
+        public int Count(string startsWith) => Lines().Count(l => l.StartsWith(startsWith, StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ShowingTheGaugeWritesAShownLineWithItsRectangleAndWhy()
+    {
+        var rig = new Rig();
+
+        rig.Layout(FreeSpace());
+
+        Assert.AreEqual("Gauge shown at 1596,1036 74x40 (first layout).", rig.OnlyLine("Gauge shown"));
+    }
+
+    [TestMethod]
+    public void ACoveredTaskbarWritesOneLineNamingTheWindowClass()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+
+        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = Chrome });
+        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = Chrome });
+
+        Assert.AreEqual("Gauge hidden (Covered by Chrome_WidgetWin_1).", rig.OnlyLine("Gauge hidden"));
+    }
+
+    [TestMethod]
+    public void AChangeOfCoveringWindowIsANewLine()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+
+        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = Chrome });
+        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = ShellCore });
+
+        Assert.AreEqual(2, rig.Count("Gauge hidden (Covered"));
+    }
+
+    [TestMethod]
+    public void AFullScreenStateNamesItsNotificationState()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+
+        rig.Layout(FreeSpace() with { NotificationState = Shell.QUNS_RUNNING_D3D_FULL_SCREEN });
+
+        Assert.AreEqual("Gauge hidden (NotificationState QUNS_RUNNING_D3D_FULL_SCREEN).", rig.OnlyLine("Gauge hidden"));
+    }
+
+    [TestMethod]
+    public void TheAppBarNotificationFastPathHasItsOwnReasonAndTheShowAfterItSaysSo()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+
+        rig.Controller.NotifyFullScreenApp(opening: true);
+        rig.Layout(FreeSpace());
+
+        Assert.AreEqual("Gauge hidden (FullScreenNotified).", rig.OnlyLine("Gauge hidden"));
+        Assert.AreEqual("Gauge shown at 1596,1036 74x40 (full-screen app closed).", rig.Lines().Last());
+    }
+
+    [TestMethod]
+    public void NoTaskbarIsItsOwnReason()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+
+        rig.Controller.OnLayout(ITaskbarReader.Result.Fail(new TaskbarReadFailure(
+            TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false))));
+        rig.Layout(FreeSpace());
+
+        Assert.AreEqual("Gauge hidden (NoTaskbar).", rig.OnlyLine("Gauge hidden"));
+        Assert.AreEqual("Gauge shown at 1596,1036 74x40 (taskbar back).", rig.Lines().Last());
+    }
+
+    [TestMethod]
+    public void NoFreeSpaceIsItsOwnReasonAndTheShowAfterItSaysSo()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+        TaskbarLayout tight = FreeSpace() with { Occupied = [Start, new Rectangle(807, 1032, 813, 48), new Rectangle(1678, 1032, 242, 48)] };
+
+        rig.Layout(tight);
+        rig.Layout(tight);
+        rig.Layout(FreeSpace());
+
+        Assert.AreEqual("Gauge hidden (NoFreeSpace).", rig.OnlyLine("Gauge hidden"));
+        Assert.AreEqual("Gauge shown at 1596,1036 74x40 (free space back).", rig.Lines().Last());
+        Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Gauge placement found no room: NoRoom."), "The placement's own reason is kept at Debug.");
+    }
+
+    [TestMethod]
+    public void AFailedShowIsWrittenOnceAsAnErrorWithItsCodeAndThenHidesAsWindowFailed()
+    {
+        var rig = new Rig();
+        rig.Surface.NextShowAtResult = StepOutcomes.FromWin32("set-window-pos:show-gauge", 1400);
+
+        rig.Layout(FreeSpace());
+
+        Assert.IsTrue(rig.Log.Has(LogLevel.Error, "1400"), "The raw code is an Error line, as before.");
+        StringAssert.StartsWith(rig.OnlyLine("Gauge hidden"), "Gauge hidden (WindowFailed ");
+        StringAssert.Contains(rig.OnlyLine("Gauge hidden"), "(1400)");
+    }
+
+    [TestMethod]
+    public void TurningTheSettingOffWritesOneLineAndAnIdleOffWritesNone()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+        rig.Enabled = false;
+
+        rig.Layout(FreeSpace());
+        rig.Layout(FreeSpace());
+
+        Assert.AreEqual("Gauge hidden (SettingOff).", rig.OnlyLine("Gauge hidden"));
+    }
+
+    [TestMethod]
+    public void MovingTheGaugeWritesAMovedLine()
+    {
+        var rig = new Rig { Position = GaugePosition.NextToApps };
+        rig.Layout(FreeSpace());
+
+        rig.Layout(FreeSpace() with { Occupied = [Start, new Rectangle(807, 1032, 88, 48), new Rectangle(1678, 1032, 242, 48)] });
+
+        StringAssert.StartsWith(rig.OnlyLine("Gauge moved"), "Gauge moved to ");
+    }
+
+    [TestMethod]
+    public void EveryLineIsOneLineAndNamesNoTitle()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+        rig.Layout(FreeSpace() with { Covered = true, CoveringWindow = new WindowIdentity("FakeClass", false) });
+        rig.Layout(FreeSpace());
+        rig.Layout(FreeSpace() with { GaugeCentreIsGauge = false, WindowAtGaugeCentre = new WindowIdentity("FakeClass", false) });
+        rig.Fail(TaskbarReadFailureStep.Occupants);
+
+        Assert.IsNotEmpty(rig.Lines());
+        foreach (string line in rig.Lines())
+        {
+            Assert.DoesNotContain("\n", line);
+            Assert.DoesNotContain("FakeTitle", line);
+        }
+
+        Assert.IsTrue(rig.Lines().Any(l => l.Contains("FakeClass", StringComparison.Ordinal)), "The class is named.");
+    }
+
+    // ---- The poll's raise ----
+
+    [TestMethod]
+    public void ThePollsRaiseNamesTheWindowItFoundOverTheGauge()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+
+        rig.Layout(FreeSpace() with { GaugeCentreIsGauge = false, WindowAtGaugeCentre = ShellCore });
+
+        Assert.AreEqual("Gauge raised: the poll found Windows.UI.Core.CoreWindow (Explorer) over it.", rig.OnlyLine("Gauge raised"));
+        CollectionAssert.Contains(rig.Surface.Calls, "Raise");
+    }
+
+    [TestMethod]
+    public void ARaiseThatFailsIsAWindowFailure()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+        rig.Surface.NextRaiseResult = StepOutcomes.FromWin32("set-window-pos:raise-gauge", 5);
+
+        rig.Layout(FreeSpace() with { GaugeCentreIsGauge = false });
+
+        Assert.AreEqual(HiddenReason.WindowFailed, ((GaugeState.Hidden)rig.Controller.State).Reason);
+        StringAssert.StartsWith(rig.OnlyLine("Gauge hidden"), "Gauge hidden (WindowFailed ");
     }
 }

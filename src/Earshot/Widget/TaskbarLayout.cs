@@ -26,6 +26,6 @@ internal sealed record TaskbarLayout(
     WindowIdentity? Foreground = null);        // the foreground window at the time of the read
 
 // Why a read failed, and the raw step. Every case maps to one of GaugeController's Hidden reasons.
-internal enum TaskbarReadFailureStep { NoTaskbar, TaskbarRect, Occupants, Notification, Dpi, GaugeProbe }
+internal enum TaskbarReadFailureStep { NoTaskbar, TaskbarRect, Occupants, Notification, Dpi, GaugeProbe, Exception }
 
 internal sealed record TaskbarReadFailure(TaskbarReadFailureStep Step, StepOutcome Outcome);

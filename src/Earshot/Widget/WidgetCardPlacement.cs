@@ -6,7 +6,13 @@ namespace Earshot.Widget;
 // a zero-size rectangle at a fallback point when the gauge is hidden), clamped into a work area. No window,
 // no native call, so it is unit-testable without a window.
 //
-// The card is meant to land above the gauge the way a click-anchored popup lands above its anchor.
+// The card follows the gauge:
+//   gauge at the right-hand end   the card's right edge is 12 px from the screen edge
+//   gauge next to the apps        the card is centred on the gauge
+// and either way it is kept 12 px inside the screen. Its bottom edge is 12 px above the taskbar, which on a
+// bottom taskbar is the bottom of the work area; a gauge on an auto-hidden taskbar has no work area edge to
+// use, so the card sits 12 px above the gauge instead.
+//
 // CardPlacement.TargetFor(NearCursor) does the equivalent job for the tray's other cards, with the cursor as
 // the anchor, but doing the same here would need CardTarget's taskbar-band exclusion rectangle to be the
 // gauge's own rectangle, which CardPlacement does not expose a seam for today; wiring one in would be a
@@ -15,19 +21,32 @@ namespace Earshot.Widget;
 // CardPlacement.Scale and CardPlacement.Clamp rather than duplicating them.
 internal static class WidgetCardPlacement
 {
-    // Gap between the card and the rectangle it is placed above, in pixels at 96 DPI. A layout choice, not
-    // a measurement, matching CardPlacement.MarginAt96.
+    // Gap between the card and the rectangle it is placed above, and between the card and the screen's
+    // edge, in pixels at 96 DPI. A layout choice, not a measurement, matching CardPlacement.MarginAt96.
     public const int GapAt96 = 12;
 
-    // The card's rectangle: centred over anchor's horizontal middle, its bottom edge Gap above anchor's
-    // top, clamped inside workArea without resizing. anchor may be a zero-size rectangle at a point (the
-    // fallback when the gauge is hidden): centring and gap above still apply.
-    public static Rectangle Above(Rectangle anchor, Size cardSize, Rectangle workArea, int dpi)
+    // The card's rectangle. anchor may be a zero-size rectangle at a point (the fallback when the gauge is
+    // hidden): the card is then centred on that point with its bottom edge the gap above it, clamped inside
+    // workArea without resizing.
+    public static Rectangle Above(Rectangle anchor, Size cardSize, Rectangle workArea, int dpi, GaugePosition position = GaugePosition.RightEnd)
     {
         int gap = CardPlacement.Scale(GapAt96, dpi);
-        int x = anchor.X + (anchor.Width / 2) - (cardSize.Width / 2);
-        int y = anchor.Y - gap - cardSize.Height;
-        var placed = new Rectangle(x, y, cardSize.Width, cardSize.Height);
-        return CardPlacement.Clamp(placed, workArea);
+        bool isGauge = anchor.Width > 0 && anchor.Height > 0;
+
+        if (!isGauge)
+        {
+            int fallbackX = anchor.X - (cardSize.Width / 2);
+            int fallbackY = anchor.Y - gap - cardSize.Height;
+            return CardPlacement.Clamp(new Rectangle(fallbackX, fallbackY, cardSize.Width, cardSize.Height), workArea);
+        }
+
+        int bottom = Math.Min(anchor.Top, workArea.Bottom);
+        int y = bottom - gap - cardSize.Height;
+        int x = position == GaugePosition.RightEnd
+            ? workArea.Right - gap - cardSize.Width
+            : anchor.X + (anchor.Width / 2) - (cardSize.Width / 2);
+
+        Rectangle inner = Rectangle.FromLTRB(workArea.Left + gap, workArea.Top, workArea.Right - gap, workArea.Bottom);
+        return CardPlacement.Clamp(new Rectangle(x, y, cardSize.Width, cardSize.Height), inner);
     }
 }

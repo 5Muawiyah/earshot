@@ -39,7 +39,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             return Fail(TaskbarReadFailureStep.TaskbarRect, rectFailure!);
         }
 
-        if (!TryReadOccupants(trayHandle, taskbar, Earshot.Audio.ComRelease.Rcw, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? occupantsFailure))
+        if (!TryReadOccupants(trayHandle, taskbar, Earshot.Audio.ComRelease.Rcw, out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? occupantsFailure))
         {
             return Fail(TaskbarReadFailureStep.Occupants, occupantsFailure!);
         }
@@ -79,7 +79,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
         var layout = new TaskbarLayout(
             trayHandle, taskbar, edge, autoHide, monitorBounds, occupied, startButton,
             (int)(dpi > 0 ? dpi : CardPlacement.BaseDpi), quns, covered, gaugeCentreIsGauge,
-            CoveringWindow: coveringWindow, WindowAtGaugeCentre: windowAtGaugeCentre,
+            NotificationArea: notificationArea, CoveringWindow: coveringWindow, WindowAtGaugeCentre: windowAtGaugeCentre,
             Foreground: GaugeWindowIdentityReader.Foreground(explorerProcess));
         return ITaskbarReader.Result.Ok(layout);
     }
@@ -93,11 +93,15 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     // comment: their managed test doubles are not real COM objects, and Marshal.ReleaseComObject throws
     // ArgumentException against one). The cached _automation field above is the only UIA object this reader
     // keeps alive across reads, so it is never passed to release.
-    internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
+    internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure) =>
+        TryReadOccupants(hwnd, containerRect, release, out occupied, out startButton, out _, out failure);
+
+    internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure)
     {
         ArgumentNullException.ThrowIfNull(release);
         occupied = [];
         startButton = null;
+        notificationArea = null;
         failure = null;
 
         if (_automation is null)
@@ -151,6 +155,11 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                         hr = cacheRequest.AddProperty(UiAutomation.UIA_AutomationIdPropertyId);
                     }
 
+                    if (hr >= 0)
+                    {
+                        hr = cacheRequest.AddProperty(UiAutomation.UIA_ClassNamePropertyId);
+                    }
+
                     if (hr < 0)
                     {
                         failure = StepOutcomes.FromHResult("uia:add-property", hr);
@@ -170,7 +179,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
 
                     try
                     {
-                        return TryReadElements(found, containerRect, release, out occupied, out startButton, out failure);
+                        return TryReadElements(found, containerRect, release, out occupied, out startButton, out notificationArea, out failure);
                     }
                     finally
                     {
@@ -197,11 +206,21 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     // IUIAutomationElementArray/IUIAutomationElement, without a real Shell_TrayWnd or a way to make the
     // real COM pipeline fail partway through an enumeration on demand. release frees each per-element
     // IUIAutomationElement GetElement returns, the same delegate TryReadOccupants passes through.
-    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure)
+    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure) =>
+        TryReadElements(found, containerRect, release, out occupied, out startButton, out _, out failure);
+
+    // notificationArea is the bounding box of every occupant whose UI Automation class name says it belongs
+    // to the notification area (the tray chevron, the tray icons, the network, sound and clock buttons and
+    // the show-desktop corner): "SystemTray.*" for the XAML buttons, "TrayNotifyWnd" for the legacy pane
+    // that spans them. Both are undocumented names read from this machine's own taskbar, so a taskbar that
+    // names them differently yields null here and the gauge falls back to the tray icon rather than
+    // guessing where the area starts.
+    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure)
     {
         ArgumentNullException.ThrowIfNull(release);
         occupied = [];
         startButton = null;
+        notificationArea = null;
         failure = null;
 
         int hr = found.get_Length(out int count);
@@ -283,6 +302,18 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                 {
                     startButton = rect;
                 }
+
+                hr = element.GetCachedPropertyValue(UiAutomation.UIA_ClassNamePropertyId, out object? classValue);
+                if (hr < 0)
+                {
+                    failure = StepOutcomes.FromHResult("uia:get-cached-property:class-name", hr);
+                    return false;
+                }
+
+                if (classValue is string className && IsNotificationAreaClass(className))
+                {
+                    notificationArea = notificationArea is { } existing ? Rectangle.Union(existing, rect) : rect;
+                }
             }
             finally
             {
@@ -292,6 +323,9 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
 
         return true;
     }
+
+    private static bool IsNotificationAreaClass(string className) =>
+        className.StartsWith("SystemTray.", StringComparison.Ordinal) || string.Equals(className, "TrayNotifyWnd", StringComparison.Ordinal);
 
     private static bool TryReadTaskbarRect(out Rectangle taskbar, out bool autoHide, out StepOutcome? failure)
     {

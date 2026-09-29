@@ -2,177 +2,151 @@ using Earshot.Popup;
 
 namespace Earshot.Widget;
 
+// Why a placement found no rectangle. None when it found one.
+internal enum PlacementFailure
+{
+    None,
+    UnsupportedEdge,     // a left or right taskbar: the gauge is a fixed landscape shape
+    AutoHiddenAway,      // the taskbar has slid off screen
+    NoAnchor,            // nothing was read that the position is measured from
+    NoRoom,              // something already sits where the gauge would go
+    OutsideTaskbar,      // the rectangle would leave the taskbar
+}
+
+// A placement: the gauge's rectangle, or the reason there is none.
+internal readonly record struct PlacementResult(Rectangle? Bounds, PlacementFailure Failure)
+{
+    public static PlacementResult Placed(Rectangle bounds) => new(bounds, PlacementFailure.None);
+
+    public static PlacementResult Failed(PlacementFailure failure) => new(null, failure);
+}
+
 // Pure placement maths for the taskbar gauge. No window, no native call.
 //
-// Along the long axis (x for a Bottom or Top taskbar, y for Left or Right):
-//   1. Project every occupant onto the axis, sort, merge overlaps.
-//   2. The task list end L is the end of the merged interval that contains the Start button's
-//      rectangle (Start plus the task buttons run together on the machine this was measured on); with
-//      no Start button, L is the end of the first merged interval. Both rules need at least one merged
-//      interval to anchor on; with no occupants at all (an empty or failed read) there is no defensible
-//      L, so the result is null (hidden) rather than a placement guess.
-//   3. The candidate free run is the one that begins exactly at L. No other run is tried, so the gauge
-//      never appears anywhere but beside the app buttons.
-//   4. It qualifies when its length is at least Clearance + gaugeLong + Clearance; otherwise the result
-//      is null (hidden).
-//   5. The rect starts at L + Clearance, is gaugeLong along the long axis, and spans the taskbar's own
-//      short axis in full.
-//   6. The result is clamped inside the taskbar rectangle; one that would leave it is null.
+// The gauge is 40 px tall at 100% and the taskbar 48, so it is centred on the taskbar's short axis and
+// only its x is chosen. Two positions, both measured from what UI Automation read:
 //
-// Auto-hide: when the taskbar has slid away (the part of its rectangle that overlaps its monitor is
-// thinner than its own thickness) the result is null; when it has slid in, the maths runs on the
-// on-screen rectangle.
+//   RightEnd (default)  its right edge 8 px (scaled) left of the notification area's left edge, which is
+//                       the tray chevron when it shows, or the first tray icon when it does not
+//   NextToApps          its left edge 4 px (scaled) after the last button that is not part of the
+//                       notification area
+//
+// Either way the result must not touch any occupant and must stay inside the taskbar; otherwise there is
+// no result and the tray icon stays. The maths never guesses: with no occupants read at all, or no
+// notification area identified for RightEnd, there is nothing to measure from and the result is none.
+//
+// A left or right taskbar is not supported: Windows 11 has none, and a gauge that is wider than tall does
+// not fit a vertical bar.
+//
+// Auto-hide: when the taskbar has slid away (the part of its rectangle that overlaps its monitor is thinner
+// than its own thickness) the result is none; when it has slid in, the maths runs on the on-screen part.
 internal static class GaugePlacement
 {
-    // Design choices at 96 DPI, scaled by CardPlacement.Scale for the target DPI.
-    public const int ClearanceAt96 = 24;
+    // Design values at 96 DPI, scaled by CardPlacement.Scale for the target DPI.
+    public const int GapToNotificationAreaAt96 = 8;
+    public const int GapAfterAppsAt96 = 4;
+
+    // A margin from the taskbar's own ends within which the gauge is never placed.
     public const int EdgeMarginAt96 = 8;
 
-    // The gauge's own rectangle for a layout, or null when there is no run wide enough, the taskbar has
-    // auto-hidden away, or the placement would leave the taskbar. gaugeLong is the gauge's extent along
-    // the long axis, already scaled for layout.Dpi (GaugeRenderer.SizeFor(dpi)).
-    public static Rectangle? Place(TaskbarLayout layout, int gaugeLong)
+    public static PlacementResult Place(TaskbarLayout layout, GaugeLayout gauge, GaugePosition position)
     {
         ArgumentNullException.ThrowIfNull(layout);
-        if (gaugeLong <= 0)
+
+        if (layout.Edge is not (TaskbarEdge.Bottom or TaskbarEdge.Top))
         {
-            return null;
+            return PlacementResult.Failed(PlacementFailure.UnsupportedEdge);
         }
 
-        bool horizontal = layout.Edge is TaskbarEdge.Bottom or TaskbarEdge.Top;
         Rectangle t = layout.Taskbar;
-        int thickness = horizontal ? t.Height : t.Width;
-
         if (layout.AutoHide)
         {
             Rectangle visible = Rectangle.Intersect(t, layout.MonitorBounds);
-            int visibleThickness = horizontal ? visible.Height : visible.Width;
-            if (visibleThickness < thickness)
+            if (visible.Height < t.Height)
             {
-                // Slid away.
-                return null;
+                return PlacementResult.Failed(PlacementFailure.AutoHiddenAway);
             }
 
             t = visible;
         }
 
-        int clearance = CardPlacement.Scale(ClearanceAt96, layout.Dpi);
-        int edgeMargin = CardPlacement.Scale(EdgeMarginAt96, layout.Dpi);
-        int axisStart = horizontal ? t.Left : t.Top;
-        int axisEnd = horizontal ? t.Right : t.Bottom;
-
-        List<(int Start, int End)> merged = MergedIntervals(layout.Occupied, t, horizontal);
-        if (merged.Count == 0)
+        if (t.Height < gauge.Height || t.Width < gauge.Width)
         {
-            // No occupants read at all: layout unknown, not "whole taskbar free". There is no Start
-            // button and no first merged interval to anchor L on, so no placement is defensible.
-            return null;
+            return PlacementResult.Failed(PlacementFailure.OutsideTaskbar);
         }
 
-        int l = FindL(merged, layout.StartButton, t, horizontal);
-
-        (int Start, int End)? candidate = FreeRunAt(merged, l, axisStart + edgeMargin, axisEnd - edgeMargin);
-        if (candidate is not { } run)
-        {
-            return null;
-        }
-
-        int required = clearance + gaugeLong + clearance;
-        if (run.End - run.Start < required)
-        {
-            return null;
-        }
-
-        int start = l + clearance;
-        Rectangle rect = horizontal
-            ? new Rectangle(start, t.Top, gaugeLong, t.Height)
-            : new Rectangle(t.Left, start, t.Width, gaugeLong);
-
-        return t.Contains(rect) ? rect : null;
-    }
-
-    private static List<(int Start, int End)> MergedIntervals(IReadOnlyList<Rectangle> occupied, Rectangle t, bool horizontal)
-    {
-        var intervals = new List<(int Start, int End)>(occupied.Count);
-        foreach (Rectangle r in occupied)
+        var occupants = new List<Rectangle>(layout.Occupied.Count);
+        foreach (Rectangle r in layout.Occupied)
         {
             Rectangle clipped = Rectangle.Intersect(r, t);
-            if (clipped.Width <= 0 || clipped.Height <= 0)
-            {
-                continue;
-            }
-
-            intervals.Add(horizontal ? (clipped.Left, clipped.Right) : (clipped.Top, clipped.Bottom));
-        }
-
-        intervals.Sort((a, b) => a.Start.CompareTo(b.Start));
-
-        var merged = new List<(int Start, int End)>(intervals.Count);
-        foreach ((int Start, int End) iv in intervals)
-        {
-            if (merged.Count > 0 && iv.Start <= merged[^1].End)
-            {
-                if (iv.End > merged[^1].End)
-                {
-                    merged[^1] = (merged[^1].Start, iv.End);
-                }
-            }
-            else
-            {
-                merged.Add(iv);
-            }
-        }
-
-        return merged;
-    }
-
-    // The task list end L: the end of the merged interval holding the Start button, or the end of the
-    // first merged interval when Start was not found. Callers only reach here with at least one merged
-    // interval; with none, there is no defensible L and Place returns null before calling this.
-    private static int FindL(List<(int Start, int End)> merged, Rectangle? startButton, Rectangle t, bool horizontal)
-    {
-        if (startButton is { } start)
-        {
-            Rectangle clipped = Rectangle.Intersect(start, t);
             if (clipped.Width > 0 && clipped.Height > 0)
             {
-                (int s, int e) = horizontal ? (clipped.Left, clipped.Right) : (clipped.Top, clipped.Bottom);
-                foreach ((int Start, int End) m in merged)
-                {
-                    if (m.Start <= s && e <= m.End)
-                    {
-                        return m.End;
-                    }
-                }
+                occupants.Add(clipped);
             }
         }
 
-        return merged[0].End;
-    }
-
-    // The free run whose start is exactly at l, or null when no such run exists (the candidate free run
-    // is the only one ever tried).
-    private static (int Start, int End)? FreeRunAt(List<(int Start, int End)> merged, int l, int lowerBound, int upperBound)
-    {
-        int cursor = lowerBound;
-        foreach ((int Start, int End) m in merged)
+        if (occupants.Count == 0)
         {
-            if (m.Start > cursor)
+            return PlacementResult.Failed(PlacementFailure.NoAnchor);
+        }
+
+        int dpi = layout.Dpi;
+        int edgeMargin = CardPlacement.Scale(EdgeMarginAt96, dpi);
+        int? trayLeft = layout.NotificationArea is { } area
+            ? Rectangle.Intersect(area, t) is { Width: > 0, Height: > 0 } clippedArea ? clippedArea.Left : null
+            : null;
+
+        int x;
+        if (position == GaugePosition.NextToApps)
+        {
+            int appsEnd = int.MinValue;
+            foreach (Rectangle o in occupants)
             {
-                if (cursor == l)
+                if (trayLeft is { } tl && o.Left >= tl)
                 {
-                    return (cursor, m.Start);
+                    continue;
                 }
+
+                appsEnd = Math.Max(appsEnd, o.Right);
             }
 
-            cursor = Math.Max(cursor, m.End);
-        }
+            if (appsEnd == int.MinValue)
+            {
+                return PlacementResult.Failed(PlacementFailure.NoAnchor);
+            }
 
-        if (cursor == l && upperBound > cursor)
+            x = appsEnd + CardPlacement.Scale(GapAfterAppsAt96, dpi);
+        }
+        else
         {
-            return (cursor, upperBound);
+            if (trayLeft is not { } tl)
+            {
+                return PlacementResult.Failed(PlacementFailure.NoAnchor);
+            }
+
+            x = tl - CardPlacement.Scale(GapToNotificationAreaAt96, dpi) - gauge.Width;
         }
 
-        return null;
+        Rectangle rect = gauge.BoundsAt(x, t);
+        bool tooFarRight = trayLeft is null && rect.Right > t.Right - edgeMargin;
+        if (rect.Left < t.Left + edgeMargin || tooFarRight || !t.Contains(rect))
+        {
+            return PlacementResult.Failed(PlacementFailure.OutsideTaskbar);
+        }
+
+        if (trayLeft is { } notificationLeft && rect.Right > notificationLeft)
+        {
+            return PlacementResult.Failed(PlacementFailure.NoRoom);
+        }
+
+        foreach (Rectangle o in occupants)
+        {
+            if (o.IntersectsWith(rect))
+            {
+                return PlacementResult.Failed(PlacementFailure.NoRoom);
+            }
+        }
+
+        return PlacementResult.Placed(rect);
     }
 }

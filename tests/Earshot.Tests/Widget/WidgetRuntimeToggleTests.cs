@@ -245,7 +245,8 @@ public sealed class WidgetRuntimeToggleTests
             List<Rectangle> buttons = Enumerable.Range(0, 8).Select(i => new Rectangle(807 + (i * 44), 1032, 44, 48)).ToList();
             var layout = new TaskbarLayout(0, bar, TaskbarEdge.Bottom, AutoHide: false,
                 new Rectangle(0, 0, 1920, 1080), [start, .. buttons, new Rectangle(1678, 1032, 242, 48)], start,
-                Dpi: 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null);
+                Dpi: 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
+                NotificationArea: new Rectangle(1678, 1032, 242, 48));
             tray.LastTaskbarReader!.SetNextResult(ITaskbarReader.Result.Ok(layout));
             // LeftClickConnects itself is irrelevant here: flipping it is only a way to make ApplyWidget
             // poke the watcher again, now that the fake reader has a real, free-space layout queued for the
