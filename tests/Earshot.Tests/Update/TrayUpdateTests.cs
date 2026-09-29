@@ -27,11 +27,10 @@ public sealed class TrayUpdateTests
     private static StagedUpdate Stage(string root, CapturingLog log)
     {
         string work = Path.Combine(UpdateFolder(root), "u" + Guid.NewGuid().ToString("N")[..8]);
-        string app = Path.Combine(work, "app");
-        Directory.CreateDirectory(app);
-        string exe = Path.Combine(app, "Earshot.exe");
-        File.WriteAllText(exe, "program");
-        return new StagedUpdate(new ReleaseVersion(1, 2, 0), work, app, exe, [new FileStream(exe, FileMode.Open, FileAccess.Read, FileShare.Read)], log);
+        Directory.CreateDirectory(work);
+        string zip = Path.Combine(work, UpdateService.ZipFileName);
+        File.WriteAllText(zip, "zip");
+        return new StagedUpdate(new ReleaseVersion(1, 2, 0), work, zip, new string('B', 64), log);
     }
 
     // ----- the menu -----
@@ -266,32 +265,29 @@ public sealed class TrayUpdateTests
                 s.OnDownload = (_, _, _) => Task.FromResult(UpdateDownloadResult.Success(staged!));
             });
             staged = Stage(temp.Path, tray.Log);
-            try
-            {
-                tray.Context.Updates!.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
-                tray.Ui.Post(_ => tray.Context.StartUpdate(), null);
-                bool timedOut = false;
-                using var watchdog = new System.Threading.Timer(
-                    _ =>
-                    {
-                        timedOut = true;
-                        tray.Ui.Post(_ => tray.Context.ExitThread(), null);
-                    },
-                    null, TimeSpan.FromSeconds(20), Timeout.InfiniteTimeSpan);
+            tray.Context.Updates!.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+            tray.Ui.Post(_ => tray.Context.StartUpdate(), null);
+            bool timedOut = false;
+            using var watchdog = new System.Threading.Timer(
+                _ =>
+                {
+                    timedOut = true;
+                    tray.Ui.Post(_ => tray.Context.ExitThread(), null);
+                },
+                null, TimeSpan.FromSeconds(20), Timeout.InfiniteTimeSpan);
 
-                Application.Run(tray.Context);
+            Application.Run(tray.Context);
 
-                Assert.IsFalse(timedOut, "The tray did not close after the hand-over.");
-                Assert.AreEqual(staged.ExecutablePath, tray.Launcher.Launches.Single().Executable);
-                Assert.AreEqual("install", tray.Launcher.Launches.Single().Arguments[0]);
-                Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Earshot is closing so the update can replace its files."), "The tray closed through Exit.");
-                Assert.AreEqual(1, tray.Cards.Hides);
-                Assert.AreEqual(1, tray.Source.DownloadCalls);
-            }
-            finally
-            {
-                staged.Dispose();
-            }
+            Assert.IsFalse(timedOut, "The tray did not close after the hand-over.");
+            (string exe, string[] arguments, string _) = tray.Launcher.Launches.Single();
+            Assert.AreEqual(UpdateTrayHarness.InstalledExe, exe, "The installed Earshot.exe is started, not a file in the staging folder.");
+            Assert.AreEqual("update", arguments[0]);
+            Assert.AreEqual(staged.ZipPath, arguments[1]);
+            Assert.AreEqual(staged.ZipSha256, arguments[2]);
+            Assert.AreEqual(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), arguments[3], "The tray gives its own process id to wait on.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Earshot is closing so the update can replace its files."), "The tray closed through Exit.");
+            Assert.AreEqual(1, tray.Cards.Hides);
+            Assert.AreEqual(1, tray.Source.DownloadCalls);
         });
     }
 

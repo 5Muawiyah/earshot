@@ -18,6 +18,10 @@ internal interface IFolderSecurity
     // reads the result back.
     StepOutcome CreateHardened(string path);
 
+    // As CreateHardened, with the security descriptor the caller gives (the update's work folder has its own). Fails
+    // when the folder already exists, so the caller never gets a folder someone else made first.
+    StepOutcome CreateWithSddl(string path, string sddl);
+
     // The folder's owner, group and DACL as SDDL. Fails for a missing folder or a reparse point.
     StepOutcome ReadSddl(string path, out string? sddl);
 }
@@ -29,21 +33,30 @@ internal sealed class NtfsFolderSecurity : IFolderSecurity
     private const AccessControlSections Sections =
         AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access;
 
-    public StepOutcome CreateHardened(string path)
+    public StepOutcome CreateHardened(string path) => Create(path, Sddl.MachineFolder, "machine-folder-create", failIfExists: false);
+
+    public StepOutcome CreateWithSddl(string path, string sddl) => Create(path, sddl, "folder-create", failIfExists: true);
+
+    private static StepOutcome Create(string path, string sddl, string step, bool failIfExists)
     {
         try
         {
+            if (failIfExists && (Directory.Exists(path) || File.Exists(path)))
+            {
+                return StepOutcomes.NotAttempted(step, "Already exists, so it was not trusted: " + path);
+            }
+
             var security = new DirectorySecurity();
-            security.SetSecurityDescriptorSddlForm(Sddl.MachineFolder, Sections);
+            security.SetSecurityDescriptorSddlForm(sddl, Sections);
             new DirectoryInfo(path).Create(security);
-            return new StepOutcome("machine-folder-create", true, 0, "S_OK", path);
+            return new StepOutcome(step, true, 0, "S_OK", path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException)
         {
             // PrivilegeNotHeldException is an UnauthorizedAccessException; the rest are what the security
             // classes throw for a descriptor or a path they cannot use.
             // https://learn.microsoft.com/en-us/dotnet/api/system.io.filesystemaclextensions.create
-            return StepOutcomes.FromHResult("machine-folder-create", ex.HResult, path + ": " + ex.Message);
+            return StepOutcomes.FromHResult(step, ex.HResult, path + ": " + ex.Message);
         }
     }
 

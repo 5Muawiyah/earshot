@@ -36,6 +36,9 @@ internal sealed class FakeFolderSecurity : IFolderSecurity
 
     public List<string> Created { get; } = new();
 
+    // The descriptor each folder made through CreateWithSddl was given; a read of that folder returns it.
+    public Dictionary<string, string> CreatedWith { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public bool FailCreate { get; set; }
 
     // Checked before the queues and defaults; null means no override for that path.
@@ -56,6 +59,24 @@ internal sealed class FakeFolderSecurity : IFolderSecurity
         return new StepOutcome("machine-folder-create", true, 0, "S_OK", path);
     }
 
+    public StepOutcome CreateWithSddl(string path, string sddl)
+    {
+        if (FailCreate)
+        {
+            return StepOutcomes.FromHResult("folder-create", unchecked((int)0x80070005), path);
+        }
+
+        if (Directory.Exists(path) || File.Exists(path))
+        {
+            return StepOutcomes.NotAttempted("folder-create", "Already exists: " + path);
+        }
+
+        Directory.CreateDirectory(path);
+        Created.Add(path);
+        CreatedWith[path] = sddl;
+        return new StepOutcome("folder-create", true, 0, "S_OK", path);
+    }
+
     public StepOutcome ReadSddl(string path, out string? sddl)
     {
         sddl = null;
@@ -67,6 +88,10 @@ internal sealed class FakeFolderSecurity : IFolderSecurity
         if (SddlFor?.Invoke(path) is { } overridden)
         {
             sddl = overridden;
+        }
+        else if (CreatedWith.TryGetValue(path, out string? made))
+        {
+            sddl = made;
         }
         else if (_sddl.TryGetValue(path, out Queue<string>? queue) && queue.Count > 0)
         {

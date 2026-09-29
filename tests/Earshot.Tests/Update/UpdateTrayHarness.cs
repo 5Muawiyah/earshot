@@ -22,13 +22,18 @@ namespace Earshot.Tests.Update;
 // Nothing here reaches a device, Bluetooth, Task Scheduler or HKCU, and no icon is added to the notification area.
 internal sealed class UpdateTrayHarness : IDisposable
 {
+    // The installed program the tray hands over to. The tray under test claims to run from it (ExePath is the same
+    // path), which is what an installed tray looks like; the file exists only as far as the fake FileExists says.
+    public const string InstalledExe = @"C:\Program Files\Earshot\Earshot.exe";
+
     private readonly TempFolder _folder = new();
 
     public UpdateTrayHarness(
         bool safeMode = false,
         Action<EarshotSettings>? settings = null,
         Action<FakeUpdateSource>? source = null,
-        bool pinned = true)
+        bool pinned = true,
+        bool installedCopy = true)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -60,14 +65,15 @@ internal sealed class UpdateTrayHarness : IDisposable
             Cards = Cards,
         };
 
-        var options = new TrayStartOptions(false, Settings.LastLoadStatus, TrayHarness.ExePath, Startup)
+        var options = new TrayStartOptions(false, Settings.LastLoadStatus, installedCopy ? InstalledExe : TrayHarness.ExePath, Startup)
         {
+            InstalledExePath = InstalledExe,
             ShowIcon = false,
             ExitNoticeTime = TimeSpan.FromMilliseconds(10),
             CursorPosition = () => TrayHarness.ClickPoint,
             TickCount = () => 0,
             DoubleClickTime = TimeSpan.FromMilliseconds(500),
-            FileExists = _ => false,
+            FileExists = path => installedCopy && string.Equals(path, InstalledExe, StringComparison.OrdinalIgnoreCase),
             NativeHotkeys = new FakeNativeHotkeys(),
             VoiceEngineFactory = () => new Earshot.Tests.Voice.FakeSpeechEngine(),
             StreamingPlatformFactory = _ => new Earshot.Tests.Streaming.FakeStreamingPlatform(),

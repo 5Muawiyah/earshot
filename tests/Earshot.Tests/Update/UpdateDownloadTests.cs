@@ -7,7 +7,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.Update;
 
 // The download half of the update service, against the same fake feed. Every failure must leave the staging folder
-// empty and touch nothing outside it; the one success must leave the unpacked files held.
+// empty and touch nothing outside it; the one success must leave exactly the verified zip, and its hash, to hand over.
 [TestClass]
 public sealed class UpdateDownloadTests
 {
@@ -75,7 +75,7 @@ public sealed class UpdateDownloadTests
     // ----- success -----
 
     [TestMethod]
-    public async Task AVerifiedDownloadIsUnpackedAndItsFilesAreHeld()
+    public async Task AVerifiedDownloadKeepsTheZipAndItsHashAndNothingUnpacked()
     {
         using var feed = new FeedFixture("v1.2.0");
         using var run = new Run(feed);
@@ -83,26 +83,34 @@ public sealed class UpdateDownloadTests
         UpdateDownloadResult result = await run.DownloadAsync();
 
         Assert.IsNotNull(result.Staged, result.Failure?.Detail);
-        using StagedUpdate staged = result.Staged;
+        StagedUpdate staged = result.Staged;
         Assert.AreEqual(new ReleaseVersion(1, 2, 0), staged.Version);
         Assert.IsTrue(staged.WorkFolder.StartsWith(run.Staging, StringComparison.OrdinalIgnoreCase), "The staging folder is under the staging root.");
-        Assert.AreEqual(Path.Combine(staged.AppFolder, "Earshot.exe"), staged.ExecutablePath);
-        Assert.IsTrue(File.Exists(staged.ExecutablePath));
-        Assert.IsTrue(File.Exists(Path.Combine(staged.AppFolder, "Earshot.files.json")));
-        Assert.IsTrue(File.Exists(Path.Combine(staged.AppFolder, "runtimes", "native.txt")), "A nested file is unpacked in place.");
-        Assert.IsFalse(File.Exists(Path.Combine(staged.WorkFolder, UpdateService.ZipFileName)), "The zip is removed once it is unpacked.");
+        Assert.AreEqual(Path.Combine(staged.WorkFolder, UpdateService.ZipFileName), staged.ZipPath);
+        CollectionAssert.AreEqual(feed.Zip, File.ReadAllBytes(staged.ZipPath), "The zip kept is the one that was downloaded.");
+        Assert.AreEqual(feed.ZipHash, staged.ZipSha256, "The hash handed over is the one the download matched.");
+        CollectionAssert.AreEqual(new[] { staged.ZipPath }, Directory.GetFileSystemEntries(staged.WorkFolder),
+            "Nothing else is left in the staging folder: the check unpack is deleted, so nothing unpacked can be run or trusted from here.");
         Assert.AreEqual(1, feed.Server.Count("/dl/" + feed.ZipName));
         Assert.AreEqual(1, feed.Server.Count("/dl/" + feed.ChecksumName));
 
-        // Held: nobody else can write to a staged file, replace it or delete it while the hand-over runs it.
-        Assert.ThrowsExactly<IOException>(() => File.WriteAllBytes(staged.ExecutablePath, [1, 2, 3]));
-        Assert.ThrowsExactly<IOException>(() => File.Delete(staged.ExecutablePath));
-        Assert.ThrowsExactly<IOException>(() => Directory.Move(staged.AppFolder, staged.AppFolder + "-moved"));
-
-        // Reading is still allowed, which the elevated program needs.
-        using (new FileStream(staged.ExecutablePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        // Nothing is held: the staging folder is the signed-in user's, and the elevated run does not depend on it staying put.
+        using (new FileStream(staged.ZipPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
         }
+    }
+
+    [TestMethod]
+    public async Task AZipWithAFileListItsFilesDoNotMatchIsRefusedBeforeAnyPrompt()
+    {
+        var zip = new ReleaseZipBuilder();
+        zip.WrongHash["Earshot.dll"] = new string('0', 64);
+        using var feed = new FeedFixture("v1.2.0", zip);
+        using var run = new Run(feed);
+
+        UpdateFailure failure = await FailsAsync(run, UpdateFailureKind.BadArchive);
+
+        StringAssert.Contains(failure.Detail, "does not match the hash the release's file list records");
     }
 
     [TestMethod]
@@ -113,7 +121,7 @@ public sealed class UpdateDownloadTests
 
         UpdateDownloadResult result = await run.DownloadAsync();
 
-        using StagedUpdate staged = result.Staged!;
+        Assert.IsNotNull(result.Staged);
         UpdateProgress[] reports = run.Progress.ToArray();
         Assert.IsNotEmpty(reports);
         Assert.AreEqual(feed.Zip.Length, reports[^1].Received);
@@ -134,7 +142,6 @@ public sealed class UpdateDownloadTests
         UpdateDownloadResult result = await run.DownloadAsync();
 
         Assert.IsNotNull(result.Staged, result.Failure?.Detail);
-        result.Staged.Dispose();
     }
 
     [TestMethod]
@@ -148,7 +155,6 @@ public sealed class UpdateDownloadTests
         UpdateDownloadResult result = await run.DownloadAsync();
 
         Assert.IsNotNull(result.Staged, result.Failure?.Detail);
-        result.Staged.Dispose();
         Assert.AreEqual(1, feed.Server.Count("/cdn/" + feed.ZipName));
     }
 
@@ -160,7 +166,7 @@ public sealed class UpdateDownloadTests
 
         UpdateDownloadResult result = await run.DownloadAsync();
 
-        result.Staged!.Dispose();
+        Assert.IsNotNull(result.Staged);
         foreach (RecordedRequest request in feed.Server.Requests)
         {
             StringAssert.StartsWith(request.UserAgent, "Earshot/1.1.0", request.Path);
@@ -252,7 +258,6 @@ public sealed class UpdateDownloadTests
         {
             UpdateDownloadResult ok = await run.DownloadAsync();
             Assert.IsNotNull(ok.Staged, "A UTF-8 byte order mark is not part of the hash.");
-            ok.Staged.Dispose();
         }
 
         // What PowerShell 5.1 writes by default: UTF-16. It is not readable as the sha256sum format, so it fails closed.
@@ -468,7 +473,7 @@ public sealed class UpdateDownloadTests
 
         UpdateDownloadResult result = await run.DownloadAsync();
 
-        using StagedUpdate staged = result.Staged!;
+        Assert.IsNotNull(result.Staged);
         Assert.IsFalse(Directory.Exists(Path.Combine(run.Staging, "u12345678")));
         Assert.IsTrue(File.Exists(Path.Combine(run.Staging, "last-check.txt")), "Only download folders are cleaned.");
         Assert.HasCount(1, Directory.GetDirectories(run.Staging));

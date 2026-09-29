@@ -11,6 +11,10 @@ namespace Earshot.Update;
 // setup run again from the new files. Install refuses a run without them.
 internal sealed record HandoverIdentity(string UserSid, string Address, Guid ContainerId);
 
+// What the tray hands the update to: the installed Earshot.exe (never a file in a folder the user can write) and the
+// tray's own process id, which the elevated run waits on before it touches the install folder.
+internal sealed record HandoverTarget(string InstalledExecutable, int TrayProcessId);
+
 internal enum LaunchOutcome
 {
     Started,
@@ -21,7 +25,7 @@ internal enum LaunchOutcome
 // Process is set when the program started; the caller disposes it. Win32Error is the raw code of a failed start.
 internal sealed record LaunchResult(LaunchOutcome Outcome, uint Win32Error, string Detail, Process? Process);
 
-// Starts the staged Earshot.exe. The real one asks Windows for the administrator prompt; a test gives the
+// Starts the installed Earshot.exe. The real one asks Windows for the administrator prompt; a test gives the
 // controller a fake so no test ever elevates.
 internal interface IUpdateLauncher
 {
@@ -32,6 +36,9 @@ internal static class UpdateHandover
 {
     // The verb setup accepts for a first install and for a repair alike.
     internal const string InstallVerb = "install";
+
+    // The verb the installed Earshot.exe accepts to update itself from a downloaded zip.
+    internal const string UpdateVerb = "update";
 
     // The pinned device, in the form install checks: a user SID, twelve upper-case hex digits, and the container.
     // Null with the reason when any of them is missing or malformed, which is the state before setup has chosen a
@@ -52,6 +59,21 @@ internal static class UpdateHandover
     {
         ArgumentNullException.ThrowIfNull(identity);
         return [InstallVerb, identity.UserSid, identity.Address, identity.ContainerId.ToString("D", CultureInfo.InvariantCulture)];
+    }
+
+    // update <zipPath> <sha256> <trayPid> <userSid> <address> <containerGuid>: the zip the tray downloaded and verified,
+    // the SHA-256 it matched (upper-case hex, which the elevated run checks again from its own copy), the tray's process
+    // id, and the same identity install takes.
+    internal static IReadOnlyList<string> UpdateArguments(string zipPath, string zipSha256, int trayProcessId, HandoverIdentity identity)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(zipPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(zipSha256);
+        ArgumentNullException.ThrowIfNull(identity);
+        return
+        [
+            UpdateVerb, zipPath, zipSha256.ToUpperInvariant(), trayProcessId.ToString(CultureInfo.InvariantCulture),
+            identity.UserSid, identity.Address, identity.ContainerId.ToString("D", CultureInfo.InvariantCulture),
+        ];
     }
 
     // One command line for CreateProcess: each argument as CommandLineToArgvW reads it back. Nothing here is a shell
@@ -101,9 +123,9 @@ internal static class UpdateHandover
     }
 }
 
-// ShellExecute with the runas verb, which shows the one administrator prompt. It does not wait: the program that
-// starts has to replace the folder this process is running from, so this process must be free to end. A declined
-// prompt is ERROR_CANCELLED (1223).
+// ShellExecute with the runas verb, which shows the one administrator prompt. It does not wait: the elevated program
+// waits for this process to end before it touches the install folder this process runs from. A declined prompt is
+// ERROR_CANCELLED (1223).
 // https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.verb
 // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecuteexw
 internal sealed class ElevatedUpdateLauncher : IUpdateLauncher

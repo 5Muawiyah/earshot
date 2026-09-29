@@ -6,9 +6,11 @@ namespace Earshot.Update;
 // administrator prompt. It holds the state the update sub-page shows (View) and raises Changed when it moves.
 //
 // Nothing is downloaded or installed until UpdateAsync is called, and only the person's own click calls it. A check
-// never downloads. The hand-over starts the staged Earshot.exe elevated with the verb setup accepts; once it has
-// started, HandedOver is raised and the caller ends this program, because that program replaces the folder this
-// one runs from and cannot do it while this one holds the folder open.
+// never downloads. The hand-over starts the installed, administrator-owned Earshot.exe elevated with the update verb
+// and the downloaded zip with the hash it matched; that program checks the zip again from a copy only administrators
+// can write, so nothing the signed-in user can change decides what is installed. Once it has started, HandedOver is
+// raised and the caller ends this program, because the install replaces the folder this one runs from and the
+// elevated program waits for this one to end first.
 //
 // Methods may be called from any thread; the state is guarded, and events are raised outside the guard.
 internal sealed class UpdateController
@@ -16,6 +18,7 @@ internal sealed class UpdateController
     private readonly IUpdateSource _source;
     private readonly IUpdateLauncher _launcher;
     private readonly Func<HandoverIdentity?> _identity;
+    private readonly Func<HandoverTarget?> _target;
     private readonly Func<string?> _unavailable;
     private readonly ReleaseVersion _installed;
     private readonly ILog _log;
@@ -27,21 +30,26 @@ internal sealed class UpdateController
     private int? _percent;
     private string? _reason;
     private string? _notice;
+    private bool _updateOffered = true;
     private CancellationTokenSource? _download;
 
-    // identity: the pinned device install needs, or null before setup has one. unavailable: why an update cannot run
-    // in this process at all (safe mode, test data), or null.
+    // identity: the pinned device install needs, or null before setup has one. target: the installed program to hand
+    // over to, or null when this program is not that install (not set up, or run from somewhere else). unavailable:
+    // why an update cannot run in this process at all (safe mode, test data), or null.
     public UpdateController(
-        IUpdateSource source, IUpdateLauncher launcher, Func<HandoverIdentity?> identity, Func<string?> unavailable, ReleaseVersion installed, ILog log)
+        IUpdateSource source, IUpdateLauncher launcher, Func<HandoverIdentity?> identity, Func<HandoverTarget?> target, Func<string?> unavailable,
+        ReleaseVersion installed, ILog log)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(launcher);
         ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(unavailable);
         ArgumentNullException.ThrowIfNull(log);
         _source = source;
         _launcher = launcher;
         _identity = identity;
+        _target = target;
         _unavailable = unavailable;
         _installed = installed;
         _log = log;
@@ -54,16 +62,13 @@ internal sealed class UpdateController
 
     public ReleaseVersion Installed => _installed;
 
-    // The staged update the elevated program was started from, kept open (and so unchangeable) until this program ends.
-    internal StagedUpdate? HandedOverUpdate { get; private set; }
-
     public UpdateViewModel View
     {
         get
         {
             lock (_gate)
             {
-                return UpdateViewModel.For(_stage, _installed, _release?.Version ?? _latest, _percent, _reason, _notice);
+                return UpdateViewModel.For(_stage, _installed, _release?.Version ?? _latest, _percent, _reason, _notice, _updateOffered);
             }
         }
     }
@@ -132,8 +137,11 @@ internal sealed class UpdateController
             result = UpdateCheckResult.Failed(new UpdateFailure(UpdateFailureKind.Network, "Something went wrong while checking.", ex.GetType().Name + ": " + ex.Message));
         }
 
+        // Read before the guard is taken: it looks at the disk.
+        bool installedCopy = _target() is not null;
         lock (_gate)
         {
+            _updateOffered = true;
             switch (result.Outcome)
             {
                 case UpdateCheckOutcome.UpToDate:
@@ -144,6 +152,14 @@ internal sealed class UpdateController
                     _stage = UpdateStage.Available;
                     _release = result.Release;
                     _latest = result.Latest;
+                    if (!installedCopy)
+                    {
+                        // The update installs over the installed copy, and only that copy can hand over safely, so a
+                        // program that is not it does not offer Update.
+                        _updateOffered = false;
+                        _notice = UpdateCopy.SetUpFirstNotice;
+                    }
+
                     break;
                 default:
                     _stage = result.Failure?.Kind == UpdateFailureKind.Cancelled ? UpdateStage.Idle : UpdateStage.CheckFailed;
@@ -162,6 +178,7 @@ internal sealed class UpdateController
         // Read before the guard is taken: neither call belongs under it.
         string? unavailable = _unavailable();
         bool pinned = _identity() is not null;
+        bool installedCopy = _target() is not null;
         ReleaseInfo release;
         CancellationTokenSource? cancel = null;
         lock (_gate)
@@ -178,6 +195,13 @@ internal sealed class UpdateController
                 _stage = UpdateStage.Available;
                 _notice = unavailable;
                 _log.Info("Update: not started. " + unavailable);
+            }
+            else if (!installedCopy)
+            {
+                _stage = UpdateStage.Available;
+                _notice = UpdateCopy.SetUpFirstNotice;
+                _updateOffered = false;
+                _log.Info("Update: not started. This program is not the installed copy, so it cannot hand over to it.");
             }
             else if (!pinned)
             {
@@ -264,24 +288,29 @@ internal sealed class UpdateController
     private void HandOver(StagedUpdate staged)
     {
         HandoverIdentity? identity = _identity();
+        HandoverTarget? target = _target();
         Move(UpdateStage.HandingOver);
-        if (identity is null)
+        if (identity is null || target is null)
         {
-            // Settings changed under the download. Nothing has been handed over.
+            // Settings, or the install, changed under the download. Nothing has been handed over.
             staged.Discard();
-            Fail(UpdateStage.Available, null, UpdateCopy.NotPinnedNotice);
+            Fail(UpdateStage.Available, null, identity is null ? UpdateCopy.NotPinnedNotice : UpdateCopy.SetUpFirstNotice);
             return;
         }
 
         LaunchResult launch;
         try
         {
-            launch = _launcher.Launch(staged.ExecutablePath, UpdateHandover.InstallArguments(identity), staged.AppFolder);
+            // The installed program, from the system folder: the elevated program must not have the install folder as
+            // its current folder, because it ends before the install replaces that folder.
+            launch = _launcher.Launch(
+                target.InstalledExecutable, UpdateHandover.UpdateArguments(staged.ZipPath, staged.ZipSha256, target.TrayProcessId, identity),
+                Environment.SystemDirectory);
         }
         catch (Exception ex)
         {
             // A launcher that throws instead of answering must not leave the view on "Approve the Windows prompt".
-            _log.Error("Update: starting the staged program threw " + ex.GetType().Name + ".", ex);
+            _log.Error("Update: starting the installed program threw " + ex.GetType().Name + ".", ex);
             launch = new LaunchResult(LaunchOutcome.Failed, 0, ex.GetType().Name + ": " + ex.Message, null);
         }
 
@@ -289,9 +318,8 @@ internal sealed class UpdateController
         {
             _log.Info("Update: started " + launch.Detail + ". Earshot ends so the new files can replace its own.");
             launch.Process?.Dispose();
-            // Held until this program ends, so the staged files cannot change under the elevated program.
-            HandedOverUpdate = staged;
 
+            // The staging folder stays: the elevated program reads the zip from it. The next start removes it.
             HandedOver?.Invoke(this, EventArgs.Empty);
             return;
         }
@@ -304,7 +332,7 @@ internal sealed class UpdateController
             return;
         }
 
-        _log.Warn("Update: the staged program did not start (" + launch.Detail + "). Nothing was changed.");
+        _log.Warn("Update: the installed program did not start (" + launch.Detail + "). Nothing was changed.");
         Fail(UpdateStage.HandoverFailed, "Windows would not start the update (error " + launch.Win32Error + "). Nothing was changed.", null);
     }
 
