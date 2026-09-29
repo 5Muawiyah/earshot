@@ -225,10 +225,10 @@ recorded that way rather than guessed at.
 | 03 | Whether enabling the nodes alone takes the AirPods off the phone. |
 | 04 | Whether the persistent disable survives a restart. |
 | 05 | Whether the enable clears the disabled bit, and how long the endpoints take to come back. |
-| 06 | Whether an unelevated Handsfree change is possible in v1.1, and what Headset returns. |
+| 06 | Whether an unelevated Handsfree change is possible, and what Headset returns. |
 | 07 | Whether the tray can start the SYSTEM tasks, and whether the `--principal user` fallback is needed. |
 | 08 | The acceptance test, in the configuration Earshot ships in. |
-| 09 | Whether the v1.1 pre-shutdown service is needed. |
+| 09 | Whether the hand-back service is needed. |
 | 10 | Which end-session messages arrive, per kind of restart. |
 | 11 | The disconnected leg of the battery question. |
 | 12 | The notification thread, apartment and event order. |
@@ -243,73 +243,41 @@ recorded that way rather than guessed at.
 | 21 | Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything. |
 | 22 | Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone. |
 
-## What the backlog asks, and where it is answered
-
-The build's backlog holds 138 `live_test_needs`. This table maps every one of them
-onto the script that asks it, by its number in `live_test_needs`. It is deliberately
-cautious: a need is named against a test only where that test has a criterion or a
-recorded finding for it, so a need marked **not asked** may still be partly visible
-in the evidence. Nothing here is settled until the test has actually been run.
+## What the tests do not ask
 
 **Not asked** is not the same as failed. It means no script puts the question, so
 after a full sitting the answer is still unknown, and it should be recorded as
-unknown rather than assumed.
+unknown rather than assumed. These are the questions no script asks:
 
-| Backlog needs | Where they are answered |
-|---|---|
-| 001, 003, 010 | 08 (`icon-dpi`, `icon-theme`). The icon ink in a contrast theme is not asked; the card in one is, under 085. |
-| 002, 011 | 08 (`icon-dpi`, `icon-theme`, `taskbarCreatedSeen`). No script restarts Explorer, so only the scaling change and the light and dark switch are actually raised; the finding counts the `TaskbarCreated` lines the log already holds. |
-| 004, 005, 006, 012, 016 | 08 (`click-once`, `menu`, `clean-exit`, `startup-value`, `startup-agrees`, `single-instance`) |
-| 007, 013 | 10, all five variants (`query-arrived`, `end-arrived`) |
-| 009, 015 | 14 (`picker-lists-devices`, `pickerMarksAbsentDevices`). The rename and the re-pin through the picker are not asked. |
-| 014 | 08 (`keyboardReachesTheIcon`) |
-| 017, 064, 080 | 08, both halves of the click: `left-click-connects`, `click-agrees-with-endpoints`, `no-admin-prompt`, then `left-click-disconnects`, `disconnect-agrees-with-endpoints`, `no-admin-prompt-disconnect`, `blocked-again-after-click`, plus `card-no-focus`. 01 and 02 settle the driver requests underneath them. |
-| 018, 021, 027, 060, 071, 079, 122 | 12 |
-| 019 | 06, 12 (`protection-churn`) |
-| 020, 025, 026, 037, 049, 078 | 04 |
-| 023, 056, 057, 065, 072, 073, 076, 098, 112, 128 | 01 |
-| 024 | 01, 02, 03 |
-| 030, 031, 045, 054, 099, 134 | 15 |
-| 032, 048, 125 | 07 (`ace-present`), 15 (`install-again`) |
-| 033, 034, 035, 047, 051, 110, 116, 124 | 07 |
-| 036 | 04, 06, 07: any gate run that completes |
-| 038, 111, 126, 127, 138 | 08 (`ACCEPTANCE`, `still-blocked`). Need 126 also asks for Fast Startup, and **that half is not asked**: see below. |
-| 039, 114 | 05 |
-| 040, 133 | 09 (`not-paged-at-boot`, `nodes-after-boot`) |
-| 041 | 07 (`setboot-round-trip`), 14 (the set-device half) |
-| 044, 055, 136 | 07 with `-AllowPlanB` (`planb`) |
-| 050, 117 | 05 (`bit-cleared`), 04 (`persisted`), 15 (`nodes-restored`). Need 117 also asks for the Fast Startup variant, and **that half is not asked**: see below. |
-| 052, 108 | 06 (`services-readable-while-blocked`), 08 (`no-fresh-handsfree-node`) |
-| 053, 119 | 09. A battery-saver boot is not asked. |
-| 058, 068, 077 | 02 |
-| 059 | 01 (`reconnectWhileActive`), 02 (`disconnectWhileUnplugged`) |
-| 061, 066, 074 | 01 (`K1-budget`), 02 (`disconnect-budget`) |
-| 081, 082, 083, 090, 092 | 08 (`cardFollowsTheCursorDisplay`, `cardClearsAnAutoHidingTaskbar`, `cardSuppressedInFullScreen`). The `ABM_GETTASKBARPOS` rectangle itself, the log line naming `QUNS_BUSY`, and a result card over an exclusive full-screen app are not read back. |
-| 084, 086, 087 | 08 (`card-no-focus`) |
-| 085 | 08 (`icon-theme`) for the light and dark half, and (`cardReadableInContrastTheme`) for the contrast theme half. |
-| 093 to 097, 100, 102 to 106, 115, 130 | 06 |
-| 113, 129 | 03 (`no-auto-page`), 02 (`block-recorded`) |
-| 118, 132 | 10 (`block-queued`), 09 (`end-session-logged`) |
-| 120, 131 | 13 |
-| 137 | 11 |
-| 008 | **Not asked.** No script watches a first sighting pin the container. |
-| 022, 028 | **Not asked.** They need a tray session of hours. |
-| 029 | **Not asked.** A code question, not a device one. |
-| 042 | **Not asked.** It needs the AirPods unpaired from this PC. |
-| 043 | **Not asked.** The tray's own `Set up Earshot...` prompt, and what a declined one gives. Test 15 elevates from PowerShell instead, so only an accepted prompt is ever seen. |
-| 046 | **Not asked.** It needs a second account and a squatted task folder. |
-| 062, 063 | **Not asked.** The controller's own return while blocked, and whether `staleSnapshotsIgnored` is ever non-zero. |
-| 067 | **Not asked.** An unsupported request, and whether a null property buffer of length 0 is accepted. A redundant request is recorded under 059. |
-| 069, 070, 075 | **Not asked.** Whether the render endpoint or its connector changes shape mid-connect. |
-| 088, 089, 091 | **Not asked.** Moving a card between displays of different scaling (this machine has only 96 DPI displays), DWM rounding on other builds, and whether a secondary-display taskbar hosts the icon. |
-| 101, 121 | **Not asked.** Two SYSTEM tasks started together, and the locks under the real task limits. |
-| 107 | **Not asked.** A protection intent kept while blocked and applied after the next allow. |
-| 109 | **Not asked.** The DACL on `device-change.lock`. |
-| 123, 135 | **Not asked.** Removing a paired device while it is blocked. |
-| 117 and 126, Fast Startup halves | **Not asked.** No script turns Fast Startup on, and none has a criterion for it. Tests 08 and 09 now read the setting and record it (`fastStartupAtPowerDown`, `fastStartupAtShutdown`), so the evidence says which kind of shutdown a run used, but they power down with whatever the machine is set to. To cover it by hand, turn Fast Startup on and run 08 (or 09), the only halves that shut the machine right down, then read the finding back beside `still-blocked`. Test 04 cannot cover it: a restart always performs a full shutdown and a cold boot, whatever Fast Startup is set to. Until a power cycle has been made with it on, the answer is unknown, not settled. |
-
-When a sitting ends, tick the needs the run actually answered against this table in
-`PROMPTING_RESPONSES.md`, so an unasked question is never read as a settled one.
+- Whether a first sighting of the AirPods pins their container.
+- Anything that needs a tray session of hours.
+- Anything that needs the AirPods unpaired from this PC, or a paired device
+  removed while it is blocked.
+- Anything that needs a second account and a squatted task folder.
+- The tray's own `Set up Earshot...` prompt, and what a declined one gives.
+  Test 15 elevates from PowerShell instead, so only an accepted prompt is ever
+  seen.
+- Whether the controller's own return while blocked, or a stale snapshot being
+  ignored, ever shows up in a run.
+- An unsupported request, and whether a null property buffer of length 0 is
+  accepted.
+- Whether the render endpoint or its connector changes shape mid-connect.
+- Moving a card between displays of different scaling (this machine has only 96
+  DPI displays), the window rounding on other builds, and whether a
+  secondary-display taskbar hosts the icon.
+- Two SYSTEM tasks started together, and the locks under the real task limits.
+- A protection intent kept while blocked and applied after the next allow.
+- The access list on `device-change.lock`.
+- Restarting Explorer, and the icon's ink in a contrast theme.
+- Fast Startup. No script turns it on, and none has a criterion for it. Tests
+  08 and 09 read the setting and record it (`fastStartupAtPowerDown`,
+  `fastStartupAtShutdown`), so the evidence says which kind of shutdown a run
+  used, but they power down with whatever the machine is set to. To cover it by
+  hand, turn Fast Startup on and run 08 (or 09), the only halves that shut the
+  machine right down, then read the finding back beside `still-blocked`. Test 04
+  cannot cover it: a restart always performs a full shutdown and a cold boot,
+  whatever Fast Startup is set to. Until a power cycle has been made with it on,
+  the answer is unknown, not settled.
 
 ## How these scripts are themselves tested
 
@@ -347,7 +315,7 @@ Open it with:
 tools\open-test-window.cmd
 ```
 
-It lists every test in this folder and offers "Run all, step by step", a guided
+It lists every test in this folder and offers "Run all the tests", a guided
 sequence that stops and asks at every step. It is never an unattended run: it
 pauses wherever the owner is needed, and stops for every shut down or restart,
 carrying on in the same row when the window is opened again.

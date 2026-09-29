@@ -12,12 +12,12 @@ stays pending until a run on the device has written the evidence for it.
 |---|---|
 | Builds with no warnings, and no suppressed or downgraded analyser rule | Done, checked on every build |
 | Unit tests: device-node matching, block and connection state, the elevated worker's argument validation, settings handling, icon bytes, card placement | Done |
-| The live test scripts parse, and every Earshot command line they pass is accepted by the application's own argument parsers | Done. Checked in the unit tests, which never run a script |
+| The live test scripts parse, and every Earshot command line they pass is accepted by the application's own argument parsers | Done. The unit tests run the self-test scripts (`LiveTestSelfTestTests`) |
 | Read-only probe of the audio endpoints on this PC | Done. The AirPods container is found by name and grouped correctly |
 | Read-only walk from the endpoints to the audio driver, including reading a pin property from both the A2DP and Hands-Free filters | Done. Both filters answer, so the connect path is reachable |
 | Read-only reads of the device nodes, installed Bluetooth services and scheduled tasks | Done |
 | Self-contained release runs from an unzipped folder | Done |
-| Connect and disconnect on the AirPods | Connect: done. Test 01 passed all 11 criteria. With Protect audio quality on, the A2DP filter accepted the reconnect request and the AirPods were playing from this PC 2749 ms later, and 3413 ms on the second run, inside the 15 s allowed. The Hands-Free assisted fallback is not needed (`hfpAssistedFallbackNeeded` = no). With protection off one run took 14371 ms, which is close to the limit. Disconnect: each of the three disconnects in Test 01 was confirmed in under 60 ms and the AirPods went back to the phone. Test 02, disconnect in detail, is pending |
+| Connect and disconnect on the AirPods | Connect: done. Test 01 passed all 11 criteria. With Protect audio quality on, the A2DP filter accepted the reconnect request and the AirPods were playing from this PC 2749 ms later, and 3413 ms on the second run, when the request was sent to all filters, inside the 15 s allowed. The Hands-Free assisted fallback is not needed (`hfpAssistedFallbackNeeded` = no). With protection off one run took 14371 ms, which is close to the limit. Disconnect: each of the three disconnects in Test 01 was confirmed in under 60 ms and the AirPods went back to the phone. Test 02, disconnect in detail, is pending |
 | Connect while blocked: allow, then reconnect | Seen in the application's log during ordinary use: a click while blocked allowed the nodes, and Windows then connected the AirPods itself about a second later. Test 03, which scores it, is pending |
 | Block and allow, and the disable surviving a restart | Block and allow: done. Test 05 showed all 8 device nodes disabled with the persistent flag before the allow, and none after it (`enableClearsConfigFlagsDisabled` = yes); the log shows a block disabling all 8. Test 05 is recorded as failed overall, because the test scripts could not read Earshot's exit code at the time; that fault is fixed and the run was not re-scored. Surviving a restart, Test 04: pending |
 | The power cycle test: after a full power cycle the AirPods stay on the phone | Pending |
@@ -30,7 +30,7 @@ stays pending until a run on the device has written the evidence for it.
 | Switching between the phone and this PC, and the `Switch to-pc:` and `Switch to-phone:` log lines (`tools\live-tests\16-FastSwitch.ps1`) | Pending: no live run yet. No timing is recorded here until a run measures one |
 | Spoken status heard on a real run | Pending |
 | Play from a phone, with a real phone | Pending |
-| Shutdown refusals on a real shutdown | Pending. Covered by the same sitting as the power cycle test (08), since that is a real shutdown |
+| Shutdown refusals on a real shutdown | Pending. No live test scores it |
 | Hand back on shut down while connected (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
 | Hand back on sleep while connected (`tools\live-tests\18-HandBackOnSleep.ps1`) | Pending: no live run yet |
 | Hand back on Exit while connected (`tools\live-tests\20-HandBackOnExit.ps1`) | Pending: no live run yet |

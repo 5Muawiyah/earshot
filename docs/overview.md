@@ -69,10 +69,10 @@ Top to bottom, with the exact wording. Separators sit between the groups.
 | `Set up Earshot...` | Runs the one-time setup. Offered before setup, for a damaged install, and when the running copy is newer than the installed one. |
 | `Check for updates` | Looks for a newer release. Downloads nothing. See [Updates](#updates). |
 | `Check automatically` | A tick, off by default. Contacts GitHub once a day when on. |
-| `Exit` | Closes Earshot. With Block at boot on, it blocks the device nodes first. With Hand back ticked and the AirPods connected to this PC, it lets them go first, then blocks the device nodes. |
+| `Exit` | Closes Earshot. With Block at boot on and the AirPods not in use, it blocks the device nodes first. With Hand back ticked and the AirPods in use on this PC, it lets them go first, then blocks the device nodes. With Hand back off, which is the default, and the AirPods in use, it closes without blocking and says so: "Closed while in use, so the AirPods are not blocked." |
 
-A shortcut typed into the settings file for connect, audio protection, block at
-boot or speak status is shown beside the item's own label, as `Block at boot
+A shortcut typed into the settings file for connect, audio protection or block
+at boot is shown beside the item's own label, as `Block at boot
 (<shortcut>)`. The two default shortcuts (see [Shortcuts](#shortcuts)) do not
 appear in the menu.
 
@@ -97,9 +97,10 @@ driver refusal.
 ## The boot block
 
 With Block at boot ticked, the AirPods' device nodes are disabled the moment
-they stop being used, and stay disabled through a restart. Nothing has to run
-at shutdown for that to hold; staying disabled is the steady state, and it is
-what stops Windows paging them at the next boot.
+they stop being used. The block is designed so that Windows has nothing to page
+at the next boot: a disabled node is meant to stay disabled through a restart,
+so nothing has to run at shutdown. The power cycle test that checks this (test
+08) has not run yet, and a shut down with Fast Startup on is not covered.
 
 <p align="center"><i>The card Earshot shows when the AirPods are blocked at boot.</i></p>
 
@@ -200,8 +201,10 @@ application far less time to act before the computer actually sleeps than it
 gives at shut down. Exit has no Windows deadline, so it uses the shut-down
 cap, and a stuck disconnect does not stop the block.
 
-Tick or untick **Hand back on shut down, sleep and Exit** in the right-click
-menu, or on the settings page. The tests cover this against stand-ins. It has
+**Hand back on shut down, sleep and Exit** is off by default. Tick it in the
+right-click menu, or on the settings page. Until you do, Exit while the AirPods
+are in use does not block them, and the hand-back service does nothing at shut
+down. The tests cover the hand-back against stand-ins. It has
 not been tried on a real shut down, sleep or Exit (tests 17, 18 and 20 are
 pending).
 
@@ -259,9 +262,10 @@ click is refused with its own card while either hold is running, so nothing
 can start a change that would fight what the hand-back is doing.
 
 If the Earshot icon has been closed, a small background service, installed by
-setup and removed by uninstall, blocks the AirPods at shut down instead. It
-cannot disconnect them, so the AirPods may stay connected until the computer
-is off. It has not had a live run, does not cover a shut down with Fast Startup
+setup and removed by uninstall, can block the AirPods at shut down instead. It
+acts only when Block at boot and Hand back are both on, and Hand back is off by
+default. It blocks and never disconnects them, so the AirPods may stay
+connected until the computer is off. It has not had a live run, does not cover a shut down with Fast Startup
 on, and whether a restart gives it the shut-down notice is not proved. See
 [architecture.md](architecture.md#handing-the-airpods-back-at-shut-down-and-sleep).
 
