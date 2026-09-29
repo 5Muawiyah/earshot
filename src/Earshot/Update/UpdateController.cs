@@ -1,0 +1,356 @@
+using Earshot.Contracts;
+
+namespace Earshot.Update;
+
+// The update flow with no window in it: check, then on the person's click download, verify and hand over to Windows'
+// administrator prompt. It holds the state the update sub-page shows (View) and raises Changed when it moves.
+//
+// Nothing is downloaded or installed until UpdateAsync is called, and only the person's own click calls it. A check
+// never downloads. The hand-over starts the staged Earshot.exe elevated with the verb setup accepts; once it has
+// started, HandedOver is raised and the caller ends this program, because that program replaces the folder this
+// one runs from and cannot do it while this one holds the folder open.
+//
+// Methods may be called from any thread; the state is guarded, and events are raised outside the guard.
+internal sealed class UpdateController
+{
+    private readonly IUpdateSource _source;
+    private readonly IUpdateLauncher _launcher;
+    private readonly Func<HandoverIdentity?> _identity;
+    private readonly Func<string?> _unavailable;
+    private readonly ReleaseVersion _installed;
+    private readonly ILog _log;
+    private readonly Lock _gate = new();
+
+    private UpdateStage _stage = UpdateStage.Idle;
+    private ReleaseInfo? _release;
+    private ReleaseVersion? _latest;
+    private int? _percent;
+    private string? _reason;
+    private string? _notice;
+    private CancellationTokenSource? _download;
+
+    // identity: the pinned device install needs, or null before setup has one. unavailable: why an update cannot run
+    // in this process at all (safe mode, test data), or null.
+    public UpdateController(
+        IUpdateSource source, IUpdateLauncher launcher, Func<HandoverIdentity?> identity, Func<string?> unavailable, ReleaseVersion installed, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(launcher);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(unavailable);
+        ArgumentNullException.ThrowIfNull(log);
+        _source = source;
+        _launcher = launcher;
+        _identity = identity;
+        _unavailable = unavailable;
+        _installed = installed;
+        _log = log;
+    }
+
+    public event EventHandler? Changed;
+
+    // Raised once the elevated program has started. The caller ends the program.
+    public event EventHandler? HandedOver;
+
+    public ReleaseVersion Installed => _installed;
+
+    // The staged update the elevated program was started from, kept open (and so unchangeable) until this program ends.
+    internal StagedUpdate? HandedOverUpdate { get; private set; }
+
+    public UpdateViewModel View
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return UpdateViewModel.For(_stage, _installed, _release?.Version ?? _latest, _percent, _reason, _notice);
+            }
+        }
+    }
+
+    public UpdateStage Stage
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _stage;
+            }
+        }
+    }
+
+    // A check, a download or a hand-over is under way.
+    public bool IsBusy => Stage is UpdateStage.Checking or UpdateStage.Downloading or UpdateStage.HandingOver;
+
+    // The release a check found, until it is dealt with.
+    public ReleaseInfo? AvailableRelease
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _release;
+            }
+        }
+    }
+
+    // Reads the feed and moves to up to date, update available or check failed. A cancel (the program closing)
+    // returns to idle without a word.
+    public async Task CheckAsync(CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (_stage is UpdateStage.Checking or UpdateStage.Downloading or UpdateStage.HandingOver)
+            {
+                return;
+            }
+
+            _stage = UpdateStage.Checking;
+            _release = null;
+            _latest = null;
+            _reason = null;
+            _notice = null;
+            _percent = null;
+        }
+
+        RaiseChanged();
+        UpdateCheckResult result;
+        try
+        {
+            result = await _source.CheckAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Move(UpdateStage.Idle);
+            return;
+        }
+        catch (Exception ex)
+        {
+            // An exception the source did not turn into a failure is still shown, with its type in the log: the
+            // view never stays on "Checking" for something that has ended.
+            _log.Error("Update check: unexpected " + ex.GetType().Name + ".", ex);
+            result = UpdateCheckResult.Failed(new UpdateFailure(UpdateFailureKind.Network, "Something went wrong while checking.", ex.GetType().Name + ": " + ex.Message));
+        }
+
+        lock (_gate)
+        {
+            switch (result.Outcome)
+            {
+                case UpdateCheckOutcome.UpToDate:
+                    _stage = UpdateStage.UpToDate;
+                    _latest = result.Latest;
+                    break;
+                case UpdateCheckOutcome.Available:
+                    _stage = UpdateStage.Available;
+                    _release = result.Release;
+                    _latest = result.Latest;
+                    break;
+                default:
+                    _stage = result.Failure?.Kind == UpdateFailureKind.Cancelled ? UpdateStage.Idle : UpdateStage.CheckFailed;
+                    _reason = result.Failure?.Reason;
+                    break;
+            }
+        }
+
+        RaiseChanged();
+    }
+
+    // The person clicked Update: download, verify, then hand over. From "available", or from a failure of the download
+    // or the hand-over (Try again). Anything else is ignored.
+    public async Task UpdateAsync(CancellationToken ct)
+    {
+        // Read before the guard is taken: neither call belongs under it.
+        string? unavailable = _unavailable();
+        bool pinned = _identity() is not null;
+        ReleaseInfo release;
+        CancellationTokenSource? cancel = null;
+        lock (_gate)
+        {
+            if (_stage is not (UpdateStage.Available or UpdateStage.DownloadFailed or UpdateStage.HandoverFailed) || _release is null)
+            {
+                return;
+            }
+
+            release = _release;
+            _reason = null;
+            if (unavailable is not null)
+            {
+                _stage = UpdateStage.Available;
+                _notice = unavailable;
+                _log.Info("Update: not started. " + unavailable);
+            }
+            else if (!pinned)
+            {
+                _stage = UpdateStage.Available;
+                _notice = UpdateCopy.NotPinnedNotice;
+                _log.Info("Update: not started. No device is pinned, and setup needs one.");
+            }
+            else
+            {
+                _stage = UpdateStage.Downloading;
+                _percent = null;
+                _notice = null;
+                cancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                _download = cancel;
+            }
+        }
+
+        if (cancel is null)
+        {
+            RaiseChanged();
+            return;
+        }
+
+        RaiseChanged();
+        UpdateDownloadResult download;
+        try
+        {
+            download = await _source.DownloadAsync(release, new Progress(this), cancel.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.Error("Update download: unexpected " + ex.GetType().Name + ".", ex);
+            download = UpdateDownloadResult.Failed(new UpdateFailure(UpdateFailureKind.Network, "Something went wrong while downloading.", ex.GetType().Name + ": " + ex.Message));
+        }
+        catch (OperationCanceledException)
+        {
+            download = UpdateDownloadResult.Failed(new UpdateFailure(UpdateFailureKind.Cancelled, UpdateService.ReasonFor(UpdateFailureKind.Cancelled), "The download was cancelled."));
+        }
+        finally
+        {
+            // Forgotten before it is disposed, so a Cancel that arrives now never meets a disposed source.
+            lock (_gate)
+            {
+                _download = null;
+            }
+
+            cancel.Dispose();
+        }
+
+        if (download.Staged is null)
+        {
+            lock (_gate)
+            {
+                bool cancelled = download.Failure?.Kind == UpdateFailureKind.Cancelled;
+                _stage = cancelled ? UpdateStage.Available : UpdateStage.DownloadFailed;
+                _reason = cancelled ? null : download.Failure?.Reason;
+                _percent = null;
+            }
+
+            RaiseChanged();
+            return;
+        }
+
+        HandOver(download.Staged);
+    }
+
+    // Stops a download under way, and returns to "available". Anything else is ignored.
+    public void Cancel()
+    {
+        CancellationTokenSource? running;
+        lock (_gate)
+        {
+            running = _stage == UpdateStage.Downloading ? _download : null;
+        }
+
+        running?.Cancel();
+    }
+
+    // The button after a failure: check again after a failed check, download again after a failed download or
+    // hand-over.
+    public Task TryAgainAsync(CancellationToken ct) =>
+        Stage == UpdateStage.CheckFailed ? CheckAsync(ct) : UpdateAsync(ct);
+
+    private void HandOver(StagedUpdate staged)
+    {
+        HandoverIdentity? identity = _identity();
+        Move(UpdateStage.HandingOver);
+        if (identity is null)
+        {
+            // Settings changed under the download. Nothing has been handed over.
+            staged.Discard();
+            Fail(UpdateStage.Available, null, UpdateCopy.NotPinnedNotice);
+            return;
+        }
+
+        LaunchResult launch;
+        try
+        {
+            launch = _launcher.Launch(staged.ExecutablePath, UpdateHandover.InstallArguments(identity), staged.AppFolder);
+        }
+        catch (Exception ex)
+        {
+            // A launcher that throws instead of answering must not leave the view on "Approve the Windows prompt".
+            _log.Error("Update: starting the staged program threw " + ex.GetType().Name + ".", ex);
+            launch = new LaunchResult(LaunchOutcome.Failed, 0, ex.GetType().Name + ": " + ex.Message, null);
+        }
+
+        if (launch.Outcome == LaunchOutcome.Started)
+        {
+            _log.Info("Update: started " + launch.Detail + ". Earshot ends so the new files can replace its own.");
+            launch.Process?.Dispose();
+            // Held until this program ends, so the staged files cannot change under the elevated program.
+            HandedOverUpdate = staged;
+
+            HandedOver?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        staged.Discard();
+        if (launch.Outcome == LaunchOutcome.Declined)
+        {
+            _log.Info("Update: the Windows prompt was declined (" + launch.Detail + "). Nothing was changed.");
+            Fail(UpdateStage.Available, null, UpdateCopy.PromptDeclinedNotice);
+            return;
+        }
+
+        _log.Warn("Update: the staged program did not start (" + launch.Detail + "). Nothing was changed.");
+        Fail(UpdateStage.HandoverFailed, "Windows would not start the update (error " + launch.Win32Error + "). Nothing was changed.", null);
+    }
+
+    private void Fail(UpdateStage stage, string? reason, string? notice)
+    {
+        lock (_gate)
+        {
+            _stage = stage;
+            _reason = reason;
+            _notice = notice;
+            _percent = null;
+        }
+
+        RaiseChanged();
+    }
+
+    private void Move(UpdateStage stage)
+    {
+        lock (_gate)
+        {
+            _stage = stage;
+        }
+
+        RaiseChanged();
+    }
+
+    private void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
+
+    private void SetPercent(int? percent)
+    {
+        lock (_gate)
+        {
+            if (_stage != UpdateStage.Downloading || _percent == percent)
+            {
+                return;
+            }
+
+            _percent = percent;
+        }
+
+        RaiseChanged();
+    }
+
+    // Progress reports come from the download's own thread.
+    private sealed class Progress(UpdateController owner) : IProgress<UpdateProgress>
+    {
+        public void Report(UpdateProgress value) => owner.SetPercent(value.Percent);
+    }
+}

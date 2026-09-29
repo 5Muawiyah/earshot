@@ -38,6 +38,8 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _nameOtherDevice = new();
     private readonly ToolStripMenuItem _chooseDevice = new();
     private readonly ToolStripMenuItem _setUp = new();
+    private readonly ToolStripMenuItem _checkForUpdates = new();
+    private readonly ToolStripMenuItem _checkAutomatically = new();
     private readonly ToolStripMenuItem _exit = new();
 
     public TrayMenu(Func<MenuState> state)
@@ -70,6 +72,9 @@ internal sealed class TrayMenu : IDisposable
             _chooseDevice,
             _setUp,
             new ToolStripSeparator(),
+            _checkForUpdates,
+            _checkAutomatically,
+            new ToolStripSeparator(),
             _exit,
         ]);
 
@@ -87,6 +92,8 @@ internal sealed class TrayMenu : IDisposable
         _nameOtherDevice.Click += (_, _) => NameOtherDeviceClicked?.Invoke(this, EventArgs.Empty);
         _chooseDevice.Click += (_, _) => ChooseDeviceClicked?.Invoke(this, EventArgs.Empty);
         _setUp.Click += (_, _) => SetUpClicked?.Invoke(this, EventArgs.Empty);
+        _checkForUpdates.Click += (_, _) => CheckForUpdatesClicked?.Invoke(this, EventArgs.Empty);
+        _checkAutomatically.Click += (_, _) => CheckAutomaticallyClicked?.Invoke(this, EventArgs.Empty);
         _exit.Click += (_, _) => ExitClicked?.Invoke(this, EventArgs.Empty);
         Strip.Opening += OnOpening;
 
@@ -127,6 +134,10 @@ internal sealed class TrayMenu : IDisposable
 
     public event EventHandler? SetUpClicked;
 
+    public event EventHandler? CheckForUpdatesClicked;
+
+    public event EventHandler? CheckAutomaticallyClicked;
+
     public event EventHandler? ExitClicked;
 
     public ContextMenuStrip Strip { get; }
@@ -163,6 +174,8 @@ internal sealed class TrayMenu : IDisposable
         Set(_nameOtherDevice, state.NameOtherDeviceItem);
         Set(_chooseDevice, state.ChooseDevice);
         Set(_setUp, state.SetUp);
+        Set(_checkForUpdates, state.CheckForUpdates);
+        Set(_checkAutomatically, state.CheckAutomatically);
         Set(_exit, state.Exit);
     }
 

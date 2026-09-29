@@ -22,6 +22,7 @@ public sealed class TrayMenuTests
         "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold",
         "Make these my AirPods (no signal threshold set up yet)", "Name your other device...", "-",
         "Choose device...", "Set up Earshot...", "-",
+        "Check for updates", "Check automatically", "-",
         "Exit",
     ];
 
