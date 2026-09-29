@@ -17,8 +17,8 @@ public enum GaugePosition
 // draws or measures anything; it is the table the renderer and the placement read, so a test can check a
 // coordinate without a bitmap.
 //
-// 100%, 125% and 150% are written out (the design gives each figure at each scale, and simple rounding of
-// the 100% figure does not reproduce them: 7 at 150% is 10, not 11, on the left and 11 on the right). Any
+// 100%, 125% and 150% are written out, because simple rounding of the 100% figures does not reproduce the
+// intended ones (the left padding of 7 is 10 at 150%, not 11, while the right padding is 11). Any
 // other scale scales the 100% figures and rounds half away from zero.
 //
 // Left to right, all x measured from the window's left edge:

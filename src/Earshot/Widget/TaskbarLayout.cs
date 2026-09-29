@@ -6,8 +6,11 @@ namespace Earshot.Widget;
 // One taskbar reading, as ITaskbarReader hands it to the controller. Every rectangle is in physical
 // screen pixels. Occupied excludes the frame containers themselves (Shell_TrayWnd, the input site,
 // TaskbarFrame): only leaf elements with a non-empty, on-screen rectangle. StartButton is the Start
-// element's own rectangle when it was found; null when it was not (GaugePlacement then falls back to
-// the first merged interval).
+// element's own rectangle when it was found; null when it was not. NotificationArea is the bounding box of
+// the elements that belong to the notification area (the tray chevron, its icons, the clock), which the
+// gauge is placed beside; null when none could be identified. CoveringWindow, WindowAtGaugeCentre and
+// Foreground name a window by its class and whether Explorer owns it, only so the log can say what sat over
+// the gauge or took the foreground.
 internal sealed record TaskbarLayout(
     nint TaskbarHandle,
     Rectangle Taskbar,

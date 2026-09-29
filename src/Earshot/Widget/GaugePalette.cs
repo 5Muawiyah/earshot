@@ -1,8 +1,7 @@
 namespace Earshot.Widget;
 
-// The colours the gauge draws with, for one theme. The values are the design's tokens for the taskbar
-// (text.primary, gauge.track, caution, gauge.hover); the ring's fill is the owner's Windows accent colour, not
-// text colour.
+// The colours the gauge draws with, for one theme: text, track, caution and hover. The ring's fill is the
+// owner's Windows accent colour, not the text colour.
 //
 //   token        light                dark
 //   ink          #1B1B1B              #FFFFFF

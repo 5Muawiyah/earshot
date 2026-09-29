@@ -149,7 +149,7 @@ internal static class GaugeRenderer
     }
 
     // The track is the whole circle; the fill runs from 12 o'clock clockwise for the battery's share of it.
-    // Flat ends, like the design's stroke. GDI+ measures angles clockwise from 3 o'clock, so 12 o'clock is -90.
+    // Flat ends. GDI+ measures angles clockwise from 3 o'clock, so 12 o'clock is -90.
     private static void DrawRing(Graphics g, GaugeLayout layout, GaugePalette palette, GaugeContent content)
     {
         PointF c = RingCentre(layout);
