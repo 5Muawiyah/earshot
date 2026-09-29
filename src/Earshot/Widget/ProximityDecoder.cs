@@ -8,10 +8,11 @@ public static class ProximityDecoder
     {
         ArgumentNullException.ThrowIfNull(t);
 
-        // A case nibble the owner's own set-ups contradict is not shown, compared or charged: null percent,
-        // null charging and no read time, the same as a case that was never read.
-        int? casePercent = t.CaseNibbleDoubted ? null : BatteryNibble.ToPercent(m.BatteryB & 0x0F);
-        PartReading caseReading = new PartReading(casePercent, t.CaseNibbleDoubted ? null : ChargingBit(m, t.CaseChargingBit), InEar: null)
+        // A case nibble the owner's own set-ups have not agreed with, twice, is not shown, compared or charged: null
+        // percent, null charging and no read time, the same as a case that was never read. Like a bud's, the case's
+        // figure is read only once it is proved.
+        int? casePercent = t.CaseNibbleProved ? BatteryNibble.ToPercent(m.BatteryB & 0x0F) : null;
+        PartReading caseReading = new PartReading(casePercent, t.CaseNibbleProved ? ChargingBit(m, t.CaseChargingBit) : null, InEar: null)
         {
             ReadAt = casePercent is not null ? at : null,
         };

@@ -282,6 +282,7 @@ public sealed class WidgetCardPresenterTests
             (BatterySetupResultStatus.BatterySetUp, WidgetCopy.SetupBatterySetUp),
             (BatterySetupResultStatus.CaseSetUp, WidgetCopy.SetupCaseSetUp),
             (BatterySetupResultStatus.CaseSetUpBudsSame, WidgetCopy.SetupCaseSetUp),
+            (BatterySetupResultStatus.SavedNeedsAnother, WidgetCopy.SetupSaved),
             (BatterySetupResultStatus.CouldNotRead, WidgetCopy.SetupCouldNotRead),
         ];
         foreach ((BatterySetupResultStatus status, string text) in expected)

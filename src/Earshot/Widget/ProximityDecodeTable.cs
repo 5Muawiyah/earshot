@@ -17,7 +17,7 @@ public sealed record ProximityDecodeTable(
     int? LidOpenBit,           // a bit of Lid that reads open, or null when the lid is a counter only
     byte? LidCounterMask,      // the bits of Lid that count lid opens, or null
     bool? CaseNibbleReadsOnlyWithLidOpen, // the paper's claim, once observed
-    bool CaseNibbleDoubted = false)       // two of the owner's own set-ups contradict the documented case nibble
+    bool CaseNibbleProved = false)        // the owner's own set-ups agree with the case nibble, so it may be read
 {
     public static ProximityDecodeTable Unproved => new(null, null, false, null, null, null, null, null, false, null, null, null);
 }

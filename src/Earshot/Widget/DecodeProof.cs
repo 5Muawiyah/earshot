@@ -4,7 +4,7 @@ namespace Earshot.Widget;
 
 public enum DecodeField { HighNibbleIsRight, FlipBit, CaseNibble, CaseChargingBit, RightChargingBit, LeftChargingBit, LeftInEarBit, RightInEarBit, Lid }
 
-public enum FieldProofStatus { Unproved, Proved, Withdrawn, Documented, Doubted, NotProvableBySetup }
+public enum FieldProofStatus { Unproved, Proved, Withdrawn, NotProvableBySetup }
 
 public sealed record FieldProof(FieldProofStatus Status, int Agree, int Disagree, string? Detail);
 
@@ -27,14 +27,13 @@ public static class DecodeProof
     public const int Tolerance = 10;
 
     // Why two: one discriminating record is already strong, but it cannot rule out the owner entering the two
-    // buds the wrong way round. Two independent entries both wrong the same way is a much smaller risk.
+    // buds the wrong way round. Two independent entries both wrong the same way is a much smaller risk. The case
+    // nibble needs the same two records that agree with the owner's pick, for the same reason.
     public const int OrderRecordsNeeded = 2;
 
     // A status bit that happens to be constant across a few records fits trivially, so a flip needs four
     // discriminating records with each value of the bit in at least two of them.
     public const int FlipRecordsNeeded = 4;
-
-    public const int CaseDoubtDisagreements = 2;
 
     private const int ChargingLowBit = 4;
     private const int ChargingHighBit = 7;
@@ -111,7 +110,9 @@ public static class DecodeProof
         fields[DecodeField.HighNibbleIsRight] = orderProof;
         fields[DecodeField.FlipBit] = flipProof;
 
-        // The case nibble: documented, and shown, unless the owner's own records contradict it.
+        // The case nibble: proved the way a bud is, by agreement with the owner's picks and never before. Two records
+        // whose case nibble is within Tolerance of the owner's case pick prove it (the count the bud order needs), and
+        // a record that does not agree withdraws it, as a record that contradicts the order withdraws the order.
         int caseAgree = 0;
         int caseDisagree = 0;
         foreach ((BatterySetupRecord record, ProximityMessage message) in usable)
@@ -129,8 +130,11 @@ public static class DecodeProof
             }
         }
 
-        bool caseDoubted = caseDisagree >= CaseDoubtDisagreements && caseDisagree > caseAgree;
-        fields[DecodeField.CaseNibble] = new FieldProof(caseDoubted ? FieldProofStatus.Doubted : FieldProofStatus.Documented, caseAgree, caseDisagree, null);
+        bool caseProved = caseAgree >= OrderRecordsNeeded && caseDisagree == 0;
+        FieldProofStatus caseStatus = caseProved
+            ? FieldProofStatus.Proved
+            : caseAgree >= OrderRecordsNeeded ? FieldProofStatus.Withdrawn : FieldProofStatus.Unproved;
+        fields[DecodeField.CaseNibble] = new FieldProof(caseStatus, caseAgree, caseDisagree, null);
 
         // The charging bits.
         int? caseBit = ProveChargingBit(usable, part: 2);
@@ -150,7 +154,7 @@ public static class DecodeProof
             highNibbleIsRight, flipBit, flipWhenSet, caseBit, rightBit, leftBit,
             LeftInEarBit: null, RightInEarBit: null, InEarWhenSet: false,
             LidOpenBit: null, LidCounterMask: null, CaseNibbleReadsOnlyWithLidOpen: null,
-            CaseNibbleDoubted: caseDoubted);
+            CaseNibbleProved: caseProved);
         return new DecodeProofResult(table, fields, notes);
     }
 

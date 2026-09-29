@@ -208,7 +208,7 @@ public sealed class UpdateActionsTests
         byte[] zip = World.ReleaseFiles("1.2.0").Build();
         UpdateRequest request = w.Stage(zip);
 
-        // What a program running as the user could put beside the zip, or where the old design ran the program from.
+        // What a program running as the user could put beside the zip, or in an unpacked folder next to it.
         string app = Path.Combine(w.Staging, "app");
         Directory.CreateDirectory(app);
         File.WriteAllText(Path.Combine(w.Staging, "evil.dll"), "planted dll");
@@ -232,8 +232,8 @@ public sealed class UpdateActionsTests
         Assert.IsFalse(Directory.GetFiles(w.Install, "*", SearchOption.AllDirectories).Any(f => File.ReadAllText(f).Contains("planted", StringComparison.Ordinal)));
     }
 
-    // The old design ran the program from the staging folder. With the zip changed after the tray hashed it, the
-    // change is refused, whatever it is: another valid release, a different file list, or bytes that are no archive.
+    // Running the program from the staging folder would let any change made after the check through. A zip changed
+    // after the tray hashed it is refused whatever the change is: another valid release, or bytes that are no archive.
     [TestMethod]
     public void AZipChangedAfterTheTrayHashedItIsRefusedAndNothingIsInstalled()
     {

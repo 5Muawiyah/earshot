@@ -26,7 +26,8 @@ public sealed class DecodeProofTests
         Assert.AreEqual(ProximityDecodeTable.Unproved, result.Table, "The table is exactly the unproved one.");
         Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.HighNibbleIsRight));
         Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.FlipBit));
-        Assert.AreEqual(FieldProofStatus.Documented, Status(result, DecodeField.CaseNibble), "The case is documented and shown from the first claim.");
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.CaseNibble), "The case is not shown before its own records prove it.");
+        Assert.IsFalse(result.Table.CaseNibbleProved);
         Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.CaseChargingBit));
         Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.RightChargingBit));
         Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.LeftChargingBit));
@@ -200,31 +201,71 @@ public sealed class DecodeProofTests
         Assert.IsNull(result.Table.HighNibbleIsRight);
     }
 
+    // The case nibble reads 5 (50%): a pick of 50 agrees, a pick of 90 disagrees.
+    private static BatterySetupRecord CaseAgrees(int minutes) => Record(Message(8, 4, caseNibble: 5), Picks(40, 80, box: 50), minutes);
+
+    private static BatterySetupRecord CaseDisagrees(int minutes) => Record(Message(8, 4, caseNibble: 5), Picks(40, 80, box: 90), minutes);
+
     [TestMethod]
-    public void TheCaseIsDocumentedUntilTwoDisagreementsOutweighAgreements()
+    public void TheCaseIsProvedByTwoRecordsThatAgreeWithTheOwnersPickAndNotBefore()
     {
-        // The case nibble reads 5 (50%): a pick of 50 agrees, a pick of 90 disagrees.
-        BatterySetupRecord agrees(int m) => Record(Message(8, 4, caseNibble: 5), Picks(40, 80, box: 50), m);
-        BatterySetupRecord disagrees(int m) => Record(Message(8, 4, caseNibble: 5), Picks(40, 80, box: 90), m);
+        DecodeProofResult none = DecodeProof.Evaluate([]);
+        DecodeProofResult one = DecodeProof.Evaluate([CaseAgrees(0)]);
+        DecodeProofResult two = DecodeProof.Evaluate([CaseAgrees(0), CaseAgrees(1)]);
 
-        Assert.AreEqual(FieldProofStatus.Documented, Status(DecodeProof.Evaluate([agrees(0), agrees(1)]), DecodeField.CaseNibble));
-        Assert.AreEqual(FieldProofStatus.Documented, Status(DecodeProof.Evaluate([agrees(0), agrees(1), disagrees(2), disagrees(3)]), DecodeField.CaseNibble),
-            "Equal for and against: not outweighed.");
-
-        DecodeProofResult doubted = DecodeProof.Evaluate([agrees(0), disagrees(1), disagrees(2)]);
-        Assert.AreEqual(FieldProofStatus.Doubted, Status(doubted, DecodeField.CaseNibble));
-        Assert.IsTrue(doubted.Table.CaseNibbleDoubted);
-        Assert.AreEqual(1, doubted.Fields[DecodeField.CaseNibble].Agree);
-        Assert.AreEqual(2, doubted.Fields[DecodeField.CaseNibble].Disagree);
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(none, DecodeField.CaseNibble));
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(one, DecodeField.CaseNibble), "One record could be the owner's mis-pick that happens to fit.");
+        Assert.IsFalse(one.Table.CaseNibbleProved, "So one record shows no case.");
+        Assert.AreEqual(1, one.Fields[DecodeField.CaseNibble].Agree);
+        Assert.AreEqual(FieldProofStatus.Proved, Status(two, DecodeField.CaseNibble));
+        Assert.IsTrue(two.Table.CaseNibbleProved, "Two records is the count the bud order needs.");
+        Assert.AreEqual(DecodeProof.OrderRecordsNeeded, two.Fields[DecodeField.CaseNibble].Agree);
+        Assert.AreEqual(0, two.Fields[DecodeField.CaseNibble].Disagree);
     }
 
     [TestMethod]
-    public void OneCaseDisagreementDoesNotDoubtIt()
+    public void AgreementUsesTheSameToleranceAsABud()
     {
-        DecodeProofResult result = DecodeProof.Evaluate([Record(Message(8, 4, caseNibble: 5), Picks(40, 80, box: 90))]);
+        // The nibble reads 50%. Within one step (10) of the pick agrees, and two steps away does not.
+        BatterySetupRecord Pick(int box, int m) => Record(Message(8, 4, caseNibble: 5), Picks(40, 80, box: box), m);
 
-        Assert.AreEqual(FieldProofStatus.Documented, Status(result, DecodeField.CaseNibble), "One disagreement is a mis-pick or a stale iPhone value.");
-        Assert.IsFalse(result.Table.CaseNibbleDoubted);
+        Assert.AreEqual(FieldProofStatus.Proved, Status(DecodeProof.Evaluate([Pick(40, 0), Pick(60, 1)]), DecodeField.CaseNibble));
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(DecodeProof.Evaluate([Pick(30, 0), Pick(70, 1)]), DecodeField.CaseNibble));
+    }
+
+    [TestMethod]
+    public void ARecordThatDisagreesWithTheOwnersPickWithdrawsWhatTwoAgreeingRecordsProved()
+    {
+        DecodeProofResult proved = DecodeProof.Evaluate([CaseAgrees(0), CaseAgrees(1)]);
+        DecodeProofResult withdrawn = DecodeProof.Evaluate([CaseAgrees(0), CaseAgrees(1), CaseDisagrees(2)]);
+
+        Assert.IsTrue(proved.Table.CaseNibbleProved);
+        Assert.AreEqual(FieldProofStatus.Withdrawn, Status(withdrawn, DecodeField.CaseNibble));
+        Assert.IsFalse(withdrawn.Table.CaseNibbleProved, "A later record that disagrees takes the figure away again.");
+        Assert.AreEqual(2, withdrawn.Fields[DecodeField.CaseNibble].Agree);
+        Assert.AreEqual(1, withdrawn.Fields[DecodeField.CaseNibble].Disagree);
+    }
+
+    [TestMethod]
+    public void OneCaseDisagreementNoLongerLeavesTheCaseShown()
+    {
+        DecodeProofResult result = DecodeProof.Evaluate([CaseDisagrees(0)]);
+
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.CaseNibble), "A record that disagrees proves nothing.");
+        Assert.IsFalse(result.Table.CaseNibbleProved);
+        Assert.AreEqual(1, result.Fields[DecodeField.CaseNibble].Disagree);
+    }
+
+    [TestMethod]
+    public void RecordsWhoseCaseNibbleIsUnknownProveNothingAboutTheCase()
+    {
+        BatterySetupRecord Unknown(int m) => Record(Message(8, 4, caseNibble: 0xF), Picks(40, 80, box: 50), m);
+
+        DecodeProofResult result = DecodeProof.Evaluate([Unknown(0), Unknown(1), Unknown(2)]);
+
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.CaseNibble));
+        Assert.AreEqual(0, result.Fields[DecodeField.CaseNibble].Agree);
+        Assert.AreEqual(0, result.Fields[DecodeField.CaseNibble].Disagree);
     }
 
     // A bit that is always 1 "explains" a part that is always charging, and a flag that never varies proves

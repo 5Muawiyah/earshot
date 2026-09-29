@@ -814,6 +814,7 @@ public sealed class WidgetCardTests
         (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp), "done-battery"),
         (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUp), "done-case"),
         (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUpBudsSame), "done-buds-same"),
+        (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.SavedNeedsAnother), "done-saved-needs-another"),
         (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead), "done-could-not-read"),
         (WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.NotFound), "failed-not-found"),
         (WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.Ambiguous), "failed-ambiguous"),

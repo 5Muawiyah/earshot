@@ -85,7 +85,7 @@ public sealed class DecodeProofStoreTests : IDisposable
         Assert.AreEqual(2, order.GetProperty("agree").GetInt32());
         Assert.AreEqual(0, order.GetProperty("disagree").GetInt32());
         Assert.AreEqual(JsonValueKind.Null, fields.GetProperty("flipBit").GetProperty("value").ValueKind);
-        Assert.AreEqual("Documented", fields.GetProperty("caseNibble").GetProperty("status").GetString());
+        Assert.AreEqual("Proved", fields.GetProperty("caseNibble").GetProperty("status").GetString(), "Two records whose case nibble agrees with the pick prove the case too.");
         Assert.AreEqual("NotProvableBySetup", fields.GetProperty("lid").GetProperty("status").GetString());
         JsonElement broadcast = root.GetProperty("broadcastWhilePlayingFromThisPc");
         Assert.AreEqual("ownedMessages,firstAtUtc,lastAtUtc,proved", Members(broadcast));
@@ -103,9 +103,10 @@ public sealed class DecodeProofStoreTests : IDisposable
         store.AddRecord(HighIsRight(2));
 
         LogEntry[] lines = _log.Entries.Where(e => e.Message.StartsWith("Decode proof", StringComparison.Ordinal)).ToArray();
-        Assert.HasCount(1, lines, "The order became proved once; a third agreeing record changes nothing.");
-        Assert.AreEqual(Earshot.Contracts.LogLevel.Info, lines[0].Level);
+        Assert.HasCount(2, lines, "The order and the case became proved once each; a third agreeing record changes nothing.");
+        Assert.IsTrue(lines.All(l => l.Level == Earshot.Contracts.LogLevel.Info));
         Assert.AreEqual("Decode proof: HighNibbleIsRight Proved (2 agree, 0 disagree).", lines[0].Message);
+        Assert.AreEqual("Decode proof: CaseNibble Proved (2 agree, 0 disagree).", lines[1].Message);
     }
 
     [TestMethod]

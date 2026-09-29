@@ -44,6 +44,7 @@ internal sealed record SetupViewModel(
         BatterySetupResultStatus.BatterySetUp => Finished(SetupIcon.Check, WidgetCopy.SetupBatterySetUp, null),
         BatterySetupResultStatus.CaseSetUp => Finished(SetupIcon.Check, WidgetCopy.SetupCaseSetUp, WidgetCopy.SetupRepeatForBuds),
         BatterySetupResultStatus.CaseSetUpBudsSame => Finished(SetupIcon.Check, WidgetCopy.SetupCaseSetUp, WidgetCopy.SetupBudsReadTheSame),
+        BatterySetupResultStatus.SavedNeedsAnother => Finished(SetupIcon.Check, WidgetCopy.SetupSaved, WidgetCopy.SetupNeedsAnother),
         _ => Finished(SetupIcon.Caution, WidgetCopy.SetupCouldNotRead, WidgetCopy.SetupCapturesKept),
     };
 
