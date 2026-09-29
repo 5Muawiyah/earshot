@@ -1267,6 +1267,60 @@ public sealed class WidgetStatusServiceTests : IDisposable
             "The exception's own code must be logged.");
     }
 
+    // The retry timer is one-shot, so a callback that throws used to leave nothing armed: the log said it
+    // would try again and it never did. Two throwing cycles, then a working one, prove it keeps trying on
+    // the doubling schedule and recovers.
+    [TestMethod]
+    public void AThrowingRetryIsArmedAgainOnTheDoublingScheduleAndRecoversOnceItWorks()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)); // arms the first retry
+        int starts = _source.StartCalls;
+        _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay);
+        Assert.AreEqual(starts + 1, _source.StartCalls, "First cycle: the retry runs and throws.");
+        Assert.AreEqual(1, RetryErrorCount());
+
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 2 - TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The next attempt waits twice as long.");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.AreEqual(starts + 2, _source.StartCalls, "Second cycle: a throwing callback must have armed it again.");
+        Assert.AreEqual(2, RetryErrorCount());
+
+        _source.StateOverride = null;
+        _clock.Advance(WidgetTiming.WatcherRetryDelay * 4);
+
+        Assert.AreEqual(starts + 3, _source.StartCalls, "Third cycle: still armed.");
+        Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
+
+        _clock.Advance(WidgetTiming.WatcherRetryLimit * 2);
+        Assert.AreEqual(starts + 3, _source.StartCalls, "Once the watcher runs, nothing is left armed.");
+    }
+
+    // A throw that lands after Suspend must not arm anything: Resume starts the watcher itself.
+    [TestMethod]
+    public void AThrowingRetryDoesNotArmAgainWhileSuspended()
+    {
+        var store = NewClaimStore();
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+        _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
+        _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
+        service.Suspend();
+        _source.StateOverride = null;
+        int starts = _source.StartCalls;
+
+        _clock.Advance(WidgetTiming.WatcherRetryLimit * 2);
+
+        Assert.AreEqual(starts, _source.StartCalls, "Nothing starts the watcher while suspended.");
+    }
+
+    private int RetryErrorCount() =>
+        _log.Entries.Count(e => e.Level == Earshot.Contracts.LogLevel.Error && e.Message.Contains("0x80070005", StringComparison.OrdinalIgnoreCase));
+
     [TestMethod]
     public void RefreshTriesOnceAtOnce()
     {
