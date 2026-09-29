@@ -14,6 +14,10 @@
     and never counts as the tray). It changes nothing and starts nothing: both reads are reads, and
     Earshot.exe is never launched.
 
+    The yes answer is proved with a decoy: a copy of ping.exe named Earshot.exe, started hidden for a few
+    seconds from a temp folder and stopped again, so a process of that name really is in a user session
+    without the tray being started. The decoy is a program that pings the local machine and does nothing else.
+
     What this cannot prove is the session-0 branch, the one that skips the service's own process. It
     can only be exercised while an Earshot process is in session 0, which needs the hand-back service to
     be installed and running; the result says, in session0Branch, whether it was exercised on this run.
@@ -40,7 +44,7 @@ Microsoft.PowerShell.Core\Import-Module (Join-Path $Root 'tools\live-tests\LiveT
 
 $result = [ordered]@{
     ok = $false; problems = @(); running = $null; independentRunning = $null
-    userSessionProcesses = 0; serviceSessionProcesses = 0; session0Branch = $null
+    userSessionProcesses = 0; serviceSessionProcesses = 0; session0Branch = $null; decoyRunning = $null
 }
 
 try
@@ -85,6 +89,45 @@ try
     {
         $result.problems += ('Test-EarshotRunning said ' + $answer + ', and tasklist.exe found ' + $user.Count +
             ' Earshot process(es) in a user session and ' + $service.Count + ' in session 0.')
+    }
+
+    # The yes branch, against a real process of the right name in a user session and an independent read that finds it by id.
+    $decoyFolder = Join-Path ([System.IO.Path]::GetTempPath()) ('earshot-decoy-' + [guid]::NewGuid().ToString('N'))
+    $decoy = $null
+    try
+    {
+        New-Item -ItemType Directory -Force -Path $decoyFolder | Out-Null
+        $decoyPath = Join-Path $decoyFolder 'Earshot.exe'
+        Copy-Item -LiteralPath (Join-Path ([System.Environment]::GetFolderPath('System')) 'PING.EXE') -Destination $decoyPath
+        $decoy = Start-Process -FilePath $decoyPath -ArgumentList '-n', '30', '127.0.0.1' -WindowStyle Hidden -PassThru
+        $seen = 'no'
+        for ($i = 0; $i -lt 40 -and $seen -ne 'yes'; $i++)
+        {
+            Start-Sleep -Milliseconds 250
+            $seen = Test-EarshotRunning
+        }
+
+        $result.decoyRunning = $seen
+        $byId = @(& $tasklist /v /fo csv /fi ('PID eq ' + $decoy.Id) 2>&1 | ForEach-Object { [string]$_ } | Where-Object { $_ -like '"*' } | Select-Object -Skip 1 |
+                ForEach-Object { $_ | ConvertFrom-Csv -Header 'image', 'pid', 'sessionName', 'session', 'memory', 'status', 'user', 'cpu', 'window' })
+        if ($byId.Count -ne 1 -or [int]$byId[0].session -eq 0 -or $byId[0].image -ne 'Earshot.exe')
+        {
+            $result.problems += ('tasklist.exe did not show the decoy as Earshot.exe in a user session: ' + ($byId | Out-String).Trim())
+        }
+        elseif ($seen -ne 'yes')
+        {
+            $result.problems += ('A process named Earshot.exe is running in session ' + $byId[0].session + ', and Test-EarshotRunning said ' + $seen + '.')
+        }
+    }
+    finally
+    {
+        if ($null -ne $decoy)
+        {
+            Stop-Process -Id $decoy.Id -Force -ErrorAction SilentlyContinue
+            $decoy.WaitForExit(5000) | Out-Null
+        }
+
+        Remove-Item -LiteralPath $decoyFolder -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 catch

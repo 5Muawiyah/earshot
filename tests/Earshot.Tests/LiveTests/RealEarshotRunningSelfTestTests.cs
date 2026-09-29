@@ -12,7 +12,8 @@ namespace Earshot.Tests.LiveTests;
 //
 // This runs tools\live-tests\selftest\Test-RealEarshotRunning.ps1, which calls the real, unfaked helper and checks
 // that it answers yes or no and agrees with an independent read of the process list (tasklist.exe, by its session
-// column). It starts nothing, and it says whether the session-0 branch was exercised.
+// column), and proves the yes answer with a decoy process named Earshot.exe (a copy of ping.exe, stopped again). It never
+// starts the tray, and it says whether the session-0 branch was exercised.
 [TestClass]
 public sealed class RealEarshotRunningSelfTestTests
 {
@@ -59,6 +60,7 @@ public sealed class RealEarshotRunningSelfTestTests
         string? running = result.GetProperty("running").GetString();
         Assert.IsTrue(running is "yes" or "no", "Test-EarshotRunning did not answer yes or no: " + running + Environment.NewLine + output);
         Assert.AreEqual(running, result.GetProperty("independentRunning").GetString(), "The helper and the independent read of tasklist.exe disagree." + Environment.NewLine + output);
+        Assert.AreEqual("yes", result.GetProperty("decoyRunning").GetString(), "A process named Earshot.exe in a user session was not seen as the tray." + Environment.NewLine + output);
         string? session0 = result.GetProperty("session0Branch").GetString();
         Assert.IsTrue(session0 is not null && (session0.StartsWith("exercised", StringComparison.Ordinal) || session0.StartsWith("unproved", StringComparison.Ordinal)), output);
         TestContext?.WriteLine("Test-EarshotRunning: " + running + "; session 0 branch " + session0);
