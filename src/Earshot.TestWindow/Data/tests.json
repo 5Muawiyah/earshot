@@ -232,6 +232,19 @@
       "secondHalfOnlyCriteriaIds": [ "delayed-deletion" ]
     },
     {
+      "number": "16",
+      "script": "16-FastSwitch.ps1",
+      "testId": "16-fast-switch",
+      "kind": "owner-present",
+      "halves": 1,
+      "name": "Switching between the phone and this computer",
+      "title": "Switching between the phone and this PC",
+      "proves": "Switching the AirPods between the phone and this computer works, and how long each switch takes.",
+      "settles": "How long a handover takes each way on the real AirPods, which path each switch to this PC took, whether the phone takes the AirPods back by itself, whether this PC is at rest after every switch to the phone, whether protection survives switching, and the first real press of a registered shortcut.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
+    },
+    {
       "number": "17",
       "script": "17-HandBackOnShutdown.ps1",
       "testId": "17-handback-on-shutdown",

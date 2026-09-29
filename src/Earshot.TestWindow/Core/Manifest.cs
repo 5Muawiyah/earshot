@@ -2,14 +2,14 @@ using System.Text.Json;
 
 namespace Earshot.TestWindow.Core;
 
-// The 22 tests, read from Data\tests.json. Read with JsonDocument, not
+// The 23 tests, read from Data\tests.json. Read with JsonDocument, not
 // JsonSerializer: this solution turns reflection-based (de)serialisation off
 // (JsonSerializerIsReflectionEnabledByDefault is false), and a hand-written source-generated
 // context is not worth it for a file this shape reads once at start-up.
 internal static class Manifest
 {
-    internal const int ExpectedRowCount = 22;
-    internal const int ExpectedHalfSum = 30;
+    internal const int ExpectedRowCount = 23;
+    internal const int ExpectedHalfSum = 31;
 
     internal static string DefaultPath() => Path.Combine(AppContext.BaseDirectory, "Data", "tests.json");
 

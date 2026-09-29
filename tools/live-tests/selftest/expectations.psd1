@@ -516,6 +516,97 @@
         two  = @{ Overall = @('pass', 'fail'); Criteria = @{ 'delayed-deletion' = 'any' } }
     }
 
+    # ------------------------------------------------------ 16 switching between the phone and this PC
+    # The rounds are 3 by default, so there are four switches to this PC (three rounds and the one before the last legs),
+    # three to the phone with the phone playing, and one with it idle: eight lines to read in all, and four to the
+    # phone. The fixture click line took the allow-first path and the shortcut one the direct path, so the paths
+    # differ. A line's figures are read back rather than assumed. The findings are a declared, exhaustive block.
+    #
+    # none: no switch line at all, so nothing was measured and the two criteria that need a line are inconclusive,
+    # never a pass; the criteria that rest on the owner's answers and on this script's own reads still come out.
+    # two: every switch has two lines with its trigger, so it is not clear which is which and nothing is measured.
+    # switch-timed-out: the one switch line is a "not active", so the timeout criterion fails on a line that is there.
+    # switch-not-at-rest: the nodes read Allowed after every switch to the phone, so the at-rest criterion fails on
+    # this script's own read, and the closing step is what blocks them (one "diag gate block"). switch-rejected: the
+    # owner said no to every wait, blind, so both acceptable criteria fail and the smallest figure said no to is kept.
+    # switch-unparsable: every line is there with its figure mangled, so nothing is measured and nothing reads as 0.
+    '16-fast-switch|first' = @{
+        none = @{ Overall = 'inconclusive'; Criteria = @{
+                'preconditions' = 'pass'; 'to-pc-measured' = 'inconclusive'; 'to-pc-no-timeout' = 'inconclusive'; 'to-pc-heard' = 'pass'
+                'to-pc-acceptable' = 'pass'; 'to-phone-measured' = 'inconclusive'; 'to-phone-at-rest' = 'pass'; 'to-phone-taken-back' = 'pass'
+                'to-phone-acceptable' = 'pass'; 'shortcut-route' = 'inconclusive'; 'click-route' = 'inconclusive'; 'protection-held' = 'pass' }
+            Findings = @{
+                'toPcActiveMs' = $null; 'toPcMinMs' = $null; 'toPcMedianMs' = $null; 'toPcMaxMs' = $null; 'toPcSamples' = $null
+                'toPcPaths' = $null; 'toPcPhases' = $null; 'protectionRanOnSwitch' = 'unknown unknown unknown unknown'
+                'soundCutOutAfterStart' = 'no'; 'toPhoneReleasedMs' = $null; 'toPhoneAtRestMs' = $null
+                'phoneHeardAfterReleaseMsOwnerObserved' = $null; 'phoneTakesThemBackWhenIdle' = 'yes'
+                'toPcAcceptedUpToMs' = $null; 'toPcRejectedFromMs' = $null; 'toPhoneAcceptedUpToMs' = $null; 'toPhoneRejectedFromMs' = $null
+                'directPathActiveMs' = $null; 'contendedSwitchesExcluded' = $null; 'firstRealPressOfShortcuts' = 'yes'; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
+        one  = @{ Overall = 'pass'; Criteria = @{
+                'preconditions' = 'pass'; 'to-pc-measured' = 'pass'; 'to-pc-no-timeout' = 'pass'; 'to-pc-heard' = 'pass'
+                'to-pc-acceptable' = 'pass'; 'to-phone-measured' = 'pass'; 'to-phone-at-rest' = 'pass'; 'to-phone-taken-back' = 'pass'
+                'to-phone-acceptable' = 'pass'; 'shortcut-route' = 'pass'; 'click-route' = 'pass'; 'protection-held' = 'pass' }
+            Findings = @{
+                'toPcActiveMs' = '1719 2749 2749 2749'; 'toPcMinMs' = 1719; 'toPcMedianMs' = 2749; 'toPcMaxMs' = 2749; 'toPcSamples' = 4
+                'toPcPaths' = 'allow-first direct direct direct'
+                'toPcPhases' = 'queued 0, first-pass 12, status 6, allow 251, endpoints 9, connect 1441, protection 3228 queued 0, first-pass 2749, status -, allow -, endpoints -, connect -, protection 3300 queued 0, first-pass 2749, status -, allow -, endpoints -, connect -, protection 3300 queued 0, first-pass 2749, status -, allow -, endpoints -, connect -, protection 3300'
+                'protectionRanOnSwitch' = 'yes yes yes yes'; 'soundCutOutAfterStart' = 'no'
+                'toPhoneReleasedMs' = '9 58 58 58'; 'toPhoneAtRestMs' = '291 349 349 349'
+                'phoneHeardAfterReleaseMsOwnerObserved' = $null; 'phoneTakesThemBackWhenIdle' = 'yes'
+                'toPcAcceptedUpToMs' = 2749; 'toPcRejectedFromMs' = $null; 'toPhoneAcceptedUpToMs' = 58; 'toPhoneRejectedFromMs' = $null
+                'directPathActiveMs' = 2749; 'contendedSwitchesExcluded' = $null; 'firstRealPressOfShortcuts' = 'yes'; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
+        two  = @{ Overall = 'inconclusive'; Criteria = @{
+                'preconditions' = 'pass'; 'to-pc-measured' = 'inconclusive'; 'to-pc-no-timeout' = 'pass'; 'to-pc-heard' = 'pass'
+                'to-pc-acceptable' = 'pass'; 'to-phone-measured' = 'inconclusive'; 'to-phone-at-rest' = 'pass'; 'to-phone-taken-back' = 'pass'
+                'to-phone-acceptable' = 'pass'; 'shortcut-route' = 'pass'; 'click-route' = 'pass'; 'protection-held' = 'pass' }
+            Findings = @{
+                'toPcActiveMs' = $null; 'toPcMinMs' = $null; 'toPcMedianMs' = $null; 'toPcMaxMs' = $null; 'toPcSamples' = $null
+                'toPcPaths' = $null; 'toPcPhases' = $null; 'protectionRanOnSwitch' = 'unknown unknown unknown unknown'
+                'soundCutOutAfterStart' = 'no'; 'toPhoneReleasedMs' = $null; 'toPhoneAtRestMs' = $null
+                'phoneHeardAfterReleaseMsOwnerObserved' = $null; 'phoneTakesThemBackWhenIdle' = 'yes'
+                'toPcAcceptedUpToMs' = $null; 'toPcRejectedFromMs' = $null; 'toPhoneAcceptedUpToMs' = $null; 'toPhoneRejectedFromMs' = $null
+                'directPathActiveMs' = $null; 'contendedSwitchesExcluded' = $null; 'firstRealPressOfShortcuts' = 'yes'; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
+        'switch-timed-out' = @{ Overall = 'fail'; Criteria = @{
+                'preconditions' = 'pass'; 'to-pc-measured' = 'inconclusive'; 'to-pc-no-timeout' = 'fail'; 'to-pc-heard' = 'pass'
+                'to-pc-acceptable' = 'pass'; 'to-phone-measured' = 'inconclusive'; 'to-phone-at-rest' = 'pass'; 'to-phone-taken-back' = 'pass'
+                'to-phone-acceptable' = 'pass'; 'shortcut-route' = 'fail'; 'click-route' = 'fail'; 'protection-held' = 'pass' }
+            FindingsInclude = @{ 'toPcActiveMs' = $null; 'toPcSamples' = $null }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
+        'switch-not-at-rest' = @{ Overall = 'fail'; Criteria = @{
+                'preconditions' = 'pass'; 'to-pc-measured' = 'pass'; 'to-pc-no-timeout' = 'pass'; 'to-pc-heard' = 'pass'
+                'to-pc-acceptable' = 'pass'; 'to-phone-measured' = 'pass'; 'to-phone-at-rest' = 'fail'; 'to-phone-taken-back' = 'pass'
+                'to-phone-acceptable' = 'pass'; 'shortcut-route' = 'pass'; 'click-route' = 'pass'; 'protection-held' = 'pass' }
+            FindingsInclude = @{ 'leftAtRest' = 'yes' }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
+        'switch-rejected' = @{ Overall = 'fail'; Criteria = @{
+                'preconditions' = 'pass'; 'to-pc-measured' = 'pass'; 'to-pc-no-timeout' = 'pass'; 'to-pc-heard' = 'pass'
+                'to-pc-acceptable' = 'fail'; 'to-phone-measured' = 'pass'; 'to-phone-at-rest' = 'pass'; 'to-phone-taken-back' = 'pass'
+                'to-phone-acceptable' = 'fail'; 'shortcut-route' = 'pass'; 'click-route' = 'pass'; 'protection-held' = 'pass' }
+            FindingsInclude = @{
+                'toPcAcceptedUpToMs' = $null; 'toPcRejectedFromMs' = 1719; 'toPhoneAcceptedUpToMs' = $null; 'toPhoneRejectedFromMs' = 9
+            }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
+        'switch-unparsable' = @{ Overall = 'inconclusive'; Criteria = @{
+                'preconditions' = 'pass'; 'to-pc-measured' = 'inconclusive'; 'to-pc-no-timeout' = 'inconclusive'; 'to-pc-heard' = 'pass'
+                'to-pc-acceptable' = 'pass'; 'to-phone-measured' = 'inconclusive'; 'to-phone-at-rest' = 'pass'; 'to-phone-taken-back' = 'pass'
+                'to-phone-acceptable' = 'pass'; 'shortcut-route' = 'pass'; 'click-route' = 'pass'; 'protection-held' = 'pass' }
+            Findings = @{
+                'toPcActiveMs' = $null; 'toPcMinMs' = $null; 'toPcMedianMs' = $null; 'toPcMaxMs' = $null; 'toPcSamples' = $null
+                'toPcPaths' = $null; 'toPcPhases' = $null; 'protectionRanOnSwitch' = 'unknown unknown unknown unknown'
+                'soundCutOutAfterStart' = 'no'; 'toPhoneReleasedMs' = $null; 'toPhoneAtRestMs' = $null
+                'phoneHeardAfterReleaseMsOwnerObserved' = $null; 'phoneTakesThemBackWhenIdle' = 'yes'
+                'toPcAcceptedUpToMs' = $null; 'toPcRejectedFromMs' = $null; 'toPhoneAcceptedUpToMs' = $null; 'toPhoneRejectedFromMs' = $null
+                'directPathActiveMs' = $null; 'contendedSwitchesExcluded' = $null; 'firstRealPressOfShortcuts' = 'yes'; 'leftAtRest' = 'yes'
+            }
+            Steps = @{ 'diag gate block' = 0; 'diag disconnect' = 0 } }
+    }
+
     # ------------------------------------------------------ 17 hand back on shut down
     '17-handback-on-shutdown|first' = @{
         none = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass' } }

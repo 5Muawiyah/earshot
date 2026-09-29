@@ -67,7 +67,11 @@ public sealed class MenuModelTests
     [TestMethod]
     public void MenuLabelsAreUnchangedWithHotkeysOff()
     {
-        EarshotSettings settings = Settings(s => s.Hotkeys.ToggleConnection = "Ctrl+Alt+C");
+        EarshotSettings settings = Settings(s =>
+        {
+            s.Hotkeys.Enabled = false;
+            s.Hotkeys.ToggleConnection = "Ctrl+Alt+C";
+        });
 
         MenuState state = Build(block: Block(BlockState.NotSetUp), settings: settings);
 

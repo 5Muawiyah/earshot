@@ -4,8 +4,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.TestWindow;
 
 // Row 10 opens into five variant rows, and reads "n of 5 recorded".
-// DisplayRow.Flatten is what turns the 22-row manifest into the 26 real, clickable
-// entries this window shows (21 ordinary rows plus 5 variants), never a text box for picking one.
+// DisplayRow.Flatten is what turns the 23-row manifest into the 27 real, clickable
+// entries this window shows (22 ordinary rows plus 5 variants), never a text box for picking one.
 [TestClass]
 public sealed class DisplayRowTests
 {
@@ -16,10 +16,10 @@ public sealed class DisplayRowTests
         Manifest.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "tests.json"));
 
     [TestMethod]
-    public void FlattenProducesTwentySixRowsTwentyOneOrdinaryPlusFiveVariants()
+    public void FlattenProducesTwentySevenRowsTwentyTwoOrdinaryPlusFiveVariants()
     {
         IReadOnlyList<DisplayRow> displayRows = DisplayRow.Flatten(Rows());
-        Assert.AreEqual(26, displayRows.Count);
+        Assert.AreEqual(27, displayRows.Count);
     }
 
     [TestMethod]

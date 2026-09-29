@@ -34,7 +34,9 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.AreEqual(d.OpenOnStartup, s.OpenOnStartup);
         Assert.AreEqual(d.PinnedContainerId, s.PinnedContainerId);
         Assert.AreEqual(d.PinnedAddress, s.PinnedAddress);
-        Assert.IsFalse(s.Hotkeys.Enabled);
+        Assert.AreEqual(d.Hotkeys.Enabled, s.Hotkeys.Enabled);
+        Assert.AreEqual(d.Hotkeys.SwitchToPc, s.Hotkeys.SwitchToPc);
+        Assert.AreEqual(d.Hotkeys.SwitchToPhone, s.Hotkeys.SwitchToPhone);
         Assert.AreEqual(string.Empty, s.Hotkeys.ToggleConnection);
     }
 
@@ -312,7 +314,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.AreEqual(SettingsLoadStatus.ResetAfterCorruption, store.LastLoadStatus);
         HotkeySettings hotkeys = store.Current.Hotkeys;
         Assert.IsNotNull(hotkeys);
-        Assert.IsFalse(hotkeys.Enabled);
+        Assert.IsTrue(hotkeys.Enabled, "A reset file reads as the defaults, and the defaults switch shortcuts on.");
 
         // The exact shape TrayContext's constructor calls at start-up (App/TrayContext.cs, ApplyHotkeys):
         // it must not throw, whatever the file held.

@@ -14,8 +14,8 @@ internal sealed record RunAllItem(string RowNumber, int? Variant)
 // escape hatch, never part of the sequence it might need to recover from.
 //
 // The order follows the owner's decisions: 17 sits beside 09, with the other two hand-back tests
-// (20, Exit, and 22, the background part) straight after it, and the pause test (21) comes after
-// 15 with the fast switch test (16) ahead of it. 18 stays at the end.
+// (20, Exit, and 22, the background part) straight after it, and the fast switch test (16) comes
+// after 15 with the pause test (21) straight after it. 18 stays at the end.
 internal static class RunAllOrder
 {
     internal static readonly IReadOnlyList<RunAllItem> Items = BuildOrder();
@@ -33,7 +33,7 @@ internal static class RunAllOrder
             items.Add(new RunAllItem("10", variant));
         }
 
-        foreach (string number in new[] { "11", "12", "13", "14", "15", "21", "18" })
+        foreach (string number in new[] { "11", "12", "13", "14", "15", "16", "21", "18" })
         {
             items.Add(new RunAllItem(number, null));
         }

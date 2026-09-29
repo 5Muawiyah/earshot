@@ -4,14 +4,14 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.TestWindow;
 
 // A guided sequence with 10 as five items, 17 beside 09 and the other hand-back tests straight
-// after it, 21 after 15 and 18 last; 00 is not in it.
+// after it, 16 and 21 after 15 and 18 last; 00 is not in it.
 [TestClass]
 public sealed class RunAllOrderTests
 {
     [TestMethod]
-    public void HasTwentyFourItemsTwelveSinglesFiveVariantsSevenMoreSingles()
+    public void HasTwentyFiveItemsTwelveSinglesFiveVariantsEightMoreSingles()
     {
-        Assert.AreEqual(24, RunAllOrder.Items.Count);
+        Assert.AreEqual(25, RunAllOrder.Items.Count);
     }
 
     [TestMethod]
@@ -27,7 +27,7 @@ public sealed class RunAllOrderTests
         {
             "01", "02", "03", "04", "05", "06", "07", "08", "09", "17", "20", "22",
             "10v1", "10v2", "10v3", "10v4", "10v5",
-            "11", "12", "13", "14", "15", "21", "18",
+            "11", "12", "13", "14", "15", "16", "21", "18",
         };
 
         CollectionAssert.AreEqual(expectedKeys, RunAllOrder.Items.Select(item => item.Key).ToArray());

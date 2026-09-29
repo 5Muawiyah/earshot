@@ -71,7 +71,8 @@ param(
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
         'exit-cut-short', 'pause-declined',
-        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended')][string]$Case = '',
+        'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended',
+        'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -143,6 +144,13 @@ $tests = @(
         Cases = @('none', 'one', 'two', 'grace-doubled', 'grace-unparsable') }
     [ordered]@{ Number = '14'; Id = '14-set-device-refusal'; Script = '14-SetDeviceRefusal.ps1'; Halves = @('first'); Extra = @('SpeakerAddress=C7D8E9F0A1B2') }
     [ordered]@{ Number = '15'; Id = '15-uninstall-reversal'; Script = '15-UninstallReversal.ps1'; Halves = @('first', 'resume'); Extra = @() }
+    # The four cases of test 16 beyond the shared three. switch-timed-out: the only switch line is a "not active", so the
+    # timeout criterion fails on a line that is there. switch-not-at-rest: the nodes still read Allowed after every
+    # switch to the phone, so the at-rest criterion fails on this script's own read and the closing step has to offer
+    # the block. switch-rejected: the owner says no to every "was that wait acceptable", blind. switch-unparsable: every
+    # switch line is there with its figure mangled, one left out altogether, so nothing may read as 0.
+    [ordered]@{ Number = '16'; Id = '16-fast-switch'; Script = '16-FastSwitch.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable') }
     # declined-start: as 09's, the owner says no to "ready to start" and nothing shuts down.
     # handback-cut-short: the hold ran out with its own block still running; the resume half sees
     # no "finished in" line, only "cut short". handback-not-reached: no hand-back line at all (the
@@ -380,6 +388,7 @@ function Invoke-Half
 #   14-set-device-refusal|first          yes, 1, 0   set-device never touches the nodes; nothing renders
 #   15-uninstall-reversal|first          yes, 1, 0   uninstall allows, install does not re-block; nothing renders
 #   15-uninstall-reversal|resume          yes, 1, 0   stays Allowed from the first half; the offer blocks; nothing renders
+#   16-fast-switch|first                 yes, 0, 0   the last thing is a switch to the phone, which lets go and blocks: nothing to offer
 #   20-handback-on-exit|first            yes, 0, 0   "choose Exit" hands them back: render Unplugged and the nodes Blocked; nothing to offer
 #   21-pause-on-leave|first              yes, 0, 0   the first leg's "choose Disconnect" blocks the nodes and nothing later enables them in the fake, so there is nothing to offer
 #   17-handback-on-shutdown|first  no-on-purpose, 0, 0   the reason is always given once ready
@@ -409,6 +418,7 @@ $script:AtRestDefaults = @{
     '14-set-device-refusal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
     '15-uninstall-reversal|first'        = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
     '15-uninstall-reversal|resume'       = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '16-fast-switch|first'               = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '17-handback-on-shutdown|first'      = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
     '17-handback-on-shutdown|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '18-handback-on-sleep|first'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }

@@ -55,6 +55,9 @@
     Test 14 only: the address of another Bluetooth audio device with an A2DP sink,
     for the protected-device half. Without it that half is inconclusive.
 
+.PARAMETER Rounds
+    Test 16 only: how many rounds of switching each way. 3 if you leave it out.
+
 .PARAMETER OfferUninstall
     Restore (00) only: offer a full uninstall at the end.
 
@@ -91,6 +94,7 @@ param(
     [int]$WatchMinutes = 0,
     [string]$PhoneAddress = '',
     [string]$SpeakerAddress = '',
+    [int]$Rounds = 0,
     [switch]$OfferUninstall
 )
 
@@ -205,6 +209,13 @@ $tests = @(
         Settles = 'Whether uninstall restores the nodes, services, tasks and folders, and whether install passes its own read-back checks.'
         Needs = 'Set up, a release build to hand, tray closed, two or three administrator prompts to approve.'
         Halves = 'two'
+    },
+    [ordered]@{
+        Number = '16'; Script = '16-FastSwitch.ps1'
+        Title = 'Switching between the phone and this PC'
+        Settles = 'How long a handover takes each way on the real AirPods, which path each switch to this PC took, whether the phone takes the AirPods back by itself, whether this PC is at rest after every switch to the phone, whether protection survives switching, and the first real press of a registered shortcut.'
+        Needs = 'Set up from a release built from the current head, tray running, Block at boot on, Play from a phone off, both switch shortcuts set and on, the AirPods on the phone and playing, something to play on this PC and on the phone.'
+        Halves = 'one, but it takes a while'
     },
     [ordered]@{
         Number = '17'; Script = '17-HandBackOnShutdown.ps1'
@@ -357,6 +368,7 @@ $options = @(
     [ordered]@{ Name = 'WatchMinutes'; Passed = ($WatchMinutes -ne 0); Value = $WatchMinutes; Takers = '13' }
     [ordered]@{ Name = 'PhoneAddress'; Passed = (-not [string]::IsNullOrEmpty($PhoneAddress)); Value = $PhoneAddress; Takers = '14' }
     [ordered]@{ Name = 'SpeakerAddress'; Passed = (-not [string]::IsNullOrEmpty($SpeakerAddress)); Value = $SpeakerAddress; Takers = '14' }
+    [ordered]@{ Name = 'Rounds'; Passed = ($Rounds -ne 0); Value = $Rounds; Takers = '16' }
     [ordered]@{ Name = 'OfferUninstall'; Passed = [bool]$OfferUninstall; Value = $true; Takers = '00' }
 )
 

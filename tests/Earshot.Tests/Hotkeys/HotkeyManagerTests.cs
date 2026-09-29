@@ -11,6 +11,10 @@ public sealed class HotkeyManagerTests
     private const int ProtectionId = HotkeyManager.HotkeyIdBase + (int)HotkeyAction.ToggleAudioProtection;
     private const int BlockId = HotkeyManager.HotkeyIdBase + (int)HotkeyAction.ToggleBlockAtBoot;
     private const int SpeakId = HotkeyManager.HotkeyIdBase + (int)HotkeyAction.SpeakStatus;
+    private const int ToPcId = HotkeyManager.HotkeyIdBase + (int)HotkeyAction.SwitchToPc;
+    private const int ToPhoneId = HotkeyManager.HotkeyIdBase + (int)HotkeyAction.SwitchToPhone;
+
+    private static readonly int[] ExpectedIds = [0x4A00, 0x4A01, 0x4A02, 0x4A03, 0x4A04, 0x4A05];
 
     private static (HotkeyManager Manager, FakeMessageWindow Window, FakeNativeHotkeys Native, CapturingLog Log) Build()
     {
@@ -20,24 +24,78 @@ public sealed class HotkeyManagerTests
         return (new HotkeyManager(window, native, log), window, native, log);
     }
 
-    private static HotkeySettings EnabledWith(string connect = "", string protect = "", string block = "", string speak = "") =>
-        new() { Enabled = true, ToggleConnection = connect, ToggleAudioProtection = protect, ToggleBlockAtBoot = block, SpeakStatus = speak };
+    // The two directional shortcuts default to a chord, so a test that means "only these" blanks them.
+    private static HotkeySettings EnabledWith(string connect = "", string protect = "", string block = "", string speak = "", string toPc = "", string toPhone = "") =>
+        new() { Enabled = true, ToggleConnection = connect, ToggleAudioProtection = protect, ToggleBlockAtBoot = block, SpeakStatus = speak, SwitchToPc = toPc, SwitchToPhone = toPhone };
 
     [TestMethod]
-    public void ApplyWithDefaultsRegistersNothing()
+    public void ApplyWithDefaultsRegistersOnlyTheTwoSwitchShortcuts()
     {
-        (HotkeyManager manager, _, FakeNativeHotkeys native, _) = Build();
+        (HotkeyManager manager, FakeMessageWindow window, FakeNativeHotkeys native, _) = Build();
 
         IReadOnlyList<HotkeyRegistrationOutcome> outcomes = manager.Apply(HotkeySettings.Defaults);
 
-        Assert.AreEqual(4, outcomes.Count);
-        foreach (HotkeyRegistrationOutcome outcome in outcomes)
+        Assert.AreEqual(6, outcomes.Count);
+        Assert.AreEqual(2, native.Calls.Count);
+        AssertRegistered(native.Calls[0], window.Handle, ToPcId, HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, 0x41);
+        AssertRegistered(native.Calls[1], window.Handle, ToPhoneId, HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, 0x44);
+        Assert.AreEqual(HotkeyRegistrationState.Registered, outcomes.Single(o => o.Action == HotkeyAction.SwitchToPc).State);
+        Assert.AreEqual(HotkeyRegistrationState.Registered, outcomes.Single(o => o.Action == HotkeyAction.SwitchToPhone).State);
+        foreach (HotkeyRegistrationOutcome outcome in outcomes.Where(o => o.Action is not (HotkeyAction.SwitchToPc or HotkeyAction.SwitchToPhone)))
         {
             Assert.AreEqual(HotkeyRegistrationState.NotSet, outcome.State);
-            Assert.AreEqual("Shortcuts are switched off.", outcome.Message);
+            Assert.AreEqual("No shortcut set.", outcome.Message);
         }
+    }
 
+    [TestMethod]
+    public void ApplyPinsSixActionsAndTheirIdsWithTheFirstFourUnmoved()
+    {
+        int[] ids = Enum.GetValues<HotkeyAction>().Select(a => HotkeyManager.HotkeyIdBase + (int)a).ToArray();
+        CollectionAssert.AreEqual(ExpectedIds, ids);
+
+        (HotkeyManager manager, _, _, _) = Build();
+        IReadOnlyList<HotkeyRegistrationOutcome> outcomes = manager.Apply(HotkeySettings.Defaults);
+        CollectionAssert.AreEqual(Enum.GetValues<HotkeyAction>(), outcomes.Select(o => o.Action).ToArray());
+    }
+
+    [TestMethod]
+    public void ApplyRejectsADuplicateAcrossAllSixActions()
+    {
+        (HotkeyManager manager, _, FakeNativeHotkeys native, _) = Build();
+
+        IReadOnlyList<HotkeyRegistrationOutcome> outcomes = manager.Apply(EnabledWith(connect: "Ctrl+Alt+Shift+D", toPhone: "Ctrl+Alt+Shift+D", toPc: "Ctrl+Alt+Shift+A"));
+
+        Assert.AreEqual(HotkeyRegistrationState.Registered, outcomes.Single(o => o.Action == HotkeyAction.ToggleConnection).State);
+        Assert.AreEqual(HotkeyRegistrationState.DuplicateInSettings, outcomes.Single(o => o.Action == HotkeyAction.SwitchToPhone).State);
+        Assert.AreEqual(HotkeyRegistrationState.Registered, outcomes.Single(o => o.Action == HotkeyAction.SwitchToPc).State);
+        Assert.AreEqual(2, native.Calls.Count(c => c.Method == "RegisterHotKey"));
+    }
+
+    [TestMethod]
+    public void ApplyWithShortcutsOffRegistersNothingEvenWithTheDefaults()
+    {
+        (HotkeyManager manager, _, FakeNativeHotkeys native, _) = Build();
+
+        IReadOnlyList<HotkeyRegistrationOutcome> outcomes = manager.Apply(new HotkeySettings { Enabled = false });
+
+        Assert.AreEqual(6, outcomes.Count);
+        Assert.IsTrue(outcomes.All(o => o.State == HotkeyRegistrationState.NotSet && o.Message == "Shortcuts are switched off."));
         Assert.AreEqual(0, native.Calls.Count);
+    }
+
+    [TestMethod]
+    public void ActivatedNamesTheDirectionForTheTwoNewIds()
+    {
+        (HotkeyManager manager, FakeMessageWindow window, _, _) = Build();
+        manager.Apply(HotkeySettings.Defaults);
+        var raised = new List<HotkeyAction>();
+        manager.Activated += (_, e) => raised.Add(e.Action);
+
+        window.Raise(0x0312, ToPcId, 0);
+        window.Raise(0x0312, ToPhoneId, 0);
+
+        CollectionAssert.AreEqual(new[] { HotkeyAction.SwitchToPc, HotkeyAction.SwitchToPhone }, raised);
     }
 
     [TestMethod]
