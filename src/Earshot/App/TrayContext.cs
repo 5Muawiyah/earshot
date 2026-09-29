@@ -1820,6 +1820,8 @@ internal sealed partial class TrayContext : ApplicationContext
             _blockingCardShown = true;
             place.Show(_registry.Cards, TrayStatus.AppName, BlockingBeforeClosingMessage);
         }
+
+        ShowExitHandBackCard();
     }
 
     private MenuState CurrentMenuState() =>
@@ -2290,7 +2292,7 @@ internal sealed partial class TrayContext : ApplicationContext
             _notifyIconVisibility.Visible = false;
             _picker?.Close();
             _exitPlace = place;
-            _coordinator.BeginShutdown();
+            _coordinator.BeginShutdown(PrepareExitHandBack());
             _lifetime.Cancel();
 
             bool gaveUp = false;

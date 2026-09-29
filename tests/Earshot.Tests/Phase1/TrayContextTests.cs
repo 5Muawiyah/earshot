@@ -1171,7 +1171,11 @@ public sealed class TrayContextTests
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Devices.Active(1), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            // Hand back off: with it on, Exit while the AirPods are in use lets them go and blocks (TrayExitHandBackTests).
+            using var tray = new TrayHarness(
+                snapshot: Devices.Active(1),
+                settings: s => s.HandBackOnShutdownAndSleep = false,
+                arrange: t => t.Block.Status = Block(BlockState.Allowed));
 
             // The check before closing reads the nodes on the system worker, so it is still in flight at the click.
             tray.Block.OnStatus = async _ =>
@@ -1195,7 +1199,11 @@ public sealed class TrayContextTests
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: Devices.Active(1), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            // Hand back off: with it on, Exit while the AirPods are in use lets them go and blocks (TrayExitHandBackTests).
+            using var tray = new TrayHarness(
+                snapshot: Devices.Active(1),
+                settings: s => s.HandBackOnShutdownAndSleep = false,
+                arrange: t => t.Block.Status = Block(BlockState.Allowed));
             tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
 
             Application.Run(tray.Context);
