@@ -376,6 +376,50 @@ public sealed class ClaimStoreTests
         Assert.AreEqual(redoneClaim, reloaded.Current, "The redone claim, not the stale one, must be what is on disk.");
     }
 
+    // Save runs on the UI thread (the service's callback), and so does the Current read. The disk write is
+    // queued on a worker, but it used to hold the store's lock for the whole write, so a read or a Save that
+    // landed while a write was in flight (a flush to a slow or scanned disk) made the UI thread wait for it.
+    // The write is held open here, and both calls must return while it is.
+    [TestMethod]
+    public async Task ReadingOrSavingWhileAWriteIsInFlightDoesNotWaitForTheDisk()
+    {
+        using var temp = new TempFolder();
+        string path = temp.File("claim.json");
+        var store = NewStore(path, new CapturingLog());
+        using var entered = new ManualResetEventSlim(initialState: false);
+        using var release = new ManualResetEventSlim(initialState: false);
+        store.TestHookAfterWriteCheckPassed = () =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(20));
+        };
+        WidgetClaim first = SampleClaim();
+        WidgetClaim second = first with { Last = new OwnedBattery(9, 9, 9, first.ClaimedAtUtc + TimeSpan.FromMinutes(1)) };
+
+        try
+        {
+            store.Save(first);
+            Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(10)), "The write never started.");
+
+            Task<WidgetClaim?> read = Task.Run(() => store.Current);
+            bool readReturned = read.Wait(TimeSpan.FromSeconds(3));
+            Task save = Task.Run(() => store.Save(second));
+            bool saveReturned = save.Wait(TimeSpan.FromSeconds(3));
+
+            Assert.IsTrue(readReturned, "Current waited for a write that was still in flight.");
+            Assert.IsTrue(saveReturned, "Save waited for a write that was still in flight.");
+            Assert.AreEqual(second, store.Current, "The newer claim is the current one at once, before either write finishes.");
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        await store.IdleAsync();
+        var reloaded = NewStore(path, new CapturingLog());
+        Assert.AreEqual(second, reloaded.Current, "The newer claim is what ends up on disk.");
+    }
+
     // The generation check inside WriteOne and the actual disk write were not atomic with respect to each
     // other: ForgetClaim could delete the file and null out _current in between a write's check passing and
     // that same write actually reaching disk, resurrecting a claim the owner had just asked to forget. This

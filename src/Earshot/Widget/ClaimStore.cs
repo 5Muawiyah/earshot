@@ -60,10 +60,10 @@ internal sealed class ClaimStore
     // The decision of what _current becomes and the enqueue of the matching disk action happen inside the
     // same lock as each other (here and in ForgetClaim), so the order those two things are decided in always
     // matches the order the queued disk actions run in. Each queued action re-reads _current, under this same
-    // lock, immediately before touching disk: a write proceeds only while its claim is still current, and
-    // ForgetClaim's delete proceeds only while _current is still null, both decided and acted upon without
-    // releasing the lock in between, so nothing can land in the gap the way a save used to resurrect a
-    // deliberately forgotten claim.
+    // lock, when its turn comes: a write proceeds only while its claim is still current, and ForgetClaim's
+    // delete proceeds only while _current is still null. The disk work itself runs outside the lock, one
+    // action at a time from the chain, so a Save or a Current read on the UI thread never waits for it, and a
+    // forget that lands during a write is a delete queued behind it, which cannot be undone by that write.
     public void Save(WidgetClaim claim)
     {
         ArgumentNullException.ThrowIfNull(claim);
@@ -113,38 +113,42 @@ internal sealed class ClaimStore
         lock (_gate)
         {
             // A later Save or a ForgetClaim already moved _current past this write's claim: nothing to do.
-            // The check and the write happen without releasing the lock in between, so nothing else can move
-            // _current on after this check passes and before the write actually reaches disk.
             if (!claim.Equals(_current))
             {
                 return;
             }
+        }
 
-            TestHookAfterWriteCheckPassed?.Invoke();
+        // The lock is not held across the disk write: Save and Current are called on the UI thread, and a
+        // flush to a slow or scanned disk must not make them wait. Nothing can reach the file meanwhile
+        // anyway, because every write and delete runs from the one chain in _pendingWrite, one at a time and
+        // in the order they were decided: a ForgetClaim or a later Save that lands during this write queues
+        // its own action behind it, and that action re-checks _current under the lock when its turn comes, so
+        // a claim forgotten during this write is deleted right after it, never resurrected by it.
+        TestHookAfterWriteCheckPassed?.Invoke();
 
-            Interlocked.Increment(ref _diskWriteCount);
-            try
-            {
-                WriteAtomic(claim);
-            }
-            catch (IOException ex)
-            {
-                _log.Warn(
-                    "The widget claim could not be saved, so only the in-memory value is current (0x" +
-                    ex.HResult.ToString("X8") + "): " + _path);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                _log.Warn(
-                    "The widget claim could not be saved, so only the in-memory value is current (0x" +
-                    ex.HResult.ToString("X8") + "): " + _path);
-            }
-            catch (Exception ex)
-            {
-                // Anything else here would otherwise be an unobserved exception on a background task and
-                // simply vanish: logged rather than left for that mechanism to lose silently.
-                _log.Error("The widget claim could not be saved because of an unexpected error: " + _path, ex);
-            }
+        Interlocked.Increment(ref _diskWriteCount);
+        try
+        {
+            WriteAtomic(claim);
+        }
+        catch (IOException ex)
+        {
+            _log.Warn(
+                "The widget claim could not be saved, so only the in-memory value is current (0x" +
+                ex.HResult.ToString("X8") + "): " + _path);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn(
+                "The widget claim could not be saved, so only the in-memory value is current (0x" +
+                ex.HResult.ToString("X8") + "): " + _path);
+        }
+        catch (Exception ex)
+        {
+            // Anything else here would otherwise be an unobserved exception on a background task and
+            // simply vanish: logged rather than left for that mechanism to lose silently.
+            _log.Error("The widget claim could not be saved because of an unexpected error: " + _path, ex);
         }
     }
 
@@ -168,23 +172,25 @@ internal sealed class ClaimStore
             {
                 return;
             }
+        }
 
-            try
-            {
-                File.Delete(_path);
-            }
-            catch (IOException ex)
-            {
-                _log.Error("Could not delete the widget claim: " + _path, ex);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                _log.Error("Could not delete the widget claim: " + _path, ex);
-            }
-            catch (Exception ex)
-            {
-                _log.Error("Could not delete the widget claim because of an unexpected error: " + _path, ex);
-            }
+        // Outside the lock, for the same reason as the write: see WriteOne. A Save that lands from here on
+        // has its own write queued behind this delete.
+        try
+        {
+            File.Delete(_path);
+        }
+        catch (IOException ex)
+        {
+            _log.Error("Could not delete the widget claim: " + _path, ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Error("Could not delete the widget claim: " + _path, ex);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Could not delete the widget claim because of an unexpected error: " + _path, ex);
         }
     }
 
