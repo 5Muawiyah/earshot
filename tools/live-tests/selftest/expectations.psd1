@@ -828,7 +828,11 @@
         'service-block-sent' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
         'service-already-blocked' = @{ Overall = 'pass'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'pass' } }
         # The process list could not be read, so "the tray is gone" is not known and the criterion is inconclusive, never a pass.
-        'tray-unreadable' = @{ Overall = 'inconclusive'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'inconclusive' } }
+        # The earlier test 17 result cannot be read and the service's process cannot be found: each is recorded as such, with
+        # its error, and neither becomes a figure or "not run".
+        'tray-unreadable' = @{ Overall = 'inconclusive'; Criteria = @{ 'connected-first' = 'pass'; 'tray-gone-still-connected' = 'inconclusive' }
+            FindingsInclude = @{ 'test17Result' = 'unreadable'; 'serviceWorkingSetBytes' = $null }
+            ExpectedErrors = 2 }
     }
     '22-service-handback|resume' = @{
         none = @{ Overall = 'fail'; Criteria = @{
@@ -892,6 +896,8 @@
         'tray-unreadable' = @{ Overall = 'inconclusive'; Criteria = @{
                 'nodes-after-boot' = 'pass'; 'not-paged-at-boot' = 'pass'; 'heard-handed-back' = 'pass'
                 'service-ran' = 'pass'; 'service-blocked' = 'inconclusive'; 'service-in-budget' = 'pass'
-                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' } }
+                'shutdown-was-clean' = 'pass'; 'service-no-error-event' = 'pass' }
+            FindingsInclude = @{ 'test17Result' = 'unreadable' }
+            ExpectedErrors = 1 }
     }
 }

@@ -541,6 +541,16 @@ function New-FakeSandbox
     Write-FakeMachineFiles -DataFolder $data -BlockAtBoot $true -Items $items
     Write-FakeStatusFiles -DataFolder $data -Case $Case
 
+    # test 22, tray-unreadable: an earlier sitting's test 17 result that cannot be read. It is there, so it is not "not run",
+    # and the script has to say unreadable. (The same case makes the service's process id one that no process has, so the
+    # working set cannot be read either; see Get-FakeService.)
+    if ($Case -eq 'tray-unreadable')
+    {
+        $earlier = Join-Path (Join-Path (Join-Path (Join-Path $local 'Earshot') 'livetest') 'earlier-sitting') '17-handback-on-shutdown'
+        New-Item -ItemType Directory -Force -Path $earlier | Out-Null
+        Set-Content -LiteralPath (Join-Path $earlier 'result.json') -Value 'this is not json' -Encoding UTF8
+    }
+
     # atrest-config-missing is the real failure shape Get-BlockAtBootSetting sees when
     # config.json is not there: Read-EarshotJsonFile returns $null without throwing, the same as
     # a probe that could not answer. Removing the file Write-FakeMachineFiles just wrote is
@@ -804,7 +814,7 @@ function Get-FakeService
         stateCode     = 4
         startType     = 2
         serviceType   = 16
-        processId     = $PID
+        processId     = $(if ($script:Context.Case -eq 'tray-unreadable') { 2147000000 } else { $PID })
         imagePath     = ('"' + (Join-Path $script:Context.ProgramFolder 'Earshot.exe') + '" service')
         account       = 'LocalSystem'
         displayName   = 'Earshot hand-back'
