@@ -242,7 +242,7 @@ public sealed class PauseOnLeaveTests
     public async Task AChangeOfTheWatchedDeviceIsNotALeave()
     {
         using var rig = new Rig();
-        var other = new Guid("0B8E5A51-7F0C-5F5E-9C6B-2D7C1E0F4A11");
+        Guid other = Guid.NewGuid();
         await rig.Active();
         rig.Tick();
 
