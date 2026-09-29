@@ -48,8 +48,8 @@ internal static class WidgetCopy
     public const string SettingsHandBack = Earshot.Tray.MenuModel.HandBackOnShutdownAndSleep;
     public const string SettingsShortcuts = "Shortcuts";
     public const string SettingsUpdates = "Updates";
-    public const string SettingsWaitsOnInEar = "Needs battery set-up to prove the in-ear field.";
-    public const string SettingsWaitsOnLid = "Needs battery set-up to prove the lid field.";
+    public const string SettingsWaitsOnInEar = "Earshot cannot yet tell when a bud is in your ear.";
+    public const string SettingsWaitsOnLid = "Earshot cannot yet tell when the case lid is open.";
     public const string ShortcutNotSet = "Not set";
     public const string ShortcutPressKeys = "Press keys";
     public const string ShortcutClear = "Clear";

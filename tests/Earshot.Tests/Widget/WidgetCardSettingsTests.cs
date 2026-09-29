@@ -251,7 +251,8 @@ public sealed class WidgetCardSettingsTests
                 Assert.AreEqual(44, row.Bounds.Height, id + ": the caption is one line, so the row is a two-line row.");
                 Assert.IsTrue(CardKit.HasInk(bitmap, row.SubRect, bitmap.GetPixel(0, 0)), id + ": the caption is drawn.");
                 Assert.IsFalse(row.A.IsEmpty, id + ": the toggle stays.");
-                StringAssert.Contains(caption, "battery set-up");
+                StringAssert.Contains(caption, "cannot yet tell");
+                Assert.IsFalse(caption.Contains("set-up", StringComparison.OrdinalIgnoreCase), id + ": set-up cannot prove this field, so the caption must not promise it.");
             }
 
             card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
