@@ -51,6 +51,32 @@ public sealed class OtherDeviceNameFormTests
         });
     }
 
+    // A paste can carry characters the settings store would remove, or end past the cap in the middle of a
+    // pair. What leaves the form is what the store keeps, so the two never disagree about the label.
+    [TestMethod]
+    public void LabelIsCleanedAsTheSettingsStoreCleansIt()
+    {
+        StaThread.Run(() =>
+        {
+            char rightToLeftOverride = (char)0x202E;
+            char zeroWidthSpace = (char)0x200B;
+            char lineSeparator = (char)0x2028;
+            string smile = char.ConvertFromUtf32(0x1F600);
+            using var form = new OtherDeviceNameForm("iPhone");
+            string pasted = rightToLeftOverride + "Sam" + zeroWidthSpace + "'s phone" + lineSeparator + new string('x', 36) + smile;
+            form.SetLabelTextForTest(pasted);
+
+            string label = form.Label();
+
+            string keptByTheStore = (WidgetSettings.Default with { OtherDeviceLabel = pasted }).Clamped(out _).OtherDeviceLabel;
+            Assert.AreEqual(keptByTheStore, label);
+            Assert.IsFalse(label.Contains(rightToLeftOverride));
+            Assert.IsFalse(label.Contains(zeroWidthSpace));
+            Assert.IsFalse(label.Contains(lineSeparator));
+            Assert.IsFalse(label.Any(char.IsSurrogate), "The emoji does not fit, so it is left out whole.");
+        });
+    }
+
     [TestMethod]
     public void LabelTrimsWhitespace()
     {
