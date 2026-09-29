@@ -15,6 +15,12 @@ namespace Earshot.App;
 //
 // Exit with the setting off, or with the AirPods not connected to this PC, is what it was before: the block before
 // closing, and "Closed while in use" when the AirPods are in use.
+//
+// Exit while a connect or a disconnect is in flight: the operation is cancelled and finishes first, as it always did,
+// and only then is it decided whether the AirPods are connected. A connect that came up despite the cancel has them
+// connected, so they are handed back; one that did not leaves nothing to hand back, so it is the ordinary Exit. A
+// disconnect that finished is not repeated; one the cancel stopped before render left ACTIVE leaves them connected, so
+// Exit sends its own.
 internal sealed partial class BlockCoordinator
 {
     // What Exit says when the hand-back did not leave the AirPods disconnected and blocked. The block failing is the

@@ -236,6 +236,28 @@ public sealed class PauseOnLeaveTests
         Assert.IsEmpty(rig.Log.Entries.Where(e => e.Message.StartsWith(PauseOnLeaveText.Prefix, StringComparison.Ordinal)));
     }
 
+    // Another device is chosen while the old one is playing: the watched container changes, so the old device showing as
+    // not active is not the AirPods leaving, and pauses nothing. The new device then gets a stretch of its own.
+    [TestMethod]
+    public async Task AChangeOfTheWatchedDeviceIsNotALeave()
+    {
+        using var rig = new Rig();
+        var other = new Guid("0B8E5A51-7F0C-5F5E-9C6B-2D7C1E0F4A11");
+        await rig.Active();
+        rig.Tick();
+
+        await rig.Pause.OnRender(RenderState.NotActive, other, rig.Time.GetUtcNow(), changeInFlight: null);
+
+        Assert.IsEmpty(rig.Sessions.PauseCalls, "A change of the watched device was taken for the AirPods leaving.");
+        Assert.IsEmpty(rig.Log.Entries.Where(e => e.Message.StartsWith(PauseOnLeaveText.Prefix, StringComparison.Ordinal)));
+
+        await rig.Pause.OnRender(RenderState.Active, other, rig.Time.GetUtcNow(), changeInFlight: null);
+        rig.Tick();
+        await rig.Pause.OnRender(RenderState.NotActive, other, rig.Time.GetUtcNow(), changeInFlight: null);
+
+        Assert.AreEqual(1, rig.Sessions.PauseCalls.Count, "The new device's own leave was not decided.");
+    }
+
     // One leave, one decision: a second NotActive snapshot for the same stretch does not decide again.
     [TestMethod]
     public async Task ARepeatedNotActiveSnapshotDecidesOnce()
@@ -463,7 +485,12 @@ public sealed class PauseOnLeaveTests
         Assert.IsFalse(rig.Log.Has(LogLevel.Info, "paused player.exe"));
 
         release.SetResult(true);
-        await Task.Delay(50);
+
+        // The pause finishes on its own thread of continuation, so the line is waited for, bounded, not slept for.
+        for (int waited = 0; waited < 500 && !rig.Log.Has(LogLevel.Info, "paused player.exe in 400 ms"); waited++)
+        {
+            await Task.Delay(10);
+        }
 
         Assert.IsTrue(rig.Log.Has(LogLevel.Info, "paused player.exe in 400 ms"));
     }

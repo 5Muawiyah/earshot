@@ -95,6 +95,14 @@ internal sealed class PauseOnLeave : IDisposable
             }
 
             RenderState before = _render;
+            if (_container != Guid.Empty && container != _container)
+            {
+                // The device Earshot watches changed (another device was chosen): what the old one did says nothing
+                // about this one, so its stretch ends without a decision and a new one starts from here.
+                before = RenderState.Unknown;
+                StopSamplingLocked();
+            }
+
             _render = state;
             if (state == RenderState.Active)
             {
