@@ -649,4 +649,61 @@
                 'caseOpenToggleLinesSeen' = 2; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
     }
+
+    # ------------------------------------------------------ 20 hand back on Exit
+    # The fake owner chooses Exit, and the world moves the way the real hand-back leaves it (render Unplugged, the nodes
+    # Blocked), so the two state criteria pass in every case: what differs is what the log says. With no hand-back in the
+    # log, "nothing said" proves nothing and is inconclusive, never a pass.
+    '20-handback-on-exit|first' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'connected-first' = 'pass'; 'hand-back-on' = 'pass'; 'nodes-after-exit' = 'pass'; 'released-after-exit' = 'pass'
+                'heard-handed-back' = 'pass'; 'exit-handback-started' = 'fail'; 'exit-disconnect-confirmed' = 'inconclusive'
+                'exit-block-sent' = 'fail'; 'exit-finished' = 'fail'; 'exit-nothing-said' = 'inconclusive'
+                'exit-paused-first' = 'fail'; 'exit-closed' = 'inconclusive' }
+            FindingsInclude = @{ 'exitHandBackFinishedMs' = $null; 'exitDisconnectMs' = $null; 'exitBlockSentAfterMs' = $null; 'exitCutShortStillRunning' = $null } }
+        one  = @{ Overall = 'pass'; Criteria = @{
+                'connected-first' = 'pass'; 'hand-back-on' = 'pass'; 'nodes-after-exit' = 'pass'; 'released-after-exit' = 'pass'
+                'heard-handed-back' = 'pass'; 'exit-handback-started' = 'pass'; 'exit-disconnect-confirmed' = 'pass'
+                'exit-block-sent' = 'pass'; 'exit-finished' = 'pass'; 'exit-nothing-said' = 'pass'
+                'exit-paused-first' = 'pass'; 'exit-closed' = 'pass' }
+            FindingsInclude = @{ 'exitHandBackFinishedMs' = 312; 'exitDisconnectMs' = 31; 'exitBlockSentAfterMs' = 350; 'exitCutShortStillRunning' = $null; 'pauseSettingAtExit' = 'on' } }
+        two  = @{ Overall = 'fail'; Criteria = @{
+                'connected-first' = 'pass'; 'hand-back-on' = 'pass'; 'nodes-after-exit' = 'pass'; 'released-after-exit' = 'pass'
+                'heard-handed-back' = 'pass'; 'exit-handback-started' = 'fail'; 'exit-disconnect-confirmed' = 'pass'
+                'exit-block-sent' = 'pass'; 'exit-finished' = 'pass'; 'exit-nothing-said' = 'pass'
+                'exit-paused-first' = 'pass'; 'exit-closed' = 'pass' } }
+        'exit-cut-short' = @{ Overall = 'fail'; Criteria = @{
+                'connected-first' = 'pass'; 'hand-back-on' = 'pass'; 'nodes-after-exit' = 'pass'; 'released-after-exit' = 'pass'
+                'heard-handed-back' = 'pass'; 'exit-handback-started' = 'pass'; 'exit-disconnect-confirmed' = 'pass'
+                'exit-block-sent' = 'pass'; 'exit-finished' = 'fail'; 'exit-nothing-said' = 'fail'
+                'exit-paused-first' = 'fail'; 'exit-closed' = 'inconclusive' }
+            FindingsInclude = @{ 'exitCutShortStillRunning' = 'block'; 'exitHandBackFinishedMs' = $null } }
+    }
+
+    # ------------------------------------------------------ 21 pause when the AirPods leave this PC
+    # The fake owner says the music paused, nothing resumed and nothing changed by itself, so the owner's own account is
+    # the same in every case: it is the log that differs, and a criterion that reads the log is what has to fail when the
+    # owner and the log disagree. pause-declined holds only a "Not paused" decision, which shares its words with a pause.
+    '21-pause-on-leave|first' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'setting-on' = 'pass'; 'connected-first' = 'pass'; 'own-disconnect-paused' = 'pass'; 'own-disconnect-not-jumped' = 'pass'
+                'own-disconnect-logged' = 'fail'; 'phone-take-paused' = 'pass'; 'phone-take-not-resumed' = 'pass'
+                'phone-take-logged' = 'fail'; 'idle-leave-not-paused' = 'fail'; 'idle-leave-untouched' = 'pass' }
+            FindingsInclude = @{ 'ownPauseMs' = $null; 'phonePausedAfterChangeMs' = $null; 'phoneReadingAgeMs' = $null; 'idleLeaveDecision' = $null } }
+        one  = @{ Overall = 'pass'; Criteria = @{
+                'setting-on' = 'pass'; 'connected-first' = 'pass'; 'own-disconnect-paused' = 'pass'; 'own-disconnect-not-jumped' = 'pass'
+                'own-disconnect-logged' = 'pass'; 'phone-take-paused' = 'pass'; 'phone-take-not-resumed' = 'pass'
+                'phone-take-logged' = 'pass'; 'idle-leave-not-paused' = 'pass'; 'idle-leave-untouched' = 'pass' }
+            FindingsInclude = @{ 'ownPauseMs' = 38; 'phonePausedAfterChangeMs' = 8; 'phoneReadingAgeMs' = 640 } }
+        two  = @{ Overall = 'pass'; Criteria = @{
+                'setting-on' = 'pass'; 'connected-first' = 'pass'; 'own-disconnect-paused' = 'pass'; 'own-disconnect-not-jumped' = 'pass'
+                'own-disconnect-logged' = 'pass'; 'phone-take-paused' = 'pass'; 'phone-take-not-resumed' = 'pass'
+                'phone-take-logged' = 'pass'; 'idle-leave-not-paused' = 'pass'; 'idle-leave-untouched' = 'pass' }
+            FindingsInclude = @{ 'ownPauseMs' = 38; 'phonePausedAfterChangeMs' = 8; 'phoneReadingAgeMs' = 640 } }
+        'pause-declined' = @{ Overall = 'fail'; Criteria = @{
+                'setting-on' = 'pass'; 'connected-first' = 'pass'; 'own-disconnect-paused' = 'pass'; 'own-disconnect-not-jumped' = 'pass'
+                'own-disconnect-logged' = 'fail'; 'phone-take-paused' = 'pass'; 'phone-take-not-resumed' = 'pass'
+                'phone-take-logged' = 'fail'; 'idle-leave-not-paused' = 'pass'; 'idle-leave-untouched' = 'pass' }
+            FindingsInclude = @{ 'phonePausedAfterChangeMs' = $null; 'idleLeaveDecision' = 'this PC was not playing to them (last reading: silent).' } }
+    }
 }

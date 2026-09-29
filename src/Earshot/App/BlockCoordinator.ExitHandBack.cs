@@ -109,7 +109,7 @@ internal sealed partial class BlockCoordinator
         ClosingNotice = ExitNoticeFor(_handBackOutcome);
         if (ClosingNotice is { } notice)
         {
-            _log.Warn(HandBackText.Prefix(HandBackTrigger.Exit) + "Exit will say: " + notice);
+            _log.Warn(HandBackText.ExitWillSay(notice));
         }
     }
 

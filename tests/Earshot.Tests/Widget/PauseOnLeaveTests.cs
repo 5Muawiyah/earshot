@@ -440,7 +440,9 @@ public sealed class PauseOnLeaveTests
         Task before = rig.Pause.BeforeOwnLeaveAsync("hand-back at shut down", Container, TimeSpan.FromMilliseconds(400), CancellationToken.None);
         Assert.IsFalse(before.IsCompleted, "The wait ended before the cap.");
         rig.Time.Advance(TimeSpan.FromMilliseconds(400));
-        await before;
+
+        // Bounded in real time, so a wait that ignored its cap fails here instead of hanging the run.
+        await before.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.IsEmpty(rig.Sessions.PauseCalls);
         Assert.IsTrue(rig.Log.Has(LogLevel.Info, "(hand-back at shut down), reading and pausing took longer than 400 ms, so the disconnect goes ahead and the pause carries on."));
@@ -457,7 +459,7 @@ public sealed class PauseOnLeaveTests
 
         Task before = rig.Pause.BeforeOwnLeaveAsync("Disconnect", Container, TimeSpan.FromMilliseconds(400), CancellationToken.None);
         rig.Time.Advance(TimeSpan.FromMilliseconds(400));
-        await before;
+        await before.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.IsFalse(rig.Log.Has(LogLevel.Info, "paused player.exe"));
 
         release.SetResult(true);

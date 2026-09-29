@@ -226,6 +226,20 @@ $tests = @(
         Settles = 'Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.'
         Needs = 'Set up, tray running, "Show on the taskbar" ticked, AirPods paired, time for a long sitting.'
         Halves = 'one, but it takes a while'
+    },
+    [ordered]@{
+        Number = '20'; Script = '20-HandBackOnExit.ps1'
+        Title = 'Hand back on Exit'
+        Settles = 'Whether choosing Exit while the AirPods are connected lets them go and blocks them, inside its cap, and leaves the nodes blocked.'
+        Needs = 'Set up from a release build, tray running, Block at boot on, the Hand back item ticked, AirPods paired, something playing on this PC. Earshot is left closed: start it again afterwards.'
+        Halves = 'one'
+    },
+    [ordered]@{
+        Number = '21'; Script = '21-PauseOnLeave.ps1'
+        Title = 'Pause when the AirPods leave this PC'
+        Settles = 'Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything.'
+        Needs = 'Set up from a release build, tray running, Block at boot on, Pause when AirPods leave this PC on, AirPods paired with this PC and the phone, a player that shows in Windows media controls.'
+        Halves = 'one'
     }
 )
 

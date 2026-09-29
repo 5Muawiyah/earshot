@@ -69,7 +69,8 @@ param(
         'atrest-decline', 'atrest-guard-throws', 'atrest-block-ineffective',
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
-        'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake')][string]$Case = '',
+        'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
+        'exit-cut-short', 'pause-declined')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -157,6 +158,14 @@ $tests = @(
     [ordered]@{ Number = '18'; Id = '18-handback-on-sleep'; Script = '18-HandBackOnSleep.ps1'; Halves = @('first'); Extra = @()
         Cases = @('none', 'one', 'two', 'no-sleep-event', 'handback-cut-short', 'repaged-at-wake') }
     [ordered]@{ Number = '19'; Id = '19-widget'; Script = '19-Widget.ps1'; Halves = @('first'); Extra = @() }
+    # exit-cut-short: Exit's hand-back ran out of its cap with the block already sent and still running, and Exit said
+    # so, so exit-finished and exit-nothing-said fail on lines that are there.
+    [ordered]@{ Number = '20'; Id = '20-handback-on-exit'; Script = '20-HandBackOnExit.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'exit-cut-short') }
+    # pause-declined: Earshot saw the AirPods leave with nothing playing and said "Not paused", which holds the same
+    # words as a pause. The phone leg has to fail on it, and the not-playing leg has to pass on it.
+    [ordered]@{ Number = '21'; Id = '21-pause-on-leave'; Script = '21-PauseOnLeave.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'pause-declined') }
 )
 
 $defaultCases = @('none', 'one', 'two')
@@ -363,6 +372,8 @@ function Invoke-Half
 #   14-set-device-refusal|first          yes, 1, 0   set-device never touches the nodes; nothing renders
 #   15-uninstall-reversal|first          yes, 1, 0   uninstall allows, install does not re-block; nothing renders
 #   15-uninstall-reversal|resume          yes, 1, 0   stays Allowed from the first half; the offer blocks; nothing renders
+#   20-handback-on-exit|first            yes, 0, 0   "choose Exit" hands them back: render Unplugged and the nodes Blocked; nothing to offer
+#   21-pause-on-leave|first              yes, 0, 0   the first leg's "choose Disconnect" blocks the nodes and nothing later enables them in the fake, so there is nothing to offer
 $script:AtRestDefaults = @{
     '00-restore|first'                   = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
     '01-a2dp-oneshot|first'              = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 1 }
@@ -390,6 +401,8 @@ $script:AtRestDefaults = @{
     '17-handback-on-shutdown|resume'     = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '18-handback-on-sleep|first'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '19-widget|first'                    = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
+    '20-handback-on-exit|first'          = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '21-pause-on-leave|first'            = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
 }
 
 # What the expectations for one case say should have been recorded, against what was. The

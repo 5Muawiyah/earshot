@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Windows.Forms;
 using Earshot.App;
 using Earshot.Contracts;
+using Earshot.Streaming;
 using Earshot.Tests.Integration.Coordinator;
+using Earshot.Tests.Streaming;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
@@ -192,6 +194,41 @@ public sealed class TrayExitHandBackTests
             CollectionAssert.AreEqual(DisconnectThenBlock, order.Skip(2).Where(o => o is "disconnect" or "block").ToArray(),
                 "The AirPods a cancelled connect left connected were not handed back before Exit ended.");
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Hand-back (exit): finished in"));
+        });
+    }
+
+    // A held Play from a phone link is let go before the hand-back's own disconnect, the first step of the shut-down and
+    // sleep hand-backs too, and the Started line says it was held.
+    [TestMethod]
+    public void ExitLetsGoOfAStreamingLinkBeforeTheHandBack()
+    {
+        StaThread.Run(() =>
+        {
+            var fake = new FakeStreamingPlatform();
+            fake.NextDiscovery(FakeStreamingPlatform.Found(new StreamingDevice("phone-1", "Test Phone", IPhoneContainer)));
+            using var tray = new TrayHarness(
+                snapshot: Devices.Active(1),
+                settings: s => s.Streaming = s.Streaming with { Enabled = true },
+                streamingPlatform: fake,
+                arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            tray.PumpUntilIdle();
+            tray.Context.Menu.Refresh();
+            ToolStripMenuItem play = tray.Context.Menu.PlayFromPhoneItems.Single(i => i.Text == "Test Phone");
+            Assert.IsTrue(play.Enabled, "Test Phone cannot be clicked.");
+            play.PerformClick();
+            tray.PumpUntilIdle();
+            Assert.IsTrue(fake.CallsNamed("Open").Count > 0, "The link was never opened.");
+            tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
+
+            Application.Run(tray.Context);
+
+            List<LogEntry> entries = tray.Log.Entries.ToList();
+            int letGoAt = entries.FindIndex(e => e.Message.Contains("letting go of any connection, because Earshot is closing", StringComparison.Ordinal));
+            int startedAt = entries.FindIndex(e => e.Message.StartsWith("Hand-back (exit): started", StringComparison.Ordinal));
+            Assert.IsGreaterThanOrEqualTo(0, letGoAt, "The streaming link was not let go of by Exit.");
+            Assert.IsGreaterThanOrEqualTo(0, startedAt);
+            Assert.IsLessThan(startedAt, letGoAt, "The streaming link is let go before the hand-back's own started line.");
+            StringAssert.Contains(entries[startedAt].Message, "streaming held");
         });
     }
 

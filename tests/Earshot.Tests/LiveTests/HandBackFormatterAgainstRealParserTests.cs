@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Earshot.App;
 using Earshot.Contracts;
+using Earshot.Widget.EarPause;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.LiveTests;
@@ -26,6 +27,10 @@ internal static class RealHandBackLines
     private static readonly DateTimeOffset ShutdownBlockSentAt = new(2026, 9, 22, 1, 31, 42, 400, TimeSpan.Zero);
     private static readonly DateTimeOffset SleepStartedAt = new(2026, 9, 22, 1, 41, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset SleepBlockSentAt = new(2026, 9, 22, 1, 41, 0, 300, TimeSpan.Zero);
+    private static readonly DateTimeOffset ExitStartedAt = new(2026, 9, 29, 14, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset ExitBlockSentAt = new(2026, 9, 29, 14, 0, 0, 350, TimeSpan.Zero);
+    private static readonly DateTimeOffset PausedLeaveSeenAt = new(2026, 9, 29, 14, 5, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset NotPausedLeaveSeenAt = new(2026, 9, 29, 14, 10, 0, 0, TimeSpan.Zero);
 
     // Message text only, exactly as HandBackText returns it (no timestamp or level prefix): the
     // shape Fakes.psm1 pins in its LogFixtures table and its handback-cut-short branch. PinText is
@@ -38,6 +43,8 @@ internal static class RealHandBackLines
     {
         string shutdownCutShort = HandBackText.CutShort(HandBackTrigger.SessionEnd, TimeSpan.FromMilliseconds(4000), ["block"], ShutdownBlockSentAt);
         const string shutdownCutShortPin = "Hand-back (shutdown): cut short at 4000 ms; still running: block; block was sent at";
+        string exitCutShort = HandBackText.CutShort(HandBackTrigger.Exit, TimeSpan.FromMilliseconds(4000), ["block"], ExitBlockSentAt);
+        const string exitCutShortPin = "Hand-back (exit): cut short at 4000 ms; still running: block; block was sent at";
 
         return
         [
@@ -47,6 +54,8 @@ internal static class RealHandBackLines
                 HandBackText.Disconnect(HandBackTrigger.SessionEnd, "S_OK", confirmed: true, TimeSpan.FromMilliseconds(37)), ""),
             ("shutdown disconnect confirmed 20ms",
                 HandBackText.Disconnect(HandBackTrigger.SessionEnd, "S_OK", confirmed: true, TimeSpan.FromMilliseconds(20)), ""),
+            ("shutdown disconnect not confirmed 1500ms",
+                HandBackText.Disconnect(HandBackTrigger.SessionEnd, "S_OK", confirmed: false, TimeSpan.FromMilliseconds(1500)), ""),
             ("shutdown block sent at",
                 HandBackText.BlockSentAt(HandBackTrigger.SessionEnd, ShutdownBlockSentAt), ""),
             ("shutdown finished",
@@ -71,6 +80,30 @@ internal static class RealHandBackLines
                 "WM_POWERBROADCAST received: ResumeAutomatic (wParam 0x12).", ""),
             ("resume check blocked",
                 HandBackText.ResumeBlocked(), ""),
+
+            // Test 20: hand back on Exit, and the pause made just before the AirPods let go.
+            ("exit started",
+                HandBackText.Started(HandBackTrigger.Exit, ExitStartedAt, HandBackText.ExitStartedReason, RenderState.Active, BlockState.Allowed, streamingHeld: false, blockAtBoot: true), ""),
+            ("exit disconnect confirmed 31ms",
+                HandBackText.Disconnect(HandBackTrigger.Exit, "S_OK", confirmed: true, TimeSpan.FromMilliseconds(31)), ""),
+            ("exit block sent at",
+                HandBackText.BlockSentAt(HandBackTrigger.Exit, ExitBlockSentAt), ""),
+            ("exit finished",
+                HandBackText.Finished(HandBackTrigger.Exit, TimeSpan.FromMilliseconds(312), "confirmed", "Success"), ""),
+            ("exit cut short, block sent",
+                exitCutShort, exitCutShortPin),
+            ("exit will say",
+                HandBackText.ExitWillSay(BlockCoordinator.ClosedBeforeChangeEndedMessage), ""),
+            ("pause before the exit hand-back",
+                PauseOnLeaveText.OwnPaused(HandBackText.LeaveReason(HandBackTrigger.Exit), "com.example.player", TimeSpan.FromMilliseconds(41)), ""),
+
+            // Test 21: pause on leave. The last two are the same leave with something playing and with nothing playing.
+            ("pause before Earshot's own disconnect",
+                PauseOnLeaveText.OwnPaused("Disconnect", "com.example.player", TimeSpan.FromMilliseconds(38)), ""),
+            ("pause when the phone took them",
+                PauseOnLeaveText.LeftPaused(PausedLeaveSeenAt, "com.example.player", TimeSpan.FromMilliseconds(8), TimeSpan.FromMilliseconds(640)), ""),
+            ("no pause, nothing playing",
+                PauseOnLeaveText.LeftNotPaused(NotPausedLeaveSeenAt, PauseOnLeaveText.ReasonNotPlaying(RenderActivityState.Silent)), ""),
         ];
     }
 

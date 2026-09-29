@@ -40,6 +40,10 @@ internal static class HandBackText
         _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown hand-back trigger."),
     };
 
+    // What Exit writes just before it says something to the owner (a block that did not take, a disconnect that did not
+    // confirm, a hand-back cut short), so a reader of the log knows what the card said.
+    public static string ExitWillSay(string notice) => Prefix(HandBackTrigger.Exit) + "Exit will say: " + notice;
+
     // The reason on the Started line for Exit: what raised it, in words a reader of the log can match to the menu.
     public const string ExitStartedReason = "Exit";
 

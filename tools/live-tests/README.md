@@ -148,6 +148,21 @@ it is never lost.
 | 15 | a restart, to check the delayed file deletion |
 | 17 | a full power down, not a restart: shut down from the Start menu with the AirPods connected and Hand back on |
 
+## Tests 20 and 21: Exit and pause on leave
+
+Neither needs a restart, and each is one half. 20 chooses Exit from the tray menu with
+the AirPods connected and playing, so it leaves Earshot closed: start it again from the
+Start menu afterwards. 21 takes the AirPods away three ways (Earshot's own Disconnect,
+the phone taking them while this PC plays, the phone taking them while this PC plays
+nothing) and reads both what you heard and the `Pause on leave:` line Earshot writes for
+each decision. Going out of range looks the same to this PC as the phone taking them, so
+it is not arranged separately.
+
+Both read log lines by their exact text. That text is written by one formatter each
+(`HandBackText`, `PauseOnLeaveText`), and the test project pins the fake log against those
+formatters and runs the scripts' own patterns over the real lines in a Windows PowerShell 5.1
+process, so a reworded line fails a test rather than quietly failing a sitting.
+
 ## Where the evidence goes
 
 ```
@@ -196,6 +211,8 @@ recorded that way rather than guessed at.
 | 17 | Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone. |
 | 18 | Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes. |
 | 19 | Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure. |
+| 20 | Whether choosing Exit while the AirPods are connected lets them go and blocks them, inside its cap, and leaves the nodes blocked. |
+| 21 | Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything. |
 
 ## What the backlog asks, and where it is answered
 
@@ -276,10 +293,10 @@ criterion after it lost, and it happens on the success path, because "no matchin
 line" is what a boot block that held produces.
 
 `tools\live-tests\selftest` runs every script in this folder, and both halves of
-every resumable one, against a fake machine: nineteen scripts, twenty-six halves,
-three sets of fake inputs holding 0, 1 and 2 matching lines and list items (seventy-
-eight runs), plus the twenty-four bespoke extra cases named against each row in
-`Invoke-SelfTest.ps1`'s `$tests`, one hundred and two runs in total. Only the
+every resumable one, against a fake machine: twenty-one scripts, twenty-eight halves,
+three sets of fake inputs holding 0, 1 and 2 matching lines and list items (eighty-
+four runs), plus the twenty-six bespoke extra cases named against each row in
+`Invoke-SelfTest.ps1`'s `$tests`, one hundred and ten runs in total. Only the
 device-touching and owner-prompting helpers are replaced;
 `Get-EarshotLogLines`, `Get-DiagEvidence`, `Copy-AppEvidence`, `Read-KsEvidence`,
 `Read-EarshotJsonFile`, `Add-Criterion` and `Complete-LiveTestRun` all run for
