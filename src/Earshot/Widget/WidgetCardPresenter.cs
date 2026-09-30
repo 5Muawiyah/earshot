@@ -538,6 +538,15 @@ internal sealed class WidgetCardPresenter : IDisposable
             case SetupAction.Check:
                 _host?.CheckForUpdates();
                 break;
+            case SetupAction.SetUp:
+                _host?.SetUpEarshot();
+                break;
+            case SetupAction.Repair:
+                _host?.RepairEarshot();
+                break;
+            case SetupAction.Switch:
+                _host?.SwitchToInstalled();
+                break;
         }
 
         SyncSpinner();

@@ -190,6 +190,7 @@ internal sealed class NotificationRegistration
     public const string SafeModeMessage = "Safe mode: the notification shortcut was not written.";
     public const string TestFolderMessage = "Test data folder: the notification shortcut was not written.";
     public const string NoExePathMessage = "Earshot could not find its own program file.";
+    public const string InstallDamagedMessage = "Earshot is installed but its program is missing, so the notification shortcut was not written. Choose Repair Earshot.";
     public const string NoProgramsFolderMessage = "The Start menu Programs folder was not found; the notification shortcut was not written.";
 
     private readonly IShellLinkWriter _writer;
@@ -199,6 +200,7 @@ internal sealed class NotificationRegistration
     private readonly string? _runningExePath;
     private readonly string? _installedExePath;
     private readonly Func<string, bool> _fileExists;
+    private readonly Func<string, bool> _folderExists;
 
     public NotificationRegistration(
         IShellLinkWriter writer,
@@ -208,7 +210,8 @@ internal sealed class NotificationRegistration
         string shortcutFolder,
         string? runningExePath,
         string? installedExePath = null,
-        Func<string, bool>? fileExists = null)
+        Func<string, bool>? fileExists = null,
+        Func<string, bool>? folderExists = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(log);
@@ -221,6 +224,7 @@ internal sealed class NotificationRegistration
         _runningExePath = runningExePath;
         _installedExePath = installedExePath;
         _fileExists = fileExists ?? File.Exists;
+        _folderExists = folderExists ?? Directory.Exists;
         ShortcutPath = Path.Combine(shortcutFolder, ShortcutFileName);
     }
 
@@ -238,7 +242,8 @@ internal sealed class NotificationRegistration
         string? shortcutFolder,
         string? runningExePath,
         string? installedExePath = null,
-        Func<string, bool>? fileExists = null)
+        Func<string, bool>? fileExists = null,
+        Func<string, bool>? folderExists = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         if (string.IsNullOrWhiteSpace(shortcutFolder))
@@ -247,15 +252,23 @@ internal sealed class NotificationRegistration
             return null;
         }
 
-        return new NotificationRegistration(writer, log, safeMode, redirected, shortcutFolder, runningExePath, installedExePath, fileExists);
+        return new NotificationRegistration(writer, log, safeMode, redirected, shortcutFolder, runningExePath, installedExePath, fileExists, folderExists);
     }
 
     public string ShortcutPath { get; }
 
     // The file the shortcut targets: the installed copy when there is one, otherwise this copy, the same
-    // preference StartupRegistration has.
+    // preference StartupRegistration has, and nothing when an install exists whose program is missing and this is not it.
     public string? TargetExePath =>
-        !string.IsNullOrWhiteSpace(_installedExePath) && _fileExists(_installedExePath) ? _installedExePath : _runningExePath;
+        !string.IsNullOrWhiteSpace(_installedExePath) && _fileExists(_installedExePath) ? _installedExePath
+        : InstallDamaged ? null
+        : _runningExePath;
+
+    // An install is there, but its program is not, and this copy is not the installed one.
+    public bool InstallDamaged =>
+        !string.IsNullOrWhiteSpace(_installedExePath) && !_fileExists(_installedExePath) &&
+        !PathsEqual(_installedExePath, _runningExePath) &&
+        Path.GetDirectoryName(_installedExePath) is { Length: > 0 } folder && _folderExists(folder);
 
     // True when this run must not write the shortcut at all: a test run must never write one into the
     // owner's real Start menu.
@@ -275,6 +288,12 @@ internal sealed class NotificationRegistration
         string? exePath = TargetExePath;
         if (string.IsNullOrWhiteSpace(exePath))
         {
+            if (InstallDamaged)
+            {
+                _log.Warn(InstallDamagedMessage);
+                return StepOutcomes.NotAttempted("shortcut-write", InstallDamagedMessage);
+            }
+
             _log.Error(NoExePathMessage + " The notification shortcut was not written.");
             return StepOutcomes.NotAttempted("shortcut-write", NoExePathMessage);
         }

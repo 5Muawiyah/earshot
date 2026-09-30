@@ -34,14 +34,19 @@ internal sealed class UpdateController
     private string? _reason;
     private string? _notice;
     private bool _updateOffered = true;
+    private UpdateButtonRole? _instead;
     private CancellationTokenSource? _download;
+    private readonly Func<InstallState>? _installState;
 
     // identity: the pinned device install needs, or null before setup has one. target: the installed program to hand
-    // over to, or null when this program is not that install (not set up, or run from somewhere else). unavailable:
-    // why an update cannot run in this process at all (safe mode, test data), or null.
+    // over to, or null when there is none to hand over to (nothing installed, or an install that cannot be used). This
+    // program need not be that install: the elevated run is always the installed program, and this program's own
+    // process id is what it waits on. unavailable: why an update cannot run in this process at all (safe mode, test
+    // data), or null. installState: what to say when target is null, Set up when nothing is installed and Repair when
+    // something is but cannot be used; Set up when it is not given.
     public UpdateController(
         IUpdateSource source, IUpdateLauncher launcher, Func<HandoverIdentity?> identity, Func<HandoverTarget?> target, Func<string?> unavailable,
-        ReleaseVersion installed, ILog log)
+        ReleaseVersion installed, ILog log, Func<InstallState>? installState = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(launcher);
@@ -56,6 +61,7 @@ internal sealed class UpdateController
         _unavailable = unavailable;
         _installed = installed;
         _log = log;
+        _installState = installState;
     }
 
     public event EventHandler? Changed;
@@ -71,7 +77,7 @@ internal sealed class UpdateController
         {
             lock (_gate)
             {
-                return UpdateViewModel.For(_stage, _installed, _release?.Version ?? _latest, _percent, _reason, _notice, _updateOffered);
+                return UpdateViewModel.For(_stage, _installed, _release?.Version ?? _latest, _percent, _reason, _notice, _updateOffered, _instead);
             }
         }
     }
@@ -142,9 +148,11 @@ internal sealed class UpdateController
 
         // Read before the guard is taken: it looks at the disk.
         bool installedCopy = _target() is not null;
+        (string Notice, UpdateButtonRole Button) missing = installedCopy ? default : MissingInstall();
         lock (_gate)
         {
             _updateOffered = true;
+            _instead = null;
             switch (result.Outcome)
             {
                 case UpdateCheckOutcome.UpToDate:
@@ -157,10 +165,11 @@ internal sealed class UpdateController
                     _latest = result.Latest;
                     if (!installedCopy)
                     {
-                        // The update installs over the installed copy, and only that copy can hand over safely, so a
-                        // program that is not it does not offer Update.
+                        // The update installs over the installed copy and is started from it, so with no install to
+                        // hand over to there is no Update: the same card offers the way to get one.
                         _updateOffered = false;
-                        _notice = UpdateCopy.SetUpFirstNotice;
+                        _notice = missing.Notice;
+                        _instead = missing.Button;
                     }
 
                     break;
@@ -182,6 +191,7 @@ internal sealed class UpdateController
         string? unavailable = _unavailable();
         bool pinned = _identity() is not null;
         bool installedCopy = _target() is not null;
+        (string Notice, UpdateButtonRole Button) missing = installedCopy ? default : MissingInstall();
         ReleaseInfo release;
         CancellationTokenSource? cancel = null;
         lock (_gate)
@@ -202,9 +212,10 @@ internal sealed class UpdateController
             else if (!installedCopy)
             {
                 _stage = UpdateStage.Available;
-                _notice = UpdateCopy.SetUpFirstNotice;
+                _notice = missing.Notice;
+                _instead = missing.Button;
                 _updateOffered = false;
-                _log.Info("Update: not started. This program is not the installed copy, so it cannot hand over to it.");
+                _log.Info("Update: not started. There is no installed copy to hand over to (" + missing.Button + ").");
             }
             else if (!pinned)
             {
@@ -297,7 +308,20 @@ internal sealed class UpdateController
         {
             // Settings, or the install, changed under the download. Nothing has been handed over.
             staged.Discard();
-            Fail(UpdateStage.Available, null, identity is null ? UpdateCopy.NotPinnedNotice : UpdateCopy.SetUpFirstNotice);
+            if (identity is null)
+            {
+                Fail(UpdateStage.Available, null, UpdateCopy.NotPinnedNotice);
+                return;
+            }
+
+            (string notice, UpdateButtonRole button) = MissingInstall();
+            lock (_gate)
+            {
+                _updateOffered = false;
+                _instead = button;
+            }
+
+            Fail(UpdateStage.Available, null, notice);
             return;
         }
 
@@ -337,6 +361,34 @@ internal sealed class UpdateController
 
         _log.Warn("Update: the installed program did not start (" + launch.Detail + "). Nothing was changed.");
         Fail(UpdateStage.HandoverFailed, "Windows would not start the update (error " + launch.Win32Error + "). Nothing was changed.", null);
+    }
+
+    // What to say, and which button to offer, when there is no install to hand over to. Looks at the disk, so it is
+    // never called under the guard.
+    private (string Notice, UpdateButtonRole Button) MissingInstall() =>
+        (_installState?.Invoke() ?? InstallState.Nothing) == InstallState.Unusable
+            ? (UpdateCopy.RepairFirstNotice, UpdateButtonRole.Repair)
+            : (UpdateCopy.SetUpFirstNotice, UpdateButtonRole.SetUp);
+
+    // This copy is not the installed one: the page offers a switch to the installed copy. Only from idle: a check or an
+    // update the person has already started is not replaced by it.
+    public void OfferSwitch()
+    {
+        lock (_gate)
+        {
+            if (_stage != UpdateStage.Idle)
+            {
+                return;
+            }
+
+            _stage = UpdateStage.SwitchOffered;
+            _release = null;
+            _reason = null;
+            _notice = null;
+            _percent = null;
+        }
+
+        RaiseChanged();
     }
 
     private void Fail(UpdateStage stage, string? reason, string? notice)

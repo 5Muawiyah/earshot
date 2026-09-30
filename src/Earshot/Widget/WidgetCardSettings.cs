@@ -78,6 +78,14 @@ internal interface IWidgetCardHost
 
     void TryUpdateAgain();
 
+    // The update page's other buttons, for when there is no install to update: set Earshot up, repair it, or switch to
+    // the installed copy from one that is not.
+    void SetUpEarshot();
+
+    void RepairEarshot();
+
+    void SwitchToInstalled();
+
     // Raised, on any thread, whenever the update flow moves.
     event EventHandler? UpdateChanged;
 }

@@ -36,6 +36,8 @@ internal sealed partial class TrayContext
     private string? _updateInstalledExe;
     private string? _updateRunningExe;
     private Func<string, bool> _updateFileExists = File.Exists;
+    private Func<string, bool> _updateFolderExists = Directory.Exists;
+    private IFolderSecurity _installFolderSecurity = new NtfsFolderSecurity();
     private Task? _updateAutoTask;
     private ReleaseVersion? _updateAnnounced;
 
@@ -55,6 +57,8 @@ internal sealed partial class TrayContext
         _updateInstalledExe = options.InstalledExePath;
         _updateRunningExe = options.ExePath;
         _updateFileExists = options.FileExists;
+        _updateFolderExists = options.DirectoryExists;
+        _installFolderSecurity = options.InstallFolderSecurity;
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
         RemoveStaleUpdateStaging();
@@ -63,7 +67,71 @@ internal sealed partial class TrayContext
         {
             _registry.UiPost(() => ShowUpdateOutcomeOnce(outcomeSource));
         }
+
+        // Safe mode and a redirected data folder are runs for tests and probes: never offered a switch that would exit
+        // and start the owner's real install.
+        if (!_registry.SafeMode && !_updateDataRootRedirected)
+        {
+            _registry.UiPost(OfferSwitchToInstalledCopy);
+        }
     }
+
+    // Set when the person chose to switch to the installed copy: the program to start once this one has exited. The
+    // installed copy would find this one's single-instance lock still held and end at once if it were started now, so
+    // Program starts it after the lock is released.
+    internal string? StartAfterExit { get; private set; }
+
+    // A copy that is not the installed one, started while an install exists, says so once on the update page of the
+    // card (or a short message card when there is no card) and offers the switch. It changes nothing by itself.
+    private void OfferSwitchToInstalledCopy()
+    {
+        if (_closing || RunsFromInstalledCopy())
+        {
+            return;
+        }
+
+        InstallAssessment install = AssessInstall();
+        if (install.State != InstallState.Usable)
+        {
+            return;
+        }
+
+        _log.Info("This copy, " + _updateRunningExe + ", is not the installed one, " + _updateInstalledExe + ". It does not point Open on startup or the Start menu shortcut at itself.");
+        UpdateController? updates = EnsureUpdates();
+        updates?.OfferSwitch();
+        if (updates is null || !RequestUpdatePageFromWidget())
+        {
+            ShowCard(TrayStatus.AppName, UpdateCopy.SwitchMessage, CardPlace.NearTray);
+        }
+    }
+
+    // The Switch button: this copy exits, in the order Exit always takes, and Program starts the installed copy, not
+    // elevated, once this one has let go of its lock.
+    internal void SwitchToInstalledCopy()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        InstallAssessment install = AssessInstall();
+        if (install.State != InstallState.Usable || _updateInstalledExe is not { } installed)
+        {
+            _log.Warn("Switch: there is no installed copy to start (" + install.Detail + ").");
+            ShowCard(TrayStatus.AppName, UpdateCopy.RepairFirstNotice, CardPlace.NearTray);
+            return;
+        }
+
+        StartAfterExit = installed;
+        _log.Info("Switch: this copy is closing so the installed copy, " + installed + ", can start.");
+        _ = ExitAsync(CardPlace.NearTray, "Switching to the installed copy.");
+    }
+
+    // The update page's Set up button, for when there is no install to update.
+    internal void SetUpFromCard() => Start("setup (card)", RunSetupAsync);
+
+    // The update page's Repair button, for an install that cannot be updated as it is.
+    internal void RepairFromCard() => Start("repair (card)", RunSetupAsync);
 
     // How the last update ended, said once, at the start after it. The elevated update has ended by then and the tray
     // that started it is gone, so the outcome is read from the machine folder, where only administrators write. It
@@ -177,7 +245,8 @@ internal sealed partial class TrayContext
 
             IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, running.Value, UpdateStagingRoot());
             var controller = new UpdateController(
-                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, running.Value, _log);
+                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, running.Value, _log,
+                () => AssessInstall().State);
             controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
             controller.Changed += (_, _) => RaiseCardUpdateChanged();
             _updates = controller;
@@ -185,19 +254,22 @@ internal sealed partial class TrayContext
         }
     }
 
-    // The installed Earshot.exe and this process's id, or null when this program is not the installed copy: not set up
-    // (no file at the installed path), or started from another folder. An update installs over the installed copy and
-    // is started from it, so only the tray that runs from it can hand over.
+    // What is in Program Files, read without changing anything. Each call looks at the disk.
+    private InstallAssessment AssessInstall() =>
+        InstalledCopy.Assess(_updateInstalledExe, _updateFileExists, _updateFolderExists, _installFolderSecurity);
+
+    // Whether this process is the installed copy.
+    private bool RunsFromInstalledCopy() => InstalledCopy.SameFile(_updateInstalledExe, _updateRunningExe);
+
+    // The installed Earshot.exe and this process's id, or null when there is no installed program to hand over to:
+    // nothing is installed, or what is there is missing its program or has a folder that is not administrators-only. An
+    // update installs over the installed copy and is started from it, never from this program's own folder, which may
+    // be one the signed-in user can write. So whichever copy is running hands over to the installed program, and this
+    // process's id is what that elevated run waits for before it touches the install folder.
     private HandoverTarget? CurrentHandoverTarget()
     {
-        string? installed = _updateInstalledExe;
-        string? running = _updateRunningExe;
-        if (installed is null || running is null || !_updateFileExists(installed))
-        {
-            return null;
-        }
-
-        return string.Equals(Path.GetFullPath(installed), Path.GetFullPath(running), StringComparison.OrdinalIgnoreCase)
+        InstallAssessment install = AssessInstall();
+        return install.State == InstallState.Usable && _updateInstalledExe is { } installed
             ? new HandoverTarget(installed, Environment.ProcessId)
             : null;
     }

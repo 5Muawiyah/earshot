@@ -177,6 +177,12 @@ internal sealed partial class TrayContext
 
         public void TryUpdateAgain() => _tray.TryUpdateAgainFromCard();
 
+        public void SetUpEarshot() => _tray.SetUpFromCard();
+
+        public void RepairEarshot() => _tray.RepairFromCard();
+
+        public void SwitchToInstalled() => _tray.SwitchToInstalledCopy();
+
         private void Write(string what, Action<EarshotSettings> mutate, CardPlace place)
         {
             if (_tray._closing)

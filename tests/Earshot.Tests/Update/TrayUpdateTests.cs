@@ -333,6 +333,46 @@ public sealed class TrayUpdateTests
         });
     }
 
+    // The owner's case: the tray that ran was a copy from a download folder while Earshot was installed in Program Files.
+    // The update still hands over to the installed program (never to a file in a folder the user can write), and the
+    // process id it gives to wait on is this copy's own.
+    [TestMethod]
+    public void AnUpdateFromACopyThatIsNotTheInstalledOneHandsOverToTheInstalledProgramWithThisProcessId()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            StagedUpdate? staged = null;
+            using var tray = new UpdateTrayHarness(installedCopy: false, otherCopy: true, source: s =>
+            {
+                FoundNewer(s);
+                s.OnDownload = (_, _, _) => Task.FromResult(UpdateDownloadResult.Success(staged!));
+            });
+            staged = Stage(temp.Path, tray.Log);
+            tray.Context.Updates!.CheckAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert.IsNull(tray.Context.Updates.View.Notice, "An install is there, so nothing says to set up first.");
+            Assert.AreEqual(UpdateButtonRole.Update, tray.Context.Updates.View.Buttons.Single().Role);
+            tray.Ui.Post(_ => tray.Context.StartUpdate(), null);
+            bool timedOut = false;
+            using var watchdog = new System.Threading.Timer(
+                _ =>
+                {
+                    timedOut = true;
+                    tray.Ui.Post(_ => tray.Context.ExitThread(), null);
+                },
+                null, TimeSpan.FromSeconds(20), Timeout.InfiniteTimeSpan);
+
+            Application.Run(tray.Context);
+
+            Assert.IsFalse(timedOut, "The tray did not close after the hand-over.");
+            (string exe, string[] arguments, string _) = tray.Launcher.Launches.Single();
+            Assert.AreEqual(UpdateTrayHarness.InstalledExe, exe, "The installed Earshot.exe is started, not this copy.");
+            Assert.AreEqual("update", arguments[0]);
+            Assert.AreEqual(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), arguments[3], "The running copy's own process id is what the elevated run waits for.");
+        });
+    }
+
     // The menu's "Check for updates" with the widget on: a newer version opens the card's update page, the way "Set up
     // battery" opens the card, so the Update button can be reached from the menu. It used to leave only a message card.
     [TestMethod]

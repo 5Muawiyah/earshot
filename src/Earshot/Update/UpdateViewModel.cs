@@ -23,10 +23,23 @@ internal static class UpdateCopy
     public const string CancelButton = "Cancel";
     public const string TryAgainButton = "Try again";
 
+    // What the update page offers when there is no install to hand the update to, in place of Update.
+    public const string SetUpButton = "Set up Earshot";
+    public const string RepairButton = "Repair Earshot";
+
     // Notices for an update that stayed where it was: the person's own choice, or something to do first.
     public const string PromptDeclinedNotice = "The Windows prompt was declined, so nothing was changed.";
     public const string NotPinnedNotice = "Choose your AirPods first, then update.";
     public const string SetUpFirstNotice = "Set up Earshot first, then update.";
+    public const string RepairFirstNotice = "Repair Earshot first, then update.";
+
+    // The card a copy shows when it is not the installed one. The installed copy is the one Windows starts from the
+    // Start menu and at sign-in, so the person is offered a switch to it.
+    public const string SwitchTitle = "Earshot";
+    public const string SwitchStatus = "Earshot is already installed";
+    public const string SwitchSub = "The installed copy is in Program Files.";
+    public const string SwitchButton = "Switch to it";
+    public const string SwitchMessage = "Earshot is already installed in Program Files. Start that copy from the Start menu.";
 
     public static string AvailableStatus(ReleaseVersion version) => "Version " + version + " is available";
 
@@ -50,6 +63,9 @@ internal enum UpdateStage
     DownloadFailed,
     HandoverFailed,
     HandingOver,
+
+    // This copy is not the installed one, and the person can switch to the installed one.
+    SwitchOffered,
 }
 
 // The picture beside the status: a spinner, a tick, a down arrow, a caution mark or a shield.
@@ -69,6 +85,9 @@ internal enum UpdateButtonRole
     Update,
     Cancel,
     TryAgain,
+    SetUp,
+    Repair,
+    Switch,
 }
 
 internal sealed record UpdateButton(UpdateButtonRole Role, string Label, bool Primary);
@@ -100,7 +119,8 @@ internal sealed record UpdateViewModel(
         int? progressPercent,
         string? reason,
         string? notice,
-        bool updateOffered = true)
+        bool updateOffered = true,
+        UpdateButtonRole? instead = null)
     {
         string title = UpdateCopy.Title;
         ReleaseVersion target = available ?? installed;
@@ -111,7 +131,7 @@ internal sealed record UpdateViewModel(
             UpdateStage.Checking => new(stage, title, UpdateIcon.Spinner, UpdateCopy.CheckingStatus, UpdateCopy.InstalledSub(installed), null, null, null, None),
             UpdateStage.UpToDate => new(stage, title, UpdateIcon.Check, UpdateCopy.UpToDateStatus, UpdateCopy.CurrentSub(installed), null, null, null, None),
             UpdateStage.Available => new(stage, title, UpdateIcon.Down, UpdateCopy.AvailableStatus(target), UpdateCopy.InstalledSub(installed), null, notice, null,
-                updateOffered ? [new UpdateButton(UpdateButtonRole.Update, UpdateCopy.UpdateButton, Primary: true)] : None),
+                updateOffered ? [new UpdateButton(UpdateButtonRole.Update, UpdateCopy.UpdateButton, Primary: true)] : Instead(instead)),
             UpdateStage.Downloading => new(stage, title, UpdateIcon.Down, UpdateCopy.DownloadingStatus(target), null, null, null, progressPercent,
                 [new UpdateButton(UpdateButtonRole.Cancel, UpdateCopy.CancelButton, Primary: false)]),
             UpdateStage.CheckFailed => new(stage, title, UpdateIcon.Caution, UpdateCopy.CheckFailedStatus, UpdateCopy.InstalledSub(installed), reason, null, null,
@@ -121,7 +141,17 @@ internal sealed record UpdateViewModel(
             UpdateStage.HandoverFailed => new(stage, title, UpdateIcon.Caution, UpdateCopy.HandoverFailedStatus, UpdateCopy.CurrentSub(target), reason, null, null,
                 [new UpdateButton(UpdateButtonRole.TryAgain, UpdateCopy.TryAgainButton, Primary: true)]),
             UpdateStage.HandingOver => new(stage, title, UpdateIcon.Shield, UpdateCopy.HandingOverStatus, UpdateCopy.InstallingSub(target), null, null, null, None),
+            UpdateStage.SwitchOffered => new(stage, UpdateCopy.SwitchTitle, UpdateIcon.Shield, UpdateCopy.SwitchStatus, UpdateCopy.SwitchSub, null, null, null,
+                [new UpdateButton(UpdateButtonRole.Switch, UpdateCopy.SwitchButton, Primary: true)]),
             _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "Not an update stage."),
         };
     }
+
+    // The one button that stands in for Update when there is no install to hand over to.
+    private static UpdateButton[] Instead(UpdateButtonRole? role) => role switch
+    {
+        UpdateButtonRole.SetUp => [new UpdateButton(UpdateButtonRole.SetUp, UpdateCopy.SetUpButton, Primary: true)],
+        UpdateButtonRole.Repair => [new UpdateButton(UpdateButtonRole.Repair, UpdateCopy.RepairButton, Primary: true)],
+        _ => None,
+    };
 }

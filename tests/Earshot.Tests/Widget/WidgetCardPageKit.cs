@@ -130,6 +130,18 @@ internal sealed class FakeCardHost : IWidgetCardHost
     public void CancelUpdate() => CancelCalls++;
 
     public void TryUpdateAgain() => TryAgainCalls++;
+
+    public int SetUpCalls { get; private set; }
+
+    public int RepairCalls { get; private set; }
+
+    public int SwitchCalls { get; private set; }
+
+    public void SetUpEarshot() => SetUpCalls++;
+
+    public void RepairEarshot() => RepairCalls++;
+
+    public void SwitchToInstalled() => SwitchCalls++;
 }
 
 internal sealed class FakeAccent : IAccentColours
