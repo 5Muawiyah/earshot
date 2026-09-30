@@ -1,7 +1,7 @@
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
-using Earshot.Infra;
+using Earshot.Widget.Alert;
 
 namespace Earshot.Update;
 
@@ -110,7 +110,7 @@ internal static class InstalledCopy
     private static IEnumerable<string> ListEntries(string folder) => Directory.EnumerateFileSystemEntries(folder);
 
     // The same file, compared as Windows compares paths.
-    public static bool SameFile(string? a, string? b) => SamePath.AreEqual(a, b);
+    public static bool SameFile(string? a, string? b) => NotificationRegistration.PathsEqual(a, b);
 }
 
 // Starts the installed Earshot.exe for the switch, and a tray that starts again. It runs with this process's own token, so it

@@ -757,7 +757,7 @@ function Get-GateExitName
         6 = 'no-identity'; 7 = 'not-available'; 8 = 'other-device-blocked'; 9 = 'status-not-written'
         10 = 'folder-not-secure'; 11 = 'device-blocked'; 12 = 'not-audio-sink'; 13 = 'other-device-protected'
         14 = 'no-manifest'; 15 = 'device-mismatch'; 16 = 'unsafe-environment'; 17 = 'no-config'
-        20 = 'rejected'; 21 = 'not-elevated'; 22 = 'running-as-system'; 23 = 'not-a-service'; 24 = 'not-from-install-folder'
+        20 = 'rejected'; 21 = 'not-elevated'; 22 = 'running-as-system'; 23 = 'not-a-service'; 24 = 'not-from-install-folder'; 25 = 'busy'
         1223 = 'the administrator prompt was declined'
         64 = 'bad command line'; 69 = 'not available in this build'; 70 = 'a check inside Earshot failed'
         71 = 'a system call failed'; 74 = 'the report could not be written'; 77 = 'refused'

@@ -3,6 +3,7 @@ using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Tests.Phase4;
 using Earshot.Update;
+using Earshot.Widget.Alert;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Update;
@@ -138,16 +139,16 @@ public sealed class InstalledCopyTests
     [TestMethod]
     public void OnePathRuleServesTheSwitchTheStartupValueAndTheShortcut()
     {
-        Assert.IsTrue(Earshot.Infra.SamePath.AreEqual(@"C:\Program Files\Earshot\Earshot.exe", "C:/Program Files/Earshot/Earshot.exe"));
-        Assert.IsTrue(Earshot.Infra.SamePath.AreEqual(@"C:\Program Files\Earshot\Earshot.exe", @"c:\PROGRAM FILES\earshot\sub\..\Earshot.exe"));
-        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual(@"C:\Program Files\Earshot\Earshot.exe", @"C:\Program Files\Earshot\Other.exe"));
-        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual("", @"C:\Earshot.exe"));
-        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual("  ", "  "), "A blank path names nothing.");
+        Assert.IsTrue(NotificationRegistration.PathsEqual(@"C:\Program Files\Earshot\Earshot.exe", "C:/Program Files/Earshot/Earshot.exe"));
+        Assert.IsTrue(NotificationRegistration.PathsEqual(@"C:\Program Files\Earshot\Earshot.exe", @"c:\PROGRAM FILES\earshot\sub\..\Earshot.exe"));
+        Assert.IsFalse(NotificationRegistration.PathsEqual(@"C:\Program Files\Earshot\Earshot.exe", @"C:\Program Files\Earshot\Other.exe"));
+        Assert.IsFalse(NotificationRegistration.PathsEqual("", @"C:\Earshot.exe"));
+        Assert.IsFalse(NotificationRegistration.PathsEqual("  ", "  "), "A blank path names nothing.");
 
         // A path Windows cannot name in full is compared as written, not thrown at the caller.
         string odd = "C:\\Earshot\0.exe";
-        Assert.IsTrue(Earshot.Infra.SamePath.AreEqual(odd, odd.ToUpperInvariant()));
-        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual(odd, @"C:\Earshot.exe"));
+        Assert.IsTrue(NotificationRegistration.PathsEqual(odd, odd.ToUpperInvariant()));
+        Assert.IsFalse(NotificationRegistration.PathsEqual(odd, @"C:\Earshot.exe"));
     }
 
     // ----- the real folder security read, in places this run can see -----
