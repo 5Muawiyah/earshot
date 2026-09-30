@@ -51,7 +51,8 @@ internal sealed class UpdateTrayHarness : IDisposable
         UpdateOutcomeSource? outcomeSource = null,
         DeviceSnapshot? snapshot = null,
         TimeSpan? elevatedExitWait = null,
-        bool elevated = false)
+        bool elevated = false,
+        TimeSpan? exitNoticeTime = null)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -93,7 +94,7 @@ internal sealed class UpdateTrayHarness : IDisposable
         {
             InstalledExePath = InstalledExe,
             ShowIcon = false,
-            ExitNoticeTime = TimeSpan.FromMilliseconds(10),
+            ExitNoticeTime = exitNoticeTime ?? TimeSpan.FromMilliseconds(10),
             CursorPosition = () => TrayHarness.ClickPoint,
             TickCount = () => 0,
             DoubleClickTime = TimeSpan.FromMilliseconds(500),

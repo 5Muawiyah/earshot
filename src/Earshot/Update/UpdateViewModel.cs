@@ -33,7 +33,12 @@ internal static class UpdateCopy
     public const string SetUpFirstNotice = "Set up Earshot first, then update.";
     public const string RepairFirstNotice = "Repair Earshot first, then update.";
     public const string ClosingNotice = "Earshot is closing, so the update was not started. Nothing was changed.";
-    public const string ClosingFailedNotice = "Something went wrong while Earshot closed its work, so the update was not started. Nothing was changed.";
+    // Shown before the update starts when the AirPods are in use and Hand back is off. The update ends this program, which
+    // cannot block the AirPods while they are in use, and the program that replaces its files cannot either.
+    public const string AirPodsStayConnectedNotice =
+        "The AirPods stay connected while Earshot updates, and are blocked again at the next start. To avoid that, decline the Windows prompt, then turn on Hand back or disconnect the AirPods, and update again.";
+
+    public const string ClosingFailedNotice ="Something went wrong while Earshot closed its work, so the update was not started. Nothing was changed.";
 
     // A repair that fetches the installed version's release runs on the same page, in its own words.
     public const string RepairTitle = "Repair";

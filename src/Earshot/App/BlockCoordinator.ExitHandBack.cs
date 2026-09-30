@@ -44,6 +44,14 @@ internal sealed partial class BlockCoordinator
         Settings.HandBackOnShutdownAndSleep && _started && !_disposed &&
         CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) == RenderState.Active;
 
+    // True when closing now would leave the AirPods connected with their nodes enabled and nothing to block them: they are in
+    // use, Hand back is off, and Block at boot is on with the nodes enabled. The state in hand, not a fresh read. Asked by
+    // the tray before an update's closing work, so the person is told before it runs, not after.
+    public bool ClosingWouldLeaveAirPodsEnabled =>
+        _started && !_disposed && !Settings.HandBackOnShutdownAndSleep &&
+        CoordinatorRules.RenderOf(_snapshot, WatchedContainer()) == RenderState.Active &&
+        _blockStatus is { BlockAtBoot: true } status && CoordinatorRules.NodesEnabled(status);
+
     // What the hand-back last ended with, for tests and Exit's notice.
     internal HandBackOutcome? LastHandBackOutcome => _handBackOutcome;
 
