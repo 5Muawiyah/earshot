@@ -248,7 +248,14 @@ the `.sha256` file published with it. Earshot then finishes its own closing work
 installed Earshot with one administrator prompt, and ends without another call to
 the AirPods: the installed 1.2.0 and the first 1.2.1 do not wait for a copy run
 from another folder to end, so the install must not start while this copy is
-still letting go. The installed Earshot checks the zip again, from a folder only
+still letting go. With Hand back off and the AirPods in use nothing can block
+them, so the card says before the closing work that they stay connected and are
+blocked again at the next start, and suggests turning Hand back on or
+disconnecting them first, and keeps that notice up for its time before the prompt
+(any notice the closing work ends with is kept up the same way). Once the closing
+work has run, a sign-out, shut down, sleep or resume while the prompt is open
+sends nothing to the AirPods, because the install that follows works on the
+scheduled tasks and the service. The installed Earshot checks the zip again, from a folder only
 administrators can write, and installs from there. The program that runs with
 that prompt is the installed one, which is in a folder only administrators can
 change, never the copy you were running. If the prompt is declined after the

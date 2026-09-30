@@ -87,8 +87,14 @@ nodes again is quick: left-click the Earshot icon, then Connect on the card.
   update always runs the installed program, which is in a folder only
   administrators can change, never the running one. Earshot finishes its own
   closing work first (with Hand back on, that hands the AirPods back and
-  blocks them), then shows the one administrator prompt, then ends. If the
-  prompt is declined after that, the card says so and Earshot starts again.
+  blocks them), then shows the one administrator prompt, then ends. With
+  Hand back off and the AirPods in use, the card first says that they stay
+  connected while Earshot updates and are blocked again at the next start, and
+  suggests turning Hand back on or disconnecting them first; it stays up for
+  a few seconds before the prompt. Once the closing work is done, a sign-out,
+  shut down or sleep before the prompt is answered sends nothing to the AirPods.
+  If the prompt is declined after that, the card says so and Earshot starts
+  again.
   Only one setup, repair or update runs at a time, and the menu and the card
   say why while one does. See
   [docs/architecture.md](docs/architecture.md#updates) for what the checksum

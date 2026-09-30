@@ -516,7 +516,13 @@ Exit ends (no more input, `BeginShutdown` with the hand-back plan, the coordinat
 block before closing with the same limits), waiting for everything in flight
 except the update action itself. Only then is the elevated program started, and
 the tray ends at the launch with no further device call (no second hand-back or
-block). The order matters for installed versions that do not wait for a copy run
+block): from the moment the closing work has run, `BlockCoordinator.EndDeviceWork`
+makes a session end, a sleep or a resume do nothing on the device, so a sign-out
+while the administrator prompt is open cannot send a hand-back or a block beside
+the install. Before the closing work, with Hand back off and the AirPods in use
+(`ClosingWouldLeaveAirPodsEnabled`), the card says they stay connected and are
+blocked again at the next start, and the closing notice is kept up for
+`ExitNoticeTime` before the launch, so the prompt does not cover it. The order matters for installed versions that do not wait for a copy run
 from another folder to end: the installed 1.2.0 and the first published 1.2.1
 ignore the process id, so an install started while the tray was still handing back
 and blocking could replace files under it. A refusal or a failed launch after the
