@@ -39,6 +39,8 @@ internal static class UpdateCopy
     public const string RepairHandoverFailedStatus = "Couldn't start the repair";
     public const string RepairNotPinnedReason = "Choose your AirPods first, then repair.";
     public const string RepairNoInstallReason = "There is no installed Earshot to repair.";
+    public const string RepairCouldNotReadStatus = "Couldn't read the installed files";
+    public const string RepairCouldNotReadText = "Earshot could not read its installed files, so nothing was changed. Try again in a moment.";
     public static string RepairingSub(ReleaseVersion version) => "Repairing " + version;
 
     // The card a copy shows when it is not the installed one. The installed copy is the one Windows starts from the

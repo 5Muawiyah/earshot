@@ -51,17 +51,20 @@ public sealed class TrayRepairTests
     }
 
     [TestMethod]
-    public void AnInstalledProgramFromBeforeTheRepairVerbIsAskedThroughInstall()
+    [DataRow(0)]
+    [DataRow(1)]
+    public void AnInstalledProgramFromBeforeTheRepairVerbIsAskedThroughInstall(int patch)
     {
         using var temp = new TempFolder();
         using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
         StaThread.Run(() =>
         {
-            using var tray = new UpdateTrayHarness(installedVersion: new Version(1, 2, 0, 0));
+            var older = new Version(1, 2, patch, 0);
+            using var tray = new UpdateTrayHarness(installedVersion: older);
 
             ClickRepair(tray);
 
-            Assert.AreEqual("repair-install", tray.Block.Calls.Single());
+            Assert.AreEqual("repair-install", tray.Block.Calls.Single(), older + " has no repair verb that can be relied on.");
             Assert.AreEqual(0, tray.Source.DownloadCalls);
         });
     }
@@ -221,21 +224,120 @@ public sealed class TrayRepairTests
         });
     }
 
+    // A copy newer than the install may be in a folder the signed-in user can write, so it is never the elevated program
+    // while an install exists. Repair sends it to the verified update path: a check, then Update (download, SHA-256, the
+    // installed program's update verb).
     [TestMethod]
-    public void ACopyNewerThanTheInstalledOneBringsTheInstallUpToDateThroughItsOwnSetup()
+    public void ACopyNewerThanTheInstalledOneIsNeverElevatedAndRepairOpensTheUpdatePathInstead()
     {
         using var temp = new TempFolder();
         using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
         StaThread.Run(() =>
         {
             using var tray = new UpdateTrayHarness(
-                installedCopy: false, otherCopy: true, block: b => b.Status = Block(BlockState.Allowed) with { RunningCopyIsNewer = true });
+                installedCopy: false, otherCopy: true, block: b => b.Status = Block(BlockState.Allowed) with { RunningCopyIsNewer = true },
+                source: s => s.OnCheck = _ => Task.FromResult(UpdateCheckResult.Available(FakeUpdateSource.Release("1.3.0"))));
             tray.PumpUntilIdle();
 
             ClickRepair(tray);
 
-            Assert.AreEqual("repair-setup", tray.Block.Calls.Single());
-            Assert.IsEmpty(tray.CheckedFolders);
+            Assert.IsEmpty(tray.Block.Calls, "No elevated run of any kind, this copy's setup least of all.");
+            Assert.IsEmpty(tray.Launcher.Launches);
+            Assert.IsEmpty(tray.CheckedFolders, "The installed files are not checked: the update replaces them from a verified release.");
+            Assert.AreEqual(1, tray.Source.CheckCalls, "A check for the update path.");
+            Assert.AreEqual(0, tray.Source.DownloadCalls, "Nothing downloads until the person presses Update.");
+            Assert.AreEqual("Version 1.3.0 is available", tray.Cards.Shown[^1].Content.Title);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "UpdateInstead"), "The route is logged.");
+        });
+    }
+
+    // The update replaces the installed copy, so it is measured against that copy: a newer copy unzipped in a download folder
+    // is still offered the update that brings the install up to date, and the installed copy itself is measured against
+    // its own version.
+    [TestMethod]
+    public void AnUpdateIsMeasuredAgainstTheInstalledProgramWhenThisCopyIsAnotherOne()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(installedCopy: false, otherCopy: true, installedVersion: new Version(1, 2, 0, 0));
+
+            Assert.AreEqual(new ReleaseVersion(1, 2, 0), tray.Context.Updates!.Installed);
+        });
+    }
+
+    [TestMethod]
+    public void AnUpdateIsMeasuredAgainstThisCopyWhenItIsTheInstalledOneOrTheInstalledVersionCannotBeRead()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        ReleaseVersion running = ReleaseVersion.Running(typeof(TrayContext).Assembly)!.Value;
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(installedCopy: true, installedVersion: new Version(9, 9, 9, 0));
+
+            Assert.AreEqual(running, tray.Context.Updates!.Installed, "The installed copy is this one: its own version.");
+        });
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(
+                installedCopy: false, otherCopy: true,
+                readInstalledFile: path => new Earshot.Boot.InstalledFile(true, null, new StepOutcome("read-file-version", false, unchecked((int)0x80070020), "SHARING", path)));
+
+            Assert.AreEqual(running, tray.Context.Updates!.Installed, "A version that cannot be read is not invented.");
+        });
+    }
+
+    // ----- a file another program holds open is not a file that is missing -----
+
+    // A standard user can hold the installed program open. Through the real check and reader on a real tree with a real
+    // FileShare.None handle, and the real tray: nothing is elevated, nothing downloads, the raw code is logged, and the
+    // person is told to try again. On the route it replaced, this ran this copy's own setup elevated.
+    [TestMethod]
+    public void AnInstalledProgramAnotherProgramHoldsOpenIsNotRepairedFromThisCopyAndThePersonIsToldToTryAgain()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        using var installTree = new TempInstallTree(temp);
+        using var held = new FileStream(installTree.File("Earshot.exe"), FileMode.Open, FileAccess.Read, FileShare.None);
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(
+                installedCopy: false, otherCopy: true,
+                checkFiles: _ => InstalledFileCheck.Check(installTree.Folder),
+                readInstalledFile: _ => new Earshot.Boot.InstalledFileReader().Read(installTree.File("Earshot.exe")));
+
+            ClickRepair(tray);
+
+            Assert.IsEmpty(tray.Block.Calls, "Nothing was elevated: " + string.Join(", ", tray.Block.Calls));
+            Assert.IsEmpty(tray.Launcher.Launches);
+            Assert.AreEqual(0, tray.Source.DownloadCalls);
+            Assert.AreEqual(0, tray.Source.FindCalls.Count);
+            Assert.AreEqual(UpdateCopy.RepairCouldNotReadStatus, tray.Cards.Shown[^1].Content.Title);
+            Assert.AreEqual(UpdateCopy.RepairCouldNotReadText, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "verify-installed:Earshot.exe"), "The raw code of the failed read is logged.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "CouldNotRead"));
+        });
+    }
+
+    // Once the other program lets go, the same tray repairs the install itself: the route is decided from what is read each time.
+    [TestMethod]
+    public void OnceTheHandleIsReleasedTheSameInstallIsRepairedByItsOwnProgram()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        using var installTree = new TempInstallTree(temp);
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(
+                installedCopy: false, otherCopy: true,
+                checkFiles: _ => InstalledFileCheck.Check(installTree.Folder),
+                readInstalledFile: _ => new Earshot.Boot.InstalledFile(true, RepairPlanner.RepairVerbSince.ToVersion(), new StepOutcome("read-file-version", true, 0, "S_OK", "")));
+
+            ClickRepair(tray);
+
+            Assert.AreEqual("repair", tray.Block.Calls.Single(), "Every file matches: the installed program repairs itself.");
         });
     }
 

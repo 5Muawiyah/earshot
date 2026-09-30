@@ -77,8 +77,18 @@ internal sealed record TrayStartOptions(
     // folder; a test gives it a fake, and the real one has its own tests against a temporary install tree.
     public Func<string, Earshot.Boot.Gate.InstalledFilesReport> CheckInstalledFiles { get; init; } = Earshot.Boot.Gate.InstalledFileCheck.Check;
 
-    // The file version of the installed Earshot.exe, or null when it cannot be read.
-    public Func<string, Version?> ReadInstalledVersion { get; init; } = static path => new Earshot.Boot.InstalledFileReader().Read(path).Version;
+    // The installed Earshot.exe as a read found it: whether the file is there, its file version (null when it is missing or
+    // cannot be read) and the raw code of the read.
+    public Func<string, Earshot.Boot.InstalledFile> ReadInstalledFile { get; init; } = static path => new Earshot.Boot.InstalledFileReader().Read(path);
+
+    // The names in the install folder, asked only when Earshot.exe was not found, to tell a program that is gone from one
+    // that could not be seen. A failure to list is an IOException or an UnauthorizedAccessException, which is kept.
+    public Func<string, IEnumerable<string>> ListFolder { get; init; } = static folder => Directory.EnumerateFileSystemEntries(folder);
+
+    // How long Exit waits for an elevated setup or repair that is still running before its hand-back and block, so the block
+    // never meets a scheduled task being registered again. A waiting budget chosen here (setup stops the service for up to
+    // 30 s and moves the folder for about 5 s more); nothing measured how long a repair takes.
+    public TimeSpan ElevatedExitWait { get; init; } = TimeSpan.FromSeconds(90);
 
     // The RegisterHotKey/UnregisterHotKey caller HotkeyManager uses, injected the way IStartupRegistry is:
     // the real one by default, a fake in tests, so a tray-level test never registers a real global hotkey.

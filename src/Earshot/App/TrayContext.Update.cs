@@ -1,3 +1,4 @@
+using Earshot.Boot;
 using System.Security.Principal;
 using Earshot.Boot.Gate;
 using Earshot.Composition;
@@ -39,6 +40,7 @@ internal sealed partial class TrayContext
     private string? _updateRunningExe;
     private Func<string, bool> _updateFileExists = File.Exists;
     private Func<string, bool> _updateFolderExists = Directory.Exists;
+    private Func<string, IEnumerable<string>> _updateListFolder = static folder => Directory.EnumerateFileSystemEntries(folder);
     private IFolderSecurity _installFolderSecurity = new NtfsFolderSecurity();
     private Task? _updateAutoTask;
     private ReleaseVersion? _updateAnnounced;
@@ -60,6 +62,7 @@ internal sealed partial class TrayContext
         _updateRunningExe = options.ExePath;
         _updateFileExists = options.FileExists;
         _updateFolderExists = options.DirectoryExists;
+        _updateListFolder = options.ListFolder;
         _installFolderSecurity = options.InstallFolderSecurity;
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
@@ -247,9 +250,10 @@ internal sealed partial class TrayContext
                 return null;
             }
 
-            IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, running.Value, UpdateStagingRoot());
+            ReleaseVersion installed = InstalledVersionOr(running.Value);
+            IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, installed, UpdateStagingRoot());
             var controller = new UpdateController(
-                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, running.Value, _log,
+                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, installed, _log,
                 () => AssessInstall().State);
             controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
             controller.Changed += (_, _) => RaiseCardUpdateChanged();
@@ -258,9 +262,30 @@ internal sealed partial class TrayContext
         }
     }
 
+    // The version an update is measured against: the one that would be replaced. That is the installed program's when this
+    // copy is another one (a newer copy unzipped in a download folder must still be offered the update that brings the
+    // install up to date, and an older one must not be offered the version that is installed already), and this copy's own
+    // when it is the installed one or the installed version cannot be read.
+    private ReleaseVersion InstalledVersionOr(ReleaseVersion running)
+    {
+        if (_updateInstalledExe is not { } installedExe || RunsFromInstalledCopy() || AssessInstall().State != InstallState.Usable)
+        {
+            return running;
+        }
+
+        InstalledFile read = _readInstalledFile(installedExe);
+        if (read.Version is not { } version)
+        {
+            _log.Warn("Update: the installed version was not read, so updates are measured against this copy. " + TrayReport.DescribeStep(read.Step));
+            return running;
+        }
+
+        return new ReleaseVersion(version.Major, version.Minor, Math.Max(version.Build, 0), Math.Max(version.Revision, 0));
+    }
+
     // What is in Program Files, read without changing anything. Each call looks at the disk.
     private InstallAssessment AssessInstall() =>
-        InstalledCopy.Assess(_updateInstalledExe, _updateFileExists, _updateFolderExists, _installFolderSecurity);
+        InstalledCopy.Assess(_updateInstalledExe, _updateFileExists, _updateFolderExists, _installFolderSecurity, _updateListFolder);
 
     // Whether this process is the installed copy.
     private bool RunsFromInstalledCopy() => InstalledCopy.SameFile(_updateInstalledExe, _updateRunningExe);

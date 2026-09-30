@@ -11,26 +11,33 @@ namespace Earshot.App;
 
 // Repair Earshot, in the tray: the menu item and the settings row on the card both come here.
 //
-// One administrator prompt, and the elevated program is always the installed Earshot.exe, which lives in a folder only
-// administrators can write. What the tray does first is read-only: it checks every installed file against the SHA-256
-// values the installed Earshot.files.json records, and it checks the install folder's security. Then:
+// One administrator prompt. While the install folder exists and grants no one but administrators write, the only program
+// this elevates is the installed Earshot.exe: it is in a folder only administrators can change, which is what makes it
+// a program the signed-in user cannot have swapped. The running copy is never elevated then, because it may be in a
+// folder the signed-in user can write. What the tray does first is read-only: it checks every installed file against the
+// SHA-256 values the installed Earshot.files.json records, and it checks the install folder's security. Then:
 //
 //   every file matches          the installed program repairs itself (its repair verb, or its install verb when it is
 //                               older than the repair verb), re-registering the tasks, the service, the machine
 //                               configuration and the device file exactly as setup does;
-//   a file is missing or differs the install folder is not trusted, so nothing in it is used to repair it: the release of
-//                               the installed version is downloaded, checked against its checksum file exactly as an
-//                               update's is, and handed to the installed program's update verb, so the files come back
-//                               only from verified bytes;
-//   no installed program to run (missing, or its folder is not administrators-only) or this copy is newer
-//                               this copy's own setup puts a new install in place.
+//   a file is missing or differs the release of the installed version is downloaded, checked against its checksum file
+//                               exactly as an update's is, and handed to the installed program's update verb. That
+//                               program is the one in the install folder, which only administrators can change, even
+//                               when its own file is one that differs; what it installs is only the verified zip;
+//   a file could not be read    nothing is elevated and nothing is changed. A file another program holds open, or one that
+//                               access was refused to, says nothing about its contents, and a standard user can cause
+//                               either, so the person is told to try again and the raw code is logged;
+//   this copy is newer          it is not elevated either. The update path (download, SHA-256, the installed program's
+//                               update verb) brings the install up to date, so Repair opens it;
+//   no installed program to run (Earshot.exe is truly absent: its folder lists without it, or the folder is one a
+//                               standard user can write) this copy's own setup puts a new install in place.
 //
 // The settings, the battery set-up records and the pinned device are not touched by any of these: they are the same
 // install over the same data folders that setup over an install already keeps.
 internal sealed partial class TrayContext
 {
     private Func<string, InstalledFilesReport> _checkInstalledFiles = InstalledFileCheck.Check;
-    private Func<string, Version?> _readInstalledVersion = static path => new InstalledFileReader().Read(path).Version;
+    private Func<string, InstalledFile> _readInstalledFile = static path => new InstalledFileReader().Read(path);
     private UpdateOutcomeSource? _updateOutcomeSource;
 
     // The menu's Repair Earshot... and the card's Repair button.
@@ -39,7 +46,7 @@ internal sealed partial class TrayContext
     private void WireRepair(TrayStartOptions options)
     {
         _checkInstalledFiles = options.CheckInstalledFiles;
-        _readInstalledVersion = options.ReadInstalledVersion;
+        _readInstalledFile = options.ReadInstalledFile;
         _updateOutcomeSource = options.UpdateOutcome;
         _menu.RepairClicked += (_, _) => Start("repair", RunRepairAsync);
     }
@@ -63,15 +70,20 @@ internal sealed partial class TrayContext
         InstallAssessment install = AssessInstall();
         bool runningIsNewer = BlockStatus is { RunningCopyIsNewer: true };
         InstalledFilesReport? files = null;
-        Version? version = null;
+        InstalledFile? installedFile = null;
         if (install.State == InstallState.Usable && !runningIsNewer && _updateInstalledExe is { } installedExe)
         {
             // Reads and hashes every installed file: off the UI thread.
             string folder = Path.GetDirectoryName(installedExe) ?? installedExe;
-            (files, version) = await Task.Run(() => (_checkInstalledFiles(folder), _readInstalledVersion(installedExe)));
+            (files, installedFile) = await Task.Run(() => (_checkInstalledFiles(folder), _readInstalledFile(installedExe)));
             foreach (StepOutcome step in files.Steps.Where(s => !s.Ok))
             {
                 _log.Warn("Repair: " + TrayReport.DescribeStep(step));
+            }
+
+            if (!installedFile.Step.Ok)
+            {
+                _log.Warn("Repair: the installed version was not read. " + TrayReport.DescribeStep(installedFile.Step));
             }
         }
 
@@ -80,15 +92,23 @@ internal sealed partial class TrayContext
             return;
         }
 
-        RepairPlan plan = RepairPlanner.Decide(install.State, runningIsNewer, files, version);
+        RepairPlan plan = RepairPlanner.Decide(install, runningIsNewer, files, installedFile?.Version);
         _log.Info("Repair: " + plan.Route + (plan.Route == RepairRoute.DownloadThenUpdate ? " of " + plan.Version : " (" + plan.Verb + ")") + ", because " + plan.Why + ". " + install.Detail);
-        if (plan.Route == RepairRoute.DownloadThenUpdate)
+        switch (plan.Route)
         {
-            await RepairByDownloadAsync(plan.Version!.Value, place);
-            return;
+            case RepairRoute.DownloadThenUpdate:
+                await RepairByDownloadAsync(plan.Version!.Value, place);
+                return;
+            case RepairRoute.CouldNotRead:
+                ShowCard(UpdateCopy.RepairCouldNotReadStatus, UpdateCopy.RepairCouldNotReadText, place);
+                return;
+            case RepairRoute.UpdateInstead:
+                await CheckForUpdatesAsync(place);
+                return;
+            default:
+                await RunRepairOperationAsync(plan.Verb, place);
+                return;
         }
-
-        await RunRepairOperationAsync(plan.Verb, place);
     }
 
     // The elevated run, waited for. It records how it ended in the machine folder; this tray has the result in hand, so it
