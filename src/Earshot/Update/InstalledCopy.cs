@@ -34,8 +34,13 @@ internal enum InstallProblem
     // that could not be found. That says nothing about what is installed, so nothing is elevated on the strength of it.
     ProgramNotConfirmedAbsent,
 
-    // The program is there, but the folder's permissions are not administrators-only, or could not be read.
+    // The program is there, and the folder's permissions were read: they grant a standard user write, or are not as Earshot
+    // needs. Only here may the running copy's own setup replace the install.
     FolderNotTrusted,
+
+    // The program is there, but the folder's permissions could not be read. That says nothing about who can write to it, so
+    // nothing is launched on the strength of it.
+    FolderNotRead,
 }
 
 internal sealed record InstallAssessment(InstallState State, string Detail, InstallProblem Problem = InstallProblem.None);
@@ -74,7 +79,11 @@ internal static class InstalledCopy
         if (!FolderTrust.IsTrusted(folders, folder, AclCheck.CheckInstallFolder, "install-folder-acl", steps))
         {
             string why = string.Join(" ", steps.Where(s => !s.Ok).Select(s => s.Step + " " + s.CodeName + (string.IsNullOrEmpty(s.Detail) ? "" : ": " + s.Detail)));
-            return new InstallAssessment(InstallState.Unusable, folder + " is not trusted. " + why, InstallProblem.FolderNotTrusted);
+
+            // The read of the folder's security is the first step. When it failed, no permission was seen at all.
+            return steps.Count > 0 && !steps[0].Ok
+                ? new InstallAssessment(InstallState.Unusable, folder + " permissions could not be read. " + why, InstallProblem.FolderNotRead)
+                : new InstallAssessment(InstallState.Unusable, folder + " is not trusted. " + why, InstallProblem.FolderNotTrusted);
         }
 
         return new InstallAssessment(InstallState.Usable, installedExe);

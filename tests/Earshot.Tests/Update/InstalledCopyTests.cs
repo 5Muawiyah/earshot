@@ -110,6 +110,8 @@ public sealed class InstalledCopyTests
         InstallAssessment unreadable = Assess(program: true, folder: true, sddl: null, unreadable: true);
         Assert.AreEqual(InstallState.Unusable, unreadable.State, "A folder whose security cannot be read is never trusted.");
         StringAssert.Contains(unreadable.Detail, "E_ACCESSDENIED");
+        Assert.AreEqual(InstallProblem.FolderNotRead, unreadable.Problem, "A failed read is its own finding, not a folder that was found writable.");
+        Assert.AreNotEqual(InstallProblem.FolderNotTrusted, unreadable.Problem);
     }
 
     private sealed class UnreadableFolderSecurity : IFolderSecurity

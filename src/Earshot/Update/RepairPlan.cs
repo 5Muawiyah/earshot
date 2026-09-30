@@ -25,7 +25,7 @@ internal enum RepairRoute
     UpdateInstead,
 
     // A file, the file list or the installed version could not be read (another program holds it, or access was refused),
-    // or the installed program could not be confirmed absent. That says nothing about what is installed, so nothing is
+    // the install folder's permissions could not be read, or the installed program could not be confirmed absent. That says nothing about what is installed, so nothing is
     // elevated: the person is told to try again.
     CouldNotRead,
 }
@@ -59,12 +59,21 @@ internal static class RepairPlanner
 
         if (install.State == InstallState.Unusable)
         {
-            return install.Problem == InstallProblem.ProgramNotConfirmedAbsent
-                ? new RepairPlan(RepairRoute.CouldNotRead, RepairVerb.Install, null, "the installed program could not be confirmed missing: " + install.Detail)
-                : new RepairPlan(RepairRoute.SetUpFromThisCopy, RepairVerb.FromThisCopy, null,
-                    install.Problem == InstallProblem.FolderNotTrusted
-                        ? "the install folder can be written by more than administrators"
-                        : "the installed program is missing");
+            // What could not be read or confirmed says nothing about what is installed, so nothing is launched for it.
+            if (install.Problem == InstallProblem.ProgramNotConfirmedAbsent)
+            {
+                return new RepairPlan(RepairRoute.CouldNotRead, RepairVerb.Install, null, "the installed program could not be confirmed missing: " + install.Detail);
+            }
+
+            if (install.Problem == InstallProblem.FolderNotRead)
+            {
+                return new RepairPlan(RepairRoute.CouldNotRead, RepairVerb.Install, null, "the install folder's permissions could not be read: " + install.Detail);
+            }
+
+            return new RepairPlan(RepairRoute.SetUpFromThisCopy, RepairVerb.FromThisCopy, null,
+                install.Problem == InstallProblem.FolderNotTrusted
+                    ? "the install folder can be written by more than administrators"
+                    : "the installed program is missing");
         }
 
         if (runningCopyIsNewer)
