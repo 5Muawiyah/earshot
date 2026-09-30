@@ -340,6 +340,7 @@ internal sealed class BlockController : IBlockController, IDisposable
                 (int)GateExitCode.FolderNotSecure => words.UnsafeFolder,
                 (int)GateExitCode.NoManifest => words.NeedsFiles,
                 (int)GateExitCode.NotFromInstallFolder => RepairNotFromInstallMessage,
+                (int)GateExitCode.Busy => InstallRunLock.BusyMessage,
                 (int)GateExitCode.NotAudioSink => NotAudioSinkMessage,
                 (int)GateExitCode.NotFound => NotFoundMessage,
                 (int)GateExitCode.DeviceMismatch => words.DeviceChanged,

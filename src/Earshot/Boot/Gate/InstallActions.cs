@@ -411,6 +411,13 @@ internal sealed class InstallActions
     // refused before anything is checked or changed.
     internal bool RepairOnly { get; init; }
 
+    // The machine-wide lock of setup, update and repair (InstallRunLock). The real runs set it; a run with none (the tests that
+    // are not about it) takes no lock, since a named mutex shared by every test would make them wait on each other.
+    internal IGateRunLock RunLock { get; init; } = NoGateRunLock.Instance;
+
+    // How long the run waits for the lock before it refuses.
+    internal TimeSpan LockWait { get; init; } = InstallRunLock.WaitBeforeRefusing;
+
     // For tests: the wait between polls of the service's state. Returning false stops waiting at once.
     internal Func<TimeSpan, bool> ServicePoll { get; init; } = DeviceChangeLock.SleepAndContinue;
 
@@ -431,8 +438,18 @@ internal sealed class InstallActions
     {
         ArgumentNullException.ThrowIfNull(request);
         var steps = new List<StepOutcome>();
+        IDisposable? held = null;
         try
         {
+            // Before anything is read or changed: two of these never work on the folder, the tasks and the service at once.
+            held = RunLock.TryEnter(LockWait, steps);
+            if (held is null)
+            {
+                bool busy = steps.Any(InstallRunLock.IsBusy);
+                _log.Warn("install: the machine-wide lock was not taken, so nothing was changed" + (busy ? " (another setup, update or repair holds it)." : "."));
+                return new InstallResult(busy ? GateExitCode.Busy : GateExitCode.Failed, steps);
+            }
+
             return RunSteps(request, steps);
         }
         catch (Exception ex)
@@ -440,6 +457,10 @@ internal sealed class InstallActions
             steps.Add(ElevatedFailure.Step("install", ex));
             _log.Error("install stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
             return new InstallResult(GateExitCode.Failed, steps);
+        }
+        finally
+        {
+            held?.Dispose();
         }
     }
 
@@ -469,6 +490,14 @@ internal sealed class InstallActions
         if (kept != GateExitCode.Success)
         {
             return new InstallResult(kept, steps);
+        }
+
+        // A run from the install folder (a repair) copies nothing, so nothing it is about to do depends on the service being
+        // stopped. The folder and every file in it are checked first: a repair that finds a file missing or different stops
+        // here with the hand-back service still running and nothing changed.
+        if (RunsFromInstallFolder() && !VerifyInstalledCopy(steps))
+        {
+            return new InstallResult(_manifestMissing ? GateExitCode.NoManifest : GateExitCode.Failed, steps);
         }
 
         if (!StopEarlierService(steps))
@@ -565,30 +594,46 @@ internal sealed class InstallActions
         return move;
     }
 
+    // Whether this run is from the install folder itself: a repair, or an install verb run by an installed program that is
+    // older than the repair verb.
+    private bool RunsFromInstallFolder() =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.SourceFolder)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.InstallFolder)),
+            StringComparison.OrdinalIgnoreCase);
+
+    // A repair run from the installed copy. The manifest rule holds here too: the folder must pass its check, hold the
+    // manifest install copied into it, and every file it lists must still match its hash. Nothing is changed here, which is
+    // why it runs before the hand-back service is stopped.
+    private bool VerifyInstalledCopy(List<StepOutcome> steps)
+    {
+        string install = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.InstallFolder));
+        if (!CheckInstallFolder(install, steps))
+        {
+            return false;
+        }
+
+        FileManifest? installed = FileManifest.Read(install, out StepOutcome installedStep);
+        steps.Add(installedStep);
+        if (installed is null)
+        {
+            _manifestMissing = true;
+            return false;
+        }
+
+        return VerifyInstalledFiles(install, installed, steps);
+    }
+
     private bool CopyApplication(List<StepOutcome> steps)
     {
         string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.SourceFolder));
         string install = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.InstallFolder));
 
-        if (string.Equals(source, install, StringComparison.OrdinalIgnoreCase))
+        if (RunsFromInstallFolder())
         {
-            // A repair run from the installed copy. The manifest rule holds here too: the folder must pass its check,
-            // hold the manifest install copied into it, and every file it lists must still match its hash.
+            // Already checked, before the service was stopped (VerifyInstalledCopy).
             steps.Add(StepOutcomes.NotAttempted("copy-app", NothingToCopyDetail));
-            if (!CheckInstallFolder(install, steps))
-            {
-                return false;
-            }
-
-            FileManifest? installed = FileManifest.Read(install, out StepOutcome installedStep);
-            steps.Add(installedStep);
-            if (installed is null)
-            {
-                _manifestMissing = true;
-                return false;
-            }
-
-            return VerifyInstalledFiles(install, installed, steps);
+            return true;
         }
 
         FileManifest? manifest = FileManifest.Read(source, out StepOutcome manifestStep);

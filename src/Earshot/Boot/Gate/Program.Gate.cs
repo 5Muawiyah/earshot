@@ -205,7 +205,10 @@ internal static partial class Program
     // the hand-back service is stopped and registered by setup and stopped and deleted by uninstall.
     internal static InstallActions CreateInstallActions(InstallLayout layout, ILog log) =>
         new(layout, new NtfsFolderSecurity(), new CfgMgr32NodeReader(), new ComTaskRegistrar(), AccountSids.Translate, log, new BluetoothServiceReader(),
-            new WindowsServiceControl());
+            new WindowsServiceControl())
+        {
+            RunLock = InstallRunLock.Create(),
+        };
 
     internal static UninstallActions CreateUninstallActions(InstallLayout layout, ILog log) =>
         new(layout, new NtfsFolderSecurity(), new CfgMgr32NodeApi(), new ComTaskRegistrar(), new MoveFileRebootDelete(), log, new MachineGateMutex(),
