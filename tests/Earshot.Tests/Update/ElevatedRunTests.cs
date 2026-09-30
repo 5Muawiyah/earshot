@@ -139,6 +139,40 @@ public sealed class ElevatedRunTests
         });
     }
 
+    // A repair that fetches the installed version's release goes through the same hand-over, so it has the same order.
+    [TestMethod]
+    public void ARepairByDownloadFinishesTheClosingBlockBeforeTheElevatedProgramStartsToo()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            StagedUpdate? staged = null;
+            using var tray = new UpdateTrayHarness(
+                installedCopy: false, otherCopy: true, snapshot: Devices.Idle(1), block: b => b.Status = Block(BlockState.Allowed),
+                checkFiles: _ => new Earshot.Boot.Gate.InstalledFilesReport(false, false, ["Earshot.dll"], []), installedVersion: new Version(1, 2, 1, 0),
+                source: s => s.OnDownload = (_, _, _) => Task.FromResult(UpdateDownloadResult.Success(staged!)));
+            staged = Stage(temp.Path, tray.Log);
+            var trace = new List<string>();
+            tray.Block.OnBlock = async _ =>
+            {
+                trace.Add("block:start");
+                await Task.Delay(30, CancellationToken.None);
+                trace.Add("block:end");
+                return ControllerResult.Ok("Blocked at boot");
+            };
+            tray.Launcher.DuringLaunch = _ => trace.Add("launch");
+            tray.PumpUntilIdle();
+            trace.Clear();
+            tray.Ui.Post(_ => tray.Context.RepairFromCard(), null);
+
+            Assert.IsTrue(RunUntilClosed(tray));
+
+            CollectionAssert.AreEqual(BlockLaunch, trace);
+            Assert.AreEqual("update", tray.Launcher.Launches.Single().Arguments[0], "The installed program's update verb.");
+        });
+    }
+
     // The prompt is refused after the closing work has been done: the tray cannot go back to what it was, so it says so,
     // ends and starts again, and sends no device call after the launch that was refused.
     [TestMethod]
