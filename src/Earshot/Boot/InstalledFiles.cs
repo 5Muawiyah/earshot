@@ -42,6 +42,13 @@ internal sealed class InstalledFileReader : IInstalledFiles
             FileVersionInfo info = FileVersionInfo.GetVersionInfo(path);
             if (info.FileVersion is null)
             {
+                // GetVersionInfo answers a file it could not open (held without sharing, or refused) the same way as a file
+                // with no version resource: an empty result and no error. Opening the file says which it was, and a failure
+                // to open keeps its raw code (IOException or UnauthorizedAccessException, handled below).
+                using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                }
+
                 return new InstalledFile(true, null, StepOutcomes.NotAvailable(step, path + " carries no file version."));
             }
 
@@ -54,11 +61,11 @@ internal sealed class InstalledFileReader : IInstalledFiles
         }
         catch (IOException ex)
         {
-            return new InstalledFile(true, null, StepOutcomes.FromHResult(step, ex.HResult, path + ": " + ex.Message));
+            return new InstalledFile(true, null, StepOutcomes.FromHResult(step, ex.HResult, path + " could not be read: " + ex.Message, ok: false));
         }
         catch (UnauthorizedAccessException ex)
         {
-            return new InstalledFile(true, null, StepOutcomes.FromHResult(step, ex.HResult, path + ": " + ex.Message));
+            return new InstalledFile(true, null, StepOutcomes.FromHResult(step, ex.HResult, path + " could not be read: " + ex.Message, ok: false));
         }
     }
 }
