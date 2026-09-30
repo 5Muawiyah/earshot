@@ -19,7 +19,8 @@ internal sealed record UpdateRequest(string ZipPath, string ZipSha256, int TrayP
 // from, so the update waits for it. Ok when the process has ended or was never running.
 internal interface IProcessWaiter
 {
-    // image: the program the process id must belong to. An id that now belongs to another program (the tray ended and
+    // image: the program the process id must belong to, by its file name: the tray that started the update may be a copy
+    // run from another folder, which is still Earshot.exe. An id that now belongs to another program (the tray ended and
     // its id was reused) is not waited on.
     StepOutcome WaitForExit(int processId, string image, TimeSpan timeout);
 }
@@ -55,7 +56,7 @@ internal sealed class ProcessExitWaiter : IProcessWaiter
                     // Not known: the process is waited for, which errs on the side of not touching the install folder.
                     Trace.WriteLine("Earshot update: the image of process " + processId.ToString(CultureInfo.InvariantCulture) + " could not be read (Win32 error " + error.ToString(CultureInfo.InvariantCulture) + "), so it is waited for.");
                 }
-                else if (!string.Equals(Path.GetFullPath(running), Path.GetFullPath(image), StringComparison.OrdinalIgnoreCase))
+                else if (!string.Equals(Path.GetFileName(running), Path.GetFileName(image), StringComparison.OrdinalIgnoreCase))
                 {
                     return new StepOutcome(Step, true, 0, "S_OK",
                         "Process " + processId.ToString(CultureInfo.InvariantCulture) + " is " + running + ", not " + image + ", so the tray has ended.");

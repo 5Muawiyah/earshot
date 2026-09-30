@@ -58,6 +58,9 @@ internal static class WidgetCopy
     public const string ShortcutClear = "Clear";
     public const string CheckForUpdates = "Check for updates";
     public const string CheckButton = "Check";
+    public const string RepairEarshot = "Repair Earshot";
+    public const string RepairButton = "Repair";
+    public const string RepairSub = "Checks the installed files and sets Earshot up again.";
     public const string CheckAutomatically = "Check automatically";
     public const string UpdateButton = "Update";
     public const string ShortcutNotSaved = "Couldn't save that shortcut.";

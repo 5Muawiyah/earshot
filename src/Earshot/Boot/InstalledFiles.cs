@@ -12,11 +12,20 @@ internal sealed record InstalledFile(bool Present, Version? Version, StepOutcome
 internal interface IInstalledFiles
 {
     InstalledFile Read(string path);
+
+    // Whether the folder is there at all, so an install whose program has gone is still known to exist.
+    bool FolderExists(string path);
 }
 
 internal sealed class InstalledFileReader : IInstalledFiles
 {
     private const int ErrorFileNotFound = unchecked((int)0x80070002);
+
+    public bool FolderExists(string path)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        return Directory.Exists(path);
+    }
 
     public InstalledFile Read(string path)
     {

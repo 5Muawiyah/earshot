@@ -24,6 +24,9 @@ internal static class WidgetCardUpdatePage
             UpdateButtonRole.Update => SetupAction.Update,
             UpdateButtonRole.Cancel => SetupAction.Cancel,
             UpdateButtonRole.TryAgain => SetupAction.TryAgain,
+            UpdateButtonRole.SetUp => SetupAction.SetUp,
+            UpdateButtonRole.Repair => SetupAction.Repair,
+            UpdateButtonRole.Switch => SetupAction.Switch,
             _ => SetupAction.Check,
         })).ToList();
 

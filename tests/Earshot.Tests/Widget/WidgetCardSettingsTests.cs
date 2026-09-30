@@ -675,6 +675,57 @@ public sealed class WidgetCardSettingsTests
         });
     }
 
+    // Repair sits under the check, and is there only when an install exists, in whatever state.
+    [TestMethod]
+    public void TheRepairRowIsBesideTheCheckRowOnlyWhenAnInstallExistsAndFitsAtEveryScale()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using WidgetCard without = CardKit.NewCard(dark: false);
+            without.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            Assert.IsFalse(without.CurrentSettingsLayout!.Items.Any(i => i.Row == SettingsRowId.Repair), "Nothing is installed, so there is nothing to repair.");
+
+            foreach (int dpi in CardKit.Scales)
+            {
+                using WidgetCard card = CardKit.NewCard(dark: false);
+                card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), dpi);
+                SettingsLayout layout = card.CurrentSettingsLayout!;
+
+                string[] rows = layout.Items.Where(i => i.Kind == SettingsItemKind.Row).Select(i => i.Row.ToString()).ToArray();
+                int check = Array.IndexOf(rows, "CheckForUpdates");
+                Assert.AreEqual("Repair", rows[check + 1], "Repair is the row next to Check for updates, at " + dpi + " dpi.");
+                SettingsItem repair = CardKit.Row(card, SettingsRowId.Repair);
+                Assert.AreEqual("Repair Earshot", repair.Label);
+                Assert.AreEqual("Checks the installed files and sets Earshot up again.", repair.Sub);
+                Assert.IsFalse(repair.A.IsEmpty, "It has a button.");
+                Assert.IsTrue(repair.Bounds.Contains(repair.A));
+                Assert.IsTrue(layout.Targets.Contains(new SettingsTarget(SettingsRowId.Repair, SettingsPart.Button)), "The keyboard reaches it.");
+                int previousBottom = layout.Frame.Body.Top;
+                foreach (SettingsItem item in layout.Items)
+                {
+                    Assert.IsGreaterThanOrEqualTo(previousBottom, item.Bounds.Top, item.Row + " overlaps the one above at " + dpi + " dpi.");
+                    previousBottom = item.Bounds.Bottom;
+                }
+            }
+        });
+    }
+
+    [TestMethod]
+    public void TheRepairButtonAsksTheTrayToRepairAndNeverAsksForACheck()
+    {
+        RunSettings(
+            page =>
+            {
+                CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.Repair, SettingsPart.Button));
+
+                Assert.AreEqual(1, page.Host.RepairCalls);
+                Assert.AreEqual(0, page.Host.CheckCalls, "It is not the check row's button.");
+                Assert.AreEqual(0, page.Host.StartUpdateCalls);
+                Assert.AreEqual(WidgetCardView.Settings, page.Presenter.ViewForTest, "The card stays where it was: the result comes on a card of its own.");
+            },
+            host => host.Values = FakeCardHost.Defaults() with { InstallExists = true });
+    }
+
     [TestMethod]
     public void TheInstalledVersionIsTheCheckRowsSubLine()
     {

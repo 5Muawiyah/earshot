@@ -66,7 +66,8 @@ Top to bottom, with the exact wording. Separators sit between the groups.
 | `Set up battery` | Starts battery set-up. Reads `Set up battery (Bluetooth is off)` and is greyed out while Earshot's listener is not running. |
 | `Name your other device...` | Sets the label used in "On your <name>". |
 | `Choose device...` | Lists the Bluetooth devices paired to this PC, so you can point Earshot at a different one, for instance if your AirPods were renamed, so that the default match "AirPods" no longer fits. Choosing one pins it, and points the elevated worker at the same device. A device that cannot play audio from this PC, a phone for instance, is refused. |
-| `Set up Earshot...` | Runs the one-time setup. Offered before setup, for a damaged install, and when the running copy is newer than the installed one. |
+| `Set up Earshot...` | Runs the one-time setup. Offered only when nothing is installed. Once Earshot is installed, in any state, the next item takes its place. |
+| `Repair Earshot...` | Offered whenever Earshot is installed, healthy, damaged, older or newer than the running copy. One administrator prompt. See [Repair](#repair). |
 | `Check for updates` | Looks for a newer release. Downloads nothing. See [Updates](#updates). |
 | `Check automatically` | A tick, off by default. Contacts GitHub once a day when on. |
 | `Exit` | Closes Earshot. With Block at boot on and the AirPods not in use, it blocks the device nodes first. With Hand back ticked and the AirPods in use on this PC, it lets them go first, then blocks the device nodes. With Hand back off, which is the default, and the AirPods in use, it closes without blocking and says so: "Closed while in use, so the AirPods are not blocked." |
@@ -236,12 +237,45 @@ its reason. No live run yet (test 21 is pending).
 release on GitHub and says whether it is newer. **Check automatically** does
 the same once a day after startup; it is off by default because a check
 contacts GitHub. A check downloads nothing. Nothing downloads until you press
-**Update**, and Update is offered only by an installed copy of Earshot.
+**Update**. Update works from any copy that is running, including one unzipped
+in a download folder, as long as Earshot is installed in Program Files.
 
 When you press Update, Earshot downloads the release zip and checks it against
 the `.sha256` file published with it. The installed Earshot then checks the zip
 again, from a folder only administrators can write, and installs from there,
-after one administrator prompt.
+after one administrator prompt. The program that runs with that prompt is
+always the installed one, never the copy you were running.
+
+If nothing is installed, the card says to set up first and offers **Set up
+Earshot** on the same card. If something is installed but cannot be used (its
+program is missing, or its folder can be changed by a standard user), the card
+says to repair first and offers **Repair Earshot**.
+
+A copy that is not the installed one, started while Earshot is installed, says
+so on one card and offers **Switch to it**: this copy closes and the installed
+one starts. Such a copy never points **Open on startup** or the Start menu
+shortcut at itself, so the next start from either is the installed copy.
+
+### Repair
+
+**Repair Earshot...** is in the menu whenever Earshot is installed, and on the
+settings page in the Updates section. Earshot first reads every installed file
+and checks it against the list the release published, and checks that the
+install folder can be changed only by administrators. Then:
+
+- If every file matches, the installed Earshot repairs itself after one
+  administrator prompt: it registers the scheduled tasks, the hand-back service,
+  the machine settings and the device file again, exactly as setup does.
+- If a file is missing or does not match, nothing in the install folder is
+  trusted. Earshot downloads the release of the version you have installed,
+  checks it against the `.sha256` file published with it, and hands it to the
+  installed Earshot's update, so the files come back only from checked bytes.
+- If the installed `Earshot.exe` is missing, or its folder is not safe, or the
+  running copy is newer than the installed one, the running copy's own setup
+  puts a new install in place.
+
+Your settings, battery set-up and chosen AirPods are kept. How the repair ended
+is recorded where the next start can say it, in case the card has gone.
 
 What the checksum does and does not protect against: it catches a damaged or
 cut-short download, and a file that differs from what the release lists. It
@@ -412,6 +446,7 @@ The gear on the card opens it. Rows, top to bottom:
 | Shortcuts: Connect | Ctrl+Alt+Shift+A | Press keys to change, Clear to remove; a chord another app holds is named under the row |
 | Shortcuts: Disconnect | Ctrl+Alt+Shift+D | The same |
 | Updates: Check for updates | | A Check button, and the version you have |
+| Updates: Repair Earshot | | A Repair button. Only there while Earshot is installed |
 | Updates: Check automatically | Off | Contacts GitHub when on |
 
 The low battery alert's own on and off is a tick in the right-click menu.

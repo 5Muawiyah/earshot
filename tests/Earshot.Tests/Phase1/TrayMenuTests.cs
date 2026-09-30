@@ -281,6 +281,31 @@ public sealed class TrayMenuTests
     }
 
     [TestMethod]
+    public void RepairTakesThePlaceOfSetUpOnceAnInstallExistsAndRaisesItsOwnCommand()
+    {
+        StaThread.Run(() =>
+        {
+            BootBlockStatus block = Block(BlockState.NotSetUp);
+            using var menu = new TrayMenu(() => State(block: block));
+            CollectionAssert.DoesNotContain(AvailableTexts(menu), "Repair Earshot...");
+            var raised = new List<string>();
+            menu.SetUpClicked += (_, _) => raised.Add("setup");
+            menu.RepairClicked += (_, _) => raised.Add("repair");
+
+            block = Block(BlockState.Allowed);
+            menu.Refresh();
+
+            string[] texts = AvailableTexts(menu);
+            CollectionAssert.DoesNotContain(texts, "Set up Earshot...");
+            int repair = Array.IndexOf(texts, "Repair Earshot...");
+            Assert.AreEqual(Array.IndexOf(texts, "Choose device...") + 1, repair, "Repair sits where Set up sits.");
+            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Repair Earshot...").PerformClick();
+            Assert.HasCount(1, raised);
+            Assert.AreEqual("repair", raised[0]);
+        });
+    }
+
+    [TestMethod]
     public void CheckedEnabledAndIndeterminateReachTheItems()
     {
         StaThread.Run(() =>

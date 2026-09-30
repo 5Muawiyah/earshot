@@ -128,10 +128,11 @@ public sealed class SafeDecoratorsTests
         AssertRefused(await safe.SetBlockAtBootAsync(false));
         AssertRefused(await safe.SetDeviceAsync("0A1B2C3D4E8C"));
         AssertRefused(await safe.RunSetupAsync());
+        AssertRefused(await safe.RunRepairAsync(RepairVerb.Repair));
         AssertRefused(await safe.UninstallAsync());
 
         CollectionAssert.AreEqual(ReadCallsBlock, inner.Calls);
-        Assert.AreEqual(7, log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("Safe mode: no device actions.", StringComparison.Ordinal)));
+        Assert.AreEqual(8, log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("Safe mode: no device actions.", StringComparison.Ordinal)));
     }
 
     [TestMethod]

@@ -81,9 +81,23 @@ nodes again is quick: left-click the Earshot icon, then Connect on the card.
   that is playing. It never resumes anything.
 - **Updates.** **Check for updates** is in the menu and on the settings page.
   **Check automatically** is off by default, because a check contacts GitHub.
-  Nothing downloads until you press Update. See
+  Nothing downloads until you press Update. Update works from whichever copy
+  is running, including one unzipped in a download folder, as long as Earshot
+  is installed in Program Files: the update always runs the installed
+  program, never the running one. See
   [docs/architecture.md](docs/architecture.md#updates) for what the checksum
   does and does not protect against.
+- **Repair Earshot.** **Repair Earshot...** is in the menu, and on the
+  settings page beside Check for updates, whenever Earshot is installed, in
+  any state. It checks every installed file against the list the release
+  published, then registers the tasks and the service again. If a file is
+  missing or does not match, it downloads the release of the version you have
+  installed, checks it the way an update is checked, and installs it, so the
+  files come back only from checked bytes. One administrator prompt. Your
+  settings, battery set-up and chosen AirPods are kept. A copy run from a
+  download folder never points Open on startup or the Start menu shortcut at
+  itself once Earshot is installed, and offers to switch to the installed
+  copy.
 - **Spoken status and playing audio from a phone**, both off by default and
   neither with a live run.
 - **A small background service for the hand-back.** When the Earshot icon has
@@ -119,8 +133,13 @@ plain-English tour of the tray.
    hides once it does.
 4. Right click the earbud on the taskbar, or the tray icon if that is what
    shows, and choose **Set up Earshot...**. Windows shows one
-   administrator prompt. The item appears before setup, for a damaged
-   install, and when the running copy is newer than the installed one.
+   administrator prompt. The item appears only when nothing is installed.
+   Once Earshot is installed, in any state, the menu says **Repair
+   Earshot...** in its place.
+
+To update later, use **Check for updates** in the menu, from any copy. Nothing
+needs setting up again first. If an install is damaged, choose **Repair
+Earshot...**.
 
 Connect and disconnect do not need setup. Block at boot and Protect audio
 quality do, because both change the device through Earshot's SYSTEM tasks.
@@ -173,8 +192,13 @@ Install:
 3. Setup copies Earshot into C:\Program Files\Earshot and installs its scheduled tasks and a small Windows service that, when Block at boot and Hand back are both on, blocks the AirPods at shut down if Earshot itself could not.
 
 Update (my settings in %APPDATA%\Earshot and my battery set-up in %LOCALAPPDATA%\Earshot are kept):
-- If the installed Earshot's menu has "Check for updates", the simplest way is that item, then the Update button on the card that opens. It downloads the new release, checks its SHA-256 and shows one administrator prompt.
-- Otherwise do it by hand. Download and check the new release as above. I choose Exit from Earshot's menu. Run the new Earshot.exe from the unzipped folder, then I choose "Set up Earshot..." (it is offered when the running copy is newer than the installed one, or the install is damaged). One administrator prompt.
+- The simplest way is "Check for updates" in Earshot's menu, then the Update button on the card that opens. It works from whichever copy of Earshot is running, even one unzipped in a download folder, as long as Earshot is installed in C:\Program Files\Earshot. It downloads the new release, checks its SHA-256 and shows one administrator prompt. Nothing needs setting up first.
+- If the card says to set up first, nothing is installed: choose "Set up Earshot..." instead. If it says to repair first, the install is damaged: choose "Repair Earshot...".
+- Otherwise do it by hand. Download and check the new release as above. I choose Exit from Earshot's menu. Run the new Earshot.exe from the unzipped folder, then I choose "Repair Earshot..." (when the running copy is newer than the installed one it brings the install up to date from that copy). One administrator prompt.
+
+Repair (my settings and battery set-up are kept):
+- If Earshot is installed but something is wrong, I choose "Repair Earshot..." in its menu, or on the settings page beside "Check for updates". It checks every installed file against the release's own list. If they all match it registers the scheduled tasks and the service again. If a file is missing or different it downloads the release of the installed version, checks its SHA-256 and installs it. One administrator prompt.
+- If C:\Program Files\Earshot\Earshot.exe itself is missing, the same menu item repairs from the copy that is running, which must be an unzipped release I downloaded and checked as above.
 
 Uninstall:
 1. I turn "Open on startup" off in Earshot's menu, then choose Exit.

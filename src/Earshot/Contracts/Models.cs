@@ -80,6 +80,11 @@ public sealed record BootBlockStatus(
     // True when the running copy of Earshot.exe carries a newer file version than the installed one, so setup would
     // bring the install up to date. False when either version could not be read.
     public bool RunningCopyIsNewer { get; init; }
+
+    // True when an install exists in whatever state: the tasks are set up, or the install folder is there. Repair is
+    // offered for it, and Set up only when this is false. A read that failed says nothing, so it is not taken as
+    // "nothing is installed" by anything but the tasks.
+    public bool InstallExists { get; init; }
 }
 
 public sealed record AudioProtectionSnapshot(

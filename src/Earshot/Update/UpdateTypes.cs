@@ -64,5 +64,9 @@ internal interface IUpdateSource
 {
     Task<UpdateCheckResult> CheckAsync(CancellationToken ct);
 
+    // The release published for exactly this version, newer than the running program or not: a repair fetches the files
+    // of the version that is installed. Available with its release, or Failed. Downloads nothing.
+    Task<UpdateCheckResult> FindReleaseAsync(ReleaseVersion version, CancellationToken ct);
+
     Task<UpdateDownloadResult> DownloadAsync(ReleaseInfo release, IProgress<UpdateProgress>? progress, CancellationToken ct);
 }

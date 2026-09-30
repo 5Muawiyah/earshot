@@ -121,7 +121,7 @@ public sealed class TrayStreamingTests
                     "Speak status", "-",
                     "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold",
                     "Set up battery (Bluetooth is off)", "Name your other device...", "-",
-                    "Choose device...", "-",
+                    "Choose device...", "Repair Earshot...", "-",
                     "Check for updates", "Check automatically", "-",
                     "Exit"),
                 texts);

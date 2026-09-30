@@ -45,6 +45,11 @@ public enum AudioProtectionState { Unknown, Protected, NotProtected, Partial }
 
 public enum OpStatus { Success, AlreadyInState, Partial, Failed, NotAttempted }
 
+// Which elevated program and command line a repair uses: the installed copy's repair verb; the installed copy's install
+// verb, which a program from before the repair verb already runs from its own folder as the same repair; or the running
+// copy's own setup, for when the installed program is missing or cannot be trusted.
+public enum RepairVerb { Repair, Install, FromThisCopy }
+
 public enum ConnectOutcome
 {
     Confirmed,          // render endpoint reached the target state within the timeout

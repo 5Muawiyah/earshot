@@ -26,6 +26,9 @@ internal sealed class UpdateTrayHarness : IDisposable
     // path), which is what an installed tray looks like; the file exists only as far as the fake FileExists says.
     public const string InstalledExe = @"C:\Program Files\Earshot\Earshot.exe";
 
+    // A copy of the release unzipped in a download folder: what the tray runs from when it is not the installed one.
+    public const string OtherExe = @"C:\Users\Someone\Downloads\Earshot-1.2.0\Earshot\Earshot.exe";
+
     private readonly TempFolder _folder = new();
 
     public UpdateTrayHarness(
@@ -34,6 +37,13 @@ internal sealed class UpdateTrayHarness : IDisposable
         Action<FakeUpdateSource>? source = null,
         bool pinned = true,
         bool installedCopy = true,
+        bool otherCopy = false,
+        bool installProgramMissing = false,
+        Action<FakeStartupRegistry>? startup = null,
+        Func<string, Earshot.Boot.Gate.InstalledFilesReport>? checkFiles = null,
+        Version? installedVersion = null,
+        Action<FakeBlockController>? block = null,
+        string? installFolderSddl = null,
         Func<IUpdateSource>? sourceFactory = null,
         TimeProvider? time = null,
         UpdateOutcomeSource? outcomeSource = null)
@@ -42,9 +52,11 @@ internal sealed class UpdateTrayHarness : IDisposable
         Ui = new WindowsFormsSynchronizationContext();
         SynchronizationContext.SetSynchronizationContext(Ui);
         source?.Invoke(Source);
+        block?.Invoke(Block);
 
         Monitor.Current = NoDevice();
         Startup.Run[StartupRegistration.ValueName] = StartupRegistration.CommandFor(TrayHarness.ExePath);
+        startup?.Invoke(Startup);
         SettingsPath = _folder.File("settings.json");
         Settings = new JsonSettingsStore(SettingsPath, Log);
         Settings.Update(s =>
@@ -68,7 +80,11 @@ internal sealed class UpdateTrayHarness : IDisposable
             Cards = Cards,
         };
 
-        var options = new TrayStartOptions(false, Settings.LastLoadStatus, installedCopy ? InstalledExe : TrayHarness.ExePath, Startup)
+        // installedCopy: the tray runs from the installed program. otherCopy: an install is there and the tray runs from
+        // another folder (a download). Neither: nothing is installed.
+        bool installPresent = installedCopy || otherCopy || installProgramMissing;
+        bool programPresent = installPresent && !installProgramMissing;
+        var options = new TrayStartOptions(false, Settings.LastLoadStatus, installedCopy && !otherCopy ? InstalledExe : otherCopy ? OtherExe : TrayHarness.ExePath, Startup)
         {
             InstalledExePath = InstalledExe,
             ShowIcon = false,
@@ -76,7 +92,15 @@ internal sealed class UpdateTrayHarness : IDisposable
             CursorPosition = () => TrayHarness.ClickPoint,
             TickCount = () => 0,
             DoubleClickTime = TimeSpan.FromMilliseconds(500),
-            FileExists = path => installedCopy && string.Equals(path, InstalledExe, StringComparison.OrdinalIgnoreCase),
+            FileExists = path => programPresent && string.Equals(path, InstalledExe, StringComparison.OrdinalIgnoreCase),
+            DirectoryExists = path => installPresent && string.Equals(path, Path.GetDirectoryName(InstalledExe), StringComparison.OrdinalIgnoreCase),
+            InstallFolderSecurity = new FixedFolderSecurity(installFolderSddl ?? FixedFolderSecurity.AdministratorsOnly),
+            CheckInstalledFiles = path =>
+            {
+                CheckedFolders.Add(path);
+                return (checkFiles ?? (_ => MatchingFiles))(path);
+            },
+            ReadInstalledVersion = _ => installedVersion ?? RepairPlanner.RepairVerbSince.ToVersion(),
             NativeHotkeys = new FakeNativeHotkeys(),
             VoiceEngineFactory = () => new Earshot.Tests.Voice.FakeSpeechEngine(),
             StreamingPlatformFactory = _ => new Earshot.Tests.Streaming.FakeStreamingPlatform(),
@@ -121,6 +145,11 @@ internal sealed class UpdateTrayHarness : IDisposable
 
     public FakeUpdateSource Source { get; } = new();
 
+    // What the check of the installed files was asked to read, and what it says unless a test says otherwise.
+    public List<string> CheckedFolders { get; } = new();
+
+    public static readonly Earshot.Boot.Gate.InstalledFilesReport MatchingFiles = new(true, false, [], []);
+
     public FakeUpdateLauncher Launcher { get; } = new();
 
     // The clock the tray's daily check waits on: it moves only when a test moves it.
@@ -163,5 +192,26 @@ internal sealed class UpdateTrayHarness : IDisposable
         SynchronizationContext.SetSynchronizationContext(null);
         Ui.Dispose();
         _folder.Dispose();
+    }
+}
+
+// Answers the security of any folder with one descriptor, read only. Nothing is created or read from disk, so a test
+// never looks at the owner's Program Files.
+internal sealed class FixedFolderSecurity(string sddl) : Earshot.Boot.Gate.IFolderSecurity
+{
+    // The install folder as Windows leaves it: SYSTEM and Administrators full control, Users read and execute.
+    public const string AdministratorsOnly = "O:BAG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1200a9;;;BU)(A;OICIIOID;GA;;;CO)";
+
+    // A folder a standard user can change: Users have full control.
+    public const string UsersCanWrite = "O:BAG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;FA;;;BU)";
+
+    public Earshot.Contracts.StepOutcome CreateHardened(string path) => throw new InvalidOperationException("A fixed security only reads.");
+
+    public Earshot.Contracts.StepOutcome CreateWithSddl(string path, string sddl) => throw new InvalidOperationException("A fixed security only reads.");
+
+    public Earshot.Contracts.StepOutcome ReadSddl(string path, out string? result)
+    {
+        result = sddl;
+        return new Earshot.Contracts.StepOutcome("folder-acl-read", true, 0, "S_OK", path);
     }
 }

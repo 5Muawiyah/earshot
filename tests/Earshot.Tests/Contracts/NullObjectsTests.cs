@@ -45,6 +45,7 @@ public sealed class NullObjectsTests
             await controller.SetBlockAtBootAsync(false),
             await controller.SetDeviceAsync("0A1B2C3D4E8C"),
             await controller.RunSetupAsync(),
+            await controller.RunRepairAsync(RepairVerb.Repair),
             await controller.UninstallAsync(),
         ];
         foreach (ControllerResult result in results)

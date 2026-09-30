@@ -23,7 +23,8 @@ internal sealed record CardSettingsValues(
     string? InstalledVersion,    // "1.2.0", or null when the running version cannot be read
     bool CheckAutomatically,
     bool InEarProofMissing,
-    bool LidProofMissing)
+    bool LidProofMissing,
+    bool InstallExists = false)    // an install exists in any state, so Repair is offered beside Check for updates
 {
     // Which display the gauge is on (GaugeDisplayChoice.MainDisplay, "", for the main one), the list the row offers
     // and a line under the row when the choice cannot be honoured now. Init-only members, so the positional list above
@@ -89,6 +90,14 @@ internal interface IWidgetCardHost
 
     void TryUpdateAgain();
 
+    // The update page's other buttons, for when there is no install to update: set Earshot up, repair it, or switch to
+    // the installed copy from one that is not.
+    void SetUpEarshot();
+
+    void RepairEarshot();
+
+    void SwitchToInstalled();
+
     // Raised, on any thread, whenever the update flow moves.
     event EventHandler? UpdateChanged;
 }
@@ -111,6 +120,7 @@ internal enum SettingsRowId
     Connect,
     Disconnect,
     CheckForUpdates,
+    Repair,
     CheckAutomatically,
 }
 
@@ -142,6 +152,8 @@ internal sealed record ShortcutChange(CardShortcut Shortcut, Keys Key, bool Cont
 internal sealed record ShortcutClear(CardShortcut Shortcut) : SettingChange;
 
 internal sealed record CheckRequest : SettingChange;
+
+internal sealed record RepairRequest : SettingChange;
 
 // How wide a run of text is and how many lines it wraps to, so the layout can size rows without drawing. The
 // card's own is measured with GDI+ in the card's font; a test hands in the same over an off-screen bitmap.
@@ -361,6 +373,17 @@ internal static class SettingsPageLayout
             SettingsRowId.CheckForUpdates, checkLabel, installed, subIsProblem: false, subFullWidth: false, checkW,
             (top, _) => (new Rectangle(right - checkW, top, checkW, control), Rectangle.Empty, Rectangle.Empty),
             SettingsPart.Button);
+
+        // Repair is offered whenever an install exists, in any state, in the row under the check.
+        if (values.InstallExists)
+        {
+            int repairW = measure.Width(WidgetCopy.RepairButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+            Row(
+                SettingsRowId.Repair, WidgetCopy.RepairEarshot, WidgetCopy.RepairSub, subIsProblem: false, subFullWidth: false, repairW,
+                (top, _) => (new Rectangle(right - repairW, top, repairW, control), Rectangle.Empty, Rectangle.Empty),
+                SettingsPart.Button);
+        }
+
         ToggleRow(SettingsRowId.CheckAutomatically, WidgetCopy.CheckAutomatically, null);
 
         int bodyHeight = y + CardPlacement.Scale(BodyBottomAt96, dpi);

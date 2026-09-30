@@ -24,8 +24,10 @@ internal sealed record UpdateOutcomeSource(string MachineFolder, string ShownFil
 // When the hand-over has started the administrator prompt's program, this program closes through the same orderly
 // Exit as the menu's, because the install replaces the install folder and cannot while this one runs from it: a
 // process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail. The
-// program the prompt starts is the installed Earshot.exe, and it waits for this process to end (by its id) before it
-// touches that folder. So Update is only offered to the tray that is the installed copy.
+// program the prompt starts is always the installed Earshot.exe, never this copy when this copy is somewhere else, and
+// it waits for this process to end (by its id) before it touches that folder. So any copy can hand over once the
+// installed program is there and its folder is administrators-only; with no such install the card offers Set up or
+// Repair instead.
 internal sealed partial class TrayContext
 {
     private Func<IUpdateSource>? _updateSourceFactory;
@@ -36,6 +38,8 @@ internal sealed partial class TrayContext
     private string? _updateInstalledExe;
     private string? _updateRunningExe;
     private Func<string, bool> _updateFileExists = File.Exists;
+    private Func<string, bool> _updateFolderExists = Directory.Exists;
+    private IFolderSecurity _installFolderSecurity = new NtfsFolderSecurity();
     private Task? _updateAutoTask;
     private ReleaseVersion? _updateAnnounced;
 
@@ -55,15 +59,79 @@ internal sealed partial class TrayContext
         _updateInstalledExe = options.InstalledExePath;
         _updateRunningExe = options.ExePath;
         _updateFileExists = options.FileExists;
+        _updateFolderExists = options.DirectoryExists;
+        _installFolderSecurity = options.InstallFolderSecurity;
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
+        WireRepair(options);
         RemoveStaleUpdateStaging();
         ApplyUpdates();
         if (options.UpdateOutcome is { } outcomeSource)
         {
             _registry.UiPost(() => ShowUpdateOutcomeOnce(outcomeSource));
         }
+
+        // Safe mode and a redirected data folder are runs for tests and probes: never offered a switch that would exit
+        // and start the owner's real install.
+        if (!_registry.SafeMode && !_updateDataRootRedirected)
+        {
+            _registry.UiPost(OfferSwitchToInstalledCopy);
+        }
     }
+
+    // Set when the person chose to switch to the installed copy: the program to start once this one has exited. The
+    // installed copy would find this one's single-instance lock still held and end at once if it were started now, so
+    // Program starts it after the lock is released.
+    internal string? StartAfterExit { get; private set; }
+
+    // A copy that is not the installed one, started while an install exists, says so once on the update page of the
+    // card (or a short message card when there is no card) and offers the switch. It changes nothing by itself.
+    private void OfferSwitchToInstalledCopy()
+    {
+        if (_closing || RunsFromInstalledCopy())
+        {
+            return;
+        }
+
+        InstallAssessment install = AssessInstall();
+        if (install.State != InstallState.Usable)
+        {
+            return;
+        }
+
+        _log.Info("This copy, " + _updateRunningExe + ", is not the installed one, " + _updateInstalledExe + ". It does not point Open on startup or the Start menu shortcut at itself.");
+        UpdateController? updates = EnsureUpdates();
+        updates?.OfferSwitch();
+        if (updates is null || !RequestUpdatePageFromWidget())
+        {
+            ShowCard(TrayStatus.AppName, UpdateCopy.SwitchMessage, CardPlace.NearTray);
+        }
+    }
+
+    // The Switch button: this copy exits, in the order Exit always takes, and Program starts the installed copy, not
+    // elevated, once this one has let go of its lock.
+    internal void SwitchToInstalledCopy()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        InstallAssessment install = AssessInstall();
+        if (install.State != InstallState.Usable || _updateInstalledExe is not { } installed)
+        {
+            _log.Warn("Switch: there is no installed copy to start (" + install.Detail + ").");
+            ShowCard(TrayStatus.AppName, UpdateCopy.RepairFirstNotice, CardPlace.NearTray);
+            return;
+        }
+
+        StartAfterExit = installed;
+        _log.Info("Switch: this copy is closing so the installed copy, " + installed + ", can start.");
+        _ = ExitAsync(CardPlace.NearTray, "Switching to the installed copy.");
+    }
+
+    // The update page's Set up button, for when there is no install to update.
+    internal void SetUpFromCard() => Start("setup (card)", RunSetupAsync);
 
     // How the last update ended, said once, at the start after it. The elevated update has ended by then and the tray
     // that started it is gone, so the outcome is read from the machine folder, where only administrators write. It
@@ -92,11 +160,15 @@ internal sealed partial class TrayContext
             return;
         }
 
-        string? notice = UpdateOutcomes.NoticeFor(outcome, _time.GetUtcNow());
+        // An update that was a repair says so in the repair's words (the note beside the shown file, written before it).
+        bool repairByDownload = OutcomeIsOfARepairByDownload(outcome);
+        string? notice = UpdateOutcomes.NoticeFor(outcome, _time.GetUtcNow(), repairByDownload);
         if (notice is null)
         {
             return;
         }
+
+        DeleteRepairNote();
 
         _log.Info("Update: the last update ended as " + outcome.Kind + (outcome.Code.Length > 0 ? " (" + outcome.Code + ")" : "") + ".");
         ShowCard(TrayStatus.AppName, notice, CardPlace.NearTray);
@@ -177,7 +249,8 @@ internal sealed partial class TrayContext
 
             IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, running.Value, UpdateStagingRoot());
             var controller = new UpdateController(
-                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, running.Value, _log);
+                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, running.Value, _log,
+                () => AssessInstall().State);
             controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
             controller.Changed += (_, _) => RaiseCardUpdateChanged();
             _updates = controller;
@@ -185,19 +258,22 @@ internal sealed partial class TrayContext
         }
     }
 
-    // The installed Earshot.exe and this process's id, or null when this program is not the installed copy: not set up
-    // (no file at the installed path), or started from another folder. An update installs over the installed copy and
-    // is started from it, so only the tray that runs from it can hand over.
+    // What is in Program Files, read without changing anything. Each call looks at the disk.
+    private InstallAssessment AssessInstall() =>
+        InstalledCopy.Assess(_updateInstalledExe, _updateFileExists, _updateFolderExists, _installFolderSecurity);
+
+    // Whether this process is the installed copy.
+    private bool RunsFromInstalledCopy() => InstalledCopy.SameFile(_updateInstalledExe, _updateRunningExe);
+
+    // The installed Earshot.exe and this process's id, or null when there is no installed program to hand over to:
+    // nothing is installed, or what is there is missing its program or has a folder that is not administrators-only. An
+    // update installs over the installed copy and is started from it, never from this program's own folder, which may
+    // be one the signed-in user can write. So whichever copy is running hands over to the installed program, and this
+    // process's id is what that elevated run waits for before it touches the install folder.
     private HandoverTarget? CurrentHandoverTarget()
     {
-        string? installed = _updateInstalledExe;
-        string? running = _updateRunningExe;
-        if (installed is null || running is null || !_updateFileExists(installed))
-        {
-            return null;
-        }
-
-        return string.Equals(Path.GetFullPath(installed), Path.GetFullPath(running), StringComparison.OrdinalIgnoreCase)
+        InstallAssessment install = AssessInstall();
+        return install.State == InstallState.Usable && _updateInstalledExe is { } installed
             ? new HandoverTarget(installed, Environment.ProcessId)
             : null;
     }
@@ -283,7 +359,25 @@ internal sealed partial class TrayContext
             return;
         }
 
-        StartUpdate();
+        Start("update (try again)", RunTryAgainAsync);
+    }
+
+    // What Try again does after a failed download or hand-over: for an update, the same as Update; for a repair, it looks
+    // for the release of the installed version again, because a repair keeps no release from an earlier check.
+    private async Task RunTryAgainAsync(CardPlace place)
+    {
+        UpdateController? updates = EnsureUpdates();
+        if (updates is null)
+        {
+            ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
+            return;
+        }
+
+        await updates.TryAgainAsync(_lifetime.Token);
+        if (updates.Stage != UpdateStage.HandingOver)
+        {
+            ShowUpdateResult(updates.View, place);
+        }
     }
 
     private async Task RunUpdateAsync(CardPlace place)

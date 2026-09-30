@@ -84,7 +84,8 @@ internal sealed partial class TrayContext
                 running?.ToString(),
                 settings.CheckForUpdatesAutomatically,
                 InEarProofMissing: !snapshot.AutoPauseAvailable,
-                LidProofMissing: snapshot.LidOpen is null)
+                LidProofMissing: snapshot.LidOpen is null,
+                InstallExists: _tray.BlockStatus is { InstallExists: true })
             {
                 GaugeDisplayId = widget.GaugeDisplay,
                 GaugeDisplayOptions = displayOptions,
@@ -191,6 +192,12 @@ internal sealed partial class TrayContext
         public void CancelUpdate() => _tray._updates?.Cancel();
 
         public void TryUpdateAgain() => _tray.TryUpdateAgainFromCard();
+
+        public void SetUpEarshot() => _tray.SetUpFromCard();
+
+        public void RepairEarshot() => _tray.RepairFromCard();
+
+        public void SwitchToInstalled() => _tray.SwitchToInstalledCopy();
 
         private void Write(string what, Action<EarshotSettings> mutate, CardPlace place)
         {

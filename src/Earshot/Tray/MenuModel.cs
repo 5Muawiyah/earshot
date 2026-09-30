@@ -45,6 +45,7 @@ internal sealed record MenuState(
     MenuItemState NameOtherDeviceItem,
     MenuItemState ChooseDevice,
     MenuItemState SetUp,
+    MenuItemState Repair,
     MenuItemState CheckForUpdates,
     MenuItemState CheckAutomatically,
     MenuItemState Exit);
@@ -69,6 +70,7 @@ internal static class MenuModel
     public const string SpeakStatusNoVoice = AnnouncerCopy.MenuItemNoVoice;
     public const string ChooseDevice = "Choose device...";
     public const string SetUpEarshot = "Set up Earshot...";
+    public const string RepairEarshot = "Repair Earshot...";
     // Kept exactly as UpdateCopy has it, referenced rather than duplicated, so the menu and the update page never
     // word the same thing two ways.
     public const string CheckForUpdates = Earshot.Update.UpdateCopy.CheckRowLabel;
@@ -155,6 +157,7 @@ internal static class MenuModel
             NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
             SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.OffersSetUp(block)),
+            Repair: new MenuItemState(RepairEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.OffersRepair(block)),
             // A check reads GitHub and touches no device, so a connect in flight does not stop it; only another
             // update step does.
             CheckForUpdates: new MenuItemState(CheckForUpdates, Checked: false, Enabled: !updateInProgress, Visible: true),

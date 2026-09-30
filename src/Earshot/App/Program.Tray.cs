@@ -6,6 +6,7 @@ using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Interop;
 using Earshot.Tray;
+using Earshot.Update;
 using Earshot.Widget.Alert;
 
 namespace Earshot;
@@ -107,15 +108,22 @@ internal static partial class Program
         }
 
         _trayInstance = mutex;
+        string? startAfterExit = null;
         try
         {
-            return RunPrimaryTray(paths, log, startedAtLogon);
+            return RunPrimaryTray(paths, log, startedAtLogon, out startAfterExit);
         }
         finally
         {
             mutex.ReleaseMutex();
             mutex.Dispose();
             _trayInstance = null;
+
+            // The switch to the installed copy: started now that the lock is free, so it becomes the tray.
+            if (startAfterExit is not null)
+            {
+                InstalledCopyStarter.Start(startAfterExit, log);
+            }
         }
     }
 
@@ -184,8 +192,9 @@ internal static partial class Program
         }
     }
 
-    private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon)
+    private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon, out string? startAfterExit)
     {
+        startAfterExit = null;
         EventWaitHandle showEvent;
         try
         {
@@ -284,6 +293,7 @@ internal static partial class Program
                 registry.Monitor.Start();
                 log.Info("Tray started" + (paths.IsSafeMode ? " in safe mode" : "") + ". Settings: " + settings.FilePath + " (" + settings.LastLoadStatus + ").");
                 Application.Run(context);
+                startAfterExit = context.StartAfterExit;
 
                 // Exit waits for actions in flight before it ends the loop; anything left here outlived that wait.
                 log.Info("Tray message loop ended." + (context.PendingActions > 0

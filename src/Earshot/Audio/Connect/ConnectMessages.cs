@@ -34,7 +34,7 @@ internal static class ConnectMessages
     public const string NotFound = "AirPods not found. Connect them to this PC once from Windows Bluetooth settings.";
 
     // Blocked and the Allow could not run because the gate task is missing. Used by the block coordinator.
-    public const string BootBlockNotSetUp = "Boot block is not set up yet. Choose Set up Earshot.";
+    public const string BootBlockNotSetUp = "Boot block is not set up yet. Choose Set up Earshot or Repair Earshot.";
 
     // The device changed mid-operation (AUDCLNT_E_DEVICE_INVALIDATED on the A2DP side), or its render endpoint
     // went, or became NOTPRESENT during a connect.

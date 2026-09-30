@@ -70,7 +70,9 @@ internal sealed class CurrentUserStartupRegistry : IStartupRegistry
 //
 // The value starts the installed copy once setup has put one in %ProgramFiles%\Earshot, and the running copy
 // until then. The installed copy is the one the scheduled tasks run and only administrators can change, while
-// a download folder can be moved or deleted, which would silently stop Earshot opening at sign-in.
+// a download folder can be moved or deleted, which would silently stop Earshot opening at sign-in. A copy that is
+// not the installed one never points the value at itself once an install exists, even one whose program is missing:
+// there is then no target, and the repair is what puts the installed program back.
 internal sealed class StartupRegistration
 {
     public const string ValueName = "Earshot";
@@ -82,6 +84,7 @@ internal sealed class StartupRegistration
     public const string TurnedOffInWindowsMessage = "Turned off in Windows. Turn it on in Settings > Apps > Startup.";
     public const string PathTooLongMessage = "The Earshot folder path is too long to open on startup.";
     public const string NoExePathMessage = "Earshot could not find its own program file.";
+    public const string InstallDamagedMessage = "Earshot is installed but its program is missing. Choose Repair Earshot first.";
     public const string ChangeFailedMessage = "Open on startup could not be changed.";
     public const string OnMessage = "Opens on startup";
     public const string OffMessage = "Does not open on startup";
@@ -93,10 +96,11 @@ internal sealed class StartupRegistration
     private readonly string? _runningExePath;
     private readonly string? _installedExePath;
     private readonly Func<string, bool> _fileExists;
+    private readonly Func<string, bool> _folderExists;
 
     public StartupRegistration(
         IStartupRegistry registry, ILog log, bool safeMode, string? exePath, bool redirected = false,
-        string? installedExePath = null, Func<string, bool>? fileExists = null)
+        string? installedExePath = null, Func<string, bool>? fileExists = null, Func<string, bool>? folderExists = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(log);
@@ -107,11 +111,21 @@ internal sealed class StartupRegistration
         _runningExePath = exePath;
         _installedExePath = installedExePath;
         _fileExists = fileExists ?? File.Exists;
+        _folderExists = folderExists ?? Directory.Exists;
     }
 
-    // The file the Run value starts: the installed copy when there is one, otherwise this copy.
+    // The file the Run value starts: the installed copy when there is one, otherwise this copy, and nothing at all when
+    // an install exists whose program is missing and this is not it.
     public string? TargetExePath =>
-        !string.IsNullOrWhiteSpace(_installedExePath) && _fileExists(_installedExePath) ? _installedExePath : _runningExePath;
+        !string.IsNullOrWhiteSpace(_installedExePath) && _fileExists(_installedExePath) ? _installedExePath
+        : InstallDamaged ? null
+        : _runningExePath;
+
+    // An install is there, but its program is not, and this copy is not the installed one.
+    public bool InstallDamaged =>
+        !string.IsNullOrWhiteSpace(_installedExePath) && !_fileExists(_installedExePath) &&
+        !string.Equals(_installedExePath, _runningExePath, StringComparison.OrdinalIgnoreCase) &&
+        Path.GetDirectoryName(_installedExePath) is { Length: > 0 } folder && _folderExists(folder);
 
     // True when this run must not write the Run value at all.
     public bool WritesBlocked => _safeMode || _redirected;
@@ -159,7 +173,7 @@ internal sealed class StartupRegistration
         string? exePath = TargetExePath;
         if (string.IsNullOrWhiteSpace(exePath))
         {
-            _log.Warn(NoExePathMessage + " The Open on startup Run value was not checked.");
+            _log.Warn((InstallDamaged ? InstallDamagedMessage : NoExePathMessage) + " The Open on startup Run value was not checked.");
             return false;
         }
 
@@ -240,8 +254,9 @@ internal sealed class StartupRegistration
         string? exePath = TargetExePath;
         if (string.IsNullOrWhiteSpace(exePath))
         {
-            _log.Error(NoExePathMessage + " Open on startup was not turned on.");
-            return new ControllerResult(OpStatus.NotAttempted, NoExePathMessage, [StepOutcomes.NotAttempted(action, NoExePathMessage)]);
+            string message = InstallDamaged ? InstallDamagedMessage : NoExePathMessage;
+            _log.Error(message + " Open on startup was not turned on.");
+            return new ControllerResult(OpStatus.NotAttempted, message, [StepOutcomes.NotAttempted(action, message)]);
         }
 
         string command = CommandFor(exePath);

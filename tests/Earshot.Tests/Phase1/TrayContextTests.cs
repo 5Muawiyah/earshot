@@ -1819,6 +1819,15 @@ internal sealed class FakeBlockController : IBlockController
 
     public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default) => Record("setup");
 
+    // Runs inside a repair, before it answers: where a test plays what the elevated run does (it records its outcome).
+    public Action? OnRepaired { get; set; }
+
+    public Task<ControllerResult> RunRepairAsync(RepairVerb verb, CancellationToken ct = default)
+    {
+        OnRepaired?.Invoke();
+        return Record(verb switch { RepairVerb.Repair => "repair", RepairVerb.Install => "repair-install", _ => "repair-setup" });
+    }
+
     public Task<ControllerResult> UninstallAsync(CancellationToken ct = default) => Record("uninstall");
 
     private Task<ControllerResult> Record(string call)

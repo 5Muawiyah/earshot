@@ -7,8 +7,9 @@ internal enum WidgetCardView { Main, SetupListening, SetupPick, SetupDone, Setup
 
 internal enum SetupIcon { None, Spinner, Check, Caution, Down, Shield }
 
-// Update and Check are the update page's buttons; the rest are the set-up's, and Back is any page's back button.
-internal enum SetupAction { Cancel, Save, TryAgain, Done, Back, Update, Check }
+// Update, Check, SetUp, Repair and Switch are the update page's buttons; the rest are the battery set-up's, and Back is
+// any page's back button.
+internal enum SetupAction { Cancel, Save, TryAgain, Done, Back, Update, Check, SetUp, Repair, Switch }
 
 internal sealed record SetupButton(string Label, bool Primary, SetupAction Action);
 

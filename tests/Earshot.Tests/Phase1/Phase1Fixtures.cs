@@ -64,7 +64,7 @@ internal static class Phase1Fixtures
     }
 
     public static BootBlockStatus Block(BlockState state, bool blockAtBoot = true) =>
-        new(state, AirPodsContainer, [], TasksInstalled: state != BlockState.NotSetUp, blockAtBoot);
+        new(state, AirPodsContainer, [], TasksInstalled: state != BlockState.NotSetUp, blockAtBoot) { InstallExists = state != BlockState.NotSetUp };
 
     public static AudioProtectionSnapshot Protection(AudioProtectionState state) =>
         new(state, HandsfreeInstalled: state is AudioProtectionState.NotProtected or AudioProtectionState.Partial, HeadsetInstalled: false);

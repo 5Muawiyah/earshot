@@ -66,6 +66,20 @@ internal sealed record TrayStartOptions(
     // Whether a file exists, for the installed copy.
     public Func<string, bool> FileExists { get; init; } = File.Exists;
 
+    // Whether a folder exists, for the install folder.
+    public Func<string, bool> DirectoryExists { get; init; } = Directory.Exists;
+
+    // Reads the install folder's security, read only, before the tray hands anything to the program in it. A test gives
+    // it a fake so no test reads the owner's Program Files.
+    public Earshot.Boot.Gate.IFolderSecurity InstallFolderSecurity { get; init; } = new Earshot.Boot.Gate.NtfsFolderSecurity();
+
+    // Hashes every installed file against the published list, read only, for Repair. The real check reads the install
+    // folder; a test gives it a fake, and the real one has its own tests against a temporary install tree.
+    public Func<string, Earshot.Boot.Gate.InstalledFilesReport> CheckInstalledFiles { get; init; } = Earshot.Boot.Gate.InstalledFileCheck.Check;
+
+    // The file version of the installed Earshot.exe, or null when it cannot be read.
+    public Func<string, Version?> ReadInstalledVersion { get; init; } = static path => new Earshot.Boot.InstalledFileReader().Read(path).Version;
+
     // The RegisterHotKey/UnregisterHotKey caller HotkeyManager uses, injected the way IStartupRegistry is:
     // the real one by default, a fake in tests, so a tray-level test never registers a real global hotkey.
     public INativeHotkeys NativeHotkeys { get; init; } = new User32Hotkeys();
@@ -341,7 +355,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _snapshot = registry.Monitor.Current;
         _devices = new BluetoothDeviceList(_log);
         _startup = new StartupRegistration(options.StartupRegistry, _log, registry.SafeMode, options.ExePath, options.DataRootRedirected,
-            options.InstalledExePath, options.FileExists);
+            options.InstalledExePath, options.FileExists, options.DirectoryExists);
         _icons = new TrayIconFactory(_log, new ThemeReader(_log));
 
         _window = new ShellMessageWindow(_log);

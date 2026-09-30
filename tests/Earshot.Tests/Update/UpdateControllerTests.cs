@@ -20,13 +20,13 @@ public sealed class UpdateControllerTests
 
         public const int TrayPid = 4321;
 
-        public Rig(bool pinned = true, string? unavailable = null, bool installedCopy = true)
+        public Rig(bool pinned = true, string? unavailable = null, bool installedCopy = true, InstallState installState = InstallState.Nothing)
         {
             Controller = new UpdateController(
                 Source, Launcher,
                 () => pinned ? new HandoverIdentity(TestUsers.Sid, "0A1B2C3D4E8C", new Guid("5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13")) : null,
                 () => installedCopy ? new HandoverTarget(InstalledExe, TrayPid) : null,
-                () => unavailable, Installed, Log);
+                () => unavailable, Installed, Log, () => installedCopy ? InstallState.Usable : installState);
             Controller.Changed += (_, _) => Stages.Add(Controller.View);
         }
 
@@ -216,16 +216,20 @@ public sealed class UpdateControllerTests
         Assert.IsTrue(Directory.Exists(staged.WorkFolder), "A handed-over update is not deleted: the elevated program reads the zip from it.");
     }
 
+    // With nothing installed there is no program to hand over to. The card says to set up first and offers that, in
+    // place of Update, rather than ending in a dead end.
     [TestMethod]
-    public async Task AProgramThatIsNotTheInstalledCopyDoesNotOfferUpdateAndSaysToSetUpFirst()
+    public async Task WithNothingInstalledTheUpdateSaysToSetUpFirstAndOffersSetUpOnTheSameCard()
     {
-        using var rig = new Rig(installedCopy: false);
+        using var rig = new Rig(installedCopy: false, installState: InstallState.Nothing);
         FoundNewer(rig);
 
         await rig.Controller.CheckAsync(CancellationToken.None);
 
         Assert.AreEqual(UpdateStage.Available, rig.Controller.Stage);
-        Assert.IsEmpty(rig.Controller.View.Buttons, "No Update button is offered.");
+        UpdateButton button = rig.Controller.View.Buttons.Single();
+        Assert.AreEqual(UpdateButtonRole.SetUp, button.Role, "Update is not offered, Set up is.");
+        Assert.AreEqual("Set up Earshot", button.Label);
         Assert.AreEqual("Set up Earshot first, then update.", rig.Controller.View.Notice);
         Assert.AreEqual("Set up Earshot first, then update.", rig.Controller.View.CardText);
 
@@ -234,6 +238,84 @@ public sealed class UpdateControllerTests
         Assert.AreEqual(0, rig.Source.DownloadCalls, "Nothing is downloaded for an update that cannot be handed over.");
         Assert.IsEmpty(rig.Launcher.Launches);
         Assert.AreEqual("Set up Earshot first, then update.", rig.Controller.View.Notice);
+    }
+
+    // Something is installed but the program in it is missing or its folder is not administrators-only: the update is
+    // not handed to it, and the card offers the repair in place of Update.
+    [TestMethod]
+    public async Task AnInstallThatCannotBeUsedSaysToRepairFirstAndOffersRepair()
+    {
+        using var rig = new Rig(installedCopy: false, installState: InstallState.Unusable);
+        FoundNewer(rig);
+
+        await rig.Controller.CheckAsync(CancellationToken.None);
+
+        UpdateButton button = rig.Controller.View.Buttons.Single();
+        Assert.AreEqual(UpdateButtonRole.Repair, button.Role);
+        Assert.AreEqual("Repair Earshot", button.Label);
+        Assert.AreEqual("Repair Earshot first, then update.", rig.Controller.View.Notice);
+
+        await rig.Controller.UpdateAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, rig.Source.DownloadCalls);
+        Assert.IsEmpty(rig.Launcher.Launches);
+    }
+
+    // The staged update can also meet a missing install at the moment of hand-over (the install changed while it
+    // downloaded): nothing is handed over, the download is discarded and the card offers the way to get an install.
+    [TestMethod]
+    public async Task AnInstallThatVanishesDuringTheDownloadIsNotHandedOverToAndOffersSetUp()
+    {
+        bool installed = true;
+        using var rig = new Rig(installedCopy: true);
+        var target = new Func<HandoverTarget?>(() => installed ? new HandoverTarget(Rig.InstalledExe, Rig.TrayPid) : null);
+        var controller = new UpdateController(
+            rig.Source, rig.Launcher, () => new HandoverIdentity(TestUsers.Sid, "0A1B2C3D4E8C", new Guid("5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13")),
+            target, () => null, Installed, rig.Log, () => installed ? InstallState.Usable : InstallState.Nothing);
+        FoundNewer(rig);
+        StagedUpdate staged = rig.Stage();
+        rig.Source.OnDownload = (_, _, _) =>
+        {
+            installed = false;
+            return Task.FromResult(UpdateDownloadResult.Success(staged));
+        };
+        await controller.CheckAsync(CancellationToken.None);
+
+        await controller.UpdateAsync(CancellationToken.None);
+
+        Assert.IsEmpty(rig.Launcher.Launches);
+        Assert.AreEqual(UpdateButtonRole.SetUp, controller.View.Buttons.Single().Role);
+        Assert.IsFalse(Directory.Exists(staged.WorkFolder), "The unused download is deleted.");
+    }
+
+    [TestMethod]
+    public void ACopyThatIsNotTheInstalledOneCanOfferTheSwitchAndAnyCheckMovesOnFromIt()
+    {
+        using var rig = new Rig(installedCopy: false, installState: InstallState.Usable);
+
+        rig.Controller.OfferSwitch();
+
+        Assert.AreEqual(UpdateStage.SwitchOffered, rig.Controller.Stage);
+        UpdateViewModel view = rig.Controller.View;
+        Assert.AreEqual("Earshot is already installed", view.Status);
+        Assert.AreEqual("The installed copy is in Program Files.", view.Sub);
+        UpdateButton button = view.Buttons.Single();
+        Assert.AreEqual(UpdateButtonRole.Switch, button.Role);
+        Assert.AreEqual("Switch to it", button.Label);
+        Assert.IsTrue(button.Primary);
+    }
+
+    [TestMethod]
+    public async Task TheSwitchOfferNeverReplacesACheckOrUpdateAlreadyUnderWay()
+    {
+        using var rig = new Rig(installedCopy: false, installState: InstallState.Usable);
+        FoundNewer(rig);
+        await rig.Controller.CheckAsync(CancellationToken.None);
+
+        rig.Controller.OfferSwitch();
+
+        Assert.AreEqual(UpdateStage.Available, rig.Controller.Stage);
+        Assert.IsNotNull(rig.Controller.AvailableRelease);
     }
 
     [TestMethod]

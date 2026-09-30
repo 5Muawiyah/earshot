@@ -33,6 +33,9 @@ public sealed class NullBlockController : IBlockController
     public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default) =>
         Task.FromResult(NullResults.NotAttempted("install"));
 
+    public Task<ControllerResult> RunRepairAsync(RepairVerb verb, CancellationToken ct = default) =>
+        Task.FromResult(NullResults.NotAttempted("repair"));
+
     public Task<ControllerResult> UninstallAsync(CancellationToken ct = default) =>
         Task.FromResult(NullResults.NotAttempted("uninstall"));
 }

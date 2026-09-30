@@ -108,6 +108,9 @@ internal sealed class FeedFixture : IDisposable
 
     public Uri Feed => Server.Address(FeedPath);
 
+    // Where the release of this fixture's own tag is published, which is what a repair asks for.
+    public string TagPath => "/repos/5Muawiyah/earshot/releases/tags/" + Tag;
+
     // Serves the release JSON for the current settings of the fixture. Assets can be left out or given other
     // addresses to make each failure.
     public void Publish(bool zipAsset = true, bool checksumAsset = true, string? zipUrl = null, string? checksumUrl = null, string? tagOverride = null, string? extra = null)
@@ -124,8 +127,10 @@ internal sealed class FeedFixture : IDisposable
         }
 
         assets.Add("{\"name\":\"Source.zip\",\"browser_download_url\":\"" + Server.Address("/dl/Source.zip") + "\"}");
-        Server.MapJson(FeedPath, "{\"tag_name\":\"" + (tagOverride ?? Tag) + "\",\"draft\":false,\"prerelease\":false" +
-                                 (extra is null ? "" : "," + extra) + ",\"assets\":[" + string.Join(",", assets) + "]}");
+        string release = "{\"tag_name\":\"" + (tagOverride ?? Tag) + "\",\"draft\":false,\"prerelease\":false" +
+                         (extra is null ? "" : "," + extra) + ",\"assets\":[" + string.Join(",", assets) + "]}";
+        Server.MapJson(FeedPath, release);
+        Server.MapJson(TagPath, release);
     }
 
     public UpdateService Service(ILog log, string stagingRoot, ReleaseVersion running, UpdateTimeouts? timeouts = null) =>
@@ -158,6 +163,12 @@ internal sealed class FakeUpdateSource : IUpdateSource
 
     public int DownloadCalls { get; private set; }
 
+    public List<ReleaseVersion> FindCalls { get; } = new();
+
+    // The release of one version: found unless a test says otherwise.
+    public Func<ReleaseVersion, CancellationToken, Task<UpdateCheckResult>> OnFind { get; set; } =
+        (version, _) => Task.FromResult(UpdateCheckResult.Available(Release(version.ToString())));
+
     public Func<CancellationToken, Task<UpdateCheckResult>> OnCheck { get; set; } =
         _ => Task.FromResult(UpdateCheckResult.UpToDate(new ReleaseVersion(1, 1, 0)));
 
@@ -168,6 +179,12 @@ internal sealed class FakeUpdateSource : IUpdateSource
     {
         CheckCalls++;
         return OnCheck(ct);
+    }
+
+    public Task<UpdateCheckResult> FindReleaseAsync(ReleaseVersion version, CancellationToken ct)
+    {
+        FindCalls.Add(version);
+        return OnFind(version, ct);
     }
 
     public Task<UpdateDownloadResult> DownloadAsync(ReleaseInfo release, IProgress<UpdateProgress>? progress, CancellationToken ct)
@@ -199,4 +216,10 @@ internal sealed class FakeUpdateLauncher : IUpdateLauncher
         DuringLaunch?.Invoke(executable);
         return OnLaunch(executable);
     }
+}
+
+internal static class ReleaseVersionTestExtensions
+{
+    // The four-part file version a program carries for this release version.
+    public static Version ToVersion(this ReleaseVersion version) => new(version.Major, version.Minor, version.Patch, version.Revision);
 }
