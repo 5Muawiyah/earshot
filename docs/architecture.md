@@ -419,16 +419,55 @@ can write reaches it or a download address. Every address is HTTPS, redirects
 are followed by hand and each hop is checked, and no credential is sent. A
 check downloads nothing.
 
-Only a click on Update starts a download, and only an installed copy offers
-it, because only that copy can hand over safely. The zip is checked against
-the `.sha256` file the release publishes beside it before anything is
-unpacked, and a failure at any step deletes what was staged. The tray then
-starts the installed `Earshot.exe` with the update verb, which asks for one
-administrator prompt. That run copies the zip into a folder only
-administrators can write, hashes the copy, goes on only if the hash matches
-the one recorded at download, and installs from there. The staging folder is
-writable by the signed-in user, which is why the check is repeated in a folder
-that is not.
+Only a click on Update starts a download. Any running copy can offer it once
+Earshot is installed: the tray checks that the installed `Earshot.exe` is there
+and that the install folder grants no one but administrators write, which is the
+check the elevated run repeats, and then the update is handed to the installed
+program whichever copy is running. The elevated program is never one in a folder
+a standard user can write. The running copy's own process id is what the elevated
+run waits on before it touches the install folder (it waits for any process named
+`Earshot.exe` with that id, so a copy run from a download folder counts). With
+nothing installed, or an install that cannot be used, the update card offers Set
+up or Repair instead. The zip is checked against the `.sha256` file the release
+publishes beside it before anything is unpacked, and a failure at any step
+deletes what was staged. The tray then starts the installed `Earshot.exe` with
+the update verb, which asks for one administrator prompt. That run copies the
+zip into a folder only administrators can write, hashes the copy, goes on only
+if the hash matches the one recorded at download, and installs from there. The
+staging folder is writable by the signed-in user, which is why the check is
+repeated in a folder that is not.
+
+A copy that is not the installed one never writes itself into the Open on
+startup Run value or the Start menu shortcut once an install exists (when the
+installed program has gone missing they have no target at all, rather than this
+copy). It offers a switch instead: this copy exits through the ordinary Exit,
+and after its single-instance lock is released the installed program is started
+with the signed-in user's own token.
+
+### Repair
+
+The elevated half of Repair is the `repair` verb of the installed
+`Earshot.exe`. It is install's own repair run from the installed copy: it
+refuses to run from any other folder, checks that the install folder grants no
+one but administrators write, checks every file in the installed
+`Earshot.files.json` against its SHA-256, and only then registers the machine
+configuration, the device file, the three scheduled tasks and the hand-back
+service again, each step with its raw code. It records how it ended in
+`update-outcome.json` in the machine folder, as an update does.
+
+The tray decides the route from read-only facts: the same hash check of the
+installed files, the folder check, and the installed file version. Files that
+all match go to the installed program's repair verb, or to its install verb,
+which every version runs from its own folder as the same repair, when the
+installed program is older than the release that added the repair verb. A file
+that is missing or does not match means the install folder is not trusted: the
+release of the installed version is read from the feed's tag route (the same
+feed, HTTPS and size rules as a check), downloaded and checked against its
+`.sha256` file, and handed to the installed program's update verb. With no
+usable installed program, or a running copy newer than the installed one, the
+running copy's own setup does the repair. The same hash check, the same release
+feed read and the same hand-over are what the tests run for real; only the
+elevated run is faked.
 
 What the checksum protects against: a damaged or cut-short download, and a
 file that differs from what the release lists. What it does not protect
@@ -524,8 +563,8 @@ owner's own label, never a name read off the AirPods.
 - **Two environment variables keep testing off the real device.**
   `EARSHOT_DATA_ROOT` moves every data folder elsewhere, and
   `EARSHOT_SAFE_MODE` turns every device action off so only reads happen.
-  `install`, `uninstall`, `gate` and `gate-protect` refuse to run while
-  either is set. A `diag` target is refused in safe mode only, so
+  `install`, `uninstall`, `update`, `repair`, `gate` and `gate-protect` refuse to
+  run while either is set. A `diag` target is refused in safe mode only, so
   `EARSHOT_DATA_ROOT` on its own does not stop a device action; the live
   test scripts stop the run themselves when it is set, rather than let a
   real device action write its evidence somewhere else.
@@ -533,8 +572,9 @@ owner's own label, never a name read off the AirPods.
 ## Setup and removal
 
 Setup is the one-time flow started from **Set up Earshot...** in the tray
-menu. The item is offered before setup, for a damaged install, and when the
-running copy is newer than the installed one. It asks for one administrator
+menu. The item is offered only when nothing is installed; once Earshot is
+installed, in any state, **Repair Earshot...** takes its place (see
+[Repair](#repair)). It asks for one administrator
 prompt, then Earshot copies itself into Program
 Files, verifies every copied file, registers the three scheduled tasks
 described above, and installs the hand-back service. Connect and disconnect do
@@ -582,6 +622,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe probe widget --out <folder>` | Writes the taskbar gauge, the card and the case-open card to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. See [The AirPods widget](#the-airpods-widget). |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
 | `Earshot.exe update <zip> <sha256> <pid> <userSid> <address> <containerGuid>` | The elevated half of Update. Started by the installed Earshot after the one administrator prompt, not by hand. See [Updates](#updates). |
+| `Earshot.exe repair <userSid> <address> <containerGuid>` | The elevated half of Repair. Started by the tray after the one administrator prompt, from the installed copy only, not by hand. See [Repair](#repair). |
 | `Earshot.exe service` | The hand-back service's run mode. Started by Windows from the service's registration, not by hand. |
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
 | `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep and `gate status` change the state of the device**; those two only read. They exist for the live tests in `tools\live-tests` and are not part of normal use. |
