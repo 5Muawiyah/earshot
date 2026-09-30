@@ -44,6 +44,9 @@ internal sealed class MachineGateMutex : IGateRunLock
     private readonly string _stepName;
     private readonly string _holder;
 
+    // The name of the mutex, so a test can tell which lock a run was given.
+    internal string Name => _name;
+
     public MachineGateMutex()
         : this(DefaultName, MachineSecurity, IsMachineOwner)
     {
