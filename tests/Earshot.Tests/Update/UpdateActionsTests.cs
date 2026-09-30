@@ -649,8 +649,11 @@ public sealed class UpdateActionsTests
         string marker = temp.File("started.txt");
         Assert.IsFalse(marker.Contains(' ', StringComparison.Ordinal), "The temp path holds a space; this check needs one that does not.");
         var starter = new ChildInstallStarter();
+        // The program runs in a folder of its own, so the test can wait for it to end (its working folder can
+        // only be deleted once it has) before the temp folder is removed; a hosted run once failed that clean-up.
+        string runFolder = Directory.CreateDirectory(Path.Combine(temp.Path, "run")).FullName;
 
-        StepOutcome started = starter.Start(CmdExe, ["/c", "cd>" + marker], temp.Path);
+        StepOutcome started = starter.Start(CmdExe, ["/c", "cd>" + marker], runFolder);
 
         Assert.IsTrue(started.Ok, started.Detail);
         Assert.IsTrue(SpinWait.SpinUntil(() => File.Exists(marker), TimeSpan.FromSeconds(30)), "The program ran.");
@@ -658,13 +661,25 @@ public sealed class UpdateActionsTests
         {
             try
             {
-                return string.Equals(File.ReadAllText(marker).Trim(), temp.Path, StringComparison.OrdinalIgnoreCase);
+                return string.Equals(File.ReadAllText(marker).Trim(), runFolder, StringComparison.OrdinalIgnoreCase);
             }
             catch (IOException)
             {
                 return false;
             }
         }, TimeSpan.FromSeconds(30)), "It ran in the folder it was given.");
+        Assert.IsTrue(SpinWait.SpinUntil(() =>
+        {
+            try
+            {
+                Directory.Delete(runFolder);
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }, TimeSpan.FromSeconds(30)), "The program ended and let go of its folder.");
 
         StepOutcome missing = starter.Start(Path.Combine(temp.Path, "missing.exe"), ["install"], temp.Path);
         Assert.IsFalse(missing.Ok);
