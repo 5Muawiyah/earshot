@@ -52,8 +52,18 @@ public sealed class BatterySetupStoreTests
         using var temp = new TempFolder();
         var store = new BatterySetupStore(temp.File("setup"), new CapturingLog());
         BatterySetupRecord record = SampleRecord();
-        BatterySetupCapture capture = new(record.EndedAtUtc, -58, 0x01, 25, Convert.ToHexString(WidgetFixtures.ProximityValue()[..9]));
-        record = record with { Candidate = record.Candidate! with { Captures = [capture] } };
+        BatterySetupCapture capture = new(record.EndedAtUtc, -58, 0x01, 25, Convert.ToHexString(WidgetFixtures.ProximityValue()[..9]), "0000000A");
+        BatterySetupCapture shortForm = new(record.EndedAtUtc, -58, 0x06, 17, Convert.ToHexString(WidgetFixtures.UnknownSeventeenByteForm()[2..]), "0000000B");
+        record = record with
+        {
+            Candidate = record.Candidate! with
+            {
+                Captures = [capture],
+                SenderTags = ["0000000A"],
+                SenderLastOkMessages = [record.Candidate.LastOkMessage!.Value],
+                ShortFormCaptures = [shortForm],
+            },
+        };
         string name = store.Save(record)!;
 
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(temp.File("setup\\" + name)));
@@ -62,8 +72,11 @@ public sealed class BatterySetupStoreTests
         AssertMembers(root, "schemaVersion,startedAtUtc,endedAtUtc,listenStatus,appVersion,appleSectionsSeen,proximityItemsSeen,candidate,otherSenders,picks");
         Assert.AreEqual("Found", root.GetProperty("listenStatus").GetString(), "Enums are written as their names.");
         JsonElement candidate = root.GetProperty("candidate");
-        AssertMembers(candidate, "messages,okFormMessages,otherFormMessages,rssiMin,rssiMedian,rssiMax,thresholdDbm,captures,lastOkMessage");
-        AssertMembers(candidate.GetProperty("captures")[0], "atUtc,rssi,prefix,length,valueHex");
+        AssertMembers(candidate, "messages,okFormMessages,otherFormMessages,rssiMin,rssiMedian,rssiMax,thresholdDbm,captures,lastOkMessage,senderTags,senderLastOkMessages,shortFormCaptures");
+        AssertMembers(candidate.GetProperty("captures")[0], "atUtc,rssi,prefix,length,valueHex,senderTag");
+        AssertMembers(candidate.GetProperty("shortFormCaptures")[0], "atUtc,rssi,prefix,length,valueHex,senderTag");
+        AssertMembers(candidate.GetProperty("senderLastOkMessages")[0], "modelHigh,modelLow,status,batteryA,batteryB,lid,colour,reserved");
+        Assert.AreEqual("0000000A", candidate.GetProperty("senderTags")[0].GetString());
         AssertMembers(candidate.GetProperty("lastOkMessage"), "modelHigh,modelLow,status,batteryA,batteryB,lid,colour,reserved");
         AssertMembers(root.GetProperty("otherSenders")[0], "messages,okFormMessages,rssiMedian");
         AssertMembers(root.GetProperty("picks"), "left,right,case,leftCharging,rightCharging,caseCharging");
@@ -146,6 +159,12 @@ public sealed class BatterySetupStoreTests
             ("a Found record with no message", r => r with { Candidate = r.Candidate! with { LastOkMessage = null } }),
             ("a capture that is not hex", r => r with { Candidate = r.Candidate! with { Captures = [new BatterySetupCapture(r.EndedAtUtc, -58, 1, 25, "ZZ")] } }),
             ("a documented-form capture longer than nine bytes", r => r with { Candidate = r.Candidate! with { Captures = [new BatterySetupCapture(r.EndedAtUtc, -58, 1, 25, Convert.ToHexString(WidgetFixtures.ProximityValue()[..12]))] } }),
+            ("a sender tag that is not eight hex digits", r => r with { Candidate = r.Candidate! with { SenderTags = ["not-a-tag"] } }),
+            ("a lower-case sender tag", r => r with { Candidate = r.Candidate! with { SenderTags = ["0000000a"] } }),
+            ("a capture with a bad sender tag", r => r with { Candidate = r.Candidate! with { Captures = [new BatterySetupCapture(r.EndedAtUtc, -58, 6, 1, "06", "xyz")] } }),
+            ("more newest messages than tags", r => r with { Candidate = r.Candidate! with { SenderTags = ["0000000A"], SenderLastOkMessages = [r.Candidate.LastOkMessage!.Value, r.Candidate.LastOkMessage.Value] } }),
+            ("more short-form captures than a record keeps", r => r with { Candidate = r.Candidate! with { ShortFormCaptures = Enumerable.Repeat(new BatterySetupCapture(r.EndedAtUtc, -58, 6, 1, "06"), SetupRules.MaxShortFormCaptures + 1).ToList() } }),
+            ("a bad short-form capture", r => r with { Candidate = r.Candidate! with { ShortFormCaptures = [new BatterySetupCapture(r.EndedAtUtc, -58, 6, 1, "ZZ")] } }),
             ("more captures than messages", r => r with { Candidate = r.Candidate! with { Messages = 3, OkFormMessages = 3, Captures = Enumerable.Repeat(new BatterySetupCapture(r.EndedAtUtc, -58, 6, 1, "06"), 4).ToList() } }),
         ];
         int n = 0;
@@ -195,10 +214,11 @@ public sealed class BatterySetupStoreTests
         Assert.IsTrue(proof.StartsWith(Path.Combine(temp.Path, "Local"), StringComparison.OrdinalIgnoreCase), proof);
     }
 
-    // The whole path from a listening window to the file: no sender tag, no address, no encrypted byte, no
-    // name reaches what is written.
+    // The whole path from a listening window to the file: no address, no encrypted byte, no name reaches what is
+    // written. The sender tag does, as the eight hex digits it is, so a reader can tell which sender a message came
+    // from; the number itself never appears.
     [TestMethod]
-    public async Task NoTagAddressOrEncryptedByteReachesTheFile()
+    public async Task NoAddressOrEncryptedByteReachesTheFileAndTheTagIsWrittenAsEightHexDigits()
     {
         using var temp = new TempFolder();
         var log = new CapturingLog();
@@ -224,8 +244,8 @@ public sealed class BatterySetupStoreTests
 
         byte[] encrypted = WidgetFixtures.ProximityValue()[9..];
         Assert.DoesNotContain(Convert.ToHexString(encrypted[..4]), text, "The encrypted bytes of the documented form are never copied.");
-        Assert.DoesNotContain(Tag.ToString(System.Globalization.CultureInfo.InvariantCulture), text, "The per-run sender tag is never written.");
-        Assert.DoesNotContain("senderTag", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Tag.ToString(System.Globalization.CultureInfo.InvariantCulture), text, "The tag is written as hex, never as the number.");
+        Assert.Contains("\"" + Tag.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "\"", text, "The tag names the sender within the record.");
         Assert.DoesNotContain("address", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("name\"", text, StringComparison.OrdinalIgnoreCase);
         Assert.IsTrue(text.Contains("\"valueHex\"", StringComparison.Ordinal), "Sanity: the captures are there.");

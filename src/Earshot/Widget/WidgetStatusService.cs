@@ -933,9 +933,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 // on every single one. Only the nibbles decide whether the disk actually needs touching; the
                 // read time itself simply moves on in memory and rides along with whatever save a later
                 // value change makes.
-                bool valueChanged = updated.NibbleHigh != _claim.Last.NibbleHigh ||
-                    updated.NibbleLow != _claim.Last.NibbleLow ||
-                    updated.Case != _claim.Last.Case;
+                //
+                // While the bud order is unproved the two nibbles are BatteryA's wire high and low, and the two
+                // buds of one set are two senders that each lead with their own bud, so their messages alternate
+                // the pair. The rule compares that pair unordered, and so does this: a swap is no change.
+                bool budsChanged = _claim.NibblesAreNamedOrder
+                    ? updated.NibbleHigh != _claim.Last.NibbleHigh || updated.NibbleLow != _claim.Last.NibbleLow
+                    : !SameUnorderedPair(updated, _claim.Last);
+                bool valueChanged = budsChanged || updated.Case != _claim.Last.Case;
                 _claim = _claim with { Last = updated };
                 if (valueChanged)
                 {
@@ -960,6 +965,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _uiPost(() => OwnedReadingApplied?.Invoke(this, new OwnedReadingEventArgs(applied, at)));
         }
     }
+
+    private static bool SameUnorderedPair(OwnedBattery a, OwnedBattery b) =>
+        (a.NibbleHigh == b.NibbleHigh && a.NibbleLow == b.NibbleLow) || (a.NibbleHigh == b.NibbleLow && a.NibbleLow == b.NibbleHigh);
 
     // Must be called holding _gate. Returns true when this reading raised the lid's rising edge or a new
     // counter value, for CaseOpened.

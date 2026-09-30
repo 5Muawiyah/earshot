@@ -10,7 +10,9 @@ namespace Earshot.Widget;
 // A message of the documented form is kept as its first nine bytes only, never the encrypted bytes after them. A
 // message of any other form is kept whole, as received, because it is the only evidence of what that form is; Earshot
 // does not know what those bytes are, so it cannot promise what they do not hold. There is no field here for a
-// device address, a sender tag or a name, and none is ever passed in. The picks are evidence for DecodeProof only.
+// device address or a name, and none is ever passed in. A sender tag is kept: it is a keyed hash of the address made
+// with a key that lives for one run of the program, so it names a sender within this record and nothing outside it. The
+// picks are evidence for DecodeProof only.
 public sealed record BatterySetupRecord(
     int SchemaVersion,
     DateTimeOffset StartedAtUtc,
@@ -106,17 +108,62 @@ public sealed record BatterySetupRecord(
 
         foreach (BatterySetupCapture capture in c.Captures)
         {
-            if (capture is null || capture.ValueHex is null || capture.ValueHex.Length % 2 != 0 || capture.Length < 0 || capture.Length > 255
-                || capture.ValueHex.Length > 2 * capture.Length || !IsUpperHex(capture.ValueHex))
+            if (CaptureProblem(capture) is { } problem)
             {
-                return "a capture that is not upper-case hex within its length";
+                return problem;
             }
+        }
 
-            bool documentedForm = capture.Prefix == 0x01 && capture.Length == 25;
-            if (documentedForm && capture.ValueHex.Length != 18)
+        // The tags and per-sender messages are optional (a record from an earlier build has none) but never wrong when
+        // present: every tag is eight hex digits, and there is one newest message per tag.
+        IReadOnlyList<string> tags = c.SenderTags ?? [];
+        if (tags.Count > MaxSenders || tags.Any(t => t is null || t.Length != 8 || !IsUpperHex(t)))
+        {
+            return "a sender tag that is not eight upper-case hex digits";
+        }
+
+        if ((c.SenderLastOkMessages?.Count ?? 0) > MaxSenders || (tags.Count > 0 && (c.SenderLastOkMessages?.Count ?? 0) > tags.Count))
+        {
+            return "more newest messages than senders";
+        }
+
+        IReadOnlyList<BatterySetupCapture> shortForm = c.ShortFormCaptures ?? [];
+        if (shortForm.Count > SetupRules.MaxShortFormCaptures)
+        {
+            return "more short-form captures than a record keeps";
+        }
+
+        foreach (BatterySetupCapture capture in shortForm)
+        {
+            if (CaptureProblem(capture) is { } problem)
             {
-                return "a documented-form capture that is not exactly nine bytes";
+                return problem;
             }
+        }
+
+        return null;
+    }
+
+    // More senders than this is not one set of AirPods: a set is two buds and, at most, a case.
+    private const int MaxSenders = 8;
+
+    private static string? CaptureProblem(BatterySetupCapture capture)
+    {
+        if (capture is null || capture.ValueHex is null || capture.ValueHex.Length % 2 != 0 || capture.Length < 0 || capture.Length > 255
+            || capture.ValueHex.Length > 2 * capture.Length || !IsUpperHex(capture.ValueHex))
+        {
+            return "a capture that is not upper-case hex within its length";
+        }
+
+        if (capture.SenderTag is { } tag && (tag.Length != 8 || !IsUpperHex(tag)))
+        {
+            return "a capture whose sender tag is not eight upper-case hex digits";
+        }
+
+        bool documentedForm = capture.Prefix == 0x01 && capture.Length == 25;
+        if (documentedForm && capture.ValueHex.Length != 18)
+        {
+            return "a documented-form capture that is not exactly nine bytes";
         }
 
         return null;

@@ -387,4 +387,83 @@ public sealed class DecodeProofTests
         Assert.AreEqual(70, reading.Left.Percent);
         Assert.AreEqual(20, reading.Case.Percent);
     }
+    // The two buds of one set are two senders and each reports itself first, so their bud nibbles arrive in opposite
+    // order and one status bit tells them apart. A record that kept both senders' newest messages proves that from two
+    // set-ups, and the table then reads either bud's message onto the same two sides. Invented bytes throughout.
+    private static BatterySetupRecord BothBuds(int minutes, int firstBud, int secondBud, byte firstStatus, byte secondStatus, int left, int right) =>
+        MergedRecord(
+            Message(high: firstBud, low: secondBud, status: firstStatus),
+            Message(high: secondBud, low: firstBud, status: secondStatus),
+            Picks(left: left, right: right),
+            minutes);
+
+    [TestMethod]
+    public void TwoSetUpsOfBothBudsAndOneDifferingStatusBitProveTheFlipAndBothBudsReadOntoTheSameSides()
+    {
+        // Right bud 70, left 40: the first sender leads with the right bud, the second with the left. Then 90 and 20.
+        BatterySetupRecord[] records =
+        [
+            BothBuds(0, firstBud: 7, secondBud: 4, firstStatus: 0x40, secondStatus: 0x60, left: 40, right: 70),
+            BothBuds(1, firstBud: 9, secondBud: 2, firstStatus: 0x40, secondStatus: 0x60, left: 20, right: 90),
+        ];
+
+        DecodeProofResult result = DecodeProof.Evaluate(records);
+
+        Assert.AreEqual(FieldProofStatus.Proved, Status(result, DecodeField.FlipBit));
+        Assert.AreEqual(FieldProofStatus.Proved, Status(result, DecodeField.HighNibbleIsRight));
+        Assert.AreEqual(5, result.Table.FlipBit);
+        Assert.AreEqual(true, result.Table.FlipWhenSet);
+
+        foreach (ProximityMessage message in records[0].Candidate!.SenderLastOkMessages!)
+        {
+            DecodedReading reading = ProximityDecoder.Decode(message, result.Table, Start);
+            Assert.AreEqual(40, reading.Left.Percent, "Whichever bud sent it, the left bud is 40.");
+            Assert.AreEqual(70, reading.Right.Percent);
+        }
+    }
+
+    // One set-up is one entry by the owner, however many senders it heard: it proves nothing alone.
+    [TestMethod]
+    public void OneSetUpOfBothBudsProvesNothingAlone()
+    {
+        DecodeProofResult result = DecodeProof.Evaluate([BothBuds(0, 7, 4, 0x40, 0x60, left: 40, right: 70)]);
+
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.HighNibbleIsRight));
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.FlipBit));
+        Assert.IsNull(result.Table.HighNibbleIsRight);
+    }
+
+    // Two status bits that differ between the buds cannot be told apart, so no flip is proved and no bud is decoded.
+    [TestMethod]
+    public void BudsWhoseStatusesDifferInTwoBitsDoNotProveAFlipAndNoBudIsDecoded()
+    {
+        BatterySetupRecord[] records =
+        [
+            BothBuds(0, 7, 4, firstStatus: 0x40, secondStatus: 0x70, left: 40, right: 70),
+            BothBuds(1, 9, 2, firstStatus: 0x40, secondStatus: 0x70, left: 20, right: 90),
+        ];
+
+        DecodeProofResult result = DecodeProof.Evaluate(records);
+
+        Assert.AreEqual(FieldProofStatus.Withdrawn, Status(result, DecodeField.HighNibbleIsRight));
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.FlipBit));
+        Assert.IsNull(result.Table.HighNibbleIsRight);
+        DecodedReading reading = ProximityDecoder.Decode(records[0].Candidate!.LastOkMessage!.Value, result.Table, Start);
+        Assert.IsNull(reading.Left.Percent, "An unproved order never decodes a bud.");
+        Assert.IsNull(reading.Right.Percent);
+        Assert.IsTrue(result.Notes.Any(n => n.Contains("2 status bits explain the records")));
+    }
+
+    // Two senders that lead with the same bud in one set-up are still one entry, not two.
+    [TestMethod]
+    public void TwoSendersThatAgreeInOneSetUpCountOnce()
+    {
+        BatterySetupRecord agreeing = MergedRecord(
+            Message(high: 7, low: 4, status: 0x40), Message(high: 7, low: 4, status: 0x41), Picks(left: 40, right: 70), 0);
+
+        DecodeProofResult result = DecodeProof.Evaluate([agreeing]);
+
+        Assert.AreEqual(FieldProofStatus.Unproved, Status(result, DecodeField.HighNibbleIsRight), "One entry could still be entered the wrong way round.");
+        Assert.IsNull(result.Table.HighNibbleIsRight);
+    }
 }

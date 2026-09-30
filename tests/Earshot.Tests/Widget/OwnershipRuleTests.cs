@@ -321,4 +321,38 @@ public sealed class OwnershipRuleTests
         Assert.AreEqual(OwnershipVerdict.Owned, unproved.Verdict, "With the case unproved it is not compared.");
         Assert.AreEqual(2, unproved.UpdatedLast!.Case, "The last known case value is kept, not replaced by a value nobody has proved.");
     }
+
+    // The two buds of one set are two senders, each leading with its own bud, so the second sender's nibbles are the
+    // first's swapped. Both are the owner's, whichever of them the claim was made from. Invented bytes.
+    [TestMethod]
+    public void BothBudsOfAClaimedSetAreOwnedBeforeTheOrderIsProved()
+    {
+        ProximityMessage first = Message(status: 0x40, batteryA: 0x74, batteryB: 0x09);
+        ProximityMessage second = Message(status: 0x60, batteryA: 0x47, batteryB: 0x09);
+        WidgetClaim claim = Claim(last: OwnedBattery.FromMessage(first, ProximityDecodeTable.Unproved, null, ClaimedAt));
+
+        OwnershipResult fromSecond = OwnershipRule.Evaluate(Input(Ok(second), claim, CaseProved, rssi: -60));
+        OwnershipResult fromFirst = OwnershipRule.Evaluate(Input(Ok(first), claim, CaseProved, rssi: -60));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, fromSecond.Verdict, "The other bud's sender is not dropped.");
+        Assert.AreEqual(OwnershipVerdict.Owned, fromFirst.Verdict);
+    }
+
+    [TestMethod]
+    public void WithAProvedFlipTheSecondBudsMessageIsOwnedAndStaysOnItsOwnSides()
+    {
+        ProximityDecodeTable table = CaseProved with { HighNibbleIsRight = true, FlipBit = 5, FlipWhenSet = true };
+        ProximityMessage first = Message(status: 0x40, batteryA: 0x94, batteryB: 0x09);   // right 90, left 40
+        ProximityMessage second = Message(status: 0x60, batteryA: 0x49, batteryB: 0x09);  // the same buds, the other bud speaking
+        WidgetClaim claim = Claim(last: OwnedBattery.FromMessage(first, table, null, ClaimedAt), nibblesAreNamedOrder: true);
+
+        OwnershipResult result = OwnershipRule.Evaluate(Input(Ok(second), claim, table, rssi: -60));
+
+        Assert.AreEqual(OwnershipVerdict.Owned, result.Verdict);
+        Assert.AreEqual(9, result.UpdatedLast!.NibbleHigh, "The right bud is still 90.");
+        Assert.AreEqual(4, result.UpdatedLast.NibbleLow, "The left bud is still 40.");
+        DecodedReading reading = ProximityDecoder.Decode(second, table, Now);
+        Assert.AreEqual(90, reading.Right.Percent);
+        Assert.AreEqual(40, reading.Left.Percent);
+    }
 }

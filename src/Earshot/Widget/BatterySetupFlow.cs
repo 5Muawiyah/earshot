@@ -3,30 +3,15 @@ using Earshot.Contracts;
 
 namespace Earshot.Widget;
 
-// Step 1 of the battery set-up: listen for the window, find the one sender that is the owner's case (the
-// strongest by median signal, three messages at least, ten decibels clear of the next), and set the signal
-// threshold ten decibels under that sender's weakest message. Nothing is claimed here; the result is the
-// evidence a set-up record keeps and the draft the claim is made from once the owner has answered step 2.
+// Step 1 of the battery set-up: listen for the window, find the one set of AirPods that is the owner's (the
+// strongest by median signal, three messages at least, ten decibels clear of the next set), and set the signal
+// threshold ten decibels under that set's weakest message. Only the documented form can be a set: the buds of one
+// set are two senders and are merged (SetupSenderGroups), and a sender of any other form is never a candidate or a
+// competitor, only evidence. Nothing is claimed here; the result is the evidence a set-up record keeps and the draft
+// the claim is made from once the owner has answered step 2.
 internal static class BatterySetupFlow
 {
     private const int DocumentedValueCaptureLength = 9;
-
-    private sealed class Sample(DateTimeOffset at, sbyte rssi, ProximityParseStatus status, byte? prefix, int length, string valueHex, ProximityMessage? message)
-    {
-        public DateTimeOffset At { get; } = at;
-
-        public sbyte Rssi { get; } = rssi;
-
-        public ProximityParseStatus Status { get; } = status;
-
-        public byte? Prefix { get; } = prefix;
-
-        public int Length { get; } = length;
-
-        public string ValueHex { get; } = valueHex;
-
-        public ProximityMessage? Message { get; } = message;
-    }
 
     public static async Task<BatterySetupListen> ListenAsync(
         IAdvertisementSource source, TimeProvider time, TimeSpan window, ILog log, CancellationToken ct)
@@ -42,7 +27,8 @@ internal static class BatterySetupFlow
             return Failed(BatterySetupListenStatus.WatcherNotStarted, WidgetCopy.SetupBluetoothOff, started, started, 0, 0, []);
         }
 
-        var bySender = new Dictionary<uint, List<Sample>>();
+        var bySender = new Dictionary<uint, List<SetupSample>>();
+        long sequence = 0;
         long appleSections = 0;
         long proximityItems = 0;
         var gate = new Lock();
@@ -68,14 +54,14 @@ internal static class BatterySetupFlow
                 // The documented form keeps its first nine bytes only (prefix to reserved): the sixteen
                 // encrypted bytes are never copied. Any other form is kept whole, as read.
                 ReadOnlySpan<byte> kept = parse.Status == ProximityParseStatus.Ok ? value[..DocumentedValueCaptureLength] : value;
-                if (!bySender.TryGetValue(sample.SenderTag, out List<Sample>? list))
+                if (!bySender.TryGetValue(sample.SenderTag, out List<SetupSample>? list))
                 {
                     list = [];
                     bySender[sample.SenderTag] = list;
                 }
 
-                list.Add(new Sample(
-                    sample.Timestamp, sample.Rssi, parse.Status, value.Length > 0 ? value[0] : null, value.Length,
+                list.Add(new SetupSample(
+                    sequence++, sample.SenderTag, sample.Timestamp, sample.Rssi, parse.Status, value.Length > 0 ? value[0] : null, value.Length,
                     Convert.ToHexString(kept), parse.Message));
             }
         }
@@ -120,10 +106,11 @@ internal static class BatterySetupFlow
         }
 
         DateTimeOffset ended = time.GetUtcNow();
-        Dictionary<uint, List<Sample>> senders;
+        List<(uint Tag, List<SetupSample> Samples)> senders;
         lock (gate)
         {
-            senders = bySender.ToDictionary(p => p.Key, p => p.Value.ToList());
+            // In the order each sender was first heard.
+            senders = bySender.Select(p => (p.Key, p.Value.ToList())).OrderBy(p => p.Item2[0].Sequence).ToList();
         }
 
         return Decide(senders, appleSections, proximityItems, started, ended, log);
@@ -140,52 +127,63 @@ internal static class BatterySetupFlow
     }
 
     private static BatterySetupListen Decide(
-        Dictionary<uint, List<Sample>> senders, long appleSections, long proximityItems,
+        List<(uint Tag, List<SetupSample> Samples)> senders, long appleSections, long proximityItems,
         DateTimeOffset started, DateTimeOffset ended, ILog log)
     {
-        var candidates = senders.Where(p => p.Value.Count >= SetupRules.MinMessages)
-            .Select(p => (Tag: p.Key, Samples: p.Value, Median: Median(p.Value)))
+        // A documented-form sender is one that sent at least one message of the documented form; those messages are
+        // what it contributes. Every other message, whoever sent it, is evidence of a form nobody decodes.
+        var documented = senders
+            .Select(s => (s.Tag, Samples: s.Samples.Where(x => x.Status == ProximityParseStatus.Ok).ToList()))
+            .Where(s => s.Samples.Count > 0)
+            .ToList();
+        List<SetupSample> otherForm = senders.SelectMany(s => s.Samples).Where(x => x.Status != ProximityParseStatus.Ok).OrderBy(x => x.Sequence).ToList();
+        int otherFormSenders = senders.Count(s => s.Samples.All(x => x.Status != ProximityParseStatus.Ok));
+
+        List<SetupSenderGroup> groups = SetupSenderGroups.Merge(documented);
+        var candidates = groups.Where(g => g.Samples.Count >= SetupRules.MinMessages)
+            .Select(g => (Group: g, Median: Median(g.Samples)))
             .OrderByDescending(c => c.Median)
             .ToList();
 
         if (candidates.Count == 0)
         {
-            int below = senders.Count;
             log.Warn(
                 "Battery set-up: no AirPods found in " + ((int)(ended - started).TotalSeconds).ToString(CultureInfo.InvariantCulture) + " s (" +
                 appleSections.ToString(CultureInfo.InvariantCulture) + " Apple sections, " + proximityItems.ToString(CultureInfo.InvariantCulture) +
-                " proximity items, " + below.ToString(CultureInfo.InvariantCulture) + " senders below " +
-                SetupRules.MinMessages.ToString(CultureInfo.InvariantCulture) + " messages).");
-            return Failed(BatterySetupListenStatus.NotFound, WidgetCopy.SetupNotFound, started, ended, appleSections, proximityItems, Summaries(senders.Values));
+                " proximity items, " + groups.Count.ToString(CultureInfo.InvariantCulture) + " senders below " +
+                SetupRules.MinMessages.ToString(CultureInfo.InvariantCulture) + " messages, " +
+                otherFormSenders.ToString(CultureInfo.InvariantCulture) + " other-form senders ignored).");
+            return Failed(BatterySetupListenStatus.NotFound, WidgetCopy.SetupNotFound, started, ended, appleSections, proximityItems, Summaries(groups));
         }
 
-        var best = candidates[0];
+        (SetupSenderGroup best, int bestMedian) = candidates[0];
         sbyte min = best.Samples.Min(s => s.Rssi);
         sbyte max = best.Samples.Max(s => s.Rssi);
         sbyte threshold = (sbyte)SetupRules.ThresholdFor(min);
-        int okCount = best.Samples.Count(s => s.Status == ProximityParseStatus.Ok);
-        var others = senders.Where(p => p.Key != best.Tag).Select(p => p.Value).ToList();
+        var others = groups.Where(g => !ReferenceEquals(g, best)).ToList();
         int? runnerUpMedian = candidates.Count > 1 ? candidates[1].Median : null;
 
         log.Info(
-            "Battery set-up: " + senders.Count.ToString(CultureInfo.InvariantCulture) + " senders; candidate " +
-            best.Samples.Count.ToString(CultureInfo.InvariantCulture) + " messages (ok " + okCount.ToString(CultureInfo.InvariantCulture) +
-            ", other " + (best.Samples.Count - okCount).ToString(CultureInfo.InvariantCulture) + "), signal min/median/max " +
-            min.ToString(CultureInfo.InvariantCulture) + "/" + best.Median.ToString(CultureInfo.InvariantCulture) + "/" + max.ToString(CultureInfo.InvariantCulture) +
+            "Battery set-up: " + senders.Count.ToString(CultureInfo.InvariantCulture) + " senders (" +
+            documented.Count.ToString(CultureInfo.InvariantCulture) + " documented form in " + groups.Count.ToString(CultureInfo.InvariantCulture) + " sets, " +
+            otherFormSenders.ToString(CultureInfo.InvariantCulture) + " other form ignored with " + otherForm.Count.ToString(CultureInfo.InvariantCulture) +
+            " messages); candidate " + best.Samples.Count.ToString(CultureInfo.InvariantCulture) + " messages from " +
+            best.Tags.Count.ToString(CultureInfo.InvariantCulture) + " senders, signal min/median/max " +
+            min.ToString(CultureInfo.InvariantCulture) + "/" + bestMedian.ToString(CultureInfo.InvariantCulture) + "/" + max.ToString(CultureInfo.InvariantCulture) +
             " dBm, runner-up median " + (runnerUpMedian is int r ? r.ToString(CultureInfo.InvariantCulture) + " dBm" : "none") +
             "; threshold " + threshold.ToString(CultureInfo.InvariantCulture) + " dBm.");
 
-        if (runnerUpMedian is int runner && best.Median - runner < SetupRules.SeparationDb)
+        if (runnerUpMedian is int runner && bestMedian - runner < SetupRules.SeparationDb)
         {
             log.Warn(
-                "Battery set-up: two senders too close in signal (medians " + best.Median.ToString(CultureInfo.InvariantCulture) + " and " +
+                "Battery set-up: two senders too close in signal (medians " + bestMedian.ToString(CultureInfo.InvariantCulture) + " and " +
                 runner.ToString(CultureInfo.InvariantCulture) + " dBm); nothing claimed.");
             return Failed(BatterySetupListenStatus.Ambiguous, WidgetCopy.SetupAmbiguous, started, ended, appleSections, proximityItems, Summaries(others));
         }
 
         // A stranger that would pass the run-time signal check right now makes the threshold useless: nothing
-        // is claimed. Every other sender counts here, however few messages it sent.
-        if (others.Any(o => o.Max(s => s.Rssi) >= threshold))
+        // is claimed. Every other set counts here, however few messages it sent.
+        if (others.Any(o => o.Samples.Max(s => s.Rssi) >= threshold))
         {
             log.Warn(
                 "Battery set-up: a sender clears the threshold (" + threshold.ToString(CultureInfo.InvariantCulture) +
@@ -193,37 +191,38 @@ internal static class BatterySetupFlow
             return Failed(BatterySetupListenStatus.Ambiguous, WidgetCopy.SetupAmbiguous, started, ended, appleSections, proximityItems, Summaries(others));
         }
 
-        ProximityMessage? lastOk = best.Samples.LastOrDefault(s => s.Status == ProximityParseStatus.Ok)?.Message;
-        var captures = best.Samples.Select(s => new BatterySetupCapture(s.At, s.Rssi, s.Prefix, s.Length, s.ValueHex)).ToList();
-        var candidate = new BatterySetupCandidate(
-            best.Samples.Count, okCount, best.Samples.Count - okCount, min, (sbyte)best.Median, max, threshold, captures, lastOk);
-        IReadOnlyList<BatterySetupSenderSummary> summaries = Summaries(others);
-
-        if (lastOk is null)
+        ProximityMessage? lastOk = best.Samples[^1].Message;
+        var captures = best.Samples.Select(Capture).ToList();
+        var senderLast = new List<ProximityMessage>();
+        foreach (uint tag in best.Tags)
         {
-            Sample first = best.Samples[0];
-            log.Warn(
-                "Battery set-up: the candidate sent only forms the parser does not read (prefix " +
-                (first.Prefix is byte p ? p.ToString("X2", CultureInfo.InvariantCulture) : "none") + " length " + first.Length.ToString(CultureInfo.InvariantCulture) +
-                " x" + best.Samples.Count.ToString(CultureInfo.InvariantCulture) + "); captures kept, nothing claimed.");
-            return new BatterySetupListen(BatterySetupListenStatus.ShortFormOnly, string.Empty, candidate, summaries, started, ended, appleSections, proximityItems);
+            SetupSample newest = best.Samples.Last(s => s.SenderTag == tag);
+            senderLast.Add(newest.Message!.Value);
         }
 
-        return new BatterySetupListen(BatterySetupListenStatus.Found, string.Empty, candidate, summaries, started, ended, appleSections, proximityItems);
+        var shortForm = otherForm.Skip(Math.Max(0, otherForm.Count - SetupRules.MaxShortFormCaptures)).Select(Capture).ToList();
+        var candidate = new BatterySetupCandidate(
+            best.Samples.Count, best.Samples.Count, OtherFormMessages: 0, min, (sbyte)bestMedian, max, threshold, captures, lastOk,
+            best.Tags.Select(t => t.ToString("X8", CultureInfo.InvariantCulture)).ToList(), senderLast, shortForm);
+
+        return new BatterySetupListen(BatterySetupListenStatus.Found, string.Empty, candidate, Summaries(others), started, ended, appleSections, proximityItems);
     }
+
+    private static BatterySetupCapture Capture(SetupSample s) =>
+        new(s.At, s.Rssi, s.Prefix, s.Length, s.ValueHex, s.SenderTag.ToString("X8", CultureInfo.InvariantCulture));
 
     private static BatterySetupListen Failed(
         BatterySetupListenStatus status, string message, DateTimeOffset started, DateTimeOffset ended,
         long appleSections, long proximityItems, IReadOnlyList<BatterySetupSenderSummary> others) =>
         new(status, message, Candidate: null, others, started, ended, appleSections, proximityItems);
 
-    private static List<BatterySetupSenderSummary> Summaries(IEnumerable<List<Sample>> senders) =>
-        senders.Select(s => new BatterySetupSenderSummary(
-            s.Count, s.Count(x => x.Status == ProximityParseStatus.Ok), (sbyte)Median(s))).ToList();
+    private static List<BatterySetupSenderSummary> Summaries(IEnumerable<SetupSenderGroup> groups) =>
+        groups.Select(g => new BatterySetupSenderSummary(
+            g.Samples.Count, g.Samples.Count(x => x.Status == ProximityParseStatus.Ok), (sbyte)Median(g.Samples))).ToList();
 
     // The middle value of every sample's signal; the lower of the two for an even count. One spike from a
     // passing device cannot choose the candidate.
-    private static int Median(List<Sample> samples)
+    private static int Median(IReadOnlyList<SetupSample> samples)
     {
         sbyte[] sorted = samples.Select(s => s.Rssi).Order().ToArray();
         return sorted[(sorted.Length - 1) / 2];
