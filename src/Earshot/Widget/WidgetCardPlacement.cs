@@ -25,6 +25,23 @@ internal static class WidgetCardPlacement
     // edge, in pixels at 96 DPI. A layout choice, not a measurement, matching CardPlacement.MarginAt96.
     public const int GapAt96 = 12;
 
+    // The work area of the display the anchor is on: the gauge's own display, so a card for a gauge on a secondary
+    // display opens there and is kept inside that display's work area. The display holding most of a gauge-sized
+    // anchor, or the one holding or nearest a point when the anchor is a point. fallback when there are no displays.
+    public static Rectangle WorkAreaFor(Rectangle anchor, IReadOnlyList<DisplayArea> displays, Rectangle fallback)
+    {
+        ArgumentNullException.ThrowIfNull(displays);
+        if (displays.Count == 0)
+        {
+            return fallback;
+        }
+
+        int index = anchor.Width > 0 && anchor.Height > 0
+            ? CardPlacement.DisplayFor(anchor, displays)
+            : CardPlacement.DisplayFor(anchor.Location, displays);
+        return displays[index].WorkArea;
+    }
+
     // The card's rectangle. anchor may be a zero-size rectangle at a point (the fallback when the gauge is
     // hidden): the card is then centred on that point with its bottom edge the gap above it, clamped inside
     // workArea without resizing.

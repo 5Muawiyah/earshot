@@ -15,7 +15,7 @@ public sealed class WidgetCardSettingsTests
 
     private static readonly SettingsRowId[] RowOrder =
     [
-        SettingsRowId.GaugePosition, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave, SettingsRowId.CaseCard,
+        SettingsRowId.GaugePosition, SettingsRowId.GaugeDisplay, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave, SettingsRowId.CaseCard,
         SettingsRowId.LowBattery, SettingsRowId.LeftClick, SettingsRowId.HandBack, SettingsRowId.Connect, SettingsRowId.Disconnect,
         SettingsRowId.CheckForUpdates, SettingsRowId.CheckAutomatically,
     ];
@@ -36,14 +36,14 @@ public sealed class WidgetCardSettingsTests
 
             string[] expectedShape =
             [
-                "GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "CaseCard", "LowBattery", "LeftClick", "HandBack",
+                "GaugePosition", "GaugeDisplay", "OtherDevice", "PauseBud", "PauseLeave", "CaseCard", "LowBattery", "LeftClick", "HandBack",
                 "Divider", "Head:Shortcuts", "Connect", "Disconnect", "Divider", "Head:Updates", "CheckForUpdates", "CheckAutomatically",
             ];
             CollectionAssert.AreEqual(expectedShape, shape);
             string[] labels = card.CurrentSettingsLayout.Items.Where(i => i.Kind == SettingsItemKind.Row).Select(i => i.Label).ToArray();
             string[] expectedLabels =
             [
-                "Gauge position", "Other device", "Pause when a bud comes out", "Pause when AirPods leave this PC", "Case-open card",
+                "Gauge position", "Gauge display", "Other device", "Pause when a bud comes out", "Pause when AirPods leave this PC", "Case-open card",
                 "Low battery alert", "Left click connects", "Hand back on shut down, sleep and Exit", "Connect", "Disconnect",
                 "Check for updates", "Check automatically",
             ];

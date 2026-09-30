@@ -21,20 +21,62 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     // never builds this class in place of a fake. Never read or reset in production.
     internal static int ConstructionCount;
 
-    public UiaTaskbarReader()
+    private readonly IDisplaySource _displays;
+
+    public UiaTaskbarReader(IDisplaySource? displays = null)
     {
+        _displays = displays ?? new SystemDisplaySource();
         Interlocked.Increment(ref ConstructionCount);
     }
 
-    public ITaskbarReader.Result Read(ShownGauge? shownGauge)
+    public ITaskbarReader.Result Read(ShownGauge? shownGauge) => Read(shownGauge, GaugeDisplayChoice.MainDisplay);
+
+    // The taskbar of the display the owner chose. The main display's is Shell_TrayWnd and the others' are each a
+    // Shell_SecondaryTrayWnd. A chosen display that is not connected, or is connected but shows no taskbar (the
+    // owner can turn the taskbar off on other displays), is read as the main display's, and the layout says why.
+    public ITaskbarReader.Result Read(ShownGauge? shownGauge, string chosenDisplayId)
     {
-        nint trayHandle = NativeMethods.FindWindowW(ShellTrayWndClass, null);
-        if (trayHandle == 0)
+        DisplayReading reading = _displays.Read();
+        (DisplayInfo? target, DisplayFallbackReason fallback) = GaugeDisplayChoice.Resolve(chosenDisplayId, reading.Displays);
+        nint trayHandle = 0;
+        Rectangle? secondaryRect = null;
+        bool secondary = false;
+        if (target is { IsPrimary: false })
         {
-            return Fail(TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false));
+            TaskbarWindowCandidate? picked = SecondaryTaskbarPicker.Pick(SystemDisplaySource.SecondaryTaskbars(), target);
+            if (picked is { } found)
+            {
+                trayHandle = found.Handle;
+                secondaryRect = found.Bounds;
+                secondary = true;
+            }
+            else
+            {
+                fallback = DisplayFallbackReason.TaskbarNotShown;
+                target = GaugeDisplayChoice.Resolve(GaugeDisplayChoice.MainDisplay, reading.Displays).Display;
+            }
         }
 
-        if (!TryReadTaskbarRect(out Rectangle taskbar, out bool autoHide, out StepOutcome? rectFailure))
+        if (!secondary)
+        {
+            trayHandle = NativeMethods.FindWindowW(ShellTrayWndClass, null);
+            if (trayHandle == 0)
+            {
+                return Fail(TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false));
+            }
+        }
+
+        Rectangle taskbar;
+        bool autoHide;
+        if (secondary)
+        {
+            taskbar = secondaryRect!.Value;
+
+            // Auto-hide is one setting for every taskbar; ABM_GETSTATE answers for it.
+            var state = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>() };
+            autoHide = (Shell.SHAppBarMessage(Shell.ABM_GETSTATE, ref state) & Shell.ABS_AUTOHIDE) != 0;
+        }
+        else if (!TryReadTaskbarRect(out taskbar, out autoHide, out StepOutcome? rectFailure))
         {
             return Fail(TaskbarReadFailureStep.TaskbarRect, rectFailure!);
         }
@@ -50,11 +92,11 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             return Fail(TaskbarReadFailureStep.Notification, StepOutcomes.FromHResult("sh-query-user-notification-state", hrQuns));
         }
 
-        uint dpi = TaskbarDpi.Read(out _);
-        Rectangle monitorBounds = MonitorBoundsFor(taskbar);
+        uint dpi = secondary && target is { } display ? (uint)display.Dpi : TaskbarDpi.Read(out _);
+        Rectangle monitorBounds = target is { } t && (secondary || t.IsPrimary) ? t.Bounds : MonitorBoundsFor(taskbar);
         TaskbarEdge edge = CardPlacement.EdgeOf(taskbar, monitorBounds);
 
-        // Explorer owns Shell_TrayWnd, so "belongs to Explorer" below means "same process as the taskbar".
+        // Explorer owns the taskbar windows, so "belongs to Explorer" below means "same process as the taskbar".
         uint explorerProcess = GaugeWindowIdentityReader.ProcessOf(trayHandle);
 
         Point probe = ProbePoint(taskbar);
@@ -80,7 +122,13 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             trayHandle, taskbar, edge, autoHide, monitorBounds, occupied, startButton,
             (int)(dpi > 0 ? dpi : CardPlacement.BaseDpi), quns, covered, gaugeCentreIsGauge,
             NotificationArea: notificationArea, CoveringWindow: coveringWindow, WindowAtGaugeCentre: windowAtGaugeCentre,
-            Foreground: GaugeWindowIdentityReader.Foreground(explorerProcess));
+            Foreground: GaugeWindowIdentityReader.Foreground(explorerProcess),
+            DisplayCount: Math.Max(1, reading.Displays.Count),
+            ForegroundWindow: SystemDisplaySource.ForegroundWindow(reading.Displays),
+            IsSecondary: secondary,
+            DisplayLabel: target is { } shown ? DisplayNames.Short(shown, reading.Displays) : "",
+            DisplayFallback: fallback,
+            DisplayProblem: reading.Problem);
         return ITaskbarReader.Result.Ok(layout);
     }
 

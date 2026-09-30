@@ -319,6 +319,52 @@ must not touch anything already there and must stay inside the taskbar, or
 there is no placement and the tray icon stays. A left or right taskbar is not
 supported.
 
+The setting **Gauge display** chooses which display's taskbar holds the gauge.
+It is stored as the monitor's device interface name, the path Windows registers
+for `GUID_DEVINTERFACE_MONITOR`, which `EnumDisplayDevices` returns in
+`DeviceID` when called with `EDD_GET_DEVICE_INTERFACE_NAME`
+(https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumdisplaydevicesw).
+It names the monitor and the output it is on, not its place in the
+enumeration, so it survives a restart and a change of which display is
+primary. A local read of two monitors of one model found paths that differ
+only in the output's id at the end, so the whole path is compared. An empty
+value means the main display. Displays are listed with `EnumDisplayMonitors`,
+each with its bounds and work area from `GetMonitorInfo` and its own scale
+from `GetDpiForMonitor`.
+
+The main display's taskbar is `Shell_TrayWnd`; every other display has a
+`Shell_SecondaryTrayWnd`. The reader picks the visible one whose window is on
+the chosen display's monitor (`MonitorFromWindow`,
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-monitorfromwindow)
+and measures it through UI Automation exactly as it measures the main one. A
+local read of a secondary taskbar showed the clock under the same `SystemTray.`
+class names the main taskbar's notification area uses, so the right-end
+position is measured from it with the same 8 pixel gap. A secondary taskbar
+with no clock has no notification area, and its own right edge is the end. The
+gauge size comes from the chosen display's own scale (100, 125 or 150%).
+
+If the chosen display is not connected, or is connected but its taskbar is not
+shown, the reader returns the main display's taskbar and says why in the
+layout; the controller writes one line when the reason changes, and another
+when the display returns. `WM_DISPLAYCHANGE` and `TaskbarCreated` already ask
+for an immediate read, so the return is seen at once. The card and the
+case-open card take the work area of the display the gauge is on.
+
+The two full-screen signals, `ABN_FULLSCREENAPP`
+(https://learn.microsoft.com/en-us/windows/win32/shell/abn-fullscreenapp) and
+`SHQueryUserNotificationState`
+(https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shqueryusernotificationstate),
+are global: neither carries a window or a monitor, and the appbar message goes
+to every appbar. So they are triggers to look, not the verdict. The gauge
+hides for them only when the foreground window is on the gauge's monitor and
+its rectangle covers that monitor's full bounds. An appbar notice that arrives
+before the foreground has moved stays pending until a foreground change, a
+closing notice, or a poll that finds no full-screen state. With one display the
+signal stands alone, as before; with several and a foreground window that
+cannot be read, the gauge hides, as before. Presentation settings hide it on
+every display. A hide writes the class and the display the full-screen window
+was on, never a title.
+
 A change of the foreground window, which Start, a flyout, a taskbar click and
 a full-screen application closing all cause, is watched by one read-only
 `SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND`
@@ -364,7 +410,8 @@ made this way actually show and do not show.
 itself, with no child controls. Its rows are read from the real settings each
 time it is drawn, so a row shows what is saved and never what was last asked
 for. Every change goes through the same path the tray menu's own item uses.
-The rows are, in order: Gauge position, Other device, Pause when a bud comes
+The rows are, in order: Gauge position, Gauge display (a button that steps through
+Main display and the connected displays), Other device, Pause when a bud comes
 out, Pause when AirPods leave this PC, Case-open card, Low battery alert (the
 threshold), Left click connects, Hand back on shut down, sleep and Exit; then
 the shortcuts for Connect and Disconnect; then Check for updates and Check

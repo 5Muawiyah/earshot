@@ -45,9 +45,34 @@ internal static class GaugeEventLog
 
     public static string HiddenCovered(WindowIdentity? window) => Hidden("Covered by " + Describe(window));
 
-    public static string HiddenNotificationState(string quns) => Hidden("NotificationState " + quns);
+    // fullScreenDisplay: the plain name of the display the full-screen window is on, given only while more than one
+    // display is connected (with one there is nothing to tell apart), else null.
+    public static string HiddenNotificationState(string quns, string? fullScreenDisplay = null) =>
+        Hidden("NotificationState " + quns + OnDisplay(fullScreenDisplay));
 
-    public static string HiddenFullScreenNotified() => Hidden("FullScreenNotified");
+    public static string HiddenFullScreenNotified(string? fullScreenDisplay = null) =>
+        Hidden("FullScreenNotified" + OnDisplay(fullScreenDisplay));
+
+    // A full-screen signal that is about another display: the gauge stays. Classes only.
+    public static string FullScreenOnOtherDisplay(string signal, WindowIdentity? window, string windowDisplay, string gaugeDisplay) =>
+        "Gauge stays shown: " + signal + " is about " + Describe(window) + " on " + windowDisplay +
+        ", not the gauge's display (" + gaugeDisplay + ").";
+
+    // The chosen display is not the one the gauge is on.
+    public static string DisplayNotConnected() => "Gauge display: the chosen display is not connected, so the main display's taskbar is used.";
+
+    public static string DisplayTaskbarNotShown() => "Gauge display: the chosen display shows no taskbar, so the main display's taskbar is used.";
+
+    public static string DisplayBack(string display) => "Gauge display: the chosen display is back (" + display + ").";
+
+    public static string DisplayProblem(StepOutcome outcome)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        return "Gauge display: " + outcome.Step + " " + outcome.CodeName + " (" + Number(outcome.Code) + ")" +
+            (outcome.Detail is null ? "" : " " + outcome.Detail);
+    }
+
+    private static string OnDisplay(string? display) => string.IsNullOrEmpty(display) ? "" : ", full-screen window on " + display;
 
     public static string HiddenWindowFailed(StepOutcome outcome)
     {

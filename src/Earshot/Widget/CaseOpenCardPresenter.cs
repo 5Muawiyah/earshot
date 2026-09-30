@@ -215,7 +215,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     {
         if (gaugeBounds is { } gauge)
         {
-            Rectangle workArea = Screen.FromPoint(gauge.Location).WorkingArea;
+            Rectangle workArea = SystemDisplaySource.WorkAreaFor(gauge);
             return WidgetCardPlacement.Above(gauge, cardSize, workArea, _callbacks.Dpi(), _callbacks.CurrentGaugePosition);
         }
 

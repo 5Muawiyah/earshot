@@ -98,7 +98,7 @@ internal sealed partial class WidgetCard
 
     private static Rectangle PartRectangle(SettingsItem item, SettingsPart part) => part switch
     {
-        SettingsPart.Toggle or SettingsPart.SegmentFirst or SettingsPart.Text or SettingsPart.Minus or SettingsPart.Shortcut or SettingsPart.Button => item.A,
+        SettingsPart.Toggle or SettingsPart.SegmentFirst or SettingsPart.Text or SettingsPart.Minus or SettingsPart.Shortcut or SettingsPart.Button or SettingsPart.Choice => item.A,
         SettingsPart.SegmentSecond or SettingsPart.Plus or SettingsPart.Clear => item.B,
         _ => Rectangle.Empty,
     };
@@ -155,6 +155,9 @@ internal sealed partial class WidgetCard
                 break;
             case SettingsPart.SegmentSecond:
                 Raise(new PositionChange(GaugePosition.NextToApps));
+                break;
+            case SettingsPart.Choice:
+                Raise(new DisplayChange(GaugeDisplayOptions.Next(values.GaugeDisplayOptions, values.GaugeDisplayId)));
                 break;
             case SettingsPart.Text:
                 BeginTextEdit(values.OtherDeviceLabel);
@@ -484,6 +487,9 @@ internal sealed partial class WidgetCard
                 case SettingsRowId.GaugePosition:
                     CardPaint.Segment(g, item.A, WidgetCopy.PositionRightEnd, values.GaugePosition == GaugePosition.RightEnd, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.SegmentFirst));
                     CardPaint.Segment(g, item.B, WidgetCopy.PositionNextToApps, values.GaugePosition == GaugePosition.NextToApps, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.SegmentSecond));
+                    break;
+                case SettingsRowId.GaugeDisplay:
+                    CardPaint.SmallButton(g, item.A, GaugeDisplayOptions.LabelFor(values.GaugeDisplayOptions, values.GaugeDisplayId), colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Choice));
                     break;
                 case SettingsRowId.OtherDevice:
                     DrawTextBox(g, item.A, colours, values.OtherDeviceLabel, Focused(item.Row, SettingsPart.Text));

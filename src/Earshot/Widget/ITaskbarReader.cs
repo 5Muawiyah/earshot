@@ -10,6 +10,10 @@ internal interface ITaskbarReader
 {
     Result Read(ShownGauge? shownGauge);
 
+    // The same read for the display the owner chose (GaugeDisplayChoice.MainDisplay, "", for the main one). A reader
+    // that knows only one taskbar ignores the choice.
+    Result Read(ShownGauge? shownGauge, string chosenDisplayId) => Read(shownGauge);
+
     // A read's outcome: exactly one of a layout or a failure.
     readonly record struct Result
     {

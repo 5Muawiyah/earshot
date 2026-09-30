@@ -122,6 +122,16 @@ internal sealed class GaugeController : IDisposable
     private readonly TimeProvider _time;
     private readonly IGaugeCoverProbe? _coverProbe;
     private readonly Action<Action> _uiPost;
+    private readonly Func<ForegroundWindowReading?>? _foregroundProbe;
+
+    // The display the last layout was read for, and how many displays there were: what a full-screen signal is
+    // judged against. One display until a layout says otherwise, so a signal that comes first hides as it always did.
+    private Rectangle _displayBounds;
+    private int _displayCount = 1;
+    private bool _fullScreenPending;
+    private string? _lastIgnoredKey;
+    private DisplayFallbackReason _lastDisplayFallback;
+    private int? _lastDisplayProblemCode;
 
     private IGaugeSurface? _surface;
     private GaugeState _state = new GaugeState.Off();
@@ -151,7 +161,7 @@ internal sealed class GaugeController : IDisposable
     // thread, gets back to the UI thread; null runs it where it is called from (a test's manual clock).
     public GaugeController(
         Func<IGaugeSurface> createSurface, ITrayIconVisibility trayIcon, Func<GaugeControllerSettings> settings, ILog log, TimeProvider time,
-        IGaugeCoverProbe? coverProbe = null, Action<Action>? uiPost = null)
+        IGaugeCoverProbe? coverProbe = null, Action<Action>? uiPost = null, Func<ForegroundWindowReading?>? foregroundProbe = null)
     {
         ArgumentNullException.ThrowIfNull(createSurface);
         ArgumentNullException.ThrowIfNull(trayIcon);
@@ -165,9 +175,13 @@ internal sealed class GaugeController : IDisposable
         _time = time;
         _coverProbe = coverProbe;
         _uiPost = uiPost ?? (static action => action());
+        _foregroundProbe = foregroundProbe;
     }
 
     public GaugeState State => _state;
+
+    // Why the last read was not on the display the owner chose, or None.
+    public DisplayFallbackReason DisplayFallback => _lastDisplayFallback;
 
     // Raised on a left click when LeftClickConnects is off (the default): the owner asked to see the card.
     public event EventHandler? CardRequested;
@@ -202,11 +216,30 @@ internal sealed class GaugeController : IDisposable
 
         _consecutiveReadFailures = 0;
         TaskbarLayout layout = result.Layout!;
+        _displayBounds = layout.MonitorBounds;
+        _displayCount = Math.Max(1, layout.DisplayCount);
+        NoteDisplay(layout);
         if (layout.NotificationState is Shell.QUNS_BUSY or Shell.QUNS_RUNNING_D3D_FULL_SCREEN or Shell.QUNS_PRESENTATION_MODE)
         {
-            TransitionHidden(HiddenReason.NotificationState, "NotificationState " + QunsName(layout.NotificationState),
-                GaugeEventLog.HiddenNotificationState(QunsName(layout.NotificationState)), outcome: null);
-            return;
+            // The state is global: it says a full-screen application exists somewhere. It hides this gauge only when
+            // that application covers this gauge's display. Presentation settings are the owner's switch, not a
+            // window, so they hide the gauge on every display as they always did.
+            string quns = QunsName(layout.NotificationState);
+            if (layout.NotificationState == Shell.QUNS_PRESENTATION_MODE ||
+                FullScreenRule.CoversGaugeDisplay(_displayCount, layout.ForegroundWindow, _displayBounds))
+            {
+                string? where = _displayCount > 1 ? layout.ForegroundWindow?.DisplayLabel : null;
+                TransitionHidden(HiddenReason.NotificationState, "NotificationState " + quns,
+                    GaugeEventLog.HiddenNotificationState(quns, layout.NotificationState == Shell.QUNS_PRESENTATION_MODE ? null : where), outcome: null);
+                return;
+            }
+
+            NoteFullScreenElsewhere(quns, layout.ForegroundWindow, layout.DisplayLabel);
+        }
+        else
+        {
+            _fullScreenPending = false;
+            _lastIgnoredKey = null;
         }
 
         if (layout.Covered)
@@ -263,21 +296,108 @@ internal sealed class GaugeController : IDisposable
     // instead of this method forcing a show. Does nothing while the widget is off (Off is not a state this
     // notification should move out of): the caller poking a disposed or never-built watcher is already
     // harmless on its own.
+    //
+    // The notice is global (it carries no window and no monitor, and the appbar message goes to every appbar), so it
+    // is a trigger to look, not the verdict: the gauge hides only when the foreground window covers the gauge's
+    // display. The foreground may not have moved to the full-screen window yet, so an opening notice stays pending
+    // until a poll says no full-screen state remains or a closing notice arrives, and each foreground change while it
+    // is pending looks again.
     public void NotifyFullScreenApp(bool opening)
     {
-        if (_disposed || !opening || _state is GaugeState.Off)
+        if (_disposed || _state is GaugeState.Off)
         {
             return;
         }
 
-        TransitionHidden(HiddenReason.FullScreenNotified, "FullScreenNotified", GaugeEventLog.HiddenFullScreenNotified(), outcome: null);
+        if (!opening)
+        {
+            _fullScreenPending = false;
+            return;
+        }
+
+        _fullScreenPending = true;
+        EvaluateFullScreenNotice();
+    }
+
+    private void EvaluateFullScreenNotice()
+    {
+        ForegroundWindowReading? foreground = _displayCount > 1 ? _foregroundProbe?.Invoke() : null;
+        if (FullScreenRule.CoversGaugeDisplay(_displayCount, foreground, _displayBounds))
+        {
+            string? where = _displayCount > 1 ? foreground?.DisplayLabel : null;
+            TransitionHidden(HiddenReason.FullScreenNotified, "FullScreenNotified", GaugeEventLog.HiddenFullScreenNotified(where), outcome: null);
+            return;
+        }
+
+        NoteFullScreenElsewhere("FullScreenNotified", foreground, "");
+    }
+
+    private void NoteFullScreenElsewhere(string signal, ForegroundWindowReading? window, string gaugeDisplay)
+    {
+        string key = signal + "|" + window?.DisplayLabel + "|" + window?.Identity?.ClassName;
+        if (string.Equals(_lastIgnoredKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastIgnoredKey = key;
+        _log.Write(LogLevel.Debug, GaugeEventLog.FullScreenOnOtherDisplay(signal, window?.Identity, window?.DisplayLabel ?? "?", gaugeDisplay));
+    }
+
+    // What the read says about the display the gauge is on: a failure reading the displays once per code, and a
+    // change between the chosen display and the main display's taskbar as one line each way.
+    private void NoteDisplay(TaskbarLayout layout)
+    {
+        if (layout.DisplayProblem is { } problem)
+        {
+            if (_lastDisplayProblemCode != problem.Code)
+            {
+                _lastDisplayProblemCode = problem.Code;
+                _log.Warn(GaugeEventLog.DisplayProblem(problem));
+            }
+        }
+        else
+        {
+            _lastDisplayProblemCode = null;
+        }
+
+        if (layout.DisplayFallback == _lastDisplayFallback)
+        {
+            return;
+        }
+
+        DisplayFallbackReason before = _lastDisplayFallback;
+        _lastDisplayFallback = layout.DisplayFallback;
+        switch (layout.DisplayFallback)
+        {
+            case DisplayFallbackReason.NotConnected:
+                _log.Info(GaugeEventLog.DisplayNotConnected());
+                break;
+            case DisplayFallbackReason.TaskbarNotShown:
+                _log.Info(GaugeEventLog.DisplayTaskbarNotShown());
+                break;
+            default:
+                if (before != DisplayFallbackReason.None)
+                {
+                    _log.Info(GaugeEventLog.DisplayBack(layout.DisplayLabel));
+                }
+
+                break;
+        }
     }
 
     // The foreground window changed to a window of the given class (a class only, never a title). Looks at
     // what is over the gauge now and again after SecondLookDelay, since the shell can raise the taskbar a
     // moment after the change. Does nothing unless the gauge is on screen. UI thread.
-    public void OnForegroundChanged(string foregroundClass) =>
+    public void OnForegroundChanged(string foregroundClass)
+    {
+        if (!_disposed && _fullScreenPending && _state is GaugeState.Shown)
+        {
+            EvaluateFullScreenNotice();
+        }
+
         OnCoverEvent(new CoverTrigger(CoverTriggerKind.ForegroundChange, foregroundClass));
+    }
 
     // Explorer showed (or hid) a top-level window of the given class (a class only, never a title): a flyout
     // opening or closing is what makes the shell raise the taskbar, with no change of the foreground window to
