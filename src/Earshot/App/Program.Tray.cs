@@ -109,9 +109,10 @@ internal static partial class Program
 
         _trayInstance = mutex;
         string? startAfterExit = null;
+        var startKind = StartAfterExitKind.Switch;
         try
         {
-            return RunPrimaryTray(paths, log, startedAtLogon, out startAfterExit);
+            return RunPrimaryTray(paths, log, startedAtLogon, out startAfterExit, out startKind);
         }
         finally
         {
@@ -122,7 +123,7 @@ internal static partial class Program
             // The switch to the installed copy: started now that the lock is free, so it becomes the tray.
             if (startAfterExit is not null)
             {
-                InstalledCopyStarter.Start(startAfterExit, log);
+                InstalledCopyStarter.Start(startAfterExit, log, kind: startKind);
             }
         }
     }
@@ -192,9 +193,10 @@ internal static partial class Program
         }
     }
 
-    private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon, out string? startAfterExit)
+    private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon, out string? startAfterExit, out StartAfterExitKind startKind)
     {
         startAfterExit = null;
+        startKind = StartAfterExitKind.Switch;
         EventWaitHandle showEvent;
         try
         {
@@ -294,6 +296,7 @@ internal static partial class Program
                 log.Info("Tray started" + (paths.IsSafeMode ? " in safe mode" : "") + ". Settings: " + settings.FilePath + " (" + settings.LastLoadStatus + ").");
                 Application.Run(context);
                 startAfterExit = context.StartAfterExit;
+                startKind = context.StartAfterExitKind;
 
                 // Exit waits for actions in flight before it ends the loop; anything left here outlived that wait.
                 log.Info("Tray message loop ended." + (context.PendingActions > 0

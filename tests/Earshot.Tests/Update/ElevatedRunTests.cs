@@ -208,6 +208,7 @@ public sealed class ElevatedRunTests
 
             CollectionAssert.AreEqual(BlockThenLaunch, trace);
             Assert.AreEqual(UpdateTrayHarness.OtherExe, tray.Context.StartAfterExit, "It starts again from the copy that was running.");
+            Assert.AreEqual(StartAfterExitKind.Restart, tray.Context.StartAfterExitKind, "It is a start again, not a switch.");
             Assert.AreEqual("The Windows prompt was declined, so nothing was changed. Earshot is starting again.", tray.Cards.Shown[^1].Content.Status);
         });
     }

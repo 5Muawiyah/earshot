@@ -213,6 +213,7 @@ internal sealed partial class TrayContext
         if (_updateRunningExe is { } running && !_isElevated())
         {
             StartAfterExit = running;
+            StartAfterExitKind = StartAfterExitKind.Restart;
         }
 
         try

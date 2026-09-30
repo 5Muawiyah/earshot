@@ -438,6 +438,7 @@ public sealed class TrayUpdateTests
             Assert.AreEqual("Version 1.2.0 is available", tray.Cards.Shown[^1].Content.Title);
             Assert.AreEqual("The Windows prompt was declined, so nothing was changed. Earshot is starting again.", tray.Cards.Shown[^1].Content.Status);
             Assert.AreEqual(UpdateTrayHarness.InstalledExe, tray.Context.StartAfterExit, "The closing work is done, so the tray cannot carry on: it starts again.");
+            Assert.AreEqual(StartAfterExitKind.Restart, tray.Context.StartAfterExitKind, "A start again after a declined prompt is not logged as a switch.");
             Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Update: the elevated program started"));
             Assert.IsFalse(Directory.Exists(staged.WorkFolder), "The unused download is deleted.");
         });

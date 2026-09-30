@@ -127,14 +127,23 @@ internal static class InstalledCopy
 // tray asks whether it is elevated first (TrayContext.IsElevated) and offers a switch only when it is not. Called after the
 // running copy has let go of the single-instance lock, because the installed copy would otherwise find the lock held and end
 // at once.
+// Why a program is started once this one has exited, for the log: the switch the person chose, or Earshot starting again
+// because an update's hand-over ended without an install.
+internal enum StartAfterExitKind
+{
+    Switch,
+    Restart,
+}
+
 internal static class InstalledCopyStarter
 {
-    // True when the process started. A failure is logged with its raw code and returned, never swallowed.
-    // hidden is for tests, which start a console program and show no window.
-    public static bool Start(string executable, ILog log, bool hidden = false)
+    // True when the process started. A failure is logged with its raw code and returned, never swallowed. kind names, in the
+    // log, which start it was. hidden is for tests, which start a console program and show no window.
+    public static bool Start(string executable, ILog log, bool hidden = false, StartAfterExitKind kind = StartAfterExitKind.Switch)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(log);
+        string what = kind.ToString();
         var info = new System.Diagnostics.ProcessStartInfo(executable)
         {
             UseShellExecute = false,
@@ -146,21 +155,21 @@ internal static class InstalledCopyStarter
             using System.Diagnostics.Process? process = System.Diagnostics.Process.Start(info);
             if (process is null)
             {
-                log.Warn("Switch: no process was started for " + executable + ".");
+                log.Warn(what + ": no process was started for " + executable + ".");
                 return false;
             }
 
-            log.Info("Switch: started " + executable + " as process " + process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+            log.Info(what + ": started " + executable + " as process " + process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
             return true;
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            log.Warn("Switch: " + executable + " did not start (Win32 error " + ex.NativeErrorCode.ToString(System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message);
+            log.Warn(what + ": " + executable + " did not start (Win32 error " + ex.NativeErrorCode.ToString(System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message);
             return false;
         }
         catch (InvalidOperationException ex)
         {
-            log.Warn("Switch: " + executable + " did not start (" + ex.GetType().Name + "): " + ex.Message);
+            log.Warn(what + ": " + executable + " did not start (" + ex.GetType().Name + "): " + ex.Message);
             return false;
         }
     }

@@ -91,6 +91,10 @@ internal sealed partial class TrayContext
     // Program starts it after the lock is released.
     internal string? StartAfterExit { get; private set; }
 
+    // Why StartAfterExit is set, for the log: the switch the person chose, or Earshot starting again after an update's hand-over
+    // ended without an install.
+    internal StartAfterExitKind StartAfterExitKind { get; private set; } = StartAfterExitKind.Switch;
+
     // A copy that is not the installed one, started while an install exists, says so once on the update page of the
     // card (or a short message card when there is no card) and offers the switch. It changes nothing by itself.
     private void OfferSwitchToInstalledCopy()
@@ -150,6 +154,7 @@ internal sealed partial class TrayContext
         }
 
         StartAfterExit = installed;
+        StartAfterExitKind = StartAfterExitKind.Switch;
         _log.Info("Switch: this copy is closing so the installed copy, " + installed + ", can start.");
         _ = ExitAsync(CardPlace.NearTray, "Switching to the installed copy.");
     }

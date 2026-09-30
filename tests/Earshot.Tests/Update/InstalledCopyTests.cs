@@ -213,6 +213,29 @@ public sealed class InstalledCopyTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "Win32 error 2"), "The raw code is on record (ERROR_FILE_NOT_FOUND).");
     }
 
+    // The log says which it was: the switch the person chose, or Earshot starting again after a hand-over that ended without an
+    // install (a declined prompt, say). Both start the same program; only the reason differs.
+    [TestMethod]
+    public void TheStartSaysWhetherItWasASwitchOrAStartAgain()
+    {
+        string hostname = Path.Combine(Environment.SystemDirectory, "hostname.exe");
+
+        var restart = new CapturingLog();
+        Assert.IsTrue(InstalledCopyStarter.Start(hostname, restart, hidden: true, StartAfterExitKind.Restart));
+        Assert.IsTrue(restart.Has(LogLevel.Info, "Restart: started " + hostname), "A start again is logged as one.");
+        Assert.IsFalse(restart.Entries.Any(e => e.Message.StartsWith("Switch", StringComparison.Ordinal)), "It was not a switch.");
+
+        var sw = new CapturingLog();
+        Assert.IsTrue(InstalledCopyStarter.Start(hostname, sw, hidden: true, StartAfterExitKind.Switch));
+        Assert.IsTrue(sw.Has(LogLevel.Info, "Switch: started " + hostname));
+
+        using var temp = new TempFolder();
+        var failed = new CapturingLog();
+        Assert.IsFalse(InstalledCopyStarter.Start(Path.Combine(temp.Path, "missing.exe"), failed, hidden: true, StartAfterExitKind.Restart));
+        Assert.IsTrue(failed.Has(LogLevel.Warn, "Restart: "), "A failure names which start it was.");
+        Assert.IsTrue(failed.Has(LogLevel.Warn, "Win32 error 2"));
+    }
+
     // ----- the wait for the process that started the update -----
 
     // The update is started by whichever copy is running. A copy run from a download folder is not the installed
