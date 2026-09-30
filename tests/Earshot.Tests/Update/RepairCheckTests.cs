@@ -201,6 +201,20 @@ public sealed class RepairCheckTests
         }
     }
 
+    // A folder whose permissions could not be read says nothing about who may write to it, so the running copy, which may
+    // be in a folder the signed-in user can write, is not made the elevated program on the strength of it.
+    [TestMethod]
+    public void AFolderWhoseSecurityCouldNotBeReadIsNotSetUpFromThisCopyAndNothingIsLaunched()
+    {
+        foreach (InstalledFilesReport? files in new InstalledFilesReport?[] { Matching, OneBad, NoList, null })
+        {
+            RepairPlan plan = RepairPlanner.Decide(Unusable(InstallProblem.FolderNotRead), runningCopyIsNewer: false, files, new Version(1, 2, 2, 0));
+
+            Assert.AreEqual(RepairRoute.CouldNotRead, plan.Route);
+            Assert.AreNotEqual(RepairVerb.FromThisCopy, plan.Verb);
+        }
+    }
+
     [TestMethod]
     public void AProgramNotConfirmedAbsentIsNotSetUpFromThisCopy()
     {

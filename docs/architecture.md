@@ -516,7 +516,13 @@ Exit ends (no more input, `BeginShutdown` with the hand-back plan, the coordinat
 block before closing with the same limits), waiting for everything in flight
 except the update action itself. Only then is the elevated program started, and
 the tray ends at the launch with no further device call (no second hand-back or
-block). The order matters for installed versions that do not wait for a copy run
+block): from the moment the closing work has run, `BlockCoordinator.EndDeviceWork`
+makes a session end, a sleep or a resume do nothing on the device, so a sign-out
+while the administrator prompt is open cannot send a hand-back or a block beside
+the install. Before the closing work, with Hand back off and the AirPods in use
+(`ClosingWouldLeaveAirPodsEnabled`), the card says they stay connected and are
+blocked again at the next start, and the closing notice is kept up for
+`ExitNoticeTime` before the launch, so the prompt does not cover it. The order matters for installed versions that do not wait for a copy run
 from another folder to end: the installed 1.2.0 and the first published 1.2.1
 ignore the process id, so an install started while the tray was still handing back
 and blocking could replace files under it. A refusal or a failed launch after the
@@ -574,9 +580,10 @@ routes are:
 |---|---|
 | Every file matches | The installed program repairs itself: its repair verb, or its install verb, which every version runs from its own folder as the same repair, when the installed program is older than 1.2.2. The first published 1.2.1 has no repair verb and answers "Unknown command: repair" with exit 64, and a later build of 1.2.1 carries the same number, so the verb is assumed only from 1.2.2 (`RepairPlanner.RepairVerbSince`). |
 | A file is missing or does not match, or there is no usable file list | The release of the installed version is read from the feed's tag route (the same feed, HTTPS and size rules as a check), downloaded, checked against its `.sha256` file, and handed to the installed program's update verb. That verb runs from the install folder, which only administrators can change, even when the installed `Earshot.exe` is itself one of the files that differs; what it installs is only the verified zip. |
-| A file, the file list or the installed version could not be read | Nothing is elevated and nothing changes. "Couldn't read the installed files ... Try again in a moment." The raw code (a sharing violation 0x80070020, say) is logged. Not treated as missing: a standard user can open an installed file with no sharing for as long as they like, which makes the hash read fail and the version unreadable, and a missing file is one whose read says so (file or path not found). |
+| A file or the file list could not be read, or the install folder's permissions could not be read (`InstallProblem.FolderNotRead`) | Nothing is elevated and nothing changes. "Couldn't read the installed files ... Try again in a moment." The raw code (a sharing violation 0x80070020, say) is logged. Not treated as missing or as writable: a standard user can open an installed file with no sharing for as long as they like, which makes the hash read fail, and a missing file is one whose read says so (file or path not found). |
+| Every file matches, but the installed version could not be read (held open, or no version in the file) | The installed program's install verb runs, as for any version below 1.2.2 (`RepairPlanner.Decide` treats an unknown version as too old for the repair verb). The log says which it was: a file that could not be read keeps its raw code, and a file with no version says it carries none. If a file is also missing or different, nothing is elevated, because the release to fetch is named by the installed version. |
 | The running copy is newer than the installed one | Not elevated. Repair opens the update path (a check against the installed version, then Update). |
-| `Earshot.exe` is truly missing (the folder lists without it), or its folder can be written by a standard user | The running copy's own setup puts a new install in place. A program that could not be found, where the folder could not be listed or lists the file, is not truly missing and is read as unreadable. |
+| `Earshot.exe` is truly missing (the folder lists without it), or its folder can be written by a standard user | The running copy's own setup puts a new install in place. A program that could not be found, where the folder could not be listed or lists the file, is not truly missing and is read as unreadable, and so is a folder whose permissions could not be read: only a folder read as writable by a standard user is this route. |
 | Nothing is installed | Set up, not Repair. |
 
 The same hash check, the same release

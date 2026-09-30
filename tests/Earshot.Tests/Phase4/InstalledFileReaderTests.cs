@@ -53,4 +53,52 @@ public sealed class InstalledFileReaderTests
             File.Delete(path);
         }
     }
+
+    // A standard user can hold an installed program open without sharing it. That is a file that could not be read, with the
+    // raw sharing code, not one that has no version: the log says which, and nothing is decided from either.
+    [TestMethod]
+    public void AFileHeldOpenWithoutSharingCouldNotBeReadAndSaysSoWithTheSharingCode()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "earshot-held-" + Guid.NewGuid().ToString("N") + ".dll");
+        File.Copy(typeof(BlockController).Assembly.Location, path);
+        try
+        {
+            InstalledFile file;
+            using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                file = new InstalledFileReader().Read(path);
+            }
+
+            Assert.IsTrue(file.Present, "The file is there.");
+            Assert.IsNull(file.Version);
+            Assert.IsFalse(file.Step.Ok);
+            Assert.AreEqual(unchecked((int)0x80070020), file.Step.Code, "The sharing violation, raw: " + file.Step.Detail);
+            StringAssert.Contains(file.Step.Detail, "could not be read");
+            Assert.DoesNotContain("no file version", file.Step.Detail);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void AFileWithNoVersionSaysItCarriesNone()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "earshot-noversion-" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(path, "not an executable");
+        try
+        {
+            InstalledFile file = new InstalledFileReader().Read(path);
+
+            Assert.IsTrue(file.Present);
+            Assert.IsNull(file.Version);
+            StringAssert.Contains(file.Step.Detail, "carries no file version");
+            Assert.AreEqual(Earshot.Contracts.NativeCodes.NotAvailable, file.Step.Code);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

@@ -58,6 +58,33 @@ public sealed class HandBackTests
         Assert.IsTrue(h.Log.Has(LogLevel.Info, "Hand-back: off"));
     }
 
+    // After the tray has done its closing device work for an update's hand-over, no session end, sleep or resume sends a
+    // device call, whatever the setting and the state of the AirPods: the install that follows is working on the tasks.
+    [TestMethod]
+    public void AfterTheClosingWorkForAnUpdateNoSessionEndSleepOrResumeSendsAnything()
+    {
+        using CoordinatorHarness h = Harness();
+        Arrange(h, Statuses.Allowed(), Devices.Active(1));
+        h.Trace.Clear();
+        h.Connection.Calls.Clear();
+        h.Block.Calls.Clear();
+
+        h.Coordinator.EndDeviceWork();
+        Task shutdown = h.Coordinator.HandBackAsync(HandBackTrigger.SessionEnd, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        Task sleep = h.Coordinator.HandBackAsync(HandBackTrigger.Suspend, h.Time.GetUtcNow() + Budget, DisconnectWait);
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+        h.Coordinator.OnSessionEnding(new SessionEndingEventArgs(isQuery: false, ending: true, flags: 0));
+        Task resume = h.Coordinator.ResumeCheckAsync();
+        h.Pump();
+
+        Assert.IsTrue(shutdown.IsCompleted && sleep.IsCompleted && resume.IsCompleted);
+        Assert.IsEmpty(h.Trace);
+        Assert.IsEmpty(h.Connection.Calls);
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.IsFalse(h.Coordinator.HandBackInProgress);
+        Assert.IsFalse(h.Coordinator.SessionEndInProgress, "A session end after the closing work starts nothing, so nothing is refused for it either.");
+    }
+
     // Render ACTIVE runs the disconnect, then the block, in that order, and finishes.
     [TestMethod]
     public void ActiveRenderDisconnectsThenBlocksInOrder()

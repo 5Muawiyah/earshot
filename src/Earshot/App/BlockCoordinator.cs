@@ -269,6 +269,12 @@ internal sealed partial class BlockCoordinator : IDisposable
     // HandBackAsync; a second end-session or power message, a click and a menu action are refused while it holds.
     private bool _handingBack;
 
+    // The tray has done its closing device work for an elevated update and is about to start the program that replaces its
+    // files. From here on a session end, a sleep or a resume sends nothing: a hand-back, a block or a resume check would
+    // be a device call made beside an install that works on the scheduled tasks and the service, after the closing work
+    // already let go of the AirPods and asked for the block.
+    private bool _deviceWorkDone;
+
     // Set at the start of a sleep hand-back (PBT_APMSUSPEND), cleared only once PBT_APMRESUMEAUTOMATIC has
     // actually arrived (ResumeCheckAsync), never earlier: _handingBack itself only covers HandBackAsync's own
     // procedure, which clears as soon as that finishes or cuts short, but Windows does not promise the machine
@@ -438,6 +444,13 @@ internal sealed partial class BlockCoordinator : IDisposable
     // flight is cancelled, and no block before closing is queued, since nothing would be left to run it. After
     // BeginShutdown this does nothing.
     public void Stop() => MarkClosing();
+
+    // Called once the closing device work for an elevated update has finished (the hand-back and the block before closing,
+    // with their limits). After it no session end, sleep or resume makes a device call.
+    public void EndDeviceWork()
+    {
+        _deviceWorkDone = true;
+    }
 
     public void Dispose()
     {
@@ -839,6 +852,12 @@ internal sealed partial class BlockCoordinator : IDisposable
     public void OnSessionEnding(SessionEndingEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
+        if (_deviceWorkDone)
+        {
+            _log.Info("Session ending: nothing is sent, because the closing work for the update is done.");
+            return;
+        }
+
         if (!e.IsQuery && !e.Ending)
         {
             if (_sessionEnding && !_sessionBlockIssued)
@@ -1139,6 +1158,12 @@ internal sealed partial class BlockCoordinator : IDisposable
             return;
         }
 
+        if (_deviceWorkDone)
+        {
+            _log.Info(HandBackText.Prefix(trigger) + "nothing is sent, because the closing work for the update is done.");
+            return;
+        }
+
         if (!Settings.HandBackOnShutdownAndSleep)
         {
             _log.Info(HandBackText.Off(trigger));
@@ -1248,6 +1273,12 @@ internal sealed partial class BlockCoordinator : IDisposable
     {
         if (_disposed)
         {
+            return;
+        }
+
+        if (_deviceWorkDone)
+        {
+            _log.Info("Resume check: nothing is sent, because the closing work for the update is done.");
             return;
         }
 

@@ -248,7 +248,14 @@ the `.sha256` file published with it. Earshot then finishes its own closing work
 installed Earshot with one administrator prompt, and ends without another call to
 the AirPods: the installed 1.2.0 and the first 1.2.1 do not wait for a copy run
 from another folder to end, so the install must not start while this copy is
-still letting go. The installed Earshot checks the zip again, from a folder only
+still letting go. With Hand back off and the AirPods in use nothing can block
+them, so the card says before the closing work that they stay connected and are
+blocked again at the next start, and suggests turning Hand back on or
+disconnecting them first, and keeps that notice up for its time before the prompt
+(any notice the closing work ends with is kept up the same way). Once the closing
+work has run, a sign-out, shut down, sleep or resume while the prompt is open
+sends nothing to the AirPods, because the install that follows works on the
+scheduled tasks and the service. The installed Earshot checks the zip again, from a folder only
 administrators can write, and installs from there. The program that runs with
 that prompt is the installed one, which is in a folder only administrators can
 change, never the copy you were running. If the prompt is declined after the
@@ -301,12 +308,18 @@ install folder can be changed only by administrators. Then:
   back only from checked bytes. The installed Earshot that runs that update is in
   a folder only administrators can change, even when its own file is one that
   differs; what it installs is only the verified zip.
-- If a file, the file list or the installed version could not be read (another
-  program holds it open, or access was refused), nothing is changed and nothing
-  is run elevated. Earshot says it could not read the installed files and to
-  try again, and logs the raw code. A file that could not be read says nothing
-  about what is in it, and a standard user can make any installed file
-  unreadable for as long as they like, so it is not treated as missing.
+- If a file or the file list could not be read, or the install folder's
+  permissions could not be read (another program holds it open, or access was
+  refused), nothing is changed and nothing is run elevated. Earshot says it
+  could not read the installed files and to try again, and logs the raw code.
+  A file that could not be read says nothing about what is in it, and a
+  standard user can make any installed file unreadable for as long as they
+  like, so it is not treated as missing.
+- If every file matches but the installed version could not be read (the file
+  is held open, or carries no version), the installed program's install verb
+  runs, which every version runs from its own folder as the same repair. If a
+  file is also missing or different, nothing is changed and nothing is run
+  elevated, because the release to download is named by the installed version.
 - If the running copy is newer than the installed one, Repair does not run it
   elevated, because that copy may be in a folder a standard user can write. It
   opens the update path instead: Check for updates, then Update.

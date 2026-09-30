@@ -208,6 +208,7 @@ public sealed class ElevatedRunTests
 
             CollectionAssert.AreEqual(BlockThenLaunch, trace);
             Assert.AreEqual(UpdateTrayHarness.OtherExe, tray.Context.StartAfterExit, "It starts again from the copy that was running.");
+            Assert.AreEqual(StartAfterExitKind.Restart, tray.Context.StartAfterExitKind, "It is a start again, not a switch.");
             Assert.AreEqual("The Windows prompt was declined, so nothing was changed. Earshot is starting again.", tray.Cards.Shown[^1].Content.Status);
         });
     }
@@ -451,6 +452,8 @@ public sealed class ElevatedRunTests
             Assert.IsTrue(RunUntilClosed(tray));
 
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "Exit: the repair was still running after 0.25 s"), "The wait that ran out is logged.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "is not known here"), "The log says what is not known about the BootBlock task, and does not promise it.");
+            Assert.IsFalse(tray.Log.Has(LogLevel.Warn, "BootBlock task blocks the AirPods at the next start"), "No certainty about the next start.");
             Assert.Contains(TrayContext.ClosedBeforeElevatedEndedMessage("repair"), tray.Cards.Statuses, "And said on a card.");
             Assert.Contains("block", trace, "Exit still blocked after the wait ran out.");
             Assert.IsGreaterThan(trace.IndexOf("repair:start"), trace.IndexOf("repair:gave-up-waiting"));

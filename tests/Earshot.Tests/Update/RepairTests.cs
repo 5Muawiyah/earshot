@@ -442,6 +442,30 @@ public sealed class RepairTests
         StringAssert.Contains(UpdateOutcomes.Describe(new InstallResult(GateExitCode.Busy, [new StepOutcome(InstallRunLock.StepName, false, (int)MachineGateMutex.WaitTimeout, "WAIT_TIMEOUT", "held")])).Reason, "another setup, update or repair");
     }
 
+    // The lock is only a lock when the real runs are given it. Each of the three elevated runs is built by one factory, and each
+    // must carry the machine-wide lock of setup, update and repair under its own name, not the gate's and not none.
+    [TestMethod]
+    public void TheRealInstallRepairAndUpdateRunsAreGivenTheMachineWideInstallLock()
+    {
+        using var temp = new TempFolder();
+        var layout = new InstallLayout(temp.File("unzip"), temp.File("Earshot"), temp.File("machine"));
+        var log = new CapturingLog();
+
+        var locks = new Dictionary<string, IGateRunLock>
+        {
+            ["install"] = Program.CreateInstallActions(layout, log).RunLock,
+            ["repair"] = Program.CreateRepairActions(layout, log).RunLock,
+            ["update"] = Program.CreateUpdateActions(layout, log).RunLock,
+        };
+
+        foreach ((string run, IGateRunLock runLock) in locks)
+        {
+            var mutex = runLock as MachineGateMutex;
+            Assert.IsNotNull(mutex, run + " run has no machine-wide lock: " + runLock.GetType().Name);
+            Assert.AreEqual(InstallRunLock.Name, mutex.Name, run + " run takes a lock under the wrong name.");
+        }
+    }
+
     // ----- the command line -----
 
     private static readonly string[] Good = ["repair", TestUsers.Sid, RecordedNodes.AirPodsAddress, "5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13"];

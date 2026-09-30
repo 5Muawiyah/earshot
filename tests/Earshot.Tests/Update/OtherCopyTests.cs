@@ -177,6 +177,7 @@ public sealed class OtherCopyTests
 
             Assert.IsFalse(timedOut, "This copy did not close.");
             Assert.AreEqual(UpdateTrayHarness.InstalledExe, tray.Context.StartAfterExit, "The installed program, not this copy.");
+            Assert.AreEqual(StartAfterExitKind.Switch, tray.Context.StartAfterExitKind, "The person's switch is logged as one.");
             Assert.IsEmpty(tray.Launcher.Launches, "Nothing is started elevated: the start is a plain one, after the lock is released.");
         });
     }

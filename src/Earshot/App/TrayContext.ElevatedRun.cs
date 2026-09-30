@@ -35,6 +35,11 @@ internal sealed partial class TrayContext
     // elevated program has started, or when starting it failed.
     private bool _closedForHandOver;
 
+    // The closing device work for the hand-over has finished. From here no session end, sleep or resume makes a device call,
+    // because the administrator prompt can stay up for as long as the person likes and the install it starts replaces the
+    // program's files, the tasks and the service.
+    private bool _handOverDeviceWorkDone;
+
     private TimeSpan _elevatedExitWait = TimeSpan.FromSeconds(90);
 
     // The elevated operation under way, for the menu, the card and tests.
@@ -105,7 +110,8 @@ internal sealed partial class TrayContext
         }
 
         _log.Warn("Exit: the " + run + " was still running after " + Seconds(_elevatedExitWait) + ", so Earshot closes without waiting longer. " +
-            "The block may meet a scheduled task the " + run + " is still registering; the BootBlock task blocks the AirPods at the next start.");
+            "The block may meet a scheduled task the " + run + " is still registering. The " + run + " deletes the scheduled tasks and registers them again, " +
+            "so it may be between the two: whether the BootBlock task is in place to block the AirPods at the next start depends on how that run ends, and is not known here.");
         return ClosedBeforeElevatedEndedMessage(run);
     }
 
@@ -138,10 +144,28 @@ internal sealed partial class TrayContext
             return UpdateCopy.ClosingNotice;
         }
 
+        CardPlace place = CardPlace.NearTray;
+
+        // With the AirPods in use and Hand back off, nothing in this hand-over can block them: this program ends, and the one
+        // that replaces its files does not touch them. Said before the closing work starts, and kept up for the notice time,
+        // so it is read before the administrator prompt covers it.
+        bool toldInUse = false;
+        if (_coordinator.ClosingWouldLeaveAirPodsEnabled)
+        {
+            toldInUse = true;
+            _log.Info("Update: the AirPods are in use and Hand back is off, so they stay connected and are not blocked until the next start. Telling the person first.");
+            place.Show(_registry.Cards, TrayStatus.AppName, UpdateCopy.AirPodsStayConnectedNotice);
+            await Task.Delay(_exitNoticeTime);
+            if (_closing)
+            {
+                _log.Info("Update: not handed over, because Earshot is closing.");
+                return UpdateCopy.ClosingNotice;
+            }
+        }
+
         // The same steps as Exit's (ExitAsync), up to the point where Exit ends: no more input, then the hand-back and the
         // block before closing, with their limits. The elevated program starts only after they have finished, because an
         // installed version that does not wait for this program to end would otherwise install while they still run.
-        CardPlace place = CardPlace.NearTray;
         _closing = true;
         _closedForHandOver = true;
         _log.Info("Update: Earshot does its closing device work first, then starts the elevated program and ends.");
@@ -151,10 +175,19 @@ internal sealed partial class TrayContext
         _coordinator.BeginShutdown(PrepareExitHandBack());
         _lifetime.Cancel();
         string? notice = await FinishClosingWorkAsync(place, exceptAction: IsElevatedFlowAction);
+        _handOverDeviceWorkDone = true;
+        _coordinator.EndDeviceWork();
         if (notice is not null)
         {
             _log.Info("Update: " + notice);
-            place.Show(_registry.Cards, TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), notice);
+
+            // Kept up for its time before the launch, as Exit keeps its notice: the administrator prompt would otherwise cover
+            // it. The in-use notice was said in full before the closing work, so it is not said twice.
+            if (!(toldInUse && notice == BlockCoordinator.ClosedWhileInUseMessage))
+            {
+                place.Show(_registry.Cards, TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), notice);
+                await Task.Delay(_exitNoticeTime);
+            }
         }
 
         return null;
@@ -180,6 +213,7 @@ internal sealed partial class TrayContext
         if (_updateRunningExe is { } running && !_isElevated())
         {
             StartAfterExit = running;
+            StartAfterExitKind = StartAfterExitKind.Restart;
         }
 
         try
