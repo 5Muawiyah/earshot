@@ -44,7 +44,7 @@ namespace Earshot.Tests.TestWindow;
 // what expectations.psd1 says, with no exception.
 //
 // Real, not faked: tools\live-tests\gui\selftest\DeviceStubs.ps1 replaces only
-// Resolve-EarshotExe, Invoke-Earshot, Invoke-EarshotElevated and Start-Process; Get-PowerEvents
+// Resolve-EarshotExe, Invoke-Earshot, Invoke-EarshotElevated, Start-Process and Test-EarshotRunning; Get-PowerEvents
 // (like Get-EarshotLogLines before it) runs for real here, reading this machine's actual System
 // event log, unlike tools\live-tests\selftest\Run-OneHalf.ps1's path, which fakes it. Nothing in
 // this sandbox ever really shuts this machine down or puts it to sleep, so a criterion that can
