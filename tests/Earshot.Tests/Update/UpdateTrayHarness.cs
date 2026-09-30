@@ -48,7 +48,9 @@ internal sealed class UpdateTrayHarness : IDisposable
         string? installFolderSddl = null,
         Func<IUpdateSource>? sourceFactory = null,
         TimeProvider? time = null,
-        UpdateOutcomeSource? outcomeSource = null)
+        UpdateOutcomeSource? outcomeSource = null,
+        DeviceSnapshot? snapshot = null,
+        TimeSpan? elevatedExitWait = null)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -56,7 +58,7 @@ internal sealed class UpdateTrayHarness : IDisposable
         source?.Invoke(Source);
         block?.Invoke(Block);
 
-        Monitor.Current = NoDevice();
+        Monitor.Current = snapshot ?? NoDevice();
         Startup.Run[StartupRegistration.ValueName] = StartupRegistration.CommandFor(TrayHarness.ExePath);
         startup?.Invoke(Startup);
         SettingsPath = _folder.File("settings.json");
@@ -120,6 +122,7 @@ internal sealed class UpdateTrayHarness : IDisposable
             UpdateSourceFactory = sourceFactory ?? (() => Source),
             UpdateLauncher = Launcher,
             UpdateOutcome = outcomeSource,
+            ElevatedExitWait = elevatedExitWait ?? TimeSpan.FromSeconds(30),
         };
 
         Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,

@@ -1917,7 +1917,7 @@ internal sealed partial class TrayContext : ApplicationContext
         MenuModel.Build(
             _snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy,
             _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.SetupAvailable ?? false,
-            updateInProgress: _updates?.IsBusy ?? false);
+            updateInProgress: _updates?.IsBusy ?? false, elevatedRun: _elevatedRun);
 
     private void UpdatePresentation(bool forceIcon)
     {
@@ -1963,10 +1963,23 @@ internal sealed partial class TrayContext : ApplicationContext
 
     private async Task RunSetupAsync(CardPlace place)
     {
-        ControllerResult? result = await RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place);
-        if (result is { IsSuccess: true } && !_closing)
+        if (!TryBeginElevatedRun(SetupRun, place))
         {
-            PointStartupAtInstalledCopy();
+            return;
+        }
+
+        try
+        {
+            ControllerResult? result = await WithElevatedProgramAsync(
+                () => RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place));
+            if (result is { IsSuccess: true } && !_closing)
+            {
+                PointStartupAtInstalledCopy();
+            }
+        }
+        finally
+        {
+            EndElevatedRun(SetupRun);
         }
     }
 
@@ -2377,54 +2390,23 @@ internal sealed partial class TrayContext : ApplicationContext
         _log.Info(why);
         try
         {
-            // No more input: the icon goes, the picker closes, and everything in flight is cancelled. The
-            // coordinator then blocks enabled nodes that are not in use, after any clean-up in flight.
+            // No more input: the icon goes and the picker closes.
             _notifyIconVisibility.Visible = false;
             _picker?.Close();
             _exitPlace = place;
+
+            // An elevated setup or repair still running is waited for before anything of Exit's own is sent: it registers the
+            // boot block's scheduled tasks again, and the block before closing (and the hand-back) must not meet one that is
+            // being replaced. Everything below cancels what is in flight, that run included, so this comes first.
+            string? elevatedNotice = await WaitForElevatedProgramAsync(place);
+
+            // Everything in flight is cancelled. The coordinator then blocks enabled nodes that are not in use, after any
+            // clean-up in flight.
             _coordinator.BeginShutdown(PrepareExitHandBack());
             _lifetime.Cancel();
 
-            bool gaveUp = false;
-            if (_pending.Count > 0 || _coordinator.IsBusy)
-            {
-                _log.Info("Waiting for " + DescribePending() + " to finish before closing.");
-
-                // The block before closing on its own first reads the state and may block nothing, so it gets no
-                // card until the block is sent (OnCoordinatorChanged).
-                bool onlyTheBlock = _pending.Count == 0 && !_coordinator.IsBusyBeyondClosingBlock;
-                if (!onlyTheBlock)
-                {
-                    place.Show(_registry.Cards, TrayStatus.AppName, ClosingMessage);
-                }
-
-                Task all = Task.WhenAll(_pending.Keys.Append(_coordinator.WhenIdleAsync()));
-                TimeSpan waited = _exitWaitLimit;
-                if (!await CompletesWithinAsync(all, _exitWaitLimit) && _coordinator.IsBusy && _coordinatorExitWaitLimit > _exitWaitLimit)
-                {
-                    // What the coordinator has in flight may still end in the block that keeps the nodes disabled at
-                    // rest, and every wait inside it has a limit of its own.
-                    _log.Info("Still waiting for the block coordinator after " + Seconds(_exitWaitLimit) + ", up to " +
-                        Seconds(_coordinatorExitWaitLimit) + " in all, so a block its work ends with is still sent.");
-                    await CompletesWithinAsync(_coordinator.WhenIdleAsync(), _coordinatorExitWaitLimit - _exitWaitLimit);
-                    waited = _coordinatorExitWaitLimit;
-                }
-
-                if (all.IsFaulted)
-                {
-                    _log.Error("An action failed while Earshot was closing.", all.Exception);
-                }
-                else if (!all.IsCompleted)
-                {
-                    gaveUp = true;
-                    _log.Warn("Closing after " + Seconds(waited) + " with " + DescribePending() + " still in flight.");
-                }
-            }
-
-            // A change still running when the wait ran out may leave the nodes enabled, with nothing left here
-            // to block them; the BootBlock task is then what blocks them at the next start.
-            string? notice = _coordinator.ClosingNotice ??
-                             (gaveUp && _coordinator.IsBusy && BlockStatus is not { BlockAtBoot: false, BlockAtBootKnown: true } ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
+            string? notice = await FinishClosingWorkAsync(place, exceptAction: null);
+            notice = elevatedNotice is null ? notice : notice is null ? elevatedNotice : elevatedNotice + " " + notice;
             if (notice is not null)
             {
                 _log.Info("Exit: " + notice);
@@ -2440,6 +2422,54 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             ExitThread();
         }
+    }
+
+    // Waits for what is in flight, the block coordinator's hand-back and block before closing included, each wait with its
+    // limit, and returns what the person should be told if the work did not end cleanly, or null. exceptAction names the
+    // actions that are not waited for because one of them is the caller (the update whose hand-over this is).
+    private async Task<string?> FinishClosingWorkAsync(CardPlace place, Func<string, bool>? exceptAction)
+    {
+        Task[] waitFor = _pending.Where(p => exceptAction is null || !exceptAction(p.Value)).Select(p => p.Key).ToArray();
+        bool gaveUp = false;
+        if (waitFor.Length > 0 || _coordinator.IsBusy)
+        {
+            _log.Info("Waiting for " + DescribePending() + " to finish before closing.");
+
+            // The block before closing on its own first reads the state and may block nothing, so it gets no
+            // card until the block is sent (OnCoordinatorChanged).
+            bool onlyTheBlock = waitFor.Length == 0 && !_coordinator.IsBusyBeyondClosingBlock;
+            if (!onlyTheBlock)
+            {
+                place.Show(_registry.Cards, TrayStatus.AppName, ClosingMessage);
+            }
+
+            Task all = Task.WhenAll(waitFor.Append(_coordinator.WhenIdleAsync()));
+            TimeSpan waited = _exitWaitLimit;
+            if (!await CompletesWithinAsync(all, _exitWaitLimit) && _coordinator.IsBusy && _coordinatorExitWaitLimit > _exitWaitLimit)
+            {
+                // What the coordinator has in flight may still end in the block that keeps the nodes disabled at
+                // rest, and every wait inside it has a limit of its own.
+                _log.Info("Still waiting for the block coordinator after " + Seconds(_exitWaitLimit) + ", up to " +
+                    Seconds(_coordinatorExitWaitLimit) + " in all, so a block its work ends with is still sent.");
+                await CompletesWithinAsync(_coordinator.WhenIdleAsync(), _coordinatorExitWaitLimit - _exitWaitLimit);
+                waited = _coordinatorExitWaitLimit;
+            }
+
+            if (all.IsFaulted)
+            {
+                _log.Error("An action failed while Earshot was closing.", all.Exception);
+            }
+            else if (!all.IsCompleted)
+            {
+                gaveUp = true;
+                _log.Warn("Closing after " + Seconds(waited) + " with " + DescribePending() + " still in flight.");
+            }
+        }
+
+        // A change still running when the wait ran out may leave the nodes enabled, with nothing left here
+        // to block them; the BootBlock task is then what blocks them at the next start.
+        return _coordinator.ClosingNotice ??
+               (gaveUp && _coordinator.IsBusy && BlockStatus is not { BlockAtBoot: false, BlockAtBootKnown: true } ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
     }
 
     // True when task completed within limit.

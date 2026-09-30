@@ -35,6 +35,10 @@ internal sealed record CardSettingsValues(
 
     public string? GaugeDisplayNote { get; init; }
 
+    // Why Check for updates and Repair do nothing now (a setup, repair or update is running), or null. The rows say it in place
+    // of their usual line, and the tray refuses the buttons with the same words.
+    public string? ElevatedRunNote { get; init; }
+
     public const int LowBatteryMin = 10;
     public const int LowBatteryMax = 90;
     public const int LowBatteryStep = 10;
@@ -368,7 +372,7 @@ internal static class SettingsPageLayout
 
         string checkLabel = WidgetCopy.CheckForUpdates;
         int checkW = measure.Width(WidgetCopy.CheckButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
-        string? installed = values.InstalledVersion is null ? null : "Version " + values.InstalledVersion;
+        string? installed = values.ElevatedRunNote ?? (values.InstalledVersion is null ? null : "Version " + values.InstalledVersion);
         Row(
             SettingsRowId.CheckForUpdates, checkLabel, installed, subIsProblem: false, subFullWidth: false, checkW,
             (top, _) => (new Rectangle(right - checkW, top, checkW, control), Rectangle.Empty, Rectangle.Empty),
@@ -379,7 +383,7 @@ internal static class SettingsPageLayout
         {
             int repairW = measure.Width(WidgetCopy.RepairButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
             Row(
-                SettingsRowId.Repair, WidgetCopy.RepairEarshot, WidgetCopy.RepairSub, subIsProblem: false, subFullWidth: false, repairW,
+                SettingsRowId.Repair, WidgetCopy.RepairEarshot, values.ElevatedRunNote ?? WidgetCopy.RepairSub, subIsProblem: false, subFullWidth: false, repairW,
                 (top, _) => (new Rectangle(right - repairW, top, repairW, control), Rectangle.Empty, Rectangle.Empty),
                 SettingsPart.Button);
         }

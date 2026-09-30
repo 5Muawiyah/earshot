@@ -90,6 +90,7 @@ internal sealed partial class TrayContext
                 GaugeDisplayId = widget.GaugeDisplay,
                 GaugeDisplayOptions = displayOptions,
                 GaugeDisplayNote = displayNote,
+                ElevatedRunNote = _tray._elevatedRun is { } run ? FinishingMessage(run) : null,
             };
         }
 

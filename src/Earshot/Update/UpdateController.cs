@@ -39,6 +39,7 @@ internal sealed class UpdateController
     private ReleaseVersion? _repairVersion;
     private CancellationTokenSource? _download;
     private readonly Func<InstallState>? _installState;
+    private readonly Func<Task<string?>>? _beforeHandOver;
 
     // identity: the pinned device install needs, or null before setup has one. target: the installed program to hand
     // over to, or null when there is none to hand over to (nothing installed, or an install that cannot be used). This
@@ -48,7 +49,7 @@ internal sealed class UpdateController
     // something is but cannot be used; Set up when it is not given.
     public UpdateController(
         IUpdateSource source, IUpdateLauncher launcher, Func<HandoverIdentity?> identity, Func<HandoverTarget?> target, Func<string?> unavailable,
-        ReleaseVersion installed, ILog log, Func<InstallState>? installState = null)
+        ReleaseVersion installed, ILog log, Func<InstallState>? installState = null, Func<Task<string?>>? beforeHandOver = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(launcher);
@@ -64,6 +65,7 @@ internal sealed class UpdateController
         _installed = installed;
         _log = log;
         _installState = installState;
+        _beforeHandOver = beforeHandOver;
     }
 
     public event EventHandler? Changed;
@@ -381,7 +383,7 @@ internal sealed class UpdateController
             return;
         }
 
-        HandOver(download.Staged);
+        await HandOverAsync(download.Staged).ConfigureAwait(false);
     }
 
     // Stops a download under way, and returns to "available". Anything else is ignored.
@@ -409,7 +411,7 @@ internal sealed class UpdateController
         return repair is { } version ? RepairAsync(version, ct) : Stage == UpdateStage.CheckFailed ? CheckAsync(ct) : UpdateAsync(ct);
     }
 
-    private void HandOver(StagedUpdate staged)
+    private async Task HandOverAsync(StagedUpdate staged)
     {
         HandoverIdentity? identity = _identity();
         HandoverTarget? target = _target();
@@ -446,6 +448,31 @@ internal sealed class UpdateController
 
             Fail(UpdateStage.Available, null, notice);
             return;
+        }
+
+        // The caller's own closing work comes first. It is what lets an installed version that does not wait for this program
+        // to end (the first published 1.2.1 and 1.2.0 do not wait for a copy run from another folder) start its install with
+        // nothing of this program's still running: the elevated program starts only after that work is done.
+        if (_beforeHandOver is { } before)
+        {
+            string? refusal;
+            try
+            {
+                refusal = await before().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error("Update: the closing work before the hand-over threw " + ex.GetType().Name + ".", ex);
+                refusal = UpdateCopy.ClosingFailedNotice;
+            }
+
+            if (refusal is not null)
+            {
+                staged.Discard();
+                _log.Info("Update: not handed over. " + refusal);
+                Fail(UpdateStage.HandoverFailed, refusal, null);
+                return;
+            }
         }
 
         LaunchResult launch;

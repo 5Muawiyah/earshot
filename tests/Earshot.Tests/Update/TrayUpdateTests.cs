@@ -327,7 +327,7 @@ public sealed class TrayUpdateTests
             Assert.AreEqual(staged.ZipPath, arguments[1]);
             Assert.AreEqual(staged.ZipSha256, arguments[2]);
             Assert.AreEqual(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), arguments[3], "The tray gives its own process id to wait on.");
-            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Earshot is closing so the update can replace its files."), "The tray closed through Exit.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Update: the elevated program started, so Earshot ends."), "The tray ended once the program had started.");
             Assert.AreEqual(1, tray.Cards.Hides);
             Assert.AreEqual(1, tray.Source.DownloadCalls);
         });
@@ -416,7 +416,7 @@ public sealed class TrayUpdateTests
     }
 
     [TestMethod]
-    public void ADeclinedPromptLeavesTheTrayRunningAndSaysNothingWasChanged()
+    public void ADeclinedPromptSaysNothingWasChangedAndTheTrayStartsAgain()
     {
         using var temp = new TempFolder();
         using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
@@ -436,8 +436,9 @@ public sealed class TrayUpdateTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual("Version 1.2.0 is available", tray.Cards.Shown[^1].Content.Title);
-            Assert.AreEqual("The Windows prompt was declined, so nothing was changed.", tray.Cards.Shown[^1].Content.Status);
-            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Earshot is closing so the update can replace its files."));
+            Assert.AreEqual("The Windows prompt was declined, so nothing was changed. Earshot is starting again.", tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual(UpdateTrayHarness.InstalledExe, tray.Context.StartAfterExit, "The closing work is done, so the tray cannot carry on: it starts again.");
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Update: the elevated program started"));
             Assert.IsFalse(Directory.Exists(staged.WorkFolder), "The unused download is deleted.");
         });
     }

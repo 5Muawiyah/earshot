@@ -132,7 +132,7 @@ public sealed class TrayRepairTests
     }
 
     [TestMethod]
-    public void ADeclinedPromptAfterTheDownloadLeavesTheTrayRunningAndSaysNothingWasChanged()
+    public void ADeclinedPromptAfterTheDownloadSaysNothingWasChangedAndTheTrayStartsAgain()
     {
         using var temp = new TempFolder();
         using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
@@ -148,7 +148,8 @@ public sealed class TrayRepairTests
             ClickRepair(tray);
 
             Assert.AreEqual("Couldn't start the repair", tray.Cards.Shown[^1].Content.Title);
-            Assert.AreEqual("The Windows prompt was declined, so nothing was changed.", tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual("The Windows prompt was declined, so nothing was changed. Earshot is starting again.", tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual(UpdateTrayHarness.InstalledExe, tray.Context.StartAfterExit, "The closing work is done, so the tray cannot carry on: it starts again.");
             Assert.IsFalse(Directory.Exists(staged.WorkFolder), "The unused download is deleted.");
             Assert.IsFalse(File.Exists(RepairNote(temp.Path)), "No note says an update was a repair when nothing was handed over.");
         });

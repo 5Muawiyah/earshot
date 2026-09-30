@@ -63,6 +63,7 @@ internal sealed partial class TrayContext
         _updateFileExists = options.FileExists;
         _updateFolderExists = options.DirectoryExists;
         _updateListFolder = options.ListFolder;
+        _elevatedExitWait = options.ElevatedExitWait;
         _installFolderSecurity = options.InstallFolderSecurity;
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
@@ -254,7 +255,7 @@ internal sealed partial class TrayContext
             IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, installed, UpdateStagingRoot());
             var controller = new UpdateController(
                 source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, installed, _log,
-                () => AssessInstall().State);
+                () => AssessInstall().State, PrepareHandOverAsync);
             controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
             controller.Changed += (_, _) => RaiseCardUpdateChanged();
             _updates = controller;
@@ -391,42 +392,92 @@ internal sealed partial class TrayContext
     // for the release of the installed version again, because a repair keeps no release from an earlier check.
     private async Task RunTryAgainAsync(CardPlace place)
     {
-        UpdateController? updates = EnsureUpdates();
-        if (updates is null)
+        if (!TryBeginElevatedRun(UpdateRun, place))
         {
-            ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
             return;
         }
 
-        await updates.TryAgainAsync(_lifetime.Token);
-        if (updates.Stage != UpdateStage.HandingOver)
+        try
         {
-            ShowUpdateResult(updates.View, place);
+            UpdateController? updates = EnsureUpdates();
+            if (updates is null)
+            {
+                ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
+                return;
+            }
+
+            await updates.TryAgainAsync(_lifetime.Token);
+            if (updates.Stage != UpdateStage.HandingOver)
+            {
+                await ShowUpdateResultAsync(updates.View, place);
+            }
+        }
+        finally
+        {
+            EndElevatedRun(UpdateRun);
         }
     }
 
     private async Task RunUpdateAsync(CardPlace place)
     {
-        UpdateController? updates = EnsureUpdates();
-        if (updates is null)
+        if (!TryBeginElevatedRun(UpdateRun, place))
         {
-            ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
             return;
         }
 
-        await updates.UpdateAsync(_lifetime.Token);
-        if (updates.Stage != UpdateStage.HandingOver)
+        try
         {
-            ShowUpdateResult(updates.View, place);
+            UpdateController? updates = EnsureUpdates();
+            if (updates is null)
+            {
+                ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
+                return;
+            }
+
+            await updates.UpdateAsync(_lifetime.Token);
+            if (updates.Stage != UpdateStage.HandingOver)
+            {
+                await ShowUpdateResultAsync(updates.View, place);
+            }
+        }
+        finally
+        {
+            EndElevatedRun(UpdateRun);
         }
     }
 
     private void ShowUpdateResult(UpdateViewModel view, CardPlace place) =>
         ShowCard(view.Status, view.CardText ?? "", place);
 
-    // The elevated program has started. Close through Exit: it blocks the AirPods at rest and lets go of every file.
-    private void OnUpdateHandedOver() =>
+    // The result of an update or repair that did not hand over. When the tray has already done its closing device work for
+    // the hand-over (the elevated program was refused or would not start after that), it cannot carry on as it was: the
+    // card says what happened and the tray ends and starts again.
+    private async Task ShowUpdateResultAsync(UpdateViewModel view, CardPlace place)
+    {
+        if (_closedForHandOver)
+        {
+            place.Show(_registry.Cards, view.Status, (view.CardText ?? "") + " Earshot is starting again.");
+            await ExitAfterFailedHandOverAsync();
+            return;
+        }
+
+        ShowUpdateResult(view, place);
+    }
+
+    // The elevated program has started, and the tray has done its closing device work before starting it (the hand-back and
+    // the block, PrepareHandOverAsync). It ends now, with no further device call: a second hand-back or block here would
+    // run beside the install that is replacing this folder.
+    private void OnUpdateHandedOver()
+    {
+        if (_closedForHandOver)
+        {
+            _log.Info("Update: the elevated program started, so Earshot ends.");
+            ExitThread();
+            return;
+        }
+
         _ = ExitAsync(CardPlace.NearTray, "Earshot is closing so the update can replace its files.");
+    }
 
     private void OnCheckAutomaticallyClicked()
     {

@@ -32,6 +32,8 @@ internal static class UpdateCopy
     public const string NotPinnedNotice = "Choose your AirPods first, then update.";
     public const string SetUpFirstNotice = "Set up Earshot first, then update.";
     public const string RepairFirstNotice = "Repair Earshot first, then update.";
+    public const string ClosingNotice = "Earshot is closing, so the update was not started. Nothing was changed.";
+    public const string ClosingFailedNotice = "Something went wrong while Earshot closed its work, so the update was not started. Nothing was changed.";
 
     // A repair that fetches the installed version's release runs on the same page, in its own words.
     public const string RepairTitle = "Repair";

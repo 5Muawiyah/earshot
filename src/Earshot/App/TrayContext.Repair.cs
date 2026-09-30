@@ -67,6 +67,23 @@ internal sealed partial class TrayContext
             return;
         }
 
+        if (!TryBeginElevatedRun(RepairRun, place))
+        {
+            return;
+        }
+
+        try
+        {
+            await RepairAsync(place);
+        }
+        finally
+        {
+            EndElevatedRun(RepairRun);
+        }
+    }
+
+    private async Task RepairAsync(CardPlace place)
+    {
         InstallAssessment install = AssessInstall();
         bool runningIsNewer = BlockStatus is { RunningCopyIsNewer: true };
         InstalledFilesReport? files = null;
@@ -116,8 +133,8 @@ internal sealed partial class TrayContext
     private async Task RunRepairOperationAsync(RepairVerb verb, CardPlace place)
     {
         DateTimeOffset started = _time.GetUtcNow();
-        ControllerResult? result = await RunOperationAsync(
-            "repair", ct => _coordinator.RunAsync("repair", token => _registry.Block.RunRepairAsync(verb, token), ct), place, alwaysShowCard: true);
+        ControllerResult? result = await WithElevatedProgramAsync(() => RunOperationAsync(
+            "repair", ct => _coordinator.RunAsync("repair", token => _registry.Block.RunRepairAsync(verb, token), ct), place, alwaysShowCard: true));
         if (result is { IsSuccess: true } && !_closing)
         {
             PointStartupAtInstalledCopy();
@@ -146,7 +163,7 @@ internal sealed partial class TrayContext
         if (updates.Stage != UpdateStage.HandingOver)
         {
             DeleteRepairNote();
-            ShowUpdateResult(updates.View, place);
+            await ShowUpdateResultAsync(updates.View, place);
         }
     }
 
