@@ -110,7 +110,8 @@ internal sealed partial class TrayContext
         }
 
         _log.Warn("Exit: the " + run + " was still running after " + Seconds(_elevatedExitWait) + ", so Earshot closes without waiting longer. " +
-            "The block may meet a scheduled task the " + run + " is still registering; the BootBlock task blocks the AirPods at the next start.");
+            "The block may meet a scheduled task the " + run + " is still registering. The " + run + " deletes the scheduled tasks and registers them again, " +
+            "so it may be between the two: whether the BootBlock task is in place to block the AirPods at the next start depends on how that run ends, and is not known here.");
         return ClosedBeforeElevatedEndedMessage(run);
     }
 

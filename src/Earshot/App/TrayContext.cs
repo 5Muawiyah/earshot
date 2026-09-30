@@ -102,8 +102,14 @@ internal sealed record TrayStartOptions(
     public Func<string, IEnumerable<string>> ListFolder { get; init; } = static folder => Directory.EnumerateFileSystemEntries(folder);
 
     // How long Exit waits for an elevated setup or repair that is still running before its hand-back and block, so the block
-    // never meets a scheduled task being registered again. A waiting budget chosen here (setup stops the service for up to
-    // 30 s and moves the folder for about 5 s more); nothing measured how long a repair takes.
+    // never meets a scheduled task being registered again. The wait covers the administrator prompt as well as the run, so
+    // every second the prompt stays open is taken from it. What the run itself may wait for adds up to more than a minute:
+    // up to 30 s for the hand-back service to stop and up to 30 s for it to be running again (InstallActions.ServiceWait),
+    // which a repair does, and for a setup also two moves of the install folder of up to 10 tries half a second apart each.
+    // That is about 60 s for a repair and about 70 s for a setup at the most, before the tasks are registered and read
+    // back, and 90 s sits above both and leaves the rest for the prompt. It is a waiting budget chosen here: nothing measured
+    // how long a run takes or how long a person leaves the prompt open, and a run still going when the wait ends is given up
+    // on, not stopped.
     public TimeSpan ElevatedExitWait { get; init; } = TimeSpan.FromSeconds(90);
 
     // The RegisterHotKey/UnregisterHotKey caller HotkeyManager uses, injected the way IStartupRegistry is:
