@@ -301,12 +301,18 @@ install folder can be changed only by administrators. Then:
   back only from checked bytes. The installed Earshot that runs that update is in
   a folder only administrators can change, even when its own file is one that
   differs; what it installs is only the verified zip.
-- If a file, the file list or the installed version could not be read (another
-  program holds it open, or access was refused), nothing is changed and nothing
-  is run elevated. Earshot says it could not read the installed files and to
-  try again, and logs the raw code. A file that could not be read says nothing
-  about what is in it, and a standard user can make any installed file
-  unreadable for as long as they like, so it is not treated as missing.
+- If a file or the file list could not be read, or the install folder's
+  permissions could not be read (another program holds it open, or access was
+  refused), nothing is changed and nothing is run elevated. Earshot says it
+  could not read the installed files and to try again, and logs the raw code.
+  A file that could not be read says nothing about what is in it, and a
+  standard user can make any installed file unreadable for as long as they
+  like, so it is not treated as missing.
+- If every file matches but the installed version could not be read (the file
+  is held open, or carries no version), the installed program's install verb
+  runs, which every version runs from its own folder as the same repair. If a
+  file is also missing or different, nothing is changed and nothing is run
+  elevated, because the release to download is named by the installed version.
 - If the running copy is newer than the installed one, Repair does not run it
   elevated, because that copy may be in a folder a standard user can write. It
   opens the update path instead: Check for updates, then Update.

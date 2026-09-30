@@ -103,10 +103,15 @@ nodes again is quick: left-click the Earshot icon, then Connect on the card.
     version you have installed, checks it the way an update is checked, and
     hands it to the installed Earshot's update, so the files come back only
     from checked bytes.
-  - A file, the file list or the installed version could not be read (another
-    program holds it open, or access was refused): nothing is changed and
-    Earshot says to try again. A file that could not be read says nothing
-    about what is in it.
+  - A file or the file list could not be read, or the install folder's
+    permissions could not be read (another program holds it open, or access
+    was refused): nothing is changed and Earshot says to try again. A file
+    that could not be read says nothing about what is in it.
+  - Every file matches but the installed version could not be read (or the
+    file carries none): the installed Earshot's install verb runs, which every
+    version runs from its own folder as the same repair. If a file is also
+    missing or different, nothing is changed, because the release to download
+    is named by the installed version.
   - The running copy is newer than the installed one: Repair does not run it
     elevated. It opens the update path (Check for updates, then Update).
   - Earshot.exe is truly missing from Program Files, or its folder can be
