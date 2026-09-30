@@ -81,6 +81,17 @@ internal sealed record TrayStartOptions(
     // cannot be read) and the raw code of the read.
     public Func<string, Earshot.Boot.InstalledFile> ReadInstalledFile { get; init; } = static path => new Earshot.Boot.InstalledFileReader().Read(path);
 
+    // Builds the gauge's window. Null (the default) means the real topmost GaugeWindow; a test gives a surface that shows nothing,
+    // so a tray-level test of where the gauge goes never puts a window on a desktop.
+    public Func<IGaugeSurface>? GaugeSurfaceFactory { get; init; }
+
+    // What the gauge's display choice reads from Windows: the list of displays. The real one by default; a test gives it a
+    // fake, so a tray-level test of the choice never depends on this PC's displays.
+    public IDisplaySource DisplaySource { get; init; } = new SystemDisplaySource();
+
+    // The foreground window as the full-screen rule needs it, given the displays. The real read by default.
+    public Func<IReadOnlyList<DisplayInfo>, ForegroundWindowReading?> ForegroundWindowProbe { get; init; } = SystemDisplaySource.ForegroundWindow;
+
     // The names in the install folder, asked only when Earshot.exe was not found, to tell a program that is gone from one
     // that could not be seen. A failure to list is an IOException or an UnauthorizedAccessException, which is kept.
     public Func<string, IEnumerable<string>> ListFolder { get; init; } = static folder => Directory.EnumerateFileSystemEntries(folder);
@@ -355,6 +366,9 @@ internal sealed partial class TrayContext : ApplicationContext
         _registry = registry;
         _coordinator = coordinator;
         _log = registry.Log;
+        _gaugeSurfaceFactory = options.GaugeSurfaceFactory;
+        _displaySource = options.DisplaySource;
+        _foregroundWindowProbe = options.ForegroundWindowProbe;
         _exitWaitLimit = options.ExitWaitLimit;
         _coordinatorExitWaitLimit = options.CoordinatorExitWaitLimit;
         _exitNoticeTime = options.ExitNoticeTime;
@@ -387,6 +401,10 @@ internal sealed partial class TrayContext : ApplicationContext
         _window.TaskbarCreated += (_, _) => OnTaskbarCreatedForShellWindowHook();
         _window.SettingChanged += (_, _) => _taskbarWatcher?.Poke();
         _window.DisplayChanged += (_, _) => _taskbarWatcher?.Poke();
+
+        // The settings page lists the connected displays as they were when it was drawn, so a display that comes or goes
+        // while the card is open redraws the page (and a choice made from the old list is refused, SetGaugeDisplay).
+        _window.DisplayChanged += (_, _) => _widgetCardPresenter?.Refresh();
 
         // AppBarRegistration's own notification callback (ABM_NEW's uCallbackMessage): ABN_STATECHANGE and
         // ABN_POSCHANGED poke the watcher for an immediate re-measure; ABN_FULLSCREENAPP hides the gauge at

@@ -42,8 +42,10 @@ internal static class DisplayNames
 {
     private const string GdiPrefix = @"\\.\DISPLAY";
 
-    // The display's own number. The GDI device name ("\\.\DISPLAY2") carries the number Windows gave the display
-    // and Settings shows as the display's own; when a name does not carry one, the display's place in the list.
+    // The display's number: the one in its GDI device name ("\\.\DISPLAY2"), which is the number the display enumeration
+    // gives it. Windows' Settings page numbers displays by its own rules and may show another number for the same display,
+    // so this is the name Earshot uses for it, not the one Settings uses. When a name does not carry a number, the display's
+    // place in the list.
     public static int Number(DisplayInfo display, IReadOnlyList<DisplayInfo> all)
     {
         ArgumentNullException.ThrowIfNull(display);

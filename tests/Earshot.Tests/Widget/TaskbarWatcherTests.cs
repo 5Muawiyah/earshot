@@ -47,6 +47,31 @@ internal sealed class FakeTaskbarReader : ITaskbarReader
             return _next;
         }
     }
+
+    // The display the watcher asked for on its last read: what the tray passed it (null before any read). A reader that
+    // implements only the one-argument read is asked through the interface's default, which drops the choice.
+    public string? LastChosenDisplay
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _lastChosenDisplay;
+            }
+        }
+    }
+
+    private string? _lastChosenDisplay;
+
+    public ITaskbarReader.Result Read(ShownGauge? shownGauge, string chosenDisplayId)
+    {
+        lock (_gate)
+        {
+            _lastChosenDisplay = chosenDisplayId;
+        }
+
+        return Read(shownGauge);
+    }
 }
 
 // A reader slow enough to trip TaskbarWatcher's own slow-read back-off (mean of the last 20 reads over

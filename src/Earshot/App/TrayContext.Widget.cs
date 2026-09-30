@@ -64,7 +64,9 @@ internal sealed partial class TrayContext
     // The owner's chosen display, for the same worker thread: written on the UI thread (WireGauge, ApplyWidget),
     // read through ReadChosenDisplay. A string reference, so a read is never torn.
     private volatile string _gaugeDisplayForWorker = GaugeDisplayChoice.MainDisplay;
-    private readonly SystemDisplaySource _displaySource = new();
+    private Func<IGaugeSurface>? _gaugeSurfaceFactory;
+    private readonly IDisplaySource _displaySource;
+    private readonly Func<IReadOnlyList<DisplayInfo>, ForegroundWindowReading?> _foregroundWindowProbe;
 
     private const int CardPlacement96 = 96;
 
@@ -175,7 +177,7 @@ internal sealed partial class TrayContext
                 _time,
                 _gaugeCoverProbeFactory?.Invoke() ?? new WindowCoverProbe(),
                 _registry.UiPost,
-                () => SystemDisplaySource.ForegroundWindow(_displaySource.Read().Displays));
+                () => _foregroundWindowProbe(_displaySource.Read().Displays));
             controller.CardRequested += OnWidgetCardRequested;
             controller.ToggleRequested += (_, _) => StartToggle();
             controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
@@ -338,6 +340,11 @@ internal sealed partial class TrayContext
     // Which page the gauge-anchored card is on, for tests: null when no card presenter exists.
     internal WidgetCardView? WidgetCardViewForTest => _widgetCardPresenter?.ViewForTest;
 
+    // The settings the card's page is showing now, for tests: proves the page is redrawn when the displays change.
+    internal CardSettingsValues? WidgetCardSettingsForTest => _widgetCardPresenter?.CurrentModelForTest?.Settings;
+
+    internal void OpenWidgetSettingsForTest() => _widgetCardPresenter?.OpenSettingsForTest();
+
     // The open card's own last-rendered ButtonEnabled, for tests: null when no card is open.
     internal bool? WidgetCardButtonEnabledForTest => _widgetCardPresenter?.CurrentModelForTest?.ButtonEnabled;
 
@@ -474,8 +481,13 @@ internal sealed partial class TrayContext
             : null;
     }
 
-    private GaugeWindow CreateGaugeSurface()
+    private IGaugeSurface CreateGaugeSurface()
     {
+        if (_gaugeSurfaceFactory is { } factory)
+        {
+            return factory();
+        }
+
         var window = new GaugeWindow(_log);
         _gaugeWindow = window;
         return window;

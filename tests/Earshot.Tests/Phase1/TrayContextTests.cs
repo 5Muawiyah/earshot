@@ -1407,7 +1407,10 @@ internal sealed class TrayHarness : IDisposable
         TimeProvider? time = null,
         int? taskbarWatcherPollIntervalMs = null,
         bool showIcon = false,
-        Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null)
+        Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null,
+        Earshot.Widget.IDisplaySource? displaySource = null,
+        Func<Earshot.Widget.IGaugeSurface>? gaugeSurfaceFactory = null,
+        Func<IReadOnlyList<Earshot.Widget.DisplayInfo>, Earshot.Widget.ForegroundWindowReading?>? foregroundWindowProbe = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1543,6 +1546,21 @@ internal sealed class TrayHarness : IDisposable
             CardEnvironmentFactory = cardEnvironmentFactory,
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
         };
+        if (displaySource is not null)
+        {
+            options = options with { DisplaySource = displaySource };
+        }
+
+        if (gaugeSurfaceFactory is not null)
+        {
+            options = options with { GaugeSurfaceFactory = gaugeSurfaceFactory };
+        }
+
+        if (foregroundWindowProbe is not null)
+        {
+            options = options with { ForegroundWindowProbe = foregroundWindowProbe };
+        }
+
         if (handBackBudget is { } hb)
         {
             options = options with { HandBackBudget = hb };
