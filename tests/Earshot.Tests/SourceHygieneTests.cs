@@ -13,8 +13,10 @@ public sealed class SourceHygieneTests
         ".txt", ".xml", ".resx", ".html", ".css", ".js", ".editorconfig", ".gitattributes", ".gitignore",
     };
 
-    // .claude and .worktrees hold local agent working copies that are never tracked, so they are not this repository's source.
-    private static readonly string[] SkippedFolders = ["bin", "obj", ".git", "node_modules", "artifacts", "TestResults", ".claude", ".worktrees"];
+    // Folders whose names start with a dot hold tools' own data and untracked local copies (git's among them), never this
+    // repository's source, so they are skipped as a rule rather than by name. .github is the one tracked exception: it holds the
+    // build workflow.
+    private static readonly string[] SkippedFolders = ["bin", "obj", "node_modules", "artifacts", "TestResults"];
 
     // Every text file under the folder that holds a NUL byte, as "relative path (offset of the first)". Folders of build output
     // are not source and are skipped.
@@ -25,7 +27,7 @@ public sealed class SourceHygieneTests
         {
             string relative = Path.GetRelativePath(root, file);
             string[] parts = relative.Split(Path.DirectorySeparatorChar);
-            if (parts.Take(parts.Length - 1).Any(part => SkippedFolders.Contains(part, StringComparer.OrdinalIgnoreCase)))
+            if (parts.Take(parts.Length - 1).Any(part => (part.StartsWith('.') && !part.Equals(".github", StringComparison.OrdinalIgnoreCase)) || SkippedFolders.Contains(part, StringComparer.OrdinalIgnoreCase)))
             {
                 continue;
             }
