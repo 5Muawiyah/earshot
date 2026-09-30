@@ -178,7 +178,7 @@ internal sealed partial class WidgetCard
 
                 break;
             case SettingsPart.Button:
-                Raise(new CheckRequest());
+                Raise(target.Row == SettingsRowId.Repair ? new RepairRequest() : new CheckRequest());
                 break;
         }
     }
@@ -502,6 +502,9 @@ internal sealed partial class WidgetCard
                     break;
                 case SettingsRowId.CheckForUpdates:
                     CardPaint.SmallButton(g, item.A, WidgetCopy.CheckButton, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Button));
+                    break;
+                case SettingsRowId.Repair:
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.RepairButton, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Button));
                     break;
                 default:
                     CardPaint.Toggle(g, item.A, ToggleValue(values, item.Row), colours, _dpi);

@@ -106,6 +106,9 @@ internal sealed class SafeBlockController : IBlockController
     public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.Refuse(_log, "install"));
 
+    public Task<ControllerResult> RunRepairAsync(RepairVerb verb, CancellationToken ct = default) =>
+        Task.FromResult(SafeDecorators.Refuse(_log, "repair"));
+
     public Task<ControllerResult> UninstallAsync(CancellationToken ct = default) =>
         Task.FromResult(SafeDecorators.Refuse(_log, "uninstall"));
 }

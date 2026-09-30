@@ -151,6 +151,40 @@ public sealed class UpdateOutcomeTests
         StringAssert.StartsWith(UpdateOutcomes.NoticeFor(new(IdA, Now, UpdateOutcomeKind.Installing, "", "", ""), Now.AddHours(1)), "The update may not have finished");
     }
 
+    // An update that was a repair (the release of the installed version, through the update path) is said in the repair's
+    // words, for every way it can end.
+    [TestMethod]
+    public void AnUpdateThatWasARepairByDownloadIsSaidInTheRepairsWords()
+    {
+        Assert.AreEqual("Earshot was repaired.", UpdateOutcomes.NoticeFor(new(IdA, Now, UpdateOutcomeKind.Installed, "1.2.0", "", ""), Now, repairByDownload: true));
+        Assert.AreEqual(
+            "The repair did not finish: Earshot did not close in time. Nothing was changed.",
+            UpdateOutcomes.NoticeFor(new(IdA, Now, UpdateOutcomeKind.Refused, "", "Earshot did not close in time", "c"), Now, repairByDownload: true));
+        Assert.AreEqual(
+            "The repair did not finish: setup finished only in part. Choose Repair Earshot from its menu to repair it.",
+            UpdateOutcomes.NoticeFor(new(IdA, Now, UpdateOutcomeKind.Failed, "", "setup finished only in part", "c"), Now, repairByDownload: true));
+        StringAssert.StartsWith(
+            UpdateOutcomes.NoticeFor(new(IdA, Now, UpdateOutcomeKind.Installing, "", "", ""), Now.AddHours(1), repairByDownload: true), "The repair may not have finished");
+        Assert.AreEqual("Earshot was repaired.", UpdateOutcomes.NoticeFor(new(IdA, Now, UpdateOutcomeKind.Repaired, "1.2.0", "", ""), Now), "A repair run from the installed copy says it with no note.");
+    }
+
+    [TestMethod]
+    public void ARepairOutcomeRoundTripsThroughTheStoreAndNoRepairNoticeUsesADash()
+    {
+        using var machine = new Machine();
+        foreach (UpdateOutcomeKind kind in new[] { UpdateOutcomeKind.Repaired, UpdateOutcomeKind.RepairFailed })
+        {
+            var outcome = new UpdateOutcome(IdA, Now, kind, kind == UpdateOutcomeKind.Repaired ? "1.2.0" : "", kind == UpdateOutcomeKind.Repaired ? "" : "an installed file is missing or is not what was published", "NOT_ATTEMPTED");
+            Assert.IsTrue(machine.Store.WriteUpdateOutcome(outcome).Ok);
+            GateRead<UpdateOutcome> read = machine.Store.ReadUpdateOutcome();
+            Assert.IsTrue(read.IsOk, read.Step.Detail);
+            Assert.AreEqual(outcome, read.Value);
+            string notice = UpdateOutcomes.NoticeFor(outcome, Now)!;
+            Assert.DoesNotContain("\u2014", notice);
+            Assert.DoesNotContain("HRESULT", notice);
+        }
+    }
+
     [TestMethod]
     public void NoNoticeUsesADashOrAWordTheOwnerWouldNotKnow()
     {

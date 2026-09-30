@@ -77,7 +77,8 @@ internal sealed partial class TrayContext
                 running?.ToString(),
                 settings.CheckForUpdatesAutomatically,
                 InEarProofMissing: !snapshot.AutoPauseAvailable,
-                LidProofMissing: snapshot.LidOpen is null);
+                LidProofMissing: snapshot.LidOpen is null,
+                InstallExists: _tray.BlockStatus is { InstallExists: true });
         }
 
         public void SetGaugePosition(GaugePosition value, CardPlace place) =>

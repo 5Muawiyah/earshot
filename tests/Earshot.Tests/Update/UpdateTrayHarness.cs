@@ -40,6 +40,9 @@ internal sealed class UpdateTrayHarness : IDisposable
         bool otherCopy = false,
         bool installProgramMissing = false,
         Action<FakeStartupRegistry>? startup = null,
+        Func<string, Earshot.Boot.Gate.InstalledFilesReport>? checkFiles = null,
+        Version? installedVersion = null,
+        Action<FakeBlockController>? block = null,
         string? installFolderSddl = null,
         Func<IUpdateSource>? sourceFactory = null,
         TimeProvider? time = null,
@@ -49,6 +52,7 @@ internal sealed class UpdateTrayHarness : IDisposable
         Ui = new WindowsFormsSynchronizationContext();
         SynchronizationContext.SetSynchronizationContext(Ui);
         source?.Invoke(Source);
+        block?.Invoke(Block);
 
         Monitor.Current = NoDevice();
         Startup.Run[StartupRegistration.ValueName] = StartupRegistration.CommandFor(TrayHarness.ExePath);
@@ -91,6 +95,12 @@ internal sealed class UpdateTrayHarness : IDisposable
             FileExists = path => programPresent && string.Equals(path, InstalledExe, StringComparison.OrdinalIgnoreCase),
             DirectoryExists = path => installPresent && string.Equals(path, Path.GetDirectoryName(InstalledExe), StringComparison.OrdinalIgnoreCase),
             InstallFolderSecurity = new FixedFolderSecurity(installFolderSddl ?? FixedFolderSecurity.AdministratorsOnly),
+            CheckInstalledFiles = path =>
+            {
+                CheckedFolders.Add(path);
+                return (checkFiles ?? (_ => MatchingFiles))(path);
+            },
+            ReadInstalledVersion = _ => installedVersion ?? RepairPlanner.RepairVerbSince.ToVersion(),
             NativeHotkeys = new FakeNativeHotkeys(),
             VoiceEngineFactory = () => new Earshot.Tests.Voice.FakeSpeechEngine(),
             StreamingPlatformFactory = _ => new Earshot.Tests.Streaming.FakeStreamingPlatform(),
@@ -134,6 +144,11 @@ internal sealed class UpdateTrayHarness : IDisposable
     public FakeStartupRegistry Startup { get; } = new();
 
     public FakeUpdateSource Source { get; } = new();
+
+    // What the check of the installed files was asked to read, and what it says unless a test says otherwise.
+    public List<string> CheckedFolders { get; } = new();
+
+    public static readonly Earshot.Boot.Gate.InstalledFilesReport MatchingFiles = new(true, false, [], []);
 
     public FakeUpdateLauncher Launcher { get; } = new();
 

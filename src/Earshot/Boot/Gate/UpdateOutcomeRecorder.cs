@@ -37,6 +37,20 @@ internal sealed class UpdateOutcomeRecorder
         Write(UpdateOutcomes.ForUpdateRun(result, NewId(), _time.GetUtcNow()));
     }
 
+    // After a repair run from the installed copy: Repaired, or RepairFailed with why. Nothing is written when the machine
+    // folder does not pass its check, as for the update's own records. version is the release this program is.
+    public void RecordRepairRun(InstallResult result, string version)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(version);
+        if (!FolderIsTrusted())
+        {
+            return;
+        }
+
+        Write(UpdateOutcomes.ForRepairRun(result, version, NewId(), _time.GetUtcNow()));
+    }
+
     // After the install run: completes an Installing record the update run wrote a moment ago, and does nothing for any
     // other install (a first setup, a repair, a setup run by hand). version is the release this program is.
     public void RecordInstallRun(InstallResult result, string version)

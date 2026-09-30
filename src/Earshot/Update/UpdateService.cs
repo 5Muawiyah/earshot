@@ -74,12 +74,33 @@ internal sealed partial class UpdateService : IUpdateSource
 
     internal Uri Feed => _feed;
 
+    // The address of the release published for one version: the same feed, the tag's own release in place of the latest.
+    // https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name
+    internal Uri TagAddress(ReleaseVersion version) => new(_feed, "tags/v" + version);
+
+    // The release published for exactly this version, found the way a check finds the latest (the same feed, the same
+    // HTTPS and size rules, the same asset names), and then downloaded and checked against its checksum file by
+    // DownloadAsync. Downloads nothing.
+    public async Task<UpdateCheckResult> FindReleaseAsync(ReleaseVersion version, CancellationToken ct)
+    {
+        try
+        {
+            return await CheckCoreAsync(TagAddress(version), version, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is UpdateException or HttpRequestException or IOException or OperationCanceledException or JsonException)
+        {
+            UpdateFailure failure = Describe(ex, "check", ct);
+            _log.Warn("Repair: the release of " + version + " could not be found (" + failure.Kind + "): " + failure.Detail, failure.Kind == UpdateFailureKind.Cancelled ? null : ex);
+            return UpdateCheckResult.Failed(failure);
+        }
+    }
+
     // Reads the latest release and says whether it is newer than the running program. Downloads nothing.
     public async Task<UpdateCheckResult> CheckAsync(CancellationToken ct)
     {
         try
         {
-            return await CheckCoreAsync(ct).ConfigureAwait(false);
+            return await CheckCoreAsync(_feed, exact: null, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is UpdateException or HttpRequestException or IOException or OperationCanceledException or JsonException)
         {
@@ -89,19 +110,25 @@ internal sealed partial class UpdateService : IUpdateSource
         }
     }
 
-    private async Task<UpdateCheckResult> CheckCoreAsync(CancellationToken ct)
+    private async Task<UpdateCheckResult> CheckCoreAsync(Uri address, ReleaseVersion? exact, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(_timeouts.Request);
         using HttpClient http = CreateClient();
-        using HttpResponseMessage response = await GetAsync(http, _feed, "application/vnd.github+json", deadline.Token).ConfigureAwait(false);
+        using HttpResponseMessage response = await GetAsync(http, address, "application/vnd.github+json", deadline.Token).ConfigureAwait(false);
         if (response.StatusCode != HttpStatusCode.OK)
         {
             throw StatusFailure(response, "the release feed");
         }
 
         byte[] body = await ReadBoundedAsync(response.Content, MaxReleaseBytes, "the release feed", deadline.Token).ConfigureAwait(false);
-        ReleaseInfo? release = ParseRelease(body, out ReleaseVersion latest);
+        ReleaseInfo? release = ParseRelease(body, exact, out ReleaseVersion latest);
+        if (exact is not null && release is not null)
+        {
+            _log.Info("Repair: the release of " + latest + " was found.");
+            return UpdateCheckResult.Available(release);
+        }
+
         if (release is null)
         {
             // Older or the same: no asset is needed, so a release that never carried Windows files still reads as
@@ -116,7 +143,10 @@ internal sealed partial class UpdateService : IUpdateSource
 
     // The release the feed named when it is newer than the running program, or null when it is not (latest says
     // which version it named). A feed that is not what this expects, or a newer release with no usable files, throws.
-    private ReleaseInfo? ParseRelease(byte[] body, out ReleaseVersion latest)
+    //
+    // exact: the one version wanted, as a repair asks for it: the tag must be that version, and it is returned whether or
+    // not it is newer than the running program.
+    private ReleaseInfo? ParseRelease(byte[] body, ReleaseVersion? exact, out ReleaseVersion latest)
     {
         using JsonDocument document = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 16 });
         JsonElement root = document.RootElement;
@@ -139,7 +169,14 @@ internal sealed partial class UpdateService : IUpdateSource
             throw new UpdateException(UpdateFailureKind.BadResponse, "The release tag '" + Bound(tag) + "' is not a version.");
         }
 
-        if (latest <= _running)
+        if (exact is { } wanted)
+        {
+            if (latest != wanted)
+            {
+                throw new UpdateException(UpdateFailureKind.BadResponse, "The release feed named " + tag + " when " + wanted + " was asked for.");
+            }
+        }
+        else if (latest <= _running)
         {
             return null;
         }

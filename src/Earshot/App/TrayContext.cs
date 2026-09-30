@@ -73,6 +73,13 @@ internal sealed record TrayStartOptions(
     // it a fake so no test reads the owner's Program Files.
     public Earshot.Boot.Gate.IFolderSecurity InstallFolderSecurity { get; init; } = new Earshot.Boot.Gate.NtfsFolderSecurity();
 
+    // Hashes every installed file against the published list, read only, for Repair. The real check reads the install
+    // folder; a test gives it a fake, and the real one has its own tests against a temporary install tree.
+    public Func<string, Earshot.Boot.Gate.InstalledFilesReport> CheckInstalledFiles { get; init; } = Earshot.Boot.Gate.InstalledFileCheck.Check;
+
+    // The file version of the installed Earshot.exe, or null when it cannot be read.
+    public Func<string, Version?> ReadInstalledVersion { get; init; } = static path => new Earshot.Boot.InstalledFileReader().Read(path).Version;
+
     // The RegisterHotKey/UnregisterHotKey caller HotkeyManager uses, injected the way IStartupRegistry is:
     // the real one by default, a fake in tests, so a tray-level test never registers a real global hotkey.
     public INativeHotkeys NativeHotkeys { get; init; } = new User32Hotkeys();

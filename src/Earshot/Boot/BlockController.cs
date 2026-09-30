@@ -68,9 +68,9 @@ internal sealed class BlockController : IBlockController, IDisposable
 {
     // Where an elevated run that is not SYSTEM writes its log (Program.MachineLog), which names the variables.
     internal const string MachineLogHint = @"See ProgramData\Earshot\logs.";
-    internal const string NotSetUpMessage = "Boot block is not set up yet. Choose Set up Earshot.";
-    internal const string NeedsRepairMessage = "Boot block needs repair. Choose Set up Earshot.";
-    internal const string CouldNotStartMessage = "The boot block task did not start. Choose Set up Earshot.";
+    internal const string NotSetUpMessage = "Boot block is not set up yet. Choose Set up Earshot or Repair Earshot.";
+    internal const string NeedsRepairMessage = "Boot block needs repair. Choose Repair Earshot.";
+    internal const string CouldNotStartMessage = "The boot block task did not start. Choose Repair Earshot.";
     internal const string TaskUnreadableMessage = "Could not read the boot block task. Try again.";
     internal const string UnsafeEnvironmentMessage = "The boot block task stopped because the environment sets .NET runtime variables. " + MachineLogHint;
     internal const string NotFoundMessage = "AirPods not found. Connect them to this PC once from Windows Bluetooth settings.";
@@ -115,6 +115,22 @@ internal sealed class BlockController : IBlockController, IDisposable
     internal const string SetupUnsafeFolderMessage = "Setup stopped because a folder it uses was not safe.";
     internal const string SetupNeedsReleaseMessage = Boot.Gate.FileManifest.MissingMessage;
     internal const string SetupFailedMessage = "Setup did not finish. Try again.";
+
+    // The same words for a repair.
+    internal const string RepairNothingPinnedMessage = "Choose your AirPods first, then repair Earshot.";
+    internal const string RepairDoneMessage = "Earshot was repaired";
+    internal const string RepairNotReadBackMessage = "Earshot was repaired, but its tasks could not be read back yet.";
+    internal const string RepairHandBackNotSetUpMessage = "Earshot was repaired, but the shut-down hand-back could not be set up. Try again.";
+    internal const string RepairCancelledMessage = "Repair was cancelled";
+    internal const string RepairFailedMessage = "Repair did not finish. Try again.";
+    internal const string RepairNeedsAdminMessage = "Repair needs administrator approval.";
+    internal const string RepairUnsafeFolderMessage = "Repair stopped because a folder it uses was not safe.";
+    internal const string RepairNeedsFilesMessage = "The installed files are not as published. Choose Repair Earshot again.";
+    internal const string RepairNotFromInstallMessage = "Repair runs only from the installed copy.";
+    internal const string RepairDeviceChangedMessage = "Choose the device again, then repair Earshot.";
+    internal const string RepairOtherDeviceBlockedMessage = "Earshot still blocks the AirPods chosen before. Choose them again, then repair Earshot.";
+    internal const string RepairOtherDeviceProtectedMessage = "Earshot turned off the microphone of the AirPods chosen before. Choose them again, then repair Earshot.";
+    internal const string RepairUnsafeEnvironmentMessage = "Repair stopped because the environment sets unsafe .NET runtime variables.";
     internal const string SetupDeviceChangedMessage = "Choose the device again, then set up Earshot.";
     internal const string RemovedMessage = "Earshot is removed";
     internal const string RemovedPartlyMessage = "Earshot is mostly removed. Some parts could not be undone.";
@@ -248,64 +264,96 @@ internal sealed class BlockController : IBlockController, IDisposable
     public Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default) =>
         _worker.RunAsync(token => SetDevice(address12, token), ct);
 
-    public async Task<ControllerResult> RunSetupAsync(CancellationToken ct = default)
+    public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default) =>
+        RunInstallAsync("install", _executable, "install", SetupWords, ct);
+
+    // Repair runs the installed Earshot.exe, which is in a folder only administrators can write. The repair verb is used
+    // when the installed program knows it; an older one is asked for the same repair through the install verb, which it
+    // already runs from its own folder as a repair. Only when there is no installed program to run (it is missing, or its
+    // folder cannot be trusted) is it this copy's own setup that runs, which puts a new install in place.
+    public Task<ControllerResult> RunRepairAsync(RepairVerb verb, CancellationToken ct = default)
+    {
+        string? installed = _installFolder is null ? null : Path.Combine(_installFolder, InstalledExecutableName);
+        string? executable = verb == RepairVerb.FromThisCopy ? _executable : installed;
+        return RunInstallAsync("repair", executable, verb == RepairVerb.Repair ? "repair" : "install", RepairWords, ct);
+    }
+
+    // What the elevated run says to the person, for setup and for repair.
+    internal sealed record ElevatedWords(
+        string NothingPinned, string Done, string Partial, string Cancelled, string Failed, string NeedsAdmin, string UnsafeFolder, string NeedsFiles,
+        string DeviceChanged, string OtherBlocked, string OtherProtected, string UnsafeEnvironment, string NotReadBack);
+
+    internal static readonly ElevatedWords SetupWords = new(
+        NothingPinnedMessage, SetupDoneMessage, SetupHandBackNotSetUpMessage, SetupCancelledMessage, SetupFailedMessage, SetupNeedsAdminMessage,
+        SetupUnsafeFolderMessage, SetupNeedsReleaseMessage, SetupDeviceChangedMessage, SetupOtherDeviceBlockedMessage, SetupOtherDeviceProtectedMessage,
+        SetupUnsafeEnvironmentMessage, SetupNotReadBackMessage);
+
+    internal static readonly ElevatedWords RepairWords = new(
+        RepairNothingPinnedMessage, RepairDoneMessage, RepairHandBackNotSetUpMessage, RepairCancelledMessage, RepairFailedMessage, RepairNeedsAdminMessage,
+        RepairUnsafeFolderMessage, RepairNeedsFilesMessage, RepairDeviceChangedMessage, RepairOtherDeviceBlockedMessage, RepairOtherDeviceProtectedMessage,
+        RepairUnsafeEnvironmentMessage, RepairNotReadBackMessage);
+
+    // One elevated run of Earshot.exe with the install-shaped command line (verb, user SID, device address, container), one
+    // UAC prompt, waited for. action names it in the log, and executable is the program to run.
+    private async Task<ControllerResult> RunInstallAsync(string action, string? executable, string verb, ElevatedWords words, CancellationToken ct)
     {
         EarshotSettings settings = _settings.Current;
         var steps = new List<StepOutcome>();
         if (!BoundaryValidation.IsAddress12(settings.PinnedAddress) || !NodeMatch.IsValidTargetContainer(settings.PinnedContainerId))
         {
-            steps.Add(StepOutcomes.NotAttempted("install", "No device is pinned in the settings."));
-            return Finish("install", ControllerResult.Fail(NothingPinnedMessage, steps));
+            steps.Add(StepOutcomes.NotAttempted(action, "No device is pinned in the settings."));
+            return Finish(action, ControllerResult.Fail(words.NothingPinned, steps));
         }
 
         if (!Sddl.IsUserSid(_userSid))
         {
-            steps.Add(StepOutcomes.NotAttempted("install", "The current user has no usable SID."));
-            return Finish("install", ControllerResult.Fail(NoUserMessage, steps));
+            steps.Add(StepOutcomes.NotAttempted(action, "The current user has no usable SID."));
+            return Finish(action, ControllerResult.Fail(NoUserMessage, steps));
         }
 
-        if (string.IsNullOrEmpty(_executable))
+        if (string.IsNullOrEmpty(executable))
         {
-            steps.Add(StepOutcomes.NotAttempted("install", "The path of Earshot.exe is unknown."));
-            return Finish("install", ControllerResult.Fail(SetupFailedMessage, steps));
+            steps.Add(StepOutcomes.NotAttempted(action, "The path of Earshot.exe is unknown."));
+            return Finish(action, ControllerResult.Fail(words.Failed, steps));
         }
 
-        string arguments = "install " + _userSid + " " + settings.PinnedAddress + " " + settings.PinnedContainerId.ToString("D");
-        ElevatedRun run = await _launcher.RunAsync(_executable, arguments, ct).ConfigureAwait(false);
+        string arguments = verb + " " + _userSid + " " + settings.PinnedAddress + " " + settings.PinnedContainerId.ToString("D");
+        ElevatedRun run = await _launcher.RunAsync(executable, arguments, ct).ConfigureAwait(false);
         steps.Add(run.Step);
         if (run.ExitCode is not int exitCode)
         {
             bool cancelled = run.Step.Code == unchecked((int)ErrorCancelled);
-            return Finish("install", ControllerResult.Fail(cancelled ? SetupCancelledMessage : SetupFailedMessage, steps));
+            return Finish(action, ControllerResult.Fail(cancelled ? words.Cancelled : words.Failed, steps));
         }
 
-        steps.Add(ExitStep("install-exit", exitCode));
+        steps.Add(ExitStep(action + "-exit", exitCode));
         if (exitCode == (int)GateExitCode.Partial)
         {
-            return Finish("install", new ControllerResult(OpStatus.Partial, SetupHandBackNotSetUpMessage, steps));
+            return Finish(action, new ControllerResult(OpStatus.Partial, words.Partial, steps));
         }
 
         if (exitCode != (int)GateExitCode.Success)
         {
             string message = exitCode switch
             {
-                (int)GateExitCode.NotElevated or (int)GateExitCode.RunningAsSystem => SetupNeedsAdminMessage,
-                (int)GateExitCode.FolderNotSecure => SetupUnsafeFolderMessage,
-                (int)GateExitCode.NoManifest => SetupNeedsReleaseMessage,
+                (int)GateExitCode.NotElevated or (int)GateExitCode.RunningAsSystem => words.NeedsAdmin,
+                (int)GateExitCode.FolderNotSecure => words.UnsafeFolder,
+                (int)GateExitCode.NoManifest => words.NeedsFiles,
+                (int)GateExitCode.NotFromInstallFolder => RepairNotFromInstallMessage,
                 (int)GateExitCode.NotAudioSink => NotAudioSinkMessage,
                 (int)GateExitCode.NotFound => NotFoundMessage,
-                (int)GateExitCode.DeviceMismatch => SetupDeviceChangedMessage,
-                (int)GateExitCode.OtherDeviceBlocked => SetupOtherDeviceBlockedMessage,
-                (int)GateExitCode.OtherDeviceProtected => SetupOtherDeviceProtectedMessage,
-                (int)GateExitCode.UnsafeEnvironment => SetupUnsafeEnvironmentMessage,
-                _ => SetupFailedMessage,
+                (int)GateExitCode.DeviceMismatch => words.DeviceChanged,
+                (int)GateExitCode.OtherDeviceBlocked => words.OtherBlocked,
+                (int)GateExitCode.OtherDeviceProtected => words.OtherProtected,
+                (int)GateExitCode.UnsafeEnvironment => words.UnsafeEnvironment,
+                _ => words.Failed,
             };
-            return Finish("install", ControllerResult.Fail(message, steps));
+            return Finish(action, ControllerResult.Fail(message, steps));
         }
 
         BootBlockStatus status = await GetStatusAsync(ct).ConfigureAwait(false);
-        return Finish("install", status.TasksInstalled ? ControllerResult.Ok(SetupDoneMessage, steps)
-            : !status.TasksKnown ? new ControllerResult(OpStatus.Partial, SetupNotReadBackMessage, steps)
+        return Finish(action, status.TasksInstalled ? ControllerResult.Ok(words.Done, steps)
+            : !status.TasksKnown ? new ControllerResult(OpStatus.Partial, words.NotReadBack, steps)
             : ControllerResult.Fail(NeedsRepairMessage, steps));
     }
 
@@ -400,6 +448,7 @@ internal sealed class BlockController : IBlockController, IDisposable
             HandBackAtShutdownMirror = configRead ? config.Value!.HandBackAtShutdown : null,
             NeedsRepair = installDamaged,
             RunningCopyIsNewer = runningNewer,
+            InstallExists = installed || (_files is not null && _installFolder is not null && _files.FolderExists(_installFolder)),
         };
     }
 

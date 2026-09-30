@@ -40,6 +40,7 @@ public sealed class MenuModelTests
         Assert.AreEqual("Open on startup", state.OpenOnStartup.Text);
         Assert.AreEqual("Choose device...", state.ChooseDevice.Text);
         Assert.AreEqual("Set up Earshot...", state.SetUp.Text);
+        Assert.AreEqual("Repair Earshot...", state.Repair.Text);
         Assert.AreEqual("Exit", state.Exit.Text);
     }
 
@@ -85,7 +86,7 @@ public sealed class MenuModelTests
         MenuItemState[] items =
             [state.Toggle, state.BlockAtBoot, state.HandBack, state.ProtectAudio, state.ProtectCaveat,
              state.OpenOnStartup, state.ShowOnTaskbar, state.LeftClickConnectsItem, state.CaseOpenCardItem,
-             state.LowBatteryAlert, state.LowBatteryThreshold, state.NameOtherDeviceItem, state.ChooseDevice, state.SetUp, state.Exit];
+             state.LowBatteryAlert, state.LowBatteryThreshold, state.NameOtherDeviceItem, state.ChooseDevice, state.SetUp, state.Repair, state.Exit];
 
         foreach (MenuItemState item in items)
         {
@@ -208,18 +209,47 @@ public sealed class MenuModelTests
         Assert.IsFalse(state.ProtectAudio.Indeterminate, "An unknown read-back never overrides the intent.");
         Assert.IsTrue(state.SetUp.Visible);
         Assert.IsTrue(state.SetUp.Enabled);
+        Assert.IsFalse(state.Repair.Visible, "Nothing is installed, so there is nothing to repair.");
         Assert.IsTrue(state.ChooseDevice.Enabled);
         Assert.IsTrue(state.Exit.Enabled);
     }
 
+    // Set up is for when nothing is installed. Once an install exists, in whatever state, the menu says Repair Earshot
+    // instead: healthy, damaged, older than this copy, newer, or with its tasks gone but its files still there.
     [TestMethod]
-    public void SetUpShowsForADamagedInstallAndForANewerCopyAndStaysHiddenForAHealthyOne()
+    public void SetUpShowsOnlyWhenNothingIsInstalledAndRepairShowsForAnInstallInAnyState()
     {
-        Assert.IsTrue(Build(block: Block(BlockState.NotSetUp)).SetUp.Visible);
-        Assert.IsTrue(Build(block: Block(BlockState.Allowed) with { NeedsRepair = true }).SetUp.Visible);
-        Assert.IsTrue(Build(block: Block(BlockState.Blocked) with { RunningCopyIsNewer = true }).SetUp.Visible);
-        Assert.IsFalse(Build(block: Block(BlockState.Allowed)).SetUp.Visible);
-        Assert.IsFalse(Build(block: Block(BlockState.Blocked)).SetUp.Visible);
+        MenuState nothing = Build(block: Block(BlockState.NotSetUp));
+        Assert.IsTrue(nothing.SetUp.Visible);
+        Assert.IsFalse(nothing.Repair.Visible);
+
+        BootBlockStatus[] installs =
+        [
+            Block(BlockState.Allowed),
+            Block(BlockState.Blocked),
+            Block(BlockState.Mixed),
+            Block(BlockState.Unknown),
+            Block(BlockState.Allowed) with { NeedsRepair = true },
+            Block(BlockState.Blocked) with { RunningCopyIsNewer = true },
+            Block(BlockState.NotSetUp) with { InstallExists = true },
+        ];
+        foreach (BootBlockStatus install in installs)
+        {
+            MenuState state = Build(block: install);
+            Assert.IsFalse(state.SetUp.Visible, install.State + " installed");
+            Assert.IsTrue(state.Repair.Visible, install.State + " installed");
+            Assert.IsTrue(state.Repair.Enabled);
+            Assert.AreEqual("Repair Earshot...", state.Repair.Text);
+        }
+    }
+
+    [TestMethod]
+    public void RepairIsDisabledWhileAnActionIsInFlightLikeSetUp()
+    {
+        MenuState state = Build(block: Block(BlockState.Allowed), busy: true);
+
+        Assert.IsTrue(state.Repair.Visible);
+        Assert.IsFalse(state.Repair.Enabled);
     }
 
     [TestMethod]
@@ -230,6 +260,7 @@ public sealed class MenuModelTests
         Assert.IsFalse(state.BlockAtBoot.Checked);
         Assert.IsTrue(state.BlockAtBoot.Indeterminate, "Not known yet, so neither on nor off.");
         Assert.IsFalse(state.SetUp.Visible);
+        Assert.IsFalse(state.Repair.Visible, "Not known yet, so neither is offered.");
     }
 
     [TestMethod]

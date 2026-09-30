@@ -353,6 +353,10 @@ internal sealed record InstallResult(GateExitCode Outcome, IReadOnlyList<StepOut
 // replaced. If install then fails before the service is registered again, the service it stopped is started again, or
 // the log says it stays stopped until the computer restarts.
 // It never touches HKCU Run: the non-elevated tray owns its own startup value.
+//
+// A repair is this run from the installed copy (RepairOnly, which the repair verb sets): it is refused from any other
+// folder before anything is checked, copies nothing, and otherwise does the same steps, every installed file against the
+// installed manifest included.
 internal sealed class InstallActions
 {
     private readonly InstallLayout _layout;
@@ -399,6 +403,14 @@ internal sealed class InstallActions
 
     internal IServiceControl? Service => _service;
 
+    // The step a repair records in place of the copy. It is not a failure, and says so when a result is read for the
+    // first thing that went wrong.
+    internal const string NothingToCopyDetail = "Running from the install folder, so there is nothing to copy.";
+
+    // A repair: install only ever runs from the installed copy and copies nothing. A run from any other folder is
+    // refused before anything is checked or changed.
+    internal bool RepairOnly { get; init; }
+
     // For tests: the wait between polls of the service's state. Returning false stops waiting at once.
     internal Func<TimeSpan, bool> ServicePoll { get; init; } = DeviceChangeLock.SleepAndContinue;
 
@@ -433,6 +445,20 @@ internal sealed class InstallActions
 
     private InstallResult RunSteps(InstallRequest request, List<StepOutcome> steps)
     {
+        if (RepairOnly)
+        {
+            string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.SourceFolder));
+            string install = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.InstallFolder));
+            if (!string.Equals(source, install, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(StepOutcomes.NotAttempted("repair-running-from",
+                    "Repair runs only from the installed copy, " + install + ", and this program is in " + source + "."));
+                return new InstallResult(GateExitCode.NotFromInstallFolder, steps);
+            }
+
+            steps.Add(new StepOutcome("repair-running-from", true, 0, "S_OK", install));
+        }
+
         GateExitCode device = CheckDevice(request, steps);
         if (device != GateExitCode.Success)
         {
@@ -548,7 +574,7 @@ internal sealed class InstallActions
         {
             // A repair run from the installed copy. The manifest rule holds here too: the folder must pass its check,
             // hold the manifest install copied into it, and every file it lists must still match its hash.
-            steps.Add(StepOutcomes.NotAttempted("copy-app", "Running from the install folder, so there is nothing to copy."));
+            steps.Add(StepOutcomes.NotAttempted("copy-app", NothingToCopyDetail));
             if (!CheckInstallFolder(install, steps))
             {
                 return false;
@@ -663,47 +689,11 @@ internal sealed class InstallActions
         return true;
     }
 
-    // A repair run: hashes each file the installed manifest lists, in place. The folder has passed its check, so
-    // only administrators can change what is in it while this reads. Earshot.exe must be listed.
-    private static bool VerifyInstalledFiles(string install, FileManifest manifest, List<StepOutcome> steps)
-    {
-        if (manifest.HashOf(TaskPlan.ExecutableName) is null)
-        {
-            steps.Add(StepOutcomes.NotAttempted("verify-installed", TaskPlan.ExecutableName + " is not in the published file list."));
-            return false;
-        }
-
-        foreach (ManifestFile file in manifest.Files)
-        {
-            string path = Path.Combine(install, file.RelativePath);
-            string actual;
-            try
-            {
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.SequentialScan);
-                actual = Convert.ToHexString(SHA256.HashData(stream));
-            }
-            catch (IOException ex)
-            {
-                steps.Add(StepOutcomes.FromHResult("verify-installed:" + file.RelativePath, ex.HResult, path + ": " + ex.Message));
-                return false;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                steps.Add(StepOutcomes.FromHResult("verify-installed:" + file.RelativePath, ex.HResult, path + ": " + ex.Message));
-                return false;
-            }
-
-            if (!string.Equals(actual, file.Sha256, StringComparison.OrdinalIgnoreCase))
-            {
-                steps.Add(StepOutcomes.NotAttempted("verify-installed:" + file.RelativePath,
-                    "The installed file does not match the hash recorded when it was published. " + FileManifest.MissingMessage));
-                return false;
-            }
-        }
-
-        steps.Add(new StepOutcome("verify-installed", true, 0, "S_OK", manifest.Files.Count + " installed files match the published hashes."));
-        return true;
-    }
+    // A repair run: hashes each file the installed manifest lists, in place, stopping at the first that is not as
+    // published. The folder has passed its check, so only administrators can change what is in it while this reads.
+    // Earshot.exe must be listed.
+    private static bool VerifyInstalledFiles(string install, FileManifest manifest, List<StepOutcome> steps) =>
+        InstalledFileCheck.Verify(install, manifest, steps, stopAtFirst: true);
 
     private bool CheckInstallFolder(string install, List<StepOutcome> steps) =>
         FolderTrust.IsTrusted(_folders, install, AclCheck.CheckInstallFolder, "install-folder-acl", steps);

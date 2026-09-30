@@ -333,7 +333,7 @@ public sealed class TrayUpdateTests
         });
     }
 
-    // The owner's case: the tray that ran was a copy from a download folder while Earshot was installed in Program Files.
+    // The tray that runs is a copy from a download folder while Earshot is installed in Program Files.
     // The update still hands over to the installed program (never to a file in a folder the user can write), and the
     // process id it gives to wait on is this copy's own.
     [TestMethod]

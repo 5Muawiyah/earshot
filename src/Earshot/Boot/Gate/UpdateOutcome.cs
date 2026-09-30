@@ -13,12 +13,16 @@ namespace Earshot.Boot.Gate;
 //   Installed:  that install finished.
 //   Refused:    the update run stopped before it changed anything.
 //   Failed:     the install started but did not finish cleanly.
+//   Repaired:   a repair run from the installed copy finished.
+//   RepairFailed: a repair run from the installed copy did not finish cleanly.
 internal enum UpdateOutcomeKind
 {
     Installing,
     Installed,
     Refused,
     Failed,
+    Repaired,
+    RepairFailed,
 }
 
 // Id is a fresh 32 character lower-case hex value for each outcome written, which is how the tray knows it has shown
@@ -46,6 +50,21 @@ internal static class UpdateOutcomes
         return new UpdateOutcome(id, now, UpdateOutcomeKind.Refused, "", reason, code);
     }
 
+    // The outcome of a repair run from the installed copy: Repaired when it finished, otherwise RepairFailed with why.
+    // A repair is one elevated run, so there is no earlier record for it to complete.
+    public static UpdateOutcome ForRepairRun(InstallResult result, string version, string id, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(version);
+        if (result.Outcome == GateExitCode.Success)
+        {
+            return new UpdateOutcome(id, now, UpdateOutcomeKind.Repaired, version, "", "");
+        }
+
+        (string reason, string code) = Describe(result);
+        return new UpdateOutcome(id, now, UpdateOutcomeKind.RepairFailed, "", reason, code);
+    }
+
     // The outcome of the install the update started, or null when there is nothing for it to complete: no record, one
     // that is not Installing, or one older than InstallWindow (a setup run by hand is not an update).
     public static UpdateOutcome? ForInstallRun(UpdateOutcome? current, InstallResult result, string version, string id, DateTimeOffset now)
@@ -70,7 +89,7 @@ internal static class UpdateOutcomes
     // holds paths.
     internal static (string Reason, string Code) Describe(InstallResult result)
     {
-        StepOutcome? failed = result.Steps.FirstOrDefault(s => !s.Ok);
+        StepOutcome? failed = result.Steps.FirstOrDefault(s => !s.Ok && !(s.Step == "copy-app" && s.Detail == InstallActions.NothingToCopyDetail));
         string code = failed is not null
             ? (failed.CodeName.Length > 0 ? failed.CodeName : "0x" + unchecked((uint)failed.Code).ToString("X8", CultureInfo.InvariantCulture))
             : GateExitCodes.ResultName(result.Outcome);
@@ -82,6 +101,9 @@ internal static class UpdateOutcomes
             "update-verify-zip" => "the downloaded update did not match what was checked",
             "update-unpack" => "the downloaded update did not pass its checks",
             "update-start-install" => "the installer could not be started",
+            "read-file-manifest" => "the installed file list is missing or damaged",
+            "repair-running-from" => "the repair was not started from the installed copy",
+            var step when step is not null && step.StartsWith("verify-installed", StringComparison.Ordinal) => "an installed file is missing or is not what was published",
             _ => result.Outcome switch
             {
                 GateExitCode.Partial => "setup finished only in part",
@@ -100,16 +122,22 @@ internal static class UpdateOutcomes
 
     // What the tray says, or null when there is nothing to say yet: an Installing record still inside its window is an
     // install that may yet report. Installing past the window never reported, and is said so without a guess at why.
-    public static string? NoticeFor(UpdateOutcome outcome, DateTimeOffset now)
+    // repairByDownload: the update was a repair, which fetched the release of the version already installed and ran it
+    // through the update path, so its words are the repair's.
+    public static string? NoticeFor(UpdateOutcome outcome, DateTimeOffset now, bool repairByDownload = false)
     {
         ArgumentNullException.ThrowIfNull(outcome);
+        string what = repairByDownload ? "repair" : "update";
         return outcome.Kind switch
         {
+            UpdateOutcomeKind.Installed when repairByDownload => "Earshot was repaired.",
             UpdateOutcomeKind.Installed => "Earshot was updated" + (outcome.Version.Length > 0 ? " to " + outcome.Version : "") + ".",
-            UpdateOutcomeKind.Refused => "The update did not finish: " + outcome.Reason + ". Nothing was changed.",
-            UpdateOutcomeKind.Failed => "The update did not finish: " + outcome.Reason + ". Set up Earshot again from its menu to repair it.",
+            UpdateOutcomeKind.Refused => "The " + what + " did not finish: " + outcome.Reason + ". Nothing was changed.",
+            UpdateOutcomeKind.Failed => "The " + what + " did not finish: " + outcome.Reason + ". Choose Repair Earshot from its menu to repair it.",
+            UpdateOutcomeKind.Repaired => "Earshot was repaired.",
+            UpdateOutcomeKind.RepairFailed => "The repair did not finish: " + outcome.Reason + ". Choose Repair Earshot from its menu to try again.",
             UpdateOutcomeKind.Installing when now - outcome.WrittenUtc > InstallWindow =>
-                "The update may not have finished: the installer never said. Set up Earshot again from its menu to repair it.",
+                "The " + what + " may not have finished: the installer never said. Choose Repair Earshot from its menu to repair it.",
             _ => null,
         };
     }

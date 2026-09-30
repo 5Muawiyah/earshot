@@ -56,6 +56,11 @@ public interface IBlockController
         Task.FromResult(Null.NullResults.NotAttempted(handBack ? "sethandback-on" : "sethandback-off"));
     Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default); // RunEx "set-device"
     Task<ControllerResult> RunSetupAsync(CancellationToken ct = default);   // ShellExecute runas (one UAC)
+
+    // Repairs the installed copy: the installed Earshot.exe (never the running copy) run elevated with one UAC prompt
+    // and waited for. A controller with no installed copy to run has nothing to repair.
+    Task<ControllerResult> RunRepairAsync(RepairVerb verb, CancellationToken ct = default) =>
+        Task.FromResult(Null.NullResults.NotAttempted("repair"));
     Task<ControllerResult> UninstallAsync(CancellationToken ct = default);
 }
 

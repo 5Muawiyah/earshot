@@ -33,6 +33,14 @@ internal static class UpdateCopy
     public const string SetUpFirstNotice = "Set up Earshot first, then update.";
     public const string RepairFirstNotice = "Repair Earshot first, then update.";
 
+    // A repair that fetches the installed version's release runs on the same page, in its own words.
+    public const string RepairTitle = "Repair";
+    public const string RepairDownloadFailedStatus = "Couldn't download the repair";
+    public const string RepairHandoverFailedStatus = "Couldn't start the repair";
+    public const string RepairNotPinnedReason = "Choose your AirPods first, then repair.";
+    public const string RepairNoInstallReason = "There is no installed Earshot to repair.";
+    public static string RepairingSub(ReleaseVersion version) => "Repairing " + version;
+
     // The card a copy shows when it is not the installed one. The installed copy is the one Windows starts from the
     // Start menu and at sign-in, so the person is offered a switch to it.
     public const string SwitchTitle = "Earshot";
@@ -120,9 +128,10 @@ internal sealed record UpdateViewModel(
         string? reason,
         string? notice,
         bool updateOffered = true,
-        UpdateButtonRole? instead = null)
+        UpdateButtonRole? instead = null,
+        bool repair = false)
     {
-        string title = UpdateCopy.Title;
+        string title = repair ? UpdateCopy.RepairTitle : UpdateCopy.Title;
         ReleaseVersion target = available ?? installed;
         return stage switch
         {
@@ -136,11 +145,11 @@ internal sealed record UpdateViewModel(
                 [new UpdateButton(UpdateButtonRole.Cancel, UpdateCopy.CancelButton, Primary: false)]),
             UpdateStage.CheckFailed => new(stage, title, UpdateIcon.Caution, UpdateCopy.CheckFailedStatus, UpdateCopy.InstalledSub(installed), reason, null, null,
                 [new UpdateButton(UpdateButtonRole.TryAgain, UpdateCopy.TryAgainButton, Primary: true)]),
-            UpdateStage.DownloadFailed => new(stage, title, UpdateIcon.Caution, UpdateCopy.DownloadFailedStatus, UpdateCopy.CurrentSub(target), reason, null, null,
+            UpdateStage.DownloadFailed => new(stage, title, UpdateIcon.Caution, repair ? UpdateCopy.RepairDownloadFailedStatus : UpdateCopy.DownloadFailedStatus, UpdateCopy.CurrentSub(target), reason, null, null,
                 [new UpdateButton(UpdateButtonRole.TryAgain, UpdateCopy.TryAgainButton, Primary: true)]),
-            UpdateStage.HandoverFailed => new(stage, title, UpdateIcon.Caution, UpdateCopy.HandoverFailedStatus, UpdateCopy.CurrentSub(target), reason, null, null,
+            UpdateStage.HandoverFailed => new(stage, title, UpdateIcon.Caution, repair ? UpdateCopy.RepairHandoverFailedStatus : UpdateCopy.HandoverFailedStatus, UpdateCopy.CurrentSub(target), reason, null, null,
                 [new UpdateButton(UpdateButtonRole.TryAgain, UpdateCopy.TryAgainButton, Primary: true)]),
-            UpdateStage.HandingOver => new(stage, title, UpdateIcon.Shield, UpdateCopy.HandingOverStatus, UpdateCopy.InstallingSub(target), null, null, null, None),
+            UpdateStage.HandingOver => new(stage, title, UpdateIcon.Shield, UpdateCopy.HandingOverStatus, repair ? UpdateCopy.RepairingSub(target) : UpdateCopy.InstallingSub(target), null, null, null, None),
             UpdateStage.SwitchOffered => new(stage, UpdateCopy.SwitchTitle, UpdateIcon.Shield, UpdateCopy.SwitchStatus, UpdateCopy.SwitchSub, null, null, null,
                 [new UpdateButton(UpdateButtonRole.Switch, UpdateCopy.SwitchButton, Primary: true)]),
             _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "Not an update stage."),

@@ -463,6 +463,10 @@ internal sealed class WidgetCardPresenter : IDisposable
                 _host.ClearShortcut(clear.Shortcut, place);
                 _shortcutNote = null;
                 break;
+            case RepairRequest:
+                // One administrator prompt, asked for by the click. The result comes back on a card of its own.
+                _host.RepairEarshot();
+                break;
             case CheckRequest:
                 // A check and nothing more: the result shows on the update page. Nothing downloads.
                 _updateFrom = WidgetCardView.Settings;

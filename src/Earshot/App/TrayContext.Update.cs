@@ -24,8 +24,10 @@ internal sealed record UpdateOutcomeSource(string MachineFolder, string ShownFil
 // When the hand-over has started the administrator prompt's program, this program closes through the same orderly
 // Exit as the menu's, because the install replaces the install folder and cannot while this one runs from it: a
 // process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail. The
-// program the prompt starts is the installed Earshot.exe, and it waits for this process to end (by its id) before it
-// touches that folder. So Update is only offered to the tray that is the installed copy.
+// program the prompt starts is always the installed Earshot.exe, never this copy when this copy is somewhere else, and
+// it waits for this process to end (by its id) before it touches that folder. So any copy can hand over once the
+// installed program is there and its folder is administrators-only; with no such install the card offers Set up or
+// Repair instead.
 internal sealed partial class TrayContext
 {
     private Func<IUpdateSource>? _updateSourceFactory;
@@ -61,6 +63,7 @@ internal sealed partial class TrayContext
         _installFolderSecurity = options.InstallFolderSecurity;
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
+        WireRepair(options);
         RemoveStaleUpdateStaging();
         ApplyUpdates();
         if (options.UpdateOutcome is { } outcomeSource)
@@ -130,9 +133,6 @@ internal sealed partial class TrayContext
     // The update page's Set up button, for when there is no install to update.
     internal void SetUpFromCard() => Start("setup (card)", RunSetupAsync);
 
-    // The update page's Repair button, for an install that cannot be updated as it is.
-    internal void RepairFromCard() => Start("repair (card)", RunSetupAsync);
-
     // How the last update ended, said once, at the start after it. The elevated update has ended by then and the tray
     // that started it is gone, so the outcome is read from the machine folder, where only administrators write. It
     // is shown once: its Id is noted in a file of this user's own, and an outcome already noted is skipped. An install
@@ -160,11 +160,15 @@ internal sealed partial class TrayContext
             return;
         }
 
-        string? notice = UpdateOutcomes.NoticeFor(outcome, _time.GetUtcNow());
+        // An update that was a repair says so in the repair's words (the note beside the shown file, written before it).
+        bool repairByDownload = OutcomeIsOfARepairByDownload(outcome);
+        string? notice = UpdateOutcomes.NoticeFor(outcome, _time.GetUtcNow(), repairByDownload);
         if (notice is null)
         {
             return;
         }
+
+        DeleteRepairNote();
 
         _log.Info("Update: the last update ended as " + outcome.Kind + (outcome.Code.Length > 0 ? " (" + outcome.Code + ")" : "") + ".");
         ShowCard(TrayStatus.AppName, notice, CardPlace.NearTray);
@@ -355,7 +359,25 @@ internal sealed partial class TrayContext
             return;
         }
 
-        StartUpdate();
+        Start("update (try again)", RunTryAgainAsync);
+    }
+
+    // What Try again does after a failed download or hand-over: for an update, the same as Update; for a repair, it looks
+    // for the release of the installed version again, because a repair keeps no release from an earlier check.
+    private async Task RunTryAgainAsync(CardPlace place)
+    {
+        UpdateController? updates = EnsureUpdates();
+        if (updates is null)
+        {
+            ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
+            return;
+        }
+
+        await updates.TryAgainAsync(_lifetime.Token);
+        if (updates.Stage != UpdateStage.HandingOver)
+        {
+            ShowUpdateResult(updates.View, place);
+        }
     }
 
     private async Task RunUpdateAsync(CardPlace place)

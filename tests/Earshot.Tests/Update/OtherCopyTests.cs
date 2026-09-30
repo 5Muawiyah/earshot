@@ -223,8 +223,8 @@ public sealed class OtherCopyTests
         Assert.AreEqual(StartupRegistration.CommandFor(Installed), registry.Run[StartupRegistration.ValueName]);
     }
 
-    // The owner's state on 2026-09-29: the install is there and its program is not. Before, the copy in the download
-    // folder wrote itself into the Run value.
+    // A damaged install: the folder is there and its program is not. The copy in a download folder used to write itself
+    // into the Run value then.
     [TestMethod]
     public void ACopyThatIsNotInstalledNeverWritesItselfIntoTheRunValueWhenTheInstalledProgramIsMissing()
     {

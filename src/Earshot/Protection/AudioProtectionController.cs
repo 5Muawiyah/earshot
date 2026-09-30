@@ -17,9 +17,9 @@ namespace Earshot.AudioProtection;
 // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iregisteredtask-runex
 internal sealed class AudioProtectionController : IAudioProtectionController, IDisposable
 {
-    internal const string NotSetUpMessage = "Protect audio quality is not set up yet. Choose Set up Earshot.";
-    internal const string NeedsRepairMessage = "Protect audio quality needs repair. Choose Set up Earshot.";
-    internal const string CouldNotStartMessage = "The protection task did not start. Choose Set up Earshot.";
+    internal const string NotSetUpMessage = "Protect audio quality is not set up. Choose Set up Earshot or Repair Earshot.";
+    internal const string NeedsRepairMessage = "Protect audio quality needs repair. Choose Repair Earshot.";
+    internal const string CouldNotStartMessage = "The protection task did not start. Choose Repair Earshot.";
     internal const string TaskUnreadableMessage = "Could not read the protection task. Try again.";
     internal const string UnsafeEnvironmentMessage = "The protection task stopped because the environment sets .NET runtime variables. " + BlockController.MachineLogHint;
     internal const string NoConfigMessage = BlockController.NoConfigMessage;

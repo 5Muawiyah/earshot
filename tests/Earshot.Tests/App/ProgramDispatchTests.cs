@@ -11,7 +11,7 @@ public sealed class ProgramDispatchTests
 {
     private const string Nonce = "0123456789abcdef0123456789abcdef";
 
-    private static readonly string[] ExpectedPrivilegedModes = ["gate", "gate-protect", "install", "uninstall", "update", "service"];
+    private static readonly string[] ExpectedPrivilegedModes = ["gate", "gate-protect", "install", "uninstall", "update", "repair", "service"];
 
     private static Paths PathsWith(string? dataRoot, string? safeMode) =>
         Paths.FromEnvironment(name => name switch

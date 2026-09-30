@@ -138,22 +138,35 @@ public sealed class TrayStatusTests
         }
     }
 
-    // Setup is the only repair and the only update, and the install verb is not one a person can type, so the menu
-    // has to offer it for a damaged install and for a copy newer than the installed one as well as before setup.
-    // NeedsSetUp stays the "before setup" question the Block at boot click and the device choice ask.
+    // Set up is offered only when nothing is installed; once an install exists, in any state (healthy, damaged, older
+    // or newer than this copy), the menu offers Repair instead. NeedsSetUp stays the "before setup" question the Block
+    // at boot click and the device choice ask.
     [TestMethod]
-    public void SetUpIsOfferedBeforeSetupForARepairAndForANewerCopyButNotForAHealthyInstall()
+    public void SetUpIsOfferedOnlyWhenNothingIsInstalledAndRepairWheneverAnInstallExists()
     {
         Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.NotSetUp)));
-        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Allowed) with { NeedsRepair = true }));
-        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Blocked) with { NeedsRepair = true }));
-        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Allowed) with { RunningCopyIsNewer = true }));
-        Assert.IsTrue(TrayStatus.OffersSetUp(Block(BlockState.Blocked) with { RunningCopyIsNewer = true }));
+        Assert.IsFalse(TrayStatus.OffersRepair(Block(BlockState.NotSetUp)));
+        Assert.IsFalse(TrayStatus.OffersSetUp(Block(BlockState.NotSetUp) with { InstallExists = true }), "The tasks are gone but the files are not.");
+        Assert.IsTrue(TrayStatus.OffersRepair(Block(BlockState.NotSetUp) with { InstallExists = true }));
+
+        foreach (BootBlockStatus install in new[]
+        {
+            Block(BlockState.Allowed) with { NeedsRepair = true },
+            Block(BlockState.Blocked) with { NeedsRepair = true },
+            Block(BlockState.Allowed) with { RunningCopyIsNewer = true },
+            Block(BlockState.Blocked) with { RunningCopyIsNewer = true },
+        })
+        {
+            Assert.IsFalse(TrayStatus.OffersSetUp(install));
+            Assert.IsTrue(TrayStatus.OffersRepair(install));
+        }
 
         Assert.IsFalse(TrayStatus.OffersSetUp(null));
+        Assert.IsFalse(TrayStatus.OffersRepair(null));
         foreach (BlockState state in new[] { BlockState.Allowed, BlockState.Blocked, BlockState.Mixed, BlockState.Unknown, BlockState.NotFound })
         {
             Assert.IsFalse(TrayStatus.OffersSetUp(Block(state)), state.ToString());
+            Assert.IsTrue(TrayStatus.OffersRepair(Block(state)), state.ToString());
         }
 
         Assert.IsFalse(TrayStatus.NeedsSetUp(Block(BlockState.Allowed) with { NeedsRepair = true }), "Only before setup does a click run setup in place of a block.");

@@ -45,12 +45,14 @@ internal static class TrayStatus
     // True when the boot block status says the gate task is missing. Unknown (null) is not "not set up".
     public static bool NeedsSetUp(BootBlockStatus? block) => block?.State == BlockState.NotSetUp;
 
-    // Whether the menu offers "Set up Earshot...": before setup, when the install is damaged, and when this copy is
-    // newer than the installed one. Setup is the only repair and the only update, and the verb it runs is not one a
-    // person can type. The click on Block at boot and the choice of a device still ask NeedsSetUp alone, because
-    // both work through a gate that is there, damaged or old.
-    public static bool OffersSetUp(BootBlockStatus? block) =>
-        NeedsSetUp(block) || block is { NeedsRepair: true } || block is { RunningCopyIsNewer: true };
+    // Whether the menu offers "Set up Earshot...": only when nothing is installed. Once an install exists, in any state,
+    // the menu offers Repair Earshot instead (OffersRepair). The click on Block at boot and the choice of a device still
+    // ask NeedsSetUp alone, because both work through a gate that is there, damaged or old.
+    public static bool OffersSetUp(BootBlockStatus? block) => NeedsSetUp(block) && block is { InstallExists: false };
+
+    // Whether the menu offers "Repair Earshot...": whenever an install exists, healthy, damaged, older or newer than
+    // this copy. Not before the first status read, and not when nothing is installed.
+    public static bool OffersRepair(BootBlockStatus? block) => block is { InstallExists: true };
 
     // The device name to show: the active target's name, or the match string when nothing is found.
     public static string DeviceName(DeviceSnapshot snapshot, EarshotSettings settings)

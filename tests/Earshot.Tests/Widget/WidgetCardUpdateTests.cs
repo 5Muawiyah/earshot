@@ -271,6 +271,43 @@ public sealed class WidgetCardUpdateTests
         });
     }
 
+    // With no install to hand an update to, Update is not there: the page offers Set up or Repair, and the switch card
+    // offers the switch. Each button reaches the tray and nothing downloads.
+    [TestMethod]
+    public void TheUpdatePagesSetUpRepairAndSwitchButtonsCallTheTrayAndDownloadNothing()
+    {
+        foreach ((UpdateViewModel view, string label) in new[]
+        {
+            (CardKit.UpdateWithoutInstall(UpdateButtonRole.SetUp), "Set up Earshot"),
+            (CardKit.UpdateWithoutInstall(UpdateButtonRole.Repair), "Repair Earshot"),
+            (UpdateViewModel.For(UpdateStage.SwitchOffered, new ReleaseVersion(1, 1, 0), null, null, null, null), "Switch to it"),
+        })
+        {
+            Phase5.CardDesktop.Run(() =>
+            {
+                var host = new FakeCardHost { View = view };
+                var log = new CapturingLog();
+                WidgetCard? card = null;
+                using var presenter = new WidgetCardPresenter(
+                    () => card = new WidgetCard(log), CardKit.Callbacks(), CardKit.Inline, new Streaming.TestTimeProvider(), log, host);
+                presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
+                Application.DoEvents();
+                CardKit.Click(card!, card!.CurrentMainLayout.Gear);
+                CardKit.Click(card, CardKit.Part(card, SettingsRowId.CheckForUpdates, SettingsPart.Button));
+
+                SetupButton button = card.Model.Setup!.Buttons.Single();
+                Assert.AreEqual(label, button.Label);
+                Assert.IsTrue(button.Primary);
+                CardKit.Click(card, card.CurrentSetupLayout!.Frame.Buttons[0]);
+
+                Assert.AreEqual(0, host.StartUpdateCalls, label + " is not Update.");
+                Assert.AreEqual(label == "Set up Earshot" ? 1 : 0, host.SetUpCalls);
+                Assert.AreEqual(label == "Repair Earshot" ? 1 : 0, host.RepairCalls);
+                Assert.AreEqual(label == "Switch to it" ? 1 : 0, host.SwitchCalls);
+            });
+        }
+    }
+
     [TestMethod]
     public void TheUpdatePagesButtonsCallTheFlowAndBackGoesWhereTheOwnerCameFrom()
     {

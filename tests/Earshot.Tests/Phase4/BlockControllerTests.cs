@@ -120,6 +120,10 @@ public sealed class BlockControllerTests
             return _files[path];
         }
 
+        // The install folder is there whenever the test gave the installed program a record, present or not; a test that
+        // gave none has no folder, as a machine before setup has none.
+        public bool FolderExists(string path) => _files.Keys.Any(k => k.StartsWith(path, StringComparison.OrdinalIgnoreCase));
+
         private FakeInstalledFiles Put(string path, InstalledFile file)
         {
             _files[path] = file;
@@ -142,12 +146,14 @@ public sealed class BlockControllerTests
         Assert.IsTrue(status.TasksInstalled);
         Assert.IsTrue(status.NeedsRepair);
         Assert.IsFalse(status.RunningCopyIsNewer);
-        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsTrue(status.InstallExists);
+        Assert.IsTrue(TrayStatus.OffersRepair(status), "An install exists, so the menu offers Repair.");
+        Assert.IsFalse(TrayStatus.OffersSetUp(status), "Set up is only for when nothing is installed.");
         Assert.IsFalse(TrayStatus.NeedsSetUp(status));
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "read-file-version"), "The failed read is on record with its code.");
     }
 
-    // The same message a block gives when device.json is gone ("Boot block needs repair. Choose Set up Earshot.") must
+    // The same message a block gives when device.json is gone ("Boot block needs repair. Choose Repair Earshot.") must
     // have the item it names on the menu.
     [TestMethod]
     public async Task AnInstallWithNoDeviceFileNeedsRepair()
@@ -160,7 +166,9 @@ public sealed class BlockControllerTests
 
         Assert.IsTrue(status.TasksInstalled);
         Assert.IsTrue(status.NeedsRepair);
-        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsTrue(status.InstallExists);
+        Assert.IsTrue(TrayStatus.OffersRepair(status), "An install exists, so the menu offers Repair.");
+        Assert.IsFalse(TrayStatus.OffersSetUp(status), "Set up is only for when nothing is installed.");
         Assert.AreEqual(BlockController.NeedsRepairMessage, (await h.Controller.BlockAsync()).UserMessage);
     }
 
@@ -179,7 +187,9 @@ public sealed class BlockControllerTests
 
         Assert.AreEqual(BlockState.NotSetUp, status.State);
         Assert.IsFalse(status.TasksInstalled);
-        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsTrue(status.InstallExists);
+        Assert.IsTrue(TrayStatus.OffersRepair(status), "An install exists, so the menu offers Repair.");
+        Assert.IsFalse(TrayStatus.OffersSetUp(status), "Set up is only for when nothing is installed.");
         Assert.IsEmpty(files.Reads, "Before the tasks verify there is no installed file to ask about.");
     }
 
@@ -194,7 +204,9 @@ public sealed class BlockControllerTests
         Assert.IsTrue(status.RunningCopyIsNewer);
         Assert.IsFalse(status.NeedsRepair);
         Assert.AreEqual(BlockState.Allowed, status.State);
-        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsTrue(status.InstallExists);
+        Assert.IsTrue(TrayStatus.OffersRepair(status), "An install exists, so the menu offers Repair.");
+        Assert.IsFalse(TrayStatus.OffersSetUp(status), "Set up is only for when nothing is installed.");
         Assert.IsFalse(TrayStatus.NeedsSetUp(status));
     }
 
@@ -211,6 +223,7 @@ public sealed class BlockControllerTests
             Assert.IsFalse(status.RunningCopyIsNewer, installed + " installed, " + running + " running");
             Assert.IsFalse(status.NeedsRepair, installed + " installed, " + running + " running");
             Assert.IsFalse(TrayStatus.OffersSetUp(status), installed + " installed, " + running + " running");
+            Assert.IsTrue(TrayStatus.OffersRepair(status), installed + " installed, " + running + " running");
         }
     }
 
@@ -227,6 +240,7 @@ public sealed class BlockControllerTests
         Assert.IsFalse(status.NeedsRepair);
         Assert.IsFalse(status.RunningCopyIsNewer);
         Assert.IsFalse(TrayStatus.OffersSetUp(status));
+        Assert.IsTrue(TrayStatus.OffersRepair(status), "Repair is offered for an install in any state.");
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "read-file-version"));
     }
 
@@ -242,6 +256,7 @@ public sealed class BlockControllerTests
         Assert.IsFalse(status.NeedsRepair);
         Assert.IsFalse(status.RunningCopyIsNewer);
         Assert.IsFalse(TrayStatus.OffersSetUp(status));
+        Assert.IsTrue(TrayStatus.OffersRepair(status), "Repair is offered for an install in any state.");
     }
 
     [TestMethod]
@@ -253,6 +268,9 @@ public sealed class BlockControllerTests
 
         Assert.AreEqual(BlockState.NotSetUp, status.State);
         Assert.IsFalse(status.TasksInstalled);
+        Assert.IsFalse(status.InstallExists);
+        Assert.IsTrue(TrayStatus.OffersSetUp(status));
+        Assert.IsFalse(TrayStatus.OffersRepair(status));
         Assert.IsTrue(status.BlockAtBoot, "The shipped default before setup.");
         Assert.IsTrue(status.BlockAtBootKnown);
         Assert.AreEqual(RecordedNodes.AirPodsContainer, status.TargetContainerId);
@@ -775,6 +793,116 @@ public sealed class BlockControllerTests
         Assert.AreEqual((Exe, "install " + TestUsers.Sid + " 0A1B2C3D4E8C 5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13"), h.Launcher.Launches.Single());
         Assert.IsTrue(h.Controller.IsSetUp);
         Assert.IsTrue(Program.TryParseInstallArgs(h.Launcher.Launches[0].Arguments.Split(' '), out _, out string? problem), "Install accepts what setup sends: " + problem);
+    }
+
+    // ----- repair -----
+
+    private static readonly string InstalledProgram = Path.Combine(InstallFolder, "Earshot.exe");
+
+    private const string Identity = " " + TestUsers.Sid + " 0A1B2C3D4E8C 5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13";
+
+    // The elevated program is the installed one, never the copy that happens to be running: the running copy may be in a
+    // folder the signed-in user can write.
+    [TestMethod]
+    public async Task RepairRunsTheInstalledProgramNotTheRunningCopyWithTheRepairVerb()
+    {
+        using var h = new Harness();
+
+        ControllerResult result = await h.Controller.RunRepairAsync(RepairVerb.Repair);
+
+        Assert.AreEqual(OpStatus.Success, result.Status, result.UserMessage);
+        Assert.AreEqual(BlockController.RepairDoneMessage, result.UserMessage);
+        Assert.AreEqual("Earshot was repaired", result.UserMessage);
+        (string exe, string arguments) = h.Launcher.Launches.Single();
+        Assert.AreEqual(InstalledProgram, exe);
+        Assert.AreNotEqual(Exe, exe);
+        Assert.AreEqual("repair" + Identity, arguments);
+        Assert.IsTrue(Program.TryParseRepairArgs(arguments.Split(' '), out _, out string? problem), "Repair accepts what the tray sends: " + problem);
+    }
+
+    // A program from before the repair verb already runs install from its own folder as a repair, and would answer an
+    // unknown verb with a usage error after the prompt.
+    [TestMethod]
+    public async Task AnInstalledProgramFromBeforeTheRepairVerbIsAskedThroughTheInstallVerb()
+    {
+        using var h = new Harness();
+
+        ControllerResult result = await h.Controller.RunRepairAsync(RepairVerb.Install);
+
+        Assert.AreEqual(OpStatus.Success, result.Status, result.UserMessage);
+        Assert.AreEqual((InstalledProgram, "install" + Identity), h.Launcher.Launches.Single());
+        Assert.IsTrue(Program.TryParseInstallArgs(h.Launcher.Launches[0].Arguments.Split(' '), out _, out string? problem), problem);
+    }
+
+    [TestMethod]
+    public async Task WithNoInstalledProgramToRunTheRunningCopysOwnSetupDoesTheRepair()
+    {
+        using var h = new Harness();
+
+        ControllerResult result = await h.Controller.RunRepairAsync(RepairVerb.FromThisCopy);
+
+        Assert.AreEqual(OpStatus.Success, result.Status, result.UserMessage);
+        Assert.AreEqual("Earshot was repaired", result.UserMessage, "It is a repair in the person's words, whichever program runs.");
+        Assert.AreEqual((Exe, "install" + Identity), h.Launcher.Launches.Single());
+    }
+
+    [TestMethod]
+    public async Task RepairRefusesWhenNothingIsPinnedAndRunsNothing()
+    {
+        using var h = new Harness();
+        h.Settings.Current = new EarshotSettings();
+
+        ControllerResult result = await h.Controller.RunRepairAsync(RepairVerb.Repair);
+
+        Assert.AreEqual(OpStatus.Failed, result.Status);
+        Assert.AreEqual("Choose your AirPods first, then repair Earshot.", result.UserMessage);
+        Assert.IsEmpty(h.Launcher.Launches);
+    }
+
+    [TestMethod]
+    public async Task RepairMapsEachEndingInItsOwnWords()
+    {
+        using var h = new Harness();
+        (int? Exit, long RunasCode, string Message)[] endings =
+        [
+            (null, 1223, BlockController.RepairCancelledMessage),
+            ((int)GateExitCode.NotElevated, 0, BlockController.RepairNeedsAdminMessage),
+            ((int)GateExitCode.FolderNotSecure, 0, BlockController.RepairUnsafeFolderMessage),
+            ((int)GateExitCode.NoManifest, 0, BlockController.RepairNeedsFilesMessage),
+            ((int)GateExitCode.NotFromInstallFolder, 0, BlockController.RepairNotFromInstallMessage),
+            ((int)GateExitCode.DeviceMismatch, 0, BlockController.RepairDeviceChangedMessage),
+            ((int)GateExitCode.UnsafeEnvironment, 0, BlockController.RepairUnsafeEnvironmentMessage),
+            ((int)GateExitCode.Failed, 0, BlockController.RepairFailedMessage),
+        ];
+
+        foreach ((int? exit, long runas, string message) in endings)
+        {
+            h.Launcher.Result = _ => new ElevatedRun(exit, StepOutcomes.FromWin32("runas", (uint)runas));
+            Assert.AreEqual(message, (await h.Controller.RunRepairAsync(RepairVerb.Repair)).UserMessage);
+        }
+
+        h.Launcher.Result = _ => new ElevatedRun((int)GateExitCode.Partial, StepOutcomes.FromWin32("runas", 0));
+        ControllerResult partial = await h.Controller.RunRepairAsync(RepairVerb.Repair);
+        Assert.AreEqual(OpStatus.Partial, partial.Status);
+        Assert.AreEqual("Earshot was repaired, but the shut-down hand-back could not be set up. Try again.", partial.UserMessage);
+    }
+
+    [TestMethod]
+    public void RepairWordsAreAllPlainAndHaveNoDash()
+    {
+        foreach (BlockController.ElevatedWords words in new[] { BlockController.RepairWords })
+        {
+            foreach (string text in new[]
+            {
+                words.NothingPinned, words.Done, words.Partial, words.Cancelled, words.Failed, words.NeedsAdmin, words.UnsafeFolder, words.NeedsFiles,
+                words.DeviceChanged, words.OtherBlocked, words.OtherProtected, words.UnsafeEnvironment, words.NotReadBack, BlockController.RepairNotFromInstallMessage,
+            })
+            {
+                Assert.DoesNotContain("\u2014", text);
+                Assert.IsLessThanOrEqualTo(120, text.Length, text);
+            }
+        }
+
     }
 
     [TestMethod]
