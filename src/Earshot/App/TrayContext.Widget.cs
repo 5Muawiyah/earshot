@@ -61,6 +61,11 @@ internal sealed partial class TrayContext
     // reference load, never a torn read of the struct's own fields.
     private volatile ShownGaugeBox? _shownGaugeForWorker;
 
+    // The owner's chosen display, for the same worker thread: written on the UI thread (WireGauge, ApplyWidget),
+    // read through ReadChosenDisplay. A string reference, so a read is never torn.
+    private volatile string _gaugeDisplayForWorker = GaugeDisplayChoice.MainDisplay;
+    private readonly SystemDisplaySource _displaySource = new();
+
     private const int CardPlacement96 = 96;
 
     // Test seam: WidgetHandBackOrderTests substitutes these to prove the hand-back-first ordering without
@@ -169,7 +174,8 @@ internal sealed partial class TrayContext
                 _log,
                 _time,
                 _gaugeCoverProbeFactory?.Invoke() ?? new WindowCoverProbe(),
-                _registry.UiPost);
+                _registry.UiPost,
+                () => SystemDisplaySource.ForegroundWindow(_displaySource.Read().Displays));
             controller.CardRequested += OnWidgetCardRequested;
             controller.ToggleRequested += (_, _) => StartToggle();
             controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
@@ -189,7 +195,9 @@ internal sealed partial class TrayContext
             _appBarRegistration = new AppBarRegistration(_window.Handle, _log);
             LogAppBarOutcome(_appBarRegistration.Register());
 
-            _taskbarWatcher = new TaskbarWatcher(_taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time, _taskbarWatcherPollIntervalMs);
+            _gaugeDisplayForWorker = _registry.Settings.Current.Widget.GaugeDisplay;
+            _taskbarWatcher = new TaskbarWatcher(
+                _taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time, _taskbarWatcherPollIntervalMs, ReadChosenDisplay);
             _taskbarWatcher.Start();
             _taskbarWatcher.Poke();
         }
@@ -454,6 +462,8 @@ internal sealed partial class TrayContext
     // only the plain field RefreshShownGaugeForWorker maintains; never the GaugeWindow itself.
     private ShownGauge? ReadShownGauge() => _shownGaugeForWorker?.Value;
 
+    private string ReadChosenDisplay() => _gaugeDisplayForWorker;
+
     // UI thread only. Recomputes the field the worker thread reads through ReadShownGauge, from the real
     // window's current Bounds and Handle: the only safe place to read either is here, since this runs on
     // the UI thread.
@@ -679,6 +689,7 @@ internal sealed partial class TrayContext
             WireWidget();
         }
 
+        _gaugeDisplayForWorker = widget.GaugeDisplay;
         if (widget.ShowOnTaskbar)
         {
             _taskbarWatcher?.Poke();

@@ -27,7 +27,8 @@ internal readonly record struct PlacementResult(Rectangle? Bounds, PlacementFail
 // only its x is chosen. Two positions, both measured from what UI Automation read:
 //
 //   RightEnd (default)  its right edge 8 px (scaled) left of the notification area's left edge, which is
-//                       the tray chevron when it shows, or the first tray icon when it does not
+//                       the tray chevron when it shows, or the first tray icon when it does not; on a
+//                       secondary taskbar the clock is that area, and with no clock the taskbar's own right edge
 //   NextToApps          its left edge 4 px (scaled) after the last button that is not part of the
 //                       notification area
 //
@@ -119,7 +120,10 @@ internal static class GaugePlacement
         }
         else
         {
-            if (trayLeft is not { } tl)
+            // A secondary taskbar that shows nothing at its right end (no clock) has no notification area to
+            // measure from; its own right edge is the end, with the same gap.
+            int? rightAnchor = trayLeft ?? (layout.IsSecondary ? t.Right : null);
+            if (rightAnchor is not { } tl)
             {
                 return PlacementResult.Failed(PlacementFailure.NoAnchor);
             }

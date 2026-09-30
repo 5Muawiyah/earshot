@@ -61,6 +61,13 @@ internal sealed partial class TrayContext
             // The two features below are switched by their own setting but only ever act once the field they read
             // has been proved, so the page says which is still waiting. The in-ear field is proved when the
             // snapshot says auto-pause is available; the lid field when a lid reading has been seen.
+            DisplayReading displays = _tray._displaySource.Read();
+            IReadOnlyList<DisplayOption> displayOptions = GaugeDisplayOptions.Build(displays.Displays);
+            bool chosenConnected = string.IsNullOrEmpty(widget.GaugeDisplay) ||
+                GaugeDisplayChoice.Resolve(widget.GaugeDisplay, displays.Displays).Fallback == DisplayFallbackReason.None;
+            string? displayNote = !chosenConnected
+                ? WidgetCopy.DisplayChosenNotConnected
+                : _tray._gaugeController?.DisplayFallback == DisplayFallbackReason.TaskbarNotShown ? WidgetCopy.DisplayChosenNoTaskbar : null;
             return new CardSettingsValues(
                 widget.GaugePosition,
                 widget.OtherDeviceLabel,
@@ -77,11 +84,19 @@ internal sealed partial class TrayContext
                 running?.ToString(),
                 settings.CheckForUpdatesAutomatically,
                 InEarProofMissing: !snapshot.AutoPauseAvailable,
-                LidProofMissing: snapshot.LidOpen is null);
+                LidProofMissing: snapshot.LidOpen is null)
+            {
+                GaugeDisplayId = widget.GaugeDisplay,
+                GaugeDisplayOptions = displayOptions,
+                GaugeDisplayNote = displayNote,
+            };
         }
 
         public void SetGaugePosition(GaugePosition value, CardPlace place) =>
             Write("gauge position (card)", s => s.Widget = s.Widget with { GaugePosition = value }, place);
+
+        public void SetGaugeDisplay(string id, CardPlace place) =>
+            Write("gauge display (card)", s => s.Widget = s.Widget with { GaugeDisplay = id }, place);
 
         public void SetOtherDeviceLabel(string value, CardPlace place)
         {

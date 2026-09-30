@@ -1,3 +1,4 @@
+using Earshot.Interop;
 using Earshot.App;
 using Earshot.Contracts;
 using Earshot.Popup;
@@ -280,7 +281,7 @@ internal sealed class WidgetCardPresenter : IDisposable
     private Rectangle PlaceAbove(WidgetCard card, Rectangle anchor)
     {
         Size cardSize = card.ClientSize;
-        Rectangle workArea = Screen.FromPoint(anchor.Location).WorkingArea;
+        Rectangle workArea = SystemDisplaySource.WorkAreaFor(anchor);
         return WidgetCardPlacement.Above(anchor, cardSize, workArea, _callbacks.Dpi(), _callbacks.CurrentGaugePosition);
     }
 
@@ -445,6 +446,9 @@ internal sealed class WidgetCardPresenter : IDisposable
         {
             case PositionChange position:
                 _host.SetGaugePosition(position.Value, place);
+                break;
+            case DisplayChange display:
+                _host.SetGaugeDisplay(display.Id, place);
                 break;
             case TextChange text:
                 _host.SetOtherDeviceLabel(text.Value, place);
@@ -714,7 +718,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         Size size = card.ClientSize;
         if (size != before.Size)
         {
-            Rectangle workArea = Screen.FromPoint(before.Location).WorkingArea;
+            Rectangle workArea = SystemDisplaySource.WorkAreaFor(before);
             var resized = new Rectangle(before.X, before.Bottom - size.Height, size.Width, size.Height);
             card.Bounds = CardPlacement.Clamp(resized, workArea);
         }

@@ -18,6 +18,7 @@ internal sealed class TaskbarWatcher : IDisposable
 
     private readonly ITaskbarReader _reader;
     private readonly Func<ShownGauge?> _shownGauge;
+    private readonly Func<string> _chosenDisplay;
     private readonly Action<ITaskbarReader.Result> _onResult;
     private readonly Action<Action> _uiPost;
     private readonly ILog _log;
@@ -50,7 +51,7 @@ internal sealed class TaskbarWatcher : IDisposable
     // than anything it runs for instead (TrayStartOptions.TaskbarWatcherPollIntervalMs is that seam).
     public TaskbarWatcher(
         ITaskbarReader reader, Func<ShownGauge?> shownGauge, Action<ITaskbarReader.Result> onResult, Action<Action> uiPost, ILog log, TimeProvider time,
-        int baselinePollIntervalMs = ShownPollIntervalMs)
+        int baselinePollIntervalMs = ShownPollIntervalMs, Func<string>? chosenDisplay = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(shownGauge);
@@ -60,6 +61,7 @@ internal sealed class TaskbarWatcher : IDisposable
         ArgumentNullException.ThrowIfNull(time);
         _reader = reader;
         _shownGauge = shownGauge;
+        _chosenDisplay = chosenDisplay ?? (static () => GaugeDisplayChoice.MainDisplay);
         _onResult = onResult;
         _uiPost = uiPost;
         _log = log;
@@ -192,7 +194,7 @@ internal sealed class TaskbarWatcher : IDisposable
                 long started = _time.GetTimestamp();
                 try
                 {
-                    result = _reader.Read(_shownGauge());
+                    result = _reader.Read(_shownGauge(), _chosenDisplay());
                 }
                 catch (Exception ex)
                 {

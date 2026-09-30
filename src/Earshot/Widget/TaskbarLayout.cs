@@ -26,7 +26,13 @@ internal sealed record TaskbarLayout(
     Rectangle? NotificationArea = null,        // the bounds of the notification area's own elements (the tray chevron, icons, clock); null when none was identified
     WindowIdentity? CoveringWindow = null,     // the window found at the probe point when Covered
     WindowIdentity? WindowAtGaugeCentre = null, // the window found at the shown gauge's centre when GaugeCentreIsGauge is false
-    WindowIdentity? Foreground = null);        // the foreground window at the time of the read
+    WindowIdentity? Foreground = null,         // the foreground window at the time of the read
+    int DisplayCount = 1,                      // how many displays are connected; 1 keeps every full-screen signal as it always was
+    ForegroundWindowReading? ForegroundWindow = null, // the foreground window's rectangle and display, for the full-screen rule
+    bool IsSecondary = false,                  // the taskbar read is a secondary display's (Shell_SecondaryTrayWnd)
+    string DisplayLabel = "",                  // the plain name of the display this taskbar is on, for the log
+    DisplayFallbackReason DisplayFallback = DisplayFallbackReason.None, // why this is not the display the owner chose
+    Earshot.Contracts.StepOutcome? DisplayProblem = null); // the first raw failure while reading the displays, or null
 
 // Why a read failed, and the raw step. Every case maps to one of GaugeController's Hidden reasons.
 internal enum TaskbarReadFailureStep { NoTaskbar, TaskbarRect, Occupants, Notification, Dpi, GaugeProbe, Exception }

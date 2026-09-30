@@ -55,6 +55,14 @@ public sealed record WidgetSettings
     // Written as its number; a number that names neither position is read as RightEnd (Clamped records it).
     public GaugePosition GaugePosition { get; set; } = GaugePosition.RightEnd;
 
+    // Which display's taskbar holds the gauge: "" for the main display (the default), or the stored identity of one
+    // display (DisplayInfo.Id, the monitor's device interface path, not its place in a list). A display that is not
+    // connected, or shows no taskbar, leaves the gauge on the main display's taskbar until it is back.
+    public string GaugeDisplay { get; set; } = "";
+
+    // The longest identity kept: a device interface path is well under this, so a longer value is not one.
+    public const int MaxGaugeDisplayLength = 512;
+
     public static WidgetSettings Default => new();
 
     // Recomputes Enabled from the four consumers (ShowOnTaskbar, LowBatteryAlert, CaseOpenCard, AutoPause):
@@ -100,7 +108,19 @@ public sealed record WidgetSettings
             position = GaugePosition.RightEnd;
         }
 
-        WidgetSettings result = this with { LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label, GaugePosition = position };
+        string display = (GaugeDisplay ?? "").Trim();
+        if (display.Length > MaxGaugeDisplayLength || display.Any(char.IsControl))
+        {
+            list.Add(new StepOutcome(
+                "clamp:GaugeDisplay",
+                Ok: true,
+                Code: 0,
+                CodeName: "S_OK",
+                Detail: "the gauge display is not an identity Windows gives, so the main display is used."));
+            display = "";
+        }
+
+        WidgetSettings result = this with { LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label, GaugePosition = position, GaugeDisplay = display };
         notes = list;
         return result;
     }

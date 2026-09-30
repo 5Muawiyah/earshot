@@ -37,6 +37,9 @@ internal static class WidgetCopy
     // switched-on row cannot act yet.
     public const string SettingsTitle = "Settings";
     public const string SettingsGaugePosition = "Gauge position";
+    public const string SettingsGaugeDisplay = "Gauge display";
+    public const string DisplayChosenNotConnected = "That display is not connected. The gauge is on the main display.";
+    public const string DisplayChosenNoTaskbar = "That display shows no taskbar. The gauge is on the main display.";
     public const string PositionRightEnd = "Right end";
     public const string PositionNextToApps = "Next to apps";
     public const string SettingsOtherDevice = "Other device";

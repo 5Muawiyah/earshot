@@ -311,7 +311,7 @@ public sealed class WidgetSettingsTests : IDisposable
         var expectedMembers = new HashSet<string>(StringComparer.Ordinal)
         {
             "Enabled", "ShowOnTaskbar", "OtherDeviceLabel", "AutoPause", "LowBatteryAlert",
-            "LowBatteryThresholdPercent", "CaseOpenCard", "LeftClickConnects", "GaugePosition",
+            "LowBatteryThresholdPercent", "CaseOpenCard", "LeftClickConnects", "GaugePosition", "GaugeDisplay",
         };
 
         CollectionAssert.AreEquivalent(

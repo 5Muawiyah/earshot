@@ -25,6 +25,15 @@ internal sealed record CardSettingsValues(
     bool InEarProofMissing,
     bool LidProofMissing)
 {
+    // Which display the gauge is on (GaugeDisplayChoice.MainDisplay, "", for the main one), the list the row offers
+    // and a line under the row when the choice cannot be honoured now. Init-only members, so the positional list above
+    // stays as it is.
+    public string GaugeDisplayId { get; init; } = GaugeDisplayChoice.MainDisplay;
+
+    public IReadOnlyList<DisplayOption> GaugeDisplayOptions { get; init; } = new DisplayOption[] { new(GaugeDisplayChoice.MainDisplay, Widget.GaugeDisplayOptions.MainLabel) };
+
+    public string? GaugeDisplayNote { get; init; }
+
     public const int LowBatteryMin = 10;
     public const int LowBatteryMax = 90;
     public const int LowBatteryStep = 10;
@@ -39,6 +48,8 @@ internal interface IWidgetCardHost
     CardSettingsValues ReadSettings();
 
     void SetGaugePosition(GaugePosition value, CardPlace place);
+
+    void SetGaugeDisplay(string id, CardPlace place);
 
     void SetOtherDeviceLabel(string value, CardPlace place);
 
@@ -89,6 +100,7 @@ internal enum SettingsRowId
 {
     None,
     GaugePosition,
+    GaugeDisplay,
     OtherDevice,
     PauseBud,
     PauseLeave,
@@ -102,7 +114,7 @@ internal enum SettingsRowId
     CheckAutomatically,
 }
 
-internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button }
+internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button, Choice }
 
 // One control of the settings page, for the keyboard order, the mouse and the focus rectangle.
 internal readonly record struct SettingsTarget(SettingsRowId Row, SettingsPart Part);
@@ -118,6 +130,8 @@ internal abstract record SettingChange
 internal sealed record ToggleChange(SettingsRowId Row, bool On) : SettingChange;
 
 internal sealed record PositionChange(GaugePosition Value) : SettingChange;
+
+internal sealed record DisplayChange(string Id) : SettingChange;
 
 internal sealed record TextChange(string Value) : SettingChange;
 
@@ -261,6 +275,18 @@ internal static class SettingsPageLayout
             SettingsRowId.GaugePosition, WidgetCopy.SettingsGaugePosition, null, false, false, firstW + segGap + secondW,
             (top, _) => (new Rectangle(right - secondW - segGap - firstW, top, firstW, control), new Rectangle(right - secondW, top, secondW, control), Rectangle.Empty),
             SettingsPart.SegmentFirst, SettingsPart.SegmentSecond);
+
+        int choiceW = 0;
+        foreach (DisplayOption option in values.GaugeDisplayOptions)
+        {
+            choiceW = Math.Max(choiceW, measure.Width(option.Label, twelve));
+        }
+
+        choiceW = Math.Max(choiceW, measure.Width(Widget.GaugeDisplayOptions.NotConnectedLabel, twelve)) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+        Row(
+            SettingsRowId.GaugeDisplay, WidgetCopy.SettingsGaugeDisplay, values.GaugeDisplayNote, false, false, choiceW,
+            (top, _) => (new Rectangle(right - choiceW, top, choiceW, control), Rectangle.Empty, Rectangle.Empty),
+            SettingsPart.Choice);
 
         int textW = CardPlacement.Scale(TextBoxWidthAt96, dpi);
         Row(

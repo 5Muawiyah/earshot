@@ -305,11 +305,29 @@ button. Choose with **Gauge position** on the settings page. If there is no
 free space on the taskbar, or Earshot cannot read the taskbar at all, the
 gauge steps aside and the ordinary tray icon takes over, without asking.
 
+**Which display.** With more than one display, **Gauge display** on the settings
+page chooses whose taskbar holds the gauge: **Main display** (the default) or
+one of the connected displays, named plainly, for example `Display 2 (1920 x 1080)`.
+Click the button to step through the list. On another display's taskbar the
+gauge keeps the same two positions: at the right end, 8 pixels left of the
+clock (or of the taskbar's end when that taskbar shows no clock), or 4 pixels
+after the last app button, and it never overlaps anything. Each display's own
+scale sets the gauge's size. If the chosen display is unplugged, or shows no
+taskbar (Windows can turn that off for other displays), the gauge goes to the
+main display's taskbar, the log says why, and it moves back when the display
+returns. The card opens on the same display as the gauge.
+
 **Staying visible.** When Start, a flyout or a taskbar click covers the gauge,
 Earshot raises it again. Every hide, show, cover and raise is written to the
 log with a reason and the window's class only, never a title. One failed read
 of the taskbar does not move or hide the gauge; it stays where it is until
 three reads in a row have failed.
+
+**Full-screen applications.** The gauge hides for a full-screen application
+only on the display that application covers. A full-screen game on another
+display leaves it shown. With one display nothing changes: a full-screen
+application hides the gauge. Presentation settings, which are the owner's own
+switch and not a window, hide it on every display.
 
 <img src="images/widget-gauge.png" alt="An earlier version of Earshot's taskbar gauge, drawn from made-up values" width="220" align="right">
 
@@ -383,6 +401,7 @@ The gear on the card opens it. Rows, top to bottom:
 | Row | Default | Notes |
 |---|---|---|
 | Gauge position | Right end | Right end, or next to apps |
+| Gauge display | Main display | Main display, or one of the connected displays; a line under the row says when the chosen one is not connected or shows no taskbar |
 | Other device | `iPhone` | The label used in "On your <name>", up to 40 characters |
 | Pause when a bud comes out | On | Says "Earshot cannot yet tell when a bud is in your ear." while in-ear is not proved, and does nothing until it is |
 | Pause when AirPods leave this PC | On | See [above](#pausing-when-the-airpods-leave-this-pc) |
