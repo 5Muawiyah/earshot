@@ -85,6 +85,11 @@ internal sealed record TrayStartOptions(
     // so a tray-level test of where the gauge goes never puts a window on a desktop.
     public Func<IGaugeSurface>? GaugeSurfaceFactory { get; init; }
 
+    // Whether this process runs elevated (an administrator's full token). A tray is started by the signed-in user's own token,
+    // but a person can start it with Run as administrator, and a program it starts then has the same elevated token. The real
+    // read by default; a test gives a fixed answer.
+    public Func<bool> IsElevated { get; init; } = static () => Earshot.Boot.Gate.WindowsProcessToken.Current().IsElevatedAdministrator;
+
     // What the gauge's display choice reads from Windows: the list of displays. The real one by default; a test gives it a
     // fake, so a tray-level test of the choice never depends on this PC's displays.
     public IDisplaySource DisplaySource { get; init; } = new SystemDisplaySource();
@@ -366,6 +371,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _registry = registry;
         _coordinator = coordinator;
         _log = registry.Log;
+        _isElevated = options.IsElevated;
         _gaugeSurfaceFactory = options.GaugeSurfaceFactory;
         _displaySource = options.DisplaySource;
         _foregroundWindowProbe = options.ForegroundWindowProbe;

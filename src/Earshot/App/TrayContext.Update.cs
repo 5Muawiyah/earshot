@@ -42,6 +42,7 @@ internal sealed partial class TrayContext
     private Func<string, bool> _updateFolderExists = Directory.Exists;
     private Func<string, IEnumerable<string>> _updateListFolder = static folder => Directory.EnumerateFileSystemEntries(folder);
     private IFolderSecurity _installFolderSecurity = new NtfsFolderSecurity();
+    private Func<bool> _isElevated = static () => false;
     private Task? _updateAutoTask;
     private ReleaseVersion? _updateAnnounced;
 
@@ -104,6 +105,16 @@ internal sealed partial class TrayContext
         }
 
         _log.Info("This copy, " + _updateRunningExe + ", is not the installed one, " + _updateInstalledExe + ". It does not point Open on startup or the Start menu shortcut at itself.");
+
+        // A switch starts the installed copy with this process's own token. From an elevated tray that would be an elevated
+        // tray, which Earshot never wants running, so no switch is offered: the person is told to start it themselves.
+        if (_isElevated())
+        {
+            _log.Info("This copy runs elevated, so no switch to the installed copy is offered: it would start elevated too.");
+            ShowCard(TrayStatus.AppName, UpdateCopy.SwitchMessage, CardPlace.NearTray);
+            return;
+        }
+
         UpdateController? updates = EnsureUpdates();
         updates?.OfferSwitch();
         if (updates is null || !RequestUpdatePageFromWidget())
@@ -118,6 +129,13 @@ internal sealed partial class TrayContext
     {
         if (_closing)
         {
+            return;
+        }
+
+        if (_isElevated())
+        {
+            _log.Warn("Switch: this copy runs elevated, so the installed copy would start elevated too. Nothing was started.");
+            ShowCard(TrayStatus.AppName, UpdateCopy.SwitchMessage, CardPlace.NearTray);
             return;
         }
 
@@ -456,7 +474,7 @@ internal sealed partial class TrayContext
     {
         if (_closedForHandOver)
         {
-            place.Show(_registry.Cards, view.Status, (view.CardText ?? "") + " Earshot is starting again.");
+            place.Show(_registry.Cards, view.Status, (view.CardText ?? "") + (_isElevated() ? " Start Earshot again from the Start menu." : " Earshot is starting again."));
             await ExitAfterFailedHandOverAsync();
             return;
         }

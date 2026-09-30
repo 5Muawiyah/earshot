@@ -25,6 +25,20 @@ public sealed class UpdateViewModelTests
             view.Buttons.ToArray());
     }
 
+    // The switch closes this copy through Exit, which hands the AirPods back and blocks them when Hand back is on, so the card
+    // says so before the button is pressed.
+    [TestMethod]
+    public void TheSwitchCardSaysBeforeTheButtonThatSwitchingClosesThisCopyAndHandsTheAirPodsBack()
+    {
+        UpdateViewModel view = For(UpdateStage.SwitchOffered);
+
+        Assert.AreEqual(UpdateCopy.SwitchNotice, view.Notice);
+        StringAssert.Contains(view.Notice, "Hand back");
+        StringAssert.Contains(view.Notice, "hands the AirPods back and blocks them");
+        Assert.AreEqual(UpdateCopy.SwitchNotice, view.CardText, "It is what a short message card under the status shows too.");
+        Assert.AreEqual(UpdateButtonRole.Switch, view.Buttons.Single().Role);
+    }
+
     [TestMethod]
     public void CheckingSpinsAndNamesTheInstalledVersion() =>
         AssertView(For(UpdateStage.Checking), UpdateIcon.Spinner, "Checking for updates", "Version 1.1.0 installed");

@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 using Earshot.Contracts;
+using Earshot.Infra;
 using Earshot.Interop;
 
 namespace Earshot.Widget.Alert;
@@ -345,6 +346,5 @@ internal sealed class NotificationRegistration
     private bool IsOurs(string existingTarget) =>
         PathsEqual(existingTarget, _runningExePath) || PathsEqual(existingTarget, _installedExePath);
 
-    private static bool PathsEqual(string? a, string? b) =>
-        !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+    private static bool PathsEqual(string? a, string? b) => SamePath.AreEqual(a, b);
 }

@@ -1,6 +1,7 @@
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Infra;
 
 namespace Earshot.Update;
 
@@ -109,14 +110,14 @@ internal static class InstalledCopy
     private static IEnumerable<string> ListEntries(string folder) => Directory.EnumerateFileSystemEntries(folder);
 
     // The same file, compared as Windows compares paths.
-    public static bool SameFile(string? a, string? b) =>
-        !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) &&
-        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+    public static bool SameFile(string? a, string? b) => SamePath.AreEqual(a, b);
 }
 
-// Starts the installed Earshot.exe for the switch. Not elevated: it runs with this process's own token, which is the
-// signed-in user's (the tray is never elevated). Called after the running copy has let go of the single-instance lock,
-// because the installed copy would otherwise find the lock held and end at once.
+// Starts the installed Earshot.exe for the switch, and a tray that starts again. It runs with this process's own token, so it
+// is not elevated only when this process is not: a tray started with Run as administrator would start an elevated one, so the
+// tray asks whether it is elevated first (TrayContext.IsElevated) and offers a switch only when it is not. Called after the
+// running copy has let go of the single-instance lock, because the installed copy would otherwise find the lock held and end
+// at once.
 internal static class InstalledCopyStarter
 {
     // True when the process started. A failure is logged with its raw code and returned, never swallowed.

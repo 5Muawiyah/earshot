@@ -1,5 +1,6 @@
 using System.Security;
 using Earshot.Contracts;
+using Earshot.Infra;
 using Microsoft.Win32;
 
 namespace Earshot.Tray;
@@ -124,7 +125,7 @@ internal sealed class StartupRegistration
     // An install is there, but its program is not, and this copy is not the installed one.
     public bool InstallDamaged =>
         !string.IsNullOrWhiteSpace(_installedExePath) && !_fileExists(_installedExePath) &&
-        !string.Equals(_installedExePath, _runningExePath, StringComparison.OrdinalIgnoreCase) &&
+        !SamePath.AreEqual(_installedExePath, _runningExePath) &&
         Path.GetDirectoryName(_installedExePath) is { Length: > 0 } folder && _folderExists(folder);
 
     // True when this run must not write the Run value at all.

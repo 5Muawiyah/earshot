@@ -133,6 +133,23 @@ public sealed class InstalledCopyTests
         Assert.IsFalse(InstalledCopy.SameFile(null, null));
     }
 
+    // One rule for every place that asks whether this is the installed copy: the installed copy, the startup value and the
+    // shortcut all use it, so none of them can take the same file for another one.
+    [TestMethod]
+    public void OnePathRuleServesTheSwitchTheStartupValueAndTheShortcut()
+    {
+        Assert.IsTrue(Earshot.Infra.SamePath.AreEqual(@"C:\Program Files\Earshot\Earshot.exe", "C:/Program Files/Earshot/Earshot.exe"));
+        Assert.IsTrue(Earshot.Infra.SamePath.AreEqual(@"C:\Program Files\Earshot\Earshot.exe", @"c:\PROGRAM FILES\earshot\sub\..\Earshot.exe"));
+        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual(@"C:\Program Files\Earshot\Earshot.exe", @"C:\Program Files\Earshot\Other.exe"));
+        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual("", @"C:\Earshot.exe"));
+        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual("  ", "  "), "A blank path names nothing.");
+
+        // A path Windows cannot name in full is compared as written, not thrown at the caller.
+        string odd = "C:\\Earshot\0.exe";
+        Assert.IsTrue(Earshot.Infra.SamePath.AreEqual(odd, odd.ToUpperInvariant()));
+        Assert.IsFalse(Earshot.Infra.SamePath.AreEqual(odd, @"C:\Earshot.exe"));
+    }
+
     // ----- the real folder security read, in places this run can see -----
 
     // A folder the running user made is owned by them and they can write it: the real read and the real rules call it

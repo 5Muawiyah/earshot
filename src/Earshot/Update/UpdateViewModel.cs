@@ -53,6 +53,9 @@ internal static class UpdateCopy
     public const string SwitchButton = "Switch to it";
     public const string SwitchMessage = "Earshot is already installed in Program Files. Start that copy from the Start menu.";
 
+    // Said on the switch card before the person presses the button: the switch is an ordinary Exit of this copy.
+    public const string SwitchNotice = "Switching closes this copy first. With Hand back on, that hands the AirPods back and blocks them.";
+
     public static string AvailableStatus(ReleaseVersion version) => "Version " + version + " is available";
 
     public static string InstalledSub(ReleaseVersion version) => "Version " + version + " installed";
@@ -154,7 +157,7 @@ internal sealed record UpdateViewModel(
             UpdateStage.HandoverFailed => new(stage, title, UpdateIcon.Caution, repair ? UpdateCopy.RepairHandoverFailedStatus : UpdateCopy.HandoverFailedStatus, UpdateCopy.CurrentSub(target), reason, null, null,
                 [new UpdateButton(UpdateButtonRole.TryAgain, UpdateCopy.TryAgainButton, Primary: true)]),
             UpdateStage.HandingOver => new(stage, title, UpdateIcon.Shield, UpdateCopy.HandingOverStatus, repair ? UpdateCopy.RepairingSub(target) : UpdateCopy.InstallingSub(target), null, null, null, None),
-            UpdateStage.SwitchOffered => new(stage, UpdateCopy.SwitchTitle, UpdateIcon.Shield, UpdateCopy.SwitchStatus, UpdateCopy.SwitchSub, null, null, null,
+            UpdateStage.SwitchOffered => new(stage, UpdateCopy.SwitchTitle, UpdateIcon.Shield, UpdateCopy.SwitchStatus, UpdateCopy.SwitchSub, null, UpdateCopy.SwitchNotice, null,
                 [new UpdateButton(UpdateButtonRole.Switch, UpdateCopy.SwitchButton, Primary: true)]),
             _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "Not an update stage."),
         };

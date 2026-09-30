@@ -50,7 +50,8 @@ internal sealed class UpdateTrayHarness : IDisposable
         TimeProvider? time = null,
         UpdateOutcomeSource? outcomeSource = null,
         DeviceSnapshot? snapshot = null,
-        TimeSpan? elevatedExitWait = null)
+        TimeSpan? elevatedExitWait = null,
+        bool elevated = false)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -123,6 +124,7 @@ internal sealed class UpdateTrayHarness : IDisposable
             UpdateLauncher = Launcher,
             UpdateOutcome = outcomeSource,
             ElevatedExitWait = elevatedExitWait ?? TimeSpan.FromSeconds(30),
+            IsElevated = () => elevated,
         };
 
         Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,
