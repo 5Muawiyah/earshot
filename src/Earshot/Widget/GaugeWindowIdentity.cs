@@ -4,8 +4,9 @@ using Earshot.Interop;
 namespace Earshot.Widget;
 
 // What the gauge's log says about another window: its class and whether it belongs to Explorer. Never
-// the title, which can carry a document name or a chat participant.
-internal readonly record struct WindowIdentity(string ClassName, bool BelongsToExplorer);
+// the title, which can carry a document name or a chat participant. BelongsToThisProcess is true for Earshot's own
+// windows (the gauge's tooltip, the card, a menu), which are never a cover to put the gauge above.
+internal readonly record struct WindowIdentity(string ClassName, bool BelongsToExplorer, bool BelongsToThisProcess = false);
 
 // Reads a WindowIdentity from a window handle. Read only, safe from any thread.
 internal static class GaugeWindowIdentityReader
@@ -14,8 +15,9 @@ internal static class GaugeWindowIdentityReader
 
     // The identity of hwnd, or null when the handle is 0 or the class name cannot be read (a window that
     // closed between the point query and this call). explorerProcessId is the process that owns
-    // Shell_TrayWnd, read once per taskbar read.
-    public static unsafe WindowIdentity? Read(nint hwnd, uint explorerProcessId)
+    // Shell_TrayWnd, read once per taskbar read. ownProcessId is the process whose windows are Earshot's own:
+    // this one when it is 0, which is always so outside a test that plays the shell from this process.
+    public static unsafe WindowIdentity? Read(nint hwnd, uint explorerProcessId, uint ownProcessId = 0)
     {
         if (hwnd == 0)
         {
@@ -31,7 +33,8 @@ internal static class GaugeWindowIdentityReader
 
         _ = NativeMethods.GetWindowThreadProcessId(hwnd, out uint processId);
         bool explorer = explorerProcessId != 0 && processId == explorerProcessId;
-        return new WindowIdentity(new string(buffer, 0, length), explorer);
+        uint own = ownProcessId != 0 ? ownProcessId : (uint)Environment.ProcessId;
+        return new WindowIdentity(new string(buffer, 0, length), explorer, processId == own);
     }
 
     // The process that owns a window, or 0 when it cannot be read.

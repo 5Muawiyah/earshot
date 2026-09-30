@@ -67,14 +67,21 @@ internal static class GaugeEventLog
     public static string RaisedAfterForegroundChange(WindowIdentity? over, string foregroundClass) =>
         "Gauge raised: " + Describe(over) + " was over it after a foreground change to " + Token(foregroundClass) + ".";
 
+    public static string RaisedAfterShellWindow(WindowIdentity? over, string windowClass, bool shown) =>
+        "Gauge raised: " + Describe(over) + " was over it after Explorer " + (shown ? "showed" : "hid") + " a window of class " + Token(windowClass) + ".";
+
+    public static string RaisedOnRecheck(WindowIdentity? over) => "Gauge raised: " + Describe(over) + " was over it on a recheck.";
+
     public static string RaisedByPoll(WindowIdentity? over) => "Gauge raised: the poll found " + Describe(over) + " over it.";
 
     public static string LeftUnder(string overClass) =>
         "Gauge left under " + Token(overClass) + " after a foreground change: not the taskbar.";
 
-    public static string RaiseSkippedRateLimit() => "Gauge raise skipped: another was made under 250 ms ago.";
+    public static string LeftUnderOtherwise(string overClass) =>
+        "Gauge left under " + Token(overClass) + ": not the taskbar.";
 
-    public static string RaiseCapReached() => "Gauge raise cap reached; waiting for a poll to confirm.";
+    public static string RaiseCapReached(int raises, int seconds) =>
+        "Gauge raise limit reached (" + Number(raises) + " in " + Number(seconds) + " s); the next check will try again.";
 
     public static string PlacementFailed(PlacementFailure failure) => "Gauge placement found no room: " + failure + ".";
 

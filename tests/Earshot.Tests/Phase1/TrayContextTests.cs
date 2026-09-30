@@ -1525,6 +1525,13 @@ internal sealed class TrayHarness : IDisposable
                 LastForegroundSource = source;
                 return source;
             },
+            // A fake, never the real ShellWindowChangeHook: no widget-enabled TrayContext test hooks Explorer.
+            ShellWindowSourceFactory = () =>
+            {
+                var source = new FakeShellWindowChangeSource();
+                LastShellWindowSource = source;
+                return source;
+            },
             // A fake, never the real WindowCoverProbe: a widget-enabled TrayContext test must never ask the desktop
             // which window is at a point on it (ForegroundChangeHookTests proves none builds a real one).
             GaugeCoverProbeFactory = () =>
@@ -1608,6 +1615,10 @@ internal sealed class TrayHarness : IDisposable
     // The fake foreground change source the widget's gauge pipeline built last (null until it has built one),
     // so a test can see it installed and disposed and raise a foreground change through it.
     public FakeForegroundChangeSource? LastForegroundSource { get; private set; }
+
+    // The fake shell window source the gauge pipeline built last (null until it has built one), so a test can see it
+    // installed, reinstalled and disposed and raise a shown or hidden window through it.
+    public FakeShellWindowChangeSource? LastShellWindowSource { get; private set; }
 
     // The fake cover probe the gauge's controller was built with (null until the gauge pipeline exists), so a test can
     // say what is over the gauge and see whether the controller asked.

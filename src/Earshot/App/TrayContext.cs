@@ -118,6 +118,11 @@ internal sealed record TrayStartOptions(
     // widget-enabled tray-level test injects a fake instead, so no test hooks the desktop.
     public Func<IForegroundChangeSource>? ForegroundChangeSourceFactory { get; init; }
 
+    // Builds the source of "Explorer showed or hid a window" events the gauge uses to look at what is over it when a
+    // flyout opens or closes with no change of the foreground window. Null (the default) means "the real hook"
+    // (ShellWindowChangeHook); a widget-enabled tray-level test injects a fake instead, so no test hooks the desktop.
+    public Func<IShellWindowChangeSource>? ShellWindowSourceFactory { get; init; }
+
     // Builds what looks at the window over the gauge's centre after a foreground change. Null (the default) means
     // "the real one" (WindowCoverProbe); a widget-enabled tray-level test injects a fake, so no test asks the desktop
     // what is at a point on it.
@@ -355,6 +360,7 @@ internal sealed partial class TrayContext : ApplicationContext
         // yet); WM_SETTINGCHANGE and WM_DISPLAYCHANGE ask only for an immediate re-measure.
         _window.TaskbarCreated += (_, _) => { _taskbarWatcher?.ResetBackoff(); _taskbarWatcher?.Poke(); };
         _window.TaskbarCreated += (_, _) => OnTaskbarCreatedForAppBar();
+        _window.TaskbarCreated += (_, _) => OnTaskbarCreatedForShellWindowHook();
         _window.SettingChanged += (_, _) => _taskbarWatcher?.Poke();
         _window.DisplayChanged += (_, _) => _taskbarWatcher?.Poke();
 
@@ -380,6 +386,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _cardEnvironmentFactory = options.CardEnvironmentFactory;
         _foregroundChangeSourceFactory = options.ForegroundChangeSourceFactory;
+        _shellWindowSourceFactory = options.ShellWindowSourceFactory;
         _gaugeCoverProbeFactory = options.GaugeCoverProbeFactory;
         _streamingShutdownWait = options.StreamingShutdownWait;
         _handBackBudget = options.HandBackBudget;

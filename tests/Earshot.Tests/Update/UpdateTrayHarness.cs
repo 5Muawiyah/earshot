@@ -85,6 +85,7 @@ internal sealed class UpdateTrayHarness : IDisposable
             TaskbarReaderFactory = () => new FakeTaskbarReader(),
             TrayIconVisibilityFactory = () => new FakeTrayIcon(),
             ForegroundChangeSourceFactory = () => new FakeForegroundChangeSource(),
+            ShellWindowSourceFactory = () => new FakeShellWindowChangeSource(),
             GaugeCoverProbeFactory = () => new FakeCoverProbe(),
             UpdateSourceFactory = sourceFactory ?? (() => Source),
             UpdateLauncher = Launcher,
