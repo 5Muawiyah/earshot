@@ -1,6 +1,7 @@
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Widget.Alert;
 
 namespace Earshot.Update;
 
@@ -19,15 +20,35 @@ internal enum InstallState
     Unusable,
 }
 
-// Detail is for the log: the raw reason, with the code of the read that failed.
-internal sealed record InstallAssessment(InstallState State, string Detail);
+// Why an install is Unusable, for the choice of what to do about it. Detail is for the log: the raw reason, with the code of
+// the read that failed.
+internal enum InstallProblem
+{
+    None,
+
+    // The folder lists and Earshot.exe is not in it: the program is truly absent. Only a person who can write to
+    // Program Files can cause this, so it is the one case where the running copy's own setup may bring an install back.
+    ProgramAbsent,
+
+    // Earshot.exe could not be found, but the folder could not be listed to confirm it is gone, or it lists the file
+    // that could not be found. That says nothing about what is installed, so nothing is elevated on the strength of it.
+    ProgramNotConfirmedAbsent,
+
+    // The program is there, but the folder's permissions are not administrators-only, or could not be read.
+    FolderNotTrusted,
+}
+
+internal sealed record InstallAssessment(InstallState State, string Detail, InstallProblem Problem = InstallProblem.None);
 
 // A read-only look at the installed copy. The elevated run that follows is the program in that folder and repeats the
-// folder check itself (UpdateActions, RepairActions), so this only decides what the tray offers and whether there is
+// folder check itself (UpdateActions, InstallActions), so this only decides what the tray offers and whether there is
 // anything to hand over to. Nothing is changed and nothing is started.
 internal static class InstalledCopy
 {
-    public static InstallAssessment Assess(string? installedExe, Func<string, bool> fileExists, Func<string, bool> folderExists, IFolderSecurity folders)
+    // listFolder names the entries of a folder; it is asked only when the program was not found, to tell a program that is
+    // gone from one that could not be seen. It is the real folder listing when not given.
+    public static InstallAssessment Assess(
+        string? installedExe, Func<string, bool> fileExists, Func<string, bool> folderExists, IFolderSecurity folders, Func<string, IEnumerable<string>>? listFolder = null)
     {
         ArgumentNullException.ThrowIfNull(fileExists);
         ArgumentNullException.ThrowIfNull(folderExists);
@@ -46,28 +67,57 @@ internal static class InstalledCopy
 
         if (!program)
         {
-            return new InstallAssessment(InstallState.Unusable, installedExe + " is missing.");
+            return AssessMissingProgram(installedExe, folder, listFolder ?? ListEntries);
         }
 
         var steps = new List<StepOutcome>();
         if (!FolderTrust.IsTrusted(folders, folder, AclCheck.CheckInstallFolder, "install-folder-acl", steps))
         {
             string why = string.Join(" ", steps.Where(s => !s.Ok).Select(s => s.Step + " " + s.CodeName + (string.IsNullOrEmpty(s.Detail) ? "" : ": " + s.Detail)));
-            return new InstallAssessment(InstallState.Unusable, folder + " is not trusted. " + why);
+            return new InstallAssessment(InstallState.Unusable, folder + " is not trusted. " + why, InstallProblem.FolderNotTrusted);
         }
 
         return new InstallAssessment(InstallState.Usable, installedExe);
     }
 
+    // File.Exists is false for a file that is not there and for one that could not be looked at. Only a folder that lists
+    // without the file shows it is gone, and the listing's own failure is kept with its code.
+    private static InstallAssessment AssessMissingProgram(string installedExe, string folder, Func<string, IEnumerable<string>> listFolder)
+    {
+        string name = Path.GetFileName(installedExe);
+        try
+        {
+            foreach (string entry in listFolder(folder))
+            {
+                if (string.Equals(Path.GetFileName(entry), name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new InstallAssessment(InstallState.Unusable, installedExe + " was not found, but " + folder + " lists it.", InstallProblem.ProgramNotConfirmedAbsent);
+                }
+            }
+        }
+        catch (IOException ex)
+        {
+            return new InstallAssessment(InstallState.Unusable, installedExe + " was not found and " + folder + " could not be listed (0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message, InstallProblem.ProgramNotConfirmedAbsent);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return new InstallAssessment(InstallState.Unusable, installedExe + " was not found and " + folder + " could not be listed (0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message, InstallProblem.ProgramNotConfirmedAbsent);
+        }
+
+        return new InstallAssessment(InstallState.Unusable, installedExe + " is missing: " + folder + " lists without it.", InstallProblem.ProgramAbsent);
+    }
+
+    private static IEnumerable<string> ListEntries(string folder) => Directory.EnumerateFileSystemEntries(folder);
+
     // The same file, compared as Windows compares paths.
-    public static bool SameFile(string? a, string? b) =>
-        !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) &&
-        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+    public static bool SameFile(string? a, string? b) => NotificationRegistration.PathsEqual(a, b);
 }
 
-// Starts the installed Earshot.exe for the switch. Not elevated: it runs with this process's own token, which is the
-// signed-in user's (the tray is never elevated). Called after the running copy has let go of the single-instance lock,
-// because the installed copy would otherwise find the lock held and end at once.
+// Starts the installed Earshot.exe for the switch, and a tray that starts again. It runs with this process's own token, so it
+// is not elevated only when this process is not: a tray started with Run as administrator would start an elevated one, so the
+// tray asks whether it is elevated first (TrayContext.IsElevated) and offers a switch only when it is not. Called after the
+// running copy has let go of the single-instance lock, because the installed copy would otherwise find the lock held and end
+// at once.
 internal static class InstalledCopyStarter
 {
     // True when the process started. A failure is logged with its raw code and returned, never swallowed.

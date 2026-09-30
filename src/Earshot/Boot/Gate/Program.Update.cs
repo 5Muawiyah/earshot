@@ -38,7 +38,10 @@ internal static partial class Program
             // tray to read at its next start. Only a run whose command line was accepted records anything.
             ctx.ExitCode = (int)Guarded(log, "update", () => RunUpdate(ctx.Args, WindowsProcessToken.Current(), log, request =>
             {
-                InstallResult result = new UpdateActions(layout, new NtfsFolderSecurity(), new ProcessExitWaiter(), new ChildInstallStarter(), log).Run(request);
+                InstallResult result = new UpdateActions(layout, new NtfsFolderSecurity(), new ProcessExitWaiter(), new ChildInstallStarter(), log)
+                {
+                    RunLock = InstallRunLock.Create(),
+                }.Run(request);
                 new UpdateOutcomeRecorder(paths.MachineFolder, new NtfsFolderSecurity(), log, TimeProvider.System).RecordUpdateRun(result);
                 return result;
             }));

@@ -41,6 +41,8 @@ internal sealed class MachineGateMutex : IGateRunLock
     private readonly string _name;
     private readonly Func<MutexSecurity> _security;
     private readonly Func<SecurityIdentifier?, bool> _trustedOwner;
+    private readonly string _stepName;
+    private readonly string _holder;
 
     public MachineGateMutex()
         : this(DefaultName, MachineSecurity, IsMachineOwner)
@@ -48,14 +50,21 @@ internal sealed class MachineGateMutex : IGateRunLock
     }
 
     // For tests: another name, an access list that also grants the current user, and the owners trusted.
-    internal MachineGateMutex(string name, Func<MutexSecurity> security, Func<SecurityIdentifier?, bool> trustedOwner)
+    // stepName and holder are for a lock of another kind (InstallRunLock): the step a refusal is recorded as, and what kind of
+    // run holds it, in the words "Another Earshot <holder> still held ...".
+    internal MachineGateMutex(
+        string name, Func<MutexSecurity> security, Func<SecurityIdentifier?, bool> trustedOwner, string stepName = StepName, string holder = "gate run")
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(stepName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(holder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(security);
         ArgumentNullException.ThrowIfNull(trustedOwner);
         _name = name;
         _security = security;
         _trustedOwner = trustedOwner;
+        _stepName = stepName;
+        _holder = holder;
     }
 
     public IDisposable? TryEnter(TimeSpan timeout, IList<StepOutcome> steps)
@@ -69,17 +78,17 @@ internal sealed class MachineGateMutex : IGateRunLock
         }
         catch (UnauthorizedAccessException ex)
         {
-            steps.Add(StepOutcomes.FromHResult(StepName, ex.HResult, _name + " exists but may not be opened here, so nothing was changed. " + ex.Message));
+            steps.Add(StepOutcomes.FromHResult(_stepName, ex.HResult, _name + " exists but may not be opened here, so nothing was changed. " + ex.Message));
             return null;
         }
         catch (WaitHandleCannotBeOpenedException ex)
         {
-            steps.Add(StepOutcomes.FromHResult(StepName, ex.HResult, _name + " could not be created or opened, so nothing was changed. " + ex.Message));
+            steps.Add(StepOutcomes.FromHResult(_stepName, ex.HResult, _name + " could not be created or opened, so nothing was changed. " + ex.Message));
             return null;
         }
         catch (IOException ex)
         {
-            steps.Add(StepOutcomes.FromHResult(StepName, ex.HResult, _name + " could not be created or opened, so nothing was changed. " + ex.Message));
+            steps.Add(StepOutcomes.FromHResult(_stepName, ex.HResult, _name + " could not be created or opened, so nothing was changed. " + ex.Message));
             return null;
         }
 
@@ -105,22 +114,25 @@ internal sealed class MachineGateMutex : IGateRunLock
         if (!entered)
         {
             mutex.Dispose();
-            steps.Add(StepOutcomes.FromWin32(StepName, WaitTimeout,
-                "Another Earshot gate run still held " + _name + " after " + Seconds(timeout) + ", so nothing was changed.", ok: false));
+            steps.Add(StepOutcomes.FromWin32(_stepName, WaitTimeout,
+                "Another Earshot " + _holder + " still held " + _name + " after " + Seconds(timeout) + ", so nothing was changed.", ok: false));
             return null;
         }
 
-        steps.Add(StepOutcomes.FromWin32(StepName, 0, abandoned
+        steps.Add(StepOutcomes.FromWin32(_stepName, 0, abandoned
             ? _name + ": entered after the previous run ended without releasing it."
             : _name));
         return new Held(mutex);
     }
 
     // True for the step of a lock another run still held.
-    public static bool IsBusy(StepOutcome step)
+    public static bool IsBusy(StepOutcome step) => IsBusy(step, StepName);
+
+    // True for the step of a lock of another name that another run still held.
+    internal static bool IsBusy(StepOutcome step, string stepName)
     {
         ArgumentNullException.ThrowIfNull(step);
-        return step.Step == StepName && !step.Ok && step.Code == (int)WaitTimeout;
+        return step.Step == stepName && !step.Ok && step.Code == (int)WaitTimeout;
     }
 
     internal static MutexSecurity MachineSecurity()
@@ -147,12 +159,12 @@ internal sealed class MachineGateMutex : IGateRunLock
         }
         catch (UnauthorizedAccessException ex)
         {
-            steps.Add(StepOutcomes.FromHResult(StepName, ex.HResult, _name + ": its owner could not be read, so it is not trusted and nothing was changed. " + ex.Message));
+            steps.Add(StepOutcomes.FromHResult(_stepName, ex.HResult, _name + ": its owner could not be read, so it is not trusted and nothing was changed. " + ex.Message));
             return true;
         }
         catch (InvalidOperationException ex)
         {
-            steps.Add(StepOutcomes.FromHResult(StepName, ex.HResult, _name + ": its owner could not be read, so it is not trusted and nothing was changed. " + ex.Message));
+            steps.Add(StepOutcomes.FromHResult(_stepName, ex.HResult, _name + ": its owner could not be read, so it is not trusted and nothing was changed. " + ex.Message));
             return true;
         }
 
@@ -161,7 +173,7 @@ internal sealed class MachineGateMutex : IGateRunLock
             return false;
         }
 
-        steps.Add(StepOutcomes.NotAttempted(StepName,
+        steps.Add(StepOutcomes.NotAttempted(_stepName,
             _name + " was created by " + (owner?.Value ?? "an unknown owner") + ", not by SYSTEM or Administrators, so it is not trusted and nothing was changed."));
         return true;
     }
@@ -207,4 +219,29 @@ internal sealed class NoGateRunLock : IGateRunLock
         {
         }
     }
+}
+
+// The machine-wide lock of setup, update and repair: one of them at a time on the machine, so two elevated runs never work
+// on the install folder, the scheduled tasks and the hand-back service together. It is the same kind of object as the gate's
+// lock (a named mutex only SYSTEM and Administrators may open, whose owner is checked), under a name of its own, so a run of
+// the boot block is never held up by an install and an install never waits for one. A run that cannot take it stops before
+// it changes anything. The update run holds it for its own part and the install it starts takes it again, so the install
+// waits for the update run to end (WaitBeforeRefusing) rather than refuse it.
+internal static class InstallRunLock
+{
+    public const string Name = @"Global\Earshot.Install.RunLock";
+    public const string StepName = "install-run-lock";
+
+    // How long a run waits for the lock before it refuses. The update run ends within moments of starting the install, which
+    // is what this covers; two runs started by hand are not meant to queue. A waiting budget chosen here, not measured.
+    public static readonly TimeSpan WaitBeforeRefusing = TimeSpan.FromSeconds(10);
+
+    // What a person is told when the lock was not free.
+    public const string BusyMessage = "Another Earshot setup, update or repair is still running. Try again when it has finished.";
+
+    public static IGateRunLock Create() =>
+        new MachineGateMutex(Name, MachineGateMutex.MachineSecurity, MachineGateMutex.IsMachineOwner, StepName, "setup, update or repair");
+
+    // True for the step of a lock another run still held.
+    public static bool IsBusy(StepOutcome step) => MachineGateMutex.IsBusy(step, StepName);
 }

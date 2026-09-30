@@ -77,8 +77,34 @@ internal sealed record TrayStartOptions(
     // folder; a test gives it a fake, and the real one has its own tests against a temporary install tree.
     public Func<string, Earshot.Boot.Gate.InstalledFilesReport> CheckInstalledFiles { get; init; } = Earshot.Boot.Gate.InstalledFileCheck.Check;
 
-    // The file version of the installed Earshot.exe, or null when it cannot be read.
-    public Func<string, Version?> ReadInstalledVersion { get; init; } = static path => new Earshot.Boot.InstalledFileReader().Read(path).Version;
+    // The installed Earshot.exe as a read found it: whether the file is there, its file version (null when it is missing or
+    // cannot be read) and the raw code of the read.
+    public Func<string, Earshot.Boot.InstalledFile> ReadInstalledFile { get; init; } = static path => new Earshot.Boot.InstalledFileReader().Read(path);
+
+    // Builds the gauge's window. Null (the default) means the real topmost GaugeWindow; a test gives a surface that shows nothing,
+    // so a tray-level test of where the gauge goes never puts a window on a desktop.
+    public Func<IGaugeSurface>? GaugeSurfaceFactory { get; init; }
+
+    // Whether this process runs elevated (an administrator's full token). A tray is started by the signed-in user's own token,
+    // but a person can start it with Run as administrator, and a program it starts then has the same elevated token. The real
+    // read by default; a test gives a fixed answer.
+    public Func<bool> IsElevated { get; init; } = static () => Earshot.Boot.Gate.WindowsProcessToken.Current().IsElevatedAdministrator;
+
+    // What the gauge's display choice reads from Windows: the list of displays. The real one by default; a test gives it a
+    // fake, so a tray-level test of the choice never depends on this PC's displays.
+    public IDisplaySource DisplaySource { get; init; } = new SystemDisplaySource();
+
+    // The foreground window as the full-screen rule needs it, given the displays. The real read by default.
+    public Func<IReadOnlyList<DisplayInfo>, ForegroundWindowReading?> ForegroundWindowProbe { get; init; } = SystemDisplaySource.ForegroundWindow;
+
+    // The names in the install folder, asked only when Earshot.exe was not found, to tell a program that is gone from one
+    // that could not be seen. A failure to list is an IOException or an UnauthorizedAccessException, which is kept.
+    public Func<string, IEnumerable<string>> ListFolder { get; init; } = static folder => Directory.EnumerateFileSystemEntries(folder);
+
+    // How long Exit waits for an elevated setup or repair that is still running before its hand-back and block, so the block
+    // never meets a scheduled task being registered again. A waiting budget chosen here (setup stops the service for up to
+    // 30 s and moves the folder for about 5 s more); nothing measured how long a repair takes.
+    public TimeSpan ElevatedExitWait { get; init; } = TimeSpan.FromSeconds(90);
 
     // The RegisterHotKey/UnregisterHotKey caller HotkeyManager uses, injected the way IStartupRegistry is:
     // the real one by default, a fake in tests, so a tray-level test never registers a real global hotkey.
@@ -345,6 +371,10 @@ internal sealed partial class TrayContext : ApplicationContext
         _registry = registry;
         _coordinator = coordinator;
         _log = registry.Log;
+        _isElevated = options.IsElevated;
+        _gaugeSurfaceFactory = options.GaugeSurfaceFactory;
+        _displaySource = options.DisplaySource;
+        _foregroundWindowProbe = options.ForegroundWindowProbe;
         _exitWaitLimit = options.ExitWaitLimit;
         _coordinatorExitWaitLimit = options.CoordinatorExitWaitLimit;
         _exitNoticeTime = options.ExitNoticeTime;
@@ -377,6 +407,10 @@ internal sealed partial class TrayContext : ApplicationContext
         _window.TaskbarCreated += (_, _) => OnTaskbarCreatedForShellWindowHook();
         _window.SettingChanged += (_, _) => _taskbarWatcher?.Poke();
         _window.DisplayChanged += (_, _) => _taskbarWatcher?.Poke();
+
+        // The settings page lists the connected displays as they were when it was drawn, so a display that comes or goes
+        // while the card is open redraws the page (and a choice made from the old list is refused, SetGaugeDisplay).
+        _window.DisplayChanged += (_, _) => _widgetCardPresenter?.Refresh();
 
         // AppBarRegistration's own notification callback (ABM_NEW's uCallbackMessage): ABN_STATECHANGE and
         // ABN_POSCHANGED poke the watcher for an immediate re-measure; ABN_FULLSCREENAPP hides the gauge at
@@ -1907,7 +1941,7 @@ internal sealed partial class TrayContext : ApplicationContext
         MenuModel.Build(
             _snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy,
             _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.SetupAvailable ?? false,
-            updateInProgress: _updates?.IsBusy ?? false);
+            updateInProgress: _updates?.IsBusy ?? false, elevatedRun: _elevatedRun);
 
     private void UpdatePresentation(bool forceIcon)
     {
@@ -1953,10 +1987,23 @@ internal sealed partial class TrayContext : ApplicationContext
 
     private async Task RunSetupAsync(CardPlace place)
     {
-        ControllerResult? result = await RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place);
-        if (result is { IsSuccess: true } && !_closing)
+        if (!TryBeginElevatedRun(SetupRun, place))
         {
-            PointStartupAtInstalledCopy();
+            return;
+        }
+
+        try
+        {
+            ControllerResult? result = await WithElevatedProgramAsync(
+                () => RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place));
+            if (result is { IsSuccess: true } && !_closing)
+            {
+                PointStartupAtInstalledCopy();
+            }
+        }
+        finally
+        {
+            EndElevatedRun(SetupRun);
         }
     }
 
@@ -2367,54 +2414,23 @@ internal sealed partial class TrayContext : ApplicationContext
         _log.Info(why);
         try
         {
-            // No more input: the icon goes, the picker closes, and everything in flight is cancelled. The
-            // coordinator then blocks enabled nodes that are not in use, after any clean-up in flight.
+            // No more input: the icon goes and the picker closes.
             _notifyIconVisibility.Visible = false;
             _picker?.Close();
             _exitPlace = place;
+
+            // An elevated setup or repair still running is waited for before anything of Exit's own is sent: it registers the
+            // boot block's scheduled tasks again, and the block before closing (and the hand-back) must not meet one that is
+            // being replaced. Everything below cancels what is in flight, that run included, so this comes first.
+            string? elevatedNotice = await WaitForElevatedProgramAsync(place);
+
+            // Everything in flight is cancelled. The coordinator then blocks enabled nodes that are not in use, after any
+            // clean-up in flight.
             _coordinator.BeginShutdown(PrepareExitHandBack());
             _lifetime.Cancel();
 
-            bool gaveUp = false;
-            if (_pending.Count > 0 || _coordinator.IsBusy)
-            {
-                _log.Info("Waiting for " + DescribePending() + " to finish before closing.");
-
-                // The block before closing on its own first reads the state and may block nothing, so it gets no
-                // card until the block is sent (OnCoordinatorChanged).
-                bool onlyTheBlock = _pending.Count == 0 && !_coordinator.IsBusyBeyondClosingBlock;
-                if (!onlyTheBlock)
-                {
-                    place.Show(_registry.Cards, TrayStatus.AppName, ClosingMessage);
-                }
-
-                Task all = Task.WhenAll(_pending.Keys.Append(_coordinator.WhenIdleAsync()));
-                TimeSpan waited = _exitWaitLimit;
-                if (!await CompletesWithinAsync(all, _exitWaitLimit) && _coordinator.IsBusy && _coordinatorExitWaitLimit > _exitWaitLimit)
-                {
-                    // What the coordinator has in flight may still end in the block that keeps the nodes disabled at
-                    // rest, and every wait inside it has a limit of its own.
-                    _log.Info("Still waiting for the block coordinator after " + Seconds(_exitWaitLimit) + ", up to " +
-                        Seconds(_coordinatorExitWaitLimit) + " in all, so a block its work ends with is still sent.");
-                    await CompletesWithinAsync(_coordinator.WhenIdleAsync(), _coordinatorExitWaitLimit - _exitWaitLimit);
-                    waited = _coordinatorExitWaitLimit;
-                }
-
-                if (all.IsFaulted)
-                {
-                    _log.Error("An action failed while Earshot was closing.", all.Exception);
-                }
-                else if (!all.IsCompleted)
-                {
-                    gaveUp = true;
-                    _log.Warn("Closing after " + Seconds(waited) + " with " + DescribePending() + " still in flight.");
-                }
-            }
-
-            // A change still running when the wait ran out may leave the nodes enabled, with nothing left here
-            // to block them; the BootBlock task is then what blocks them at the next start.
-            string? notice = _coordinator.ClosingNotice ??
-                             (gaveUp && _coordinator.IsBusy && BlockStatus is not { BlockAtBoot: false, BlockAtBootKnown: true } ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
+            string? notice = await FinishClosingWorkAsync(place, exceptAction: null);
+            notice = elevatedNotice is null ? notice : notice is null ? elevatedNotice : elevatedNotice + " " + notice;
             if (notice is not null)
             {
                 _log.Info("Exit: " + notice);
@@ -2430,6 +2446,54 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             ExitThread();
         }
+    }
+
+    // Waits for what is in flight, the block coordinator's hand-back and block before closing included, each wait with its
+    // limit, and returns what the person should be told if the work did not end cleanly, or null. exceptAction names the
+    // actions that are not waited for because one of them is the caller (the update whose hand-over this is).
+    private async Task<string?> FinishClosingWorkAsync(CardPlace place, Func<string, bool>? exceptAction)
+    {
+        Task[] waitFor = _pending.Where(p => exceptAction is null || !exceptAction(p.Value)).Select(p => p.Key).ToArray();
+        bool gaveUp = false;
+        if (waitFor.Length > 0 || _coordinator.IsBusy)
+        {
+            _log.Info("Waiting for " + DescribePending() + " to finish before closing.");
+
+            // The block before closing on its own first reads the state and may block nothing, so it gets no
+            // card until the block is sent (OnCoordinatorChanged).
+            bool onlyTheBlock = waitFor.Length == 0 && !_coordinator.IsBusyBeyondClosingBlock;
+            if (!onlyTheBlock)
+            {
+                place.Show(_registry.Cards, TrayStatus.AppName, ClosingMessage);
+            }
+
+            Task all = Task.WhenAll(waitFor.Append(_coordinator.WhenIdleAsync()));
+            TimeSpan waited = _exitWaitLimit;
+            if (!await CompletesWithinAsync(all, _exitWaitLimit) && _coordinator.IsBusy && _coordinatorExitWaitLimit > _exitWaitLimit)
+            {
+                // What the coordinator has in flight may still end in the block that keeps the nodes disabled at
+                // rest, and every wait inside it has a limit of its own.
+                _log.Info("Still waiting for the block coordinator after " + Seconds(_exitWaitLimit) + ", up to " +
+                    Seconds(_coordinatorExitWaitLimit) + " in all, so a block its work ends with is still sent.");
+                await CompletesWithinAsync(_coordinator.WhenIdleAsync(), _coordinatorExitWaitLimit - _exitWaitLimit);
+                waited = _coordinatorExitWaitLimit;
+            }
+
+            if (all.IsFaulted)
+            {
+                _log.Error("An action failed while Earshot was closing.", all.Exception);
+            }
+            else if (!all.IsCompleted)
+            {
+                gaveUp = true;
+                _log.Warn("Closing after " + Seconds(waited) + " with " + DescribePending() + " still in flight.");
+            }
+        }
+
+        // A change still running when the wait ran out may leave the nodes enabled, with nothing left here
+        // to block them; the BootBlock task is then what blocks them at the next start.
+        return _coordinator.ClosingNotice ??
+               (gaveUp && _coordinator.IsBusy && BlockStatus is not { BlockAtBoot: false, BlockAtBootKnown: true } ? BlockCoordinator.ClosedBeforeChangeEndedMessage : null);
     }
 
     // True when task completed within limit.

@@ -562,7 +562,7 @@ public sealed class GaugeDisplayTests : IDisposable
     [TestMethod]
     public void RealUiaTaskbarReaderReadsARealSecondaryTaskbarReadOnly()
     {
-        List<TaskbarWindowCandidate> secondaries = SystemDisplaySource.SecondaryTaskbars().Where(c => c.Visible).ToList();
+        List<TaskbarWindowCandidate> secondaries = SystemDisplaySource.SecondaryTaskbars().Taskbars.Where(c => c.Visible).ToList();
         if (secondaries.Count == 0)
         {
             Assert.Inconclusive("No Shell_SecondaryTrayWnd on this machine or desktop (one display, a private desktop, or a hosted runner): skipped.");

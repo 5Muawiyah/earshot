@@ -1,3 +1,4 @@
+using Earshot.Boot;
 using System.Security.Principal;
 using Earshot.Boot.Gate;
 using Earshot.Composition;
@@ -21,13 +22,15 @@ internal sealed record UpdateOutcomeSource(string MachineFolder, string ShownFil
 // "Check automatically" (off by default, because a check contacts GitHub) makes one check a day, the first a little
 // after startup. It only checks. It shows a card once for each version it finds, and never downloads.
 //
-// When the hand-over has started the administrator prompt's program, this program closes through the same orderly
-// Exit as the menu's, because the install replaces the install folder and cannot while this one runs from it: a
-// process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail. The
-// program the prompt starts is always the installed Earshot.exe, never this copy when this copy is somewhere else, and
-// it waits for this process to end (by its id) before it touches that folder. So any copy can hand over once the
-// installed program is there and its folder is administrators-only; with no such install the card offers Set up or
-// Repair instead.
+// The hand-over closes this program, because the install replaces the install folder and cannot while this one runs from
+// it: a process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail. It
+// does the closing work of Exit first (the hand-back and the block before closing, with their limits), then starts the
+// administrator prompt's program, then ends without another device call (PrepareHandOverAsync, in TrayContext.ElevatedRun.cs),
+// because the installed Earshot.exe of 1.2.0 and of the first 1.2.1 does not wait for a copy run from another folder to end. The
+// program the prompt starts is the installed Earshot.exe, which is in a folder only administrators can change, never this
+// copy when this copy is somewhere else, and a newer installed version also waits for this process to end (by its id) before it
+// touches that folder. So any copy can hand over once the installed program is there and its folder is administrators-only;
+// with no such install the card offers Set up or Repair instead.
 internal sealed partial class TrayContext
 {
     private Func<IUpdateSource>? _updateSourceFactory;
@@ -39,7 +42,9 @@ internal sealed partial class TrayContext
     private string? _updateRunningExe;
     private Func<string, bool> _updateFileExists = File.Exists;
     private Func<string, bool> _updateFolderExists = Directory.Exists;
+    private Func<string, IEnumerable<string>> _updateListFolder = static folder => Directory.EnumerateFileSystemEntries(folder);
     private IFolderSecurity _installFolderSecurity = new NtfsFolderSecurity();
+    private Func<bool> _isElevated = static () => false;
     private Task? _updateAutoTask;
     private ReleaseVersion? _updateAnnounced;
 
@@ -60,6 +65,8 @@ internal sealed partial class TrayContext
         _updateRunningExe = options.ExePath;
         _updateFileExists = options.FileExists;
         _updateFolderExists = options.DirectoryExists;
+        _updateListFolder = options.ListFolder;
+        _elevatedExitWait = options.ElevatedExitWait;
         _installFolderSecurity = options.InstallFolderSecurity;
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
@@ -100,6 +107,16 @@ internal sealed partial class TrayContext
         }
 
         _log.Info("This copy, " + _updateRunningExe + ", is not the installed one, " + _updateInstalledExe + ". It does not point Open on startup or the Start menu shortcut at itself.");
+
+        // A switch starts the installed copy with this process's own token. From an elevated tray that would be an elevated
+        // tray, which Earshot never wants running, so no switch is offered: the person is told to start it themselves.
+        if (_isElevated())
+        {
+            _log.Info("This copy runs elevated, so no switch to the installed copy is offered: it would start elevated too.");
+            ShowCard(TrayStatus.AppName, UpdateCopy.SwitchMessage, CardPlace.NearTray);
+            return;
+        }
+
         UpdateController? updates = EnsureUpdates();
         updates?.OfferSwitch();
         if (updates is null || !RequestUpdatePageFromWidget())
@@ -114,6 +131,13 @@ internal sealed partial class TrayContext
     {
         if (_closing)
         {
+            return;
+        }
+
+        if (_isElevated())
+        {
+            _log.Warn("Switch: this copy runs elevated, so the installed copy would start elevated too. Nothing was started.");
+            ShowCard(TrayStatus.AppName, UpdateCopy.SwitchMessage, CardPlace.NearTray);
             return;
         }
 
@@ -247,10 +271,11 @@ internal sealed partial class TrayContext
                 return null;
             }
 
-            IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, running.Value, UpdateStagingRoot());
+            ReleaseVersion installed = InstalledVersionOr(running.Value);
+            IUpdateSource source = _updateSourceFactory?.Invoke() ?? new UpdateService(_log, installed, UpdateStagingRoot());
             var controller = new UpdateController(
-                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, running.Value, _log,
-                () => AssessInstall().State);
+                source, _updateLauncher ?? new ElevatedUpdateLauncher(), CurrentHandoverIdentity, CurrentHandoverTarget, UpdateUnavailableReason, installed, _log,
+                () => AssessInstall().State, PrepareHandOverAsync);
             controller.HandedOver += (_, _) => _registry.UiPost(OnUpdateHandedOver);
             controller.Changed += (_, _) => RaiseCardUpdateChanged();
             _updates = controller;
@@ -258,9 +283,30 @@ internal sealed partial class TrayContext
         }
     }
 
+    // The version an update is measured against: the one that would be replaced. That is the installed program's when this
+    // copy is another one (a newer copy unzipped in a download folder must still be offered the update that brings the
+    // install up to date, and an older one must not be offered the version that is installed already), and this copy's own
+    // when it is the installed one or the installed version cannot be read.
+    private ReleaseVersion InstalledVersionOr(ReleaseVersion running)
+    {
+        if (_updateInstalledExe is not { } installedExe || RunsFromInstalledCopy() || AssessInstall().State != InstallState.Usable)
+        {
+            return running;
+        }
+
+        InstalledFile read = _readInstalledFile(installedExe);
+        if (read.Version is not { } version)
+        {
+            _log.Warn("Update: the installed version was not read, so updates are measured against this copy. " + TrayReport.DescribeStep(read.Step));
+            return running;
+        }
+
+        return new ReleaseVersion(version.Major, version.Minor, Math.Max(version.Build, 0), Math.Max(version.Revision, 0));
+    }
+
     // What is in Program Files, read without changing anything. Each call looks at the disk.
     private InstallAssessment AssessInstall() =>
-        InstalledCopy.Assess(_updateInstalledExe, _updateFileExists, _updateFolderExists, _installFolderSecurity);
+        InstalledCopy.Assess(_updateInstalledExe, _updateFileExists, _updateFolderExists, _installFolderSecurity, _updateListFolder);
 
     // Whether this process is the installed copy.
     private bool RunsFromInstalledCopy() => InstalledCopy.SameFile(_updateInstalledExe, _updateRunningExe);
@@ -366,42 +412,92 @@ internal sealed partial class TrayContext
     // for the release of the installed version again, because a repair keeps no release from an earlier check.
     private async Task RunTryAgainAsync(CardPlace place)
     {
-        UpdateController? updates = EnsureUpdates();
-        if (updates is null)
+        if (!TryBeginElevatedRun(UpdateRun, place))
         {
-            ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
             return;
         }
 
-        await updates.TryAgainAsync(_lifetime.Token);
-        if (updates.Stage != UpdateStage.HandingOver)
+        try
         {
-            ShowUpdateResult(updates.View, place);
+            UpdateController? updates = EnsureUpdates();
+            if (updates is null)
+            {
+                ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
+                return;
+            }
+
+            await updates.TryAgainAsync(_lifetime.Token);
+            if (updates.Stage != UpdateStage.HandingOver)
+            {
+                await ShowUpdateResultAsync(updates.View, place);
+            }
+        }
+        finally
+        {
+            EndElevatedRun(UpdateRun);
         }
     }
 
     private async Task RunUpdateAsync(CardPlace place)
     {
-        UpdateController? updates = EnsureUpdates();
-        if (updates is null)
+        if (!TryBeginElevatedRun(UpdateRun, place))
         {
-            ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
             return;
         }
 
-        await updates.UpdateAsync(_lifetime.Token);
-        if (updates.Stage != UpdateStage.HandingOver)
+        try
         {
-            ShowUpdateResult(updates.View, place);
+            UpdateController? updates = EnsureUpdates();
+            if (updates is null)
+            {
+                ShowCard(UpdateCopy.CheckFailedStatus, "Earshot cannot read its own version.", place);
+                return;
+            }
+
+            await updates.UpdateAsync(_lifetime.Token);
+            if (updates.Stage != UpdateStage.HandingOver)
+            {
+                await ShowUpdateResultAsync(updates.View, place);
+            }
+        }
+        finally
+        {
+            EndElevatedRun(UpdateRun);
         }
     }
 
     private void ShowUpdateResult(UpdateViewModel view, CardPlace place) =>
         ShowCard(view.Status, view.CardText ?? "", place);
 
-    // The elevated program has started. Close through Exit: it blocks the AirPods at rest and lets go of every file.
-    private void OnUpdateHandedOver() =>
+    // The result of an update or repair that did not hand over. When the tray has already done its closing device work for
+    // the hand-over (the elevated program was refused or would not start after that), it cannot carry on as it was: the
+    // card says what happened and the tray ends and starts again.
+    private async Task ShowUpdateResultAsync(UpdateViewModel view, CardPlace place)
+    {
+        if (_closedForHandOver)
+        {
+            place.Show(_registry.Cards, view.Status, (view.CardText ?? "") + (_isElevated() ? " Start Earshot again from the Start menu." : " Earshot is starting again."));
+            await ExitAfterFailedHandOverAsync();
+            return;
+        }
+
+        ShowUpdateResult(view, place);
+    }
+
+    // The elevated program has started, and the tray has done its closing device work before starting it (the hand-back and
+    // the block, PrepareHandOverAsync). It ends now, with no further device call: a second hand-back or block here would
+    // run beside the install that is replacing this folder.
+    private void OnUpdateHandedOver()
+    {
+        if (_closedForHandOver)
+        {
+            _log.Info("Update: the elevated program started, so Earshot ends.");
+            ExitThread();
+            return;
+        }
+
         _ = ExitAsync(CardPlace.NearTray, "Earshot is closing so the update can replace its files.");
+    }
 
     private void OnCheckAutomaticallyClicked()
     {

@@ -50,6 +50,7 @@ internal enum GateExitCode
     RunningAsSystem = 22,    // install or uninstall started as SYSTEM
     NotAService = 23,        // the service run mode started by anything other than the service control manager
     NotFromInstallFolder = 24, // the service run mode from an image outside %ProgramFiles%\Earshot
+    Busy = 25,               // install, update or repair while another of them still holds the machine-wide lock; nothing was changed
 }
 
 internal static class GateExitCodes
@@ -78,6 +79,7 @@ internal static class GateExitCodes
         [GateExitCode.RunningAsSystem] = "running-as-system",
         [GateExitCode.NotAService] = "not-a-service",
         [GateExitCode.NotFromInstallFolder] = "not-from-install-folder",
+        [GateExitCode.Busy] = "busy",
     };
 
     public static string ResultName(GateExitCode code) =>

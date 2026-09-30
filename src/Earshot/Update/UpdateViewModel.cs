@@ -32,6 +32,8 @@ internal static class UpdateCopy
     public const string NotPinnedNotice = "Choose your AirPods first, then update.";
     public const string SetUpFirstNotice = "Set up Earshot first, then update.";
     public const string RepairFirstNotice = "Repair Earshot first, then update.";
+    public const string ClosingNotice = "Earshot is closing, so the update was not started. Nothing was changed.";
+    public const string ClosingFailedNotice = "Something went wrong while Earshot closed its work, so the update was not started. Nothing was changed.";
 
     // A repair that fetches the installed version's release runs on the same page, in its own words.
     public const string RepairTitle = "Repair";
@@ -39,6 +41,8 @@ internal static class UpdateCopy
     public const string RepairHandoverFailedStatus = "Couldn't start the repair";
     public const string RepairNotPinnedReason = "Choose your AirPods first, then repair.";
     public const string RepairNoInstallReason = "There is no installed Earshot to repair.";
+    public const string RepairCouldNotReadStatus = "Couldn't read the installed files";
+    public const string RepairCouldNotReadText = "Earshot could not read its installed files, so nothing was changed. Try again in a moment.";
     public static string RepairingSub(ReleaseVersion version) => "Repairing " + version;
 
     // The card a copy shows when it is not the installed one. The installed copy is the one Windows starts from the
@@ -48,6 +52,9 @@ internal static class UpdateCopy
     public const string SwitchSub = "The installed copy is in Program Files.";
     public const string SwitchButton = "Switch to it";
     public const string SwitchMessage = "Earshot is already installed in Program Files. Start that copy from the Start menu.";
+
+    // Said on the switch card before the person presses the button: the switch is an ordinary Exit of this copy.
+    public const string SwitchNotice = "Switching closes this copy first. With Hand back on, that hands the AirPods back and blocks them.";
 
     public static string AvailableStatus(ReleaseVersion version) => "Version " + version + " is available";
 
@@ -150,7 +157,7 @@ internal sealed record UpdateViewModel(
             UpdateStage.HandoverFailed => new(stage, title, UpdateIcon.Caution, repair ? UpdateCopy.RepairHandoverFailedStatus : UpdateCopy.HandoverFailedStatus, UpdateCopy.CurrentSub(target), reason, null, null,
                 [new UpdateButton(UpdateButtonRole.TryAgain, UpdateCopy.TryAgainButton, Primary: true)]),
             UpdateStage.HandingOver => new(stage, title, UpdateIcon.Shield, UpdateCopy.HandingOverStatus, repair ? UpdateCopy.RepairingSub(target) : UpdateCopy.InstallingSub(target), null, null, null, None),
-            UpdateStage.SwitchOffered => new(stage, UpdateCopy.SwitchTitle, UpdateIcon.Shield, UpdateCopy.SwitchStatus, UpdateCopy.SwitchSub, null, null, null,
+            UpdateStage.SwitchOffered => new(stage, UpdateCopy.SwitchTitle, UpdateIcon.Shield, UpdateCopy.SwitchStatus, UpdateCopy.SwitchSub, null, UpdateCopy.SwitchNotice, null,
                 [new UpdateButton(UpdateButtonRole.Switch, UpdateCopy.SwitchButton, Primary: true)]),
             _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "Not an update stage."),
         };

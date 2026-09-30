@@ -3,6 +3,7 @@ using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Tests.Phase4;
 using Earshot.Update;
+using Earshot.Widget.Alert;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Update;
@@ -17,10 +18,12 @@ public sealed class InstalledCopyTests
     private const string Exe = @"C:\Program Files\Earshot\Earshot.exe";
     private const string Folder = @"C:\Program Files\Earshot";
 
-    private static InstallAssessment Assess(bool program, bool folder, string? sddl, bool unreadable = false)
+    private static InstallAssessment Assess(bool program, bool folder, string? sddl, bool unreadable = false, Func<string, IEnumerable<string>>? list = null)
     {
         IFolderSecurity security = unreadable ? new UnreadableFolderSecurity() : new FixedFolderSecurity(sddl ?? FixedFolderSecurity.AdministratorsOnly);
-        return InstalledCopy.Assess(Exe, path => program && path == Exe, path => folder && path == Folder, security);
+
+        // The listing is faked here so no test reads the owner's Program Files: a folder that lists without the program.
+        return InstalledCopy.Assess(Exe, path => program && path == Exe, path => folder && path == Folder, security, list ?? (_ => [Path.Combine(Folder, "Earshot.dll")]));
     }
 
     [TestMethod]
@@ -36,7 +39,58 @@ public sealed class InstalledCopyTests
         InstallAssessment assessment = Assess(program: false, folder: true, sddl: null);
 
         Assert.AreEqual(InstallState.Unusable, assessment.State);
+        Assert.AreEqual(InstallProblem.ProgramAbsent, assessment.Problem, "The folder lists without the program: it is truly absent.");
         StringAssert.Contains(assessment.Detail, "missing");
+    }
+
+    // File.Exists is false for a file it could not look at as well as for one that is not there, so only a folder that lists
+    // without the file shows it is gone. A listing that fails, or that does list the file, is not that.
+    [TestMethod]
+    public void AProgramThatWasNotFoundIsAbsentOnlyWhenTheFolderListsWithoutIt()
+    {
+        InstallAssessment refused = Assess(program: false, folder: true, sddl: null, list: _ => throw new UnauthorizedAccessException("denied"));
+        Assert.AreEqual(InstallState.Unusable, refused.State);
+        Assert.AreEqual(InstallProblem.ProgramNotConfirmedAbsent, refused.Problem);
+        StringAssert.Contains(refused.Detail, "could not be listed (0x80070005)", "The raw code of the failed listing is kept.");
+
+        InstallAssessment io = Assess(program: false, folder: true, sddl: null, list: _ => throw new IOException("in use", unchecked((int)0x80070020)));
+        Assert.AreEqual(InstallProblem.ProgramNotConfirmedAbsent, io.Problem);
+        StringAssert.Contains(io.Detail, "0x80070020");
+
+        InstallAssessment listed = Assess(program: false, folder: true, sddl: null, list: _ => [Path.Combine(Folder, "earshot.EXE")]);
+        Assert.AreEqual(InstallProblem.ProgramNotConfirmedAbsent, listed.Problem, "A folder that lists the file is not evidence that it is gone.");
+    }
+
+    [TestMethod]
+    public void TheRealListingOfAFolderWithoutTheProgramConfirmsItAbsentAndAFailedListingDoesNot()
+    {
+        using var temp = new TempFolder();
+        string folder = Directory.CreateDirectory(Path.Combine(temp.Path, "Earshot")).FullName;
+        File.WriteAllText(Path.Combine(folder, "Earshot.dll"), "library");
+        string exe = Path.Combine(folder, "Earshot.exe");
+
+        InstallAssessment absent = InstalledCopy.Assess(exe, File.Exists, Directory.Exists, new NtfsFolderSecurity());
+        Assert.AreEqual(InstallProblem.ProgramAbsent, absent.Problem, absent.Detail);
+
+        // A folder that vanishes between the two reads cannot be listed: not confirmed.
+        InstallAssessment vanished = InstalledCopy.Assess(exe, _ => false, _ => true, new NtfsFolderSecurity(), _ => throw new DirectoryNotFoundException(folder));
+        Assert.AreEqual(InstallProblem.ProgramNotConfirmedAbsent, vanished.Problem);
+    }
+
+    // The program another program holds open with no sharing is still found: File.Exists reads attributes, which a lock
+    // does not stop, so a standard user cannot make an installed program look missing by holding it.
+    [TestMethod]
+    public void AProgramHeldOpenWithNoSharingIsStillFound()
+    {
+        using var temp = new TempFolder();
+        string exe = Path.Combine(temp.Path, "Earshot.exe");
+        File.WriteAllText(exe, "program");
+        using var held = new FileStream(exe, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        Assert.IsTrue(File.Exists(exe), "A locked file still exists.");
+        InstallAssessment assessment = InstalledCopy.Assess(exe, File.Exists, Directory.Exists, new NtfsFolderSecurity());
+        Assert.AreNotEqual(InstallProblem.ProgramAbsent, assessment.Problem, assessment.Detail);
+        Assert.AreNotEqual(InstallProblem.ProgramNotConfirmedAbsent, assessment.Problem, assessment.Detail);
     }
 
     [TestMethod]
@@ -50,6 +104,7 @@ public sealed class InstalledCopyTests
     {
         InstallAssessment writable = Assess(program: true, folder: true, FixedFolderSecurity.UsersCanWrite);
         Assert.AreEqual(InstallState.Unusable, writable.State);
+        Assert.AreEqual(InstallProblem.FolderNotTrusted, writable.Problem);
         StringAssert.Contains(writable.Detail, "not trusted");
 
         InstallAssessment unreadable = Assess(program: true, folder: true, sddl: null, unreadable: true);
@@ -77,6 +132,23 @@ public sealed class InstalledCopyTests
         Assert.IsFalse(InstalledCopy.SameFile(Exe, UpdateTrayHarness.OtherExe));
         Assert.IsFalse(InstalledCopy.SameFile(Exe, null));
         Assert.IsFalse(InstalledCopy.SameFile(null, null));
+    }
+
+    // One rule for every place that asks whether this is the installed copy: the installed copy, the startup value and the
+    // shortcut all use it, so none of them can take the same file for another one.
+    [TestMethod]
+    public void OnePathRuleServesTheSwitchTheStartupValueAndTheShortcut()
+    {
+        Assert.IsTrue(NotificationRegistration.PathsEqual(@"C:\Program Files\Earshot\Earshot.exe", "C:/Program Files/Earshot/Earshot.exe"));
+        Assert.IsTrue(NotificationRegistration.PathsEqual(@"C:\Program Files\Earshot\Earshot.exe", @"c:\PROGRAM FILES\earshot\sub\..\Earshot.exe"));
+        Assert.IsFalse(NotificationRegistration.PathsEqual(@"C:\Program Files\Earshot\Earshot.exe", @"C:\Program Files\Earshot\Other.exe"));
+        Assert.IsFalse(NotificationRegistration.PathsEqual("", @"C:\Earshot.exe"));
+        Assert.IsFalse(NotificationRegistration.PathsEqual("  ", "  "), "A blank path names nothing.");
+
+        // A path Windows cannot name in full is compared as written, not thrown at the caller.
+        string odd = "C:\\Earshot\0.exe";
+        Assert.IsTrue(NotificationRegistration.PathsEqual(odd, odd.ToUpperInvariant()));
+        Assert.IsFalse(NotificationRegistration.PathsEqual(odd, @"C:\Earshot.exe"));
     }
 
     // ----- the real folder security read, in places this run can see -----

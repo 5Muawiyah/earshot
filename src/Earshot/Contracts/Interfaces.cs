@@ -57,8 +57,10 @@ public interface IBlockController
     Task<ControllerResult> SetDeviceAsync(string address12, CancellationToken ct = default); // RunEx "set-device"
     Task<ControllerResult> RunSetupAsync(CancellationToken ct = default);   // ShellExecute runas (one UAC)
 
-    // Repairs the installed copy: the installed Earshot.exe (never the running copy) run elevated with one UAC prompt
-    // and waited for. A controller with no installed copy to run has nothing to repair.
+    // Repairs the install with one UAC prompt, waited for. The program that runs elevated is the installed Earshot.exe, which is
+    // in a folder only administrators can change. Only when there is no installed program to run (its folder lists without it, or
+    // the folder can be written by a standard user) is it this copy's own setup, RepairVerb.FromThisCopy. A controller with no
+    // install folder to run from has nothing to repair.
     Task<ControllerResult> RunRepairAsync(RepairVerb verb, CancellationToken ct = default) =>
         Task.FromResult(Null.NullResults.NotAttempted("repair"));
     Task<ControllerResult> UninstallAsync(CancellationToken ct = default);

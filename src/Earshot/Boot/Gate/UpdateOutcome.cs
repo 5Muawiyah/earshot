@@ -101,6 +101,7 @@ internal static class UpdateOutcomes
             "update-verify-zip" => "the downloaded update did not match what was checked",
             "update-unpack" => "the downloaded update did not pass its checks",
             "update-start-install" => "the installer could not be started",
+            InstallRunLock.StepName => "another setup, update or repair was still running",
             "read-file-manifest" => "the installed file list is missing or damaged",
             "repair-running-from" => "the repair was not started from the installed copy",
             var step when step is not null && step.StartsWith("verify-installed", StringComparison.Ordinal) => "an installed file is missing or is not what was published",

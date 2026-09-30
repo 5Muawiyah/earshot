@@ -218,12 +218,30 @@ internal sealed class UpdateActions
     // The wait for the tray. Tests shorten it.
     internal TimeSpan TrayWait { get; init; } = TrayExitWait;
 
+    // The machine-wide lock of setup, update and repair, held for this run's own part (it ends as the install starts, and the
+    // install takes the lock itself). The real run sets it; a run with none takes no lock.
+    internal IGateRunLock RunLock { get; init; } = NoGateRunLock.Instance;
+
+    // How long the run waits for the lock before it refuses.
+    internal TimeSpan LockWait { get; init; } = InstallRunLock.WaitBeforeRefusing;
+
     public InstallResult Run(UpdateRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var steps = new List<StepOutcome>();
+        IDisposable? held = null;
         try
         {
+            // Before anything is read or changed, earlier work folders included: a repair or another update still working
+            // must not have its folder removed or its files replaced.
+            held = RunLock.TryEnter(LockWait, steps);
+            if (held is null)
+            {
+                bool busy = steps.Any(InstallRunLock.IsBusy);
+                _log.Warn("update: the machine-wide lock was not taken, so nothing was changed" + (busy ? " (another setup, update or repair holds it)." : "."));
+                return new InstallResult(busy ? GateExitCode.Busy : GateExitCode.Failed, steps);
+            }
+
             return RunSteps(request, steps);
         }
         catch (Exception ex)
@@ -231,6 +249,10 @@ internal sealed class UpdateActions
             steps.Add(ElevatedFailure.Step("update", ex));
             _log.Error("update stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
             return new InstallResult(GateExitCode.Failed, steps);
+        }
+        finally
+        {
+            held?.Dispose();
         }
     }
 

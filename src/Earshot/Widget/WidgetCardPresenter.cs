@@ -121,6 +121,9 @@ internal sealed class WidgetCardPresenter : IDisposable
     // For tests: which page the presenter has the card on, and whether the spinner timer is running.
     internal WidgetCardView ViewForTest => _view;
 
+    // Opens the settings page on the card that is showing, as the gear does. UI thread.
+    internal void OpenSettingsForTest() => OnSettingsRequested(this, EventArgs.Empty);
+
     internal bool SpinnerRunningForTest => _spinnerTimer is not null;
 
     internal bool ListenTokenCancelledForTest => _listenCts?.IsCancellationRequested ?? false;

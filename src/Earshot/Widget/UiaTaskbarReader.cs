@@ -22,14 +22,55 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     internal static int ConstructionCount;
 
     private readonly IDisplaySource _displays;
+    private readonly Func<SecondaryTaskbarReading> _secondaryTaskbars;
+    private readonly Func<TaskbarTarget, ShownGauge?, DisplayReading, StepOutcome?, ITaskbarReader.Result>? _readOn;
 
     public UiaTaskbarReader(IDisplaySource? displays = null)
+        : this(displays, null, null)
+    {
+    }
+
+    // displays, secondaryTaskbars and readOn are for tests, which cannot have a second taskbar: readOn, when given, stands in
+    // for everything after the chosen taskbar is worked out (the UI Automation read of it), so the choice and the fallback are
+    // proved through Read itself. The real class passes none of them.
+    internal UiaTaskbarReader(
+        IDisplaySource? displays, Func<SecondaryTaskbarReading>? secondaryTaskbars,
+        Func<TaskbarTarget, ShownGauge?, DisplayReading, StepOutcome?, ITaskbarReader.Result>? readOn)
     {
         _displays = displays ?? new SystemDisplaySource();
+        _secondaryTaskbars = secondaryTaskbars ?? SystemDisplaySource.SecondaryTaskbars;
+        _readOn = readOn;
         Interlocked.Increment(ref ConstructionCount);
     }
 
     public ITaskbarReader.Result Read(ShownGauge? shownGauge) => Read(shownGauge, GaugeDisplayChoice.MainDisplay);
+
+    // Which display's taskbar the gauge is read on. The chosen display when it is connected and shows a secondary taskbar
+    // (or is the main display); otherwise the main display, with the reason. taskbarsProblem is the first secondary taskbar
+    // window that could not be read, or null.
+    internal static TaskbarTarget ResolveTarget(
+        string chosenDisplayId, DisplayReading reading, Func<SecondaryTaskbarReading> secondaryTaskbars, out StepOutcome? taskbarsProblem)
+    {
+        ArgumentNullException.ThrowIfNull(reading);
+        ArgumentNullException.ThrowIfNull(secondaryTaskbars);
+        taskbarsProblem = null;
+        (DisplayInfo? target, DisplayFallbackReason fallback) = GaugeDisplayChoice.Resolve(chosenDisplayId, reading.Displays);
+        if (target is { IsPrimary: false })
+        {
+            SecondaryTaskbarReading taskbars = secondaryTaskbars();
+            taskbarsProblem = taskbars.Problem;
+            TaskbarWindowCandidate? picked = SecondaryTaskbarPicker.Pick(taskbars.Taskbars, target);
+            if (picked is { } found)
+            {
+                return new TaskbarTarget(found.Handle, found.Bounds, Secondary: true, target, fallback);
+            }
+
+            return new TaskbarTarget(
+                0, null, Secondary: false, GaugeDisplayChoice.Resolve(GaugeDisplayChoice.MainDisplay, reading.Displays).Display, DisplayFallbackReason.TaskbarNotShown);
+        }
+
+        return new TaskbarTarget(0, null, Secondary: false, target, fallback);
+    }
 
     // The taskbar of the display the owner chose. The main display's is Shell_TrayWnd and the others' are each a
     // Shell_SecondaryTrayWnd. A chosen display that is not connected, or is connected but shows no taskbar (the
@@ -37,25 +78,17 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     public ITaskbarReader.Result Read(ShownGauge? shownGauge, string chosenDisplayId)
     {
         DisplayReading reading = _displays.Read();
-        (DisplayInfo? target, DisplayFallbackReason fallback) = GaugeDisplayChoice.Resolve(chosenDisplayId, reading.Displays);
-        nint trayHandle = 0;
-        Rectangle? secondaryRect = null;
-        bool secondary = false;
-        if (target is { IsPrimary: false })
+        TaskbarTarget chosen = ResolveTarget(chosenDisplayId, reading, _secondaryTaskbars, out StepOutcome? taskbarsProblem);
+        if (_readOn is { } replacement)
         {
-            TaskbarWindowCandidate? picked = SecondaryTaskbarPicker.Pick(SystemDisplaySource.SecondaryTaskbars(), target);
-            if (picked is { } found)
-            {
-                trayHandle = found.Handle;
-                secondaryRect = found.Bounds;
-                secondary = true;
-            }
-            else
-            {
-                fallback = DisplayFallbackReason.TaskbarNotShown;
-                target = GaugeDisplayChoice.Resolve(GaugeDisplayChoice.MainDisplay, reading.Displays).Display;
-            }
+            return replacement(chosen, shownGauge, reading, taskbarsProblem);
         }
+
+        DisplayInfo? target = chosen.Display;
+        DisplayFallbackReason fallback = chosen.Fallback;
+        nint trayHandle = chosen.TrayHandle;
+        Rectangle? secondaryRect = chosen.SecondaryBounds;
+        bool secondary = chosen.Secondary;
 
         if (!secondary)
         {
@@ -128,7 +161,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
             IsSecondary: secondary,
             DisplayLabel: target is { } shown ? DisplayNames.Short(shown, reading.Displays) : "",
             DisplayFallback: fallback,
-            DisplayProblem: reading.Problem);
+            DisplayProblem: reading.Problem ?? taskbarsProblem);
         return ITaskbarReader.Result.Ok(layout);
     }
 
@@ -444,3 +477,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     private static ITaskbarReader.Result Fail(TaskbarReadFailureStep step, StepOutcome outcome) =>
         ITaskbarReader.Result.Fail(new TaskbarReadFailure(step, outcome));
 }
+
+// The taskbar the gauge is read on: a secondary taskbar's window and bounds, or (Secondary false) the main one, which Read
+// finds itself. Display is the display it is on, and Fallback says why it is not the chosen display's.
+internal readonly record struct TaskbarTarget(nint TrayHandle, Rectangle? SecondaryBounds, bool Secondary, DisplayInfo? Display, DisplayFallbackReason Fallback);

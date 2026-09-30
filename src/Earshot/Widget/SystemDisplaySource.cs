@@ -5,6 +5,9 @@ using Earshot.Interop;
 
 namespace Earshot.Widget;
 
+// The secondary taskbar windows that could be read, and the first failed read (with its raw code), or null.
+internal sealed record SecondaryTaskbarReading(IReadOnlyList<TaskbarWindowCandidate> Taskbars, StepOutcome? Problem = null);
+
 // The real display source: EnumDisplayMonitors for the monitors, GetMonitorInfo for bounds, work area and device
 // name, GetDpiForMonitor for each display's own scale, EnumDisplayDevices for the monitor's interface path. Safe from
 // any thread; changes nothing.
@@ -47,27 +50,44 @@ internal sealed class SystemDisplaySource : IDisplaySource
         return new DisplayReading(list, problem);
     }
 
-    // Every visible or hidden secondary taskbar window, each with the monitor it is on. Safe from any thread.
-    public static List<TaskbarWindowCandidate> SecondaryTaskbars()
+    // Every visible or hidden secondary taskbar window, each with the monitor it is on. Safe from any thread. A window whose
+    // rectangle could not be read is left out, and the first such failure is returned with its raw code, so a chosen display
+    // whose taskbar was skipped for that reason is not mistaken for one that shows none.
+    public static SecondaryTaskbarReading SecondaryTaskbars() =>
+        Collect(
+            after => Shell.FindWindowEx(0, after, "Shell_SecondaryTrayWnd", null),
+            hwnd =>
+            {
+                bool ok = NativeMethods.GetWindowRect(hwnd, out RECT rect);
+                return (ok, Rectangle.FromLTRB(rect.left, rect.top, rect.right, rect.bottom), ok ? 0u : unchecked((uint)Marshal.GetLastPInvokeError()));
+            },
+            Shell.IsWindowVisible,
+            hwnd => Shell.MonitorFromWindow(hwnd, Shell.MONITOR_DEFAULTTONEAREST));
+
+    // The walk itself, with what it asks of Windows passed in: the next window after one (0 at the end), a window's rectangle
+    // and the error code when it cannot be read, whether it is visible, and its monitor.
+    internal static SecondaryTaskbarReading Collect(
+        Func<nint, nint> next, Func<nint, (bool Ok, Rectangle Bounds, uint Error)> rectOf, Func<nint, bool> visible, Func<nint, nint> monitorOf)
     {
         var found = new List<TaskbarWindowCandidate>();
+        StepOutcome? problem = null;
         nint hwnd = 0;
         while (true)
         {
-            hwnd = Shell.FindWindowEx(0, hwnd, "Shell_SecondaryTrayWnd", null);
+            hwnd = next(hwnd);
             if (hwnd == 0)
             {
-                return found;
+                return new SecondaryTaskbarReading(found, problem);
             }
 
-            if (!NativeMethods.GetWindowRect(hwnd, out RECT rect))
+            (bool ok, Rectangle bounds, uint error) = rectOf(hwnd);
+            if (!ok)
             {
+                problem ??= StepOutcomes.FromWin32("get-window-rect:Shell_SecondaryTrayWnd", error, ok: false);
                 continue;
             }
 
-            found.Add(new TaskbarWindowCandidate(
-                hwnd, Rectangle.FromLTRB(rect.left, rect.top, rect.right, rect.bottom), Shell.IsWindowVisible(hwnd),
-                Shell.MonitorFromWindow(hwnd, Shell.MONITOR_DEFAULTTONEAREST)));
+            found.Add(new TaskbarWindowCandidate(hwnd, bounds, visible(hwnd), monitorOf(hwnd)));
         }
     }
 

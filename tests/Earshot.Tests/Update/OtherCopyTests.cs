@@ -181,6 +181,48 @@ public sealed class OtherCopyTests
         });
     }
 
+    // The switch starts the installed copy with this process's own token. From a tray started with Run as administrator that
+    // would be an elevated tray, so no switch is offered and the button refuses; the person starts it from the Start menu.
+    [TestMethod]
+    public void AnElevatedTrayIsOfferedNoSwitchAndTheSwitchRefusesToStartAnElevatedCopy()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(installedCopy: false, otherCopy: true, elevated: true);
+            tray.Settle();
+
+            Assert.AreEqual(UpdateStage.Idle, tray.Context.Updates!.Stage, "No switch is offered on the update page.");
+            Assert.AreEqual(UpdateCopy.SwitchMessage, tray.Cards.Shown[0].Content.Status, "The person is told to start the installed copy themselves.");
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "runs elevated, so no switch to the installed copy is offered"));
+
+            tray.Context.SwitchToInstalledCopy();
+            tray.PumpUntilIdle();
+
+            Assert.IsNull(tray.Context.StartAfterExit, "Nothing is started: it would start elevated.");
+            Assert.IsEmpty(tray.Launcher.Launches);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "this copy runs elevated"));
+        });
+    }
+
+    [TestMethod]
+    public void AnElevatedTrayThatFindsTheInstalledCopyUsableStillDoesNotCloseForTheSwitchButton()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(installedCopy: false, otherCopy: true, elevated: true);
+            tray.Settle();
+
+            tray.Context.SwitchToInstalledCopy();
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Switch: this copy is closing"), "It did not start closing.");
+        });
+    }
+
     [TestMethod]
     public void TheSwitchRefusesWhenThereIsNothingUsableToSwitchTo()
     {
@@ -203,6 +245,32 @@ public sealed class OtherCopyTests
 
     private const string Installed = UpdateTrayHarness.InstalledExe;
     private const string Other = UpdateTrayHarness.OtherExe;
+
+    // Two spellings of one path are the same file, so a copy running from the install folder under a different spelling is not
+    // "another copy" and an install is not taken as damaged because of it.
+    [TestMethod]
+    public void TheInstalledCopyRunningUnderAnotherSpellingOfItsPathIsNotAnotherCopy()
+    {
+        var registry = new FakeStartupRegistry();
+        var respelled = @"C:\Program Files\Earshot\..\Earshot\EARSHOT.EXE";
+        var startup = new StartupRegistration(
+            registry, new CapturingLog(), safeMode: false, respelled, redirected: false, Installed,
+            fileExists: _ => false, folderExists: path => path == @"C:\Program Files\Earshot");
+
+        Assert.IsFalse(startup.InstallDamaged, "The running copy is the installed one: its program is there, this is not a damaged install.");
+        Assert.AreEqual(respelled, startup.TargetExePath, "And with no other copy there is nothing to refuse to point at.");
+    }
+
+    [TestMethod]
+    public void ACopyThatIsReallyAnotherOneStillFindsTheInstallDamagedWhenItsProgramIsMissing()
+    {
+        var startup = new StartupRegistration(
+            new FakeStartupRegistry(), new CapturingLog(), safeMode: false, Other, redirected: false, Installed,
+            fileExists: _ => false, folderExists: path => path == @"C:\Program Files\Earshot");
+
+        Assert.IsTrue(startup.InstallDamaged);
+        Assert.IsNull(startup.TargetExePath);
+    }
 
     private static StartupRegistration Startup(FakeStartupRegistry registry, CapturingLog log, bool installedProgram, bool installedFolder) =>
         new(registry, log, safeMode: false, Other, redirected: false, Installed,

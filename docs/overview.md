@@ -67,7 +67,7 @@ Top to bottom, with the exact wording. Separators sit between the groups.
 | `Name your other device...` | Sets the label used in "On your <name>". |
 | `Choose device...` | Lists the Bluetooth devices paired to this PC, so you can point Earshot at a different one, for instance if your AirPods were renamed, so that the default match "AirPods" no longer fits. Choosing one pins it, and points the elevated worker at the same device. A device that cannot play audio from this PC, a phone for instance, is refused. |
 | `Set up Earshot...` | Runs the one-time setup. Offered only when nothing is installed. Once Earshot is installed, in any state, the next item takes its place. |
-| `Repair Earshot...` | Offered whenever Earshot is installed, healthy, damaged, older or newer than the running copy. One administrator prompt. See [Repair](#repair). |
+| `Repair Earshot...` | Offered whenever Earshot is installed, healthy, damaged, older or newer than the running copy. At most one administrator prompt. Disabled, with the reason in its text, while a setup, repair or update is running. See [Repair](#repair). |
 | `Check for updates` | Looks for a newer release. Downloads nothing. See [Updates](#updates). |
 | `Check automatically` | A tick, off by default. Contacts GitHub once a day when on. |
 | `Exit` | Closes Earshot. With Block at boot on and the AirPods not in use, it blocks the device nodes first. With Hand back ticked and the AirPods in use on this PC, it lets them go first, then blocks the device nodes. With Hand back off, which is the default, and the AirPods in use, it closes without blocking and says so: "Closed while in use, so the AirPods are not blocked." |
@@ -238,13 +238,35 @@ release on GitHub and says whether it is newer. **Check automatically** does
 the same once a day after startup; it is off by default because a check
 contacts GitHub. A check downloads nothing. Nothing downloads until you press
 **Update**. Update works from any copy that is running, including one unzipped
-in a download folder, as long as Earshot is installed in Program Files.
+in a download folder and one newer than the installed copy, as long as Earshot
+is installed in Program Files. A copy that is not the installed one measures
+the update against the installed version, because that is what gets replaced.
 
 When you press Update, Earshot downloads the release zip and checks it against
-the `.sha256` file published with it. The installed Earshot then checks the zip
-again, from a folder only administrators can write, and installs from there,
-after one administrator prompt. The program that runs with that prompt is
-always the installed one, never the copy you were running.
+the `.sha256` file published with it. Earshot then finishes its own closing work
+(the hand-back and the block that Exit does, with the same limits), starts the
+installed Earshot with one administrator prompt, and ends without another call to
+the AirPods: the installed 1.2.0 and the first 1.2.1 do not wait for a copy run
+from another folder to end, so the install must not start while this copy is
+still letting go. The installed Earshot checks the zip again, from a folder only
+administrators can write, and installs from there. The program that runs with
+that prompt is the installed one, which is in a folder only administrators can
+change, never the copy you were running. If the prompt is declined after the
+closing work, the card says so and Earshot starts again, because it cannot carry
+on from a half-closed state. A copy started as an administrator starts no other
+copy, so it says so instead.
+
+Only one setup, repair or update runs at a time. While one does, **Repair
+Earshot**, **Set up Earshot** and **Check for updates** are disabled in the menu
+with the reason in their text ("finishing the repair first"), the settings page
+says the same on its rows, and a click from the card is refused with the same
+words. Exit waits for a setup or repair that is running (up to 90 seconds, with
+the card "Finishing the repair first.") before it hands back and blocks, so the
+block never meets a scheduled task that is being registered again; if the wait
+runs out it says so and logs it. The installed program also takes a
+machine-wide lock for setup, update and repair, so two runs from different
+places never work on the folder, tasks and service at once; a second one is
+refused with "Another Earshot setup, update or repair is still running."
 
 If nothing is installed, the card says to set up first and offers **Set up
 Earshot** on the same card. If something is installed but cannot be used (its
@@ -252,9 +274,14 @@ program is missing, or its folder can be changed by a standard user), the card
 says to repair first and offers **Repair Earshot**.
 
 A copy that is not the installed one, started while Earshot is installed, says
-so on one card and offers **Switch to it**: this copy closes and the installed
-one starts. Such a copy never points **Open on startup** or the Start menu
-shortcut at itself, so the next start from either is the installed copy.
+so on one card and offers **Switch to it**. The card says before the button
+that switching closes this copy first, and that with Hand back on it hands the
+AirPods back and blocks them, because the switch is an ordinary Exit. The
+installed one then starts. Such a copy never points **Open on startup** or the
+Start menu shortcut at itself, so the next start from either is the installed
+copy. A copy that runs as an administrator offers no switch, because the
+installed copy would start as an administrator too: it says to start Earshot
+from the Start menu.
 
 ### Repair
 
@@ -265,14 +292,30 @@ install folder can be changed only by administrators. Then:
 
 - If every file matches, the installed Earshot repairs itself after one
   administrator prompt: it registers the scheduled tasks, the hand-back service,
-  the machine settings and the device file again, exactly as setup does.
-- If a file is missing or does not match, nothing in the install folder is
-  trusted. Earshot downloads the release of the version you have installed,
-  checks it against the `.sha256` file published with it, and hands it to the
-  installed Earshot's update, so the files come back only from checked bytes.
-- If the installed `Earshot.exe` is missing, or its folder is not safe, or the
-  running copy is newer than the installed one, the running copy's own setup
-  puts a new install in place.
+  the machine settings and the device file again, exactly as setup does. It
+  checks the folder and every file before it stops the hand-back service, so a
+  repair that finds a file damaged leaves the service running.
+- If a file is missing or does not match, Earshot downloads the release of the
+  version you have installed, checks it against the `.sha256` file published
+  with it, and hands it to the installed Earshot's update, so the files come
+  back only from checked bytes. The installed Earshot that runs that update is in
+  a folder only administrators can change, even when its own file is one that
+  differs; what it installs is only the verified zip.
+- If a file, the file list or the installed version could not be read (another
+  program holds it open, or access was refused), nothing is changed and nothing
+  is run elevated. Earshot says it could not read the installed files and to
+  try again, and logs the raw code. A file that could not be read says nothing
+  about what is in it, and a standard user can make any installed file
+  unreadable for as long as they like, so it is not treated as missing.
+- If the running copy is newer than the installed one, Repair does not run it
+  elevated, because that copy may be in a folder a standard user can write. It
+  opens the update path instead: Check for updates, then Update.
+- If the installed `Earshot.exe` is truly missing (its folder lists without it),
+  or its folder can be changed by a standard user, the running copy's own setup
+  puts a new install in place. That copy must be an unzipped release you
+  downloaded and checked. Nothing else makes Earshot run the running copy
+  elevated while an install exists.
+- If nothing is installed, the menu offers Set up instead.
 
 Your settings, battery set-up and chosen AirPods are kept. How the repair ended
 is recorded where the next start can say it, in case the card has gone.
@@ -349,7 +392,12 @@ after the last app button, and it never overlaps anything. Each display's own
 scale sets the gauge's size. If the chosen display is unplugged, or shows no
 taskbar (Windows can turn that off for other displays), the gauge goes to the
 main display's taskbar, the log says why, and it moves back when the display
-returns. The card opens on the same display as the gauge.
+returns. The card opens on the same display as the gauge. "Display 2" is the
+number in the display's GDI device name, which is how Windows enumerates it;
+Windows' own Settings page may number the same display differently, so use the
+resolution beside the name to tell them apart. If a display is plugged in or
+out while the settings page is open, the page redraws with the displays that
+are there, and a choice of a display that has just gone is not stored.
 
 **Staying visible.** When Start, a flyout or a taskbar click covers the gauge,
 Earshot raises it again. Every hide, show, cover and raise is written to the

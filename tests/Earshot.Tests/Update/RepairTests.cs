@@ -1,9 +1,14 @@
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Interop;
+using Earshot.Service;
 using Earshot.Tests.Phase4;
+using Earshot.Tests.Service;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Update;
@@ -62,14 +67,23 @@ public sealed class RepairTests
             return folder;
         }
 
-        public InstallResult RunInstall(string source) =>
+        public InstallResult RunInstall(string source, IGateRunLock? runLock = null, TimeSpan? lockWait = null) =>
             new InstallActions(new InstallLayout(source, Install, Data.MachineFolder), Folders, Nodes, Tasks, NoLookup, Log)
-                .Run(Request);
+            {
+                RunLock = runLock ?? NoGateRunLock.Instance,
+                LockWait = lockWait ?? InstallRunLock.WaitBeforeRefusing,
+            }.Run(Request);
 
         // The repair the tray asks for: the installed copy runs it, so the running folder is the install folder.
-        public InstallResult RunRepair(string? runningFrom = null, IFolderSecurity? folders = null) =>
-            new InstallActions(new InstallLayout(runningFrom ?? Install, Install, Data.MachineFolder), folders ?? Folders, Nodes, Tasks, NoLookup, Log) { RepairOnly = true }
-                .Run(Request);
+        public InstallResult RunRepair(
+            string? runningFrom = null, IFolderSecurity? folders = null, IGateRunLock? runLock = null, TimeSpan? lockWait = null, IServiceControl? service = null) =>
+            new InstallActions(new InstallLayout(runningFrom ?? Install, Install, Data.MachineFolder), folders ?? Folders, Nodes, Tasks, NoLookup, Log, service: service)
+            {
+                RepairOnly = true,
+                RunLock = runLock ?? NoGateRunLock.Instance,
+                LockWait = lockWait ?? InstallRunLock.WaitBeforeRefusing,
+                ServicePoll = _ => true,
+            }.Run(Request);
 
         private static InstallRequest Request { get; } =
             new(TestUsers.Sid, RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer, TaskPrincipalMode.System);
@@ -227,6 +241,205 @@ public sealed class RepairTests
 
         Assert.AreEqual(GateExitCode.NoManifest, result.Outcome, Steps(result));
         Assert.IsEmpty(w.Tasks.Tasks);
+    }
+
+    // ----- the service is left alone until the files have been checked -----
+
+    // A repair registers the service again, which stops it first. It copies nothing, so nothing needs the service stopped
+    // before the files are known to be good: a repair that finds one missing or different leaves the service running.
+    [TestMethod]
+    public void ARepairThatFindsAFileDamagedStopsBeforeTheServiceIsStopped()
+    {
+        foreach (string damage in new[] { "changed", "missing", "no-list" })
+        {
+            using var w = new World();
+            var service = new FakeServiceControl();
+            service.Install(AdvApi32.SERVICE_RUNNING, ServicePlan.Spec(w.Install));
+            if (damage == "changed")
+            {
+                File.WriteAllText(w.InstalledFile("Earshot.dll"), "dll tampered");
+            }
+            else if (damage == "missing")
+            {
+                File.Delete(w.InstalledFile("Earshot.dll"));
+            }
+            else
+            {
+                File.Delete(w.InstalledFile(FileManifest.FileName));
+            }
+
+            w.Tasks.Tasks.Clear();
+            w.Tasks.Calls.Clear();
+
+            InstallResult result = w.RunRepair(service: service);
+
+            Assert.AreNotEqual(GateExitCode.Success, result.Outcome, damage);
+            Assert.DoesNotContain("stop", service.Calls, damage + ": the service was stopped before the files were checked: " + string.Join(", ", service.Calls));
+            Assert.AreEqual(AdvApi32.SERVICE_RUNNING, service.State, damage + ": and it is still running.");
+            Assert.IsEmpty(w.Tasks.Calls, damage + ": nothing was changed.");
+        }
+    }
+
+    [TestMethod]
+    public void ARepairOfFilesThatAllMatchStillStopsAndRegistersTheServiceAgain()
+    {
+        using var w = new World();
+        var service = new FakeServiceControl();
+        service.Install(AdvApi32.SERVICE_RUNNING, ServicePlan.Spec(w.Install));
+
+        InstallResult result = w.RunRepair(service: service);
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Steps(result));
+        Assert.Contains("stop", service.Calls);
+        Assert.AreEqual(AdvApi32.SERVICE_RUNNING, service.State);
+        Assert.IsLessThan(result.Steps.ToList().FindIndex(s => s.Step == ServiceSteps.Stop), result.Steps.ToList().FindIndex(s => s.Step == "verify-installed"), "The files were checked first.");
+    }
+
+    // ----- one setup, update or repair at a time on the machine -----
+
+    private static string NewLockName() => @"Local\Earshot.Tests.InstallRunLock." + Guid.NewGuid().ToString("N");
+
+    // The real lock class under a private name and an access list that lets this test's own user in, as the gate's tests do.
+    private static MachineGateMutex TestLock(string name, Func<SecurityIdentifier?, bool>? trusted = null) =>
+        new(name, UserAndMachineSecurity, trusted ?? (_ => true), InstallRunLock.StepName, "setup, update or repair");
+
+    private static MutexSecurity UserAndMachineSecurity()
+    {
+        MutexSecurity security = MachineGateMutex.MachineSecurity();
+        using WindowsIdentity me = WindowsIdentity.GetCurrent();
+        security.AddAccessRule(new MutexAccessRule(me.User!, MutexRights.FullControl, AccessControlType.Allow));
+        return security;
+    }
+
+    // Holds the lock on another thread, as another elevated process would, until the test lets go.
+    private sealed class OtherRun : IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new();
+        private readonly Thread _thread;
+
+        public OtherRun(string name)
+        {
+            using var entered = new ManualResetEventSlim();
+            _thread = new Thread(() =>
+            {
+                var steps = new List<StepOutcome>();
+                using IDisposable? held = TestLock(name).TryEnter(TimeSpan.FromSeconds(5), steps);
+                Assert.IsNotNull(held, "The other run could not take the lock.");
+                entered.Set();
+                _release.Wait(TimeSpan.FromSeconds(30));
+            });
+            _thread.Start();
+            Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(10)), "The other run never took the lock.");
+        }
+
+        public void LetGo()
+        {
+            _release.Set();
+            _thread.Join(TimeSpan.FromSeconds(10));
+        }
+
+        public void Dispose()
+        {
+            LetGo();
+            _release.Dispose();
+        }
+    }
+
+    [TestMethod]
+    public void ARepairThatFindsTheLockHeldIsRefusedAndLoggedWithNothingChangedAndWorksOnceItIsFree()
+    {
+        using var w = new World();
+        string name = NewLockName();
+        using var other = new OtherRun(name);
+        w.Tasks.Tasks.Clear();
+        w.Tasks.Calls.Clear();
+
+        InstallResult refused = w.RunRepair(runLock: TestLock(name), lockWait: TimeSpan.FromMilliseconds(150));
+
+        Assert.AreEqual(GateExitCode.Busy, refused.Outcome, Steps(refused));
+        StepOutcome step = refused.Steps.Single();
+        Assert.AreEqual(InstallRunLock.StepName, step.Step);
+        Assert.AreEqual((int)MachineGateMutex.WaitTimeout, step.Code, "The raw code is the wait that ran out.");
+        Assert.IsTrue(InstallRunLock.IsBusy(step));
+        Assert.IsEmpty(w.Tasks.Calls, "Nothing was read or changed.");
+        Assert.IsTrue(w.Log.Has(LogLevel.Warn, "the machine-wide lock was not taken, so nothing was changed (another setup, update or repair holds it)"));
+
+        other.LetGo();
+        InstallResult allowed = w.RunRepair(runLock: TestLock(name), lockWait: TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(GateExitCode.Success, allowed.Outcome, Steps(allowed));
+    }
+
+    // Two runs in progress at once: the second is refused while the first is part-way through its work, and the first is
+    // not disturbed.
+    [TestMethod]
+    public void ARepairAndASetupStartedTogetherNeverWorkOnTheTasksAtOnce()
+    {
+        using var w = new World();
+        string name = NewLockName();
+        using var insideFirst = new ManualResetEventSlim();
+        using var letFirstGo = new ManualResetEventSlim();
+        w.Tasks.Tasks.Clear();
+        w.Tasks.Calls.Clear();
+        w.Tasks.OnList = () =>
+        {
+            insideFirst.Set();
+            Assert.IsTrue(letFirstGo.Wait(TimeSpan.FromSeconds(30)));
+        };
+        InstallResult? first = null;
+        var thread = new Thread(() => first = w.RunRepair(runLock: TestLock(name), lockWait: TimeSpan.FromSeconds(5)));
+        thread.Start();
+        Assert.IsTrue(insideFirst.Wait(TimeSpan.FromSeconds(10)), "The first run never reached the tasks.");
+        string[] whileHeld = w.Tasks.Calls.ToArray();
+
+        InstallResult second = w.RunInstall(w.Release, TestLock(name), TimeSpan.FromMilliseconds(150));
+
+        Assert.AreEqual(GateExitCode.Busy, second.Outcome, Steps(second));
+        CollectionAssert.AreEqual(whileHeld, w.Tasks.Calls.ToArray(), "The second run did not touch the tasks while the first had them.");
+        letFirstGo.Set();
+        Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual(GateExitCode.Success, first!.Outcome, Steps(first));
+    }
+
+    // The install the update starts is a separate run that begins as the update run ends: it waits for the lock rather than
+    // refusing.
+    [TestMethod]
+    public void AnInstallThatWaitsForTheRunBeforeItGoesOnInsteadOfRefusing()
+    {
+        using var w = new World();
+        string name = NewLockName();
+        using var other = new OtherRun(name);
+        using var timer = new System.Threading.Timer(_ => other.LetGo(), null, TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
+
+        InstallResult result = w.RunInstall(w.Release, TestLock(name), TimeSpan.FromSeconds(10));
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Steps(result));
+    }
+
+    // A mutex someone else made under the name is not a lock that is held: it is a failure, said as one, and nothing is changed.
+    [TestMethod]
+    public void ALockNameTakenByAnotherOwnerIsAFailureNotABusyAndNothingIsChanged()
+    {
+        using var w = new World();
+        string name = NewLockName();
+        using var squatter = new Mutex(false, name);
+        w.Tasks.Tasks.Clear();
+        w.Tasks.Calls.Clear();
+
+        InstallResult result = w.RunRepair(runLock: TestLock(name, trusted: _ => false), lockWait: TimeSpan.FromMilliseconds(150));
+
+        Assert.AreEqual(GateExitCode.Failed, result.Outcome, Steps(result));
+        Assert.IsFalse(InstallRunLock.IsBusy(result.Steps.Single()));
+        StringAssert.Contains(result.Steps.Single().Detail, "not trusted");
+        Assert.IsEmpty(w.Tasks.Calls);
+    }
+
+    [TestMethod]
+    public void TheRealLockIsTheMachineWideOneUnderItsOwnNameAndTheTrayTellsWhyNothingStarted()
+    {
+        Assert.IsInstanceOfType<MachineGateMutex>(InstallRunLock.Create());
+        Assert.AreEqual("busy", GateExitCodes.ResultName(GateExitCode.Busy));
+        StringAssert.Contains(UpdateOutcomes.Describe(new InstallResult(GateExitCode.Busy, [new StepOutcome(InstallRunLock.StepName, false, (int)MachineGateMutex.WaitTimeout, "WAIT_TIMEOUT", "held")])).Reason, "another setup, update or repair");
     }
 
     // ----- the command line -----

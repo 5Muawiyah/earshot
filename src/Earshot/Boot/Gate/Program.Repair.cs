@@ -18,8 +18,9 @@ namespace Earshot;
 // installed copy (InstallActions with RepairOnly): the install folder must grant no one but administrators write, every
 // file listed in the installed Earshot.files.json must match its recorded SHA-256, and then the machine configuration,
 // the device file, the scheduled tasks and the hand-back service are registered again exactly as setup registers them,
-// each step with its raw code. A file that is missing or does not match stops it with nothing changed: the tray, which
-// checked the same files first, has already gone for the release of this version instead.
+// each step with its raw code. The folder and every file are checked before the hand-back service is stopped or anything is
+// registered, so a file that is missing or does not match stops it with nothing changed and the service still running: the
+// tray, which checked the same files first, has already gone for the release of this version instead.
 //
 // The tray has usually outlived the run, but it may not have, so how the run ended is written to update-outcome.json in
 // the machine folder, as an update's is, and the tray says it once.
@@ -64,6 +65,7 @@ internal static partial class Program
             new WindowsServiceControl())
         {
             RepairOnly = true,
+            RunLock = InstallRunLock.Create(),
         };
 
     // environmentNames: as for RunGate.

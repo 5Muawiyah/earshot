@@ -332,8 +332,15 @@ value means the main display. Displays are listed with `EnumDisplayMonitors`,
 each with its bounds and work area from `GetMonitorInfo` and its own scale
 from `GetDpiForMonitor`.
 
+The display is named "Display N" from the number in its GDI device name (`\\.\DISPLAYN`).
+Settings numbers displays by its own rules and may show another number for the
+same display, so the name is Earshot's, and the settings page adds the
+resolution. The page lists the displays as they are each time it is drawn, is
+redrawn on `WM_DISPLAYCHANGE` while it is open, and does not store a choice of
+a display that is no longer connected.
+
 The main display's taskbar is `Shell_TrayWnd`; every other display has a
-`Shell_SecondaryTrayWnd`. The reader picks the visible one whose window is on
+`Shell_SecondaryTrayWnd`. The reader (`UiaTaskbarReader.ResolveTarget`) picks the visible one whose window is on
 the chosen display's monitor (`MonitorFromWindow`,
 https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-monitorfromwindow)
 and measures it through UI Automation exactly as it measures the main one. A
@@ -341,7 +348,19 @@ local read of a secondary taskbar showed the clock under the same `SystemTray.`
 class names the main taskbar's notification area uses, so the right-end
 position is measured from it with the same 8 pixel gap. A secondary taskbar
 with no clock has no notification area, and its own right edge is the end. The
-gauge size comes from the chosen display's own scale (100, 125 or 150%).
+gauge size comes from the chosen display's own scale (100, 125 or 150%). A
+secondary taskbar window whose rectangle cannot be read (`GetWindowRect`) is left
+out of the list and the first such failure is carried to the log with its raw
+code, so a display whose taskbar was skipped for that reason is not mistaken for
+one that shows none.
+
+Wiring: the tray passes the chosen display to the taskbar watcher, the watcher
+passes it to the reader on every read, the reader resolves it (falling back to the
+main display when the chosen one is gone or shows no taskbar), and the tray gives
+the gauge controller its foreground-window reader for the full-screen rule. Each
+link has a test through the real tray (`GaugeDisplayWiringTests`), with only the
+display list, the taskbar windows, the foreground window and the UI Automation
+read replaced.
 
 If the chosen display is not connected, or is connected but its taskbar is not
 shown, the reader returns the main display's taskbar and says why in the
@@ -470,8 +489,13 @@ Only a click on Update starts a download. Any running copy can offer it once
 Earshot is installed: the tray checks that the installed `Earshot.exe` is there
 and that the install folder grants no one but administrators write, which is the
 check the elevated run repeats, and then the update is handed to the installed
-program whichever copy is running. The elevated program is never one in a folder
-a standard user can write. The running copy's own process id is what the elevated
+program whichever copy is running. The elevated program is the installed
+`Earshot.exe`, which is in a folder only administrators can change, never the
+running copy. A copy that is not the installed one measures the update against
+the installed version (the controller's installed version is read from the
+installed file), because that is what the update replaces; a newer copy run from
+a download folder is still offered the update that brings the install up to date.
+The running copy's own process id is what the elevated
 run waits on before it touches the install folder (it waits for any process named
 `Earshot.exe` with that id, so a copy run from a download folder counts). With
 nothing installed, or an install that cannot be used, the update card offers Set
@@ -484,12 +508,48 @@ if the hash matches the one recorded at download, and installs from there. The
 staging folder is writable by the signed-in user, which is why the check is
 repeated in a folder that is not.
 
+The order in the tray is: download and check, then the tray's own closing device
+work, then the prompt, then the tray ends. The controller takes a
+`beforeHandOver` step that runs between the download and the launch. For the tray
+that step is `PrepareHandOverAsync`: it does what Exit does up to the point where
+Exit ends (no more input, `BeginShutdown` with the hand-back plan, the coordinator's
+block before closing with the same limits), waiting for everything in flight
+except the update action itself. Only then is the elevated program started, and
+the tray ends at the launch with no further device call (no second hand-back or
+block). The order matters for installed versions that do not wait for a copy run
+from another folder to end: the installed 1.2.0 and the first published 1.2.1
+ignore the process id, so an install started while the tray was still handing back
+and blocking could replace files under it. A refusal or a failed launch after the
+closing work cannot go back to the running tray, so the card says what happened
+and the tray ends and starts itself again (only when it is not elevated; an
+elevated tray would start an elevated one, so it says to start Earshot from the
+Start menu). A tray that is already closing when the hand-over comes starts nothing.
+
+One elevated operation at a time: the tray claims `setup`, `repair` or `update` on
+the UI thread before anything awaits, and a second is refused with "Finishing the
+repair first." (the menu items and the settings rows say the same while one
+runs). Exit waits, up to 90 seconds, for the elevated program of a setup or repair
+that is still running before it begins its hand-back and block, because Exit
+otherwise cancels what is in flight, and the launcher stops waiting for a program
+that keeps running, which let the block meet a scheduled task being registered
+again. If the wait runs out, the card and the log say so. Between processes,
+setup, update and repair take the machine-wide lock `Global\Earshot.Install.RunLock`
+(`InstallRunLock`, the same kind of object as the gate's lock: a named mutex only
+SYSTEM and Administrators can open, whose owner is checked). A run that cannot
+take it stops before it changes anything, exits with `busy` (25), and logs
+it; the install the update starts waits up to 10 seconds for the update run to end
+instead of refusing. An object someone else created under that name is a failure,
+not a held lock. Uninstall takes the gate's lock and not this one.
+
 A copy that is not the installed one never writes itself into the Open on
 startup Run value or the Start menu shortcut once an install exists (when the
 installed program has gone missing they have no target at all, rather than this
-copy). It offers a switch instead: this copy exits through the ordinary Exit,
-and after its single-instance lock is released the installed program is started
-with the signed-in user's own token.
+copy). It offers a switch instead: this copy exits through the ordinary Exit
+(which hands the AirPods back and blocks them when Hand back is on, and the
+card says so before the button), and after its single-instance lock is released
+the installed program is started with the signed-in user's own token. A tray
+that is itself elevated offers no switch, since the token it would pass on is
+elevated too.
 
 ### Repair
 
@@ -497,22 +557,29 @@ The elevated half of Repair is the `repair` verb of the installed
 `Earshot.exe`. It is install's own repair run from the installed copy: it
 refuses to run from any other folder, checks that the install folder grants no
 one but administrators write, checks every file in the installed
-`Earshot.files.json` against its SHA-256, and only then registers the machine
-configuration, the device file, the three scheduled tasks and the hand-back
-service again, each step with its raw code. It records how it ended in
+`Earshot.files.json` against its SHA-256, and only then stops the hand-back service
+and registers the machine configuration, the device file, the three scheduled tasks and
+the hand-back service again, each step with its raw code. The folder and the files
+are checked before the service is stopped, so a repair that finds a file damaged
+leaves the service running. It records how it ended in
 `update-outcome.json` in the machine folder, as an update does.
 
-The tray decides the route from read-only facts: the same hash check of the
-installed files, the folder check, and the installed file version. Files that
-all match go to the installed program's repair verb, or to its install verb,
-which every version runs from its own folder as the same repair, when the
-installed program is older than the release that added the repair verb. A file
-that is missing or does not match means the install folder is not trusted: the
-release of the installed version is read from the feed's tag route (the same
-feed, HTTPS and size rules as a check), downloaded and checked against its
-`.sha256` file, and handed to the installed program's update verb. With no
-usable installed program, or a running copy newer than the installed one, the
-running copy's own setup does the repair. The same hash check, the same release
+The tray decides the route from read-only facts (`RepairPlanner`): the same hash check of the
+installed files, the folder check, and the installed file version. The rule is
+that while the install folder exists and passes its check, the only program run
+elevated is the installed `Earshot.exe`, which only administrators can change. The
+routes are:
+
+| What the tray found | Route |
+|---|---|
+| Every file matches | The installed program repairs itself: its repair verb, or its install verb, which every version runs from its own folder as the same repair, when the installed program is older than 1.2.2. The first published 1.2.1 has no repair verb and answers "Unknown command: repair" with exit 64, and a later build of 1.2.1 carries the same number, so the verb is assumed only from 1.2.2 (`RepairPlanner.RepairVerbSince`). |
+| A file is missing or does not match, or there is no usable file list | The release of the installed version is read from the feed's tag route (the same feed, HTTPS and size rules as a check), downloaded, checked against its `.sha256` file, and handed to the installed program's update verb. That verb runs from the install folder, which only administrators can change, even when the installed `Earshot.exe` is itself one of the files that differs; what it installs is only the verified zip. |
+| A file, the file list or the installed version could not be read | Nothing is elevated and nothing changes. "Couldn't read the installed files ... Try again in a moment." The raw code (a sharing violation 0x80070020, say) is logged. Not treated as missing: a standard user can open an installed file with no sharing for as long as they like, which makes the hash read fail and the version unreadable, and a missing file is one whose read says so (file or path not found). |
+| The running copy is newer than the installed one | Not elevated. Repair opens the update path (a check against the installed version, then Update). |
+| `Earshot.exe` is truly missing (the folder lists without it), or its folder can be written by a standard user | The running copy's own setup puts a new install in place. A program that could not be found, where the folder could not be listed or lists the file, is not truly missing and is read as unreadable. |
+| Nothing is installed | Set up, not Repair. |
+
+The same hash check, the same release
 feed read and the same hand-over are what the tests run for real; only the
 elevated run is faked.
 

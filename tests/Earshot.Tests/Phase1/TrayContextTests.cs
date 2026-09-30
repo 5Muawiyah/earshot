@@ -1407,7 +1407,10 @@ internal sealed class TrayHarness : IDisposable
         TimeProvider? time = null,
         int? taskbarWatcherPollIntervalMs = null,
         bool showIcon = false,
-        Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null)
+        Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null,
+        Earshot.Widget.IDisplaySource? displaySource = null,
+        Func<Earshot.Widget.IGaugeSurface>? gaugeSurfaceFactory = null,
+        Func<IReadOnlyList<Earshot.Widget.DisplayInfo>, Earshot.Widget.ForegroundWindowReading?>? foregroundWindowProbe = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1543,6 +1546,21 @@ internal sealed class TrayHarness : IDisposable
             CardEnvironmentFactory = cardEnvironmentFactory,
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
         };
+        if (displaySource is not null)
+        {
+            options = options with { DisplaySource = displaySource };
+        }
+
+        if (gaugeSurfaceFactory is not null)
+        {
+            options = options with { GaugeSurfaceFactory = gaugeSurfaceFactory };
+        }
+
+        if (foregroundWindowProbe is not null)
+        {
+            options = options with { ForegroundWindowProbe = foregroundWindowProbe };
+        }
+
         if (handBackBudget is { } hb)
         {
             options = options with { HandBackBudget = hb };
@@ -1817,7 +1835,22 @@ internal sealed class FakeBlockController : IBlockController
         return OnSetDevice(ct);
     }
 
-    public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default) => Record("setup");
+    // A setup that takes as long as a test says, as the administrator prompt and the elevated run do.
+    public Func<CancellationToken, Task<ControllerResult>>? OnRunSetup { get; set; }
+
+    public Task<ControllerResult> RunSetupAsync(CancellationToken ct = default)
+    {
+        if (OnRunSetup is null)
+        {
+            return Record("setup");
+        }
+
+        Calls.Add("setup");
+        return OnRunSetup(ct);
+    }
+
+    // A repair that takes as long as a test says. It gets the verb and the token the tray gave it.
+    public Func<RepairVerb, CancellationToken, Task<ControllerResult>>? OnRunRepair { get; set; }
 
     // Runs inside a repair, before it answers: where a test plays what the elevated run does (it records its outcome).
     public Action? OnRepaired { get; set; }
@@ -1825,7 +1858,14 @@ internal sealed class FakeBlockController : IBlockController
     public Task<ControllerResult> RunRepairAsync(RepairVerb verb, CancellationToken ct = default)
     {
         OnRepaired?.Invoke();
-        return Record(verb switch { RepairVerb.Repair => "repair", RepairVerb.Install => "repair-install", _ => "repair-setup" });
+        string call = verb switch { RepairVerb.Repair => "repair", RepairVerb.Install => "repair-install", _ => "repair-setup" };
+        if (OnRunRepair is null)
+        {
+            return Record(call);
+        }
+
+        Calls.Add(call);
+        return OnRunRepair(verb, ct);
     }
 
     public Task<ControllerResult> UninstallAsync(CancellationToken ct = default) => Record("uninstall");

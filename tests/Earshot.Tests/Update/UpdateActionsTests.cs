@@ -125,10 +125,12 @@ public sealed class UpdateActionsTests
                 new InstallRequest(TestUsers.Sid, RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer, TaskPrincipalMode.System));
         }
 
-        public UpdateActions Actions(string? runningFrom = null, IFolderSecurity? folders = null) =>
+        public UpdateActions Actions(string? runningFrom = null, IFolderSecurity? folders = null, IGateRunLock? runLock = null, TimeSpan? lockWait = null) =>
             new(new InstallLayout(runningFrom ?? Install, Install, Data.MachineFolder), folders ?? Folders, Waiter, Starter, Log)
             {
                 TrayWait = TimeSpan.FromSeconds(3),
+                RunLock = runLock ?? NoGateRunLock.Instance,
+                LockWait = lockWait ?? InstallRunLock.WaitBeforeRefusing,
             };
 
         // What the started install program does: the install verb, run from the folder it was started in.
@@ -171,6 +173,83 @@ public sealed class UpdateActionsTests
 
     private static string Steps(InstallResult result) =>
         string.Join(Environment.NewLine, result.Steps.Select(GateActions.Describe));
+
+    // ----- one setup, update or repair at a time on the machine -----
+
+    private static string NewLockName() => @"Local\Earshot.Tests.UpdateRunLock." + Guid.NewGuid().ToString("N");
+
+    private static MachineGateMutex TestLock(string name) => new(name, UserAndMachineSecurity, _ => true, InstallRunLock.StepName, "setup, update or repair");
+
+    private static MutexSecurity UserAndMachineSecurity()
+    {
+        MutexSecurity security = MachineGateMutex.MachineSecurity();
+        using WindowsIdentity me = WindowsIdentity.GetCurrent();
+        security.AddAccessRule(new MutexAccessRule(me.User!, MutexRights.FullControl, AccessControlType.Allow));
+        return security;
+    }
+
+    [TestMethod]
+    public void AnUpdateThatFindsTheLockHeldIsRefusedBeforeItRemovesOrCreatesAnything()
+    {
+        using var w = new World();
+        string name = NewLockName();
+        UpdateRequest request = w.Stage(World.ReleaseFiles("1.2.0").Build());
+        string[] foldersBefore = w.InstallSiblings();
+        SortedDictionary<string, string> installBefore = w.InstallSnapshot();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var other = new Thread(() =>
+        {
+            using IDisposable? held = TestLock(name).TryEnter(TimeSpan.FromSeconds(5), new List<StepOutcome>());
+            Assert.IsNotNull(held);
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(30));
+        });
+        other.Start();
+        Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(10)));
+
+        InstallResult result = w.Actions(runLock: TestLock(name), lockWait: TimeSpan.FromMilliseconds(150)).Run(request);
+        release.Set();
+        other.Join();
+
+        Assert.AreEqual(GateExitCode.Busy, result.Outcome, Steps(result));
+        Assert.IsTrue(InstallRunLock.IsBusy(result.Steps.Single()));
+        Assert.IsEmpty(w.Waiter.Waits, "It did not wait for the tray: nothing was started.");
+        Assert.IsEmpty(w.Starter.Starts);
+        Assert.IsEmpty(w.WorkFolders(), "No work folder was made.");
+        CollectionAssert.AreEqual(foldersBefore, w.InstallSiblings());
+        CollectionAssert.AreEqual(installBefore.ToArray(), w.InstallSnapshot().ToArray());
+        Assert.IsTrue(w.Log.Has(LogLevel.Warn, "update: the machine-wide lock was not taken, so nothing was changed"));
+    }
+
+    // The update run holds the lock for its own part, the wait for the tray included, so a repair started meanwhile is refused.
+    [TestMethod]
+    public void AnUpdateHoldsTheLockWhileItWaitsForTheTrayAndReleasesItWhenItEnds()
+    {
+        using var w = new World();
+        string name = NewLockName();
+        UpdateRequest request = w.Stage(World.ReleaseFiles("1.2.0").Build());
+        InstallResult? otherWhileWaiting = null;
+        w.Waiter.During = () =>
+        {
+            var thread = new Thread(() =>
+            {
+                var steps = new List<StepOutcome>();
+                using IDisposable? held = TestLock(name).TryEnter(TimeSpan.FromMilliseconds(150), steps);
+                otherWhileWaiting = new InstallResult(held is null ? GateExitCode.Busy : GateExitCode.Success, steps);
+            });
+            thread.Start();
+            thread.Join();
+        };
+
+        InstallResult result = w.Actions(runLock: TestLock(name), lockWait: TimeSpan.FromSeconds(5)).Run(request);
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Steps(result));
+        Assert.AreEqual(GateExitCode.Busy, otherWhileWaiting!.Outcome, "Another run could not take the lock while the update waited for the tray.");
+        var after = new List<StepOutcome>();
+        using IDisposable? free = TestLock(name).TryEnter(TimeSpan.FromSeconds(2), after);
+        Assert.IsNotNull(free, "The lock was released when the update run ended.");
+    }
 
     // ----- the whole update, with the install run for real -----
 

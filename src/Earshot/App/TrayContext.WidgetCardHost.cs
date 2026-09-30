@@ -90,14 +90,26 @@ internal sealed partial class TrayContext
                 GaugeDisplayId = widget.GaugeDisplay,
                 GaugeDisplayOptions = displayOptions,
                 GaugeDisplayNote = displayNote,
+                ElevatedRunNote = _tray._elevatedRun is { } run ? FinishingMessage(run) : null,
             };
         }
 
         public void SetGaugePosition(GaugePosition value, CardPlace place) =>
             Write("gauge position (card)", s => s.Widget = s.Widget with { GaugePosition = value }, place);
 
-        public void SetGaugeDisplay(string id, CardPlace place) =>
+        // A display that has gone since the list was drawn is not stored: the choice would be one nothing can honour, and the
+        // page is redrawn with the displays that are there.
+        public void SetGaugeDisplay(string id, CardPlace place)
+        {
+            if (!string.IsNullOrEmpty(id) && GaugeDisplayChoice.Resolve(id, _tray._displaySource.Read().Displays).Fallback != DisplayFallbackReason.None)
+            {
+                _tray._log.Info("Gauge display: the display chosen on the settings page is no longer connected, so the choice was not stored.");
+                _tray._widgetCardPresenter?.Refresh();
+                return;
+            }
+
             Write("gauge display (card)", s => s.Widget = s.Widget with { GaugeDisplay = id }, place);
+        }
 
         public void SetOtherDeviceLabel(string value, CardPlace place)
         {

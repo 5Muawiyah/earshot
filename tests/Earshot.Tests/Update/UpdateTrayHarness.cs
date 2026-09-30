@@ -42,11 +42,16 @@ internal sealed class UpdateTrayHarness : IDisposable
         Action<FakeStartupRegistry>? startup = null,
         Func<string, Earshot.Boot.Gate.InstalledFilesReport>? checkFiles = null,
         Version? installedVersion = null,
+        Func<string, Earshot.Boot.InstalledFile>? readInstalledFile = null,
+        Func<string, IEnumerable<string>>? listFolder = null,
         Action<FakeBlockController>? block = null,
         string? installFolderSddl = null,
         Func<IUpdateSource>? sourceFactory = null,
         TimeProvider? time = null,
-        UpdateOutcomeSource? outcomeSource = null)
+        UpdateOutcomeSource? outcomeSource = null,
+        DeviceSnapshot? snapshot = null,
+        TimeSpan? elevatedExitWait = null,
+        bool elevated = false)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -54,7 +59,7 @@ internal sealed class UpdateTrayHarness : IDisposable
         source?.Invoke(Source);
         block?.Invoke(Block);
 
-        Monitor.Current = NoDevice();
+        Monitor.Current = snapshot ?? NoDevice();
         Startup.Run[StartupRegistration.ValueName] = StartupRegistration.CommandFor(TrayHarness.ExePath);
         startup?.Invoke(Startup);
         SettingsPath = _folder.File("settings.json");
@@ -100,7 +105,11 @@ internal sealed class UpdateTrayHarness : IDisposable
                 CheckedFolders.Add(path);
                 return (checkFiles ?? (_ => MatchingFiles))(path);
             },
-            ReadInstalledVersion = _ => installedVersion ?? RepairPlanner.RepairVerbSince.ToVersion(),
+            ReadInstalledFile = path => readInstalledFile?.Invoke(path) ?? new Earshot.Boot.InstalledFile(
+                true, installedVersion ?? RepairPlanner.RepairVerbSince.ToVersion(), new Earshot.Contracts.StepOutcome("read-file-version", true, 0, "S_OK", path)),
+            ListFolder = folder => listFolder?.Invoke(folder) ?? (installPresent && string.Equals(folder, Path.GetDirectoryName(InstalledExe), StringComparison.OrdinalIgnoreCase)
+                ? (programPresent ? new[] { InstalledExe } : new[] { Path.Combine(folder, "Earshot.dll") })
+                : throw new DirectoryNotFoundException(folder)),
             NativeHotkeys = new FakeNativeHotkeys(),
             VoiceEngineFactory = () => new Earshot.Tests.Voice.FakeSpeechEngine(),
             StreamingPlatformFactory = _ => new Earshot.Tests.Streaming.FakeStreamingPlatform(),
@@ -114,6 +123,8 @@ internal sealed class UpdateTrayHarness : IDisposable
             UpdateSourceFactory = sourceFactory ?? (() => Source),
             UpdateLauncher = Launcher,
             UpdateOutcome = outcomeSource,
+            ElevatedExitWait = elevatedExitWait ?? TimeSpan.FromSeconds(30),
+            IsElevated = () => elevated,
         };
 
         Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,

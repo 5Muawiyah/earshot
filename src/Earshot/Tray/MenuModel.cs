@@ -102,7 +102,8 @@ internal static class MenuModel
         bool voiceKnownMissing = false,
         StreamingMenuModel? streaming = null,
         bool setupAvailable = false,
-        bool updateInProgress = false)
+        bool updateInProgress = false,
+        string? elevatedRun = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -156,14 +157,23 @@ internal static class MenuModel
                 Visible: true),
             NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
-            SetUp: new MenuItemState(SetUpEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.OffersSetUp(block)),
-            Repair: new MenuItemState(RepairEarshot, Checked: false, Enabled: !busy, Visible: TrayStatus.OffersRepair(block)),
+            // While a setup, repair or update is running, a second one would work on the same folder, tasks and service, so
+            // these are disabled and say why in their own text, as Set up battery does when Bluetooth is off.
+            SetUp: new MenuItemState(WithReason(SetUpEarshot, elevatedRun), Checked: false, Enabled: !busy && elevatedRun is null, Visible: TrayStatus.OffersSetUp(block)),
+            Repair: new MenuItemState(WithReason(RepairEarshot, elevatedRun), Checked: false, Enabled: !busy && elevatedRun is null, Visible: TrayStatus.OffersRepair(block)),
             // A check reads GitHub and touches no device, so a connect in flight does not stop it; only another
             // update step does.
-            CheckForUpdates: new MenuItemState(CheckForUpdates, Checked: false, Enabled: !updateInProgress, Visible: true),
+            CheckForUpdates: new MenuItemState(WithReason(CheckForUpdates, elevatedRun), Checked: false, Enabled: !updateInProgress && elevatedRun is null, Visible: true),
             CheckAutomatically: new MenuItemState(CheckAutomatically, Checked: settings.CheckForUpdatesAutomatically, Enabled: !busy, Visible: true),
             Exit: new MenuItemState(Exit, Checked: false, Enabled: true, Visible: true));
     }
+
+    // "finishing the repair first", or "Finishing the repair first." for a card: the reason nothing else elevated starts.
+    public static string FinishingFirst(string run, bool capital = false) =>
+        capital ? "Finishing the " + run + " first." : "finishing the " + run + " first";
+
+    private static string WithReason(string label, string? elevatedRun) =>
+        elevatedRun is null ? label : label + " (" + FinishingFirst(elevatedRun) + ")";
 
     // The nine percentages the threshold can be set to, checked against the saved value and disabled
     // together while the alert itself is off: a submenu with nothing to choose from would confuse a
