@@ -6,14 +6,16 @@ namespace Earshot.Update;
 // administrator prompt. It holds the state the update sub-page shows (View) and raises Changed when it moves.
 //
 // Nothing is downloaded or installed until UpdateAsync is called, and only the person's own click calls it. A check
-// never downloads. The hand-over starts the installed, administrator-owned Earshot.exe elevated with the update verb
+// never downloads. The hand-over starts the installed Earshot.exe, in a folder only administrators can change, elevated with the update verb
 // and the downloaded zip with the hash it matched; that program checks the zip again from a copy only administrators
 // can write, against the hash on its own command line. That closes the gap between this program's check and the
 // install, but it does not stop a program the signed-in user runs from raising the same prompt with a zip of its own
 // and that zip's own hash, an older release included: the hash is only as trusted as the command line it came on, and
-// the person is the one who accepts or declines the prompt (Program.Update.cs says the same). Once it has started,
-// HandedOver is raised and the caller ends this program, because the install replaces the folder this one runs from and the
-// elevated program waits for this one to end first.
+// the person is the one who accepts or declines the prompt (Program.Update.cs says the same). Before the program is started,
+// the caller is asked to finish its own closing work (beforeHandOver: for the tray, the hand-back and the block before
+// closing), because an installed version that does not wait for this program to end would otherwise install while that work
+// still runs. Once the program has started, HandedOver is raised and the caller ends this program without another device
+// call, because the install replaces the folder this one runs from.
 //
 // Methods may be called from any thread; the state is guarded, and events are raised outside the guard.
 internal sealed class UpdateController

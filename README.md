@@ -82,22 +82,47 @@ nodes again is quick: left-click the Earshot icon, then Connect on the card.
 - **Updates.** **Check for updates** is in the menu and on the settings page.
   **Check automatically** is off by default, because a check contacts GitHub.
   Nothing downloads until you press Update. Update works from whichever copy
-  is running, including one unzipped in a download folder, as long as Earshot
-  is installed in Program Files: the update always runs the installed
-  program, never the running one. See
+  is running, including one unzipped in a download folder and one newer than
+  the installed copy, as long as Earshot is installed in Program Files: the
+  update always runs the installed program, which is in a folder only
+  administrators can change, never the running one. Earshot finishes its own
+  closing work first (with Hand back on, that hands the AirPods back and
+  blocks them), then shows the one administrator prompt, then ends. If the
+  prompt is declined after that, the card says so and Earshot starts again.
+  Only one setup, repair or update runs at a time, and the menu and the card
+  say why while one does. See
   [docs/architecture.md](docs/architecture.md#updates) for what the checksum
   does and does not protect against.
 - **Repair Earshot.** **Repair Earshot...** is in the menu, and on the
   settings page beside Check for updates, whenever Earshot is installed, in
   any state. It checks every installed file against the list the release
-  published, then registers the tasks and the service again. If a file is
-  missing or does not match, it downloads the release of the version you have
-  installed, checks it the way an update is checked, and installs it, so the
-  files come back only from checked bytes. One administrator prompt. Your
-  settings, battery set-up and chosen AirPods are kept. A copy run from a
-  download folder never points Open on startup or the Start menu shortcut at
-  itself once Earshot is installed, and offers to switch to the installed
-  copy.
+  published, and the route depends on what it finds:
+  - Every file matches: the installed Earshot repairs itself and registers the
+    tasks and the service again.
+  - A file is missing or does not match: it downloads the release of the
+    version you have installed, checks it the way an update is checked, and
+    hands it to the installed Earshot's update, so the files come back only
+    from checked bytes.
+  - A file, the file list or the installed version could not be read (another
+    program holds it open, or access was refused): nothing is changed and
+    Earshot says to try again. A file that could not be read says nothing
+    about what is in it.
+  - The running copy is newer than the installed one: Repair does not run it
+    elevated. It opens the update path (Check for updates, then Update).
+  - Earshot.exe is truly missing from Program Files, or its folder can be
+    changed by a standard user: the running copy's own setup puts a new
+    install in place, so that copy must be an unzipped release you downloaded
+    and checked.
+
+  Each route asks for one administrator prompt, or none when it only tells you
+  something. Your settings, battery set-up and chosen AirPods are kept. A copy
+  run from a download folder never points Open on startup or the Start menu
+  shortcut at itself once Earshot is installed, and offers to switch to the
+  installed copy: a switch closes that copy first, which with Hand back on
+  hands the AirPods back and blocks them. A copy started as an administrator
+  offers no switch, because the installed copy would start as an administrator
+  too: start it from the Start menu. Exit waits for a setup or repair that is
+  still running before it hands back and blocks.
 - **Spoken status and playing audio from a phone**, both off by default and
   neither with a live run.
 - **A small background service for the hand-back.** When the Earshot icon has
@@ -139,7 +164,8 @@ plain-English tour of the tray.
 
 To update later, use **Check for updates** in the menu, from any copy. Nothing
 needs setting up again first. If an install is damaged, choose **Repair
-Earshot...**.
+Earshot...**. Repair never installs from a copy that is only unzipped in a
+folder once Earshot is installed: a newer copy goes through Update.
 
 Connect and disconnect do not need setup. Block at boot and Protect audio
 quality do, because both change the device through Earshot's SYSTEM tasks.
@@ -192,13 +218,13 @@ Install:
 3. Setup copies Earshot into C:\Program Files\Earshot and installs its scheduled tasks and a small Windows service that, when Block at boot and Hand back are both on, blocks the AirPods at shut down if Earshot itself could not.
 
 Update (my settings in %APPDATA%\Earshot and my battery set-up in %LOCALAPPDATA%\Earshot are kept):
-- The simplest way is "Check for updates" in Earshot's menu, then the Update button on the card that opens. It works from whichever copy of Earshot is running, even one unzipped in a download folder, as long as Earshot is installed in C:\Program Files\Earshot. It downloads the new release, checks its SHA-256 and shows one administrator prompt. Nothing needs setting up first.
+- The way to update is "Check for updates" in Earshot's menu, then the Update button on the card that opens. It works from whichever copy of Earshot is running, even one unzipped in a download folder and even one newer than the installed copy, as long as Earshot is installed in C:\Program Files\Earshot. It downloads the new release, checks its SHA-256, finishes Earshot's own closing work (with Hand back on, that hands my AirPods back and blocks them), shows one administrator prompt and then ends Earshot. I start Earshot again from the Start menu afterwards. Nothing needs setting up first. If I decline the prompt, Earshot says so and starts again.
 - If the card says to set up first, nothing is installed: choose "Set up Earshot..." instead. If it says to repair first, the install is damaged: choose "Repair Earshot...".
-- Otherwise do it by hand. Download and check the new release as above. I choose Exit from Earshot's menu. Run the new Earshot.exe from the unzipped folder, then I choose "Repair Earshot..." (when the running copy is newer than the installed one it brings the install up to date from that copy). One administrator prompt.
+- There is no other way to update. Repair does not install a newer release from an unzipped copy when Earshot is already installed: from a newer copy it opens the same Check for updates. Only one setup, update or repair can run at a time.
 
 Repair (my settings and battery set-up are kept):
-- If Earshot is installed but something is wrong, I choose "Repair Earshot..." in its menu, or on the settings page beside "Check for updates". It checks every installed file against the release's own list. If they all match it registers the scheduled tasks and the service again. If a file is missing or different it downloads the release of the installed version, checks its SHA-256 and installs it. One administrator prompt.
-- If C:\Program Files\Earshot\Earshot.exe itself is missing, the same menu item repairs from the copy that is running, which must be an unzipped release I downloaded and checked as above.
+- If Earshot is installed but something is wrong, I choose "Repair Earshot..." in its menu, or on the settings page beside "Check for updates". It checks every installed file against the release's own list. If they all match it registers the scheduled tasks and the service again. If a file is missing or different it downloads the release of the installed version, checks its SHA-256 and installs it. If a file could not be read (another program holds it open), nothing is changed and I try again. If the running copy is newer than the installed one, it opens Check for updates instead. One administrator prompt at most.
+- If C:\Program Files\Earshot\Earshot.exe itself is missing (its folder lists without it), the same menu item repairs from the copy that is running, which must be an unzipped release I downloaded and checked as above.
 
 Uninstall:
 1. I turn "Open on startup" off in Earshot's menu, then choose Exit.

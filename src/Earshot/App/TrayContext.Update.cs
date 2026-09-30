@@ -22,13 +22,15 @@ internal sealed record UpdateOutcomeSource(string MachineFolder, string ShownFil
 // "Check automatically" (off by default, because a check contacts GitHub) makes one check a day, the first a little
 // after startup. It only checks. It shows a card once for each version it finds, and never downloads.
 //
-// When the hand-over has started the administrator prompt's program, this program closes through the same orderly
-// Exit as the menu's, because the install replaces the install folder and cannot while this one runs from it: a
-// process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail. The
-// program the prompt starts is always the installed Earshot.exe, never this copy when this copy is somewhere else, and
-// it waits for this process to end (by its id) before it touches that folder. So any copy can hand over once the
-// installed program is there and its folder is administrators-only; with no such install the card offers Set up or
-// Repair instead.
+// The hand-over closes this program, because the install replaces the install folder and cannot while this one runs from
+// it: a process whose current folder is inside it, or that holds any file open in it, makes the folder's rename fail. It
+// does the closing work of Exit first (the hand-back and the block before closing, with their limits), then starts the
+// administrator prompt's program, then ends without another device call (PrepareHandOverAsync, in TrayContext.ElevatedRun.cs),
+// because the installed Earshot.exe of 1.2.0 and of the first 1.2.1 does not wait for a copy run from another folder to end. The
+// program the prompt starts is the installed Earshot.exe, which is in a folder only administrators can change, never this
+// copy when this copy is somewhere else, and a newer installed version also waits for this process to end (by its id) before it
+// touches that folder. So any copy can hand over once the installed program is there and its folder is administrators-only;
+// with no such install the card offers Set up or Repair instead.
 internal sealed partial class TrayContext
 {
     private Func<IUpdateSource>? _updateSourceFactory;
