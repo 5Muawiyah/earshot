@@ -34,8 +34,9 @@ public static class DecodeProof
     // count.
     public const int OrderRecordsNeeded = 2;
 
-    // A status bit that happens to be constant across a few records fits trivially, so a flip needs four
-    // discriminating records with each value of the bit in at least two of them.
+    // A status bit that happens to be constant across a few observations fits trivially, so a flip needs four
+    // discriminating observations with each value of the bit in at least two of them. A record that kept both buds'
+    // messages gives two, so two set-ups of both buds are enough; the order itself still needs two records.
     public const int FlipRecordsNeeded = 4;
 
     private const int ChargingLowBit = 4;
@@ -57,18 +58,37 @@ public static class DecodeProof
         var notes = new List<string>();
         var fields = new Dictionary<DecodeField, FieldProof>();
 
-        // Bud order and flip.
+        // Bud order and flip. Each bud of one set is its own sender and reports itself first, so a record that kept
+        // both senders' newest messages holds two observations of the same set-up: they read the buds in opposite
+        // order, and the status bit that differs between them is the flip. The observations feed the flip; the owner's
+        // entries (one per record) are what the order needs twice over.
         var discriminating = new List<(bool HighIsRight, byte Status)>();
-        foreach ((BatterySetupRecord record, ProximityMessage message) in usable)
+        int discriminatingRecords = 0;
+        foreach ((BatterySetupRecord record, ProximityMessage lastMessage) in usable)
         {
-            BudOrderEvidence evidence = Discriminate(record);
-            if (evidence.HighNibbleIsRight is bool highIsRight)
+            bool discriminated = false;
+            string? whyNot = null;
+            foreach (ProximityMessage message in EvidenceMessages(record, lastMessage))
             {
-                discriminating.Add((highIsRight, message.Status));
+                BudOrderEvidence evidence = Discriminate(record, message);
+                if (evidence.HighNibbleIsRight is bool highIsRight)
+                {
+                    discriminating.Add((highIsRight, message.Status));
+                    discriminated = true;
+                }
+                else
+                {
+                    whyNot ??= evidence.WhyNot;
+                }
+            }
+
+            if (discriminated)
+            {
+                discriminatingRecords++;
             }
             else
             {
-                notes.Add("record " + record.FileName + ": " + evidence.WhyNot + ", not discriminating");
+                notes.Add("record " + record.FileName + ": " + whyNot + ", not discriminating");
             }
         }
 
@@ -80,12 +100,12 @@ public static class DecodeProof
 
         int toRight = discriminating.Count(d => d.HighIsRight);
         int toLeft = discriminating.Count - toRight;
-        if (discriminating.Count >= OrderRecordsNeeded && (toRight == 0 || toLeft == 0))
+        if (discriminatingRecords >= OrderRecordsNeeded && (toRight == 0 || toLeft == 0))
         {
             highNibbleIsRight = toRight > 0;
             orderProof = new FieldProof(FieldProofStatus.Proved, discriminating.Count, 0, null);
         }
-        else if (discriminating.Count >= OrderRecordsNeeded)
+        else if (discriminatingRecords >= OrderRecordsNeeded)
         {
             orderProof = new FieldProof(FieldProofStatus.Withdrawn, Math.Max(toRight, toLeft), Math.Min(toRight, toLeft), null);
             (bool found, int bit, bool whenSet, int fitting) = FindFlip(discriminating);
@@ -173,6 +193,12 @@ public static class DecodeProof
             return new BudOrderEvidence(null, "no documented-form message");
         }
 
+        return Discriminate(record, message);
+    }
+
+    // The same, for one message of the record: the newest of any sender, or the newest of each.
+    private static BudOrderEvidence Discriminate(BatterySetupRecord record, ProximityMessage message)
+    {
         int high = (message.BatteryA >> 4) & 0x0F;
         int low = message.BatteryA & 0x0F;
         if (BatteryNibble.ToPercent(high) is null || BatteryNibble.ToPercent(low) is null)
@@ -206,6 +232,11 @@ public static class DecodeProof
 
         return new BudOrderEvidence(highRight, null);
     }
+
+    // The messages one record offers as evidence of the bud order: the newest of each merged sender when the record
+    // kept them, else the newest of all. A record from before senders were merged has only the second.
+    private static IReadOnlyList<ProximityMessage> EvidenceMessages(BatterySetupRecord record, ProximityMessage lastMessage) =>
+        record.Candidate?.SenderLastOkMessages is { Count: > 0 } perSender ? perSender : new[] { lastMessage };
 
     private static bool Matches(int nibble, int pick) =>
         BatteryNibble.ToPercent(nibble) is int percent && Math.Abs(percent - pick) <= Tolerance;

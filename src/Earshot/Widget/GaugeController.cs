@@ -77,10 +77,13 @@ internal readonly record struct GaugeControllerSettings(bool Enabled, bool LeftC
 // read) counts, and the gauge hides after ReadFailureTolerance failures in a row.
 //
 // Being put back on top: the shell raises the taskbar above the topmost band when Start, a flyout or a
-// full-screen application closes, which leaves the gauge under it. Every one of those changes the
-// foreground window, so a foreground change (OnForegroundChanged) looks at what is over the gauge's centre
-// now and once more 250 ms later, and raises the gauge only when that window is the taskbar. The poll's own
-// check stays as the safety net.
+// full-screen application closes, and again after a click on it, which leaves the gauge under it. A foreground
+// change (OnForegroundChanged) or a window Explorer showed or hid (OnShellWindowChanged) looks at what is over
+// the gauge's centre now and once more 250 ms later, and raises the gauge only when that window is the taskbar.
+// Whenever any cover is found, by those or by the poll, the same look repeats every FastCheckInterval for
+// FastCheckDuration after the last cover, since the taskbar covers the gauge again a moment after a raise with no
+// event to say so; a cover without an event then lasts one interval, not one poll. The poll's own check stays as
+// the safety net. Earshot's own windows over the gauge (its tooltip, the card) are never a cover.
 internal sealed class GaugeController : IDisposable
 {
     public static readonly TimeSpan IconHideDebounce = TimeSpan.FromSeconds(2);
@@ -89,12 +92,26 @@ internal sealed class GaugeController : IDisposable
     // in the field log), and few enough that a real loss is noticed in about three seconds.
     public const int ReadFailureTolerance = 3;
 
-    // The gap between the two looks at what is over the gauge after a foreground change, and the shortest
-    // time between two raises.
+    // The gap between the two looks at what is over the gauge after an event.
     public static readonly TimeSpan SecondLookDelay = TimeSpan.FromMilliseconds(250);
 
-    // Raises after which no more are made until a poll confirms the gauge is on top.
-    public const int RaiseCap = 4;
+    // How often the gauge is looked at after a cover was found, and for how long after the last one. A quarter of a
+    // second is the second look's own gap, short enough that a covered gauge is back on top before it is noticed
+    // and cheap enough (one point query, no UI Automation) to run for ten seconds.
+    public static readonly TimeSpan FastCheckInterval = TimeSpan.FromMilliseconds(250);
+
+    public static readonly TimeSpan FastCheckDuration = TimeSpan.FromSeconds(10);
+
+    // At most this many raises in any RaiseWindow. Four in a second is one per FastCheckInterval, the most a check
+    // that runs that often can ask for, so a taskbar that covers the gauge again after every raise is answered every
+    // time; a real loop (two windows raising each other) is held to that rate and never runs away. It is a window
+    // that slides, not a stop until something confirms: a gauge left covered is the defect this replaced.
+    public const int RaisesPerWindow = 4;
+
+    public static readonly TimeSpan RaiseWindow = TimeSpan.FromSeconds(1);
+
+    // The limit is reported at most this often, so a long fight is one line a minute, not one a second.
+    private static readonly TimeSpan LimitWarnInterval = TimeSpan.FromMinutes(1);
 
     private const string ShellTrayWndClass = "Shell_TrayWnd";
 
@@ -114,13 +131,20 @@ internal sealed class GaugeController : IDisposable
     private int? _lastLoggedCode;
     private string? _lastHideKey;
     private int _consecutiveReadFailures;
-    private long _lastRaiseTimestamp;
-    private bool _raisedBefore;
-    private int _raisesSinceConfirmed;
-    private bool _capWarned;
+    private readonly Queue<long> _raiseStamps = new();
+    private long _lastLimitWarnTimestamp;
+    private bool _limitWarnedBefore;
     private ITimer? _secondLook;
-    private string _secondLookForegroundClass = "";
+    private CoverTrigger _secondLookTrigger;
+    private ITimer? _fastChecks;
+    private long _lastCoverTimestamp;
+    private string? _lastLeftUnderClass;
     private bool _disposed;
+
+    // What made the gauge look at its cover: the log line for a raise says which.
+    private enum CoverTriggerKind { ForegroundChange, ShellWindowShown, ShellWindowHidden, Recheck }
+
+    private readonly record struct CoverTrigger(CoverTriggerKind Kind, string Class);
 
     // coverProbe: what is at the gauge's centre; null means the foreground-change path has nothing to look
     // with and does nothing (the poll still works). uiPost: how a timer callback, which runs on a pool
@@ -252,22 +276,31 @@ internal sealed class GaugeController : IDisposable
     // The foreground window changed to a window of the given class (a class only, never a title). Looks at
     // what is over the gauge now and again after SecondLookDelay, since the shell can raise the taskbar a
     // moment after the change. Does nothing unless the gauge is on screen. UI thread.
-    public void OnForegroundChanged(string foregroundClass)
+    public void OnForegroundChanged(string foregroundClass) =>
+        OnCoverEvent(new CoverTrigger(CoverTriggerKind.ForegroundChange, foregroundClass));
+
+    // Explorer showed (or hid) a top-level window of the given class (a class only, never a title): a flyout
+    // opening or closing is what makes the shell raise the taskbar, with no change of the foreground window to
+    // say so. Treated as a foreground change is. UI thread.
+    public void OnShellWindowChanged(string windowClass, bool shown) =>
+        OnCoverEvent(new CoverTrigger(shown ? CoverTriggerKind.ShellWindowShown : CoverTriggerKind.ShellWindowHidden, windowClass));
+
+    private void OnCoverEvent(CoverTrigger trigger)
     {
         if (_disposed || _state is not GaugeState.Shown)
         {
             return;
         }
 
-        CheckCover(foregroundClass);
+        CheckCover(trigger);
         if (_secondLook is not null)
         {
             // One second look is already pending: this change is covered by it.
-            _secondLookForegroundClass = foregroundClass;
+            _secondLookTrigger = trigger;
             return;
         }
 
-        _secondLookForegroundClass = foregroundClass;
+        _secondLookTrigger = trigger;
         _secondLook = _time.CreateTimer(_ => _uiPost(OnSecondLook), null, SecondLookDelay, Timeout.InfiniteTimeSpan);
     }
 
@@ -285,6 +318,7 @@ internal sealed class GaugeController : IDisposable
         _disposed = true;
         _secondLook?.Dispose();
         _secondLook = null;
+        StopFastChecks();
         DisposeSurface();
     }
 
@@ -297,13 +331,47 @@ internal sealed class GaugeController : IDisposable
             return;
         }
 
-        CheckCover(_secondLookForegroundClass);
+        CheckCover(_secondLookTrigger);
+    }
+
+    // A cover was found: look again every FastCheckInterval until FastCheckDuration has passed since the last one.
+    private void NoteCover()
+    {
+        if (_coverProbe is null)
+        {
+            return;
+        }
+
+        _lastCoverTimestamp = _time.GetTimestamp();
+        _fastChecks ??= _time.CreateTimer(_ => _uiPost(OnFastCheck), null, FastCheckInterval, FastCheckInterval);
+    }
+
+    private void OnFastCheck()
+    {
+        if (_fastChecks is null)
+        {
+            return;
+        }
+
+        if (_disposed || _state is not GaugeState.Shown || _time.GetElapsedTime(_lastCoverTimestamp) >= FastCheckDuration)
+        {
+            StopFastChecks();
+            return;
+        }
+
+        CheckCover(new CoverTrigger(CoverTriggerKind.Recheck, ""));
+    }
+
+    private void StopFastChecks()
+    {
+        _fastChecks?.Dispose();
+        _fastChecks = null;
     }
 
     // Asks what is at the gauge's centre. The gauge itself: nothing to do. The taskbar: put the gauge back
     // on top, within the limits. Anything else (a flyout, a full-screen window, another topmost window)
     // belongs over the gauge for now and is left alone.
-    private void CheckCover(string foregroundClass)
+    private void CheckCover(CoverTrigger trigger)
     {
         if (_coverProbe is null || _surface is not { IsDisposed: false } surface || _state is not GaugeState.Shown shown)
         {
@@ -311,46 +379,79 @@ internal sealed class GaugeController : IDisposable
         }
 
         GaugeCover cover = _coverProbe.Probe(new ShownGauge(shown.Bounds, surface.WindowHandle));
-        if (cover.IsGauge)
+        if (cover.IsGauge || cover.BelongsToThisProcess)
         {
+            _lastLeftUnderClass = null;
             return;
         }
 
+        NoteCover();
         if (!string.Equals(cover.RootClassName, ShellTrayWndClass, StringComparison.Ordinal))
         {
-            _log.Write(LogLevel.Debug, GaugeEventLog.LeftUnder(cover.RootClassName));
-            return;
-        }
-
-        if (_raisedBefore && _time.GetElapsedTime(_lastRaiseTimestamp) < SecondLookDelay)
-        {
-            _log.Write(LogLevel.Debug, GaugeEventLog.RaiseSkippedRateLimit());
-            return;
-        }
-
-        if (_raisesSinceConfirmed >= RaiseCap)
-        {
-            if (!_capWarned)
+            // Once per window class: a flyout that stays open is found by every recheck.
+            if (!string.Equals(_lastLeftUnderClass, cover.RootClassName, StringComparison.Ordinal))
             {
-                _capWarned = true;
-                _log.Write(LogLevel.Warn, GaugeEventLog.RaiseCapReached());
+                _lastLeftUnderClass = cover.RootClassName;
+                _log.Write(
+                    LogLevel.Debug,
+                    trigger.Kind == CoverTriggerKind.ForegroundChange
+                        ? GaugeEventLog.LeftUnder(cover.RootClassName)
+                        : GaugeEventLog.LeftUnderOtherwise(cover.RootClassName));
             }
 
             return;
         }
 
+        _lastLeftUnderClass = null;
+        if (!RaiseAllowed())
+        {
+            return;
+        }
+
         var over = new WindowIdentity(cover.RootClassName, cover.BelongsToExplorer);
-        RaiseSurface(surface, GaugeEventLog.RaisedAfterForegroundChange(over, foregroundClass));
+        RaiseSurface(surface, trigger.Kind switch
+        {
+            CoverTriggerKind.ForegroundChange => GaugeEventLog.RaisedAfterForegroundChange(over, trigger.Class),
+            CoverTriggerKind.ShellWindowShown => GaugeEventLog.RaisedAfterShellWindow(over, trigger.Class, shown: true),
+            CoverTriggerKind.ShellWindowHidden => GaugeEventLog.RaisedAfterShellWindow(over, trigger.Class, shown: false),
+            _ => GaugeEventLog.RaisedOnRecheck(over),
+        }, counted: true);
+    }
+
+    // Whether the sliding limit lets another raise through now: RaisesPerWindow in any RaiseWindow.
+    private bool RaiseAllowed()
+    {
+        long now = _time.GetTimestamp();
+        while (_raiseStamps.Count > 0 && _time.GetElapsedTime(_raiseStamps.Peek(), now) >= RaiseWindow)
+        {
+            _ = _raiseStamps.Dequeue();
+        }
+
+        if (_raiseStamps.Count < RaisesPerWindow)
+        {
+            return true;
+        }
+
+        if (!_limitWarnedBefore || _time.GetElapsedTime(_lastLimitWarnTimestamp, now) >= LimitWarnInterval)
+        {
+            _limitWarnedBefore = true;
+            _lastLimitWarnTimestamp = now;
+            _log.Write(LogLevel.Warn, GaugeEventLog.RaiseCapReached(RaisesPerWindow, (int)RaiseWindow.TotalSeconds));
+        }
+
+        return false;
     }
 
     // Puts the gauge back on top and writes the line saying why. A failing raise is a window failure, the
-    // same as a failing show or move.
-    private void RaiseSurface(IGaugeSurface surface, string line)
+    // same as a failing show or move. counted: the raise takes one of the sliding limit's places.
+    private void RaiseSurface(IGaugeSurface surface, string line, bool counted)
     {
         StepOutcome outcome = surface.Raise();
-        _lastRaiseTimestamp = _time.GetTimestamp();
-        _raisedBefore = true;
-        _raisesSinceConfirmed++;
+        if (counted)
+        {
+            _raiseStamps.Enqueue(_time.GetTimestamp());
+        }
+
         if (!outcome.Ok)
         {
             LogFailureOnce(HiddenReason.WindowFailed, outcome);
@@ -367,12 +468,6 @@ internal sealed class GaugeController : IDisposable
         IGaugeSurface surface = EnsureSurface();
         bool wasShown = _state is GaugeState.Shown;
         Rectangle? previous = wasShown ? ((GaugeState.Shown)_state).Bounds : null;
-
-        if (layout.GaugeCentreIsGauge == true)
-        {
-            _raisesSinceConfirmed = 0;
-            _capWarned = false;
-        }
 
         if (!wasShown)
         {
@@ -397,7 +492,7 @@ internal sealed class GaugeController : IDisposable
 
             _log.Info(GaugeEventLog.Moved(bounds));
         }
-        else if (layout.GaugeCentreIsGauge == false)
+        else if (layout.GaugeCentreIsGauge == false && layout.WindowAtGaugeCentre is not { BelongsToThisProcess: true })
         {
             // Nothing moved, but the read's own WindowFromPoint check at the gauge's own centre (the
             // reader's GaugeCentreIsGauge) found something else there instead of the gauge itself: the
@@ -405,8 +500,12 @@ internal sealed class GaugeController : IDisposable
             // confirmed it was on top. A MoveTo to the same rectangle is a SetWindowPos no-op that would
             // leave the gauge invisible under whatever now sits there; Raise puts it back on top without
             // moving or resizing it. False, not just "not true": a genuinely unreadable point (no gauge
-            // was shown for this read to check) is null, never treated as covered.
-            RaiseSurface(surface, GaugeEventLog.RaisedByPoll(layout.WindowAtGaugeCentre));
+            // was shown for this read to check) is null, never treated as covered. One of Earshot's own
+            // windows there (its tooltip, the card) is not a cover and falls through to "nothing to do".
+            // The poll cannot loop faster than its own interval, so its raise is not counted against the
+            // limit the event-driven checks share.
+            NoteCover();
+            RaiseSurface(surface, GaugeEventLog.RaisedByPoll(layout.WindowAtGaugeCentre), counted: false);
             if (_state is not GaugeState.Shown)
             {
                 return;
@@ -475,6 +574,7 @@ internal sealed class GaugeController : IDisposable
         _lastHideKey = key;
         _iconHiddenForShown = false;
         _trayIcon.Visible = true;
+        StopFastChecks();
         _surface?.HideWindow();
         if (changed)
         {
@@ -492,6 +592,7 @@ internal sealed class GaugeController : IDisposable
         _lastHideKey = null;
         _consecutiveReadFailures = 0;
         _trayIcon.Visible = true;
+        StopFastChecks();
         DisposeSurface();
         if (!wasOff)
         {

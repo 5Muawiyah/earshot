@@ -22,6 +22,17 @@ public static class SetupRules
     // signal a set-up could have measured.
     public const int WeakestSignalDbm = -127;
 
+    // Two senders are one set when they sent the same case level and the same two bud levels (as an unordered pair) this
+    // close together, with the same model and colour. Each bud advertises on its own about twice a second, so the two
+    // buds of one set land within a second or so of each other whenever both are sending; two seconds is that gap with
+    // room for a missed message. A set of the same model, colour and levels heard in the same two seconds cannot be
+    // told from the owner's own, which is the residual risk the owner accepted for a same-model stranger.
+    public static readonly TimeSpan SameSetWithin = TimeSpan.FromSeconds(2);
+
+    // How many messages of forms the parser does not read a record keeps as evidence (the newest ones): enough to study
+    // the form, bounded so a busy neighbour cannot make a record large.
+    public const int MaxShortFormCaptures = 200;
+
     // The threshold a set-up derives from the weakest message its candidate sent, never above the weakest message and
     // never below WeakestSignalDbm. A claim whose threshold is anything else was not made by a set-up.
     public static int ThresholdFor(int weakestDbm) => Math.Max(WeakestSignalDbm, weakestDbm - SignalMarginDb);

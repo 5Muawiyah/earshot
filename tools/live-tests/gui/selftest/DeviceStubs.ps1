@@ -192,9 +192,16 @@ function Start-Process
 {
     throw ('This sandboxed run never starts a process directly. Something reached Start-Process: ' + ($args -join ' '))
 }
+
+# Whether the tray icon is running: the fake machine's own answer, as selftest\Run-OneHalf.ps1 gives it,
+# never this PC's process list, which holds the owner's own Earshot whenever it is open.
+function Test-EarshotRunning
+{
+    return (Test-FakeTrayRunning)
+}
 '@
 
-# Puts the four stubs in the global scope, where a shipped script's own calls find them, and
+# Puts the stubs in the global scope, where a shipped script's own calls find them, and
 # inside LiveTest.psm1's session state, where the module's own helpers (Get-TaskState and the
 # rest calling Invoke-Earshot internally) find them. The same two-session-state technique as
 # selftest\Run-OneHalf.ps1's Install-EarshotStubs, applied to a smaller set of names.

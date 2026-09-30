@@ -49,6 +49,8 @@ internal sealed partial class TrayContext
     private readonly Func<IForegroundChangeSource>? _foregroundChangeSourceFactory;
     private readonly Func<IGaugeCoverProbe>? _gaugeCoverProbeFactory;
     private IForegroundChangeSource? _foregroundSource;
+    private readonly Func<IShellWindowChangeSource>? _shellWindowSourceFactory;
+    private IShellWindowChangeSource? _shellWindowSource;
 
     // The gauge's own bounds and handle, for TaskbarWatcher's worker thread: written on the UI thread only
     // (RefreshShownGaugeForWorker, called after every OnTaskbarLayout, the only place the real window's
@@ -203,10 +205,50 @@ internal sealed partial class TrayContext
             StepOutcome outcome = source.Install();
             _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn, "Foreground hook: " + TrayReport.DescribeStep(outcome));
         }
+
+        if (_shellWindowSource is null)
+        {
+            // The same, for a window Explorer showed or hid: a flyout opening raises the taskbar with no change of
+            // the foreground window. Bound to the Explorer that runs now; TaskbarCreated moves it to a new one.
+            IShellWindowChangeSource source = _shellWindowSourceFactory?.Invoke() ?? new ShellWindowChangeHook(_log);
+            source.ShellWindowChanged += OnShellWindowChanged;
+            _shellWindowSource = source;
+            StepOutcome outcome = source.Install();
+            _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn, "Shell window hook: " + TrayReport.DescribeStep(outcome));
+        }
     }
 
     private void OnForegroundChanged(object? sender, ForegroundChangedEventArgs e) =>
         _gaugeController?.OnForegroundChanged(e.RootClassName);
+
+    private void OnShellWindowChanged(object? sender, ShellWindowChangedEventArgs e) =>
+        _gaugeController?.OnShellWindowChanged(e.RootClassName, e.Shown);
+
+    // A hook is bound to the process it was installed against, so the hook on the old Explorer hears nothing from the
+    // new one; called from TrayContext's TaskbarCreated listener, alongside the others. A no-op while nothing is wired.
+    private void OnTaskbarCreatedForShellWindowHook()
+    {
+        if (_shellWindowSource is not { } source)
+        {
+            return;
+        }
+
+        StepOutcome outcome = source.Reinstall();
+        _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn, "Shell window hook: " + TrayReport.DescribeStep(outcome));
+    }
+
+    // Unhooks on the UI thread, before the controller it calls is torn down.
+    private void DisposeShellWindowSource()
+    {
+        if (_shellWindowSource is not { } source)
+        {
+            return;
+        }
+
+        source.ShellWindowChanged -= OnShellWindowChanged;
+        source.Dispose();
+        _shellWindowSource = null;
+    }
 
     // Unhooks on the UI thread, before the controller it calls is torn down.
     private void DisposeForegroundSource()
@@ -587,6 +629,7 @@ internal sealed partial class TrayContext
         _caseOpenCardPresenter?.Dispose();
         _caseOpenCardPresenter = null;
         DisposeForegroundSource();
+        DisposeShellWindowSource();
         _taskbarWatcher?.Dispose();
         _taskbarWatcher = null;
         _appBarRegistration?.Dispose();
@@ -650,6 +693,7 @@ internal sealed partial class TrayContext
             _widgetCardPresenter?.Hide();
             _gaugeController?.TurnOff();
             DisposeForegroundSource();
+            DisposeShellWindowSource();
             _taskbarWatcher.Dispose();
             _taskbarWatcher = null;
             _appBarRegistration?.Dispose();

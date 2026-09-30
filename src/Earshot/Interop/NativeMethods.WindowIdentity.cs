@@ -31,6 +31,12 @@ internal static partial class NativeMethods
     // OBJID_WINDOW and idChild is CHILDID_SELF.
     // https://learn.microsoft.com/en-us/windows/win32/winauto/event-constants
     internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+
+    // "An object has been shown" and "An object is hidden". hwnd is the window, idObject OBJID_WINDOW and idChild
+    // CHILDID_SELF for the window itself. The two values are adjacent, so one hook covers exactly both.
+    // https://learn.microsoft.com/en-us/windows/win32/winauto/event-constants
+    internal const uint EVENT_OBJECT_SHOW = 0x8002;
+    internal const uint EVENT_OBJECT_HIDE = 0x8003;
     internal const int OBJID_WINDOW = 0;
     internal const int CHILDID_SELF = 0;
 

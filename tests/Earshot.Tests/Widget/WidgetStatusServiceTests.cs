@@ -642,6 +642,34 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, store.DiskWriteCount - baseline, "20 adverts carrying the same battery value must write to disk once, not twenty times.");
     }
 
+    // The two buds of one set are two senders leading with their own bud, so their bud nibbles arrive swapped, message
+    // after message. Before the order is proved the pair is compared unordered, so the swap is no change and the file
+    // is not rewritten for it.
+    [TestMethod]
+    public async Task TwoBudsAlternatingWriteTheClaimToDiskOnce()
+    {
+        var store = NewClaimStore();
+        store.Save(SampleClaim(new OwnedBattery(4, 7, 3, _clock.GetUtcNow())));
+        await store.IdleAsync();
+        int baseline = store.DiskWriteCount;
+        using WidgetStatusService service = NewService(store);
+        service.Start();
+
+        for (int i = 0; i < 20; i++)
+        {
+            _clock.Advance(TimeSpan.FromSeconds(1));
+            byte batteryA = i % 2 == 0 ? (byte)0x74 : (byte)0x47;
+            uint sender = i % 2 == 0 ? 1u : 2u;
+            _source.Raise(new AdvertisementSample(
+                ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(status: (byte)(i % 2 == 0 ? 0x40 : 0x60), batteryA: batteryA, batteryB: 0x03), -60, _clock.GetUtcNow(), sender));
+        }
+
+        await store.IdleAsync();
+
+        Assert.AreEqual(20, service.Current.Counters.Owned, "Both buds' senders are owned.");
+        Assert.AreEqual(0, store.DiskWriteCount - baseline, "The swap of the two bud nibbles is not a change of battery.");
+    }
+
     // Same 20 identical adverts, but the file cannot be written at all: one save is attempted (and logged),
     // not twenty, because the service never even asks the store to save the 19 that changed nothing.
     [TestMethod]
@@ -1651,25 +1679,17 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNotNull(store.Current, "The case is still set up.");
     }
 
-    // A short-form-only candidate: the record and its captures are kept, nothing is claimed, and an existing
-    // claim is left alone.
+    // A listen whose candidate sent only forms the parser does not read (what an earlier build could return): the
+    // record and its captures are kept, nothing is claimed, and an existing claim is left alone.
     [TestMethod]
-    public async Task ShortFormOnlyWritesARecordAndNoClaim()
+    public void ShortFormOnlyWritesARecordAndNoClaim()
     {
         var store = NewClaimStore();
         DecodeProofStore proof = NewProof();
         using WidgetStatusService service = NewService(store, proof: proof);
         service.Start();
 
-        Task<BatterySetupListen> listening = service.ListenForSetupAsync(CancellationToken.None);
-        for (int i = 0; i < 4; i++)
-        {
-            _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), -55, _clock.GetUtcNow(), SenderTag: 5));
-        }
-
-        _clock.Advance(WidgetTiming.SetupListenWindow);
-        BatterySetupListen listen = await listening;
-        Assert.AreEqual(BatterySetupListenStatus.ShortFormOnly, listen.Status);
+        BatterySetupListen listen = ShortFormListen();
         BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80));
 
         Assert.AreEqual(BatterySetupResultStatus.CouldNotRead, result.Status);
@@ -1684,16 +1704,43 @@ public sealed class WidgetStatusServiceTests : IDisposable
         // The same again with a claim already there: the claim is left alone.
         store.Save(SampleClaim(new OwnedBattery(1, 2, 3, _clock.GetUtcNow())));
         WidgetClaim before = store.Current!;
-        Task<BatterySetupListen> again = service.ListenForSetupAsync(CancellationToken.None);
+        _clock.Advance(WidgetTiming.SetupListenWindow);
+        service.CompleteSetup(ShortFormListen(), SetupRecordFixtures.Picks(40, 80));
+
+        Assert.AreEqual(before, store.Current, "A set-up that read nothing does not touch an existing claim.");
+    }
+
+    private BatterySetupListen ShortFormListen()
+    {
+        DateTimeOffset end = _clock.GetUtcNow();
+        BatterySetupCapture capture = new(end, -55, 0x06, 17, Convert.ToHexString(WidgetFixtures.UnknownSeventeenByteForm()[2..]));
+        var candidate = new BatterySetupCandidate(
+            Messages: 4, OkFormMessages: 0, OtherFormMessages: 4, RssiMin: -55, RssiMedian: -55, RssiMax: -55, ThresholdDbm: -65,
+            Captures: [capture, capture, capture, capture], LastOkMessage: null);
+        return new BatterySetupListen(BatterySetupListenStatus.ShortFormOnly, string.Empty, candidate, [], end.AddSeconds(-20), end, 4, 4);
+    }
+
+    // The short form is never the candidate: with nothing else heard, the window found no AirPods and nothing is written.
+    [TestMethod]
+    public async Task OnlyShortFormSendersAreNotFoundAtTheService()
+    {
+        var store = NewClaimStore();
+        DecodeProofStore proof = NewProof();
+        using WidgetStatusService service = NewService(store, proof: proof);
+        service.Start();
+
+        Task<BatterySetupListen> listening = service.ListenForSetupAsync(CancellationToken.None);
         for (int i = 0; i < 4; i++)
         {
             _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), -55, _clock.GetUtcNow(), SenderTag: 5));
         }
 
         _clock.Advance(WidgetTiming.SetupListenWindow);
-        service.CompleteSetup(await again, SetupRecordFixtures.Picks(40, 80));
+        BatterySetupListen listen = await listening;
 
-        Assert.AreEqual(before, store.Current, "A set-up that read nothing does not touch an existing claim.");
+        Assert.AreEqual(BatterySetupListenStatus.NotFound, listen.Status);
+        Assert.AreEqual(WidgetCopy.SetupNotFound, listen.Message);
+        Assert.IsNull(store.Current);
     }
 
     // Set-up ends with the case unreadable and the buds unproved: nothing at all can be shown, and the last step

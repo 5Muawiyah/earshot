@@ -51,7 +51,15 @@ public sealed class GaugeEventLogTests
         Assert.AreEqual("Gauge raised: the poll found Chrome_WidgetWin_1 over it.", GaugeEventLog.RaisedByPoll(Chrome));
         Assert.AreEqual("Gauge raised: the poll found an unknown window over it.", GaugeEventLog.RaisedByPoll(null));
         Assert.AreEqual("Gauge left under Chrome_WidgetWin_1 after a foreground change: not the taskbar.", GaugeEventLog.LeftUnder("Chrome_WidgetWin_1"));
-        Assert.AreEqual("Gauge raise cap reached; waiting for a poll to confirm.", GaugeEventLog.RaiseCapReached());
+        Assert.AreEqual("Gauge raise limit reached (4 in 1 s); the next check will try again.", GaugeEventLog.RaiseCapReached(4, 1));
+        Assert.AreEqual(
+            "Gauge raised: Shell_TrayWnd (Explorer) was over it after Explorer showed a window of class ControlCenterWindow.",
+            GaugeEventLog.RaisedAfterShellWindow(new WindowIdentity("Shell_TrayWnd", true), "ControlCenterWindow", shown: true));
+        Assert.AreEqual(
+            "Gauge raised: Shell_TrayWnd (Explorer) was over it after Explorer hid a window of class ControlCenterWindow.",
+            GaugeEventLog.RaisedAfterShellWindow(new WindowIdentity("Shell_TrayWnd", true), "ControlCenterWindow", shown: false));
+        Assert.AreEqual("Gauge raised: Shell_TrayWnd (Explorer) was over it on a recheck.", GaugeEventLog.RaisedOnRecheck(new WindowIdentity("Shell_TrayWnd", true)));
+        Assert.AreEqual("Gauge left under Windows.UI.Core.CoreWindow: not the taskbar.", GaugeEventLog.LeftUnderOtherwise("Windows.UI.Core.CoreWindow"));
     }
 
     [TestMethod]

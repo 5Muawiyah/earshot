@@ -31,6 +31,19 @@ internal static class SetupRecordFixtures
             [new BatterySetupSenderSummary(4, 4, -79)], picks);
     }
 
+    // A usable Found record of a set that was two senders (one per bud): each sender's newest message is kept, the second
+    // being the newest of all. The two buds' messages read the same levels in opposite order.
+    public static BatterySetupRecord MergedRecord(ProximityMessage first, ProximityMessage second, BatterySetupPicks picks, int minutes = 0)
+    {
+        DateTimeOffset end = Start.AddMinutes(minutes);
+        var candidate = new BatterySetupCandidate(
+            Messages: 8, OkFormMessages: 8, OtherFormMessages: 0, RssiMin: -60, RssiMedian: -58, RssiMax: -55, ThresholdDbm: -70,
+            Captures: [], LastOkMessage: second, SenderTags: ["00000001", "00000002"], SenderLastOkMessages: [first, second]);
+        return new BatterySetupRecord(
+            1, end.AddSeconds(-20), end, BatterySetupListenStatus.Found, "1.1.0", 40, 12, candidate,
+            [new BatterySetupSenderSummary(4, 4, -79)], picks);
+    }
+
     // A record whose candidate sent only forms the parser does not read: no message to decode.
     public static BatterySetupRecord ShortFormRecord(BatterySetupPicks picks, int minutes = 0)
     {
