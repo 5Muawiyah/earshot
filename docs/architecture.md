@@ -249,18 +249,24 @@ device, and it is stopped and restarted around sleep.
 **Battery set-up and proof.** The message's battery, charging, in-ear and lid
 fields are held as unproved until the owner's own set-ups prove them. **Set up
 battery** (on the card and in the menu) listens for 20 seconds while the owner
-opens the case by the PC. It picks the one sender it treats as the case: the
-strongest by median signal, with at least three messages, and ten decibels
-clear of the next. It sets the signal threshold ten decibels under that
-sender's weakest message. Those three figures are design choices held as named
+opens the case by the PC. Only senders of the documented message form are
+candidates; senders of other forms (a nearby iPhone sends one) are kept as
+evidence and never compete. The two buds of one set broadcast from two
+addresses, with the bud values in swapped order, so senders with the same
+model, colour and case value, and the same two bud values in either order
+within two seconds, are merged into one set. It picks the one set it treats as
+yours: the strongest by median signal, with at least three messages, and ten
+decibels clear of the next set. It sets the signal threshold ten decibels under
+that set's weakest message. Those three figures are design choices held as named
 constants (`SetupRules`), not facts about the device. The owner then answers
 three pickers (left bud, right bud, case, in steps of 10) and a Charging
 toggle for each, to match what the iPhone shows.
 
 What one set-up saw is kept as a record under `%LOCALAPPDATA%\Earshot\widget`,
 written once and never replaced. A message of the documented form is kept as
-its first nine bytes only. There is no field for a device address, a sender
-tag or a name. The picker values are evidence for `DecodeProof` and are never
+its first nine bytes only. Each sender is named by a tag, a hash of its
+address under a key made for that listen and never stored, so no address is
+kept. There is no field for a name. The picker values are evidence for `DecodeProof` and are never
 shown as a reading.
 
 `DecodeProof` works out, from the records alone, which fields can be read, and

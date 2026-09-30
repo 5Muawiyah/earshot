@@ -349,8 +349,9 @@ Connect or Disconnect button.
 proved) and in the menu. It has three steps.
 
 1. **Open your AirPods case next to this PC.** Earshot listens for 20 seconds
-   and looks for one sender it can call your case: the strongest, with at
-   least three messages, and clearly stronger than the next. If it hears none,
+   and looks for one set it can call yours: your two buds count as one set,
+   and messages from a nearby iPhone are ignored. It takes the strongest set,
+   with at least three messages, clearly stronger than any other. If it hears none,
    it says "Couldn't find your AirPods"; if more than one set is near, "More
    than one set of AirPods is near". If Bluetooth is off it says so.
 2. **What does your iPhone show?** Three pickers, left bud, right bud and
