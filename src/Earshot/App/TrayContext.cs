@@ -992,6 +992,14 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
+        if (_handOverDeviceWorkDone)
+        {
+            // The closing work for an update has run and the administrator prompt may still be up: a hand-back or a block now
+            // would be a device call made beside the install the prompt starts.
+            _log.Info("Session ending: nothing is sent, because the closing work for the update is done.");
+            return;
+        }
+
         _coordinator.OnSessionEnding(e);
 
         // WM_ENDSESSION with the session really ending: the streaming connection is let go now, without waiting,
@@ -1080,6 +1088,12 @@ internal sealed partial class TrayContext : ApplicationContext
     {
         if (_closed)
         {
+            return;
+        }
+
+        if (_handOverDeviceWorkDone)
+        {
+            _log.Info("Power change (" + e.Kind + "): nothing is sent, because the closing work for the update is done.");
             return;
         }
 

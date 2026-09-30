@@ -35,6 +35,11 @@ internal sealed partial class TrayContext
     // elevated program has started, or when starting it failed.
     private bool _closedForHandOver;
 
+    // The closing device work for the hand-over has finished. From here no session end, sleep or resume makes a device call,
+    // because the administrator prompt can stay up for as long as the person likes and the install it starts replaces the
+    // program's files, the tasks and the service.
+    private bool _handOverDeviceWorkDone;
+
     private TimeSpan _elevatedExitWait = TimeSpan.FromSeconds(90);
 
     // The elevated operation under way, for the menu, the card and tests.
@@ -151,6 +156,8 @@ internal sealed partial class TrayContext
         _coordinator.BeginShutdown(PrepareExitHandBack());
         _lifetime.Cancel();
         string? notice = await FinishClosingWorkAsync(place, exceptAction: IsElevatedFlowAction);
+        _handOverDeviceWorkDone = true;
+        _coordinator.EndDeviceWork();
         if (notice is not null)
         {
             _log.Info("Update: " + notice);
