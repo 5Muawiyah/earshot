@@ -1025,7 +1025,9 @@ internal sealed partial class WidgetCard : Form
             g.FillPath(brush, glyph);
         }
 
-        if (part.InEar == true)
+        // Like the figure, the mark is of the part's shown reading (connected, linked): a raw value of the snapshot that is not
+        // shown must not be drawn, and nothing decodes an in-ear bit today, so this is only ever a guard.
+        if (shown.HasValue && part.InEar == true)
         {
             DrawInEarMark(g, column.Glyph, mirror);
         }

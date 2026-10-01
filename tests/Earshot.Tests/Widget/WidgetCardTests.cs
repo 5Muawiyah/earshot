@@ -57,6 +57,36 @@ public sealed class WidgetCardTests
     // The head (an ellipse) and the stem (a rounded rectangle) overlap where the stem meets the head:
     // FillMode.Alternate (the GraphicsPath default) XORs that overlap into a hole instead of filling it
     // solid, which FillMode.Winding fixes.
+    // The in-ear mark is part of what is shown of a bud, so it follows the same rule as the figure: nothing for AirPods that are not
+    // connected to this PC, whatever the raw snapshot still says of the bud. (No documented bit says a bud is in the ear, so
+    // nothing decodes one today; this holds the card to the rule for the day something does.)
+    [TestMethod]
+    public void TheInEarMarkIsDrawnOnlyForABudWhoseReadingIsShown()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
+
+            Bitmap Draw(AirPodsWhere where, bool? inEar)
+            {
+                using var card = new WidgetCard(new CapturingLog());
+                card.SetTheme(Color.Black, highContrast: false);
+                WidgetSnapshot snapshot = Snapshot(where, left: new PartReading(80, false, inEar) { ReadAt = now }, readAt: now);
+                card.Render(Model(snapshot), 96);
+                return Render(card);
+            }
+
+            using Bitmap awayWithMark = Draw(AirPodsWhere.NotInUse, true);
+            using Bitmap awayWithout = Draw(AirPodsWhere.NotInUse, null);
+            using Bitmap hereWithMark = Draw(AirPodsWhere.ThisPc, true);
+            using Bitmap hereWithout = Draw(AirPodsWhere.ThisPc, null);
+
+            Assert.IsTrue(SamePixels(awayWithMark, awayWithout, layout.Left.Glyph), "Not connected: no mark is drawn for the bud.");
+            Assert.IsFalse(SamePixels(hereWithMark, hereWithout, layout.Left.Glyph), "Connected with the reading shown: the mark is drawn.");
+        });
+    }
+
     [TestMethod]
     public void TheBudGlyphHasNoHoleWhereTheHeadAndStemMeet()
     {
@@ -1086,6 +1116,22 @@ public sealed class WidgetCardTests
     }
 
     private static bool HasInk(Bitmap bitmap, Rectangle rect, Color background) => CountInk(bitmap, rect, background) > 0;
+
+    private static bool SamePixels(Bitmap first, Bitmap second, Rectangle rect)
+    {
+        for (int y = rect.Top; y < rect.Bottom; y++)
+        {
+            for (int x = rect.Left; x < rect.Right; x++)
+            {
+                if (first.GetPixel(x, y) != second.GetPixel(x, y))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
 
     private static int CountInk(Bitmap bitmap, Rectangle rect, Color background)
     {
