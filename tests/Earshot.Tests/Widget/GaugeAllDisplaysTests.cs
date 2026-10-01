@@ -797,6 +797,9 @@ public sealed class GaugeAllDisplaysTests
 
         public SecondaryGaugeSet Set { get; }
 
+        // Called as each reader is built, for a test that has the set asked to reconcile again while it is part way through.
+        public Action? OnReaderBuilt { get; set; }
+
         // The taskbar over a gauge on another display is that display's own, a Shell_SecondaryTrayWnd.
         public SetRig(bool deferred = false)
         {
@@ -810,6 +813,7 @@ public sealed class GaugeAllDisplaysTests
                         Readers.Add(reader);
                     }
 
+                    OnReaderBuilt?.Invoke();
                     return reader;
                 },
                 () =>
@@ -885,6 +889,51 @@ public sealed class GaugeAllDisplaysTests
 
         rig.Set.Reconcile(wanted: false);
         Assert.AreEqual(0, rig.Set.Count);
+    }
+
+    // A reconcile asked for while one is running (a display change arriving during a wait on the UI thread) is run after it, not
+    // inside it: run inside, it adds the gauge the outer pass has not stored yet, and the outer pass then stores another over it.
+    [TestMethod]
+    public void AReconcileAskedForWhileOneIsRunningIsRunAfterItAndLeavesNoGaugeRunningWithNothingToStopIt()
+    {
+        using var rig = new SetRig();
+        bool asked = false;
+        rig.OnReaderBuilt = () =>
+        {
+            if (!asked)
+            {
+                asked = true;
+                rig.Set.Reconcile(wanted: true);
+            }
+        };
+
+        rig.Set.Reconcile(wanted: true);
+
+        CollectionAssert.AreEquivalent(new[] { IdTwo, IdThree }, rig.Set.Gauges.Select(g => g.DisplayId).ToArray());
+        Assert.AreEqual(2, rig.Readers.Count, "Each gauge was built once: a third reader is a gauge that was stored over and never stopped.");
+
+        rig.Set.Reconcile(wanted: false);
+        Assert.AreEqual(0, rig.Set.Count);
+    }
+
+    [TestMethod]
+    public void AReconcileThatTheSettingEndedWhileOneWasRunningEndsWithNoGauges()
+    {
+        using var rig = new SetRig();
+        bool asked = false;
+        rig.OnReaderBuilt = () =>
+        {
+            if (!asked)
+            {
+                asked = true;
+                rig.Set.Reconcile(wanted: false);
+            }
+        };
+
+        rig.Set.Reconcile(wanted: true);
+
+        Assert.AreEqual(0, rig.Set.Count, "The newest answer was that no gauge is wanted.");
+        Assert.IsTrue(rig.Surfaces.All(s => s.IsDisposed), "No window is left behind.");
     }
 
     [TestMethod]

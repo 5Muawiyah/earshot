@@ -17,6 +17,9 @@ internal sealed class SecondaryGaugeSet : IDisposable
     private readonly Func<SecondaryTaskbarReading> _taskbars;
     private readonly Dictionary<string, SecondaryGauge> _gauges = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
+    private bool _reconciling;
+    private bool _reconcileAgain;
+    private bool _wantedNext;
 
     public SecondaryGaugeSet(SecondaryGaugeParts parts, IDisplaySource displays, Func<SecondaryTaskbarReading> taskbars)
     {
@@ -43,6 +46,11 @@ internal sealed class SecondaryGaugeSet : IDisposable
 
     // Adds the gauges for displays that have a taskbar now and removes the rest. wanted false (Gauge display is not All displays)
     // removes every gauge.
+    //
+    // A wait on the UI thread (stopping a removed gauge's watcher) lets messages in, and WM_DISPLAYCHANGE among them asks for
+    // another Reconcile while this one is part way through. That one is not run inside this one, which would add a gauge this
+    // pass has not stored yet a second time and leave the first running with nothing to stop it: it is noted, and this pass
+    // goes round again with the newest answer once it is done.
     public void Reconcile(bool wanted)
     {
         if (_disposed)
@@ -50,6 +58,33 @@ internal sealed class SecondaryGaugeSet : IDisposable
             return;
         }
 
+        if (_reconciling)
+        {
+            _reconcileAgain = true;
+            _wantedNext = wanted;
+            return;
+        }
+
+        _reconciling = true;
+        try
+        {
+            bool current = wanted;
+            do
+            {
+                _reconcileAgain = false;
+                ReconcileOnce(current);
+                current = _wantedNext;
+            }
+            while (_reconcileAgain && !_disposed);
+        }
+        finally
+        {
+            _reconciling = false;
+        }
+    }
+
+    private void ReconcileOnce(bool wanted)
+    {
         if (!wanted)
         {
             RemoveWhere(static _ => true, "Gauge display is no longer All displays");
