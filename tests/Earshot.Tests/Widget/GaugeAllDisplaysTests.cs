@@ -333,6 +333,28 @@ public sealed class GaugeAllDisplaysTests
             NotificationArea: tray, DisplayCount: 2, ForegroundWindow: null, IsSecondary: secondary, DisplayLabel: "Display " + display.DeviceName[^1], DisplayFallback: fallback);
     }
 
+    // Runs what the UI thread has been posted for a while, which a sleep does not: a read of the main taskbar reaches the tray, and the
+    // other gauges are matched to the displays, only when this thread pumps.
+    private static void PumpFor(TimeSpan span)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (watch.Elapsed < span)
+        {
+            Application.DoEvents();
+            Thread.Sleep(1);
+        }
+    }
+
+    // Pumps until the main taskbar has been read at least this many more times and the tray has handled the reads, each of which
+    // matches the other gauges to the displays and taskbars there are. Fails when the reads do not come, so a test that waits for
+    // something not to happen has seen the tray look.
+    private static void PumpThroughMainReads(Rig rig, int reads)
+    {
+        int target = rig.Tray.TaskbarReaders[0].ReadCount + reads;
+        TrayHarness.PumpUntil(() => rig.Tray.TaskbarReaders[0].ReadCount >= target, "The main taskbar was not read " + reads + " more times.");
+        PumpFor(TimeSpan.FromMilliseconds(50));
+    }
+
     private static string Why(Rig rig) => string.Join(" | ", rig.Tray.Log.Entries.TakeLast(25).Select(e => e.Message)) + " readers=" + rig.Tray.TaskbarReaders.Count + " surfaces=" + string.Join(",", rig.Surfaces.Select(s => s.Bounds?.ToString() ?? "none"));
 
     private static ForegroundWindowReading Game(Rectangle monitor, string label) =>
@@ -472,9 +494,9 @@ public sealed class GaugeAllDisplaysTests
             Assert.IsTrue(second.IsDisposed, "The removed display's gauge window is disposed.");
             Assert.AreEqual(0, rig.Tray.Context.SecondaryGaugeCountForTest);
             Assert.IsFalse(rig.ShownOn(Left1080)!.IsDisposed, "The main display's gauge is left alone.");
-            Thread.Sleep(150);
+            PumpFor(TimeSpan.FromMilliseconds(150));
             int reads = reader.ReadCount;
-            Thread.Sleep(250);
+            PumpFor(TimeSpan.FromMilliseconds(250));
             Assert.AreEqual(reads, reader.ReadCount, "Its taskbar is no longer being read.");
             Assert.IsTrue(rig.Tray.Log.Has(LogLevel.Info, "the gauge for Display 2 is removed"));
         });
@@ -513,9 +535,7 @@ public sealed class GaugeAllDisplaysTests
 
             rig.Taskbars.SetProblem(StepOutcomes.FromWin32("get-window-rect:Shell_SecondaryTrayWnd", 1400, ok: false));
             rig.Taskbars.Set();
-            var pumpWatch = System.Diagnostics.Stopwatch.StartNew(); int mainReads = rig.Tray.TaskbarReaders[0].ReadCount;
-            while (pumpWatch.ElapsedMilliseconds < 400) { Application.DoEvents(); Thread.Sleep(1); }
-            Assert.IsTrue(rig.Tray.TaskbarReaders[0].ReadCount > mainReads + 3, "main reads did not run");
+            PumpThroughMainReads(rig, 4);
 
             Assert.AreEqual(1, rig.Tray.Context.SecondaryGaugeCountForTest, "A taskbar missing because it could not be read is not a taskbar that is gone.");
             Assert.IsFalse(rig.ShownOn(Right1080)!.IsDisposed);
@@ -540,9 +560,9 @@ public sealed class GaugeAllDisplaysTests
             Assert.AreEqual(1, rig.Surfaces.Count(s => !s.IsDisposed), "Exactly one gauge is left.");
             Assert.IsFalse(rig.ShownOn(Left1080)!.IsDisposed);
             Assert.AreEqual("", rig.Tray.Settings.Current.Widget.GaugeDisplay);
-            Thread.Sleep(150);
+            PumpFor(TimeSpan.FromMilliseconds(150));
             int reads = reader.ReadCount;
-            Thread.Sleep(250);
+            PumpFor(TimeSpan.FromMilliseconds(250));
             Assert.AreEqual(reads, reader.ReadCount, "No gauge is left reading the other taskbar.");
 
             rig.Tray.Context.WidgetCardHostForTest.SetGaugeDisplay(GaugeDisplayChoice.AllDisplays, CardPlace.NearTray);
@@ -576,7 +596,7 @@ public sealed class GaugeAllDisplaysTests
         {
             using Rig rig = StartRigCore(GaugeDisplayChoice.AllDisplays, secondaryBars: false, [One, Two]);
             TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null, "The main gauge was never shown.");
-            Thread.Sleep(200);
+            PumpThroughMainReads(rig, 4);
 
             Assert.AreEqual(0, rig.Tray.Context.SecondaryGaugeCountForTest);
             Assert.AreEqual(1, rig.Tray.TaskbarReaders.Count, "No second reader was built.");
@@ -591,7 +611,7 @@ public sealed class GaugeAllDisplaysTests
         {
             using Rig rig = StartRig(GaugeDisplayChoice.AllDisplays, One);
             TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null, "The main gauge was never shown.");
-            Thread.Sleep(200);
+            PumpThroughMainReads(rig, 4);
 
             Assert.AreEqual(0, rig.Tray.Context.SecondaryGaugeCountForTest);
             Assert.AreEqual(1, rig.Surfaces.Count);
