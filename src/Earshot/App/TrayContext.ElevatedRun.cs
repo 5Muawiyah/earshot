@@ -208,7 +208,7 @@ internal sealed partial class TrayContext
             return;
         }
 
-        // Started again only when this process is not elevated: a program it starts has its token, and Earshot never runs elevated.
+        // Started again only when this process is not elevated: a program it starts has its token, and Earshot is never started with more than the user's own token.
         _log.Info("Update: the elevated program did not start, so Earshot ends" + (_isElevated() ? "." : " and starts again."));
         if (_updateRunningExe is { } running && !_isElevated())
         {

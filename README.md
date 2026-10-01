@@ -156,8 +156,11 @@ What to know before you trust a number:
 - **The risk that remains.** A pair of the same model that opens its case next to
   the PC more strongly than yours can be linked instead, and one whose levels
   equal yours, heard within 30 seconds of yours going quiet, can be followed as if
-  it were yours. I accept that risk, and you should know it is there. Opening your
-  own case at least 8 dB stronger takes the link back.
+  it were yours. Once your pair has been unheard for more than 10 seconds (the
+  case shut, or the buds out of range), any pair of the same model that opens its
+  case at -70 dBm or stronger is linked at once, with no 8 dB margin to clear.
+  I accept that risk, and you should know it is there. Opening your own case at
+  least 8 dB stronger takes the link back.
 - **Only while connected.** Nothing is shown for AirPods that are not connected
   to this PC: not as current and not greyed. Windows' own figure follows the same
   rule.

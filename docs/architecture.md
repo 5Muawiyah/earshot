@@ -290,10 +290,11 @@ colour is learned and held. The figures are named constants in
 `BroadcastRules` (`src/Earshot/Widget/BroadcastSenderSets.cs`), and they are
 design choices, not facts about the device. -70 dBm comes from the saved
 records of the owner's pair with both buds in the case and the lid open (the 30
-September capture and two set-up records of 1 October, about 300 messages): the
-median over each window of five messages ran from -72 to -51 dBm, the middle
-window of each record was -61 to -58, and 95% of the weakest record's windows
-were above -70. A pair worn nearby on the evening of 1 October, which was shown
+September capture and two set-up records of 1 October, about 300 case-known
+messages): the median over each run of five consecutive messages (both buds together,
+in time order) ran from -72 to -51 dBm, the run in the middle of each record read -54,
+-61 and -58, and about 95% of the weakest record's runs were above -70. A test replays
+those three records and holds these figures. A pair worn nearby on the evening of 1 October, which was shown
 as the owner's, read -64 to -76 dBm with the case level unknown. So no level
 separates the owner from a same-model stranger who opens a case at the same
 distance. The level only keeps out a pair that is not next to the PC.
@@ -331,8 +332,12 @@ or dropped, with counts only.
 **The accepted risk.** A same-model pair that opens its case next to the PC more
 strongly than the owner's can be linked instead, and a same-model pair whose
 fields equal the linked set's last, heard within 30 seconds of it going quiet, can
-be followed as if it were the owner's. Both need a stranger of the same model
-(and, once one is held, the same colour) to be close and to match. This is an
+be followed as if it were the owner's. And once the linked pair has been unheard
+for more than ten seconds (the case shut, or the buds out of range), any same-model
+pair that opens its case at -70 dBm or stronger is linked at once, with no margin to
+clear: the 8 dB margin is asked only while an anchor of the linked set has been heard
+inside the ten second window. These need a stranger of the same model
+(and, once one is held, the same colour) to be close and, for the first two, to match. This is an
 owner decision, not an oversight: the owner accepted that risk rather than ask for
 a set-up step to rule it out. There is no consistency check against another
 device.
@@ -773,7 +778,9 @@ an elevated process to run a program with the user's own interactive token and t
 least run level. It is registered as `\Earshot\StartTray` (the folder only
 administrators and SYSTEM can write, read again first and refused if anyone else
 could write it) with the user's SID, `TASK_LOGON_INTERACTIVE_TOKEN` and
-`TASK_RUNLEVEL_LUA`, one `Exec` action (the installed `Earshot.exe`, no arguments:
+`TASK_RUNLEVEL_LUA` (least privilege: the tray gets the user's own token and no more, and nothing here
+elevates it; with User Account Control off, or for the built-in Administrator, that token is already an
+administrator's and this does not lower it), one `Exec` action (the installed `Earshot.exe`, no arguments:
 it is a start by hand, so the tray does not treat it as the start at sign-in), no
 trigger, no time limit (`PT0S`, or the scheduler would end the tray after its default
 three days), normal task priority, and security that lets the user read the task
@@ -1011,8 +1018,8 @@ ends with one line: `Earshot: done.` or `Earshot: stopped.` and the reason. It
 never uses `exit`, which would close the person's window when run through
 `iex`.
 
-**What it does, in order.** It refuses an administrator shell, because the
-tray must never run elevated. It reads the latest release once, with
+**What it does, in order.** It refuses an administrator shell, because a tray
+started from it would hold an elevated token the user's own sign-in does not give it. It reads the latest release once, with
 PowerShell's own default headers. It downloads that release's zip and its
 `.sha256` into a new folder under `%TEMP%` with a progress bar (plain percent
 lines when output is redirected), and checks the zip's SHA-256 before anything

@@ -123,7 +123,9 @@ internal static class TaskPlan
     }
 
     // The tray's start task: the installed Earshot.exe with no arguments, for the user, with their interactive token and the
-    // least run level, so what it starts is never elevated. PT0S is no time limit: the default limit of a task is three
+    // least run level, so what it starts has the user's own privilege and no more: nothing here elevates it. (With User
+    // Account Control off, or for the built-in Administrator, the user's own token is already an administrator's, and the
+    // least run level does not lower it.) PT0S is no time limit: the default limit of a task is three
     // days, after which the scheduler would end a tray started by it. Only on demand (no trigger), and the user may read it
     // and nothing more.
     public static TaskSpec TrayStartSpec(string installFolder, string userSid)

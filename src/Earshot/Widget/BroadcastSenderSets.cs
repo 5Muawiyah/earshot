@@ -42,8 +42,10 @@ internal static class BroadcastRules
     public static readonly TimeSpan LinkSpan = TimeSpan.FromSeconds(2);
 
     // A linked set that is not heard under any of its addresses is followed to a set that continues its last fields
-    // (the same model, colour, case level and bud levels) only while the last value from the old address is still
-    // current: BatteryFreshness.FreshWindow. After that the new address is not taken to be the old, whatever it says.
+    // (Continues: the same model, colour and two bud levels, and the same case level unless either message gives none, since
+    // the case level comes and goes as the buds leave the case and return) only within this long of its last message, the
+    // freshness window of a value (BatteryFreshness.FreshWindow). After that the new address is not taken to be the old,
+    // whatever it says.
     public static readonly TimeSpan ContinueWithin = TimeSpan.FromSeconds(30);
 
     // The set that continues has to have been heard this long, with MinMessages in the window, so one passing message

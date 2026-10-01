@@ -420,6 +420,71 @@ public sealed class OwnerCaptureReplayTests
         }
     }
 
+    // The signal of each documented-form message that carries a case level (a bud in the case with the lid open), in time order,
+    // senders together: what the near-the-PC level of BroadcastRules.LinkThresholdDbm is a median of.
+    private static List<int> CaseKnownSignals(IReadOnlyList<ReplayMessage> messages)
+    {
+        var signals = new List<int>();
+        foreach (ReplayMessage message in messages.OrderBy(m => m.At))
+        {
+            ProximityParse parse = ProximityParser.Parse(ProximityParser.AppleCompanyId, message.Section);
+            if (parse.Status == ProximityParseStatus.Ok && parse.Message is ProximityMessage m && BroadcastSenderSets.CaseKnown(m))
+            {
+                signals.Add(message.Rssi);
+            }
+        }
+
+        return signals;
+    }
+
+    // The median of every run of LinkMessages consecutive signals.
+    private static List<int> WindowMedians(List<int> signals)
+    {
+        var medians = new List<int>();
+        for (int i = 0; i + BroadcastRules.LinkMessages <= signals.Count; i++)
+        {
+            medians.Add(signals.Skip(i).Take(BroadcastRules.LinkMessages).Order().ElementAt(BroadcastRules.LinkMessages / 2));
+        }
+
+        return medians;
+    }
+
+    // The figures the documents give for -70 dBm, held to the saved records they were taken from, by name: the 30 September
+    // capture and the two set-up records of 1 October, each the owner's pair with both buds in the case and the lid open. About 300
+    // case-known messages; the median over every run of five of them (senders together, in time order) ran from -72 to -51 dBm;
+    // the run in the middle of each record read -61, -58 or -54; and about 95% of the weakest record's runs were above -70.
+    // Inconclusive where the files are not (the hosted build).
+    [TestMethod]
+    public void TheLinkThresholdFiguresInTheDocumentsHoldForTheThreeSavedRecordsTheyWereTakenFrom()
+    {
+        IReadOnlyList<string> setups = OwnerCaptureReplay.SetupRecordFiles();
+        IReadOnlyList<ReplayMessage>? capture = OwnerCaptureReplay.LoadCapture(Path.Combine(OwnerCaptureReplay.PhaseZeroFolder, OwnerCaptureReplay.BaselineCaptureName));
+        if (setups.Count != OwnerCaptureReplay.PinnedSetupRecordNames.Length || capture is null)
+        {
+            Assert.Inconclusive("The capture and the two set-up records the figures were taken from are not all on this machine.");
+        }
+
+        var records = new List<(string Name, List<int> Signals)>();
+        foreach (string file in setups)
+        {
+            records.Add((Path.GetFileName(file), CaseKnownSignals(OwnerCaptureReplay.LoadSetupRecord(file)!)));
+        }
+
+        records.Add((OwnerCaptureReplay.BaselineCaptureName, CaseKnownSignals(capture!)));
+
+        int total = records.Sum(r => r.Signals.Count);
+        Assert.IsTrue(total is >= 290 and <= 300, "About 300 case-known messages in all, not " + total + ".");
+
+        var windows = records.Select(r => (r.Name, Medians: WindowMedians(r.Signals))).ToList();
+        Assert.AreEqual(-72, windows.Min(w => w.Medians.Min()), "The weakest window's median.");
+        Assert.AreEqual(-51, windows.Max(w => w.Medians.Max()), "The strongest window's median.");
+        CollectionAssert.AreEqual(new[] { -54, -61, -58 }, windows.Select(w => w.Medians[w.Medians.Count / 2]).ToArray(), "The middle window of each record, in the order they are named above.");
+
+        (string weakestName, List<int> weakest) = windows.OrderBy(w => w.Medians.Min()).Select(w => (w.Name, w.Medians)).First();
+        double above = weakest.Count(m => m > -70) / (double)weakest.Count;
+        Assert.IsTrue(above is >= 0.94 and <= 0.96, weakestName + ": " + above.ToString("P1", CultureInfo.InvariantCulture) + " of its windows were above -70 dBm, and the documents say about 95%.");
+    }
+
     [TestMethod]
     public void AShortFormSenderIsCountedAsUnknownAndNeverChosen()
     {

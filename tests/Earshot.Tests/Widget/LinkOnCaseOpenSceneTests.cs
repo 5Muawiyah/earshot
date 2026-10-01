@@ -125,6 +125,18 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         }
     }
 
+    // A same-model pair opens its own case: 70% in each bud, 60% in the case, both buds sending about four times a second.
+    private void StrangerOpensTheCase(double seconds, sbyte rssi)
+    {
+        int steps = (int)Math.Round(seconds / 0.25);
+        for (int i = 0; i <= steps; i++)
+        {
+            bool one = i % 2 == 0;
+            Raise(one ? StrangerBud : StrangerOtherBud, BroadcastFixtures.Bud(one, caseNibble: 0x6, pairHigh: 0x7, pairLow: 0x7), rssi);
+            Tick(0.25);
+        }
+    }
+
     private ShownBattery Shown(WidgetStatusService service) => BatteryFreshness.Shown(service.Current, _clock.GetUtcNow());
 
     private GaugeContent Gauge(WidgetStatusService service) =>
@@ -181,6 +193,39 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
     }
 
     // ---- Linking on a case open
+
+    // The risk the documents state: while the linked pair has been heard inside the ten second window another pair has to open
+    // its case 8 dB nearer to take the link, and once the linked pair has been unheard for more than ten seconds any pair of the
+    // same model that opens its case at -70 dBm or stronger is linked, with no margin to clear.
+    [TestMethod]
+    public void AStrangersCaseOpenedWhileTheOwnersPairWasHeardInTheLastTenSecondsDoesNotTakeTheLinkWithoutTheMargin()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Connect();
+        OpenTheCase(seconds: 3);
+        Tick(5);
+
+        StrangerOpensTheCase(seconds: 3, rssi: -70);
+
+        Assert.AreEqual(100, Shown(service).Left.Percent, "Still the owner's: its last message was only a few seconds ago and the stranger is 15 dB weaker.");
+    }
+
+    [TestMethod]
+    public void AStrangersCaseOpenedAfterTheOwnersPairWentQuietForMoreThanTenSecondsIsLinkedWithNoMargin()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Connect();
+        OpenTheCase(seconds: 3);
+        Assert.AreEqual(100, Shown(service).Left.Percent, "Sanity: the owner's pair is linked.");
+        Tick(11);
+
+        StrangerOpensTheCase(seconds: 3, rssi: -70);
+
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        Assert.AreEqual(70, Shown(service).Left.Percent, "The stranger's pair is the linked one: 15 dB weaker than the owner's was, and no margin was asked.");
+    }
 
     [TestMethod]
     public void ACaseOpenBurstFromTheOwnersPairLinksItAndShowsLeftRightAndCase()
