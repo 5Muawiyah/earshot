@@ -354,6 +354,9 @@ public sealed class WidgetCardSettingsTests
         });
     }
 
+    // Tab is given to the page as a Tab with no modifier. A key message sent to the window has Shift added to it from the real
+    // keyboard when a Shift key is held or stuck, and the page would then go backwards; Escape reads the same either way, so it is
+    // still sent as a message.
     [TestMethod]
     public void TabAndEscapeWorkOnTheSettingsPageFromTheKeyboard()
     {
@@ -365,7 +368,7 @@ public sealed class WidgetCardSettingsTests
             Application.DoEvents();
 
             Assert.AreEqual(new SettingsTarget(SettingsRowId.None, SettingsPart.Back), page.Card.SettingsFocusTarget);
-            Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
+            page.Card.HandleSettingsKey(Keys.Tab);
             Assert.AreEqual(new SettingsTarget(SettingsRowId.GaugePosition, SettingsPart.SegmentFirst), page.Card.SettingsFocusTarget);
 
             Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.Escape, 0);
