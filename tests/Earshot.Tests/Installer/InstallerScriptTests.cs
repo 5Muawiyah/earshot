@@ -24,6 +24,8 @@ public sealed class InstallerScriptTests
     private const string UsageLine =
         "Usage: & ([scriptblock]::Create((irm https://github.com/5Muawiyah/earshot/releases/latest/download/earshot.ps1))) -Action Install|Update|Repair|Uninstall [-DryRun] [-RemoveSettings]";
 
+    private const string AdministratorRefusalLine = "Earshot: stopped. Run this in a normal PowerShell window, not as administrator.";
+
     private static readonly string[] MenuLines = ["Earshot", "  1  Install", "  2  Update", "  3  Repair", "  4  Uninstall", "Choose 1 to 4, or press Enter to cancel"];
     private static readonly string[] ClosedThenElevated = ["ExitTray|4242", "Elevate"];
 
@@ -154,9 +156,23 @@ public sealed class InstallerScriptTests
             "$leaked = @((Get-Variable | ForEach-Object Name) | Where-Object { $variables.Split(',') -notcontains $_ -and @('Action','DryRun','RemoveSettings','Roots','Feed','TestHooks','st','hk','final','keepFolder') -contains $_ })\r\n" +
             "'LEAKED=' + ($leaked -join ',')\r\n";
 
+        // The script reads the token of its own process, which is the test's. A hosted runner is an administrator, and there
+        // the first thing the script says is the refusal, before it looks at any action.
+        bool elevated = WindowsProcessToken.Current().IsElevatedAdministrator;
+
         InstallerRun run = world.Run(shell);
 
-        CollectionAssert.Contains(run.Lines, UsageLine, run.Describe());
+        if (elevated)
+        {
+            CollectionAssert.Contains(run.Lines, AdministratorRefusalLine, run.Describe());
+            Assert.AreEqual(AdministratorRefusalLine, run.Lines.First(l => l.Length > 0), "The refusal is the script's first word.");
+            CollectionAssert.DoesNotContain(run.Lines, UsageLine, "An administrator shell is refused before the action is looked at.");
+        }
+        else
+        {
+            CollectionAssert.Contains(run.Lines, UsageLine, run.Describe());
+        }
+
         Assert.AreEqual("True", run.Value("EAP-SAME"), run.Describe());
         Assert.AreEqual("True", run.Value("FUNCTIONS-SAME"), run.Describe());
         Assert.AreEqual("", run.Value("LEAKED"), run.Describe());
@@ -243,7 +259,7 @@ public sealed class InstallerScriptTests
 
         InstallerRun run = world.Run(shell);
 
-        Assert.AreEqual("Earshot: stopped. Run this in a normal PowerShell window, not as administrator.", run.Final);
+        Assert.AreEqual(AdministratorRefusalLine, run.Final);
         Assert.IsEmpty(world.Feed.Requests);
         Assert.IsEmpty(run.Calls);
     }
