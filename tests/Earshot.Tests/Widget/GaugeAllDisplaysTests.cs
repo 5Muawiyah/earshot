@@ -592,6 +592,55 @@ public sealed class GaugeAllDisplaysTests
         });
     }
 
+    // Turning the gauge off stops the main taskbar's reads for good, so nothing but the settings change itself can take the other
+    // displays' gauges down. The poll interval is long here for the same reason: a read that came by is not what removes them.
+    [TestMethod]
+    public void TurningTheGaugeOffTakesTheOtherDisplaysGaugesDownAtOnceWithNoMoreReadsOfTheMainTaskbar()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            DisplayInfo scaled = Two with { Dpi = 144 };
+            using Rig rig = StartRigCore(GaugeDisplayChoice.AllDisplays, secondaryBars: true, [One, scaled], pollIntervalMs: 600000);
+            FeedSecondary(rig, scaled);
+            Poke(rig);
+            TrayHarness.PumpUntil(() => rig.ShownOn(Right1080) is not null, "The second gauge was never shown. " + Why(rig));
+            TestSurface second = rig.ShownOn(Right1080)!;
+            FakeTaskbarReader reader = rig.ReaderFor(IdTwo)!;
+
+            rig.Tray.ClickMenu(WidgetCopy.ShowOnTaskbar);
+
+            TrayHarness.PumpUntil(() => !rig.Tray.Settings.Current.Widget.ShowOnTaskbar, "The menu item did not turn the gauge off.");
+            TrayHarness.PumpUntil(() => second.IsDisposed, "The other display's gauge window was not disposed when the gauge was turned off.");
+            Assert.AreEqual(0, rig.Tray.Context.SecondaryGaugeCountForTest);
+            PumpFor(TimeSpan.FromMilliseconds(100));
+            int reads = reader.ReadCount;
+            PumpFor(TimeSpan.FromMilliseconds(200));
+            Assert.AreEqual(reads, reader.ReadCount, "No gauge is left reading the other taskbar.");
+        });
+    }
+
+    // Closing the tray takes every gauge down with it: each has a watcher thread and a window of its own.
+    [TestMethod]
+    public void ClosingTheTrayDisposesTheOtherDisplaysGaugesAndStopsReadingTheirTaskbars()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
+            FeedSecondary(rig, Two);
+            TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null && rig.ShownOn(Right1080) is not null, "The gauges were never shown.");
+            TestSurface second = rig.ShownOn(Right1080)!;
+            FakeTaskbarReader reader = rig.ReaderFor(IdTwo)!;
+
+            rig.Dispose();
+
+            Assert.IsTrue(second.IsDisposed, "The other display's gauge window was left behind when the tray closed.");
+            Assert.AreEqual(0, rig.Tray.Context.SecondaryGaugeCountForTest);
+            int reads = reader.ReadCount;
+            Thread.Sleep(200);
+            Assert.AreEqual(reads, reader.ReadCount, "The other display's taskbar is still being read after the tray closed.");
+        });
+    }
+
     [TestMethod]
     public void SwitchingFromAllDisplaysToANamedDisplayLeavesExactlyOneGaugeToo()
     {
