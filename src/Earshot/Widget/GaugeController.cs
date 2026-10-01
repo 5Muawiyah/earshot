@@ -52,6 +52,13 @@ internal interface IGaugeSurface : IDisposable
     // opened after it.
     StepOutcome Raise();
 
+    // The window this one is owned by (GetWindow with GW_OWNER), or 0 when it has none.
+    nint OwnerWindow { get; }
+
+    // Makes the window the owned window of owner (SetWindowLongPtr with GWLP_HWNDPARENT), so the system keeps it above
+    // that window wherever that window is raised. The window is not a child and is not moved.
+    StepOutcome SetOwner(nint owner);
+
     // Draws the gauge for this snapshot at these bounds.
     void Render(WidgetSnapshot snapshot, DateTimeOffset now, GaugeDisplaySettings settings, int dpi, Rectangle bounds, Color ink, string fontFamily);
 
@@ -79,14 +86,24 @@ internal readonly record struct GaugeControllerSettings(bool Enabled, bool LeftC
 // bar to sit on; any other failure (a UI Automation read that timed out while the shell was busy, a thrown
 // read) counts, and the gauge hides after ReadFailureTolerance failures in a row.
 //
-// Being put back on top: the shell raises the taskbar above the topmost band when Start, a flyout or a
-// full-screen application closes, and again after a click on it, which leaves the gauge under it. A foreground
+// Being put back on top: the gauge is the taskbar's owned window (EnsureOwner), and an owned window is always above its
+// owner in the z-order, so wherever the shell raises the taskbar the system raises the gauge with it, in the same step
+// and with no frame between. What follows is the safety net for a gauge that could not be owned, or that another
+// program's topmost window covers.
+//
+// The shell raises the taskbar above the topmost band when Start, a flyout or a
+// full-screen application closes, and again after a click on it, which leaves an unowned gauge under it. A foreground
 // change (OnForegroundChanged) or a window Explorer showed or hid (OnShellWindowChanged) looks at what is over
 // the gauge's centre now and once more 250 ms later, and raises the gauge only when that window is the taskbar.
 // Whenever any cover is found, by those or by the poll, the same look repeats every FastCheckInterval for
 // FastCheckDuration after the last cover, since the taskbar covers the gauge again a moment after a raise with no
 // event to say so; a cover without an event then lasts one interval, not one poll. The poll's own check stays as
 // the safety net. Earshot's own windows over the gauge (its tooltip, the card) are never a cover.
+//
+// A raise that does not hold is not repeated at once. When the same cover is found again right after a raise, the next raise
+// waits longer each time (RaiseGap), up to RaiseGapLimit; the gauge being found on top a second after a raise ends that,
+// so the next cover is answered at once again. Each raise shows the gauge for a moment and it is covered again, so a
+// raise every quarter second for as long as the cover lasts is a flash every quarter second.
 internal sealed class GaugeController : IDisposable
 {
     public static readonly TimeSpan IconHideDebounce = TimeSpan.FromSeconds(2);
@@ -112,6 +129,18 @@ internal sealed class GaugeController : IDisposable
     public const int RaisesPerWindow = 4;
 
     public static readonly TimeSpan RaiseWindow = TimeSpan.FromSeconds(1);
+
+    // A raise held when the gauge is found on top this long after it. Until then a cover found again counts against it.
+    public static readonly TimeSpan RaiseHoldConfirm = TimeSpan.FromSeconds(1);
+
+    // The longest wait between two raises that did not hold.
+    public static readonly TimeSpan RaiseGapLimit = TimeSpan.FromSeconds(8);
+
+    // How long the next raise waits after this many raises in a row that did not hold: none after none, a quarter second
+    // after one (the bar that rose a moment late is still answered by the second look), then doubling to RaiseGapLimit.
+    public static TimeSpan RaiseGap(int unheldRaises) => unheldRaises <= 0
+        ? TimeSpan.Zero
+        : TimeSpan.FromTicks(Math.Min(RaiseGapLimit.Ticks, SecondLookDelay.Ticks << Math.Min(unheldRaises - 1, 8)));
 
     // The limit is reported at most this often, so a long fight is one line a minute, not one a second.
     private static readonly TimeSpan LimitWarnInterval = TimeSpan.FromMinutes(1);
@@ -148,6 +177,9 @@ internal sealed class GaugeController : IDisposable
     private string? _lastHideKey;
     private int _consecutiveReadFailures;
     private readonly Queue<long> _raiseStamps = new();
+    private int _unheldRaises;
+    private long _lastRaiseTimestamp;
+    private nint _ownerFailedFor;
     private long _lastLimitWarnTimestamp;
     private bool _limitWarnedBefore;
     private ITimer? _secondLook;
@@ -508,6 +540,7 @@ internal sealed class GaugeController : IDisposable
         if (cover.IsGauge || cover.BelongsToThisProcess)
         {
             _lastLeftUnderClass = null;
+            NoteOnTop();
             return;
         }
 
@@ -545,10 +578,30 @@ internal sealed class GaugeController : IDisposable
         }, counted: true);
     }
 
-    // Whether the sliding limit lets another raise through now: RaisesPerWindow in any RaiseWindow.
-    private bool RaiseAllowed()
+    // The gauge was found on top. A second or more after a raise that is the raise holding, and the next cover is a new one.
+    private void NoteOnTop()
+    {
+        if (_unheldRaises > 0 && _time.GetElapsedTime(_lastRaiseTimestamp) >= RaiseHoldConfirm)
+        {
+            _unheldRaises = 0;
+        }
+    }
+
+    // Whether another raise may be made now: not before RaiseGap has passed since the last one when raises have not been
+    // holding, and, for the event-driven checks (sliding), not more than RaisesPerWindow in any RaiseWindow.
+    private bool RaiseAllowed(bool sliding = true)
     {
         long now = _time.GetTimestamp();
+        if (_unheldRaises > 0 && _time.GetElapsedTime(_lastRaiseTimestamp, now) < RaiseGap(_unheldRaises))
+        {
+            return false;
+        }
+
+        if (!sliding)
+        {
+            return true;
+        }
+
         while (_raiseStamps.Count > 0 && _time.GetElapsedTime(_raiseStamps.Peek(), now) >= RaiseWindow)
         {
             _ = _raiseStamps.Dequeue();
@@ -574,9 +627,11 @@ internal sealed class GaugeController : IDisposable
     private void RaiseSurface(IGaugeSurface surface, string line, bool counted)
     {
         StepOutcome outcome = surface.Raise();
+        _lastRaiseTimestamp = _time.GetTimestamp();
+        _unheldRaises++;
         if (counted)
         {
-            _raiseStamps.Enqueue(_time.GetTimestamp());
+            _raiseStamps.Enqueue(_lastRaiseTimestamp);
         }
 
         if (!outcome.Ok)
@@ -588,11 +643,42 @@ internal sealed class GaugeController : IDisposable
         }
 
         _log.Info(line);
+        if (RaiseGap(_unheldRaises) >= RaiseHoldConfirm)
+        {
+            _log.Info(GaugeEventLog.RaiseBackedOff(RaiseGap(_unheldRaises)));
+        }
+    }
+
+    // The gauge is made the owned window of the taskbar it sits on. An owned window is always above its owner in the
+    // z-order, so the system keeps the gauge above the taskbar wherever the shell raises it: no raise, and no frame with
+    // the taskbar over the gauge, which is what a flash was. Done when there is a taskbar window to name and the gauge
+    // is not already owned by it (a new window, or an Explorer that started again with a new taskbar window), and not
+    // asked again for a window it failed for, so a refusal is one line and not one per poll.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#owned-windows
+    private void EnsureOwner(IGaugeSurface surface, TaskbarLayout layout)
+    {
+        nint taskbar = layout.TaskbarHandle;
+        if (taskbar == 0 || taskbar == _ownerFailedFor || surface.OwnerWindow == taskbar)
+        {
+            return;
+        }
+
+        StepOutcome outcome = surface.SetOwner(taskbar);
+        if (outcome.Ok)
+        {
+            _ownerFailedFor = 0;
+            _log.Info(GaugeEventLog.Owned(layout.IsSecondary));
+            return;
+        }
+
+        _ownerFailedFor = taskbar;
+        _log.Warn(GaugeEventLog.OwnerFailed(outcome));
     }
 
     private void ShowOrMove(Rectangle bounds, TaskbarLayout layout)
     {
         IGaugeSurface surface = EnsureSurface();
+        EnsureOwner(surface, layout);
         bool wasShown = _state is GaugeState.Shown;
         Rectangle? previous = wasShown ? ((GaugeState.Shown)_state).Bounds : null;
 
@@ -632,7 +718,11 @@ internal sealed class GaugeController : IDisposable
             // The poll cannot loop faster than its own interval, so its raise is not counted against the
             // limit the event-driven checks share.
             NoteCover();
-            RaiseSurface(surface, GaugeEventLog.RaisedByPoll(layout.WindowAtGaugeCentre), counted: false);
+            if (RaiseAllowed(sliding: false))
+            {
+                RaiseSurface(surface, GaugeEventLog.RaisedByPoll(layout.WindowAtGaugeCentre), counted: false);
+            }
+
             if (_state is not GaugeState.Shown)
             {
                 return;
@@ -642,6 +732,11 @@ internal sealed class GaugeController : IDisposable
         {
             // Nothing changed, and the read confirms the gauge is still the topmost window at its own
             // centre (or there was no shown gauge yet for this read to check in the first place).
+            if (layout.GaugeCentreIsGauge == true)
+            {
+                NoteOnTop();
+            }
+
             return;
         }
 
@@ -702,6 +797,7 @@ internal sealed class GaugeController : IDisposable
         _iconHiddenForShown = false;
         _trayIcon.Visible = true;
         StopFastChecks();
+        _unheldRaises = 0;
         _surface?.HideWindow();
         if (changed)
         {
@@ -720,6 +816,7 @@ internal sealed class GaugeController : IDisposable
         _consecutiveReadFailures = 0;
         _trayIcon.Visible = true;
         StopFastChecks();
+        _unheldRaises = 0;
         DisposeSurface();
         if (!wasOff)
         {
@@ -761,6 +858,7 @@ internal sealed class GaugeController : IDisposable
             _surface.RightClicked -= OnRightClicked;
         }
 
+        _ownerFailedFor = 0;
         IGaugeSurface created = _createSurface();
         created.LeftClicked += OnLeftClicked;
         created.RightClicked += OnRightClicked;

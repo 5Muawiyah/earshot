@@ -6,8 +6,8 @@ using Earshot.Tray;
 
 namespace Earshot.Widget;
 
-// The layered overlay gauge: an owned, topmost tool window over free taskbar space, never parented into
-// Shell_TrayWnd. Paints nothing itself through WinForms; content comes from GaugeRenderer as a
+// The layered overlay gauge: a topmost tool window over free taskbar space, owned by the taskbar it sits on (SetOwner, so
+// it stays above it) but never parented into Shell_TrayWnd. Paints nothing itself through WinForms; content comes from GaugeRenderer as a
 // premultiplied bitmap pushed with UpdateLayeredWindow, whose alpha-0 pixels let a click pass through to
 // the taskbar underneath (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows). Never sets Form.Opacity or Form.TransparencyKey (both call
 // SetLayeredWindowAttributes, after which UpdateLayeredWindow fails until the style bit is cleared and
@@ -198,6 +198,33 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         }
 
         return StepOutcomes.FromWin32(Step, 0);
+    }
+
+    // The window this one is owned by, or 0. Read from the window, not remembered: an Explorer that ended leaves the
+    // handle it was given behind, and the controller compares it with the taskbar window there is now.
+    public nint OwnerWindow => IsHandleCreated ? NativeMethods.GetWindow(Handle, NativeMethods.GW_OWNER) : 0;
+
+    // Makes the gauge the owned window of the taskbar. "An owned window is always above its owner in the z-order": when
+    // the shell raises the taskbar, the system raises the gauge with it in the same step, so there is never a frame with
+    // the taskbar over the gauge and nothing for a raise to do. The gauge stays a top-level window (it is never a child
+    // of the taskbar's window, which the XAML taskbar draws over). The owner may belong to another process.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#owned-windows
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowlongptrw
+    public StepOutcome SetOwner(nint owner)
+    {
+        const string Step = "set-window-long-ptr:gauge-owner";
+        nint previous = NativeMethods.SetWindowLongPtrW(Handle, NativeMethods.GWLP_HWNDPARENT, owner);
+        uint error = unchecked((uint)Marshal.GetLastPInvokeError());
+
+        // 0 comes back both for "there was no owner before" and for a failure; only the last error tells them apart.
+        if (previous == 0 && error != 0)
+        {
+            return StepOutcomes.FromWin32(Step, error);
+        }
+
+        return OwnerWindow == owner
+            ? StepOutcomes.FromWin32(Step, 0)
+            : StepOutcomes.FromWin32(Step, 0, "The window did not take the owner.", ok: false);
     }
 
     public void HideWindow()

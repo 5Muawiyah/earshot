@@ -108,6 +108,19 @@ internal static class GaugeEventLog
     public static string RaiseCapReached(int raises, int seconds) =>
         "Gauge raise limit reached (" + Number(raises) + " in " + Number(seconds) + " s); the next check will try again.";
 
+    public static string RaiseBackedOff(TimeSpan wait) =>
+        "Gauge raise backed off: the taskbar covered it again right after the last raise, so the next raise waits " +
+        Number((int)Math.Round(wait.TotalSeconds)) + " s.";
+
+    public static string Owned(bool secondary) =>
+        "Gauge owned by the taskbar (" + (secondary ? "Shell_SecondaryTrayWnd" : "Shell_TrayWnd") + "): the system keeps it above the bar.";
+
+    public static string OwnerFailed(StepOutcome outcome)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        return "Gauge could not be owned by the taskbar: " + outcome.CodeName + " (" + Number(outcome.Code) + "); it is raised instead when the bar covers it.";
+    }
+
     public static string PlacementFailed(PlacementFailure failure) => "Gauge placement found no room: " + failure + ".";
 
     // "x,y WxH" in physical pixels.

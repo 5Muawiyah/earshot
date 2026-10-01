@@ -255,6 +255,14 @@ public sealed class GaugeAllDisplaysTests
             return new StepOutcome("move-to", true, 0, "S_OK", null);
         }
 
+        public nint OwnerWindow { get; private set; }
+
+        public StepOutcome SetOwner(nint owner)
+        {
+            OwnerWindow = owner;
+            return new StepOutcome("set-owner", true, 0, "S_OK", null);
+        }
+
         public int RaiseCount { get; private set; }
 
         public StepOutcome Raise()
@@ -1032,7 +1040,8 @@ public sealed class GaugeAllDisplaysTests
 
         quiet.OnForegroundChanged("SomeWindow");
 
-        Assert.AreEqual(GaugeController.RaisesPerWindow, busySurface.RaiseCount, "The busy gauge is held to the limit.");
+        Assert.IsGreaterThanOrEqualTo(1, busySurface.RaiseCount, "The busy gauge's cover was answered.");
+        Assert.IsLessThanOrEqualTo(2, busySurface.RaiseCount, "The busy gauge's repeats are held back, not answered every time.");
         Assert.AreEqual(1, quietSurface.RaiseCount, "The other gauge's raise is not refused for the busy one's.");
     }
 
