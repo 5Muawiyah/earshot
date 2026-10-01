@@ -26,11 +26,20 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     $MaxZipBytes = 512MB
     $MaxChecksumBytes = 4096
     $MaxZipPathLength = 300
+    # Waiting budgets, chosen here and not measured. The tray's own Exit is given 45 s by the update (UpdateActions.TrayExitWait),
+    # so this script waits 60 s, a little longer, before it says the tray did not close. The record of an update is waited for
+    # 300 s, as long as the first install's own wait for the install it starts (UpdateActions.InstallWait).
     $TrayWaitSecondsDefault = 60
     $OutcomeWaitSecondsDefault = 300
 
     # State shared by the functions below. Nothing here outlives the script block.
-    $st = @{ Folder = $null; Verified = $false; TrayClosed = $null; Redirected = [Console]::IsOutputRedirected }
+    $st = @{
+        Folder = $null; Verified = $false; Redirected = [Console]::IsOutputRedirected
+        ClosedTrays = @()       # the trays this script asked to exit, so a stop can start them again
+        Succeeded = $false      # an install, update, repair or uninstall reported success: nothing is started again
+        NoRestart = $false      # the elevated program may still be working in the install folder: nothing is started
+        OutcomeProblem = ''     # why the last read of the update's record failed, if it did
+    }
     $hk = $TestHooks
     if ($null -eq $hk) { $hk = @{} }
     if ($null -ne $hk.Redirected) { $st.Redirected = [bool]$hk.Redirected }
@@ -125,6 +134,32 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         return $false
     }
 
+    # Whether anyone can answer a question, from what the host says about itself: a console host, a user session, input that
+    # is not redirected, and no -NonInteractive among the host's own arguments. Windows PowerShell 5.1 reads -noni as that
+    # switch and nothing shorter (probed: -non is taken as a command), so four letters is the least that counts. The arguments
+    # are the host's, so a script argument spelled like it only ever makes this say no, which asks nothing.
+    function Test-CanAnswer([string[]]$CommandLineArgs, [string]$HostName, [bool]$InputRedirected, [bool]$UserInteractive) {
+        if (-not $UserInteractive) { return $false }
+        if ($HostName -ne 'ConsoleHost') { return $false }
+        if ($InputRedirected) { return $false }
+        foreach ($a in @($CommandLineArgs)) {
+            if (-not $a) { continue }
+            if (-not ($a.StartsWith('-') -or $a.StartsWith('/'))) { continue }
+            $name = $a.TrimStart([char]45, [char]47).ToLowerInvariant()
+            if ($name.Length -ge 4 -and 'noninteractive'.StartsWith($name)) { return $false }
+        }
+        return $true
+    }
+
+    # Whether a Run value starts exactly one of these programs in the form Earshot writes it: the quoted path, a space and
+    # --startup. Another program that merely names the path, or another file beside it, is not ours.
+    function Test-OursRunValue([string]$Text, [string[]]$Programs) {
+        foreach ($program in @($Programs)) {
+            if ($Text.Equals(('"' + $program + '" --startup'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        return $false
+    }
+
     function Test-Under([string]$Path, [string]$Folder) {
         if (-not $Path -or -not $Folder) { return $false }
         $full = [IO.Path]::GetFullPath($Folder).TrimEnd([char]92) + [char]92
@@ -138,6 +173,8 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
             GetSha256 = ${function:Get-Sha256}
             GetProgramVersion = ${function:Get-ProgramVersion}
             TestDeclined = ${function:Test-Declined}
+            TestCanAnswer = ${function:Test-CanAnswer}
+            TestOursRunValue = ${function:Test-OursRunValue}
         }
         return
     }
@@ -151,17 +188,10 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         finally { $identity.Dispose() }
     }
 
-    # Whether anyone can answer a question: a console, input that is not redirected, and not started -NonInteractive.
+    # Whether anyone can answer a question, asked of the real host (Test-CanAnswer decides).
     function Test-CanAsk {
         if ($null -ne $hk.CanAsk) { return [bool]$hk.CanAsk }
-        if (-not [Environment]::UserInteractive) { return $false }
-        if ($Host.Name -ne 'ConsoleHost') { return $false }
-        if ([Console]::IsInputRedirected) { return $false }
-        foreach ($a in [Environment]::GetCommandLineArgs()) {
-            $name = $a.TrimStart([char]45, [char]47).ToLowerInvariant()
-            if (($a.StartsWith('-') -or $a.StartsWith('/')) -and $name.Length -ge 4 -and 'noninteractive'.StartsWith($name)) { return $false }
-        }
-        return $true
+        return (Test-CanAnswer ([Environment]::GetCommandLineArgs()) $Host.Name ([Console]::IsInputRedirected) ([Environment]::UserInteractive))
     }
 
     function Read-Answer {
@@ -250,11 +280,12 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         return 0
     }
 
-    function Stop-ForStatus([int]$Status, [string]$What, [string]$MissingMessage = '') {
+    function Stop-ForStatus([int]$Status, [string]$What, [string]$MissingMessage = '', [string]$Detail = '') {
         if ($Status -eq 404 -and $MissingMessage) { Stop-Run $MissingMessage }
         if ($Status -eq 404) { Stop-Run ('GitHub does not have ' + $What + ' (404).') }
         if ($Status -eq 403 -or $Status -eq 429) { Stop-Run ('GitHub refused the request (' + $Status + '). Try again later.') }
         if ($Status -gt 0) { Stop-Run ('GitHub answered ' + $Status + ' for ' + $What + '.') }
+        if ($Detail) { Stop-Run ('Could not reach GitHub for ' + $What + ': ' + $Detail) }
         Stop-Run ('Could not reach GitHub for ' + $What + '.')
     }
 
@@ -264,7 +295,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         Write-Line 'Looking for the latest release...'
         $release = $null
         try { $release = Invoke-RestMethod -Uri $Addresses.Api -Method Get }
-        catch { Stop-ForStatus (Get-FailureStatus $_) 'the latest release' }
+        catch { Stop-ForStatus (Get-FailureStatus $_) 'the latest release' '' ([string]$_.Exception.GetBaseException().Message) }
         $tag = [string]$release.tag_name
         if ($tag -notmatch '^v(\d{1,9})\.(\d{1,9})\.(\d{1,9})$') { Stop-Run ('The latest release has a tag this script does not read: ' + $tag) }
         if ($release.draft -or $release.prerelease) { Stop-Run 'The latest release is not a published release.' }
@@ -448,7 +479,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         }
     }
 
-    # Closes a running Earshot through its own Exit (so AirPods in use are let go and blocked) and returns its process id,
+    # Closes a running Earshot through its own Exit (when Hand back is on, AirPods in use are let go and blocked) and returns its process id,
     # or this script's own id when none was running. A dry run only says what it would do.
     function Close-Tray($Pth, [bool]$Dry) {
         $trays = @(Find-Tray $Pth)
@@ -469,7 +500,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
                 [void](Read-Answer)
             }
             if (-not (Wait-TrayGone $Pth $tray)) { Stop-Run 'Earshot did not close. Choose Exit in its menu and run this again.' }
-            $st.TrayClosed = $tray
+            $st.ClosedTrays = @($st.ClosedTrays) + @($tray)
         }
         return $first
     }
@@ -477,6 +508,23 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     function Start-Tray([string]$Exe) {
         if ($hk.StartTray) { [void](& $hk.StartTray $Exe); return }
         [void](Start-Process -FilePath $Exe -WorkingDirectory (Split-Path -Parent $Exe))
+    }
+
+    # A run that stops after it closed the tray starts that tray again, so Earshot is not left closed with the AirPods
+    # unprotected until the next sign-in. It does not when the run reported success (the run's own ending starts the program),
+    # when the elevated program may still be working in the install folder (a program started now could be half replaced), or
+    # when the tray's program is no longer there. Each program is started once.
+    function Restart-ClosedTrays {
+        if ($st.Succeeded -or $st.NoRestart) { return }
+        $seen = @{}
+        foreach ($tray in @($st.ClosedTrays)) {
+            $exe = [string]$tray.Path
+            if (-not $exe -or $seen.ContainsKey($exe.ToLowerInvariant())) { continue }
+            $seen[$exe.ToLowerInvariant()] = $true
+            if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
+            try { Start-Tray $exe; Write-Line 'Earshot was started again.' }
+            catch { Write-Line ('Earshot could not be started again: ' + $_.Exception.Message) }
+        }
     }
 
     # ---------------------------------------------------------------- the one administrator prompt
@@ -521,10 +569,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         Write-Line 'Windows will ask for administrator approval once.'
         try { return (Invoke-Elevated $Exe $Line) }
         catch {
-            if (Test-Declined $_.Exception) {
-                if ($st.TrayClosed) { Start-Tray $st.TrayClosed.Path }
-                Stop-Run 'Administrator approval was declined, so nothing was changed.'
-            }
+            if (Test-Declined $_.Exception) { Stop-Run 'Administrator approval was declined, so nothing was changed.' }
             throw
         }
     }
@@ -540,6 +585,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
             20 { return 'setup was asked for in a form Earshot did not accept' }
             21 { return 'Windows did not give setup administrator rights' }
             25 { return 'another setup, update or repair is running' }
+            27 { return 'setup was still running when the time to wait for it ran out' }
             77 { return 'setup does not run while a test setting is on' }
             default { return 'setup did not finish' }
         }
@@ -550,9 +596,17 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     function Read-OutcomeFile($Pth) {
         $file = Join-Path $Pth.Machine 'update-outcome.json'
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
-        # A record being written when it is read looks damaged for a moment; the next read sees it whole.
-        try { return ([IO.File]::ReadAllText($file) | ConvertFrom-Json) }
-        catch { return $null }
+        # A record being written when it is read looks damaged for a moment; the next read sees it whole. The last problem is
+        # kept, so a record that never reads is said so at the end of the wait instead of looking like no record.
+        try {
+            $record = ([IO.File]::ReadAllText($file) | ConvertFrom-Json)
+            $st.OutcomeProblem = ''
+            return $record
+        }
+        catch {
+            $st.OutcomeProblem = [string]$_.Exception.Message
+            return $null
+        }
     }
 
     # After the elevated update ended: waits for a record different from the one before the prompt, and says how it went.
@@ -579,16 +633,20 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         if (-not $st.Redirected) { [Console]::Write("`r" + (' ' * 20) + "`r") }
         if ($null -eq $outcome) {
             if ($ExitCode -ne 0) { Stop-Run ('The update did not start (' + (Get-ExitCodeMeaning $ExitCode) + ', code ' + $ExitCode + ').') }
-            Stop-Run 'Earshot is still installing. It will say how it went when it starts.'
+            # The update may still be replacing files, so the closed tray is not started over it.
+            $st.NoRestart = $true
+            $more = ''
+            if ($st.OutcomeProblem) { $more = ' The record of the update could not be read: ' + $st.OutcomeProblem }
+            Stop-Run ('The update was still running when this script stopped waiting for it. Earshot will say how it went when it starts.' + $more)
         }
         $kind = [string]$outcome.Kind
-        if ($kind -eq 'Installed' -or $kind -eq 'Repaired') { return }
+        if ($kind -eq 'Installed' -or $kind -eq 'Repaired') { $st.Succeeded = $true; return }
         $reason = [string]$outcome.Reason
         if (-not $reason) { $reason = 'the update did not finish' }
         Stop-Run ($reason + '. (' + [string]$outcome.Code + ')')
     }
 
-    # ---------------------------------------------------------------- the per-user copy (no AirPods paired, or several)
+    # ---------------------------------------------------------------- the per-user copy (no AirPods paired yet)
 
     function Test-OursFolder([string]$Folder) {
         return (Test-Path -LiteralPath (Join-Path $Folder 'Earshot.files.json') -PathType Leaf)
@@ -602,13 +660,10 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         }
         [void](New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force)
         Copy-Item -LiteralPath $Copy.App -Destination $target -Recurse
+        $st.Succeeded = $true
         Write-Line ('Earshot is set up for you only, in ' + $target + '.')
         Start-Tray (Join-Path $target 'Earshot.exe')
-        switch ([string]$Values.reason) {
-            'several' { Write-Line "Several AirPods are paired. Choose yours in Earshot's menu (Choose device), then run this line again." }
-            'unreadable' { Write-Line 'Windows did not list your paired Bluetooth devices. Check that Bluetooth is on, then run this line again.' }
-            default { Write-Line 'Pair your AirPods with this PC in Bluetooth settings, then run this line again to finish installing.' }
-        }
+        Write-Line 'Pair your AirPods with this PC in Bluetooth settings, then run this line again to finish installing. Until then Earshot cannot stop this PC paging them.'
     }
 
     function Remove-UserCopy($Pth) {
@@ -647,6 +702,13 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
                 if ([string]$values.reason -eq 'several') { Stop-Run "Earshot is installed, but several AirPods are paired. Choose yours in Earshot's menu (Choose device), then run this again." }
                 Stop-Run 'Earshot is installed, but no paired AirPods were found to set it up for. Pair them in Bluetooth settings, then run this again.'
             }
+            # The per-user copy has no part that runs before sign-in, so it cannot keep the PC from paging AirPods that are
+            # already paired. It is only for a PC with none paired yet; with several, or a list that could not be read, an
+            # install for the machine has no device to be set up for, and a copy that does not protect would look like one that does.
+            $why = [string]$values.reason
+            if ($why -eq 'several') { Stop-Run 'Several AirPods are paired with this PC, so Earshot cannot tell which are yours. Remove the ones you do not use in Bluetooth settings, then run this again.' }
+            if ($why -eq 'unreadable') { Stop-Run 'Windows did not list your paired Bluetooth devices. Check that Bluetooth is on, then run this again.' }
+            if ($why -ne 'not-paired') { Stop-Run 'Earshot could not tell which AirPods to set up for, so nothing was installed.' }
             if ($DryRun) { Write-Line ('Would copy Earshot to ' + $Pth.UserPrograms + ' and start it. No administrator approval is needed.'); return }
             [void](Close-Tray $Pth $false)
             Install-UserCopy $copy $Pth $values
@@ -671,7 +733,13 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
             [void](Close-Tray $Pth $false)
             $code = Invoke-ElevatedStep $copy.Exe $line
             if ($code -eq 26) { Stop-Run 'Earshot is already installed. Use Update or Repair.' }
+            if ($code -eq 27) {
+                # The install it started was left running; a program started now could be half replaced.
+                $st.NoRestart = $true
+                Stop-Run 'Setup was still running when this script stopped waiting for it. It was left to finish. Run this line again in a few minutes to see where it got to.'
+            }
             if ($code -ne 0) { Stop-Run ('Setup did not finish (' + (Get-ExitCodeMeaning $code) + ', code ' + $code + ').') }
+            $st.Succeeded = $true
         }
         else {
             Write-Line ('Route: ' + $route + ' through the installed Earshot.')
@@ -699,20 +767,30 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     function Invoke-Uninstall($Pth, $Addresses) {
         $installedExe = Join-Path $Pth.Install 'Earshot.exe'
         $exe = $null
-        if (Test-Path -LiteralPath $installedExe -PathType Leaf) { $exe = $installedExe }
-        elseif ((Test-Path -LiteralPath $Pth.Install) -or (Test-Path -LiteralPath (Join-Path $Pth.Machine 'config.json'))) {
-            # Something of an install is left but its program is gone: the latest release's own program removes it.
+        if ((Test-Path -LiteralPath $installedExe -PathType Leaf) -or (Test-Path -LiteralPath $Pth.Install) -or (Test-Path -LiteralPath (Join-Path $Pth.Machine 'config.json'))) {
+            # The uninstall is run as administrator, so the program it runs must be one only administrators could have put
+            # there. The installed program cannot vouch for its own folder; the checked download's can. When that check does
+            # not pass, or the program is gone, the latest release's own program removes what is left.
             $copy = Get-VerifiedCopy (Get-LatestRelease $Addresses) $Addresses $Pth
             $exe = $copy.Exe
+            if (Test-Path -LiteralPath $installedExe -PathType Leaf) {
+                $values = Get-SetupValues $copy
+                if ([string]$values.install.state -eq 'usable') { $exe = $installedExe }
+                else { Write-Line "The installed copy's folder is not one only administrators can change, so the downloaded copy removes it." }
+            }
         }
 
         if ($null -eq $exe) {
             if (Test-Path -LiteralPath $Pth.UserPrograms) {
-                if ($DryRun) { Write-Line ('Would close Earshot and remove ' + $Pth.UserPrograms + '. No administrator approval is needed.'); [void](Close-Tray $Pth $true); return }
-                [void](Close-Tray $Pth $false)
-                Remove-UserCopy $Pth
+                if ($DryRun) { Write-Line ('Would close Earshot and remove ' + $Pth.UserPrograms + '. No administrator approval is needed.'); [void](Close-Tray $Pth $true) }
+                else {
+                    [void](Close-Tray $Pth $false)
+                    Remove-UserCopy $Pth
+                }
             }
             else { Write-Line 'Earshot is not installed.' }
+            # A dry run changes nothing, whatever is left over: it only says what a real run would remove.
+            if ($DryRun) { Write-WouldRemoveLeftovers $Pth; return }
             Remove-Leftovers $Pth
             return
         }
@@ -720,29 +798,40 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         if ($DryRun) {
             Write-WouldRun $exe 'uninstall'
             [void](Close-Tray $Pth $true)
+            Write-WouldRemoveLeftovers $Pth
             return
         }
         [void](Close-Tray $Pth $false)
         $code = Invoke-ElevatedStep $exe 'uninstall'
         if ($code -ne 0) { Stop-Run ('Uninstall did not finish (' + (Get-ExitCodeMeaning $code) + ', code ' + $code + ').') }
+        $st.Succeeded = $true
         Write-Line 'Earshot was uninstalled.'
         Remove-UserCopy $Pth
         Remove-Leftovers $Pth
     }
 
+    # The sign-in entry of an Earshot of ours: the Run value that starts exactly the installed program or the per-user copy.
+    function Get-OursRunValue($Pth) {
+        if (-not (Test-Path -LiteralPath $Pth.RunKey)) { return $null }
+        $value = Get-ItemProperty -LiteralPath $Pth.RunKey -Name 'Earshot' -ErrorAction SilentlyContinue
+        if (-not $value) { return $null }
+        $text = [string]$value.Earshot
+        if (Test-OursRunValue $text @((Join-Path $Pth.Install 'Earshot.exe'), (Join-Path $Pth.UserPrograms 'Earshot.exe'))) { return $text }
+        return $null
+    }
+
+    # What Remove-Leftovers would remove, said and not done.
+    function Write-WouldRemoveLeftovers($Pth) {
+        if ($null -ne (Get-OursRunValue $Pth)) { Write-Line 'Would remove the Open on startup entry.' }
+        if ($st.RemoveSettings) { Write-Line ('Would remove your Earshot settings (' + $Pth.Roaming + ' and ' + $Pth.Local + ').') }
+        else { Write-Line 'Would keep your settings.' }
+    }
+
     # After an uninstall: the sign-in entry when it names an Earshot of ours, and the settings when they were asked for.
     function Remove-Leftovers($Pth) {
-        $value = $null
-        if (Test-Path -LiteralPath $Pth.RunKey) { $value = Get-ItemProperty -LiteralPath $Pth.RunKey -Name 'Earshot' -ErrorAction SilentlyContinue }
-        if ($value) {
-            $text = [string]$value.Earshot
-            foreach ($ours in @((Join-Path $Pth.Install 'Earshot.exe'), (Join-Path $Pth.UserPrograms 'Earshot.exe'))) {
-                if ($text.IndexOf($ours, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                    Remove-ItemProperty -LiteralPath $Pth.RunKey -Name 'Earshot'
-                    Write-Line 'Open on startup was removed.'
-                    break
-                }
-            }
+        if ($null -ne (Get-OursRunValue $Pth)) {
+            Remove-ItemProperty -LiteralPath $Pth.RunKey -Name 'Earshot'
+            Write-Line 'Open on startup was removed.'
         }
         if ($st.RemoveSettings) {
             foreach ($folder in @($Pth.Roaming, $Pth.Local)) {
@@ -802,6 +891,8 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         if ($message.StartsWith($StopMarker)) { $final = 'Earshot: stopped. ' + $message.Substring($StopMarker.Length) }
         else { $final = 'Earshot: stopped. Something went wrong: ' + $message }
         $keepFolder = $st.Verified
+        try { Restart-ClosedTrays }
+        catch { Write-Line ('Earshot could not be started again: ' + $_.Exception.Message) }
     }
     try { Remove-WorkFolder $keepFolder }
     catch { Write-Line ('The downloaded files in ' + $st.Folder + ' could not be removed: ' + $_.Exception.Message) }

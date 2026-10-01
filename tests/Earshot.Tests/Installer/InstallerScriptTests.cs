@@ -502,7 +502,7 @@ public sealed class InstallerScriptTests
 
         InstallerRun run = world.Run(shell);
 
-        Assert.AreEqual("Earshot: stopped. Earshot is still installing. It will say how it went when it starts.", run.Final, run.Describe());
+        Assert.AreEqual("Earshot: stopped. The update was still running when this script stopped waiting for it. Earshot will say how it went when it starts.", run.Final, run.Describe());
     }
 
     [TestMethod]
@@ -587,7 +587,7 @@ public sealed class InstallerScriptTests
     [TestMethod]
     [DataRow(ShellKind.WindowsPowerShell)]
     [DataRow(ShellKind.PowerShell7)]
-    public void UninstallRunsTheInstalledProgramsUninstallVerbDownloadsNothingAndKeepsTheSettings(ShellKind shell)
+    public void UninstallRunsTheInstalledProgramsUninstallVerbOnceTheCheckedDownloadSaysItsFolderIsUsableAndKeepsTheSettings(ShellKind shell)
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
@@ -595,6 +595,7 @@ public sealed class InstallerScriptTests
         Directory.CreateDirectory(world.Local);
         File.WriteAllText(Path.Combine(world.Roaming, "settings.json"), "{}");
         world.Spec.Action = "Uninstall";
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
 
         InstallerRun run = world.Run(shell);
 
@@ -602,7 +603,8 @@ public sealed class InstallerScriptTests
         string[] elevate = run.CallsNamed("Elevate");
         Assert.HasCount(1, elevate);
         Assert.AreEqual("Elevate|" + world.InstalledExe + "|uninstall", elevate[0]);
-        Assert.IsEmpty(world.Feed.Requests, "A usable installed program needs no download to uninstall.");
+        Assert.AreEqual(1, world.Feed.ZipDownloads, "The installed program is not run as administrator until the checked download has looked at its folder.");
+        Assert.AreEqual(1, run.CallsNamed("SetupValues").Length);
         CollectionAssert.Contains(run.Lines, "Your settings were kept.");
         Assert.IsTrue(File.Exists(Path.Combine(world.Roaming, "settings.json")));
         Assert.IsTrue(Directory.Exists(world.Local));
@@ -619,6 +621,7 @@ public sealed class InstallerScriptTests
         Directory.CreateDirectory(world.Roaming);
         Directory.CreateDirectory(world.Local);
         world.Spec.Action = "Uninstall";
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
         world.Spec.RemoveSettings = true;
         world.Spec.RunValue = "\"" + world.InstalledExe + "\" --startup";
 
@@ -639,6 +642,7 @@ public sealed class InstallerScriptTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Uninstall";
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
         world.Spec.RunValue = "\"C:\\Tools\\Other\\Earshot.exe\" --startup";
 
         InstallerRun run = world.Run(shell);
@@ -689,6 +693,7 @@ public sealed class InstallerScriptTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Uninstall";
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
         world.Spec.DryRun = true;
 
         InstallerRun run = world.Run(shell);
@@ -706,6 +711,7 @@ public sealed class InstallerScriptTests
     public void ADeclinedPromptChangesNothingSaysSoAndStartsTheTrayItClosed(ShellKind shell)
     {
         using var world = new InstallerWorld();
+        world.PlaceProgramFile();
         world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
         world.Spec.ElevateBody = "throw (New-Object System.ComponentModel.Win32Exception 1223)";
 
@@ -773,10 +779,9 @@ public sealed class InstallerScriptTests
     // ----- no AirPods paired, or several -----
 
     [TestMethod]
-    [DataRow(ShellKind.WindowsPowerShell, "not-paired", "Pair your AirPods with this PC in Bluetooth settings, then run this line again to finish installing.")]
-    [DataRow(ShellKind.WindowsPowerShell, "several", "Several AirPods are paired. Choose yours in Earshot's menu (Choose device), then run this line again.")]
-    [DataRow(ShellKind.PowerShell7, "not-paired", "Pair your AirPods with this PC in Bluetooth settings, then run this line again to finish installing.")]
-    public void WithNoDeviceToInstallForTheVerifiedCopyIsPlacedForThisUserOnlyAndStartedWithNothingElevated(ShellKind shell, string reason, string message)
+    [DataRow(ShellKind.WindowsPowerShell, "not-paired", "Pair your AirPods with this PC in Bluetooth settings, then run this line again to finish installing. Until then Earshot cannot stop this PC paging them.")]
+    [DataRow(ShellKind.PowerShell7, "not-paired", "Pair your AirPods with this PC in Bluetooth settings, then run this line again to finish installing. Until then Earshot cannot stop this PC paging them.")]
+    public void WithNoAirPodsPairedYetTheVerifiedCopyIsPlacedForThisUserOnlyAndStartedWithNothingElevated(ShellKind shell, string reason, string message)
     {
         using var world = new InstallerWorld();
         world.Spec.Setup = InstallerWorld.SetupJson(ready: false, reason: reason);
@@ -1057,6 +1062,12 @@ public sealed class InstallerScriptTests
         string[] names = ["Earshot.exe", "Earshot.dll", "Earshot.deps.json", "Earshot.runtimeconfig.json", "Microsoft.Windows.SDK.NET.dll", "System.Speech.dll", "WinRT.Runtime.dll"];
         if (names.Any(n => !File.Exists(Path.Combine(baseFolder, n))))
         {
+            // The hosted build says it must run every row; a test build with no program beside it must not pass there as a skip.
+            if (Environment.GetEnvironmentVariable(PwshHost.RequireVariable) == "1")
+            {
+                Assert.Fail("The test build does not hold the program's files beside the tests, and " + PwshHost.RequireVariable + "=1 says this row must run.");
+            }
+
             Assert.Inconclusive("The test build does not hold the program's files beside the tests.");
         }
 
@@ -1252,6 +1263,13 @@ internal sealed class InstallerWorld : IDisposable
     {
         Directory.CreateDirectory(Install);
         File.Copy(Path.Combine(AppContext.BaseDirectory, "Earshot.exe"), InstalledExe);
+    }
+
+    // A file where the installed program would be, for a test whose tray ran from there. It is no program, so the script reads no version.
+    public void PlaceProgramFile()
+    {
+        Directory.CreateDirectory(Install);
+        File.WriteAllText(InstalledExe, "a stand-in for the program");
     }
 
     public string WriteFile(string name, string content)

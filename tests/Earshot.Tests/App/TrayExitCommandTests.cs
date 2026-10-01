@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using Earshot.Contracts;
+using Earshot.Tests.Integration.Coordinator;
 using Earshot.Tests.Phase1;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using static Earshot.Tests.Phase1.Phase1Fixtures;
 
 namespace Earshot.Tests.App;
 
@@ -95,17 +97,31 @@ public sealed class TrayExitCommandTests
         Assert.AreEqual(1, count);
     }
 
-    // The tray's side: the signal takes the menu's own exit path and ends the message loop, with the hand-back setting on
-    // or off, and a second request while it is closing does nothing more.
+    private static readonly string[] DisconnectThenBlock = ["disconnect", "block"];
+
+    // The tray's side: the signal takes the menu's own exit path and ends the message loop, with the AirPods connected to this
+    // PC. With Hand back on they are disconnected and then blocked; with it off Exit leaves them as they are, which is what the
+    // menu's Exit does too. A second request while it is closing does nothing more.
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
-    public void TheSignalEndsTheTrayThroughTheMenusExitPath(bool handBackOn)
+    public void TheSignalEndsTheTrayThroughTheMenusExitPathAndHandsTheAirPodsBackOnlyWhenHandBackIsOn(bool handBackOn)
     {
         StaThread.Run(() =>
         {
-            using var tray = new TrayHarness(snapshot: null, exitWaitLimit: TimeSpan.FromSeconds(5),
-                settings: s => s.HandBackOnShutdownAndSleep = handBackOn);
+            using var tray = new TrayHarness(snapshot: Devices.Active(1), exitWaitLimit: TimeSpan.FromSeconds(5),
+                settings: s => s.HandBackOnShutdownAndSleep = handBackOn, arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            var order = new List<string>();
+            tray.Connection.OnDisconnect = _ =>
+            {
+                order.Add("disconnect");
+                return Task.FromResult(new ConnectResult(ConnectOutcome.Confirmed, "Disconnected", []));
+            };
+            tray.Block.OnBlock = _ =>
+            {
+                order.Add("block");
+                return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
+            };
             tray.Ui.Post(_ =>
             {
                 tray.Context.ExitFromSignal();
@@ -118,6 +134,39 @@ public sealed class TrayExitCommandTests
             Assert.IsLessThan(TimeSpan.FromSeconds(10), watch.Elapsed, "The tray did not end.");
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Exit was asked for by another copy of Earshot (--exit)."));
             Assert.AreEqual(1, tray.Log.Entries.Count(e => e.Message.Contains("--exit)", StringComparison.Ordinal)), "The second request did nothing.");
+            if (handBackOn)
+            {
+                CollectionAssert.AreEqual(DisconnectThenBlock, order, "With Hand back on, --exit lets go of the AirPods and blocks them.");
+                Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Hand-back (exit): finished in"));
+            }
+            else
+            {
+                Assert.IsEmpty(order, "With Hand back off, --exit leaves the AirPods connected, as the menu's Exit does.");
+                Assert.IsEmpty(tray.Connection.Calls);
+                Assert.IsEmpty(tray.Block.Calls);
+                Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Hand-back: off, so nothing runs for this Exit."));
+            }
+        });
+    }
+
+    // The wiring the tray's start makes: a request for the instance sets the event, the registered wait posts the tray's own
+    // exit on to the UI context, and the message loop ends. A watchdog ends the loop if the request never arrives, so a broken
+    // wiring fails this test instead of hanging it.
+    [TestMethod]
+    public void ARequestToExitForTheInstanceReachesTheTraysOwnExitThroughTheWiringTheTrayStartMakes()
+    {
+        StaThread.Run(() =>
+        {
+            string instance = NewInstanceName();
+            using var tray = new TrayHarness(snapshot: null, exitWaitLimit: TimeSpan.FromSeconds(5));
+            using var watchdog = new Timer(_ => tray.Ui.Post(_ => System.Windows.Forms.Application.ExitThread(), null), null, TimeSpan.FromSeconds(20), Timeout.InfiniteTimeSpan);
+            using IDisposable? wired = Program.WireExitSignal(tray.Log, instance, tray.Ui, tray.Context);
+            Assert.IsNotNull(wired, "The exit event was not created.");
+
+            Assert.IsTrue(Program.RequestTrayExit(tray.Log, instance));
+            System.Windows.Forms.Application.Run(tray.Context);
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Exit was asked for by another copy of Earshot (--exit)."), "The request did not reach the tray's Exit.");
         });
     }
 }

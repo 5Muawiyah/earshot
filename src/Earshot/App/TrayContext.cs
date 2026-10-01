@@ -2888,7 +2888,7 @@ internal sealed partial class TrayContext : ApplicationContext
     }
 
     // Exit as the menu's Exit does, asked for by a copy of Earshot started with --exit (Program.RequestTrayExit): the same
-    // orderly path, the hand-back included, so AirPods in use are let go and blocked before the tray ends. Asking again, or
-    // after Exit has begun, does nothing more.
+    // orderly path, so with Hand back on the AirPods in use are let go and blocked before the tray ends, and with it off Exit
+    // leaves them as they are. Asking again, or after Exit has begun, does nothing more.
     internal void ExitFromSignal() => _ = ExitAsync(CardPlace.NearTray, "Exit was asked for by another copy of Earshot (--exit).");
 }
