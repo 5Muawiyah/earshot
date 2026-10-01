@@ -82,15 +82,15 @@ public sealed class WidgetStatusServiceTests : IDisposable
         byte colour = WidgetFixtures.Colour, byte modelLow = WidgetFixtures.ModelLow) =>
         new(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(modelLow: modelLow, status: status, batteryA: batteryA, batteryB: batteryB, lid: lid, colour: colour), rssi, _clock.GetUtcNow(), tag);
 
-    // The first choice waits for the paired model to have been heard for two seconds and the set to have three
-    // messages, so a test that needs the set chosen sends three messages that carry no values and lets the time
-    // pass between them. What the test then raises is what the chosen set says.
+    // A set is linked when its case is opened near the PC: five messages with the case level known inside five seconds,
+    // the first and last two seconds apart. A test that needs the set linked sends that burst, which says the case is at
+    // 50% and nothing about the buds; what the test then raises is what the linked set says.
     private void Prime(byte lid = 0x00, uint tag = 1)
     {
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 5; i++)
         {
-            _source.Raise(Owned(lid: lid, tag: tag));
-            _clock.Advance(TimeSpan.FromMilliseconds(1100));
+            _source.Raise(Owned(batteryB: 0x05, lid: lid, tag: tag));
+            _clock.Advance(TimeSpan.FromMilliseconds(500));
         }
     }
 
@@ -182,7 +182,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(BroadcastSelectionState.NoPairedModel, snapshot.Selection);
         Assert.IsNull(snapshot.Case.Percent);
         Assert.IsNull(snapshot.Left.Percent);
-        Assert.AreEqual(4, snapshot.Counters.NoPairedModel);
+        Assert.AreEqual(6, snapshot.Counters.NoPairedModel);
         Assert.AreEqual(0, snapshot.Counters.Chosen);
         Assert.IsTrue(_log.Has(LogLevel.Warn, "CR_FAILURE"), "The raw code of the failed read is logged.");
         Assert.IsTrue(_log.Has(LogLevel.Warn, "no paired AirPods model"));
@@ -225,7 +225,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         WidgetSnapshot snapshot = service.Current;
         Assert.AreEqual(1, snapshot.Counters.ModelMismatch);
         Assert.AreEqual(1, snapshot.Counters.ColourMismatch);
-        Assert.IsNull(snapshot.Case.Percent);
+        Assert.AreEqual(50, snapshot.Case.Percent, "Only the linked set's own case level, from the burst that linked it.");
         Assert.IsNull(snapshot.Left.Percent);
     }
 
@@ -245,7 +245,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         WidgetSnapshot snapshot = service.Current;
         Assert.AreEqual(20, snapshot.Counters.UnknownForm);
-        Assert.IsNull(snapshot.Case.Percent);
+        Assert.AreEqual(50, snapshot.Case.Percent, "Only the linked set's own case level, from the burst that linked it.");
         Assert.IsNull(snapshot.Left.Percent);
         Assert.IsNull(snapshot.Right.Percent);
         Assert.IsTrue(snapshot.Counters.UnknownForms.Any(s => s.Prefix == 0x06 && s.Length == 17 && s.Count == 20));
@@ -302,28 +302,28 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     [TestMethod]
-    public void ASwitchToANearerSetDropsTheOldSetsValuesAndIsCounted()
+    public void AnotherPairOpeningItsCaseClearlyNearerTakesTheLinkAndTheOldPairsValuesAreDropped()
     {
         using WidgetStatusService service = NewService();
         service.Start();
         ProximityMessage a = BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4);
 
-        // The winner does not say what its case holds (nibble 0xF), so a case figure that survives the switch can only
-        // be the old pair's: the switch has to drop it.
-        ProximityMessage b = BroadcastFixtures.Bud(first: true, caseNibble: 0xF, pairHigh: 0x3, pairLow: 0x1);
+        // The pair that opens its case says its own case level (20%), so what is shown for the case afterwards can only
+        // be the old pair's 90% if the switch failed to drop it.
+        ProximityMessage b = BroadcastFixtures.Bud(first: true, caseNibble: 0x2, pairHigh: 0x3, pairLow: 0x1);
         Send(1, a, -60, 3);
         Assert.AreEqual(90, service.Current.Case.Percent);
 
-        for (int i = 0; i <= 70; i++)
+        for (int i = 0; i <= 16; i++)
         {
             Raise(1, a, -60);
             Raise(2, b, -51);
-            Tick(0.5);
+            Tick(0.25);
         }
 
         WidgetSnapshot snapshot = service.Current;
         Assert.AreEqual(1, snapshot.Counters.Switches);
-        Assert.IsNull(snapshot.Case.Percent, "The old pair's case level is not shown against the new pair.");
+        Assert.AreEqual(20, snapshot.Case.Percent, "The old pair's case level is not shown against the new pair.");
         Assert.AreEqual(10, snapshot.Left.Percent);
         Assert.AreEqual(30, snapshot.Right.Percent);
     }
@@ -347,57 +347,65 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(0, snapshot.Counters.Switches);
     }
 
-    // The case was closed for longer than the window and opened under a new address: it is chosen again, the old
-    // values stay greyed, and nothing the new set does not say is carried over as current.
+    // The addresses rotated: the linked set goes quiet under its old addresses and is heard under a new one with the fields
+    // it last said. It is followed, the values on show stay greyed as they age until the new address's own messages
+    // replace them, and nothing the new address does not say (the case level, which a pair in use does not send) is
+    // carried over as current.
     [TestMethod]
-    public void AfterTheCaseWasClosedTheValuesOnShowStayGreyedUntilTheNewSetsOwnMessagesReplaceThem()
+    public void AfterAnAddressChangeTheValuesOnShowStayUntilTheFollowedSetsOwnMessagesReplaceThem()
     {
         using WidgetStatusService service = NewService();
         service.Start();
+        ProximityMessage inUse = BroadcastFixtures.Bud(first: true, caseNibble: 0xF, pairHigh: 0x7, pairLow: 0x4);
         Send(1, BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4), -60, 3);
-        DateTimeOffset heardAt = _clock.GetUtcNow();
-        Tick(60);
+        DateTimeOffset caseHeardAt = _clock.GetUtcNow();
+        Tick(0.5);
+        Send(1, inUse, -60, 2);
+        DateTimeOffset budsHeardAt = _clock.GetUtcNow();
+        Tick(12);
 
         // The new address says the buds' levels and not the case's.
-        ProximityMessage fresh = BroadcastFixtures.Bud(first: true, caseNibble: 0xF, pairHigh: 0x6, pairLow: 0x3);
-        Send(5, fresh, -60, 1.5);
+        Send(5, inUse, -60, 1.5);
         WidgetSnapshot waiting = service.Current;
-        Assert.AreEqual(40, waiting.Left.Percent, "Not chosen yet: the old values stand, with their own read time.");
-        Assert.AreEqual(heardAt, waiting.Left.ReadAt);
+        Assert.AreEqual(0, waiting.Counters.Followed, "Not followed yet: four messages inside a second and a half.");
+        Assert.AreEqual(40, waiting.Left.Percent, "The old values stand, with their own read time.");
+        Assert.AreEqual(budsHeardAt, waiting.Left.ReadAt);
 
         Tick(0.5);
-        Send(5, fresh, -60, 1.0);
+        Send(5, inUse, -60, 1.0);
 
         WidgetSnapshot snapshot = service.Current;
         Assert.AreEqual(BroadcastSelectionState.Chosen, snapshot.Selection);
-        Assert.AreEqual(30, snapshot.Left.Percent);
-        Assert.AreEqual(60, snapshot.Right.Percent);
-        Assert.AreEqual(_clock.GetUtcNow(), snapshot.Left.ReadAt);
+        Assert.AreEqual(1, snapshot.Counters.Followed);
+        Assert.AreEqual(40, snapshot.Left.Percent);
+        Assert.AreEqual(70, snapshot.Right.Percent);
+        Assert.AreEqual(_clock.GetUtcNow(), snapshot.Left.ReadAt, "The new address's own message replaced the read time.");
         Assert.AreEqual(90, snapshot.Case.Percent, "The case level was not said again: the old one stays.");
-        Assert.AreEqual(heardAt, snapshot.Case.ReadAt, "...with its own, old read time, so it is greyed and never current.");
+        Assert.AreEqual(caseHeardAt, snapshot.Case.ReadAt, "...with its own, old read time, so it is greyed and never current.");
         Assert.AreEqual(0, snapshot.Counters.Switches);
-        Assert.IsTrue(_log.Has(LogLevel.Info, "went quiet, and a set of AirPods was picked out again"));
+        Assert.AreEqual(1, snapshot.Counters.Links, "Only the case open linked.");
+        Assert.IsTrue(_log.Has(LogLevel.Info, "the linked set changed address and was followed"));
     }
 
-    // The values on show stay when a set is chosen again, but the set may be another pair, so what pairs readings by set
-    // (ear detection) is told: the readings of the set chosen again carry a later generation than those before the quiet.
+    // The values on show stay when a set is followed, but the set may be another pair, so what pairs readings by set
+    // (ear detection) is told: the readings of the set followed carry a later generation than those before the quiet.
     [TestMethod]
-    public void ASetChosenAgainAfterTheCaseWasClosedCarriesALaterSelectionGeneration()
+    public void ASetFollowedToANewAddressCarriesALaterSelectionGeneration()
     {
         using WidgetStatusService service = NewService();
         service.Start();
+        ProximityMessage inUse = BroadcastFixtures.Bud(first: true, caseNibble: 0xF, pairHigh: 0x7, pairLow: 0x4);
         Send(1, BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4), -60, 3);
-        long before = _readingEvents[^1].SelectionGeneration;
-        Tick(60);
-
-        ProximityMessage fresh = BroadcastFixtures.Bud(first: true, caseNibble: 0xF, pairHigh: 0x6, pairLow: 0x3);
-        Send(5, fresh, -60, 1.5);
         Tick(0.5);
-        Send(5, fresh, -60, 1.0);
+        Send(1, inUse, -60, 2);
+        long before = _readingEvents[^1].SelectionGeneration;
+        Tick(12);
+
+        Send(5, inUse, -60, 2.5);
 
         Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
-        Assert.IsTrue(_log.Has(LogLevel.Info, "went quiet, and a set of AirPods was picked out again"));
-        Assert.IsGreaterThan(before, _readingEvents[^1].SelectionGeneration, "A set chosen again may be another pair: its readings do not pair with the earlier ones.");
+        Assert.IsTrue(_log.Has(LogLevel.Info, "the linked set changed address and was followed"));
+        Assert.IsGreaterThan(before, _readingEvents[^1].SelectionGeneration, "A set followed may be another pair: its readings do not pair with the earlier ones.");
     }
 
     // One message of a far sender that said what the chosen set said, then fields of its own: once it has left the
@@ -476,11 +484,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsNotEmpty(firstSet);
         Assert.AreEqual(1, firstSet.Distinct().Count(), "One chosen set, one generation.");
 
-        for (int i = 0; i <= 62; i++)
+        for (int i = 0; i <= 16; i++)
         {
             Raise(1, a, -60);
             Raise(3, b, -51);
-            Tick(0.5);
+            Tick(0.25);
         }
 
         long last = _readingEvents[^1].SelectionGeneration;
@@ -529,7 +537,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _clock.Advance(WidgetTiming.CountersLogInterval);
 
         LogEntry line = _log.Entries.Last(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal));
-        string[] keys = ["allSections=", "apple=", "other=", "items=", "ok=", "truncated=", "unknownForm=", "modelMismatch=", "colourMismatch=", "otherSet=", "chosen=", "noPairedModel=", "budOrderDisagree=", "switches=", "sets=", "unknownFormShapes="];
+        string[] keys = ["allSections=", "apple=", "other=", "items=", "ok=", "truncated=", "unknownForm=", "modelMismatch=", "colourMismatch=", "otherSet=", "chosen=", "noPairedModel=", "budOrderDisagree=", "switches=", "links=", "followed=", "drops=", "sets=", "unknownFormShapes="];
         int at = -1;
         foreach (string key in keys)
         {
@@ -538,8 +546,8 @@ public sealed class WidgetStatusServiceTests : IDisposable
             at = next;
         }
 
-        Assert.Contains(" allSections=4 ", line.Message);
-        Assert.Contains(" ok=4 ", line.Message);
+        Assert.Contains(" allSections=6 ", line.Message);
+        Assert.Contains(" ok=6 ", line.Message);
         Assert.Contains(" chosen=2 ", line.Message);
     }
 
@@ -896,8 +904,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsTrue(_log.Has(LogLevel.Warn, "form may have drifted"));
     }
 
+    // A value is not cleared by its age: it stays with its own read time and the card greys it. What clears it is the link
+    // being dropped, after the linked set has been lost for longer than two minutes.
     [TestMethod]
-    public void BatteryKeepsItsReadTimeAndNeverExpires()
+    public void BatteryKeepsItsReadTimeWhileLinkedAndIsClearedWhenTheLinkIsDropped()
     {
         using WidgetStatusService service = NewService();
         service.Start();
@@ -908,10 +918,18 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(50, service.Current.Case.Percent);
         Assert.AreEqual(at, service.Current.Case.ReadAt);
 
-        _clock.Advance(TimeSpan.FromDays(1));
+        _clock.Advance(TimeSpan.FromSeconds(110));
 
-        Assert.AreEqual(50, service.Current.Case.Percent);
+        Assert.AreEqual(50, service.Current.Case.Percent, "Lost for under two minutes: still linked, so still kept.");
         Assert.AreEqual(at, service.Current.Case.ReadAt);
+        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+
+        _clock.Advance(TimeSpan.FromSeconds(30));
+
+        Assert.IsNull(service.Current.Case.Percent, "Lost for over two minutes: the link is dropped and nothing is kept.");
+        Assert.AreEqual(BroadcastSelectionState.Listening, service.Current.Selection);
+        Assert.AreEqual(1, service.Current.Counters.Drops);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "the link was dropped"));
     }
 
     [TestMethod]
@@ -1599,7 +1617,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         // Once a minute while anything changed, the counters line itself, counts only.
         Assert.IsTrue(
-            widgetEntries.Any(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal) && e.Message.Contains("ok=4", StringComparison.Ordinal)),
+            widgetEntries.Any(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal) && e.Message.Contains("ok=6", StringComparison.Ordinal)),
             "The once-a-minute counters line was not logged.");
     }
 

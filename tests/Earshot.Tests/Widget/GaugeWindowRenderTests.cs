@@ -30,6 +30,7 @@ public sealed class GaugeWindowRenderTests
         WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = AirPodsWhere.ThisPc,
+            Selection = BroadcastSelectionState.Chosen,
             Left = new PartReading(70, false, null) { ReadAt = Now - TimeSpan.FromMinutes(2) },
             Right = new PartReading(60, false, null) { ReadAt = Now - TimeSpan.FromMinutes(2) },
         };

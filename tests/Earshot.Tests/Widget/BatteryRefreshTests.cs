@@ -54,13 +54,14 @@ public sealed class BatteryRefreshTests : IDisposable
             ProximityParser.AppleCompanyId,
             WidgetFixtures.Proximity(batteryA: 0x56, batteryB: 0x0A), -60, at ?? _clock.GetUtcNow(), tag);
 
-    // The chosen set with values: three messages two seconds apart, the last choosing it.
+    // The linked set with values: the owner opens the case, so five messages with the case level known, half a second
+    // apart, the last of them linking the set.
     private void Choose()
     {
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 5; i++)
         {
             _source.Raise(Message());
-            _clock.Advance(TimeSpan.FromMilliseconds(1100));
+            _clock.Advance(TimeSpan.FromMilliseconds(500));
         }
     }
 
@@ -252,13 +253,13 @@ public sealed class BatteryRefreshTests : IDisposable
         service.Start();
         Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
 
-        for (int i = 0; i < 3 && !refresh.IsCompleted; i++)
+        for (int i = 0; i < 5 && !refresh.IsCompleted; i++)
         {
             _source.Raise(Message());
-            _clock.Advance(TimeSpan.FromMilliseconds(1100));
+            _clock.Advance(TimeSpan.FromMilliseconds(500));
         }
 
-        Assert.IsTrue(refresh.IsCompleted, "The first choice is made after two seconds and three messages.");
+        Assert.IsTrue(refresh.IsCompleted, "The link is made after five messages with the case level known, two seconds apart.");
         Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
     }
 
@@ -363,27 +364,29 @@ public sealed class BatteryRefreshTests : IDisposable
         Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(refresh));
     }
 
-    // The case was closed past the window: the selection is made again, and a refresh asked for meanwhile ends
-    // Heard on the message that makes the choice, not before.
+    // The addresses rotated past the window: the linked set is followed under its new address, and a refresh asked for
+    // meanwhile ends Heard on the message that follows it, not before.
     [TestMethod]
-    public void ARefreshDuringAReacquireWaitsForTheChoiceAndEndsHeardWhenItIsMade()
+    public void ARefreshDuringAnAddressChangeWaitsForTheFollowAndEndsHeardWhenItIsMade()
     {
         using WidgetStatusService service = NewService();
         service.Start();
         Choose();
-        _clock.Advance(TimeSpan.FromSeconds(30));
+        _clock.Advance(TimeSpan.FromSeconds(12));
         Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
 
-        _source.Raise(Message(tag: 7));
-        Assert.IsFalse(refresh.IsCompleted, "A set heard for the first time since the quiet is not chosen yet.");
-        _clock.Advance(TimeSpan.FromMilliseconds(1100));
-        _source.Raise(Message(tag: 7));
-        _clock.Advance(TimeSpan.FromMilliseconds(1100));
-        Assert.IsFalse(refresh.IsCompleted, "Two messages and two seconds are not three messages.");
+        for (int i = 0; i < 4; i++)
+        {
+            _source.Raise(Message(tag: 7));
+            _clock.Advance(TimeSpan.FromMilliseconds(500));
+        }
+
+        Assert.IsFalse(refresh.IsCompleted, "A set heard for a second and a half under a new address is not followed yet.");
 
         _source.Raise(Message(tag: 7));
 
         Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
+        Assert.AreEqual(1, service.Current.Counters.Followed);
     }
 
     // A model that could not be read at start is read again by a refresh, and the set can then be chosen.
@@ -401,10 +404,10 @@ public sealed class BatteryRefreshTests : IDisposable
 
         Assert.AreEqual(2, _paired.Reads, "The refresh asked again.");
         Assert.AreEqual(BroadcastSelectionState.Listening, service.Current.Selection);
-        for (int i = 0; i < 3 && !refresh.IsCompleted; i++)
+        for (int i = 0; i < 5 && !refresh.IsCompleted; i++)
         {
             _source.Raise(Message());
-            _clock.Advance(TimeSpan.FromMilliseconds(1100));
+            _clock.Advance(TimeSpan.FromMilliseconds(500));
         }
 
         Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));

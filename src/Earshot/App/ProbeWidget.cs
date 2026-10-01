@@ -103,6 +103,7 @@ internal static partial class Program
         WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = where,
+            Selection = BroadcastSelectionState.Chosen,
             Left = new PartReading(70, true, null) { ReadAt = readAt },
             Right = new PartReading(60, false, true) { ReadAt = readAt },
             Case = new PartReading(90, false, null) { ReadAt = readAt },
@@ -184,7 +185,8 @@ internal static partial class Program
     // The card variants the widget card probe renders, from the same fixed synthetic snapshots the gauge already
     // uses. "this-pc" and "elsewhere" are the card as it renders with fresh values (AutoPauseAvailable false in both,
     // so the switch row never appears); "greyed" is the same values read four minutes ago, drawn greyed with their
-    // age; "no-reading" is a card with no value for any part; "refresh-reading" and "refresh-nothing-heard" are a battery refresh in progress and one that heard nothing. "auto-pause-preview" is a preview only: production
+    // age; "no-reading" is a card with no value for any part; "open-the-case" is the connected card with no pair linked;
+    // "refresh-reading" and "refresh-nothing-heard" are a battery refresh in progress and one that heard nothing. "auto-pause-preview" is a preview only: production
     // never sets AutoPauseAvailable true until the in-ear signal is known.
     internal static IReadOnlyList<(string Variant, WidgetCardModel Model)> ProbeWidgetCardVariants(DateTimeOffset now)
     {
@@ -204,6 +206,9 @@ internal static partial class Program
                 ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
             ("no-reading", new WidgetCardModel(none, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
                 ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
+            // Connected, with no pair linked yet: the line that says opening the case next to the PC links one.
+            ("open-the-case", new WidgetCardModel(none with { Selection = BroadcastSelectionState.Listening }, AutoPauseOn: false,
+                ShowSwitch: false, ConnectIntent: false, ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
             ("auto-pause-preview", new WidgetCardModel(thisPc with { AutoPauseAvailable = true },
                 AutoPauseOn: false, ShowSwitch: true, ConnectIntent: false, ButtonEnabled: true,
                 OtherDeviceLabel: "", Now: now)),

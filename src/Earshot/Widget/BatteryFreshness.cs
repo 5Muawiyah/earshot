@@ -86,15 +86,27 @@ internal static class BatteryFreshness
     public static ShownBattery Shown(WidgetSnapshot snapshot, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        return Shown(snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset, snapshot.Where == AirPodsWhere.ThisPc, now);
+        return Shown(
+            snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset,
+            onThisPc: snapshot.Where == AirPodsWhere.ThisPc, linked: snapshot.Selection == BroadcastSelectionState.Chosen, now);
     }
 
+    // onThisPc: the owner's AirPods are connected to this PC; nothing at all is shown otherwise. linked: the broadcast's
+    // set is the one linked to the owner's pair (a case opened near the PC); the buds and the case are shown only then,
+    // since an unlinked broadcast may be any pair's. Windows' own figure is for the connected headset and needs no link.
     public static ShownBattery Shown(
-        PartReading left, PartReading right, PartReading caseReading, PartReading headset, bool onThisPc, DateTimeOffset now)
+        PartReading left, PartReading right, PartReading caseReading, PartReading headset, bool onThisPc, bool linked, DateTimeOffset now)
     {
         if (!onThisPc)
         {
             return ShownBattery.None;
+        }
+
+        if (!linked)
+        {
+            left = PartReading.Unknown;
+            right = PartReading.Unknown;
+            caseReading = PartReading.Unknown;
         }
 
         ShownPart l = Part(left, now);

@@ -710,7 +710,7 @@ internal sealed partial class WidgetCard : Form
         }
         else
         {
-            DrawIconLine(g, layout.ReadLine, FluentGlyphs.Clock, ReadLineShort, ReadLineText);
+            DrawIconLine(g, layout.ReadLine, AsksToOpenTheCase ? FluentGlyphs.Earbud : FluentGlyphs.Clock, ReadLineShort, ReadLineText);
         }
 
         if (layout.ShowUpdateLine)

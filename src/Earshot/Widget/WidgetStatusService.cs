@@ -64,13 +64,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private TimeSpan _retryDelay;
     private ITimer? _countersLogTimer;
     private ITimer? _headsetTimer;
+    private ITimer? _linkTimer;
     private WidgetCounters? _lastLoggedCounters;
     private WidgetWatcherState? _lastLoggedWatcherState;
 
     private long _allSections, _appleSections, _otherCompanySections, _proximityItems;
     private long _okForm, _truncated, _unknownForm;
     private long _modelMismatch, _colourMismatch, _otherSet, _chosen, _noPairedModel;
-    private long _budOrderDisagree, _switches;
+    private long _budOrderDisagree, _switches, _links, _followed, _drops;
     private int _setsInRange;
 
     // One line per run, not per message: a form that drifted, and two senders of the chosen set disagreeing on
@@ -228,6 +229,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 static state => ((WidgetStatusService)state!).OnCountersLogDue(), this,
                 WidgetTiming.CountersLogInterval, WidgetTiming.CountersLogInterval);
 
+            // Silence brings no message to notice it with, so a linked set that has been lost for too long is found by
+            // looking at the clock now and then.
+            _linkTimer ??= _timeProvider.CreateTimer(
+                static state => ((WidgetStatusService)state!).OnLinkCheckDue(), this,
+                WidgetTiming.LinkCheckInterval, WidgetTiming.LinkCheckInterval);
+
             // Windows' own figure is read once a minute, only while the AirPods are on this PC (the tick checks).
             if (_handsFree is not null)
             {
@@ -325,6 +332,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _countersLogTimer = null;
             _headsetTimer?.Dispose();
             _headsetTimer = null;
+            _linkTimer?.Dispose();
+            _linkTimer = null;
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
@@ -1115,27 +1124,36 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 _setsInRange = seen.SetsInRange;
             }
 
+            if (seen.Dropped)
+            {
+                // The linked set was lost for longer than the limit before this message: nothing is linked, so nothing of
+                // what it said is kept.
+                DropLinkLocked();
+            }
+
             if (seen.NewChoice)
             {
-                // A set was chosen that is not the one whose values are held (the first choice, a switch, a choice
-                // after a release): those values were another pair's, so they are dropped.
+                // A set was linked that is not the one whose values are held (a case opened near the PC, or another pair
+                // that opened its case clearly nearer): those values were another pair's, so they are dropped.
                 ResetReadingsLocked();
                 if (seen.Switched)
                 {
                     _switches++;
-                    _log.Info("Widget: another set of AirPods stayed clearly nearer for long enough, so it is the one shown now.");
+                    _log.Info("Widget: another set of AirPods opened its case clearly nearer, so the link moved to it (" + seen.SetsInRange + " in range).");
                 }
                 else
                 {
-                    _log.Info("Widget: picked out a set of AirPods to show (" + seen.SetsInRange + " in range).");
+                    _links++;
+                    _log.Info("Widget: linked to the AirPods whose case was opened (" + seen.SetsInRange + " in range).");
                 }
             }
             else if (seen.Reacquired)
             {
                 // The values on show stay, greyed as they age, until this set's own messages replace them. The in-ear
-                // state does not: a set chosen again may be another pair, so whoever pairs readings by set is told.
+                // state does not: whoever pairs readings by set is told the set changed addresses.
                 _selectionGeneration++;
-                _log.Info("Widget: the chosen set went quiet, and a set of AirPods was picked out again (" + seen.SetsInRange + " in range).");
+                _followed++;
+                _log.Info("Widget: the linked set changed address and was followed (" + seen.SetsInRange + " in range).");
             }
 
             switch (seen.Class)
@@ -1210,7 +1228,49 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     private static bool Differs(int? a, int? b) => a is int x && b is int y && x != y;
 
-    // Whatever the chosen set held is dropped: after a choice that is another set, or a new paired model, nothing
+    // The link was dropped because the linked set was lost for longer than BroadcastRules.LostLimit: nothing it said is
+    // kept, and the drop is counted and logged as numbers only, never an address. Must be called holding _gate.
+    private void DropLinkLocked()
+    {
+        ResetReadingsLocked();
+        _drops++;
+        _setsInRange = 0;
+        _log.Info("Widget: the linked AirPods were not heard for " + (long)BroadcastRules.LostLimit.TotalSeconds + " s, so the link was dropped.");
+    }
+
+    // Runs on a real timer thread, so like the other timers it catches what nothing else would, logs it with its code and
+    // never lets it end the process.
+    private void OnLinkCheckDue()
+    {
+        try
+        {
+            bool dropped;
+            lock (_gate)
+            {
+                if (_closed)
+                {
+                    return;
+                }
+
+                dropped = _selector.Expire(_timeProvider.GetUtcNow());
+                if (dropped)
+                {
+                    DropLinkLocked();
+                }
+            }
+
+            if (dropped)
+            {
+                PublishAndNotify();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Widget link check failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+        }
+    }
+
+    // Whatever the linked set held is dropped: after a link that is another set, or a new paired model, nothing
     // of the old values may be shown against the new pair.
     private void ResetReadingsLocked()
     {
@@ -1634,7 +1694,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Interlocked.Read(ref _budOrderDisagree),
             Interlocked.Read(ref _switches),
             _setsInRange,
-            _cachedUnknownForms);
+            _cachedUnknownForms)
+        {
+            Links = Interlocked.Read(ref _links),
+            Followed = Interlocked.Read(ref _followed),
+            Drops = Interlocked.Read(ref _drops),
+        };
     }
 
     // Once a minute while anything changed since the last one, logs the counters as numbers, the
@@ -1685,6 +1750,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         a.NoPairedModel == b.NoPairedModel &&
         a.BudOrderDisagree == b.BudOrderDisagree &&
         a.Switches == b.Switches &&
+        a.Links == b.Links &&
+        a.Followed == b.Followed &&
+        a.Drops == b.Drops &&
         a.Sets == b.Sets &&
         a.UnknownForms.SequenceEqual(b.UnknownForms);
 
@@ -1711,6 +1779,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             " noPairedModel=" + c.NoPairedModel +
             " budOrderDisagree=" + c.BudOrderDisagree +
             " switches=" + c.Switches +
+            " links=" + c.Links +
+            " followed=" + c.Followed +
+            " drops=" + c.Drops +
             " sets=" + c.Sets +
             " unknownFormShapes=[" + shapes + "]";
     }

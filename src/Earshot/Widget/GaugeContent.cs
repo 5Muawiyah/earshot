@@ -68,6 +68,11 @@ internal sealed record GaugeContent(
             return new GaugeContent(GaugeMode.Reading, figure.Percent, low, figure.Charging, tooltip);
         }
 
-        return new GaugeContent(GaugeMode.MarkOnly, null, false, false, WidgetCopy.GaugeNoRecentReading);
+        // Connected, with no figure: either no pair is linked yet (opening the case near the PC links one) or nothing
+        // recent was read.
+        string noFigure = snapshot.Selection == BroadcastSelectionState.Listening
+            ? WidgetCopy.OpenTheCaseToShowBattery
+            : WidgetCopy.GaugeNoRecentReading;
+        return new GaugeContent(GaugeMode.MarkOnly, null, false, false, noFigure);
     }
 }

@@ -229,7 +229,10 @@ internal static class CardKit
             WatcherErrorCode: null,
             WatcherErrorName: null,
             AutoPauseAvailable: false,
-            WidgetCounters.Empty);
+            WidgetCounters.Empty)
+        {
+            Selection = BroadcastSelectionState.Chosen,
+        };
 
     public static WidgetCardModel MainModel(WidgetSnapshot? snapshot = null, string? updateVersion = null) =>
         new(snapshot ?? Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, UpdateVersion: updateVersion);

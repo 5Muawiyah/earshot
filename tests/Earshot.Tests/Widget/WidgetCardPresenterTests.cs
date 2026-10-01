@@ -327,7 +327,10 @@ public sealed class WidgetCardPresenterTests
             WatcherErrorCode: null,
             WatcherErrorName: null,
             AutoPauseAvailable: autoPauseAvailable,
-            WidgetCounters.Empty);
+            WidgetCounters.Empty)
+        {
+            Selection = BroadcastSelectionState.Chosen,
+        };
 
     // Records every call the presenter makes into "TrayContext"; nothing here touches a real coordinator,
     // settings store or device.

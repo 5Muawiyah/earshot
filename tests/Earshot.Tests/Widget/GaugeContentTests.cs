@@ -19,6 +19,7 @@ public sealed class GaugeContentTests
         WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = where,
+            Selection = BroadcastSelectionState.Chosen,
             Left = left ?? PartReading.Unknown,
             Right = right ?? PartReading.Unknown,
             Headset = headset ?? PartReading.Unknown,
@@ -88,6 +89,39 @@ public sealed class GaugeContentTests
         Assert.AreEqual("No recent reading", none.Tooltip);
         Assert.AreEqual("No recent reading", old.Tooltip);
         Assert.AreEqual(GaugeMode.MarkOnly, old.Mode);
+    }
+
+    // Connected with no pair linked: the mark alone, and the tooltip says what makes a figure show. The same broadcast
+    // figures, unlinked, are never drawn.
+    [TestMethod]
+    public void ConnectedWithNoPairLinkedTheGaugeIsTheMarkAloneAndTheTooltipAsksToOpenTheCase()
+    {
+        WidgetSnapshot unlinked = Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromSeconds(1)), Bud(60, age: TimeSpan.FromSeconds(1))) with
+        {
+            Selection = BroadcastSelectionState.Listening,
+        };
+
+        GaugeContent c = GaugeContent.From(unlinked, Now, Settings);
+
+        Assert.AreEqual(GaugeMode.MarkOnly, c.Mode);
+        Assert.IsNull(c.Percent);
+        Assert.AreEqual("Open the case to show battery", c.Tooltip);
+        Assert.AreEqual("No recent reading", GaugeContent.From(unlinked with { Selection = BroadcastSelectionState.NoPairedModel }, Now, Settings).Tooltip, "With no paired model opening the case would not help.");
+    }
+
+    // Windows' figure is for the connected headset and needs no link.
+    [TestMethod]
+    public void ConnectedWithNoPairLinkedWindowsFigureIsStillOnTheGauge()
+    {
+        WidgetSnapshot unlinked = Snapshot(AirPodsWhere.ThisPc, headset: new PartReading(55, null, null) { ReadAt = Now - TimeSpan.FromSeconds(5) }) with
+        {
+            Selection = BroadcastSelectionState.Listening,
+        };
+
+        GaugeContent c = GaugeContent.From(unlinked, Now, Settings);
+
+        Assert.AreEqual(GaugeMode.Reading, c.Mode);
+        Assert.AreEqual(55, c.Percent);
     }
 
     // The one rule for how old a reading may be: exactly an hour is still recent, a minute more is not.

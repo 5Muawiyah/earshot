@@ -909,6 +909,44 @@ public sealed class WidgetCardTests
         });
     }
 
+    // Connected with no pair linked, the read line asks to open the case, with an earbud icon beside it. Nothing else says
+    // so: not a card for AirPods that are not here, not one with a figure to show, not a linked pair with nothing read.
+    [TestMethod]
+    public void TheCardAsksToOpenTheCaseOnlyWhileConnectedAndNoPairIsLinkedAndNothingIsShown()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            string AskFor(WidgetSnapshot snapshot)
+            {
+                using var card = new WidgetCard(new CapturingLog());
+                card.SetTheme(Color.Black, highContrast: false);
+                card.Render(Model(snapshot), 96);
+                return card.ReadLineText;
+            }
+
+            WidgetSnapshot unlinked = Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.Listening };
+            Assert.AreEqual("Open the case to show battery", AskFor(unlinked));
+
+            using (var card = new WidgetCard(new CapturingLog()))
+            {
+                card.SetTheme(Color.Black, highContrast: false);
+                card.Render(Model(unlinked), 96);
+                Assert.AreEqual("Open the case to show battery", card.ReadLineShort, "The same words beside the icon, however short the line.");
+                Assert.AreEqual("Open the case to show battery", card.TooltipAt(new Point(card.CurrentMainLayout.ReadLine.X + 40, card.CurrentMainLayout.ReadLine.Y + 4))!.Value.Text);
+                using Bitmap bitmap = Render(card);
+                Assert.IsTrue(HasInk(bitmap, card.CurrentMainLayout.ReadLine, bitmap.GetPixel(0, 0)), "The line is drawn.");
+            }
+
+            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.Unknown) with { Selection = BroadcastSelectionState.Listening }), "Not connected: nothing to ask for.");
+            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.Chosen }), "Linked, nothing read yet.");
+            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.NoPairedModel }), "No paired model: opening the case would not help.");
+            Assert.AreEqual(
+                "Windows reads 70%",
+                AskFor(unlinked with { Headset = new PartReading(70, null, null) { ReadAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(5) } }),
+                "A figure is shown, so there is nothing to ask for.");
+        });
+    }
+
     private static int CountDifferingPixels(Bitmap a, Bitmap b, Rectangle rect)
     {
         Rectangle bounds = Rectangle.Intersect(rect, new Rectangle(0, 0, Math.Min(a.Width, b.Width), Math.Min(a.Height, b.Height)));
@@ -1086,7 +1124,11 @@ public sealed class WidgetCardTests
             WatcherErrorCode: null,
             WatcherErrorName: null,
             AutoPauseAvailable: autoPauseAvailable,
-            WidgetCounters.Empty);
+            WidgetCounters.Empty)
+        {
+            // A card that shows figures is one for a linked pair: opening the case near the PC is what links one.
+            Selection = BroadcastSelectionState.Chosen,
+        };
 
     private static WidgetCardModel Model(
         WidgetSnapshot snapshot,

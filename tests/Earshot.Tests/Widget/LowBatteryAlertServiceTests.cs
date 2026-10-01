@@ -62,13 +62,16 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
 
     // A snapshot whose parts were read this long ago. A value read within 30 s is fresh and is what is shown;
     // older it is greyed and feeds nothing.
-    private WidgetSnapshot Snapshot(int? left = null, int? right = null, int? box = null, double ageSeconds = 1, int? headset = null, double headsetAgeSeconds = 1, AirPodsWhere where = AirPodsWhere.ThisPc)
+    private WidgetSnapshot Snapshot(
+        int? left = null, int? right = null, int? box = null, double ageSeconds = 1, int? headset = null, double headsetAgeSeconds = 1,
+        AirPodsWhere where = AirPodsWhere.ThisPc, BroadcastSelectionState selection = BroadcastSelectionState.Chosen)
     {
         DateTimeOffset readAt = _clock.GetUtcNow() - TimeSpan.FromSeconds(ageSeconds);
         PartReading Part(int? percent) => percent is null ? PartReading.Unknown : new PartReading(percent, null, null) { ReadAt = readAt };
         return WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = where,
+            Selection = selection,
             Left = Part(left),
             Right = Part(right),
             Case = Part(box),
@@ -206,6 +209,29 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
 
         _status.Raise(Snapshot(left: 10, where: AirPodsWhere.ThisPc));
         Assert.AreEqual(1, _notifier.Calls.Count, "Once the AirPods are on this PC the same value is shown and alerts.");
+    }
+
+    // Connected is not enough for the broadcast: a pair that was never linked (no case opened near the PC) may be any
+    // pair's, so its figures alert nothing, in range and low or not. Windows' own figure, for the connected headset, still can.
+    [TestMethod]
+    public void ALowBroadcastValueNeverAlertsWhileNoPairIsLinked()
+    {
+        using LowBatteryAlertService service = NewService();
+
+        foreach (BroadcastSelectionState state in new[] { BroadcastSelectionState.Listening, BroadcastSelectionState.NoPairedModel })
+        {
+            _status.Raise(Snapshot(left: 10, right: 10, box: 10, selection: state));
+        }
+
+        Assert.AreEqual(0, _notifier.Calls.Count);
+        Assert.AreEqual(LatchState.Armed, service.LeftLatchStateForTest);
+
+        _status.Raise(Snapshot(headset: 15, selection: BroadcastSelectionState.Listening));
+        Assert.AreEqual(1, _notifier.Calls.Count, "Windows' figure needs no link.");
+        Assert.AreEqual(("Earshot", "AirPods at 15%"), _notifier.Calls[0]);
+
+        _status.Raise(Snapshot(left: 10, selection: BroadcastSelectionState.Chosen));
+        Assert.AreEqual(2, _notifier.Calls.Count, "Linked, the same value is shown and alerts.");
     }
 
     // The setting gates only the notification call. The latch keeps being fed while the setting is off, so its

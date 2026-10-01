@@ -272,7 +272,7 @@ public sealed class OwnerCaptureReplayTests
         ReplayResult result = ReplayRunner.Run(Baseline(), OwnersModel);
 
         ShownBattery shown = BatteryFreshness.Shown(
-            result.Left, result.Right, result.Case, PartReading.Unknown, onThisPc: true, result.LastAt + TimeSpan.FromSeconds(1));
+            result.Left, result.Right, result.Case, PartReading.Unknown, onThisPc: true, linked: true, result.LastAt + TimeSpan.FromSeconds(1));
 
         Assert.AreEqual(50, shown.Gauge?.Percent);
     }
