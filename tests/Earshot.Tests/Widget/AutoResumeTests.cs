@@ -121,7 +121,7 @@ public sealed class AutoResumeTests
         DateTimeOffset now = PausedAt + TimeSpan.FromSeconds(30);
         DateTimeOffset oldReading = now - WidgetTiming.EarFreshWindow - TimeSpan.FromSeconds(1);
 
-        ResumeDecision decision = resume.Evaluate(now, oldReading, true, true, Container, In(oldReading), In(oldReading));
+        ResumeDecision decision = resume.Evaluate(now, oldReading, true, true, Container, In(now), In(now));
 
         Assert.AreEqual(ResumeVerdict.Wait, decision.Verdict);
         Assert.IsTrue(resume.HasPending);
