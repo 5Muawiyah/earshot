@@ -18,6 +18,13 @@ internal sealed partial class TrayContext
 
     internal IReadOnlyCollection<SecondaryGauge> SecondaryGaugesForTest => _secondaryGauges?.Gauges ?? [];
 
+    // The icon goes and stays gone while Earshot closes: the gauges are taken down on the way, and their votes must not bring it back.
+    private void HideIconForClosing()
+    {
+        _notifyIconVisibility.Visible = false;
+        _iconVotes?.HoldHidden();
+    }
+
     // Makes the gauges on the other displays match the setting and what is connected. UI thread.
     private void ReconcileSecondaryGauges()
     {

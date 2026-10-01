@@ -6,10 +6,20 @@ namespace Earshot.Widget;
 // visible only when every voter asks for it.
 //
 // A vote is forwarded on every change, with no check that the answer differs from the last one, so a tray with one
-// gauge sets the icon exactly as often as a controller that held the icon itself would. UI thread only.
+// gauge sets the icon exactly as often as a controller that held the icon itself would. Once the tray is closing the icon is
+// held hidden and no vote reaches it, whoever is removed after. UI thread only.
 internal sealed class TrayIconVotes(ITrayIconVisibility icon)
 {
     private readonly List<Voter> _voters = [];
+    private bool _held;
+
+    // The tray is closing (Exit, or the hand-over to an update): the icon goes and stays gone. The gauges are taken down as it
+    // closes, and each one removed would otherwise leave the icon wanted by everyone left and show it again.
+    public void HoldHidden()
+    {
+        _held = true;
+        icon.Visible = false;
+    }
 
     public Voter NewVoter()
     {
@@ -20,6 +30,11 @@ internal sealed class TrayIconVotes(ITrayIconVisibility icon)
 
     private void Changed()
     {
+        if (_held)
+        {
+            return;
+        }
+
         bool visible = true;
         foreach (Voter v in _voters)
         {

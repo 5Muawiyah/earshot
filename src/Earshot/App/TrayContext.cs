@@ -688,7 +688,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _coordinator.Stop();
         _lifetime.Cancel();
         _registry.Cards.Hide();
-        _notifyIconVisibility.Visible = false;
+        HideIconForClosing();
         CloseWidget();
         ClosePauseOnLeave();
 
@@ -2466,7 +2466,7 @@ internal sealed partial class TrayContext : ApplicationContext
         try
         {
             // No more input: the icon goes and the picker closes.
-            _notifyIconVisibility.Visible = false;
+            HideIconForClosing();
             _picker?.Close();
             _exitPlace = place;
 

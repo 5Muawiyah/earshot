@@ -169,7 +169,7 @@ internal sealed partial class TrayContext
         _closing = true;
         _closedForHandOver = true;
         _log.Info("Update: Earshot does its closing device work first, then starts the elevated program and ends.");
-        _notifyIconVisibility.Visible = false;
+        HideIconForClosing();
         _picker?.Close();
         _exitPlace = place;
         _coordinator.BeginShutdown(PrepareExitHandBack());

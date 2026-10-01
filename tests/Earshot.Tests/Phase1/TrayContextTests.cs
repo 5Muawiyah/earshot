@@ -1533,7 +1533,16 @@ internal sealed class TrayHarness : IDisposable
             },
             // Left out only by a test that reads whether the tray has real surfaces (the card animation choice follows that),
             // with the widget off so nothing real is ever built from it.
-            TrayIconVisibilityFactory = realTrayIconSurface ? null : () => new FakeTrayIcon(),
+            TrayIconVisibilityFactory = realTrayIconSurface ? null : () =>
+            {
+                var icon = new FakeTrayIcon();
+                lock (TrayIcons)
+                {
+                    TrayIcons.Add(icon);
+                }
+
+                return icon;
+            },
             ForegroundChangeSourceFactory = () =>
             {
                 var source = new FakeForegroundChangeSource();
@@ -1654,6 +1663,9 @@ internal sealed class TrayHarness : IDisposable
 
     // Every fake taskbar reader the tray built, in order: the main gauge's first, then one for each other display's gauge (All displays).
     public List<FakeTaskbarReader> TaskbarReaders { get; } = new();
+
+    // The tray icon surfaces the tray built, in order, for a test to read what was set on them.
+    public List<FakeTrayIcon> TrayIcons { get; } = new();
 
     // The fake foreground change source the widget's gauge pipeline built last (null until it has built one),
     // so a test can see it installed and disposed and raise a foreground change through it.

@@ -5,6 +5,7 @@ using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Popup;
 using Earshot.Tests.Phase1;
+using Earshot.Tray;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
@@ -121,6 +122,26 @@ public sealed class GaugeAllDisplaysTests
 
         other.Visible = false;
         Assert.IsTrue(icon.Visible, "A late vote from a gauge that is gone counts for nothing.");
+    }
+
+    [TestMethod]
+    public void OnceTheIconIsHeldHiddenNoVoteOrRemovedGaugeBringsItBack()
+    {
+        var icon = new FakeTrayIcon();
+        var votes = new TrayIconVotes(icon);
+        using TrayIconVotes.Voter main = votes.NewVoter();
+        TrayIconVotes.Voter other = votes.NewVoter();
+        main.Visible = false;
+        other.Visible = false;
+
+        votes.HoldHidden();
+        int changes = icon.VisibilityChanges.Count;
+        main.Visible = true;
+        other.Dispose();
+        other.Visible = true;
+
+        Assert.IsFalse(icon.Visible, "The icon was brought back after it was held hidden.");
+        Assert.AreEqual(changes, icon.VisibilityChanges.Count, "Nothing more was set on the icon.");
     }
 
     [TestMethod]
@@ -915,6 +936,62 @@ public sealed class GaugeAllDisplaysTests
 
         Assert.AreEqual(GaugeController.RaisesPerWindow, busySurface.RaiseCount, "The busy gauge is held to the limit.");
         Assert.AreEqual(1, quietSurface.RaiseCount, "The other gauge's raise is not refused for the busy one's.");
+    }
+
+    // ----- the icon while the tray closes -----
+
+    // The main gauge goes while another stays shown, so the icon is held hidden by the other's vote alone. Closing the tray takes
+    // that gauge down, and the icon must not come back as it goes.
+    private static (Rig Rig, FakeTrayIcon Icon) RigWithTheIconHeldHiddenByTheOtherGauge()
+    {
+        Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
+        FeedSecondary(rig, Two);
+        TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null && rig.ShownOn(Right1080) is not null, "The gauges were never shown.");
+        rig.Tray.TaskbarReaders[0].SetNextResult(
+            ITaskbarReader.Result.Fail(new TaskbarReadFailure(TaskbarReadFailureStep.NoTaskbar, new StepOutcome("fake", false, 0, "S_OK", null))));
+        TrayHarness.PumpUntil(() => rig.Tray.Context.WidgetGaugeStateForTest is GaugeState.Hidden, "The main gauge never hid.");
+        rig.Tray.Time.Advance(TimeSpan.FromSeconds(3));
+        rig.Tray.PumpUntilIdle();
+        FakeTrayIcon icon = rig.Tray.TrayIcons.Single();
+        TrayHarness.PumpUntil(() => !icon.Visible, "The other gauge did not hold the icon hidden.");
+        return (rig, icon);
+    }
+
+    [TestMethod]
+    public void TheIconStaysHiddenWhileTheGaugesAreTakenDownAsTheTrayCloses()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            (Rig rig, FakeTrayIcon icon) = RigWithTheIconHeldHiddenByTheOtherGauge();
+            int mark = icon.VisibilityChanges.Count;
+
+            rig.Dispose();
+
+            Assert.IsFalse(icon.Visible, "The icon was shown again while the tray closed: " + string.Join(",", icon.VisibilityChanges.Skip(mark)));
+        });
+    }
+
+    // Exit waits for what is in flight with the gauges still being matched to the displays. They are removed as soon as the tray is
+    // closing, which is while the icon is already gone.
+    [TestMethod]
+    public void TheIconStaysHiddenWhileExitWaitsAndTheGaugesAreRemoved()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            (Rig rig, FakeTrayIcon icon) = RigWithTheIconHeldHiddenByTheOtherGauge();
+            using Rig keep = rig;
+            var release = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            rig.Tray.Connection.OnConnect = _ => release.Task;
+            rig.Tray.ClickMenu(MenuModel.Connect);
+            int mark = icon.VisibilityChanges.Count;
+
+            rig.Tray.ClickMenu(MenuModel.Exit);
+            TrayHarness.PumpUntil(() => rig.Tray.Context.SecondaryGaugeCountForTest == 0, "The gauges were not removed once Exit began. " + Why(rig));
+
+            Assert.IsFalse(icon.Visible, "The icon was shown again while Exit was waiting: " + string.Join(",", icon.VisibilityChanges.Skip(mark)));
+            release.SetResult(new ConnectResult(ConnectOutcome.Failed, "Cancelled", []));
+            rig.Tray.PumpUntilIdle();
+        });
     }
 
     // ----- the raise -----
