@@ -379,6 +379,27 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsTrue(_log.Has(LogLevel.Info, "went quiet, and a set of AirPods was picked out again"));
     }
 
+    // The values on show stay when a set is chosen again, but the set may be another pair, so what pairs readings by set
+    // (ear detection) is told: the readings of the set chosen again carry a later generation than those before the quiet.
+    [TestMethod]
+    public void ASetChosenAgainAfterTheCaseWasClosedCarriesALaterSelectionGeneration()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Send(1, BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4), -60, 3);
+        long before = _readingEvents[^1].SelectionGeneration;
+        Tick(60);
+
+        ProximityMessage fresh = BroadcastFixtures.Bud(first: true, caseNibble: 0xF, pairHigh: 0x6, pairLow: 0x3);
+        Send(5, fresh, -60, 1.5);
+        Tick(0.5);
+        Send(5, fresh, -60, 1.0);
+
+        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "went quiet, and a set of AirPods was picked out again"));
+        Assert.IsGreaterThan(before, _readingEvents[^1].SelectionGeneration, "A set chosen again may be another pair: its readings do not pair with the earlier ones.");
+    }
+
     // One message of a far sender that said what the chosen set said, then fields of its own: once it has left the
     // window of that message it is another set, and none of its values reach the card.
     [TestMethod]

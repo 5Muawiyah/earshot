@@ -23,10 +23,22 @@ internal sealed class FakeMediaSessions : IMediaSessions
     public Task<IReadOnlyList<MediaSessionView>> ReadAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<MediaSessionView>>(Sessions);
 
-    public Task<bool> TryPauseAsync(string sessionId, CancellationToken ct)
+    // Completed when a pause has been asked for, and the pause does not return until HoldPause completes: a test can then
+    // do something else while a pause is in flight.
+    public TaskCompletionSource? PauseEntered { get; set; }
+
+    public Task? HoldPause { get; set; }
+
+    public async Task<bool> TryPauseAsync(string sessionId, CancellationToken ct)
     {
         PauseCalls.Add(sessionId);
-        return Task.FromResult(PauseResult);
+        PauseEntered?.TrySetResult();
+        if (HoldPause is { } held)
+        {
+            await held.ConfigureAwait(false);
+        }
+
+        return PauseResult;
     }
 
     public Task<bool> TryPlayAsync(string sessionId, CancellationToken ct)

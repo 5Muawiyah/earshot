@@ -537,8 +537,7 @@ Windows to keep the Hands-Free link up, so Windows can hold a battery figure,
 without apps being able to use the AirPods' microphone. Turning it on only
 turns Protect audio quality off. The row's Open button opens Windows' sound
 settings, at the AirPods' microphone when Earshot has a capture endpoint id for
-it in the form Windows Settings takes, and at the list of sound devices when it
-has none, with one line: set the AirPods microphone to "Don't allow". Earshot
+it, and at the list of sound devices when it has none, with one line: set the AirPods microphone to "Don't allow". Earshot
 cannot do that for you, because Windows documents no call that switches that
 microphone off. The row says when Windows already lists the microphone as off.
 Choosing Protect audio quality on its own turns the mode off.

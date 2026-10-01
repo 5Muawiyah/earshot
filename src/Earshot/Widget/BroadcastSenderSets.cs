@@ -24,9 +24,12 @@ internal static class BroadcastRules
     public static readonly TimeSpan SameSetWithin = TimeSpan.FromSeconds(2);
 
     // A sender that merely merged into the chosen set (it said what an anchor said, near it in time) becomes an anchor
-    // only after it has matched anchor messages this many times, the first of the run this long before the last. A
-    // passer-by whose levels happen to equal the owner's is heard once or twice before the next of its messages differs;
-    // the owner's other bud matches every message it sends. Three matches is the count BroadcastRules.MinMessages
+    // only after it has matched anchor messages this many times, the first of the run this long before the last. The
+    // design assumes that a passer-by whose levels happen to equal the owner's stops matching after a message or two,
+    // while the owner's other bud matches every message it sends. That is an assumption, not something that was measured:
+    // a same-model stranger whose levels stay equal to the owner's for AnchorSpan can become an anchor, which is part of
+    // the same-model risk the documentation states (an equal or lower battery level of the same model can pass as the
+    // owner's). Three matches is the count BroadcastRules.MinMessages
     // already calls a median rather than a passer-by, and three seconds is the shortest run in which the case-open rate
     // (about four messages a second) gives that many while the in-use rate (a message every few seconds per bud) needs
     // longer, which is harmless: the first sender is an anchor already, and a second bud that is not one yet only means

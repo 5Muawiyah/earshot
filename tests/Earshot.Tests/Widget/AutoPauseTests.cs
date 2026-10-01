@@ -397,6 +397,59 @@ public sealed class AutoPauseTests
         Assert.IsTrue(log.Has(LogLevel.Info, "another set"));
     }
 
+    // A pause being made for one set while another set is chosen: the pause is real, but it was made for a set that is no
+    // longer the chosen one, so it is not remembered, and nothing of the other set's buds can resume it.
+    [TestMethod]
+    public async Task APauseInFlightForOneSetIsNotRememberedOnceAnotherSetWasChosen()
+    {
+        var sessions = OnePlayingSession();
+        sessions.PauseEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sessions.HoldPause = release.Task;
+        var log = new CapturingLog();
+        var autoPause = NewAutoPause(sessions, log: log);
+        DateTimeOffset back = At + TimeSpan.FromSeconds(10);
+
+        await autoPause.ApplyAsync(true, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None, selectionGeneration: 1);
+        Task<bool> pausing = autoPause.ApplyAsync(false, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None, selectionGeneration: 1);
+        await sessions.PauseEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Another set is chosen while the pause for the first is still being made.
+        await autoPause.ApplyAsync(true, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None, selectionGeneration: 2);
+        release.SetResult();
+        bool paused = await pausing.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.IsTrue(paused, "The session was paused.");
+        Assert.IsFalse(autoPause.HasRememberedPause, "A pause made for the first set is not carried to the set chosen since.");
+        sessions.Sessions[0] = sessions.Sessions[0] with { PlaybackStatus = MediaPlaybackState.Paused };
+        await autoPause.ApplyAsync(true, true, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None, selectionGeneration: 2);
+        Assert.AreEqual(0, sessions.PlayCalls.Count, "The other set's buds being in is not the paused set's bud coming back.");
+        Assert.IsTrue(log.Has(LogLevel.Info, "another set"));
+    }
+
+    // The source reported changes when the pause was made and has stopped by the time a bud is back: a play and a pause by
+    // hand since would not have been reported, so nothing is resumed through it.
+    [TestMethod]
+    public async Task NothingIsResumedWhenTheSourceStoppedReportingChangesAfterThePause()
+    {
+        var sessions = OnePlayingSession();
+        var log = new CapturingLog();
+        var autoPause = NewAutoPause(sessions, log: log);
+        DateTimeOffset back = At + TimeSpan.FromSeconds(10);
+
+        await autoPause.ApplyAsync(true, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        Assert.IsTrue(paused);
+        Assert.IsTrue(autoPause.HasRememberedPause, "The source was listening when the pause was made, so a resume was armed.");
+        sessions.Sessions[0] = sessions.Sessions[0] with { PlaybackStatus = MediaPlaybackState.Paused };
+        sessions.ReportsChanges = false;
+
+        await autoPause.ApplyAsync(true, true, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.AreEqual(0, sessions.PlayCalls.Count, "Played by hand and paused by hand look the same to a read.");
+        Assert.IsTrue(log.Has(LogLevel.Info, "not reporting changes"));
+    }
+
     [TestMethod]
     public async Task DisposeStopsListeningToTheSessions()
     {

@@ -191,12 +191,29 @@ internal sealed class AutoPause : IDisposable
                 }
                 else if (recorder.PausedSessionId is { } rememberedId)
                 {
-                    // The buds that were in the ear before this reading are the ones that have to be back.
-                    _resume.Remember(new RememberedPause(
-                        rememberedId, result.AppId ?? "(unknown)",
-                        LeftWasIn: beforeLeft.Value == true,
-                        RightWasIn: beforeRight.Value == true,
-                        watchedContainerId, nowUtc, nowUtc + WidgetTiming.OwnPauseEchoWindow));
+                    // Another reading may have chosen another set while the pause was being made, and reset what was
+                    // remembered for the first. A pause made for a set that is no longer the chosen one is not
+                    // remembered: the new set's buds being in is not that set's bud coming back. The check and the
+                    // remembering are one step under the lock, so a choice cannot land between them.
+                    bool stillTheChosenSet;
+                    lock (_gate)
+                    {
+                        stillTheChosenSet = selectionGeneration == _generation;
+                        if (stillTheChosenSet)
+                        {
+                            // The buds that were in the ear before this reading are the ones that have to be back.
+                            _resume.Remember(new RememberedPause(
+                                rememberedId, result.AppId ?? "(unknown)",
+                                LeftWasIn: beforeLeft.Value == true,
+                                RightWasIn: beforeRight.Value == true,
+                                watchedContainerId, nowUtc, nowUtc + WidgetTiming.OwnPauseEchoWindow));
+                        }
+                    }
+
+                    if (!stillTheChosenSet)
+                    {
+                        _log.Info("Auto-resume is not armed: another set of AirPods was chosen while this pause was being made.");
+                    }
                 }
 
                 return true;
