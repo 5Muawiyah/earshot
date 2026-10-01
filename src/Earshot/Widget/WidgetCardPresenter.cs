@@ -65,6 +65,7 @@ internal sealed class WidgetCardPresenter : IDisposable
     private readonly TimeProvider _time;
     private readonly ILog _log;
     private readonly IWidgetCardHost? _host;
+    private readonly Func<bool>? _animationsEnabled;
 
     private WidgetCard? _card;
     private ITimer? _refreshTimer;
@@ -89,7 +90,7 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     public WidgetCardPresenter(
         Func<WidgetCard> createCard, WidgetCardPresenterCallbacks callbacks, Action<Action> uiPost, TimeProvider time, ILog log,
-        IWidgetCardHost? host = null)
+        IWidgetCardHost? host = null, Func<bool>? animationsEnabled = null)
     {
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(callbacks);
@@ -102,6 +103,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         _time = time;
         _log = log;
         _host = host;
+        _animationsEnabled = animationsEnabled;
         if (_host is not null)
         {
             _host.UpdateChanged += OnHostUpdateChanged;
@@ -109,7 +111,7 @@ internal sealed class WidgetCardPresenter : IDisposable
     }
 
     // True while the card is on screen. For tests; the UI thread only.
-    internal bool IsShown => _card is { IsDisposed: false, Visible: true };
+    internal bool IsShown => _card is { IsDisposed: false, Visible: true, IsExiting: false };
 
     // The card's own last-rendered model, for tests: proving a Refresh() actually reached the real card
     // Render drew, rather than only that Refresh() itself was called.
@@ -193,7 +195,7 @@ internal sealed class WidgetCardPresenter : IDisposable
             return;
         }
 
-        if (_card is { IsDisposed: false, Visible: true })
+        if (_card is { IsDisposed: false, Visible: true, IsExiting: false })
         {
             if (_view == WidgetCardView.Settings)
             {
@@ -283,9 +285,9 @@ internal sealed class WidgetCardPresenter : IDisposable
         WidgetCard card = EnsureCard();
         card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
         card.Render(BuildModel(), _callbacks.Dpi());
-        card.Bounds = PlaceAbove(card, anchor);
+        Rectangle rest = PlaceAbove(card, anchor);
         card.ResetFocusCue(openedByKeyboard);
-        card.Show();
+        card.PresentAnimated(rest, CardMotion.TravelFor(gaugeBounds ?? Rectangle.Empty, SystemDisplaySource.WorkAreaFor(anchor), _callbacks.Dpi()));
         card.Activate();
         StartRefreshTimer();
     }
@@ -302,7 +304,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         CancelSetup();
         if (_card is { IsDisposed: false, Visible: true } card)
         {
-            card.Hide();
+            card.HideAnimated();
         }
 
         StopRefreshTimer();
@@ -396,6 +398,11 @@ internal sealed class WidgetCardPresenter : IDisposable
         }
 
         _card = _createCard();
+        if (_animationsEnabled is not null)
+        {
+            _card.AttachMotion(_time, _uiPost, _animationsEnabled);
+        }
+
         _card.ToggleRequested += OnToggleRequested;
         _card.AutoPauseChanged += OnAutoPauseChanged;
         _card.SetupRequested += OnSetupRequested;
@@ -716,7 +723,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         CancelSetup();
         if (_card is { IsDisposed: false, Visible: true } card)
         {
-            card.Hide();
+            card.HideAnimated();
         }
 
         StopRefreshTimer();
@@ -754,7 +761,7 @@ internal sealed class WidgetCardPresenter : IDisposable
             return;
         }
 
-        Rectangle before = card.Bounds;
+        Rectangle before = card.RestBounds;
         card.Render(BuildModel(), _callbacks.Dpi());
 
         Size size = card.ClientSize;
@@ -762,7 +769,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         {
             Rectangle workArea = SystemDisplaySource.WorkAreaFor(before);
             var resized = new Rectangle(before.X, before.Bottom - size.Height, size.Width, size.Height);
-            card.Bounds = CardPlacement.Clamp(resized, workArea);
+            card.PlaceAtRest(CardPlacement.Clamp(resized, workArea));
         }
     }
 

@@ -30,6 +30,11 @@ internal static unsafe partial class Shell
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
     internal const uint SPI_GETMESSAGEDURATION = 0x2016;
 
+    // SPI_GETCLIENTAREAANIMATION: pvParam is a BOOL* that is TRUE while animation effects are on (Settings >
+    // Accessibility > Visual effects > Animation effects).
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
+    internal const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
+
     // ABM_GETSTATE result bits.
     // https://learn.microsoft.com/en-us/windows/win32/shell/abm-getstate
     internal const uint ABS_AUTOHIDE = 0x0000001;
@@ -143,6 +148,11 @@ internal static unsafe partial class Shell
     [LibraryImport(User32, EntryPoint = "SystemParametersInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SystemParametersInfoForMessageDuration(uint uiAction, uint uiParam, out uint pvParam, uint fWinIni);
+
+    // The same call for an action whose pvParam is a BOOL*.
+    [LibraryImport(User32, EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SystemParametersInfoForBool(uint uiAction, uint uiParam, out int pvParam, uint fWinIni);
 
     // Sets this process's AppUserModelID, so a toast shown against it is attributed to Earshot rather than to
     // the host process. Must be called before creating or showing any UI (a window, a toast); the tray calls

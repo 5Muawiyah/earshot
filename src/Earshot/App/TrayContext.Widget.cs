@@ -151,7 +151,8 @@ internal sealed partial class TrayContext
                 OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
             _caseOpenCardPresenter = new CaseOpenCardPresenter(
                 () => CreateWidgetCard(notice: true), _widgetCardCallbacks, caseOpenGate,
-                _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log);
+                _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log,
+                animationsEnabled: CardAnimationsEnabled());
         }
 
         if (_registry.Settings.Current.Widget.ShowOnTaskbar)
@@ -383,6 +384,10 @@ internal sealed partial class TrayContext
     internal bool TryUpdateSettingsFromWidget(string what, Action<EarshotSettings> mutate, CardPlace place) =>
         TryUpdateSettings(what, mutate, place);
 
+    // Whether the cards slide and fade: Windows' own Animation effects setting, read at each show and hide. A tray
+    // whose surfaces are replaced by fakes (a test) has no motion at all, so its cards are shown and hidden in one step.
+    private Func<bool>? CardAnimationsEnabled() => _trayIconVisibilityFactory is null ? new SystemAnimationSetting(_log).Enabled : null;
+
     // Every widget card is made here, so what all of them share is set in one place: the accent is the owner's
     // Windows accent colour, the same one the gauge's ring uses, and an open card repaints when it changes.
     private WidgetCard CreateWidgetCard(bool notice) => CreateWidgetCard(_log, notice, AccentColourService.Shared(_log), SystemLookService.Shared(_log));
@@ -405,7 +410,7 @@ internal sealed partial class TrayContext
     {
         if (_widgetCardPresenter is null)
         {
-            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost);
+            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost, CardAnimationsEnabled());
             WireLook();
         }
 

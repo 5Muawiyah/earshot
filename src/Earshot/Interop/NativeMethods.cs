@@ -276,4 +276,12 @@ internal static partial class NativeMethods
 
     [LibraryImport("gdi32.dll", EntryPoint = "GetGlyphIndicesW", StringMarshalling = StringMarshalling.Utf16)]
     internal static partial uint GetGlyphIndices(nint hdc, string text, int count, out ushort indices, uint flags);
+    // A constant opacity for a layered window: LWA_ALPHA uses bAlpha for the whole window (0 invisible, 255 opaque),
+    // where per-pixel alpha comes from UpdateLayeredWindow. The card fades with this and keeps its own painting.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setlayeredwindowattributes
+    internal const uint LWA_ALPHA = 0x00000002;
+
+    [LibraryImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetLayeredWindowAttributes(nint hwnd, uint crKey, byte bAlpha, uint dwFlags);
 }

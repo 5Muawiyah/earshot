@@ -47,6 +47,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     private readonly CaseOpenCardGate _gate;
     private readonly ICardEnvironment _environment;
     private readonly Func<DismissDurationReading> _readDismissDuration;
+    private readonly Func<bool>? _animationsEnabled;
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _time;
     private readonly ILog _log;
@@ -64,7 +65,8 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         Action<Action> uiPost,
         TimeProvider time,
         ILog log,
-        Func<DismissDurationReading>? readDismissDuration = null)
+        Func<DismissDurationReading>? readDismissDuration = null,
+        Func<bool>? animationsEnabled = null)
     {
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(callbacks);
@@ -81,6 +83,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         _time = time;
         _log = log;
         _readDismissDuration = readDismissDuration ?? ReadRealDismissDuration;
+        _animationsEnabled = animationsEnabled;
     }
 
     // True while the card is on screen. For tests; the UI thread only.
@@ -186,8 +189,11 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
         card.Render(model, _callbacks.Dpi());
 
-        card.Bounds = PlaceCard(gaugeBounds, card.ClientSize);
-        card.Show();
+        Rectangle rest = PlaceCard(gaugeBounds, card.ClientSize);
+        int travel = gaugeBounds is { } gauge
+            ? CardMotion.TravelFor(gauge, SystemDisplaySource.WorkAreaFor(gauge), _callbacks.Dpi())
+            : CardMotion.TravelFor(Rectangle.Empty, Rectangle.Empty, _callbacks.Dpi());
+        card.PresentAnimated(rest, travel);
         StartDismissTimer();
     }
 
@@ -216,7 +222,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     {
         if (_card is { IsDisposed: false, Visible: true } card)
         {
-            card.Hide();
+            card.HideAnimated();
         }
 
         StopDismissTimer();
@@ -276,6 +282,11 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         }
 
         _card = _createCard();
+        if (_animationsEnabled is not null)
+        {
+            _card.AttachMotion(_time, _uiPost, _animationsEnabled);
+        }
+
         _card.CloseRequested += OnCardClosed;
         _card.ToggleRequested += OnToggleRequested;
         _card.AutoPauseChanged += OnAutoPauseChanged;

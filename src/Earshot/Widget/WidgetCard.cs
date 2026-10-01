@@ -160,6 +160,11 @@ internal sealed partial class WidgetCard : Form
         {
             CreateParams cp = base.CreateParams;
             cp.ExStyle |= NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_TOPMOST;
+            if (WantsLayeredStyle)
+            {
+                cp.ExStyle |= NativeMethods.WS_EX_LAYERED;
+            }
+
             if (_notice)
             {
                 cp.ExStyle |= NativeMethods.WS_EX_NOACTIVATE;
@@ -229,6 +234,7 @@ internal sealed partial class WidgetCard : Form
         if (disposing)
         {
             DetachAccent();
+            StopMotion();
         }
 
         base.Dispose(disposing);
@@ -810,7 +816,7 @@ internal sealed partial class WidgetCard : Form
         EndEdits(commit: true);
         if (Visible)
         {
-            Hide();
+            HideAnimated();
         }
 
         CloseRequested?.Invoke(this, reason);
