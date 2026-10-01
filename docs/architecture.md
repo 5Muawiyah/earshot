@@ -692,6 +692,51 @@ and the tray ends and starts itself again (only when it is not elevated; an
 elevated tray would start an elevated one, so it says to start Earshot from the
 Start menu). A tray that is already closing when the hand-over comes starts nothing.
 
+**Earshot is running again afterwards.** The elevated update ends before the new
+release's own install does, and a program an elevated process starts is elevated
+too, which the tray must never be, so the install is what starts the tray
+(`TrayRestarter`). The install verb takes the same three values as before, so the
+one a 1.2.x tray's update starts behaves the same: what tells it that it is the
+end of an update (or of a repair by download, which runs as one) is the
+`Installing` record the update run left in `update-outcome.json`, still inside its
+ten-minute window. When such an install finishes with `Success`, it records
+`Installed` first, so the tray that starts reads it and says once how the update
+went, and then starts the installed `Earshot.exe` for the user whose SID it was
+given. A first install, a setup by hand, a repair run from the installed copy (the
+tray is not closed for that one) and an install that did not finish start nothing:
+the tasks and the service are in place only after a `Success`, and the tray it
+starts blocks idle AirPods as any tray does.
+
+The start is a one-shot Task Scheduler task, because that is the documented way for
+an elevated process to run a program with the user's own interactive token and the
+least run level. It is registered as `\Earshot\StartTray` (the folder only
+administrators and SYSTEM can write, read again first and refused if anyone else
+could write it) with the user's SID, `TASK_LOGON_INTERACTIVE_TOKEN` and
+`TASK_RUNLEVEL_LUA`, one `Exec` action (the installed `Earshot.exe`, no arguments:
+it is a start by hand, so the tray does not treat it as the start at sign-in), no
+trigger, no time limit (`PT0S`, or the scheduler would end the tray after its default
+three days), normal task priority, and security that lets the user read the task
+and nothing more. It is run at once with `RunEx` and deleted with `DeleteTask`;
+a task an earlier run left behind is deleted first. Nothing the signed-in user can
+write is read or run. The shell route (`IShellDispatch2.ShellExecute` through the
+desktop's shell window) was not chosen: it gives no return code to record, it starts
+the program as whoever runs the shell instead of the SID the install was given, and
+it needs the shell to be running. No tray is started when one is already running in
+this session: the probe opens the tray's own single-instance lock for the session
+only (a lock that exists but cannot be opened by this account counts as held), so a
+second start never relies on the lock to turn itself away, which would show the
+running tray's card.
+
+Nothing here can fail the install. A user who is not signed in, a task that does not
+register or run, or a tray that does not appear within fifteen seconds is a step with
+its raw code, a log line, and the sentence that Earshot starts at the next sign-in if
+Open on startup is on, or when it is started. After the task is removed the tray is
+looked for once more and the step says what was seen: Microsoft does not say what
+removing a task does to an instance that is running, so that is recorded rather than
+assumed. https://learn.microsoft.com/en-us/windows/win32/taskschd/security-contexts-for-running-tasks,
+https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iregisteredtask-runex,
+https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-itaskfolder-deletetask
+
 One elevated operation at a time: the tray claims `setup`, `repair` or `update` on
 the UI thread before anything awaits, and a second is refused with "Finishing the
 repair first." (the menu items and the settings rows say the same while one
@@ -923,7 +968,9 @@ not the settings, not the Open on startup entry, not a per-user copy. The one
 thing it writes is Earshot's own log, because the unpacked copy's read-only
 `probe setup-values` writes a line there as every probe does. After an install,
 update or repair it starts Earshot unelevated; after an uninstall it starts
-nothing.
+nothing. An update's install starts the tray itself as well (see
+[Updates](#updates)), so the script's own start, a moment later, finds the tray
+running and only brings up its card.
 
 **When a run stops.** A run that stopped after it closed the tray starts that
 tray again, so Earshot is not left closed until the next sign-in (the closed

@@ -267,6 +267,14 @@ closing work, the card says so and Earshot starts again, because it cannot carry
 on from a half-closed state. A copy started as an administrator starts no other
 copy, so it says so instead.
 
+When the update has finished, Earshot is running again: the install that ends the
+update starts the new Earshot for you, not as an administrator, once the scheduled
+tasks and the service are in place, and the card says once how the update went. It
+does this only for an update (or a repair that downloads the files again), and not
+when Earshot is already running. If Windows will not start it now, for example
+because you have signed out meanwhile, Earshot starts at your next sign-in when
+Open on startup is on, or when you start it.
+
 Only one setup, repair or update runs at a time. While one does, **Repair
 Earshot**, **Set up Earshot** and **Check for updates** are disabled in the menu
 with the reason in their text ("finishing the repair first"), the settings page

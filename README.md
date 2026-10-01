@@ -117,6 +117,7 @@ Startup on is not covered.
   contacts GitHub, and nothing downloads until you press Update. **Repair
   Earshot...** checks every installed file against the list the release
   published and fixes what it finds. Your settings and chosen AirPods are kept.
+  After an update, Earshot starts again on its own.
   [docs/architecture.md](docs/architecture.md#updates) has each route.
 - **A small background service for the hand-back.** If the Earshot icon has
   been closed or has crashed, `EarshotHandBack` blocks the AirPods at shut down

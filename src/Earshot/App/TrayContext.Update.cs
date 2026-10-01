@@ -165,10 +165,11 @@ internal sealed partial class TrayContext
     // How the last update ended, said once, at the start after it. The elevated update has ended by then and the tray
     // that started it is gone, so the outcome is read from the machine folder, where only administrators write. It
     // is shown once: its Id is noted in a file of this user's own, and an outcome already noted is skipped. An install
-    // still inside its window is left for the next start. The elevated program does not start the tray again: a
-    // program it starts would be elevated too, and the tray must not run elevated. So after an update the tray comes
-    // back at the next sign-in (Open on startup) or when it is started by hand, and this card is how it says what
-    // happened.
+    // still inside its window is left for the next start. The elevated update does not start the tray again: a
+    // program it starts would be elevated too, and the tray must not run elevated. The install that ends the update
+    // starts it not elevated, after it has written the outcome (TrayRestarter), so this is normally the new tray's first
+    // act. When that start did not happen, the tray comes back at the next sign-in (Open on startup) or when it is
+    // started by hand, and this card is how it says what happened.
     private void ShowUpdateOutcomeOnce(UpdateOutcomeSource source)
     {
         GateRead<UpdateOutcome> read = new GateStore(source.MachineFolder).ReadUpdateOutcome();

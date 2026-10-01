@@ -163,19 +163,39 @@ internal static partial class Program
                     .GetAwaiter().GetResult();
 
                 // An install the update started completes the record the update run left; any other install leaves
-                // it alone (UpdateOutcomes.ForInstallRun).
-                if (Earshot.Update.ReleaseVersion.Running(typeof(Program).Assembly) is { } running)
-                {
-                    new UpdateOutcomeRecorder(paths.MachineFolder, new NtfsFolderSecurity(), log, TimeProvider.System).RecordInstallRun(result, running.ToString());
-                }
-
-                return result;
+                // it alone (UpdateOutcomes.ForInstallRun). The end of an update also starts the tray again.
+                var recorder = new UpdateOutcomeRecorder(paths.MachineFolder, new NtfsFolderSecurity(), log, TimeProvider.System);
+                var restarter = new TrayRestarter(new MutexTrayInstanceProbe(TrayInstanceName), new ComTaskRegistrar(), new ComTaskRunner(), log);
+                return CompleteInstall(result, recorder, Earshot.Update.ReleaseVersion.Running(typeof(Program).Assembly)?.ToString(),
+                    () => worker.RunAsync(_ => restarter.Restart(request.UserSid, layout.InstallFolder)).GetAwaiter().GetResult());
             }));
         }
         finally
         {
             log.FlushTo(MachineLog(paths, new NtfsFolderSecurity(), out string whyNot), whyNot);
         }
+    }
+
+    // What follows a finished install. Records how an update's install ended, when this install is one (version is the
+    // release this program is, null when it cannot be read), and then, only when that update installed, starts the tray
+    // again: the tray was closed for the update, and a program the elevated update starts would be elevated, so it is
+    // started through restart, which starts it not elevated. The record is written first, so the tray that starts reads
+    // it and says once how the update went. A first install, a setup by hand and an update that did not finish start
+    // nothing: earshot.ps1 starts the tray itself after a first install, and an update that stopped has no new program
+    // to start. A start that does not happen never changes the install's result; its steps are added to it.
+    internal static InstallResult CompleteInstall(
+        InstallResult result, UpdateOutcomeRecorder recorder, string? version, Func<IReadOnlyList<StepOutcome>> restart)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(recorder);
+        ArgumentNullException.ThrowIfNull(restart);
+        UpdateOutcome? completed = version is null ? null : recorder.RecordInstallRun(result, version);
+        if (completed is not { Kind: UpdateOutcomeKind.Installed } || result.Outcome != GateExitCode.Success)
+        {
+            return result;
+        }
+
+        return result with { Steps = [.. result.Steps, .. restart()] };
     }
 
     static partial void TryRunUninstall(RunContext ctx)

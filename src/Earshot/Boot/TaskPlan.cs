@@ -31,6 +31,13 @@ internal sealed record TaskSpec(
     bool UserMayRun)
 {
     public string Path => TaskPlan.TaskPath(Name);
+
+    // The task's description, or null for the one the three boot block tasks carry.
+    public string? Description { get; init; }
+
+    // The task priority (0 highest to 10 lowest), or null for the scheduler's own default, 7, which runs the program below
+    // normal. The tray is started with 4, the priority of a program the user starts.
+    public int? Priority { get; init; }
 }
 
 // The three scheduled tasks install registers, described once so install, the tray's pre-run check and
@@ -59,6 +66,10 @@ internal static class TaskPlan
     public const string ProtectArguments = "gate-protect $(Arg0) $(Arg1)";
     public const string BootArguments = "gate boot";
     public const string GateTimeLimit = "PT2M";
+
+    // The one-shot task that starts the tray again after an update (TrayRestarter). It is registered, run and removed within
+    // one install run, so it is not one of TaskNames and nothing checks for it.
+    public const string TrayStartTaskName = "StartTray";
 
     // BluetoothSetServiceState installs and removes drivers for an undocumented time and must not be
     // stopped part way.
@@ -109,6 +120,22 @@ internal static class TaskPlan
             new TaskSpec(BootTaskName, exe, BootArguments, installFolder, GateTimeLimit, BootTrigger: true,
                 PrincipalFor(BootTaskName, mode, userSid), Sddl.ReadableTask(userSid), UserMayRun: false),
         ];
+    }
+
+    // The tray's start task: the installed Earshot.exe with no arguments, for the user, with their interactive token and the
+    // least run level, so what it starts is never elevated. PT0S is no time limit: the default limit of a task is three
+    // days, after which the scheduler would end a tray started by it. Only on demand (no trigger), and the user may read it
+    // and nothing more.
+    public static TaskSpec TrayStartSpec(string installFolder, string userSid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(installFolder);
+        return new TaskSpec(TrayStartTaskName, System.IO.Path.Combine(installFolder, ExecutableName), "", installFolder, "PT0S", BootTrigger: false,
+            new TaskPrincipal(userSid, TaskSchedulerCom.TASK_LOGON_INTERACTIVE_TOKEN, TaskSchedulerCom.TASK_RUNLEVEL_LUA),
+            Sddl.ReadableTask(userSid), UserMayRun: false)
+        {
+            Description = "Earshot: starts the tray once after an update. It is removed as soon as it has run.",
+            Priority = 4,
+        };
     }
 
     public static TaskSpec Spec(string taskName, string installFolder, string userSid, TaskPrincipalMode mode) =>
@@ -432,7 +459,7 @@ internal static class TaskDefinitionWriter
                 return Failed(hr);
             }
 
-            if (!Put(steps, step + ":description", hr = info.put_Description("Earshot boot block: " + spec.Name + ".")))
+            if (!Put(steps, step + ":description", hr = info.put_Description(spec.Description ?? "Earshot boot block: " + spec.Name + ".")))
             {
                 return Failed(hr);
             }
@@ -454,7 +481,8 @@ internal static class TaskDefinitionWriter
                 !Put(steps, step + ":stop-on-batteries", hr = settings.put_StopIfGoingOnBatteries(false)) ||
                 !Put(steps, step + ":time-limit", hr = settings.put_ExecutionTimeLimit(spec.ExecutionTimeLimit)) ||
                 !Put(steps, step + ":instances", hr = settings.put_MultipleInstances(TaskSchedulerCom.TASK_INSTANCES_QUEUE)) ||
-                !Put(steps, step + ":compatibility", hr = settings.put_Compatibility(TaskSchedulerCom.TASK_COMPATIBILITY_V2_4)))
+                !Put(steps, step + ":compatibility", hr = settings.put_Compatibility(TaskSchedulerCom.TASK_COMPATIBILITY_V2_4)) ||
+                (spec.Priority is { } priority && !Put(steps, step + ":priority", hr = settings.put_Priority(priority))))
             {
                 return Failed(hr);
             }

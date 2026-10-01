@@ -52,14 +52,17 @@ internal sealed class UpdateOutcomeRecorder
     }
 
     // After the install run: completes an Installing record the update run wrote a moment ago, and does nothing for any
-    // other install (a first setup, a repair, a setup run by hand). version is the release this program is.
-    public void RecordInstallRun(InstallResult result, string version)
+    // other install (a first setup, a repair, a setup run by hand). version is the release this program is. Returns the
+    // outcome it completed, whether or not it could be written, or null when this install is not the end of an update (or
+    // of a repair by download, which runs as one) or the machine folder did not pass its check. What an install does only
+    // for an update, such as starting the tray again, goes by this.
+    public UpdateOutcome? RecordInstallRun(InstallResult result, string version)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(version);
         if (!FolderIsTrusted())
         {
-            return;
+            return null;
         }
 
         GateRead<UpdateOutcome> current = _store.ReadUpdateOutcome();
@@ -73,6 +76,8 @@ internal sealed class UpdateOutcomeRecorder
         {
             Write(next);
         }
+
+        return next;
     }
 
     private void Write(UpdateOutcome outcome)
