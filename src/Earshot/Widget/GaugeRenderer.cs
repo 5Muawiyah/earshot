@@ -4,7 +4,7 @@ using Earshot.Icons;
 
 namespace Earshot.Widget;
 
-// Draws the gauge bitmap: the earbud mark, a ring round it that fills to the lower proved bud's battery, that
+// Draws the gauge bitmap: the earbud mark, a ring round it that fills to the lower bud's battery, that
 // number beside it, and a charging bolt in a slot that is always kept. Pure drawing, used by GaugeWindow, the
 // tests and the screenshot probe. Every coordinate comes from GaugeLayout.
 //

@@ -70,7 +70,7 @@ param(
         'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
         'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-        'exit-cut-short', 'pause-declined',
+        'exit-cut-short', 'pause-declined', 'chosen-rising',
         'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
         'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case = '',
     [string]$Test = '',
@@ -166,7 +166,10 @@ $tests = @(
     # closing step offers a block.
     [ordered]@{ Number = '18'; Id = '18-handback-on-sleep'; Script = '18-HandBackOnSleep.ps1'; Halves = @('first'); Extra = @()
         Cases = @('none', 'one', 'two', 'no-sleep-event', 'handback-cut-short', 'repaged-at-wake') }
-    [ordered]@{ Number = '19'; Id = '19-widget'; Script = '19-Widget.ps1'; Halves = @('first'); Extra = @() }
+    # chosen-rising: the widget picked its set out before the sitting, so there is no picked-out line, and its chosen
+    # counter is higher in the newest counters line than in the first; the choice is shown by the counter.
+    [ordered]@{ Number = '19'; Id = '19-widget'; Script = '19-Widget.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'chosen-rising') }
     # exit-cut-short: Exit's hand-back ran out of its cap with the block already sent and still running, and Exit said
     # so, so exit-finished and exit-nothing-said fail on lines that are there.
     [ordered]@{ Number = '20'; Id = '20-handback-on-exit'; Script = '20-HandBackOnExit.ps1'; Halves = @('first'); Extra = @()

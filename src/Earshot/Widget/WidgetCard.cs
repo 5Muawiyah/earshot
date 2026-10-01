@@ -703,7 +703,14 @@ internal sealed partial class WidgetCard : Form
         }
 
         DrawIconLine(g, layout.WhereLine, FluentGlyphs.Location, WhereLineText, WhereLineText);
-        DrawIconLine(g, layout.ReadLine, FluentGlyphs.Clock, ReadLineShort, ReadLineText);
+        if (_model.Refresh is { IsProblem: true })
+        {
+            DrawProblemLine(g, layout.ReadLine, ReadLineText);
+        }
+        else
+        {
+            DrawIconLine(g, layout.ReadLine, FluentGlyphs.Clock, ReadLineShort, ReadLineText);
+        }
 
         if (layout.ShowUpdateLine)
         {
@@ -1099,6 +1106,24 @@ internal sealed partial class WidgetCard : Form
 
         int indent = box + CardPlacement.Scale(8, _dpi);
         DrawLine(g, new Rectangle(bounds.X + indent, bounds.Y, Math.Max(1, bounds.Width - indent), bounds.Height), text, _palette.Status, role);
+    }
+
+    // A line that says something is wrong (a refresh that heard nothing, Bluetooth off): the caution triangle in the
+    // caution colour in the icon's place, then the words. The triangle is drawn, not a font glyph, so it is there
+    // where no icon font is installed. The sub-page triangle is 20 px; here it is scaled into the 16 px icon box.
+    private void DrawProblemLine(Graphics g, Rectangle bounds, string text)
+    {
+        int box = CardPlacement.Scale(CardPaint.GlyphSizeAt96, _dpi);
+        var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
+        GraphicsState saved = g.Save();
+        g.TranslateTransform(iconRect.X, iconRect.Y);
+        float shrink = CardPaint.GlyphSizeAt96 / 20f;
+        g.ScaleTransform(shrink, shrink);
+        CardPaint.CautionIcon(g, new Rectangle(0, 0, 20, 20), Colours.Caution, _dpi);
+        g.Restore(saved);
+
+        int indent = box + CardPlacement.Scale(8, _dpi);
+        DrawLine(g, new Rectangle(bounds.X + indent, bounds.Y, Math.Max(1, bounds.Width - indent), bounds.Height), text, _palette.Status);
     }
 
     private void DrawLine(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role = TypeRole.Caption)

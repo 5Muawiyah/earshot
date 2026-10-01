@@ -5,8 +5,8 @@ public enum LatchState { Armed, Fired }
 // One latch per part (left, right, case, and Windows' own figure for the headset), pure. Armed and a known percent at or below the threshold fires
 // once; Fired and a known percent at least one 10% step above the threshold re-arms; an unknown percent
 // changes nothing. A threshold change arms every latch, so the next reading at or below the new threshold
-// fires once and a value already above it re-arms by the ordinary rule. Only owned readings feed this: the
-// caller passes a decoded reading only after the ownership rule reads Owned.
+// fires once and a value already above it re-arms by the ordinary rule. Only what the card shows as current feeds
+// this: the caller passes a part's percent only while it is fresh, and Windows' figure only while it is the one shown.
 internal sealed class LowBatteryLatch
 {
     public const int DefaultThresholdPercent = 20;

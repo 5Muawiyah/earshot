@@ -161,8 +161,9 @@ internal static class BatterySweep
 
     private static readonly Guid BatteryKeySetId = new(BatteryKeySet);
 
-    // The one property of that set Windows fills with the Hands-Free battery figure while the profile is up: id 2.
-    // HandsFreeBatteryProvider reads it; the sweep records the whole set as it always did.
+    // The one property of that set where a Hands-Free battery figure is expected while the profile is up: id 2. It has
+    // never been seen filled in (empty on every node read so far, with Hands-Free off), so this is a reading of where
+    // to look, not an observed fact. HandsFreeBatteryProvider reads it; the sweep records the whole set as it always did.
     internal static readonly DEVPROPKEY HandsFreeBatteryKey = new(BatteryKeySetId, 2);
 
     // propkey.h: System.Devices.BatteryLife (10), BatteryPlusCharging (22), BatteryPlusChargingText (23), and

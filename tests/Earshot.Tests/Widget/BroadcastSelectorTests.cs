@@ -11,6 +11,7 @@ public sealed class BroadcastSelectorTests
     private const uint SetAOtherBud = 2;
     private const uint SetB = 3;
     private const uint SetANewAddress = 4;
+    private const uint Stranger = 5;
 
     // Both sets send every half second for the given time, A then B at the same instant.
     private static void RunBoth(SelectorDriver d, sbyte rssiA, sbyte rssiB, double seconds, ProximityMessage? a = null, ProximityMessage? b = null)
@@ -221,9 +222,10 @@ public sealed class BroadcastSelectorTests
         Assert.IsFalse(switched, "Twenty seconds, a gap, twenty seconds is never thirty without a break.");
     }
 
-    // While the chosen set is silent its last median is the one a challenger is compared with.
+    // A chosen set that sends too seldom to have a median in the window (it sends once every eight seconds, so the
+    // window holds one or two of its messages) is compared with its last median.
     [TestMethod]
-    public void WhileTheChosenSetIsSilentItsLastMedianIsHeldForTheComparison()
+    public void WhileTheChosenSetIsTooSeldomHeardForAMedianItsLastMedianIsHeldForTheComparison()
     {
         var d = new SelectorDriver();
         d.Run(SetA, Bud(first: true), -60, 3);
@@ -232,6 +234,11 @@ public sealed class BroadcastSelectorTests
         bool nearSwitched = false;
         for (int i = 0; i < 80; i++)
         {
+            if (i % 16 == 8)
+            {
+                d.Send(SetA, Bud(first: true), -60);
+            }
+
             nearSwitched |= d.Send(SetB, OtherSet(), -55).Switched; // 5 dB over the held median: under the margin
             d.Tick(0.5);
         }
@@ -241,6 +248,11 @@ public sealed class BroadcastSelectorTests
         bool switched = false;
         for (int i = 0; i < 80; i++)
         {
+            if (i % 16 == 8)
+            {
+                d.Send(SetA, Bud(first: true), -60);
+            }
+
             switched |= d.Send(SetB, OtherSet(), -50).Switched; // 10 dB over the held median, for forty seconds
             d.Tick(0.5);
         }
@@ -248,8 +260,10 @@ public sealed class BroadcastSelectorTests
         Assert.IsTrue(switched);
     }
 
+    // While any chosen sender has sent inside the window a different set is never adopted as the chosen set's
+    // continuation, however equal its fields: only the margin and the hold can make it the chosen one.
     [TestMethod]
-    public void AddressesThatRotateWithinTenSecondsWithEqualFieldsAreTheChosenSetAndKeepItsValues()
+    public void EqualFieldsFromANewAddressWhileTheChosenSetSentInsideTheWindowAreNotItsContinuation()
     {
         var d = new SelectorDriver();
         d.Run(SetA, Bud(first: true), -60, 3);
@@ -257,14 +271,13 @@ public sealed class BroadcastSelectorTests
 
         SelectionObservation seen = d.Send(SetANewAddress, Bud(first: true), -60);
 
-        Assert.AreEqual(BroadcastClass.Chosen, seen.Class);
-        Assert.IsTrue(seen.Continued);
-        Assert.IsFalse(seen.NewChoice, "The values stand: it is the same pair under a new address.");
-        Assert.IsFalse(seen.Switched);
+        Assert.AreEqual(BroadcastClass.OtherSet, seen.Class);
+        Assert.IsFalse(seen.NewChoice);
+        Assert.AreEqual(BroadcastClass.Chosen, d.Send(SetA, Bud(first: true), -60).Class, "The chosen set still sends and is still chosen.");
     }
 
     [TestMethod]
-    public void AddressesThatRotateWithDifferentFieldsAreANewSetHeldToTheStickinessRule()
+    public void ANewAddressWithDifferentFieldsIsANewSetHeldToTheStickinessRule()
     {
         var d = new SelectorDriver();
         d.Run(SetA, Bud(first: true), -60, 3);
@@ -273,21 +286,199 @@ public sealed class BroadcastSelectorTests
         SelectionObservation seen = d.Send(SetANewAddress, Bud(first: true, pairHigh: 0x6, pairLow: 0x4), -60);
 
         Assert.AreEqual(BroadcastClass.OtherSet, seen.Class);
-        Assert.IsFalse(seen.Continued);
         Assert.IsFalse(seen.NewChoice);
     }
 
+    // A sender that said exactly what the chosen set said, once, far away, and then said something else is not part
+    // of the chosen set for good: each evaluation the chosen tags are those of the set the chosen sender is in.
     [TestMethod]
-    public void AnEqualSetThatAppearsMoreThanTenSecondsAfterTheChosenOneWentQuietIsNotItsContinuation()
+    public void AFarStrangerThatMatchedTheChosenSetOnceAndThenDiffersIsAnotherSet()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -50, 3);
+        d.Tick(0.5);
+        d.Send(Stranger, Bud(first: true), -85);
+
+        SelectionObservation owner = default;
+        SelectionObservation stranger = default;
+        for (int i = 0; i < 30; i++)
+        {
+            d.Tick(0.5);
+            owner = d.Send(SetA, Bud(first: true), -50);
+            stranger = d.Send(Stranger, OtherSet(), -85);
+        }
+
+        Assert.AreEqual(BroadcastClass.Chosen, owner.Class);
+        Assert.AreEqual(BroadcastClass.OtherSet, stranger.Class, "Fifteen seconds on, the stranger's own fields make it another set.");
+        Assert.AreEqual(2, stranger.SetsInRange);
+        Assert.IsFalse(stranger.NewChoice);
+    }
+
+    [TestMethod]
+    public void AStrangerThatSplitsOffIsHeldToTheMarginAndTheHoldLikeAnyOtherSet()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -70, 3);
+        d.Tick(0.5);
+        d.Send(Stranger, Bud(first: true), -50);
+
+        bool switched = false;
+        for (int i = 0; i < 40; i++)
+        {
+            d.Tick(0.5);
+            switched |= d.Send(SetA, Bud(first: true), -70).Switched;
+            switched |= d.Send(Stranger, OtherSet(), -50).Switched;
+        }
+
+        Assert.IsFalse(switched, "Twenty seconds is not the thirty it takes, split off or not.");
+        for (int i = 0; i < 70; i++)
+        {
+            d.Tick(0.5);
+            switched |= d.Send(SetA, Bud(first: true), -70).Switched;
+            switched |= d.Send(Stranger, OtherSet(), -50).Switched;
+        }
+
+        Assert.IsTrue(switched, "Twenty decibels nearer for thirty seconds after it split off takes over.");
+    }
+
+    // The case closed, or the addresses rotated, and more than the window passed: the selection is made again by
+    // the first-choice rule, however long the new address has been going.
+    [TestMethod]
+    public void ANewAddressMoreThanTheWindowAfterTheChosenSetWentQuietIsChosenAgainAfterTwoSecondsAndThreeMessages()
     {
         var d = new SelectorDriver();
         d.Run(SetA, Bud(first: true), -60, 3);
         d.Tick(11);
 
-        SelectionObservation seen = d.Send(SetANewAddress, Bud(first: true), -60);
+        SelectionObservation first = d.Send(SetANewAddress, Bud(first: true), -60);
+        d.Tick(0.5);
+        SelectionObservation second = d.Send(SetANewAddress, Bud(first: true), -60);
+        d.Tick(0.5);
+        SelectionObservation third = d.Send(SetANewAddress, Bud(first: true), -60);
 
-        Assert.AreEqual(BroadcastClass.OtherSet, seen.Class);
-        Assert.IsFalse(seen.Continued);
+        Assert.AreEqual(BroadcastClass.Choosing, first.Class);
+        Assert.AreEqual(BroadcastClass.Choosing, second.Class);
+        Assert.AreEqual(BroadcastClass.Choosing, third.Class, "A second in: the two seconds have not passed.");
+
+        d.Tick(1.1);
+        SelectionObservation chosen = d.Send(SetANewAddress, Bud(first: true), -60);
+
+        Assert.AreEqual(BroadcastClass.Chosen, chosen.Class);
+        Assert.IsTrue(d.Selector.HasChosen);
+    }
+
+    [TestMethod]
+    public void ACaseClosedForFiveMinutesAndOpenedUnderANewAddressIsNotShutOutForAnHour()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true, colour: 0x11), -60, 3);
+        d.Tick(300);
+
+        BroadcastClass last = BroadcastClass.OtherSet;
+        for (int i = 0; i < 20; i++)
+        {
+            last = d.Send(SetANewAddress, Bud(first: true, colour: 0x11, pairHigh: 0x6, pairLow: 0x4), -60).Class;
+            d.Tick(0.5);
+        }
+
+        Assert.AreEqual(BroadcastClass.Chosen, last, "Ten seconds after it opened, the new address is the chosen set.");
+        Assert.AreEqual((byte)0x11, d.Selector.HeldColour);
+        Assert.AreEqual(BroadcastClass.ColourMismatch, d.Send(SetB, OtherSet(colour: 0x22), -30).Class, "The colour stays held across the gap.");
+    }
+
+    [TestMethod]
+    public void WhenTheSelectionIsMadeAgainTheNearestSetIsChosenAndTheValuesAreNotMarkedAsANewPair()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -60, 3);
+        d.Tick(11);
+
+        SelectionObservation seen = default;
+        for (int i = 0; i < 8; i++)
+        {
+            d.Send(SetANewAddress, Bud(first: true), -72);
+            seen = d.Send(SetB, OtherSet(), -48);
+            d.Tick(0.5);
+        }
+
+        Assert.AreEqual(BroadcastClass.Chosen, seen.Class, "The nearer of the two is chosen.");
+        Assert.IsFalse(seen.NewChoice, "The values on show are kept, greyed as they age, until the new set's own replace them.");
+        Assert.AreEqual(BroadcastClass.OtherSet, d.Send(SetANewAddress, Bud(first: true), -72).Class);
+    }
+
+    [TestMethod]
+    public void TheTwoSecondsRestartWhenTheModelComesBackAfterEveryoneWentQuiet()
+    {
+        var d = new SelectorDriver();
+        d.Send(SetA, Bud(first: true), -60);
+        d.Tick(60);
+
+        SelectionObservation first = d.Send(SetA, Bud(first: true), -60);
+        d.Tick(0.4);
+        d.Send(SetA, Bud(first: true), -60);
+        d.Tick(0.4);
+        SelectionObservation third = d.Send(SetA, Bud(first: true), -60);
+
+        Assert.AreEqual(BroadcastClass.Choosing, first.Class);
+        Assert.AreEqual(BroadcastClass.Choosing, third.Class, "Heard for less than two seconds since it came back, whatever it did a minute ago.");
+        Assert.IsFalse(d.Selector.HasChosen);
+    }
+
+    // Three messages six seconds apart are a median over the ten second window; five seconds would hold two of
+    // them, and twenty would hold the third message twelve seconds apart.
+    [TestMethod]
+    public void TheWindowIsTenSecondsAndNeitherLongerNorShorterGivesTheSameFirstChoice()
+    {
+        var spread = new SelectorDriver();
+        spread.Send(SetA, Bud(first: true), -60);
+        spread.Tick(3);
+        spread.Send(SetA, Bud(first: true), -60);
+        spread.Tick(3);
+        SelectionObservation inside = spread.Send(SetA, Bud(first: true), -60);
+        Assert.AreEqual(BroadcastClass.Chosen, inside.Class, "Three messages inside six seconds are a median.");
+
+        var wide = new SelectorDriver();
+        wide.Send(SetA, Bud(first: true), -60);
+        wide.Tick(6);
+        wide.Send(SetA, Bud(first: true), -60);
+        wide.Tick(6);
+        SelectionObservation outside = wide.Send(SetA, Bud(first: true), -60);
+        Assert.AreEqual(BroadcastClass.Choosing, outside.Class, "The first of three messages twelve seconds apart is out of the window.");
+    }
+
+    // The challenger's own median is -52.5 (messages alternate between -52 and -53), 7.5 dB over the chosen set.
+    [TestMethod]
+    public void AChallengerSevenAndAHalfDecibelsNearerForAMinuteDoesNotSwitch()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -60, 3);
+
+        bool switched = false;
+        for (int i = 0; i <= 120; i++)
+        {
+            switched |= d.Send(SetA, Bud(first: true), -60).Switched;
+            switched |= d.Send(SetB, OtherSet(), (sbyte)(i % 2 == 0 ? -52 : -53)).Switched;
+            d.Tick(0.5);
+        }
+
+        Assert.IsFalse(switched, "Seven and a half decibels is under the eight it takes.");
+    }
+
+    [TestMethod]
+    public void AChallengerExactlyEightDecibelsNearerForThirtySecondsSwitches()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -60, 3);
+
+        bool switched = false;
+        for (int i = 0; i <= 70; i++)
+        {
+            switched |= d.Send(SetA, Bud(first: true), -60).Switched;
+            switched |= d.Send(SetB, OtherSet(), -52).Switched;
+            d.Tick(0.5);
+        }
+
+        Assert.IsTrue(switched, "Eight decibels is the margin: at least that, for thirty seconds.");
     }
 
     [TestMethod]

@@ -144,8 +144,17 @@ public sealed class GaugeContentTests
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromSeconds(20)), Bud(60, age: TimeSpan.FromSeconds(200))), Now, Settings);
 
         StringAssert.EndsWith(c.Tooltip, "Read 3 min ago");
-        Assert.AreEqual("Read just now", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(59)));
         Assert.AreEqual("Read 1 min ago", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(119)));
+    }
+
+    // The card greys a figure after BatteryFreshness.FreshWindow, so the tooltip never calls an older one "just now".
+    [TestMethod]
+    public void ReadJustNowIsSaidOnlyWhileTheReadingIsCurrent()
+    {
+        Assert.AreEqual("Read just now", WidgetCopy.GaugeReadLine(BatteryFreshness.FreshWindow));
+        Assert.AreEqual("Read 31 s ago", WidgetCopy.GaugeReadLine(BatteryFreshness.FreshWindow + TimeSpan.FromSeconds(1)));
+        Assert.AreEqual("Read 59 s ago", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(59)));
+        Assert.AreEqual("Read 1 min ago", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(60)));
     }
 
     // ---- Only what has a value ----

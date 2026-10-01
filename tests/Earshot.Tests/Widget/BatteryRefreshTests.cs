@@ -19,6 +19,7 @@ public sealed class BatteryRefreshTests : IDisposable
     private FakeDeviceMonitor _monitor = null!;
     private FakeAdvertisementSource _source = null!;
     private FakeHandsFreeBatterySource _handsFree = null!;
+    private FakePairedModelSource _paired = null!;
 
     [TestInitialize]
     public void Setup()
@@ -30,14 +31,23 @@ public sealed class BatteryRefreshTests : IDisposable
         _monitor = new FakeDeviceMonitor(_clock);
         _source = new FakeAdvertisementSource();
         _handsFree = new FakeHandsFreeBatterySource();
+        _paired = new FakePairedModelSource();
     }
 
     public void Dispose() => _temp.Dispose();
 
     private WidgetStatusService NewService() =>
         new(
-            () => _source, _settings, _monitor, () => null, _log, action => action(), _clock, new FakePairedModelSource(), _handsFree,
+            () => _source, _settings, _monitor, () => null, _log, action => action(), _clock, _paired, _handsFree,
             ProximityDecodeTable.Documented, runInBackground: work => work());
+
+    // A refresh that has not ended would block a bare .Result for ever, so a regression that stops one ending hung the
+    // run instead of failing a test: the end is asserted first.
+    private static BatteryRefreshOutcome Outcome(Task<BatteryRefreshOutcome> task)
+    {
+        Assert.IsTrue(task.IsCompleted, "The refresh has ended.");
+        return task.Result;
+    }
 
     private AdvertisementSample Message(DateTimeOffset? at = null, uint tag = 1) =>
         new(
@@ -72,7 +82,7 @@ public sealed class BatteryRefreshTests : IDisposable
         _source.Raise(Message());
 
         Assert.IsTrue(refresh.IsCompleted);
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
         Assert.IsTrue(_log.Has(LogLevel.Info, "Widget: battery refresh ended: Heard."), "The end is on the log, which the live test reads.");
     }
 
@@ -92,7 +102,7 @@ public sealed class BatteryRefreshTests : IDisposable
         Assert.IsFalse(refresh.IsCompleted, "That message is older than the restart.");
 
         _source.Raise(Message());
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
     }
 
     [TestMethod]
@@ -110,7 +120,26 @@ public sealed class BatteryRefreshTests : IDisposable
 
         Assert.AreEqual(TimeSpan.FromSeconds(12), WidgetTiming.RefreshWindow);
         Assert.IsTrue(refresh.IsCompleted);
-        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, Outcome(refresh));
+    }
+
+    private static readonly Guid Container = Guid.NewGuid();
+
+    // The AirPods become this PC's output, with the pinned device the figure is read for.
+    private void PutOnThisPc(bool active = true)
+    {
+        _settings.Update(s =>
+        {
+            s.PinnedContainerId = Container;
+            s.PinnedAddress = Phase4.RecordedNodes.AirPodsAddress;
+        });
+        var endpoint = new AudioEndpoint("ep1", EndpointFlow.Render, active ? EndpointState.Active : EndpointState.Unplugged, "AirPods", Container);
+        var model = new DeviceModel(Container, "AirPods", active ? ConnectionState.Connected : ConnectionState.Disconnected, new[] { endpoint });
+        _monitor.Raise(new DeviceSnapshot(model, new[] { model }, _clock.GetUtcNow())
+        {
+            ReadStatus = SnapshotReadStatus.Ok,
+            Resolution = TargetResolution.Pinned,
+        });
     }
 
     [TestMethod]
@@ -119,6 +148,7 @@ public sealed class BatteryRefreshTests : IDisposable
         _handsFree.Percent = 64;
         using WidgetStatusService service = NewService();
         service.Start();
+        PutOnThisPc();
         Choose();
         int readsBefore = _handsFree.Reads;
 
@@ -126,7 +156,7 @@ public sealed class BatteryRefreshTests : IDisposable
         Assert.AreEqual(readsBefore + 1, _handsFree.Reads, "A refresh starts a read of Windows' figure.");
         _clock.Advance(WidgetTiming.RefreshWindow);
 
-        Assert.AreEqual(BatteryRefreshOutcome.WindowsFigure, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.WindowsFigure, Outcome(refresh));
         Assert.AreEqual(64, service.Current.Headset.Percent);
     }
 
@@ -141,7 +171,7 @@ public sealed class BatteryRefreshTests : IDisposable
         Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
         _source.Raise(Message());
 
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
     }
 
     [TestMethod]
@@ -158,7 +188,7 @@ public sealed class BatteryRefreshTests : IDisposable
         WidgetSnapshot during = service.Current;
         _clock.Advance(WidgetTiming.RefreshWindow);
 
-        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, Outcome(refresh));
         Assert.AreEqual(before.Left, during.Left);
         Assert.AreEqual(before.Right, service.Current.Right);
         Assert.AreEqual(before.Case, service.Current.Case);
@@ -179,8 +209,8 @@ public sealed class BatteryRefreshTests : IDisposable
         Assert.AreEqual(stops, _source.StopCalls, "The second request does not restart the listen again.");
         _source.Raise(Message());
 
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, first.Result);
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, second.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(first));
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(second));
     }
 
     [TestMethod]
@@ -199,7 +229,7 @@ public sealed class BatteryRefreshTests : IDisposable
         Assert.IsFalse(other.IsCompleted, "The refresh itself goes on.");
 
         _source.Raise(Message());
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, other.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(other));
     }
 
     [TestMethod]
@@ -229,27 +259,27 @@ public sealed class BatteryRefreshTests : IDisposable
         }
 
         Assert.IsTrue(refresh.IsCompleted, "The first choice is made after two seconds and three messages.");
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
     }
 
     [TestMethod]
-    public void WithBluetoothOffItSaysSoAndAvailabilityFollowsTheWatcher()
+    public void WithBluetoothOffItSaysSoAndTheNextRefreshMakesTheOneImmediateAttempt()
     {
         _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
         using WidgetStatusService service = NewService();
         service.Start();
-        Assert.IsFalse(service.BatteryRefreshAvailable);
 
         Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
 
         Assert.IsTrue(refresh.IsCompleted);
-        Assert.AreEqual(BatteryRefreshOutcome.BluetoothOff, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.BluetoothOff, Outcome(refresh));
 
         _source.StartResult = null; // Bluetooth is on again
+        int starts = _source.StartCalls;
         Task<BatteryRefreshOutcome> again = service.RefreshBatteryAsync(CancellationToken.None);
 
-        Assert.IsTrue(service.BatteryRefreshAvailable, "The refresh made the one immediate attempt and it worked.");
-        Assert.IsFalse(again.IsCompleted, "It waits for the set to be heard.");
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The refresh made the one immediate attempt.");
+        Assert.IsFalse(again.IsCompleted, "It worked, so it waits for the set to be heard.");
     }
 
     [TestMethod]
@@ -262,7 +292,7 @@ public sealed class BatteryRefreshTests : IDisposable
 
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
 
-        Assert.AreEqual(BatteryRefreshOutcome.BluetoothOff, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.BluetoothOff, Outcome(refresh));
     }
 
     [TestMethod]
@@ -271,18 +301,17 @@ public sealed class BatteryRefreshTests : IDisposable
         _settings.Update(s => s.Widget = s.Widget with { Enabled = false });
         using WidgetStatusService off = NewService();
         off.Start();
-        Assert.AreEqual(BatteryRefreshOutcome.NotListening, off.RefreshBatteryAsync(CancellationToken.None).Result);
-        Assert.IsFalse(off.BatteryRefreshAvailable);
+        Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(off.RefreshBatteryAsync(CancellationToken.None)));
 
         _settings.Update(s => s.Widget = s.Widget with { Enabled = true });
         using WidgetStatusService service = NewService();
         service.Start();
         service.Suspend();
-        Assert.AreEqual(BatteryRefreshOutcome.NotListening, service.RefreshBatteryAsync(CancellationToken.None).Result);
+        Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(service.RefreshBatteryAsync(CancellationToken.None)));
         service.Resume();
 
         service.Close();
-        Assert.AreEqual(BatteryRefreshOutcome.NotListening, service.RefreshBatteryAsync(CancellationToken.None).Result);
+        Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(service.RefreshBatteryAsync(CancellationToken.None)));
     }
 
     [TestMethod]
@@ -295,7 +324,119 @@ public sealed class BatteryRefreshTests : IDisposable
 
         service.Suspend();
 
-        Assert.AreEqual(BatteryRefreshOutcome.NotListening, refresh.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(refresh));
+    }
+
+    // What the card reads to clear "Nothing heard": a battery read time after the refresh started. Buds heard with the case
+    // unsaid (its lid is shut) are that, whatever age the case's own figure has.
+    [TestMethod]
+    public void BudsHeardDuringARefreshWithTheCaseUnsaidMoveTheBatteryReadTimePastTheRefreshStart()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Choose();
+        _source.Raise(Message());
+        _clock.Advance(TimeSpan.FromSeconds(9));
+        DateTimeOffset started = _clock.GetUtcNow();
+        Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
+        Assert.IsTrue(service.Current.BatteryReadAt < started, "Before anything is heard the newest reading is from before the refresh.");
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _source.Raise(new AdvertisementSample(
+            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryA: 0x56, batteryB: 0x0F), -60, _clock.GetUtcNow(), 1));
+
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
+        Assert.IsTrue(service.Current.BatteryReadAt >= started, "The buds' own reading is newer than the refresh.");
+        Assert.IsTrue(service.Current.Case.ReadAt < started, "The case still carries its old figure.");
+    }
+
+    [TestMethod]
+    public void ClosingDuringTheWaitEndsItNotListening()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Choose();
+        Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
+
+        service.Close();
+
+        Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(refresh));
+    }
+
+    // The case was closed past the window: the selection is made again, and a refresh asked for meanwhile ends
+    // Heard on the message that makes the choice, not before.
+    [TestMethod]
+    public void ARefreshDuringAReacquireWaitsForTheChoiceAndEndsHeardWhenItIsMade()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Choose();
+        _clock.Advance(TimeSpan.FromSeconds(30));
+        Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
+
+        _source.Raise(Message(tag: 7));
+        Assert.IsFalse(refresh.IsCompleted, "A set heard for the first time since the quiet is not chosen yet.");
+        _clock.Advance(TimeSpan.FromMilliseconds(1100));
+        _source.Raise(Message(tag: 7));
+        _clock.Advance(TimeSpan.FromMilliseconds(1100));
+        Assert.IsFalse(refresh.IsCompleted, "Two messages and two seconds are not three messages.");
+
+        _source.Raise(Message(tag: 7));
+
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
+    }
+
+    // A model that could not be read at start is read again by a refresh, and the set can then be chosen.
+    [TestMethod]
+    public void ARefreshReadsThePairedModelAgainWhileNoneIsHeld()
+    {
+        _paired.Model = null;
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Assert.AreEqual(1, _paired.Reads);
+        Assert.AreEqual(BroadcastSelectionState.NoPairedModel, service.Current.Selection);
+
+        _paired.Model = BroadcastFixtures.PairedModel;
+        Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
+
+        Assert.AreEqual(2, _paired.Reads, "The refresh asked again.");
+        Assert.AreEqual(BroadcastSelectionState.Listening, service.Current.Selection);
+        for (int i = 0; i < 3 && !refresh.IsCompleted; i++)
+        {
+            _source.Raise(Message());
+            _clock.Advance(TimeSpan.FromMilliseconds(1100));
+        }
+
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
+        Assert.AreEqual(60, service.Current.Left.Percent);
+    }
+
+    [TestMethod]
+    public void ARefreshDoesNotReadThePairedModelAgainWhileOneIsHeld()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Assert.AreEqual(1, _paired.Reads);
+
+        _ = service.RefreshBatteryAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, _paired.Reads);
+    }
+
+    [TestMethod]
+    public void ARetryOfTheListenReadsThePairedModelAgainWhileNoneIsHeld()
+    {
+        _paired.Model = null;
+        _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Assert.AreEqual(1, _paired.Reads);
+
+        _paired.Model = BroadcastFixtures.PairedModel;
+        _clock.Advance(WidgetTiming.WatcherRetryDelay);
+
+        Assert.AreEqual(2, _paired.Reads, "The retry asked again.");
+        Assert.AreEqual(BroadcastSelectionState.Listening, service.Current.Selection);
     }
 
     [TestMethod]
@@ -306,13 +447,13 @@ public sealed class BatteryRefreshTests : IDisposable
         Choose();
         Task<BatteryRefreshOutcome> first = service.RefreshBatteryAsync(CancellationToken.None);
         _clock.Advance(WidgetTiming.RefreshWindow);
-        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, first.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, Outcome(first));
         int starts = _source.StartCalls;
 
         Task<BatteryRefreshOutcome> second = service.RefreshBatteryAsync(CancellationToken.None);
 
         Assert.AreEqual(starts + 1, _source.StartCalls);
         _source.Raise(Message());
-        Assert.AreEqual(BatteryRefreshOutcome.Heard, second.Result);
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(second));
     }
 }

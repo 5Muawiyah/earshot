@@ -9,7 +9,7 @@ public sealed record WidgetSnapshot(
     PartReading Left,
     PartReading Right,
     PartReading Case,
-    DateTimeOffset? BatteryReadAt,      // the oldest ReadAt among the parts that have one
+    DateTimeOffset? BatteryReadAt,      // the newest ReadAt among the parts that have one
     DateTimeOffset? EarReadAt,          // the last reading of the chosen set that carried an in-ear bit, while fresh
     bool? LidOpen,
     WidgetWatcherState Watcher,

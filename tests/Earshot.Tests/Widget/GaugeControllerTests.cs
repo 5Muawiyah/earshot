@@ -44,6 +44,12 @@ internal sealed class FakeGaugeSurface : IGaugeSurface
 
     public void HideWindow() => Calls.Add("HideWindow");
 
+    // Every draw the surface was asked for, kept apart from Calls so the order tests of the window's own moves read as they did.
+    public List<(Rectangle Bounds, GaugeDisplaySettings Settings)> Renders { get; } = new();
+
+    public void Render(WidgetSnapshot snapshot, DateTimeOffset now, GaugeDisplaySettings settings, int dpi, Rectangle bounds, Color ink, string fontFamily) =>
+        Renders.Add((bounds, settings));
+
     public void Dispose() => IsDisposed = true;
 
     public void RaiseLeftClicked() => LeftClicked?.Invoke(this, EventArgs.Empty);

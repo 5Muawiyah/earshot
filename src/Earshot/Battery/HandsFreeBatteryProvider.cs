@@ -6,8 +6,9 @@ using Earshot.Widget;
 namespace Earshot.Battery;
 
 // Windows' own Hands-Free battery figure for the paired AirPods: the property {104EA319-6EE2-4701-BD47-8DDBF425BBE5}
-// id 2 (BatterySweep.HandsFreeBatteryKey), which Windows fills in for a Bluetooth device while the Hands-Free
-// profile is up. Read-only, property reads with CfgMgr32 and DevQuery and nothing else: nothing is enabled,
+// id 2 (BatterySweep.HandsFreeBatteryKey), where a figure is expected while the Hands-Free profile is up. That is
+// not established: the property has been empty on every node read so far, with Hands-Free off, so what makes
+// Windows fill it in has never been seen. Read-only, property reads with CfgMgr32 and DevQuery and nothing else: nothing is enabled,
 // disabled, connected or written, so it keeps the at-rest invariant whatever it finds. It lives here and not under
 // Earshot.Widget because the widget's own types may not reach a device path.
 //
@@ -15,10 +16,10 @@ namespace Earshot.Battery;
 //   1. every device node of the pinned device (the same nodes NodeMatch.IsDisableTarget selects: in the pinned
 //      container, a Bluetooth bus node, carrying the device's address), listed with the phantom nodes included.
 //      Listing the nodes and reading their properties takes a millisecond or two;
-//   2. only when readPairedObjects is set: the paired association endpoint's container object, then the association
-//      endpoints themselves, found by the pinned container id. Windows' own device query for those blocks for about a
-//      minute each on the machine this was written on (measured), so the minute-by-minute reads never use it; the
-//      probe and the sweep do.
+//   2. only when readPairedObjects is set (nothing that ships sets it): the paired association endpoint's container
+//      object, then the association endpoints themselves, found by the pinned container id. Windows' own device query
+//      for those blocks for about a minute each on the machine this was written on (measured), so neither the
+//      minute-by-minute reads nor the probe use it; diag battery-sweep reads the paired objects as evidence.
 // A figure is taken only from a byte, an unsigned 16 bit or an unsigned 32 bit property of 0 to 100. Anything else
 // (another type, out of range, empty) is no figure and is said so in the note. Two different figures are taken as
 // none, whichever is right being unknowable: both kinds are named.

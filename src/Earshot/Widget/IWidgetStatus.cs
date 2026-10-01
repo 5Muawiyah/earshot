@@ -6,10 +6,6 @@ public interface IWidgetStatus
 {
     WidgetSnapshot Current { get; }
 
-    // True while the watcher runs: the one thing the UI can know ahead of a refresh, so its trigger can be shown
-    // disabled with the reason rather than left to fail.
-    bool BatteryRefreshAvailable { get; }
-
     event EventHandler? Changed;                          // UI thread
 
     event EventHandler<CaseOpenedEventArgs>? CaseOpened;  // UI thread; the lid is not read, so never raised today

@@ -736,7 +736,7 @@
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
-                'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'pass'
+                'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
                 'gauge-stays-on-top' = 'pass' }
             FindingsInclude = @{
@@ -762,6 +762,24 @@
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
                 'caseOpenToggleLinesSeen' = 2; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes'
                 'gaugeRaisedLines' = 2; 'gaugeLeftUnderLines' = 2; 'gaugeRingShown' = 'yes' }
+            Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
+        'chosen-rising' = @{ Overall = 'fail'; Criteria = @{
+                'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
+                'gauge-follows-autohide' = 'pass'; 'gauge-hidden-fullscreen' = 'pass'; 'explorer-restart-reattach' = 'fail'
+                'gauge-card-dpi' = 'pass'; 'gauge-card-theme' = 'pass'; 'gauge-click-behaviour' = 'pass'
+                'positive-control-counters' = 'pass'; 'refresh-battery-reachable' = 'pass'
+                'airpods-picked-out' = 'pass'; 'battery-matches-iphone' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
+                'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
+                'case-open-no-auto-connect' = 'pass'; 'bluetooth-off-then-on' = 'inconclusive'
+                'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
+                'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
+                'gauge-stays-on-top' = 'inconclusive' }
+            FindingsInclude = @{
+                'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 0; 'chosenCounterRose' = 'yes'; 'refreshEndedLines' = 0
+                'widgetAllSectionsSeen' = 90; 'widgetAppleSectionsSeen' = 90; 'widgetProximityItemsSeen' = 90
+                'caseOpenToggleLinesSeen' = 0; 'widgetWatcherStoppedLine' = $null; 'leftAtRest' = 'yes'
+                'gaugeRaisedLines' = 0; 'gaugeLeftUnderLines' = 0; 'gaugeRingShown' = 'yes' }
             Steps = @{ 'diag gate block' = 1; 'diag disconnect' = 0 } }
     }
 

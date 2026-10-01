@@ -88,6 +88,58 @@ public sealed class WidgetCardRefreshTests
         });
     }
 
+    // A refresh that ended with nothing to show marks the read line with the caution triangle in the caution colour in
+    // the clock's place; the clock and a refresh under way keep the neutral ink.
+    [TestMethod]
+    public void AFinishedRefreshThatFoundNothingMarksTheReadLineWithACautionIconAndTheOrdinaryLineDoesNot()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            foreach (bool dark in CardKit.Themes)
+            {
+                using WidgetCard card = CardKit.NewCard(dark);
+                BatteryRefreshView?[] views =
+                [
+                    null,
+                    BatteryRefreshView.Started,
+                    new(false, 0, BatteryRefreshOutcome.Heard),
+                    new(false, 0, BatteryRefreshOutcome.NothingHeard),
+                    new(false, 0, BatteryRefreshOutcome.BluetoothOff),
+                    new(false, 0, BatteryRefreshOutcome.NotListening),
+                ];
+                bool[] expected = [false, false, false, true, true, true];
+                for (int i = 0; i < views.Length; i++)
+                {
+                    card.Render(CardKit.MainModel() with { Refresh = views[i] }, 96);
+                    using Bitmap bitmap = CardKit.Render(card);
+                    Rectangle line = card.CurrentMainLayout.ReadLine;
+                    var icon = new Rectangle(line.X, line.Y, 16, line.Height);
+                    Assert.AreEqual(expected[i], HasSaturatedInk(bitmap, icon), "Refresh view " + i + (dark ? " (dark)" : " (light)") + ": caution icon expected " + expected[i] + ".");
+                }
+            }
+        });
+    }
+
+    // Caution is amber in both themes; the clock and the text are neutral greys, so a pixel with a wide spread between its
+    // channels is the caution icon.
+    private static bool HasSaturatedInk(Bitmap bitmap, Rectangle rect)
+    {
+        Rectangle bounds = Rectangle.Intersect(rect, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+        for (int y = bounds.Top; y < bounds.Bottom; y++)
+        {
+            for (int x = bounds.Left; x < bounds.Right; x++)
+            {
+                Color pixel = bitmap.GetPixel(x, y);
+                if (Math.Max(pixel.R, Math.Max(pixel.G, pixel.B)) - Math.Min(pixel.R, Math.Min(pixel.G, pixel.B)) > 60)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static bool SameRegion(Bitmap a, Bitmap b, Rectangle rect)
     {
         for (int y = rect.Top; y < rect.Bottom; y++)

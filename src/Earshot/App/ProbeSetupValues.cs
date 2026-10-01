@@ -51,16 +51,17 @@ internal static partial class Program
         DeviceIdentity? machine = SetupValues.ReadMachineIdentity(paths, folders, log);
         EarshotSettings settings = new JsonSettingsStore(paths.SettingsFile, log, readOnly: true).Current;
         PairedDeviceList paired = new BluetoothDeviceList(log).Read();
-        SetupDeviceChoice device = SetupValues.Select(machine, settings, paired.Devices, pairedUnreadable: paired.Devices.Count == 0 && paired.Problems.Count > 0);
+        SetupDeviceChoice device = SetupValues.Select(machine, settings, paired.Devices, listHadProblems: paired.Problems.Count > 0);
         SetupInstall install = SetupValues.ReadInstall(paths.InstalledExe, folders);
 
         ctx.WriteJson(w => SetupValues.Write(w, new SetupValuesReport(sid, device, install)));
     }
 }
 
-// Why ready is false: "not-paired" (no device named like the match), "several" (more than one) or "unreadable" (the
-// paired devices could not be listed). Source: "machine", "settings" or "paired". Address and ContainerId are empty
-// when not ready.
+// Why ready is false: "not-paired" (no device named like the match, in a list that was read without a problem),
+// "several" (more than one), "unreadable" (the paired devices could not be listed) or "incomplete" (some were listed
+// and some could not be read, so the AirPods may be among those that could not). Source: "machine", "settings" or
+// "paired". Address and ContainerId are empty when not ready.
 internal sealed record SetupDeviceChoice(bool Ready, string Reason, string Address, Guid ContainerId, string Source);
 
 // State is InstalledCopy's: "nothing", "usable" or "unusable". Problem is why it is unusable, or empty. Version is the
@@ -76,12 +77,15 @@ internal static class SetupValues
     public const string ReasonNotPaired = "not-paired";
     public const string ReasonSeveral = "several";
     public const string ReasonUnreadable = "unreadable";
+    public const string ReasonIncomplete = "incomplete";
 
     // The choice, from the three places a device can come from, in this order. The machine's device file and the settings'
     // pin count only while the device they name is still paired with that address in that container: a pin that
     // outlived its device is not a device to install for. Several devices named like the match is a question for the
-    // person, not a guess.
-    public static SetupDeviceChoice Select(DeviceIdentity? machine, EarshotSettings settings, IReadOnlyList<PairedDevice> paired, bool pairedUnreadable)
+    // person, not a guess. listHadProblems is true when the list of paired devices was read with any problem: a device
+    // found in it is still found, but "no device named like the match" is then "not paired" only for a list that was read
+    // cleanly, since the device may be one of those that could not be read.
+    public static SetupDeviceChoice Select(DeviceIdentity? machine, EarshotSettings settings, IReadOnlyList<PairedDevice> paired, bool listHadProblems)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(paired);
@@ -112,7 +116,11 @@ internal static class SetupValues
             return Chosen(named[0].Address, named[0].ContainerId, "paired");
         }
 
-        string reason = named.Length > 1 ? ReasonSeveral : pairedUnreadable ? ReasonUnreadable : ReasonNotPaired;
+        string reason = named.Length > 1
+            ? ReasonSeveral
+            : listHadProblems
+                ? (paired.Count == 0 ? ReasonUnreadable : ReasonIncomplete)
+                : ReasonNotPaired;
         return new SetupDeviceChoice(false, reason, "", Guid.Empty, "");
     }
 

@@ -760,6 +760,48 @@ public sealed class InstallerScriptTests
 
         Assert.AreEqual("Earshot: stopped. Earshot did not close. Choose Exit in its menu and run this again.", run.Final, run.Describe());
         Assert.IsEmpty(run.CallsNamed("Elevate"));
+        Assert.IsEmpty(run.CallsNamed("StartTray"), "It never closed, so it is still running and is not started a second time.");
+    }
+
+    // A tray that was asked to exit and was a moment slow: the script gives up on it, and by the time it stops the tray has
+    // gone, so the tray it asked to exit is started again.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void ATrayThatWasAskedToExitAndWasSlowIsStartedAgainWhenTheRunStopsOnItsAccount(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.PlaceProgramFile();
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.TrayStaysOpen = true;
+        world.Spec.TrayWaitSeconds = 0.0001;
+        world.Spec.TrayFindsBeforeGone = 2;
+
+        InstallerRun run = world.Run(shell);
+
+        StringAssert.Contains(string.Join("\n", run.Lines), "Earshot: stopped. Earshot did not close.", run.Describe());
+        CollectionAssert.AreEqual(new[] { world.InstalledExe }, run.CallsNamed("StartTray").Select(c => c.Split('|')[1]).ToArray(), run.Describe());
+        Assert.IsEmpty(run.CallsNamed("Elevate"));
+    }
+
+    // Ctrl+C ends the run without any stop being reported (PowerShell does not catch a pipeline stop), so the tray the run
+    // closed is started again from the script's own finally, not its catch.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void CtrlCAfterTheTrayWasClosedStartsTheTrayAgain(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.PlaceProgramFile();
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.ElevateBody = "throw [System.Management.Automation.PipelineStoppedException]::new()";
+
+        InstallerRun run = world.Run(shell);
+
+        CollectionAssert.AreEqual(ClosedThenElevated, run.Calls.Where(c => c.StartsWith("ExitTray|", StringComparison.Ordinal) || c.StartsWith("Elevate|", StringComparison.Ordinal)).Select(c => c.StartsWith("Elevate", StringComparison.Ordinal) ? "Elevate" : c).ToArray(), "The tray was closed, then the run was stopped at the administrator prompt.");
+        CollectionAssert.AreEqual(new[] { world.InstalledExe }, run.CallsNamed("StartTray").Select(c => c.Split('|')[1]).ToArray(), run.Describe());
+        CollectionAssert.Contains(run.Lines, "Earshot was started again.");
+        Assert.IsFalse(run.Lines.Any(l => l.StartsWith("Earshot: done.", StringComparison.Ordinal)), "A run that was stopped by Ctrl+C is not a finished one.");
     }
 
     [TestMethod]
@@ -790,6 +832,7 @@ public sealed class InstallerScriptTests
 
         Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
         CollectionAssert.Contains(run.Lines, message);
+        CollectionAssert.Contains(run.Lines, "Already paired under a name without 'AirPods' in it? Choose them in Earshot's menu (Choose device), then run this line again.", "A pair that was renamed is not found by name, so the person is told how to point Earshot at it.");
         Assert.IsEmpty(run.CallsNamed("Elevate"));
         Assert.IsTrue(File.Exists(Path.Combine(world.UserPrograms, "Earshot.exe")), "The unpacked release was copied for this user.");
         CollectionAssert.AreEqual(new[] { Path.Combine(world.UserPrograms, "Earshot.exe") }, run.CallsNamed("StartTray").Select(c => c.Split('|')[1]).ToArray());
@@ -833,6 +876,24 @@ public sealed class InstallerScriptTests
         StringAssert.StartsWith(run.Final, "Earshot: stopped. Earshot is installed, but no paired AirPods were found");
         Assert.IsEmpty(run.CallsNamed("Elevate"));
         Assert.IsFalse(Directory.Exists(world.UserPrograms));
+    }
+
+    // An install already there is told the list was not read in full, not that no AirPods were found.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell, "incomplete")]
+    [DataRow(ShellKind.PowerShell7, "incomplete")]
+    [DataRow(ShellKind.WindowsPowerShell, "unreadable")]
+    public void WithAListNotReadInFullAnInstallThatIsAlreadyThereIsToldSoAndNotThatNoAirPodsWereFound(ShellKind shell, string reason)
+    {
+        using var world = new InstallerWorld();
+        world.InstallRealProgram();
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1", ready: false, reason: reason);
+        world.Spec.Action = "Update";
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("Earshot: stopped. Earshot is installed, but Windows did not list all of your paired Bluetooth devices, so no AirPods could be found to set it up for. Check that Bluetooth is on, then run this again.", run.Final, run.Describe());
+        Assert.IsEmpty(run.CallsNamed("Elevate"));
     }
 
     [TestMethod]
@@ -1124,7 +1185,11 @@ internal sealed class RunSpec
 
     public bool TrayLeavesOnEnter { get; set; }
 
-    public int TrayWaitSeconds { get; set; } = 5;
+    public double TrayWaitSeconds { get; set; } = 5;
+
+    // When set, the tray is found running this many times and is gone from the next look on, whatever asked it to exit: a
+    // tray that was slow to close and was gone by the time the script looked again.
+    public int? TrayFindsBeforeGone { get; set; }
 
     public int OutcomeWaitSeconds { get; set; } = 20;
 
@@ -1408,7 +1473,14 @@ internal sealed class InstallerWorld : IDisposable
 
         if (Spec.Tray is { } tray)
         {
-            d.AppendLine("$h.FindTray = { if ($global:TrayRunning) { @{ Id = " + tray.Id + "; Path = " + Q(tray.Path) + "; Version = " + Q(tray.Version) + " } } else { @() } }");
+            string present = "if ($global:TrayRunning)";
+            if (Spec.TrayFindsBeforeGone is int finds)
+            {
+                d.AppendLine("$global:FindTrayCalls = 0");
+                present = "$global:FindTrayCalls = $global:FindTrayCalls + 1; if ($global:TrayRunning -and $global:FindTrayCalls -le " + finds + ")";
+            }
+
+            d.AppendLine("$h.FindTray = { " + present + " { @{ Id = " + tray.Id + "; Path = " + Q(tray.Path) + "; Version = " + Q(tray.Version) + " } } else { @() } }");
             d.AppendLine("$h.ExitTray = { param($t) Note ('ExitTray|' + $t.Id); " + (Spec.TrayStaysOpen ? "" : "$global:TrayRunning = $false") + " }");
         }
         else
@@ -1423,7 +1495,7 @@ internal sealed class InstallerWorld : IDisposable
             d.AppendLine("$h.Redirected = $false");
         }
 
-        d.AppendLine("$h.TrayWaitSeconds = " + Spec.TrayWaitSeconds);
+        d.AppendLine("$h.TrayWaitSeconds = " + Spec.TrayWaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
         d.AppendLine("$h.OutcomeWaitSeconds = " + Spec.OutcomeWaitSeconds);
 
         d.AppendLine("$roots = @{ Install = " + Q(Install) + "; Machine = " + Q(Machine) + "; UserPrograms = " + Q(UserPrograms) + "; Roaming = " + Q(Roaming) +

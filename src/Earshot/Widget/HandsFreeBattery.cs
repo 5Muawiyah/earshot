@@ -10,8 +10,9 @@ namespace Earshot.Widget;
 //   failing step's raw code is in Steps.
 internal sealed record HandsFreeBatteryRead(int? Percent, string? Origin, string? Note, IReadOnlyList<StepOutcome> Steps);
 
-// Windows' Hands-Free battery figure for the paired AirPods, read from the property Windows fills in for a
-// Bluetooth device while the Hands-Free profile is up. Read-only, and it never throws for anything Windows did.
+// Windows' Hands-Free battery figure for the paired AirPods, read from the property where Windows is expected to
+// put one while the Hands-Free profile is up (never seen filled in yet). Read-only, and it never throws for anything
+// Windows did.
 // The real source reads device properties with CfgMgr32 and DevQuery and so lives outside this namespace: nothing
 // under Earshot.Widget may reach a device path, and a property read is the nearest thing to one.
 internal interface IHandsFreeBatterySource

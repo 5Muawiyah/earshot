@@ -22,7 +22,7 @@ public sealed class ProbeSetupValuesTests
     private static readonly Guid OtherContainer = new("aaaaaaaa-bbbb-4ccc-8ddd-000000000001");
 
     private static readonly string[] SetupValuesTarget = ["setup-values"];
-    private static readonly string[] NotReadyReasons = ["not-paired", "several", "unreadable"];
+    private static readonly string[] NotReadyReasons = ["not-paired", "several", "unreadable", "incomplete"];
     private static readonly string[] Sources = ["machine", "settings", "paired", ""];
     private static readonly string[] InstallStates = ["nothing", "usable", "unusable"];
 
@@ -61,7 +61,7 @@ public sealed class ProbeSetupValuesTests
     {
         PairedDevice[] paired = [Device("AirPods Pro", PodsAddress, PodsContainer), Device("AirPods Max", OtherAddress, OtherContainer)];
 
-        SetupDeviceChoice choice = SetupValues.Select(Identity(OtherAddress, OtherContainer), Settings(address: PodsAddress, container: PodsContainer), paired, pairedUnreadable: false);
+        SetupDeviceChoice choice = SetupValues.Select(Identity(OtherAddress, OtherContainer), Settings(address: PodsAddress, container: PodsContainer), paired, listHadProblems: false);
 
         Assert.IsTrue(choice.Ready);
         Assert.AreEqual("machine", choice.Source);
@@ -139,8 +139,31 @@ public sealed class ProbeSetupValuesTests
     {
         PairedDevice[] paired = [Device("Keyboard", OtherAddress, OtherContainer)];
 
-        Assert.AreEqual("not-paired", SetupValues.Select(null, Settings(), paired, pairedUnreadable: false).Reason);
-        Assert.AreEqual("unreadable", SetupValues.Select(null, Settings(), [], pairedUnreadable: true).Reason);
+        Assert.AreEqual("not-paired", SetupValues.Select(null, Settings(), paired, listHadProblems: false).Reason);
+        Assert.AreEqual("unreadable", SetupValues.Select(null, Settings(), [], listHadProblems: true).Reason);
+    }
+
+    // A list that was read with a problem but listed some devices says nothing about the AirPods that may be among those it
+    // could not read, so "not paired" would be a guess; the reason is its own.
+    [TestMethod]
+    public void AListReadWithAProblemThatNamesNoMatchIsIncompleteNotNotPaired()
+    {
+        PairedDevice[] paired = [Device("Keyboard", OtherAddress, OtherContainer)];
+
+        SetupDeviceChoice choice = SetupValues.Select(null, Settings(), paired, listHadProblems: true);
+
+        Assert.IsFalse(choice.Ready);
+        Assert.AreEqual("incomplete", choice.Reason);
+    }
+
+    [TestMethod]
+    public void ADeviceFoundInAListReadWithAProblemIsStillChosenAndSeveralStaysSeveral()
+    {
+        PairedDevice[] one = [Device("AirPods Pro", PodsAddress, PodsContainer), Device("Keyboard", OtherAddress, OtherContainer)];
+        PairedDevice[] two = [Device("AirPods Pro", PodsAddress, PodsContainer), Device("AirPods Max", OtherAddress, OtherContainer)];
+
+        Assert.IsTrue(SetupValues.Select(null, Settings(), one, listHadProblems: true).Ready, "What was found is found.");
+        Assert.AreEqual("several", SetupValues.Select(null, Settings(), two, listHadProblems: true).Reason);
     }
 
     [TestMethod]

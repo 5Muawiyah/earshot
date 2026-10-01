@@ -100,6 +100,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // The pinned device the paired model was last read for, so a settings change that leaves it alone reads nothing.
     private (Guid Container, string Address)? _pairedModelFor;
 
+    // True while a read of the model that was asked for because none is held is running.
+    private bool _pairedModelRetryBusy;
+
     // The container this PC renders to when the AirPods are on it (where Windows' figure would be), and whether a
     // read of that figure is running: one at a time, so a read still running skips the next tick.
     private Guid _watchedContainer;
@@ -458,7 +461,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             if (AdvertisementSourceCodes.IsRadioOff(step))
             {
                 // Bluetooth is off: shown as the RadioNotAvailable a Stopped event would have carried, so
-                // the card, the set-up and the retry treat both the same way. The raw code stays in the log
+                // the card and the retry treat both the same way. The raw code stays in the log
                 // line below and in the step.
                 _watcherErrorCode = AdvertisementSourceCodes.RadioNotAvailableCode;
                 _watcherErrorName = AdvertisementSourceCodes.RadioNotAvailableName;
@@ -626,18 +629,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         public bool WindowsFigure { get; set; }
     }
 
-    // True while the watcher runs.
-    public bool BatteryRefreshAvailable
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return !_closed && !_suspended && _watcherState == WidgetWatcherState.Started;
-            }
-        }
-    }
-
     // Restarts the passive listen through the same outside-the-lock stop and start every other restart uses (a new
     // generation, so the old run's own Stopped never reads as the current one), starts a read of Windows' own figure,
     // and waits for a message of the chosen set sent after the restart, or for WidgetTiming.RefreshWindow to pass.
@@ -668,6 +659,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _refresh = state;
         }
 
+        RereadPairedModelIfNone();
         StartRefresh(state);
         return state.Completion.Task.WaitAsync(ct);
     }
@@ -875,13 +867,20 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 return;
             }
 
-            if (read.Percent is int percent)
+            if (read.Percent is int percent && _thisPcActive)
             {
                 _headset = new PartReading(percent, null, null) { ReadAt = at };
                 if (_refresh is { } waiting)
                 {
                     waiting.WindowsFigure = true;
                 }
+            }
+            else
+            {
+                // A read that found no figure says there is none now, so the figure an earlier read found is
+                // dropped rather than left to age. One that finished after the AirPods left this PC is not
+                // theirs to show here either: Windows' figure only ever stands for AirPods on this PC.
+                _headset = PartReading.Unknown;
             }
         }
 
@@ -967,6 +966,46 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         if (reset && publish)
         {
             PublishAndNotify();
+        }
+    }
+
+    // A model that could not be read (the device was not listed yet, or the list failed) is read again whenever the
+    // listening is retried or a refresh is asked for, while none is held: otherwise a failed read at start would
+    // leave the card with no reading until the pinned device changed. The read runs off the calling thread, one at a
+    // time, and its result is published like any other change of the model.
+    private void RereadPairedModelIfNone()
+    {
+        lock (_gate)
+        {
+            if (_closed || _pairedModelRetryBusy || _selector.PairedModel is not null)
+            {
+                return;
+            }
+
+            _pairedModelRetryBusy = true;
+        }
+
+        _runInBackground(ReadPairedModelAgain);
+    }
+
+    // On a worker thread, where an exception nothing handles would end the process: the one catch is a bug in this
+    // process, logged with its code, never swallowed.
+    private void ReadPairedModelAgain()
+    {
+        try
+        {
+            ReadPairedModel(force: true, publish: true);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Widget: reading the paired AirPods' model again failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _pairedModelRetryBusy = false;
+            }
         }
     }
 
@@ -1089,9 +1128,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                     _log.Info("Widget: picked out a set of AirPods to show (" + seen.SetsInRange + " in range).");
                 }
             }
-            else if (seen.Continued)
+            else if (seen.Reacquired)
             {
-                _log.Info("Widget: the chosen set came back under new addresses, so its values stand.");
+                // The values on show stay, greyed as they age, until this set's own messages replace them.
+                _log.Info("Widget: the chosen set went quiet, and a set of AirPods was picked out again (" + seen.SetsInRange + " in range).");
             }
 
             switch (seen.Class)
@@ -1341,6 +1381,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             source = _source;
         }
 
+        RereadPairedModelIfNone();
         try
         {
             StepOutcome step = source.Start(generation);
@@ -1433,6 +1474,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             source = _source;
         }
 
+        RereadPairedModelIfNone();
         RunStartOutsideLock(source, generation);
     }
 
@@ -1466,7 +1508,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    // Counters tick on almost every advertisement (a section counted, an owned reading, ...), so comparing
+    // Counters tick on almost every advertisement (a section counted, a chosen reading, ...), so comparing
     // the whole snapshot by record equality (which is what WidgetCounters, and Counters.UnknownForms as a
     // reference-equality list, would fall back to) would raise Changed constantly even when nothing the UI
     // shows moved. Everything the UI actually displays is compared; Counters is deliberately left out, since
@@ -1518,7 +1560,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool fresh = IsFreshLocked(now);
         AirPodsWhere where = ComputeWhereLocked(fresh);
         DateTimeOffset? earReadAt = fresh ? _earReadAt : null;
-        DateTimeOffset? batteryReadAt = OldestReadAt(_left, _right, _case);
+        DateTimeOffset? batteryReadAt = NewestReadAt(_left, _right, _case);
         bool autoPauseAvailable = _table.LeftInEarBit is not null || _table.RightInEarBit is not null;
 
         // Per-bud InEar is only as good as the reading it came from. Percent, Charging and ReadAt stand whatever
@@ -1538,18 +1580,21 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         };
     }
 
-    private static DateTimeOffset? OldestReadAt(PartReading a, PartReading b, PartReading c)
+    // When anything was last read: the newest of the parts' read times. A part the broadcast does not say (the case
+    // while its lid is shut) keeps its own old time and is greyed by itself; it must not make a card whose buds were
+    // just heard say the battery was read hours ago.
+    private static DateTimeOffset? NewestReadAt(PartReading a, PartReading b, PartReading c)
     {
-        DateTimeOffset? oldest = null;
+        DateTimeOffset? newest = null;
         foreach (PartReading part in new[] { a, b, c })
         {
-            if (part.ReadAt is DateTimeOffset at && (oldest is null || at < oldest))
+            if (part.ReadAt is DateTimeOffset at && (newest is null || at > newest))
             {
-                oldest = at;
+                newest = at;
             }
         }
 
-        return oldest;
+        return newest;
     }
 
     private WidgetCounters BuildCountersLocked()
