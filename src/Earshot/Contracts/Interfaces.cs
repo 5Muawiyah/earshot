@@ -80,7 +80,8 @@ public interface IAudioProtectionController
 // A battery figure for the paired AirPods, kept behind one contract so the UI never depends on where it came from.
 // The shipping provider reads Windows' own Hands-Free battery property; the null provider has no source, and a test
 // uses it when it needs none. The figure from the AirPods' own broadcast does not come through here: the widget
-// reads that from the advertisements.
+// reads that from the advertisements. HasSource says the provider looks for a figure, not that one exists: with
+// Hands-Free off Windows has none to give.
 public interface IBatteryProvider
 {
     bool HasSource { get; }

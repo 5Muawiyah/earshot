@@ -223,7 +223,7 @@ public sealed class SafeDecoratorsTests
             Assert.IsInstanceOfType<SafeBlockController>(registry.Block);
             Assert.IsInstanceOfType<SafeAudioProtectionController>(registry.Protection);
             Assert.IsNotInstanceOfType<SafeBlockController>(((SafeBlockController)registry.Block).Inner, "Wrapped once, not twice.");
-            Assert.IsFalse(registry.Battery.HasSource);
+            Assert.IsTrue(registry.Battery.HasSource, "Reading Windows' own figure is a property read, so safe mode leaves it be.");
             Assert.IsTrue(log.Has(LogLevel.Warn, "Safe mode is on."));
         }
         finally

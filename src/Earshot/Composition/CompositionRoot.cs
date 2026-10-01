@@ -1,3 +1,4 @@
+using Earshot.Battery;
 using Earshot.Contracts;
 using Earshot.Contracts.Null;
 using Earshot.Infra;
@@ -21,7 +22,7 @@ internal static partial class CompositionRoot
             Connection = new NullConnectionController(),
             Block      = new NullBlockController(),
             Protection = new NullAudioProtectionController(),
-            Battery    = new NoBatterySource(),     // the only real impl in v1
+            Battery    = new HandsFreeBatteryProvider(new SystemBatterySweepReader(), () => settings.Current.PinnedAddress),
             Cards      = new NullCardPresenter(log),
         };
         ConfigureAudio(r); ConfigureConnect(r); ConfigureBoot(r);

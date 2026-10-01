@@ -10,7 +10,9 @@ namespace Earshot.Widget;
 //
 // Which AirPods are the owner's is decided with no step from the owner: the paired AirPods' model (read once at
 // start and again when the pinned device changes) picks the candidates, and BroadcastSelector picks the set.
-// Only the chosen set's messages ever reach the values the card, the gauge and the alert show.
+// Only the chosen set's messages ever reach the values the card, the gauge and the alert show. Windows' own
+// Hands-Free battery figure, when it has one, is read beside them (every minute while the AirPods are on this PC, at
+// each connect, and when asked) and held apart: it fills in only when no bud has a fresh broadcast value.
 //
 // Start, Suspend, Resume and Close are not on IWidgetStatus: they are called directly by whatever wires the
 // widget into the tray (out of scope here), the way the device monitor's own Start is called once and its
@@ -25,6 +27,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _timeProvider;
     private readonly IPairedModelSource _pairedModel;
+    private readonly IHandsFreeBatterySource? _handsFree;
+    private readonly Action<Action> _runInBackground;
 
     // The decode table is the documented one. Only a test hands in another, to exercise bits the documented table
     // does not set (in-ear, the lid).
@@ -59,6 +63,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private ITimer? _retryTimer;
     private TimeSpan _retryDelay;
     private ITimer? _countersLogTimer;
+    private ITimer? _headsetTimer;
     private WidgetCounters? _lastLoggedCounters;
     private WidgetWatcherState? _lastLoggedWatcherState;
 
@@ -95,6 +100,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // The pinned device the paired model was last read for, so a settings change that leaves it alone reads nothing.
     private (Guid Container, string Address)? _pairedModelFor;
 
+    // The container this PC renders to when the AirPods are on it (where Windows' figure would be), and whether a
+    // read of that figure is running: one at a time, so a read still running skips the next tick.
+    private Guid _watchedContainer;
+    private bool _headsetBusy;
+    private string? _lastHeadsetNote;
+
     public WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ISettingsStore settings,
@@ -103,12 +114,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         ILog log,
         Action<Action> uiPost,
         TimeProvider timeProvider,
-        IPairedModelSource pairedModel)
-        : this(sourceFactory, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, pairedModel, ProximityDecodeTable.Documented)
+        IPairedModelSource pairedModel,
+        IHandsFreeBatterySource? handsFree = null)
+        : this(sourceFactory, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, pairedModel, handsFree, ProximityDecodeTable.Documented)
     {
     }
 
-    // Test-only: supplies the decode table directly, so a test can exercise bits the documented table does not set.
+    // Test-only: supplies the decode table directly, so a test can exercise bits the documented table does not set, and
+    // the way a Hands-Free read is run off the UI thread, so a test can run it where it stands.
     internal WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ISettingsStore settings,
@@ -118,7 +131,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         Action<Action> uiPost,
         TimeProvider timeProvider,
         IPairedModelSource pairedModel,
-        ProximityDecodeTable table)
+        IHandsFreeBatterySource? handsFree,
+        ProximityDecodeTable table,
+        Action<Action>? runInBackground = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFactory);
         ArgumentNullException.ThrowIfNull(settings);
@@ -138,6 +153,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _uiPost = uiPost;
         _timeProvider = timeProvider;
         _pairedModel = pairedModel;
+        _handsFree = handsFree;
+        _runInBackground = runInBackground ?? (static work => _ = Task.Run(work));
         _table = table;
     }
 
@@ -169,6 +186,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         IAdvertisementSource? sourceToStart = null;
         int generation = 0;
+        bool startOnThisPc;
         lock (_gate)
         {
             if (_started || _closed)
@@ -178,6 +196,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             _started = true;
             RecomputeThisPcLocked(_deviceMonitor.Current);
+            startOnThisPc = _thisPcActive;
             _deviceMonitor.SnapshotChanged += OnDeviceSnapshotChanged;
 
             if (!_settingsHooked)
@@ -201,6 +220,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _countersLogTimer ??= _timeProvider.CreateTimer(
                 static state => ((WidgetStatusService)state!).OnCountersLogDue(), this,
                 WidgetTiming.CountersLogInterval, WidgetTiming.CountersLogInterval);
+
+            // Windows' own figure is read once a minute, only while the AirPods are on this PC (the tick checks).
+            if (_handsFree is not null)
+            {
+                _headsetTimer ??= _timeProvider.CreateTimer(
+                    static state => ((WidgetStatusService)state!).OnHeadsetPollDue(), this,
+                    WidgetTiming.HeadsetPollInterval, WidgetTiming.HeadsetPollInterval);
+            }
         }
 
         if (sourceToStart is not null)
@@ -214,6 +241,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             // original, single-lock version of this method did (a caller watching uiPost's own queue,
             // ChangedAndCaseOpenedAreRaisedThroughUiPost, pins it).
             RunStartOutsideLock(sourceToStart, generation, publish: false);
+
+            // Already on this PC when the widget starts: Windows' figure is read once now.
+            if (startOnThisPc)
+            {
+                RequestHeadsetRead();
+            }
         }
     }
 
@@ -282,6 +315,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             _countersLogTimer?.Dispose();
             _countersLogTimer = null;
+            _headsetTimer?.Dispose();
+            _headsetTimer = null;
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
@@ -546,9 +581,18 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     private void OnDeviceSnapshotChanged(object? sender, DeviceSnapshotEventArgs e)
     {
+        bool justConnected;
         lock (_gate)
         {
+            bool wasThisPc = _thisPcActive;
             RecomputeThisPcLocked(e.Snapshot);
+            justConnected = _thisPcActive && !wasThisPc;
+        }
+
+        // Windows' figure is read once at each connect.
+        if (justConnected)
+        {
+            RequestHeadsetRead();
         }
 
         PublishAndNotify();
@@ -557,7 +601,107 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private void RecomputeThisPcLocked(DeviceSnapshot snapshot)
     {
         Guid watched = CoordinatorRules.WatchedContainer(_blockStatus(), _settings.Current, snapshot);
+        _watchedContainer = watched;
         _thisPcActive = CoordinatorRules.RenderOf(snapshot, watched) == RenderState.Active;
+    }
+
+    // ---- Windows' Hands-Free figure
+
+    private void OnHeadsetPollDue()
+    {
+        lock (_gate)
+        {
+            if (!_thisPcActive)
+            {
+                return; // Windows' figure is never shown for AirPods that are not on this PC, so it is not read for them
+            }
+        }
+
+        RequestHeadsetRead();
+    }
+
+    // Starts one read of Windows' figure off the UI thread, unless one is running, the widget is off or suspended, or
+    // there is no source. The result comes back through uiPost.
+    internal void RequestHeadsetRead()
+    {
+        Guid container;
+        string address;
+        lock (_gate)
+        {
+            if (_handsFree is null || _closed || _suspended || _source is null || _headsetBusy)
+            {
+                return;
+            }
+
+            _headsetBusy = true;
+            container = _watchedContainer != Guid.Empty ? _watchedContainer : _settings.Current.PinnedContainerId;
+            address = _settings.Current.PinnedAddress;
+        }
+
+        _runInBackground(() => ReadHeadsetOffTheUiThread(container, address));
+    }
+
+    // The source never throws for anything Windows did; the one catch is a bug in this process on a worker thread, which
+    // would otherwise end it. The raw code is logged, never swallowed.
+    private void ReadHeadsetOffTheUiThread(Guid container, string address)
+    {
+        HandsFreeBatteryRead? read = null;
+        try
+        {
+            read = _handsFree!.Read(container, address);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Widget: reading Windows' Hands-Free battery failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+        }
+
+        DateTimeOffset at = _timeProvider.GetUtcNow();
+        _uiPost(() => ApplyHeadsetRead(read, at));
+    }
+
+    private void ApplyHeadsetRead(HandsFreeBatteryRead? read, DateTimeOffset at)
+    {
+        lock (_gate)
+        {
+            _headsetBusy = false;
+            if (_closed || read is null)
+            {
+                return;
+            }
+
+            if (read.Percent is int percent)
+            {
+                _headset = new PartReading(percent, null, null) { ReadAt = at };
+            }
+        }
+
+        // What was found is logged when it changes, not every minute: the raw code of a failing step, and the one line
+        // that says why there was no figure.
+        string text = string.Join(
+            "; ", read.Steps.Where(step => !step.Ok).Select(step => step.Step + " " + step.CodeName)
+                .Append(read.Percent is int found ? "a figure from a " + read.Origin : read.Note ?? "no figure"));
+        bool changed;
+        lock (_gate)
+        {
+            changed = _lastHeadsetNote != text;
+            _lastHeadsetNote = text;
+        }
+
+        if (changed)
+        {
+            bool failed = read.Steps.Any(step => !step.Ok);
+            string line = "Widget: Windows' Hands-Free battery: " + text + ".";
+            if (failed)
+            {
+                _log.Warn(line);
+            }
+            else
+            {
+                _log.Info(line);
+            }
+        }
+
+        PublishAndNotify();
     }
 
     // Reads the paired AirPods' model for the pinned device and hands it to the selector. The read is CfgMgr32 work

@@ -7,6 +7,10 @@ public static class WidgetTiming
     // How fresh a reading of the chosen set has to be for the ear state (Elsewhere/NotInUse) to be shown at all.
     public static readonly TimeSpan EarFreshWindow = TimeSpan.FromSeconds(10);
 
+    // How often Windows' own Hands-Free figure is read while the AirPods are on this PC. The figure counts as current for
+    // two of these (BatteryFreshness.HeadsetCurrentWindow), so one missed read does not drop it.
+    public static readonly TimeSpan HeadsetPollInterval = TimeSpan.FromSeconds(60);
+
     public static readonly TimeSpan WatcherRetryDelay = TimeSpan.FromSeconds(30);
 
     public static readonly TimeSpan WatcherRetryLimit = TimeSpan.FromMinutes(15);

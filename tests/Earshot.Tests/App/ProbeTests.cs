@@ -2,6 +2,9 @@ using System.Globalization;
 using System.Text.Json;
 using Earshot.App;
 using Earshot.Composition;
+using Earshot.Contracts;
+using Earshot.Infra;
+using Earshot.Tests.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.App;
@@ -16,9 +19,28 @@ public sealed class ProbeTests
     private static readonly int[] IconSizes = [16, 24, 32];
     private static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
-    // Probe battery needs no services; building them here would be a test bug.
+    // The icon probe needs no services; building them here would be a test bug.
     private static ServiceRegistry NoServices() =>
-        throw new AssertFailedException("probe battery must not build the service registry.");
+        throw new AssertFailedException("this probe must not build the service registry.");
+
+    // The battery probe reads the pinned device from the settings and Windows' figure from the registry's battery
+    // provider: both are fakes here, so no test reads this machine.
+    private static Func<ServiceRegistry> BatteryServices(IBatteryProvider provider, bool pinned = true)
+    {
+        var temp = new TempFolder();
+        var log = new CapturingLog();
+        var settings = new JsonSettingsStore(temp.File("settings.json"), log);
+        if (pinned)
+        {
+            settings.Update(s =>
+            {
+                s.PinnedContainerId = Phase4.RecordedNodes.AirPodsContainer;
+                s.PinnedAddress = Phase4.RecordedNodes.AirPodsAddress;
+            });
+        }
+
+        return () => new ServiceRegistry(log, settings, action => action(), safeMode: false) { Battery = provider };
+    }
 
     private static Program.ProbeRequest Parse(params string[] args)
     {
@@ -69,37 +91,95 @@ public sealed class ProbeTests
     }
 
     [TestMethod]
-    public void BatteryTextReportsNoSourceAndNoFigure()
+    public void BatteryTextSaysWhatWindowsReadsAndLeavesTheBroadcastToTheTray()
     {
         using var output = new StringWriter(CultureInfo.InvariantCulture);
+        var provider = new FakeBatteryProvider(percent: 70);
 
-        int exit = Program.RunProbe(Parse("probe", "battery"), output, NoServices);
+        int exit = Program.RunProbe(Parse("probe", "battery"), output, BatteryServices(provider));
 
         string text = output.ToString();
         Assert.AreEqual(ExitCodes.Ok, exit);
         Assert.IsTrue(text.Contains("== battery ==", StringComparison.Ordinal));
-        Assert.IsTrue(text.Contains("Battery source: none", StringComparison.Ordinal));
-        Assert.IsTrue(text.Contains("Reading: no value", StringComparison.Ordinal));
-        Assert.IsTrue(text.Contains("Disconnected check: Not run yet. Repeat the check with the AirPods disconnected", StringComparison.Ordinal));
-        Assert.IsFalse(text.Contains('%', StringComparison.Ordinal), "No percentage is ever printed.");
+        Assert.IsTrue(text.Contains("Windows' Hands-Free battery: 70% (from a device node)", StringComparison.Ordinal));
+        Assert.IsTrue(text.Contains(Program.BatteryBroadcastNote, StringComparison.Ordinal));
+        Assert.IsTrue(text.Contains(Program.BatteryObjectsNote, StringComparison.Ordinal));
+        Assert.AreEqual(Phase4.RecordedNodes.AirPodsContainer, provider.LastContainer, "It asks about the pinned device.");
+        Assert.AreEqual(Phase4.RecordedNodes.AirPodsAddress, provider.LastAddress);
     }
 
     [TestMethod]
-    public void BatteryJsonIsOneObjectWithoutAPercent()
+    public void BatteryTextWithNoFigureSaysWhyAndNamesEveryFailedStepWithItsRawCode()
+    {
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+        var provider = new FakeBatteryProvider(
+            note: "No figure: the property was empty or absent on 8 device nodes.",
+            steps: [StepOutcomes.FromConfigRet("hands-free-battery:cm-property", Earshot.Interop.CfgMgr32.CR_FAILURE, "A property could not be read.")]);
+
+        int exit = Program.RunProbe(Parse("probe", "battery"), output, BatteryServices(provider));
+
+        string text = output.ToString();
+        Assert.AreEqual(ExitCodes.Ok, exit);
+        Assert.IsTrue(text.Contains("Windows' Hands-Free battery: no figure. No figure: the property was empty or absent on 8 device nodes.", StringComparison.Ordinal));
+        Assert.IsTrue(text.Contains("step failed: hands-free-battery:cm-property CR_FAILURE", StringComparison.Ordinal));
+        Assert.IsFalse(text.Contains('%', StringComparison.Ordinal), "No figure, so no percentage is printed.");
+    }
+
+    [TestMethod]
+    public void BatteryJsonIsOneObjectWithTheFigureItsOriginAndTheSteps()
     {
         using var output = new StringWriter(CultureInfo.InvariantCulture);
 
-        int exit = Program.RunProbe(Parse("probe", "battery", "--json"), output, NoServices);
+        int exit = Program.RunProbe(Parse("probe", "battery", "--json"), output, BatteryServices(new FakeBatteryProvider(percent: 70)));
 
         Assert.AreEqual(ExitCodes.Ok, exit);
         using JsonDocument doc = JsonDocument.Parse(output.ToString());
         JsonElement root = doc.RootElement;
         Assert.AreEqual(JsonValueKind.Object, root.ValueKind);
         Assert.AreEqual("battery", root.GetProperty("target").GetString());
-        Assert.IsFalse(root.GetProperty("hasSource").GetBoolean());
-        Assert.IsFalse(root.GetProperty("hasValue").GetBoolean());
-        Assert.IsFalse(root.TryGetProperty("percent", out _));
-        Assert.IsGreaterThan(0, root.GetProperty("evidence").GetProperty("findings").GetArrayLength());
+        Assert.IsTrue(root.GetProperty("hasSource").GetBoolean());
+        Assert.IsTrue(root.GetProperty("hasValue").GetBoolean());
+        Assert.AreEqual(70, root.GetProperty("percent").GetInt32());
+        Assert.AreEqual("device node", root.GetProperty("origin").GetString());
+        Assert.AreEqual(JsonValueKind.Array, root.GetProperty("steps").ValueKind);
+        Assert.AreEqual(Program.BatteryBroadcastNote, root.GetProperty("broadcast").GetString());
+    }
+
+    [TestMethod]
+    public void BatteryJsonWithNoFigureHasNoPercent()
+    {
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+
+        Program.RunProbe(Parse("probe", "battery", "--json"), output, BatteryServices(new FakeBatteryProvider()));
+
+        using JsonDocument doc = JsonDocument.Parse(output.ToString());
+        Assert.IsFalse(doc.RootElement.GetProperty("hasValue").GetBoolean());
+        Assert.IsFalse(doc.RootElement.TryGetProperty("percent", out _));
+        Assert.AreEqual("No figure.", doc.RootElement.GetProperty("note").GetString());
+    }
+
+    [TestMethod]
+    public void NothingPinnedIsAConfigurationAnswerNotAFailure()
+    {
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+
+        int exit = Program.RunProbe(Parse("probe", "battery", "--json"), output, BatteryServices(new FakeBatteryProvider(), pinned: false));
+
+        Assert.AreEqual(ExitCodes.Config, exit);
+        using JsonDocument doc = JsonDocument.Parse(output.ToString());
+        Assert.IsTrue(doc.RootElement.GetProperty("hasSource").GetBoolean());
+        Assert.IsFalse(doc.RootElement.GetProperty("hasValue").GetBoolean());
+    }
+
+    [TestMethod]
+    public void TheNullProviderHasNoSourceAndSaysSo()
+    {
+        using var output = new StringWriter(CultureInfo.InvariantCulture);
+
+        int exit = Program.RunProbe(Parse("probe", "battery"), output, BatteryServices(new Earshot.Contracts.Null.NoBatterySource()));
+
+        Assert.AreEqual(ExitCodes.Config, exit);
+        Assert.IsTrue(output.ToString().Contains("no source in this build", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -108,7 +188,7 @@ public sealed class ProbeTests
         using var output = new StringWriter(CultureInfo.InvariantCulture);
         var request = new Program.ProbeRequest(["battery", "battery"], Json: true, OutPath: null);
 
-        int exit = Program.RunProbe(request, output, NoServices);
+        int exit = Program.RunProbe(request, output, BatteryServices(new FakeBatteryProvider(percent: 70)));
 
         Assert.AreEqual(ExitCodes.Ok, exit);
         using JsonDocument doc = JsonDocument.Parse(output.ToString());
@@ -184,7 +264,7 @@ public sealed class ProbeTests
         using (output)
         {
             Assert.AreEqual(path, output.Destination);
-            Program.RunProbe(Parse("probe", "battery"), output.Writer, NoServices);
+            Program.RunProbe(Parse("probe", "battery"), output.Writer, BatteryServices(new FakeBatteryProvider(percent: 70)));
         }
 
         byte[] bytes = File.ReadAllBytes(path);

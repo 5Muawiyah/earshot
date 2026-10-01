@@ -21,6 +21,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     private TestTimeProvider _clock = null!;
     private FakeAdvertisementSource _source = null!;
     private FakePairedModelSource _paired = null!;
+    private FakeHandsFreeBatterySource _handsFree = null!;
     private int _posts;
     private List<EventArgs> _changedEvents = null!;
     private List<CaseOpenedEventArgs> _caseOpenedEvents = null!;
@@ -36,6 +37,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _deviceMonitor = new FakeDeviceMonitor(_clock);
         _source = new FakeAdvertisementSource();
         _paired = new FakePairedModelSource();
+        _handsFree = new FakeHandsFreeBatterySource();
         _posts = 0;
         _changedEvents = new List<EventArgs>();
         _caseOpenedEvents = new List<CaseOpenedEventArgs>();
@@ -45,11 +47,12 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     // The documented table, or one with extra bits a test wants to exercise (in-ear, the lid).
-    private WidgetStatusService NewService(ProximityDecodeTable? table = null)
+    private WidgetStatusService NewService(ProximityDecodeTable? table = null, Action<Action>? runInBackground = null)
     {
         var service = new WidgetStatusService(
             () => _source, _settings, _deviceMonitor, () => null, _log,
-            action => { Interlocked.Increment(ref _posts); action(); }, _clock, _paired, table ?? ProximityDecodeTable.Documented);
+            action => { Interlocked.Increment(ref _posts); action(); }, _clock, _paired, _handsFree, table ?? ProximityDecodeTable.Documented,
+            runInBackground: runInBackground ?? (work => work()));
         service.Changed += (sender, e) => { lock (_changedEvents) { _changedEvents.Add(e); } };
         service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
         service.ReadingApplied += (sender, e) => { lock (_readingEvents) { _readingEvents.Add(e); } };
@@ -405,7 +408,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         var other = new FakeAdvertisementSource();
         using var withBits = new WidgetStatusService(
-            () => other, _settings, _deviceMonitor, () => null, _log, action => action(), _clock, _paired, WithInEarBits());
+            () => other, _settings, _deviceMonitor, () => null, _log, action => action(), _clock, _paired, null, WithInEarBits());
         withBits.Start();
         Assert.IsTrue(withBits.Current.AutoPauseAvailable);
     }
@@ -442,6 +445,169 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(BroadcastSelectionState.Listening, snapshot.Selection);
         Assert.IsFalse(snapshot.AutoPauseAvailable);
         Assert.AreEqual(0, snapshot.Counters.AllSections);
+    }
+
+    // ---- Windows' own Hands-Free figure, read beside the broadcast and held apart from it
+
+    private void PinAndConnect()
+    {
+        _settings.Update(s =>
+        {
+            s.PinnedContainerId = Container;
+            s.PinnedAddress = Phase4.RecordedNodes.AirPodsAddress;
+        });
+        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
+    }
+
+    [TestMethod]
+    public void WindowsFigureIsReadOnceWhenTheAirPodsBecomeThisPcsOutputWithThePinnedDevice()
+    {
+        _handsFree.Percent = 70;
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Assert.AreEqual(0, _handsFree.Reads, "Not on this PC yet: nothing is read.");
+
+        PinAndConnect();
+
+        Assert.AreEqual(1, _handsFree.Reads);
+        Assert.AreEqual(Container, _handsFree.LastContainer);
+        Assert.AreEqual(Phase4.RecordedNodes.AirPodsAddress, _handsFree.LastAddress);
+        Assert.AreEqual(70, service.Current.Headset.Percent);
+        Assert.AreEqual(_clock.GetUtcNow(), service.Current.Headset.ReadAt);
+    }
+
+    [TestMethod]
+    public void WindowsFigureIsReadEveryMinuteWhileOnThisPcAndNotOtherwise()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        PinAndConnect();
+        Assert.AreEqual(1, _handsFree.Reads);
+
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        Assert.AreEqual(2, _handsFree.Reads);
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        Assert.AreEqual(3, _handsFree.Reads);
+
+        _deviceMonitor.Raise(ThisPcSnapshot(active: false));
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+
+        Assert.AreEqual(3, _handsFree.Reads, "Off this PC it is not read.");
+    }
+
+    [TestMethod]
+    public void ARunningReadSkipsTheNextTickAndTheOneAfterItFinishesReadsAgain()
+    {
+        var queued = new Queue<Action>();
+        using WidgetStatusService service = NewService(runInBackground: queued.Enqueue);
+        service.Start();
+        PinAndConnect();
+        Assert.AreEqual(1, queued.Count, "The connect starts one read.");
+
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        Assert.AreEqual(1, queued.Count, "The first read has not finished, so the tick starts none.");
+        Assert.AreEqual(0, _handsFree.Reads);
+
+        queued.Dequeue()();
+        Assert.AreEqual(1, _handsFree.Reads);
+
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        Assert.AreEqual(1, queued.Count, "Once finished, the next tick reads again.");
+    }
+
+    [TestMethod]
+    public void NoWindowsFigureIsReadWhileSuspendedOrAfterClose()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        PinAndConnect();
+        int before = _handsFree.Reads;
+
+        service.Suspend();
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        Assert.AreEqual(before, _handsFree.Reads, "Suspended: nothing is read.");
+
+        service.Resume();
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        Assert.AreEqual(before + 1, _handsFree.Reads);
+
+        service.Close();
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        Assert.AreEqual(before + 1, _handsFree.Reads, "Closed: nothing is read.");
+    }
+
+    [TestMethod]
+    public void AFigureIsHeldApartFromTheBudsAndOnlyShownWhenNoBudIsFresh()
+    {
+        _handsFree.Percent = 70;
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A));
+        PinAndConnect();
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(70, snapshot.Headset.Percent);
+        Assert.AreEqual(60, snapshot.Left.Percent, "It is never written into Left or Right.");
+        Assert.AreEqual(50, snapshot.Right.Percent);
+        Assert.IsNull(BatteryFreshness.Shown(snapshot, _clock.GetUtcNow()).WindowsPercent, "A fresh bud is shown, so Windows' figure is not.");
+
+        _clock.Advance(TimeSpan.FromSeconds(45));
+        _handsFree.Percent = 68;
+        _clock.Advance(WidgetTiming.HeadsetPollInterval - TimeSpan.FromSeconds(45));
+
+        ShownBattery shown = BatteryFreshness.Shown(service.Current, _clock.GetUtcNow());
+        Assert.AreEqual(68, shown.WindowsPercent, "With no bud fresh and Windows' figure current, it is what is shown.");
+    }
+
+    [TestMethod]
+    public void NoFigureLogsWhyOnceAndAnEarlierFigureIsKeptToAge()
+    {
+        _handsFree.Percent = 70;
+        using WidgetStatusService service = NewService();
+        service.Start();
+        PinAndConnect();
+        DateTimeOffset firstRead = _clock.GetUtcNow();
+
+        _handsFree.Percent = null;
+        _handsFree.Note = "No figure: the property was empty or absent on 8 device nodes and 1 paired objects.";
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+
+        Assert.AreEqual(70, service.Current.Headset.Percent, "The old figure stays, with its own read time, until it ages out.");
+        Assert.AreEqual(firstRead, service.Current.Headset.ReadAt);
+        Assert.AreEqual(1, _log.Entries.Count(e => e.Message.Contains("empty or absent on 8 device nodes", StringComparison.Ordinal)), "The same finding is logged once.");
+    }
+
+    [TestMethod]
+    public void AFailingStepIsLoggedAtWarnWithItsRawCode()
+    {
+        _handsFree.Steps = [StepOutcomes.FromConfigRet("hands-free-battery:cm-property", CfgMgr32.CR_FAILURE, "The battery property of a node could not be read.")];
+        using WidgetStatusService service = NewService();
+        service.Start();
+
+        PinAndConnect();
+
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "hands-free-battery:cm-property CR_FAILURE"));
+    }
+
+    [TestMethod]
+    public void AnUnexpectedExceptionIsLoggedWithItsCodeAndTheNextTickReadsAgain()
+    {
+        _handsFree.Throws = new InvalidOperationException("a bug in this process");
+        using WidgetStatusService service = NewService();
+        service.Start();
+
+        PinAndConnect();
+
+        Assert.IsTrue(_log.Has(LogLevel.Error, "unexpected error (0x"));
+        _handsFree.Throws = null;
+        _handsFree.Percent = 55;
+        _clock.Advance(WidgetTiming.HeadsetPollInterval);
+
+        Assert.AreEqual(55, service.Current.Headset.Percent, "The failed read did not leave the service believing one was still running.");
     }
 
     // ---- The lifecycle, the logs and the rest, as they were before the battery came from the broadcast
@@ -695,7 +861,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
                 Interlocked.Increment(ref _posts);
                 queue.Enqueue(action);
             },
-            _clock, _paired, table);
+            _clock, _paired, null, table);
         service.Changed += (sender, e) => changedCompletedCountAtFire.Add(itemsCompleted);
         service.CaseOpened += (sender, e) => caseOpenedCompletedCountAtFire.Add(itemsCompleted);
         service.Start();
