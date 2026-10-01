@@ -87,7 +87,7 @@ internal static class WidgetCopy
     public const string TipCheckForUpdates = "Check for a newer version now";
     public const string TipRepair = RepairSub;
     public const string TipAutoCheck = "Look for a newer version once a day";
-    public const string TipMicOff = "Keep the Hands-Free link up so Windows can read the battery, and turn only the AirPods microphone off in Windows' sound settings. Off by default.";
+    public const string TipMicOff = "Keep the Hands-Free link up, which may let Windows read the battery, and turn only the AirPods microphone off in Windows' sound settings. Off by default.";
     public const string TipSoundSettings = "Open Windows sound settings at the AirPods microphone";
     public const string NameGaugePosition = "Gauge position";
     public const string NameGaugeDisplay = "Gauge display";

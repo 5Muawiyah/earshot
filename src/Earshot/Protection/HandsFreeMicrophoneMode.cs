@@ -11,8 +11,8 @@ internal sealed record MicrophoneRow(MicrophoneRowState State, string SettingsUr
 // settings and node rules in Contracts. The row's state (MicrophoneRowState) is the widget's own type, because the widget
 // may reach only its own types and never the device path.
 //
-// What the mode is: Protect audio quality turned off, so the Hands-Free link and Windows' own battery reading stay up,
-// and the person switching the AirPods' Hands-Free microphone off in Windows' sound settings, so an app that opens a
+// What the mode is: Protect audio quality turned off, so the Hands-Free link stays up (which may let Windows read the
+// battery; that has not been observed with this link up on this PC), and the person switching the AirPods' Hands-Free microphone off in Windows' sound settings, so an app that opens a
 // microphone finds nothing to switch the AirPods to. Earshot cannot switch that microphone off itself. Core Audio
 // documents reading an endpoint's state (DEVICE_STATE_DISABLED) and no call that sets it, and the interface that does is
 // undocumented, so the mode opens Windows' own page and says what to press.
@@ -27,10 +27,14 @@ internal static partial class HandsFreeMicrophoneMode
 
     private const string SoundPropertiesPrefix = "ms-settings:sound-properties?endpointId=";
 
-    // A capture endpoint's id, in the form Windows Settings takes: the flow digit is 1 for a capture endpoint and the
-    // second part is the endpoint's GUID.
+    // A capture endpoint's id, in the form the id of an AirPods capture endpoint has been seen to have on this PC:
+    // {0.0.1.<8 hex>}.{<GUID>}. Core Audio documents endpoint ids as opaque strings, so no part of that form is a
+    // documented promise (the 1 is the digit those capture ids carry, not a documented flow code); the check is a
+    // precaution that only an id of exactly that form is put into the settings address, and any other id opens the list
+    // of sound devices instead. \z, not $, so a trailing line break does not pass.
+    // https://learn.microsoft.com/en-us/windows/win32/coreaudio/endpoint-id-strings
     // https://learn.microsoft.com/en-us/windows/apps/develop/launch/launch-settings-app
-    [GeneratedRegex(@"^\{0\.0\.1\.[0-9A-Fa-f]{8}\}\.\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$")]
+    [GeneratedRegex(@"^\{0\.0\.1\.[0-9A-Fa-f]{8}\}\.\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}\z")]
     private static partial Regex CaptureEndpointId();
 
     // The mode as the settings say it. Protect audio quality wins: both set reads as off.

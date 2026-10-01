@@ -41,7 +41,8 @@ irm https://github.com/5Muawiyah/earshot/releases/latest/download/earshot.ps1 | 
 
 It offers install, update, repair and uninstall, and works the same way for
 each. It downloads the latest release, checks the zip's SHA-256, and shows one
-administrator prompt. Afterwards it starts Earshot. The details are in
+administrator prompt. After an install, update or repair it starts Earshot; after
+an uninstall it does not. The details are in
 [docs/architecture.md](docs/architecture.md#the-install-script).
 
 The script and the zip come from the same release, so the checksum catches a
@@ -90,10 +91,11 @@ Startup on is not covered.
 - **Connects and disconnects them** from the card.
 - **Blocks the Hands-Free profile**, on by default. This turns off the AirPods
   microphone on this PC while it is on.
-- **Microphone off mode**, an opt-in alternative, off by default. It turns audio
-  protection off and opens Windows' sound settings at the AirPods' input, with
-  one line on what to press. Call quality with it on is unproved until I have
-  tried it.
+- **Microphone off mode**, an opt-in alternative, off by default. The switch
+  only turns audio protection off. Its Open button opens Windows' sound settings
+  at the AirPods' microphone when Earshot has a well-formed id for that capture
+  endpoint, and the list of sound devices when it has not, with one line on what
+  to press. Call quality with it on is unproved until I have tried it.
 - **Shows the battery** of the left bud, the right bud and the case, with no
   set-up. Earshot listens to the AirPods' own Bluetooth broadcast, so it needs
   no connection. See [Battery](#battery) for what that does and does not prove.

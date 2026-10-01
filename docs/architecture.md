@@ -224,8 +224,11 @@ after a connect rather than instantly.
 
 **Microphone off mode.** An opt-in alternative on the settings page, off by
 default. Turning it on turns Protect audio quality off, so the Hands-Free link
-stays up, and opens Windows' own sound settings at the AirPods' input with one
-line of guidance: set the AirPods microphone to "Don't allow". Earshot cannot
+stays up. The row's Open button opens Windows' own sound settings, at the AirPods'
+capture endpoint when its id is well formed (`{0.0.1.<8 hex>}.{<GUID>}`, the form
+a probe of this PC saw; Core Audio documents endpoint ids as opaque) and at the
+list of sound devices otherwise, with one line of guidance: set the AirPods
+microphone to "Don't allow". Earshot cannot
 switch that microphone off itself: the Core Audio documentation lets a program
 read an endpoint's state and gives no call that sets it, and the interface that
 does is undocumented, so Earshot does not use it. The mode changes only the
@@ -278,8 +281,17 @@ more than a passer-by would. It learns that set's colour and holds it.
 
 The choice is held. Another pair takes over only when it is clearly nearer
 for a sustained time, so one loud message from a stranger does not move it.
-After the chosen pair falls silent the choice is made again among the sets of
-the paired model and the held colour. The values already shown are kept, and
+The choice stands on its anchors, the senders that were in the set when the
+first-choice rule or a switch made it the chosen one. A sender that only merged
+into the set (it said what the set said, close in time) is not an anchor until it
+has matched anchor messages three times over three seconds, and one of its
+messages counts as the chosen set's only when it matches an anchor's message
+within two seconds, so a stranger that matched once never has its different
+messages shown and never holds the choice when the owner goes quiet. After
+every anchor has been silent for longer than the ten second window the choice is
+made again, by the first-choice rule, among the sets of the paired model and the
+held colour: a lone same-model pair heard for two seconds then qualifies, which
+is part of the accepted risk below. The values already shown are kept, and
 grey as they age, until the new choice's own messages replace them. The
 figures behind this are named constants in `BroadcastRules`
 (`src/Earshot/Widget/BroadcastSenderSets.cs`). They are design choices, not
@@ -317,8 +329,9 @@ and the AirPods are on this PC, Earshot also reads the Hands-Free battery
 property Windows may hold for the device. It reads the paired device's device
 nodes only, once a minute, and the figure counts as current for two minutes.
 The slower query through the paired device's association object (about a minute
-each, measured) is used by `probe battery` and the sweep, never by the
-background read. With Hands-Free off, which is the default, it was seen empty
+each, measured) is used by the sweep (`diag battery-sweep`) only, never by the
+background read and never by `probe battery`, which reads the device nodes once
+and says so. With Hands-Free off, which is the default, it was seen empty
 on this PC. Whether Windows fills it with Hands-Free up has not been observed
 here. The figure is one number for the headset, never a bud's or the case's.
 
@@ -336,9 +349,17 @@ so the settings row says "Earshot cannot yet tell when a bud is in your ear."
 and nothing acts. The resume half is strict by design. It resumes only the
 session Earshot paused, only within 60 seconds of the pause, only while the
 AirPods are still this PC's output, only if nothing was played or paused by hand
-since, and only when every bud that was in is back in on fresh values. A
-resume that misses any of these is forgotten, never retried later. Pausing
-when the AirPods leave this PC never resumes.
+since as far as Windows reports it, and only when every bud that was in is back
+in on fresh values of the same chosen set. "As far as Windows reports it" is the
+session manager's own change events (a session came or went, a session's playback
+info changed), which cancel the remembered pause, plus a read of the sessions just
+before resuming that must find the paused session paused and nothing else playing.
+If those events are not being listened to (the listening starts the first time the
+manager is read and has had no live run), nothing is resumed. In-ear values and a
+remembered pause belong to one chosen set: when another set is chosen, or the
+same one is chosen again after it went quiet, they are forgotten. A resume that
+misses any of these is forgotten, never retried later. Pausing when the AirPods
+leave this PC never resumes.
 
 **The taskbar gauge.** Earshot does not use a taskbar docking API. The gauge is
 an owned, topmost, layered overlay window positioned over free taskbar space, which it finds by
@@ -521,7 +542,11 @@ charging; choosing one changes the gauge on the taskbar at once.
 **Probe target.** `Earshot.exe probe widget --out <folder>` renders the
 gauge, the card and the case-open card from fixed, synthetic snapshots, at
 three DPIs and in both taskbar inks, straight to PNG files, the same
-drawing and layout code the real widget uses. No device, no window shown on
+drawing and layout code the real widget uses. `--set design` renders the design
+set instead: every gauge state and each of the six orders, and the card with its
+pages (fresh, greyed, refreshing, refresh with nothing heard, fresh and greyed
+again with Windows' text size at 150%, settings, update available, update
+downloading), each on light and dark at 100% and 150% display scale. No device, no window shown on
 screen, and no `IWidgetStatus` connection: see
 [docs/overview.md](overview.md#the-airpods-widget) for what the pictures
 made this way actually show and do not show.
@@ -973,7 +998,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe` | The tray application. `--startup` is the same thing, and is what the startup value passes. |
 | `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer described in [requirements.md](requirements.md). It changes nothing. On a machine where Earshot is not set up and no device is pinned it still writes a full report, and exits 78 to say so: the nodes and services targets had no device to read. So read the report rather than the exit code. |
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
-| `Earshot.exe probe widget --out <folder>` | Writes the taskbar gauge, the card and the case-open card to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. See [The AirPods widget](#the-airpods-widget). |
+| `Earshot.exe probe widget --out <folder> [--set design]` | Writes the taskbar gauge, the card and the case-open card to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. With `--set design` it writes the design set instead: every gauge state and order and the card's pages, light and dark, at 100% and 150% display scale. See [The AirPods widget](#the-airpods-widget). |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
 | `Earshot.exe install-zip <zip> <sha256> <userSid> <address> <containerGuid>` | The elevated half of a first install by the install script, run from the verified download's own copy, never by hand. It refuses (exit code 26) when a usable install is already there. See [The install script](#the-install-script). |
 | `Earshot.exe probe setup-values [--out <path>]` | Read-only. Writes JSON with the signed-in user's SID, the AirPods' address and container, whether one device could be chosen, and the state and version of the installed copy. The install script reads it. |

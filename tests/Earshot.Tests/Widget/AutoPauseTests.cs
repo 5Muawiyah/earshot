@@ -255,6 +255,25 @@ public sealed class AutoPauseTests
     }
 
     [TestMethod]
+    public async Task ASessionThatReadsPausedButCannotBePlayedIsNotPlayed()
+    {
+        var sessions = OnePlayingSession();
+        var log = new CapturingLog();
+        var autoPause = NewAutoPause(sessions, log: log);
+        DateTimeOffset back = At + TimeSpan.FromSeconds(10);
+
+        await autoPause.ApplyAsync(true, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(false, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        sessions.Sessions[0] = sessions.Sessions[0] with { PlaybackStatus = MediaPlaybackState.Paused, IsPlayEnabled = false };
+
+        await autoPause.ApplyAsync(true, true, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.AreEqual(0, sessions.PlayCalls.Count, "Windows says the session cannot be played now.");
+        Assert.IsTrue(log.Has(LogLevel.Info, "cannot be played"));
+        Assert.IsFalse(autoPause.HasRememberedPause, "A refused resume is forgotten, not retried.");
+    }
+
+    [TestMethod]
     public async Task AReadingWithNoInEarValueNeverResumes()
     {
         var sessions = OnePlayingSession();

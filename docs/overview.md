@@ -492,7 +492,7 @@ The gear on the card opens it. Rows, top to bottom:
 | Gauge display | Main display | Main display, or one of the connected displays; a line under the row says when the chosen one is not connected or shows no taskbar |
 | Other device | `iPhone` | The label used in "On your <name>", up to 40 characters |
 | Gauge order | Ring, number, bolt | Six pictures of the gauge; pick one |
-| Pause when a bud comes out | On | Says "Earshot cannot yet tell when a bud is in your ear." and does nothing, because there is no documented in-ear value to read |
+| Pause when a bud comes out | On | Built but inactive. Says "Earshot cannot yet tell when a bud is in your ear." and nothing acts, because no documented source gives an in-ear value |
 | Pause when AirPods leave this PC | On | See [above](#pausing-when-the-airpods-leave-this-pc) |
 | Low battery alert | 20% | A stepper, 10% to 90% in steps of 10 |
 | Left click connects | Off | |
@@ -517,14 +517,16 @@ a threshold, 20% by default. It only fires again once that part has read at
 least one 10% step back above the threshold, so a value sitting on the edge
 does not repeat itself.
 
-**Pausing when a bud comes out.** A row on the settings page, on by default,
-and inactive. It is built to pause what this PC is playing to the AirPods when a
-bud is taken out, and to play it again if the bud goes back: only the session it
-paused, only within 60 seconds, only while the AirPods are still this PC's
-output, only if nothing was played or paused by hand since, and only with every
-bud that was in back in. It reads the in-ear state from the broadcast, and no
-documented source gives that value, so it does nothing today. Nothing resumes
-after the AirPods leave this PC.
+**Pausing when a bud comes out.** A row on the settings page, on by default.
+It is built but inactive. It is meant to pause what this PC is playing to the
+AirPods when a bud is taken out, and to play it again if the bud goes back: only
+the session it paused, only within 60 seconds, only while the AirPods are still
+this PC's output, only if nothing was played or paused by hand since as far as
+Windows reports it, and only with every bud that was in back in. It would read
+the in-ear state from the broadcast, and no documented source gives that value,
+so Earshot reads none, nothing pauses, and nothing resumes. Turning it on
+changes nothing until a documented in-ear value exists. Nothing resumes after the
+AirPods leave this PC.
 
 <a id="microphone-off-mode"></a>
 
@@ -532,13 +534,14 @@ after the AirPods leave this PC.
 
 An option on the settings page, off by default. It is for someone who wants
 Windows to keep the Hands-Free link up, so Windows can hold a battery figure,
-without apps being able to use the AirPods' microphone. Turning it on turns
-Protect audio quality off and opens Windows' sound settings at the AirPods'
-input, with one line: set the AirPods microphone to "Don't allow". Earshot
+without apps being able to use the AirPods' microphone. Turning it on only
+turns Protect audio quality off. The row's Open button opens Windows' sound
+settings, at the AirPods' microphone when Earshot has a capture endpoint id for
+it in the form Windows Settings takes, and at the list of sound devices when it
+has none, with one line: set the AirPods microphone to "Don't allow". Earshot
 cannot do that for you, because Windows documents no call that switches that
-microphone off. The Open button opens the page again, and the row says when
-Windows already lists the microphone as off. Choosing Protect audio quality on
-its own turns the mode off.
+microphone off. The row says when Windows already lists the microphone as off.
+Choosing Protect audio quality on its own turns the mode off.
 
 Call quality with the mode on is unproved until the owner has tried it, and the
 full block, Protect audio quality, stays the default. The block that keeps the

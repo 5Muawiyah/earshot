@@ -55,9 +55,10 @@ Earshot can turn this profile off for the AirPods so there is nothing to
 switch to. See also **Microphone off mode**.
 
 **Microphone off mode.** An opt-in setting, off by default, that turns audio
-protection off and opens Windows' sound settings at the AirPods' input, so the
-person can switch the AirPods microphone off there. Call quality with it on is
-unproved. See [overview.md](overview.md#microphone-off-mode).
+protection off. Its Open button opens Windows' sound settings at the AirPods'
+microphone (or the list of sound devices when Earshot has no usable id for it),
+so the person can switch the AirPods microphone off there. Call quality with it
+on is unproved. See [overview.md](overview.md#microphone-off-mode).
 
 **Live test.** A test run by hand against the real AirPods and, for some
 tests, a real phone and a real restart or shutdown, as opposed to the

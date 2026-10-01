@@ -206,6 +206,8 @@ public sealed class HandsFreeMicrophoneModeTests
         yield return ["{0.0.1.00000000}.capture"];
         yield return [CaptureId(g) + "&other=1"];
         yield return [CaptureId(g) + " "];
+        yield return [CaptureId(g) + "\n"];
+        yield return [CaptureId(g) + "\r\n"];
         yield return ["ms-settings:privacy-microphone"];
         yield return ["\\\\?\\SWD#MMDEVAPI#" + CaptureId(g) + "#{" + Invented(3).ToString("D") + "}"];
     }
@@ -400,6 +402,62 @@ public sealed class HandsFreeMicrophoneModeTests
             Assert.IsFalse(tray.Settings.Current.HandsFreeMicrophoneOffMode);
             Assert.IsTrue(tray.Settings.Current.ProtectAudioQuality);
             CollectionAssert.AreEqual(OffThenOn, tray.Protection.Calls);
+        });
+    }
+
+    // A change that is already running: the switch is refused with the busy card, and neither the protection setting nor
+    // the mode is saved first.
+    [TestMethod]
+    public void TheSwitchWhileAnotherChangeRunsShowsTheBusyCardAndSavesNeitherSetting()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(settings: s => s.ProtectAudioQuality = true);
+            var apply = new TaskCompletionSource<ControllerResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tray.Protection.OnApply = async (_, _) => await apply.Task;
+            IWidgetCardHost host = tray.Context.WidgetCardHostForTest;
+
+            tray.ClickMenu(MenuModel.ProtectAudioQuality);
+            Assert.IsTrue(tray.Context.IsBusy, "Protect audio quality is being turned off.");
+            bool protectBefore = tray.Settings.Current.ProtectAudioQuality;
+            bool modeBefore = tray.Settings.Current.HandsFreeMicrophoneOffMode;
+            tray.Cards.Shown.Clear();
+
+            host.SetHandsFreeMicrophoneOff(true, Place);
+
+            Assert.AreEqual(TrayContext.BusyMessage, tray.Cards.Shown[^1].Content.Status, "No busy card.");
+            Assert.AreEqual(protectBefore, tray.Settings.Current.ProtectAudioQuality, "The protection setting was saved first.");
+            Assert.AreEqual(modeBefore, tray.Settings.Current.HandsFreeMicrophoneOffMode, "The mode was saved first.");
+            Assert.HasCount(1, tray.Protection.Calls, "The refused switch asked for nothing.");
+
+            apply.SetResult(ControllerResult.Ok("Not protected"));
+            tray.PumpUntilIdle();
+            Assert.AreEqual(modeBefore, tray.Settings.Current.HandsFreeMicrophoneOffMode, "Nothing came back later.");
+        });
+    }
+
+    // While the session ends nothing is saved or sent, and the person is told so.
+    [TestMethod]
+    public void TheSwitchWhileTheSessionEndsShowsTheRefusalCardAndSavesNothing()
+    {
+        using var temp = new TempFolder();
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
+        StaThread.Run(() =>
+        {
+            using var tray = new UpdateTrayHarness(settings: s => s.ProtectAudioQuality = true);
+            IWidgetCardHost host = tray.Context.WidgetCardHostForTest;
+            tray.Context.OnSessionEnding(null, new SessionEndingEventArgs(isQuery: true, ending: true, flags: 0));
+            tray.Cards.Shown.Clear();
+
+            host.SetHandsFreeMicrophoneOff(true, Place);
+
+            Assert.AreEqual(BlockCoordinator.SessionEndingMessage, tray.Cards.Shown[^1].Content.Status, "No refusal card.");
+            Assert.IsTrue(tray.Settings.Current.ProtectAudioQuality, "Protection was saved off while the session ended.");
+            Assert.IsFalse(tray.Settings.Current.HandsFreeMicrophoneOffMode, "The mode was saved while the session ended.");
+            tray.PumpUntilIdle();
+            Assert.IsEmpty(tray.Protection.Calls, "Protection was asked while the session ended.");
         });
     }
 
