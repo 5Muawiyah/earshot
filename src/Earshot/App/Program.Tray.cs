@@ -34,7 +34,15 @@ namespace Earshot;
 //      worker, the system worker, the show event and the mutex.
 internal static partial class Program
 {
-    internal const string TrayUsage = "Usage: Earshot.exe [--startup]";
+    internal const string TrayUsage = "Usage: Earshot.exe [--startup | --exit]";
+
+    // Earshot.exe --exit asks the running tray to exit, by the menu's own Exit (so AirPods in use are let go and blocked), and
+    // ends. The install script uses it to close the tray before it replaces the files, without ending the process from
+    // outside. Any process of the same user in the same session can already end the tray, so it grants nothing new.
+    internal const string ExitArgument = "--exit";
+
+    // The exit code of --exit when no tray is running (EX_TEMPFAIL): distinct from 0, which means the tray was asked.
+    internal const int NoTrayRunning = 75;
 
     // Fixed name of the single-instance mutex; the show event adds ".show". Never change it, or an
     // older and a newer build could run side by side. No backslash: that character is reserved.
@@ -66,22 +74,29 @@ internal static partial class Program
             return;
         }
 
+        // A second copy that only asks the running tray to exit never becomes a tray itself: it takes no lock.
+        if (ctx.Args.Length == 1 && ctx.Args[0] == ExitArgument)
+        {
+            ctx.ExitCode = RequestTrayExit(log, TrayInstanceName) ? ExitCodes.Ok : NoTrayRunning;
+            return;
+        }
+
         bool startedAtLogon = ctx.Args.Length == 1 && ctx.Args[0] == StartupRegistration.StartupArgument;
         ctx.ExitCode = RunTray(paths, log, startedAtLogon);
     }
 
-    // No arguments, or only --startup (the Run value adds it).
+    // No arguments, only --startup (the Run value adds it), or only --exit.
     internal static bool IsTrayCommandLine(IReadOnlyList<string> args, [NotNullWhen(false)] out string? error)
     {
         ArgumentNullException.ThrowIfNull(args);
-        if (args.Count == 0 || (args.Count == 1 && args[0] == StartupRegistration.StartupArgument))
+        if (args.Count == 0 || (args.Count == 1 && (args[0] == StartupRegistration.StartupArgument || args[0] == ExitArgument)))
         {
             error = null;
             return true;
         }
 
-        error = args[0] == StartupRegistration.StartupArgument
-            ? "--startup takes no further arguments."
+        error = args[0] == StartupRegistration.StartupArgument || args[0] == ExitArgument
+            ? args[0] + " takes no further arguments."
             : "Unknown command: " + args[0];
         return false;
     }
@@ -166,6 +181,65 @@ internal static partial class Program
     // The name of the event a second copy sets to ask the running tray for its card.
     internal static string ShowEventName(string instanceName) => instanceName + ".show";
 
+    // The name of the event a second copy started with --exit sets to ask the running tray to exit.
+    internal static string ExitEventName(string instanceName) => instanceName + ".exit";
+
+    // Sets the running tray's exit event. True when it was set, which says the tray was asked, not that it has ended. The
+    // instance name is a parameter so tests can use their own and never signal a real tray.
+    internal static bool RequestTrayExit(ILog log, string instanceName)
+    {
+        try
+        {
+            if (EventWaitHandle.TryOpenExisting(ExitEventName(instanceName), TrayInstanceOptions, out EventWaitHandle? exitEvent))
+            {
+                using (exitEvent)
+                {
+                    exitEvent.Set();
+                }
+
+                log.Info("Earshot is running; it was asked to exit.");
+                return true;
+            }
+
+            log.Warn("Earshot is not running, so there is nothing to ask to exit.");
+            return false;
+        }
+        catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
+        {
+            log.Error("Earshot could not be asked to exit.", ex);
+            return false;
+        }
+    }
+
+    // The event a copy started with --exit sets, created beside the show event with the same owner and session. Null, logged,
+    // when it cannot be created.
+    private static EventWaitHandle? TryCreateExitEvent(ILog log)
+    {
+        try
+        {
+            return new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName(TrayInstanceName), TrayInstanceOptions, out _);
+        }
+        catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
+        {
+            log.Error("The exit event could not be created, so a copy started with --exit cannot ask this tray to exit.", ex);
+            return null;
+        }
+    }
+
+    // Runs onExit on a thread-pool thread each time the event is set; the caller posts it on to the UI thread. Unregister
+    // the result, waiting for a callback that is already running, before what it uses is closed.
+    internal static RegisteredWaitHandle RegisterExitWait(EventWaitHandle exitEvent, Action onExit)
+    {
+        ArgumentNullException.ThrowIfNull(exitEvent);
+        ArgumentNullException.ThrowIfNull(onExit);
+        return ThreadPool.RegisterWaitForSingleObject(
+            exitEvent,
+            (_, _) => onExit(),
+            state: null,
+            Timeout.Infinite,
+            executeOnlyOnce: false);
+    }
+
     // Sets the running tray's show event. Returns true when it was set. The instance name is a parameter
     // so tests can use their own and never signal a real tray.
     internal static bool SignalRunningTray(ILog log, string instanceName)
@@ -240,6 +314,8 @@ internal static partial class Program
             ServiceRegistry? registry = null;
             BlockCoordinator? coordinator = null;
             RegisteredWaitHandle? showWait = null;
+            RegisteredWaitHandle? exitWait = null;
+            EventWaitHandle? exitEvent = null;
             try
             {
                 var settings = new JsonSettingsStore(paths.SettingsFile, log);
@@ -291,6 +367,13 @@ internal static partial class Program
                     Timeout.Infinite,
                     executeOnlyOnce: false);
 
+                // Without the exit event the tray still runs; a copy started with --exit then finds no tray to ask.
+                exitEvent = TryCreateExitEvent(log);
+                if (exitEvent is not null)
+                {
+                    exitWait = RegisterExitWait(exitEvent, () => ui.Post(static state => ((TrayContext)state!).ExitFromSignal(), shown));
+                }
+
                 coordinator.Start();
                 registry.Monitor.Start();
                 log.Info("Tray started" + (paths.IsSafeMode ? " in safe mode" : "") + ". Settings: " + settings.FilePath + " (" + settings.LastLoadStatus + ").");
@@ -320,6 +403,17 @@ internal static partial class Program
                         unregistered.WaitOne();
                     }
                 }
+
+                if (exitWait is not null)
+                {
+                    using var exitUnregistered = new ManualResetEvent(false);
+                    if (exitWait.Unregister(exitUnregistered))
+                    {
+                        exitUnregistered.WaitOne();
+                    }
+                }
+
+                exitEvent?.Dispose();
 
                 // Nothing after this point may resume on the UI thread: its message loop has ended. The card
                 // window and its timer belong to this thread, so the presenter is disposed here too.
