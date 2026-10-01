@@ -26,6 +26,23 @@ public sealed class StatusCardInPlaceTests
         }
     }
 
+    // Pumps until the card has painted the given text, or two seconds have passed: a slower machine
+    // delivers the paint after more than one pass of the message loop.
+    private static void PumpUntilPainted(ConnectCard card, string text)
+    {
+        var until = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < until)
+        {
+            Application.DoEvents();
+            IReadOnlyList<string> painted = card.LastPaintedText();
+            if (painted.Count > 0 && painted[^1] == text)
+            {
+                return;
+            }
+            Thread.Sleep(10);
+        }
+    }
+
     private static CardPresenter RealCardPresenter(ConnectCard card, CapturingLog log) =>
         new(log, static action => action(), new FakeCardEnvironment(), () => card, static () => new FakeCardTimer(), TimeProvider.System);
 
@@ -49,7 +66,8 @@ public sealed class StatusCardInPlaceTests
             using var counter = new WindowMessageCounter(card.Handle);
 
             presenter.Show(new CardContent(Device, "Allowing"), CardAnchor.NearCursor, click);
-            Application.DoEvents();
+            PumpUntilPainted(card, "Allowing");
+            Settle();
 
             Assert.AreEqual("Allowing", card.LastPaintedText()[^1], "The new status was drawn.");
             Assert.AreEqual(placed, card.Bounds, "Same size, same place.");
@@ -103,7 +121,7 @@ public sealed class StatusCardInPlaceTests
             using var counter = new WindowMessageCounter(card.Handle);
 
             presenter.Show(new CardContent(Device, "Connected"), CardAnchor.NearCursor, click);
-            Application.DoEvents();
+            Settle();
 
             Assert.AreEqual(0, counter.Count(WindowMessageCounter.WmPaint), "Nothing changed, so nothing was drawn.");
             Assert.AreEqual(0, counter.Count(WindowMessageCounter.WmWindowPosChanging));
