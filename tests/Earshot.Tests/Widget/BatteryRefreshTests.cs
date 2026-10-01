@@ -263,12 +263,11 @@ public sealed class BatteryRefreshTests : IDisposable
     }
 
     [TestMethod]
-    public void WithBluetoothOffItSaysSoAndAvailabilityFollowsTheWatcher()
+    public void WithBluetoothOffItSaysSoAndTheNextRefreshMakesTheOneImmediateAttempt()
     {
         _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
         using WidgetStatusService service = NewService();
         service.Start();
-        Assert.IsFalse(service.BatteryRefreshAvailable);
 
         Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
 
@@ -276,10 +275,11 @@ public sealed class BatteryRefreshTests : IDisposable
         Assert.AreEqual(BatteryRefreshOutcome.BluetoothOff, Outcome(refresh));
 
         _source.StartResult = null; // Bluetooth is on again
+        int starts = _source.StartCalls;
         Task<BatteryRefreshOutcome> again = service.RefreshBatteryAsync(CancellationToken.None);
 
-        Assert.IsTrue(service.BatteryRefreshAvailable, "The refresh made the one immediate attempt and it worked.");
-        Assert.IsFalse(again.IsCompleted, "It waits for the set to be heard.");
+        Assert.AreEqual(starts + 1, _source.StartCalls, "The refresh made the one immediate attempt.");
+        Assert.IsFalse(again.IsCompleted, "It worked, so it waits for the set to be heard.");
     }
 
     [TestMethod]
@@ -302,7 +302,6 @@ public sealed class BatteryRefreshTests : IDisposable
         using WidgetStatusService off = NewService();
         off.Start();
         Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(off.RefreshBatteryAsync(CancellationToken.None)));
-        Assert.IsFalse(off.BatteryRefreshAvailable);
 
         _settings.Update(s => s.Widget = s.Widget with { Enabled = true });
         using WidgetStatusService service = NewService();
@@ -326,6 +325,29 @@ public sealed class BatteryRefreshTests : IDisposable
         service.Suspend();
 
         Assert.AreEqual(BatteryRefreshOutcome.NotListening, Outcome(refresh));
+    }
+
+    // What the card reads to clear "Nothing heard": a battery read time after the refresh started. Buds heard with the case
+    // unsaid (its lid is shut) are that, whatever age the case's own figure has.
+    [TestMethod]
+    public void BudsHeardDuringARefreshWithTheCaseUnsaidMoveTheBatteryReadTimePastTheRefreshStart()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Choose();
+        _source.Raise(Message());
+        _clock.Advance(TimeSpan.FromSeconds(9));
+        DateTimeOffset started = _clock.GetUtcNow();
+        Task<BatteryRefreshOutcome> refresh = service.RefreshBatteryAsync(CancellationToken.None);
+        Assert.IsTrue(service.Current.BatteryReadAt < started, "Before anything is heard the newest reading is from before the refresh.");
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _source.Raise(new AdvertisementSample(
+            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryA: 0x56, batteryB: 0x0F), -60, _clock.GetUtcNow(), 1));
+
+        Assert.AreEqual(BatteryRefreshOutcome.Heard, Outcome(refresh));
+        Assert.IsTrue(service.Current.BatteryReadAt >= started, "The buds' own reading is newer than the refresh.");
+        Assert.IsTrue(service.Current.Case.ReadAt < started, "The case still carries its old figure.");
     }
 
     [TestMethod]

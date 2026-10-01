@@ -13,8 +13,8 @@ internal sealed partial class WidgetCard
     private const float StaleInkOpacity = 0.55f;
 
     // The line under the where line: Windows' own figure when that is what is shown ("Windows reads 70%"), else
-    // when the battery was last read ("Battery read 4 min ago"). The age is the oldest part's, so one part going
-    // stale shows in the line as well as in the part.
+    // when the battery was last read ("Battery read 4 min ago"). The age is the newest part's: a part that is old
+    // greys by itself, and must not make buds that were just heard read as old.
     internal string ReadLineText =>
         _model.Refresh?.ReadLine is { } refreshing ? refreshing
         : _model.ShownParts.WindowsPercent is int figure

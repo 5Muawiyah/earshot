@@ -184,7 +184,7 @@ internal static class WidgetCopy
     public const string GaugeNotOnThisPc = "Not on this PC";
     public const string GaugeNoRecentReading = "No recent reading";
 
-    // "L 70%   R 60%": the buds that have a proved reading, left first, three spaces apart. A bud with none is
+    // "L 70%   R 60%": the buds that have a reading, left first, three spaces apart. A bud with none is
     // left out, never shown as a dash or a guess.
     public static string GaugeBudsLine(int? left, int? right)
     {
@@ -193,19 +193,25 @@ internal static class WidgetCopy
         return l.Length > 0 && r.Length > 0 ? l + "   " + r : l + r;
     }
 
-    // "Read just now" inside the first minute, then "Read 2 min ago" (whole minutes, rounded down, so the
-    // line is never younger than the reading).
+    // "Read just now" only while the reading is current (within BatteryFreshness.FreshWindow, the age at which the card
+    // greys it), then "Read 45 s ago" inside the minute and "Read 2 min ago" after it (whole seconds and minutes,
+    // rounded down, so the line is never younger than the reading).
     public static string GaugeReadLine(TimeSpan age)
     {
-        if (age < TimeSpan.FromMinutes(1))
+        if (age <= BatteryFreshness.FreshWindow)
         {
             return "Read just now";
+        }
+
+        if (age < TimeSpan.FromMinutes(1))
+        {
+            return "Read " + ((long)Math.Floor(age.TotalSeconds)).ToString(CultureInfo.InvariantCulture) + " s ago";
         }
 
         return "Read " + ((long)Math.Floor(age.TotalMinutes)).ToString(CultureInfo.InvariantCulture) + " min ago";
     }
 
-    // The percent for one part, or NoReading when it has not been proved.
+    // The percent for one part, or NoReading when it has none.
     public static string Percent(int? percent) =>
         percent is { } value ? value.ToString(CultureInfo.InvariantCulture) + "%" : NoReading;
 

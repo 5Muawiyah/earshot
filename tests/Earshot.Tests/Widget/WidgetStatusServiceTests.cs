@@ -842,7 +842,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     [TestMethod]
-    public void BatteryReadAtIsTheOldestKnownPart()
+    public void BatteryReadAtIsTheNewestKnownPart()
     {
         using WidgetStatusService service = NewService();
         service.Start();
@@ -857,7 +857,28 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(60, service.Current.Case.Percent);
         Assert.AreEqual(second, service.Current.Case.ReadAt);
         Assert.AreEqual(first, service.Current.Left.ReadAt);
-        Assert.AreEqual(first, service.Current.BatteryReadAt, "The oldest known ReadAt among the parts, so it lines up with the buds, not the case.");
+        Assert.AreEqual(second, service.Current.BatteryReadAt, "The newest known ReadAt among the parts.");
+    }
+
+    // The case says nothing while its lid is shut (its nibble reads unknown), so its figure is old; the buds were
+    // just heard. The battery was read just now, and only the case is old.
+    [TestMethod]
+    public void BudsHeardJustNowWithTheCaseUnsaidMakeTheBatteryReadTimeNowNotTheCasesOldOne()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A)); // case 100 now
+        DateTimeOffset caseReadAt = _clock.GetUtcNow();
+        _clock.Advance(TimeSpan.FromSeconds(9));
+
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0F)); // buds known, case unknown
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(100, snapshot.Case.Percent, "The case keeps its last figure.");
+        Assert.AreEqual(caseReadAt, snapshot.Case.ReadAt);
+        Assert.AreEqual(_clock.GetUtcNow(), snapshot.Left.ReadAt);
+        Assert.AreEqual(_clock.GetUtcNow(), snapshot.BatteryReadAt, "The card says the battery was read just now, not nine seconds ago.");
     }
 
     [TestMethod]

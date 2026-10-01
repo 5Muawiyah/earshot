@@ -879,8 +879,74 @@ public sealed class WidgetCardTests
         });
     }
 
+    // The figure's own text and the charging bolt are greyed with the bar, not only the bar.
     [TestMethod]
-    public void TheReadLineGivesTheAgeOfTheOldestValue()
+    public void AValueThatIsNotFreshHasItsFigureTextAndItsBoltGreyedToo()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            PartReading Charging(TimeSpan age) => new(100, true, null) { ReadAt = DateTimeOffset.UtcNow - age };
+
+            using var fresh = new WidgetCard(new CapturingLog());
+            fresh.SetTheme(Color.Black, highContrast: false);
+            fresh.Render(Model(Snapshot(left: Charging(TimeSpan.FromSeconds(2)))), 96);
+            using Bitmap freshBitmap = Render(fresh);
+
+            using var old = new WidgetCard(new CapturingLog());
+            old.SetTheme(Color.Black, highContrast: false);
+            old.Render(Model(Snapshot(left: Charging(TimeSpan.FromMinutes(4)))), 96);
+            using Bitmap oldBitmap = Render(old);
+
+            Rectangle bar = fresh.CurrentMainLayout.Left.Bar;
+            float h = bar.Height * 2.2f;
+            var bolt = new Rectangle(bar.Right + 2, (int)(bar.Y + (bar.Height / 2f) - (h / 2f)), (int)(h * 0.6f) + 1, (int)h + 1);
+            Color background = freshBitmap.GetPixel(0, 0);
+
+            Assert.IsTrue(HasInk(freshBitmap, bolt, background), "The bolt is drawn when charging.");
+            Assert.IsTrue(HasInk(oldBitmap, bolt, background), "It is still drawn for an old value.");
+            Assert.IsFalse(SameRegion(freshBitmap, oldBitmap, bolt), "The bolt of an old value is greyed, not drawn as current.");
+            Assert.IsTrue(HasInk(oldBitmap, old.CurrentMainLayout.Left.Percent, background), "The figure is still shown.");
+            Assert.IsFalse(SameRegion(freshBitmap, oldBitmap, fresh.CurrentMainLayout.Left.Percent), "The figure's text is greyed, not drawn as current.");
+            Assert.IsLessThan(Strongest(freshBitmap, fresh.CurrentMainLayout.Left.Percent, background), Strongest(oldBitmap, old.CurrentMainLayout.Left.Percent, background), "Greyed ink is closer to the background than current ink.");
+        });
+    }
+
+    private static bool SameRegion(Bitmap a, Bitmap b, Rectangle rect)
+    {
+        Rectangle bounds = Rectangle.Intersect(rect, new Rectangle(0, 0, Math.Min(a.Width, b.Width), Math.Min(a.Height, b.Height)));
+        for (int y = bounds.Top; y < bounds.Bottom; y++)
+        {
+            for (int x = bounds.Left; x < bounds.Right; x++)
+            {
+                if (a.GetPixel(x, y) != b.GetPixel(x, y))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // How far the strongest pixel in the region is from the background: the contrast of the ink.
+    private static int Strongest(Bitmap bitmap, Rectangle rect, Color background)
+    {
+        Rectangle bounds = Rectangle.Intersect(rect, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+        int best = 0;
+        for (int y = bounds.Top; y < bounds.Bottom; y++)
+        {
+            for (int x = bounds.Left; x < bounds.Right; x++)
+            {
+                Color pixel = bitmap.GetPixel(x, y);
+                best = Math.Max(best, Math.Abs(pixel.R - background.R) + Math.Abs(pixel.G - background.G) + Math.Abs(pixel.B - background.B));
+            }
+        }
+
+        return best;
+    }
+
+    [TestMethod]
+    public void TheReadLineGivesTheAgeOfTheSnapshotsBatteryReadTime()
     {
         Phase5.CardSta.Run(() =>
         {

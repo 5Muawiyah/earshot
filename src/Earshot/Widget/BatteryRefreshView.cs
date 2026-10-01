@@ -9,6 +9,10 @@ internal sealed record BatteryRefreshView(bool Reading, int SpinFrame = 0, Batte
 
     public static BatteryRefreshView Started { get; } = new(Reading: true);
 
+    // Whether a finished refresh is telling the person something went wrong or nothing was there to hear, which the card
+    // marks with a caution icon in place of the clock.
+    public bool IsProblem => !Reading && Outcome is BatteryRefreshOutcome.NothingHeard or BatteryRefreshOutcome.BluetoothOff or BatteryRefreshOutcome.NotListening;
+
     // The read line while a refresh is showing something, or null when the ordinary read line stands.
     public string? ReadLine =>
         Reading ? WidgetCopy.ReadingBattery

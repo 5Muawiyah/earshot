@@ -50,10 +50,19 @@ public sealed class HandsFreeBatteryRealQueryTests
 
         public uint GetPropertyKeys(uint devInst, out DEVPROPKEY[] keys) => inner.GetPropertyKeys(devInst, out keys);
 
+        // How many times the battery property itself was read from a node: the read that matters, as against the
+        // container reads that only decide which nodes are the device's.
+        public int BatteryPropertyReads { get; private set; }
+
         public uint GetProperty(uint devInst, DEVPROPKEY key, out uint type, out byte[] data)
         {
             uint capturedType = 0;
             byte[] capturedData = [];
+            if (key.fmtid == BatterySweep.HandsFreeBatteryKey.fmtid && key.pid == BatterySweep.HandsFreeBatteryKey.pid)
+            {
+                BatteryPropertyReads++;
+            }
+
             uint cr = Time("get property", () => inner.GetProperty(devInst, key, out capturedType, out capturedData));
             type = capturedType;
             data = capturedData;
@@ -95,6 +104,10 @@ public sealed class HandsFreeBatteryRealQueryTests
             Assert.Inconclusive("This machine has no Bluetooth adapter.");
         }
 
+        // How many nodes of the pinned device this machine has, found here by the same rule the read uses but not by its
+        // code, so a read that skipped every node cannot pass by reporting "no figure" on none.
+        int targets = CountTargetNodes(container, address);
+
         var timed = new TimedReader(new SystemBatterySweepReader());
         var provider = new HandsFreeBatteryProvider(timed, () => address);
         var watch = Stopwatch.StartNew();
@@ -119,5 +132,35 @@ public sealed class HandsFreeBatteryRealQueryTests
 
         Assert.IsTrue(read.Percent is null || (read.Percent >= 0 && read.Percent <= 100));
         Assert.IsTrue(read.Percent is not null || read.Note is not null, "No figure always says why.");
+
+        TestContext.WriteLine("Nodes of the pinned device found on this machine: " + targets.ToString(CultureInfo.InvariantCulture) +
+            "; the battery property was read from " + timed.BatteryPropertyReads.ToString(CultureInfo.InvariantCulture) + ".");
+        if (targets > 0)
+        {
+            Assert.IsGreaterThan(0, timed.BatteryPropertyReads, "The scan finds nodes of the pinned device, so the property was read from at least one.");
+        }
+    }
+
+    private static int CountTargetNodes(Guid container, string address)
+    {
+        var reader = new SystemBatterySweepReader();
+        if (reader.ListDeviceIds(out string[] ids) != CfgMgr32.CR_SUCCESS)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        foreach (string id in ids.Where(i => i.Contains(address, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (reader.Locate(id, out uint devInst) == CfgMgr32.CR_SUCCESS &&
+                reader.GetProperty(devInst, CfgMgr32.DEVPKEY_Device_ContainerId, out uint type, out byte[] data) == CfgMgr32.CR_SUCCESS &&
+                CfgMgr32.TryDecodeGuid(type, data, out Guid nodeContainer) &&
+                NodeMatch.IsDisableTarget(id, nodeContainer, container, address))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 }
