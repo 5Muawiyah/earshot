@@ -49,6 +49,28 @@ public sealed class WidgetCardScrollTests
         });
     }
 
+    // The cap a page is given when it replaces the one on the card is worked out again from where the card is then, not carried over
+    // from when it was shown: the card opened with room for the whole page, and by the time the page opens the work area has
+    // changed (a display rearranged, the taskbar moved) and has less above the card.
+    [TestMethod]
+    public void APageThatReplacesTheOneOnTheCardIsCappedToTheWorkAreaAsItIsThenNotAsItWasWhenTheCardOpened()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(LargeWorkArea);
+            int bottom = page.Card.Bounds.Bottom;
+            var lower = new Rectangle(LargeWorkArea.X, 360, LargeWorkArea.Width, LargeWorkArea.Height - 360);
+            page.WorkArea.Value = lower;
+
+            page.OpenSettings(capped: false);
+
+            Assert.AreEqual(bottom, page.Card.Bounds.Bottom, "It keeps its bottom edge.");
+            Assert.AreEqual(bottom - (lower.Top + Gap), page.Card.Height, "Capped to the room above it in the work area as it is now.");
+            Assert.IsGreaterThanOrEqualTo(lower.Top + Gap, page.Card.Bounds.Top, "A margin at the top of the work area as it is now.");
+            Assert.IsLessThan(page.Card.CurrentSettingsLayout!.Frame.Height, page.Card.Height, "The page is taller than the card now.");
+        });
+    }
+
     [TestMethod]
     public void ASettingsPageThatFitsKeepsItsFullHeightAndItsBottomEdge()
     {
@@ -516,6 +538,9 @@ public sealed class WidgetCardScrollTests
 
         public required WidgetCard Card { get; init; }
 
+        // The work area the card is placed in, which a test can change under a card that is open.
+        public required System.Runtime.CompilerServices.StrongBox<Rectangle> WorkArea { get; init; }
+
         // The scrolling body of the page: the card under its header, in client pixels.
         public Rectangle Viewport
         {
@@ -533,11 +558,12 @@ public sealed class WidgetCardScrollTests
             WidgetCard? card = null;
             Rectangle gauge = new(workArea.Right - CardPlacement.Scale(200, dpi), workArea.Bottom, CardPlacement.Scale(74, dpi), CardPlacement.Scale(40, dpi));
             WidgetCardPresenterCallbacks callbacks = CardKit.Callbacks() with { Dpi = () => dpi };
+            var current = new System.Runtime.CompilerServices.StrongBox<Rectangle>(workArea);
             var presenter = new WidgetCardPresenter(
-                () => card = new WidgetCard(log), callbacks, CardKit.Inline, new Streaming.TestTimeProvider(), log, host, workAreaFor: _ => workArea);
+                () => card = new WidgetCard(log), callbacks, CardKit.Inline, new Streaming.TestTimeProvider(), log, host, workAreaFor: _ => current.Value);
             presenter.RequestShow(gauge, gauge.Location);
             Application.DoEvents();
-            return new ScrollPage { Host = host, Presenter = presenter, Card = card! };
+            return new ScrollPage { Host = host, Presenter = presenter, Card = card!, WorkArea = current };
         }
 
         // Opens the page with the gear. A test on a work area the page does not fit says so, and the card must then be shorter
