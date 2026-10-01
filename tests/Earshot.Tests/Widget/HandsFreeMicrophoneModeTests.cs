@@ -399,6 +399,13 @@ public sealed class HandsFreeMicrophoneModeTests
             Assert.IsTrue(tray.Settings.Current.ProtectAudioQuality);
             Assert.IsFalse(tray.Settings.Current.HandsFreeMicrophoneOffMode);
             CollectionAssert.AreEqual(OnOnly, tray.Protection.Calls);
+
+            // And protection off again from the menu is plain protection off: the mode does not come back with it.
+            tray.ClickMenu(MenuModel.ProtectAudioQuality);
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Settings.Current.ProtectAudioQuality);
+            Assert.IsFalse(tray.Settings.Current.HandsFreeMicrophoneOffMode, "The mode does not come back by itself.");
         });
     }
 
