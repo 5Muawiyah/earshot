@@ -63,6 +63,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     private readonly ILog _log;
     private readonly IWidgetCardHost? _host;
     private readonly Func<bool>? _animationsEnabled;
+    private readonly Func<Rectangle, Rectangle> _workAreaFor;
 
     private WidgetCard? _card;
     private ITimer? _refreshTimer;
@@ -82,7 +83,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     public WidgetCardPresenter(
         Func<WidgetCard> createCard, WidgetCardPresenterCallbacks callbacks, Action<Action> uiPost, TimeProvider time, ILog log,
-        IWidgetCardHost? host = null, Func<bool>? animationsEnabled = null)
+        IWidgetCardHost? host = null, Func<bool>? animationsEnabled = null, Func<Rectangle, Rectangle>? workAreaFor = null)
     {
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(callbacks);
@@ -96,6 +97,10 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         _log = log;
         _host = host;
         _animationsEnabled = animationsEnabled;
+
+        // The work area of the display an anchor is on. The tray reads the real displays; a test hands in a fixed area so a
+        // page's placement does not depend on the screen the tests happen to run on.
+        _workAreaFor = workAreaFor ?? SystemDisplaySource.WorkAreaFor;
         if (_host is not null)
         {
             _host.UpdateChanged += OnHostUpdateChanged;
@@ -257,7 +262,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         card.Render(BuildModel(), _callbacks.Dpi());
         Rectangle rest = PlaceAbove(card, anchor);
         card.ResetFocusCue(openedByKeyboard);
-        card.PresentAnimated(rest, CardMotion.TravelFor(gaugeBounds ?? Rectangle.Empty, SystemDisplaySource.WorkAreaFor(anchor), _callbacks.Dpi()));
+        card.PresentAnimated(rest, CardMotion.TravelFor(gaugeBounds ?? Rectangle.Empty, _workAreaFor(anchor), _callbacks.Dpi()));
         card.Activate();
         StartRefreshTimer();
         SyncRefreshSpinner();
@@ -266,7 +271,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     private Rectangle PlaceAbove(WidgetCard card, Rectangle anchor)
     {
         Size cardSize = card.ClientSize;
-        Rectangle workArea = SystemDisplaySource.WorkAreaFor(anchor);
+        Rectangle workArea = _workAreaFor(anchor);
         return WidgetCardPlacement.Above(anchor, cardSize, workArea, _callbacks.Dpi(), _callbacks.CurrentGaugePosition);
     }
 
@@ -614,7 +619,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         Size size = card.ClientSize;
         if (size != before.Size)
         {
-            Rectangle workArea = SystemDisplaySource.WorkAreaFor(before);
+            Rectangle workArea = _workAreaFor(before);
             var resized = new Rectangle(before.X, before.Bottom - size.Height, size.Width, size.Height);
             card.PlaceAtRest(CardPlacement.Clamp(resized, workArea));
         }
