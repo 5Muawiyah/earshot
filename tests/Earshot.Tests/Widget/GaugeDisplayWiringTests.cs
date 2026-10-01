@@ -362,7 +362,7 @@ public sealed class GaugeDisplayWiringTests
             var changed = Message.Create(tray.Context.Window.Handle, 0x007E, 0, 0);
             tray.Context.Window.Dispatch(ref changed);
 
-            TrayHarness.PumpUntil(() => tray.Context.WidgetCardSettingsForTest?.GaugeDisplayOptions.Count == 3, "The open page kept the old display list.");
+            TrayHarness.PumpUntil(() => tray.Context.WidgetCardSettingsForTest?.GaugeDisplayOptions.Count == 4, "The open page kept the old display list.");
         });
     }
 }

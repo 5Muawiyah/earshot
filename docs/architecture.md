@@ -388,7 +388,9 @@ It names the monitor and the output it is on, not its place in the
 enumeration, so it survives a restart and a change of which display is
 primary. A local read of two monitors of one model found paths that differ
 only in the output's id at the end, so the whole path is compared. An empty
-value means the main display. Displays are listed with `EnumDisplayMonitors`,
+value means the main display. The reserved value `*all-displays` (`GaugeDisplayChoice.AllDisplays`)
+means every display's taskbar at once; no interface path or `gdi:` name starts with `*`, so it
+cannot be taken for a display. Displays are listed with `EnumDisplayMonitors`,
 each with its bounds and work area from `GetMonitorInfo` and its own scale
 from `GetDpiForMonitor`.
 
@@ -421,6 +423,27 @@ the gauge controller its foreground-window reader for the full-screen rule. Each
 link has a test through the real tray (`GaugeDisplayWiringTests`), with only the
 display list, the taskbar windows, the foreground window and the UI Automation
 read replaced.
+
+**All displays.** The main display's gauge is the ordinary one, read as the main display always is.
+Every other connected display that shows a taskbar of its own (a visible `Shell_SecondaryTrayWnd` on
+its monitor) gets a `SecondaryGauge`: its own `GaugeController`, window, `TaskbarWatcher` (one UI
+Automation worker thread reading that display's taskbar, as `Read(shown, displayId)` does for a
+chosen display) and its own scale. Each gauge is therefore placed, raised and hidden for a
+full-screen window by the same code as the main one, against its own display's bounds, and the sliding
+raise limit is counted per controller. `SecondaryGaugeSet.Reconcile` makes the set match the
+displays and taskbars that are there now; it runs on the UI thread after each read of the main
+taskbar, on `WM_DISPLAYCHANGE` and when the setting changes, adds a gauge for a display or taskbar
+that appeared and stops and disposes the gauge of one that went (watcher first, then controller
+and window), and a result already posted for a gauge that was removed is dropped. A taskbar window
+whose rectangle could not be read removes nothing. A read that fell back to another display's
+taskbar is no taskbar for that gauge and is not drawn. The foreground and shell-window hooks, the
+appbar notices and the pokes go to every gauge. The tray icon goes through one vote per controller
+(`TrayIconVotes`) and is visible only when no gauge wants it hidden. A click on a gauge opens the
+card above that gauge's own rectangle, which `WidgetCardPlacement.WorkAreaFor` places on that
+display, at that display's scale. Choosing another value removes every secondary gauge at once.
+`GaugeAllDisplaysTests` proves these with fake displays and windows through the real tray; the
+real secondary taskbar read stays under the existing real UI Automation test, which finds none on
+a private desktop.
 
 If the chosen display is not connected, or is connected but its taskbar is not
 shown, the reader returns the main display's taskbar and says why in the

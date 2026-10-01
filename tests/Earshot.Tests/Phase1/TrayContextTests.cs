@@ -1414,7 +1414,8 @@ internal sealed class TrayHarness : IDisposable
         Earshot.Widget.SystemLookService? lookService = null,
         Func<bool>? cardAnimationsEnabled = null,
         Func<MouseButtons>? mouseButtonsDown = null,
-        bool realTrayIconSurface = false)
+        bool realTrayIconSurface = false,
+        Func<Earshot.Widget.SecondaryTaskbarReading>? secondaryTaskbars = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1523,6 +1524,11 @@ internal sealed class TrayHarness : IDisposable
                 TaskbarReaderFactoryCalls++;
                 var reader = new FakeTaskbarReader();
                 LastTaskbarReader = reader;
+                lock (TaskbarReaders)
+                {
+                    TaskbarReaders.Add(reader);
+                }
+
                 return reader;
             },
             // Left out only by a test that reads whether the tray has real surfaces (the card animation choice follows that),
@@ -1565,6 +1571,11 @@ internal sealed class TrayHarness : IDisposable
         if (gaugeSurfaceFactory is not null)
         {
             options = options with { GaugeSurfaceFactory = gaugeSurfaceFactory };
+        }
+
+        if (secondaryTaskbars is not null)
+        {
+            options = options with { SecondaryTaskbars = secondaryTaskbars };
         }
 
         if (foregroundWindowProbe is not null)
@@ -1640,6 +1651,9 @@ internal sealed class TrayHarness : IDisposable
     // read to pick it up (Poke, through any settings change ApplyWidget reacts to), rather than being stuck
     // with the constructor-time default of Fail(NoTaskbar) for the whole test.
     public FakeTaskbarReader? LastTaskbarReader { get; private set; }
+
+    // Every fake taskbar reader the tray built, in order: the main gauge's first, then one for each other display's gauge (All displays).
+    public List<FakeTaskbarReader> TaskbarReaders { get; } = new();
 
     // The fake foreground change source the widget's gauge pipeline built last (null until it has built one),
     // so a test can see it installed and disposed and raise a foreground change through it.

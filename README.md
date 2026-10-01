@@ -134,7 +134,8 @@ together, and the taskbar gauge shows a ring round the earbud mark with the
 lower bud's number. There is a **Refresh** control on the card and in the menu.
 It listens for up to 12 seconds and ends on values or on "Open the case".
 **Gauge order** on the settings page changes how the gauge lines up its ring,
-number and charging bolt.
+number and charging bolt. **Gauge display** puts the gauge on one display's
+taskbar, or on every display's taskbar at once with **All displays**.
 
 What to know before you trust a number:
 

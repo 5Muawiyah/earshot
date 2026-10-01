@@ -107,8 +107,20 @@ internal static class GaugeDisplayChoice
     // The setting's value for the main display.
     public const string MainDisplay = "";
 
-    // The display for a stored choice: the primary display for "" (the default), the display with that Id when it
-    // is connected, else the primary display with NotConnected. Null only when there is no display at all.
+    // The setting's value for a gauge on every display's taskbar. A display's Id is a device interface path (it starts
+    // with "\\?\") or "gdi:" and a device name, so a value that starts with "*" can never be one, and a stored display
+    // is never mistaken for this choice or the other way round.
+    public const string AllDisplays = "*all-displays";
+
+    public static bool IsAll(string? chosenId) => string.Equals(chosenId, AllDisplays, StringComparison.Ordinal);
+
+    // What the one taskbar reader that follows the main gauge is asked for. All displays has the main display's gauge
+    // read as the main display always is; the other displays' gauges are each read for their own display.
+    public static string ReaderChoice(string? chosenId) => IsAll(chosenId) ? MainDisplay : chosenId ?? MainDisplay;
+
+    // The display for a stored choice: the primary display for "" (the default) and for All displays (whose main
+    // gauge is the primary display's), the display with that Id when it is connected, else the primary display with
+    // NotConnected. Null only when there is no display at all.
     public static (DisplayInfo? Display, DisplayFallbackReason Fallback) Resolve(string? chosenId, IReadOnlyList<DisplayInfo> displays)
     {
         ArgumentNullException.ThrowIfNull(displays);
@@ -123,7 +135,7 @@ internal static class GaugeDisplayChoice
         }
 
         primary ??= displays.Count > 0 ? displays[0] : null;
-        if (string.IsNullOrEmpty(chosenId))
+        if (string.IsNullOrEmpty(chosenId) || IsAll(chosenId))
         {
             return (primary, DisplayFallbackReason.None);
         }
@@ -147,13 +159,20 @@ internal sealed record DisplayOption(string Id, string Label);
 internal static class GaugeDisplayOptions
 {
     public const string MainLabel = "Main display";
+    public const string AllLabel = "All displays";
     public const string NotConnectedLabel = "Not connected";
 
-    // "Main display" first, then every connected display by its number.
+    // "Main display" first, "All displays" next when there is more than one display to show it on, then every
+    // connected display by its number.
     public static IReadOnlyList<DisplayOption> Build(IReadOnlyList<DisplayInfo> displays)
     {
         ArgumentNullException.ThrowIfNull(displays);
         var options = new List<DisplayOption> { new(GaugeDisplayChoice.MainDisplay, MainLabel) };
+        if (displays.Count > 1)
+        {
+            options.Add(new DisplayOption(GaugeDisplayChoice.AllDisplays, AllLabel));
+        }
+
         foreach (DisplayInfo d in displays.OrderBy(x => DisplayNames.Number(x, displays)))
         {
             options.Add(new DisplayOption(d.Id, DisplayNames.Long(d, displays)));
@@ -174,7 +193,8 @@ internal static class GaugeDisplayOptions
             }
         }
 
-        return NotConnectedLabel;
+        // A stored All displays stays named while one display is connected, when the list does not offer it.
+        return GaugeDisplayChoice.IsAll(chosenId) ? AllLabel : NotConnectedLabel;
     }
 
     // The choice after the current one, wrapping round; the first entry when the current one is not in the list.

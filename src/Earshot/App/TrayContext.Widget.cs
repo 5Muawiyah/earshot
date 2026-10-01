@@ -175,9 +175,11 @@ internal sealed partial class TrayContext
     {
         if (_gaugeController is null)
         {
+            // The icon goes through a vote, so the gauges on other displays (All displays) and this one share it.
+            _iconVotes = new TrayIconVotes(_trayIconVisibilityFactory?.Invoke() ?? _notifyIconVisibility);
             var controller = new GaugeController(
                 CreateGaugeSurface,
-                _trayIconVisibilityFactory?.Invoke() ?? _notifyIconVisibility,
+                _iconVotes.NewVoter(),
                 ReadGaugeControllerSettings,
                 _log,
                 _time,
@@ -203,7 +205,7 @@ internal sealed partial class TrayContext
             _appBarRegistration = new AppBarRegistration(_window.Handle, _log);
             LogAppBarOutcome(_appBarRegistration.Register());
 
-            _gaugeDisplayForWorker = _registry.Settings.Current.Widget.GaugeDisplay;
+            _gaugeDisplayForWorker = GaugeDisplayChoice.ReaderChoice(_registry.Settings.Current.Widget.GaugeDisplay);
             _taskbarWatcher = new TaskbarWatcher(
                 _taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time, _taskbarWatcherPollIntervalMs, ReadChosenDisplay);
             _taskbarWatcher.Start();
@@ -234,11 +236,17 @@ internal sealed partial class TrayContext
         }
     }
 
-    private void OnForegroundChanged(object? sender, ForegroundChangedEventArgs e) =>
+    private void OnForegroundChanged(object? sender, ForegroundChangedEventArgs e)
+    {
         _gaugeController?.OnForegroundChanged(e.RootClassName);
+        _secondaryGauges?.OnForegroundChanged(e.RootClassName);
+    }
 
-    private void OnShellWindowChanged(object? sender, ShellWindowChangedEventArgs e) =>
+    private void OnShellWindowChanged(object? sender, ShellWindowChangedEventArgs e)
+    {
         _gaugeController?.OnShellWindowChanged(e.RootClassName, e.Shown);
+        _secondaryGauges?.OnShellWindowChanged(e.RootClassName, e.Shown);
+    }
 
     // A hook is bound to the process it was installed against, so the hook on the old Explorer hears nothing from the
     // new one; called from TrayContext's TaskbarCreated listener, alongside the others. A no-op while nothing is wired.
@@ -306,14 +314,17 @@ internal sealed partial class TrayContext
             case Shell.ABN_STATECHANGE:
             case Shell.ABN_POSCHANGED:
                 _taskbarWatcher?.Poke();
+                PokeSecondaryGauges(resetBackoff: false);
                 break;
 
             case Shell.ABN_FULLSCREENAPP:
                 bool opening = e.LParam != 0;
                 _gaugeController?.NotifyFullScreenApp(opening);
+                _secondaryGauges?.NotifyFullScreenApp(opening);
                 if (!opening)
                 {
                     _taskbarWatcher?.Poke();
+                    PokeSecondaryGauges(resetBackoff: false);
                 }
 
                 break;
@@ -515,12 +526,15 @@ internal sealed partial class TrayContext
 
         if (result.Layout is { } layout)
         {
-            _widgetLayoutDpi = layout.Dpi;
+            NoteMainLayoutDpi(layout.Dpi);
         }
 
         controller.OnLayout(result);
         RefreshShownGaugeForWorker();
         RenderGaugeIfShown();
+
+        // Each read of the main taskbar is also when the other displays' gauges are matched to the displays and taskbars there are.
+        ReconcileSecondaryGauges();
     }
 
     // IWidgetStatus.Changed is documented as raised on the UI thread already (the data side posts it
@@ -539,6 +553,7 @@ internal sealed partial class TrayContext
 
     private void RenderGaugeIfShown()
     {
+        RenderSecondaryGauges();
         if (_gaugeController?.State is GaugeState.Shown shown && _gaugeSurface is { IsDisposed: false } surface && _widgetTheme is not null)
         {
             WidgetSettings widget = _registry.Settings.Current.Widget;
@@ -569,13 +584,16 @@ internal sealed partial class TrayContext
         }
 
         _caseOpenCardPresenter?.Hide();
+        UseMainDisplayScaleForCard();
 
         if (GaugeBoundsIfShown() is { } bounds)
         {
+            LastCardAnchorForTest = bounds;
             presenter.RequestShow(bounds, bounds.Location, openedByKeyboard);
         }
         else
         {
+            LastCardAnchorForTest = null;
             presenter.RequestShow(gaugeBounds: null, _cursorPosition(), openedByKeyboard);
         }
     }
@@ -584,7 +602,11 @@ internal sealed partial class TrayContext
     // every gate (the setting, closing, the owner's own card already open, the notification state,
     // hand-back or a session end) before it shows anything; this only supplies where the gauge is, the same
     // rectangle OnWidgetCardRequested already uses for "above the gauge".
-    private void OnCaseOpened(object? sender, CaseOpenedEventArgs e) => _caseOpenCardPresenter?.RequestShow(GaugeBoundsIfShown());
+    private void OnCaseOpened(object? sender, CaseOpenedEventArgs e)
+    {
+        UseMainDisplayScaleForCard();
+        _caseOpenCardPresenter?.RequestShow(GaugeBoundsIfShown());
+    }
 
     // The gauge's own bounds when it is actually on screen with a handle, or null (the case-open card falls
     // back to NearTray; the widget card's own click path falls back to the cursor instead, since that path
@@ -667,6 +689,8 @@ internal sealed partial class TrayContext
         _taskbarWatcher = null;
         _appBarRegistration?.Dispose();
         _appBarRegistration = null;
+        _secondaryGauges?.Dispose();
+        _secondaryGauges = null;
         _gaugeController?.Dispose();
         _gaugeController = null;
         _gaugeWindow?.Dispose();
@@ -713,10 +737,11 @@ internal sealed partial class TrayContext
             WireWidget();
         }
 
-        _gaugeDisplayForWorker = widget.GaugeDisplay;
+        _gaugeDisplayForWorker = GaugeDisplayChoice.ReaderChoice(widget.GaugeDisplay);
         if (widget.ShowOnTaskbar)
         {
             _taskbarWatcher?.Poke();
+            PokeSecondaryGauges(resetBackoff: false);
 
             // A setting that changes how the gauge is drawn (its order) shows on the taskbar at once, rather than at
             // the poll's next answer.
@@ -739,6 +764,9 @@ internal sealed partial class TrayContext
             _appBarRegistration = null;
             _shownGaugeForWorker = null;
         }
+
+        // The setting moving to or from All displays adds or removes the other displays' gauges now, not at the next read.
+        ReconcileSecondaryGauges();
     }
 }
 

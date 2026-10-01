@@ -73,7 +73,7 @@ internal static class WidgetCopy
     public const string TipSettings = "Settings";
     public const string TipBack = "Back";
     public const string TipGaugePosition = "Where the gauge sits on the taskbar";
-    public const string TipGaugeDisplay = "Which display's taskbar shows the gauge";
+    public const string TipGaugeDisplay = "Which display's taskbar shows the gauge. All displays puts it on every taskbar at once.";
     public const string TipGaugeOrder = "Pick how the gauge's ring, number and bolt line up";
     public const string TipOtherDevice = "The name shown when your AirPods are on another device";
     public const string TipPauseBud = "Pause when a bud comes out, and play again when it goes back";

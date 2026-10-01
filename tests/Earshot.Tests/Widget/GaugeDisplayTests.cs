@@ -31,7 +31,7 @@ public sealed class GaugeDisplayTests : IDisposable
     private static DisplayInfo Display(string id, string device, Rectangle bounds, bool primary, int dpi = 96, nint handle = 0) =>
         new(id, device, bounds, new Rectangle(bounds.X, bounds.Y, bounds.Width, bounds.Height - (48 * dpi / 96)), primary, dpi, handle);
 
-    private static readonly string[] ExpectedLabels = ["Main display", "Display 1 (1920 x 1080)", "Display 2 (1920 x 1080)"];
+    private static readonly string[] ExpectedLabels = ["Main display", "All displays", "Display 1 (1920 x 1080)", "Display 2 (1920 x 1080)"];
     private static readonly int[] Scales = [96, 120, 144];
     private static readonly int[] FullScreenStates = [Shell.QUNS_BUSY, Shell.QUNS_RUNNING_D3D_FULL_SCREEN];
 
@@ -89,7 +89,8 @@ public sealed class GaugeDisplayTests : IDisposable
         IReadOnlyList<DisplayOption> options = GaugeDisplayOptions.Build([Two, One]);
 
         CollectionAssert.AreEqual(ExpectedLabels, options.Select(o => o.Label).ToArray());
-        Assert.AreEqual(IdOne, GaugeDisplayOptions.Next(options, ""));
+        Assert.AreEqual(GaugeDisplayChoice.AllDisplays, GaugeDisplayOptions.Next(options, ""));
+        Assert.AreEqual(IdOne, GaugeDisplayOptions.Next(options, GaugeDisplayChoice.AllDisplays));
         Assert.AreEqual(IdTwo, GaugeDisplayOptions.Next(options, IdOne));
         Assert.AreEqual("", GaugeDisplayOptions.Next(options, IdTwo), "It wraps round to the main display.");
         Assert.AreEqual("", GaugeDisplayOptions.Next(options, IdThree), "A display that is gone is not in the list; the next is the first.");

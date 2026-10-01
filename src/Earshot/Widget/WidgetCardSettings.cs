@@ -403,7 +403,7 @@ internal static class SettingsPageLayout
             choiceW = Math.Max(choiceW, measure.Width(option.Label, twelve));
         }
 
-        choiceW = Math.Max(choiceW, measure.Width(Widget.GaugeDisplayOptions.NotConnectedLabel, twelve)) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+        choiceW = Math.Max(choiceW, Math.Max(measure.Width(Widget.GaugeDisplayOptions.NotConnectedLabel, twelve), measure.Width(Widget.GaugeDisplayOptions.AllLabel, twelve))) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
         Row(
             SettingsRowId.GaugeDisplay, WidgetCopy.SettingsGaugeDisplay, values.GaugeDisplayNote, false, false, choiceW,
             (top, _) => (new Rectangle(right - choiceW, top, choiceW, control), Rectangle.Empty, Rectangle.Empty),
