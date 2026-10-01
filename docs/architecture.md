@@ -269,45 +269,87 @@ source is copied into this repository; both are cited by URL only. The
 watcher is read-only throughout: nothing it does ever writes to a Bluetooth
 device, and it is stopped and restarted around sleep.
 
-**Which AirPods it shows.** There is no set-up step. Earshot reads the paired
-device's model from Windows (the device's own record, never a guess) and keeps
-only messages of the documented 25-byte form of that model. The two buds of
-one set broadcast from two addresses, with the bud values in swapped order, so
-senders with the same model, colour and case value, and the same two bud
-values in either order within two seconds, are merged into one set. Earshot
-then chooses the set by model and by which is nearest, by signal strength over
-a short window, once the model has been heard for a moment and the set has sent
-more than a passer-by would. It learns that set's colour and holds it.
+**Which AirPods it shows.** The owner opens the case next to the PC, and nothing
+else is asked. Earshot reads the paired device's model from Windows (the device's
+own record, never a guess) and keeps only messages of the documented 25-byte
+form of that model. The two buds of one set broadcast from two addresses, with
+the bud values in swapped order, so senders with the same model, colour and case
+value, and the same two bud values in either order within two seconds, are
+merged into one set.
 
-The choice is held. Another pair takes over only when it is clearly nearer
-for a sustained time, so one loud message from a stranger does not move it.
-The choice stands on its anchors, the senders that were in the set when the
-first-choice rule or a switch made it the chosen one. A sender that only merged
-into the set (it said what the set said, close in time) is not an anchor until it
-has matched anchor messages three times over three seconds, and one of its
-messages counts as the chosen set's only when it matches an anchor's message
-within two seconds, so a stranger that matched once never has its different
-messages shown and never holds the choice when the owner goes quiet. After
-every anchor has been silent for longer than the ten second window the choice is
-made again, by the first-choice rule, among the sets of the paired model and the
-held colour: a lone same-model pair heard for two seconds then qualifies, which
-is part of the accepted risk below. The values already shown are kept, and
-grey as they age, until the new choice's own messages replace them. The
-figures behind this are named constants in `BroadcastRules`
-(`src/Earshot/Widget/BroadcastSenderSets.cs`). They are design choices, not
-facts about the device. They were checked against one capture of one set and
-synthetic sequences; no second set was ever near the owner.
+*Linking.* A pair in a case with the lid open sends a message with the case level
+known, about four times a second between its two buds. A pair in use sends one
+with the case level unknown (0xF) every second or two. That level is what tells
+the owner opening the case from every pair worn nearby, so a set is linked only
+when it sends at least five case-known messages inside five seconds, the first
+and last two seconds apart, with a median signal of at least -70 dBm. Of sets that
+qualify at the same message the strongest is linked; in practice the first set to
+qualify is, and a pair that opens its case later but at least 8 dB stronger takes the
+link from it (below). A pair worn nearby, however near, is never linked. The set's
+colour is learned and held. The figures are named constants in
+`BroadcastRules` (`src/Earshot/Widget/BroadcastSenderSets.cs`), and they are
+design choices, not facts about the device. -70 dBm comes from the saved
+records of the owner's pair with both buds in the case and the lid open (the 30
+September capture and two set-up records of 1 October, about 300 messages): the
+median over each window of five messages ran from -72 to -51 dBm, the middle
+window of each record was -61 to -58, and 95% of the weakest record's windows
+were above -70. A pair worn nearby on the evening of 1 October, which was shown
+as the owner's, read -64 to -76 dBm with the case level unknown. So no level
+separates the owner from a same-model stranger who opens a case at the same
+distance. The level only keeps out a pair that is not next to the PC.
 
-Nothing about the selection is written to disk, and no address is kept. A
-message from a device that is not chosen is counted and nothing else about it
-is recorded.
+*Following.* The link stands on its anchors, the senders that were in the set
+when it was linked. A sender that only merged into the set (it said what the set
+said, close in time) is not an anchor until it has matched anchor messages three
+times over three seconds, and one of its messages counts as the linked set's only
+when it matches an anchor's message within two seconds, so a stranger that
+matched once never has its different messages shown. The addresses rotate. When
+every anchor has been silent for longer than the ten second window, a set whose
+fields continue the linked set's last (the same model, colour and two bud levels, and
+the same case level unless either message gives none, since a pair sends it only with a bud in the case), heard for two seconds with three messages and within 30 seconds of
+the old address's last message, is followed under its new addresses, and the values
+already shown stay. A set with other fields is never followed, however near and
+however long it is heard. A case opened during the loss links as it would with no
+link. A different pair that opens its case at least 8 dB nearer than the linked set
+takes the link, which is how the owner corrects a link made to somebody else's
+pair: open the case next to the PC.
 
-**The accepted risk.** A pair of the same model, and the same colour once one
-is held, that sits nearer than the owner's for long enough can be chosen
-instead. This is an owner decision, not an oversight: the owner accepted that
-risk rather than ask for a set-up step to rule it out.
+*Dropping.* When the linked set has not been heard under any address for two
+minutes, the link is dropped, what it said is cleared, and nothing is shown until
+the next case open. Two minutes covers an address change, which takes seconds, and
+a pair put back in the case for a moment. It does not cover a session. It is a
+margin, not a measurement: the saved records do not show when the addresses
+rotate. A clock check every ten seconds notices the silence, since silence brings
+no message.
 
-**What is read, and how old it may be.** From the chosen set Earshot reads the
+*In memory only.* The link is held in memory and nothing about it is written, no
+address included, so a restart of Earshot (an update restarts it) has no link, and
+the next case open makes one. A message from a device that is not linked is counted
+and nothing else about it is recorded. The log says that a link was made, followed
+or dropped, with counts only.
+
+**The accepted risk.** A same-model pair that opens its case next to the PC more
+strongly than the owner's can be linked instead, and a same-model pair whose
+fields equal the linked set's last, heard within 30 seconds of it going quiet, can
+be followed as if it were the owner's. Both need a stranger of the same model
+(and, once one is held, the same colour) to be close and to match. This is an
+owner decision, not an oversight: the owner accepted that risk rather than ask for
+a set-up step to rule it out. There is no consistency check against another
+device.
+
+**Shown only while connected.** `BatteryFreshness.Shown` is the one definition of
+what the card, the gauge, its tooltip and the low battery alert show. It gives
+nothing unless the owner's AirPods are connected to this PC (the card's "On this
+PC" state), not as current and not greyed. A figure read while connected does not
+stay on screen after a disconnect, because the buds are then in the case, on
+another device or somebody else's, and a figure for them is not one the person can
+use. The values stay in memory while the link holds, so a quick reconnect shows
+them again, greyed with the time they were read until the set's own messages
+replace them. With the AirPods connected and no pair linked, the buds and the case
+show nothing, and the card and the gauge's tooltip say "Open the case to show
+battery". Windows' own figure, below, follows the same connected-only rule and
+needs no link.
+**What is read, and how old it may be.** From the linked set Earshot reads the
 left bud, the right bud and the case, each in steps of 10% (that is what the
 message carries), and the charging bits. Each part keeps its own read time. A
 value read within 30 seconds is current. An older value is drawn greyed with
@@ -325,7 +367,7 @@ are not proved here either. In-ear and the lid are in neither source and in no
 saved capture, so they are not decoded.
 
 **Windows' own Hands-Free figure.** When no bud has a current broadcast value
-and the AirPods are on this PC, Earshot also reads the Hands-Free battery
+and the AirPods are on this PC (linked or not), Earshot also reads the Hands-Free battery
 property Windows may hold for the device. It reads the paired device's device
 nodes only, once a minute, and the figure counts as current for two minutes.
 The slower query through the paired device's association object (about a minute
@@ -337,9 +379,9 @@ here. The figure is one number for the headset, never a bud's or the case's.
 
 **Refresh.** The card has a refresh control and the menu has **Refresh
 battery**. It restarts the listener and waits up to 12 seconds for a message
-of the chosen pair. It ends on values, on Windows' figure when that is what it
-finds, or on "Nothing heard. Open the case.", because a shut case sends
-nothing. It also ends when Bluetooth is off or the listener is not running, and
+of the linked pair, or, when no pair is linked, for the case-open link. It ends
+on values, on Windows' figure when that is what it finds, or on "Nothing heard.
+Open the case.", because a shut case sends nothing. It also ends when Bluetooth is off or the listener is not running, and
 says so. The 12 seconds is a design choice sized to the longest gap seen
 between messages.
 
@@ -350,14 +392,14 @@ and nothing acts. The resume half is strict by design. It resumes only the
 session Earshot paused, only within 60 seconds of the pause, only while the
 AirPods are still this PC's output, only if nothing was played or paused by hand
 since as far as Windows reports it, and only when every bud that was in is back
-in on fresh values of the same chosen set. "As far as Windows reports it" is the
+in on fresh values of the same linked set. "As far as Windows reports it" is the
 session manager's own change events (a session came or went, a session's playback
 info changed), which cancel the remembered pause, plus a read of the sessions just
 before resuming that must find the paused session paused and nothing else playing.
 If those events are not being listened to (the listening starts the first time the
 manager is read and has had no live run), nothing is resumed. In-ear values and a
-remembered pause belong to one chosen set: when another set is chosen, or the
-same one is chosen again after it went quiet, they are forgotten. A resume that
+remembered pause belong to one linked set: when another set is linked, or the
+same one is followed to new addresses after it went quiet, they are forgotten. A resume that
 misses any of these is forgotten, never retried later. Pausing when the AirPods
 leave this PC never resumes.
 

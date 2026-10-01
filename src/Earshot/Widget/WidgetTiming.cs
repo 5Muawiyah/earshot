@@ -20,6 +20,11 @@ public static class WidgetTiming
     // two of these (BatteryFreshness.HeadsetCurrentWindow), so one missed read does not drop it.
     public static readonly TimeSpan HeadsetPollInterval = TimeSpan.FromSeconds(60);
 
+    // How often the clock is looked at for a linked set that has been lost for longer than BroadcastRules.LostLimit.
+    // Silence brings no message to notice it with, so without this a dropped link would show until the next one. Ten
+    // seconds is a small part of the two minutes, so a drop is shown within about that of its time.
+    public static readonly TimeSpan LinkCheckInterval = TimeSpan.FromSeconds(10);
+
     public static readonly TimeSpan WatcherRetryDelay = TimeSpan.FromSeconds(30);
 
     public static readonly TimeSpan WatcherRetryLimit = TimeSpan.FromMinutes(15);

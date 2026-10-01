@@ -22,7 +22,8 @@ public sealed record WidgetSnapshot(
     // Not part of the positional shape, so a snapshot built without it reads Unknown.
     public PartReading Headset { get; init; } = PartReading.Unknown;
 
-    // Whether the owner's AirPods have been picked out of the broadcast yet.
+    // Whether a set of the broadcast is linked to the owner's AirPods (a case was opened near the PC and the set has not
+    // been lost for too long). Listening: a paired model is known and nothing is linked.
     public BroadcastSelectionState Selection { get; init; } = BroadcastSelectionState.NoPairedModel;
 
     public static WidgetSnapshot Empty(WidgetWatcherState watcher) => new(

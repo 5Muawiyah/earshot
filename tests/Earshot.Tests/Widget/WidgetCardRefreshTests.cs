@@ -365,7 +365,7 @@ public sealed class WidgetCardRefreshTests
             Assert.AreEqual("Nothing heard. Open the case", flow.Card.ReadLineText);
 
             // A reading taken after the refresh began supersedes the words.
-            flow.Snapshot = flow.Snapshot with { BatteryReadAt = flow.Time.GetUtcNow() + TimeSpan.FromSeconds(1) };
+            flow.Snapshot = flow.Snapshot with { Left = new PartReading(60, false, null) { ReadAt = flow.Time.GetUtcNow() + TimeSpan.FromSeconds(1) }, BatteryReadAt = flow.Time.GetUtcNow() + TimeSpan.FromSeconds(1) };
             flow.Presenter.Refresh();
             Assert.IsNull(flow.Presenter.CurrentModelForTest!.Refresh);
         });

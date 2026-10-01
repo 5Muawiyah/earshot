@@ -142,6 +142,7 @@ public sealed class GaugeWindowTests
             WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
             {
                 Where = AirPodsWhere.ThisPc,
+                Selection = BroadcastSelectionState.Linked,
                 Left = new PartReading(70, false, null),
             };
             gauge.Render(snapshot, DateTimeOffset.UtcNow, GaugeDisplaySettings.Default, 96, bounds, Color.White, "Segoe UI");

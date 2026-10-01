@@ -31,8 +31,9 @@ internal readonly record struct GaugeDisplaySettings(int LowBatteryThresholdPerc
 //   3. on this PC with a value BatteryFreshness lets the gauge draw: Reading
 //   4. on this PC, no value: MarkOnly
 //
-// The number is the one BatteryFreshness.Shown gives the gauge: the lower of the buds that have a value no older
-// than an hour (an unknown bud is skipped), or Windows' own figure while that is current and no bud has a fresh
+// The number is the one BatteryFreshness.Shown gives the gauge, which gives none unless the AirPods are connected to
+// this PC and, for the buds, a pair is linked (a case opened near the PC): the lower of the buds that have a value no
+// older than an hour (an unknown bud is skipped), or Windows' own figure while that is current and no bud has a fresh
 // broadcast value. Nothing here invents, rounds or interpolates a figure, and a charging flag that is not true
 // is not shown.
 internal sealed record GaugeContent(
@@ -68,6 +69,11 @@ internal sealed record GaugeContent(
             return new GaugeContent(GaugeMode.Reading, figure.Percent, low, figure.Charging, tooltip);
         }
 
-        return new GaugeContent(GaugeMode.MarkOnly, null, false, false, WidgetCopy.GaugeNoRecentReading);
+        // Connected, with no figure: either no pair is linked yet (opening the case near the PC links one) or nothing
+        // recent was read.
+        string noFigure = snapshot.Selection == BroadcastSelectionState.Listening
+            ? WidgetCopy.OpenTheCaseToShowBattery
+            : WidgetCopy.GaugeNoRecentReading;
+        return new GaugeContent(GaugeMode.MarkOnly, null, false, false, noFigure);
     }
 }

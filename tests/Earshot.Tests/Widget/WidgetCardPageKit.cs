@@ -219,7 +219,7 @@ internal static class CardKit
     public static WidgetSnapshot Snapshot(PartReading? left = null, PartReading? right = null, DateTimeOffset? readAt = null) =>
         new(
             AirPodsWhere.ThisPc,
-            left ?? PartReading.Unknown,
+            left ?? (readAt is { } at ? new PartReading(60, false, null) { ReadAt = at } : PartReading.Unknown),
             right ?? PartReading.Unknown,
             PartReading.Unknown,
             BatteryReadAt: readAt,
@@ -229,7 +229,10 @@ internal static class CardKit
             WatcherErrorCode: null,
             WatcherErrorName: null,
             AutoPauseAvailable: false,
-            WidgetCounters.Empty);
+            WidgetCounters.Empty)
+        {
+            Selection = BroadcastSelectionState.Linked,
+        };
 
     public static WidgetCardModel MainModel(WidgetSnapshot? snapshot = null, string? updateVersion = null) =>
         new(snapshot ?? Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, UpdateVersion: updateVersion);

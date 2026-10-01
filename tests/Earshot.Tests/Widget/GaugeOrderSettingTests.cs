@@ -77,6 +77,7 @@ public sealed class GaugeOrderSettingTests : IDisposable
             WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
             {
                 Where = AirPodsWhere.ThisPc,
+                Selection = BroadcastSelectionState.Linked,
                 Left = new PartReading(70, false, null) { ReadAt = now },
                 Right = new PartReading(60, false, null) { ReadAt = now },
             };

@@ -135,7 +135,7 @@ public sealed class WidgetCardTests
         {
             using var card = new WidgetCard(new CapturingLog());
             card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(left: new PartReading(70, false, false))), 96);
+            card.Render(Model(Snapshot(left: new PartReading(70, false, false) { ReadAt = DateTimeOffset.UtcNow })), 96);
             using Bitmap bitmap = Render(card);
 
             WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
@@ -152,12 +152,12 @@ public sealed class WidgetCardTests
         {
             using var notCharging = new WidgetCard(new CapturingLog());
             notCharging.SetTheme(Color.Black, highContrast: false);
-            notCharging.Render(Model(Snapshot(left: new PartReading(70, false, false))), 96);
+            notCharging.Render(Model(Snapshot(left: new PartReading(70, false, false) { ReadAt = DateTimeOffset.UtcNow })), 96);
             using Bitmap bitmapOff = Render(notCharging);
 
             using var charging = new WidgetCard(new CapturingLog());
             charging.SetTheme(Color.Black, highContrast: false);
-            charging.Render(Model(Snapshot(left: new PartReading(70, true, false))), 96);
+            charging.Render(Model(Snapshot(left: new PartReading(70, true, false) { ReadAt = DateTimeOffset.UtcNow })), 96);
             using Bitmap bitmapOn = Render(charging);
 
             // Both cards draw the same glyph, bar, percent text, where line and read line (only Charging
@@ -177,12 +177,12 @@ public sealed class WidgetCardTests
         {
             using var outOfEar = new WidgetCard(new CapturingLog());
             outOfEar.SetTheme(Color.Black, highContrast: false);
-            outOfEar.Render(Model(Snapshot(left: new PartReading(70, false, false))), 96);
+            outOfEar.Render(Model(Snapshot(left: new PartReading(70, false, false) { ReadAt = DateTimeOffset.UtcNow })), 96);
             using Bitmap bitmapOff = Render(outOfEar);
 
             using var inEar = new WidgetCard(new CapturingLog());
             inEar.SetTheme(Color.Black, highContrast: false);
-            inEar.Render(Model(Snapshot(left: new PartReading(70, false, true))), 96);
+            inEar.Render(Model(Snapshot(left: new PartReading(70, false, true) { ReadAt = DateTimeOffset.UtcNow })), 96);
             using Bitmap bitmapOn = Render(inEar);
 
             Color background = bitmapOff.GetPixel(0, 0);
@@ -879,6 +879,92 @@ public sealed class WidgetCardTests
         });
     }
 
+    // A card for AirPods that are not on this PC shows no battery part at all: the columns are drawn exactly as when
+    // nothing was ever read, and the read line does not give the age of a reading that is not shown.
+    [TestMethod]
+    public void ACardForAirPodsNotOnThisPcDrawsNoFigureWhateverWasRead()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            foreach (AirPodsWhere where in new[] { AirPodsWhere.Unknown, AirPodsWhere.Elsewhere, AirPodsWhere.NotInUse })
+            {
+                PartReading Charging(int percent) => new(percent, true, null) { ReadAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(2) };
+
+                using var empty = new WidgetCard(new CapturingLog());
+                empty.SetTheme(Color.Black, highContrast: false);
+                empty.Render(Model(Snapshot(where: where)), 96);
+                using Bitmap emptyBitmap = Render(empty);
+
+                using var read = new WidgetCard(new CapturingLog());
+                read.SetTheme(Color.Black, highContrast: false);
+                read.Render(Model(Snapshot(where: where, left: Charging(70), right: Charging(60), box: Charging(90), readAt: DateTimeOffset.UtcNow)), 96);
+                using Bitmap readBitmap = Render(read);
+
+                WidgetCardLayout.Layout layout = read.CurrentMainLayout;
+                var columns = Rectangle.Union(layout.Left.Label, layout.Case.Percent);
+                Assert.AreEqual(0, CountDifferingPixels(emptyBitmap, readBitmap, columns), where + ": the columns are drawn as if nothing was read.");
+                Assert.AreEqual(empty.ReadLineText, read.ReadLineText, where + ": the read line does not date a reading that is not shown.");
+                StringAssert.DoesNotMatch(read.ReadLineText, new System.Text.RegularExpressions.Regex("ago"));
+            }
+        });
+    }
+
+    // Connected with no pair linked, the read line asks to open the case, with an earbud icon beside it. Nothing else says
+    // so: not a card for AirPods that are not here, not one with a figure to show, not a linked pair with nothing read.
+    [TestMethod]
+    public void TheCardAsksToOpenTheCaseOnlyWhileConnectedAndNoPairIsLinkedAndNothingIsShown()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            string AskFor(WidgetSnapshot snapshot)
+            {
+                using var card = new WidgetCard(new CapturingLog());
+                card.SetTheme(Color.Black, highContrast: false);
+                card.Render(Model(snapshot), 96);
+                return card.ReadLineText;
+            }
+
+            WidgetSnapshot unlinked = Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.Listening };
+            Assert.AreEqual("Open the case to show battery", AskFor(unlinked));
+
+            using (var card = new WidgetCard(new CapturingLog()))
+            {
+                card.SetTheme(Color.Black, highContrast: false);
+                card.Render(Model(unlinked), 96);
+                Assert.AreEqual("Open the case to show battery", card.ReadLineShort, "The same words beside the icon, however short the line.");
+                Assert.AreEqual("Open the case to show battery", card.TooltipAt(new Point(card.CurrentMainLayout.ReadLine.X + 40, card.CurrentMainLayout.ReadLine.Y + 4))!.Value.Text);
+                using Bitmap bitmap = Render(card);
+                Assert.IsTrue(HasInk(bitmap, card.CurrentMainLayout.ReadLine, bitmap.GetPixel(0, 0)), "The line is drawn.");
+            }
+
+            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.Unknown) with { Selection = BroadcastSelectionState.Listening }), "Not connected: nothing to ask for.");
+            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.Linked }), "Linked, nothing read yet.");
+            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.NoPairedModel }), "No paired model: opening the case would not help.");
+            Assert.AreEqual(
+                "Windows reads 70%",
+                AskFor(unlinked with { Headset = new PartReading(70, null, null) { ReadAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(5) } }),
+                "A figure is shown, so there is nothing to ask for.");
+        });
+    }
+
+    private static int CountDifferingPixels(Bitmap a, Bitmap b, Rectangle rect)
+    {
+        Rectangle bounds = Rectangle.Intersect(rect, new Rectangle(0, 0, Math.Min(a.Width, b.Width), Math.Min(a.Height, b.Height)));
+        int count = 0;
+        for (int y = bounds.Top; y < bounds.Bottom; y++)
+        {
+            for (int x = bounds.Left; x < bounds.Right; x++)
+            {
+                if (a.GetPixel(x, y) != b.GetPixel(x, y))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
     // The figure's own text and the charging bolt are greyed with the bar, not only the bar.
     [TestMethod]
     public void AValueThatIsNotFreshHasItsFigureTextAndItsBoltGreyedToo()
@@ -1038,7 +1124,11 @@ public sealed class WidgetCardTests
             WatcherErrorCode: null,
             WatcherErrorName: null,
             AutoPauseAvailable: autoPauseAvailable,
-            WidgetCounters.Empty);
+            WidgetCounters.Empty)
+        {
+            // A card that shows figures is one for a linked pair: opening the case near the PC is what links one.
+            Selection = BroadcastSelectionState.Linked,
+        };
 
     private static WidgetCardModel Model(
         WidgetSnapshot snapshot,

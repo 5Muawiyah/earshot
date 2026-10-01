@@ -227,6 +227,10 @@ internal static class WidgetCopy
     // Refresh: the menu item (and the name of the card's icon), and what a refresh that heard nothing says.
     public const string RefreshBattery = "Refresh battery";
     public const string OpenTheCase = "Open the case";
+
+    // What the card and the gauge say while the AirPods are connected and no pair is linked to show a battery for: opening
+    // the case next to the PC is what links one.
+    public const string OpenTheCaseToShowBattery = "Open the case to show battery";
     public const string BluetoothIsOff = "Bluetooth is off";
     public const string NotListening = "Not listening";
     public const string ReadingBattery = "Reading the battery";

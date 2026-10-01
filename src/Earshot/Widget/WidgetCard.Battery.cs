@@ -19,7 +19,17 @@ internal sealed partial class WidgetCard
         _model.Refresh?.ReadLine is { } refreshing ? refreshing
         : _model.ShownParts.WindowsPercent is int figure
             ? WidgetCopy.WindowsReads(figure)
-            : WidgetCopy.BatteryReadLine(_model.Snapshot.BatteryReadAt, _model.Now);
+            : AsksToOpenTheCase
+                ? WidgetCopy.OpenTheCaseToShowBattery
+                : WidgetCopy.BatteryReadLine(_model.ShownParts.NewestReadAt, _model.Now);
+
+    // The AirPods are connected to this PC, no pair is linked and no figure of any kind is shown: the line says what makes
+    // one show, with an earbud icon, in the place the age takes once a battery has been read.
+    internal bool AsksToOpenTheCase =>
+        !_notice
+        && _model.Snapshot.Where == AirPodsWhere.ThisPc
+        && _model.Snapshot.Selection == BroadcastSelectionState.Listening
+        && _model.ShownParts.NewestReadAt is null;
 
     // The same line as drawn beside its clock icon: the age alone ("4 min ago"), since the icon says what is aged. The
     // full line is the tooltip, and what is drawn when no icon font is installed. A line that is not an age (a refresh
@@ -28,7 +38,9 @@ internal sealed partial class WidgetCard
         _model.Refresh?.ReadLine is { } refreshing ? refreshing
         : _model.ShownParts.WindowsPercent is int figure
             ? WidgetCopy.WindowsReads(figure)
-            : WidgetCopy.ReadAge(_model.Snapshot.BatteryReadAt, _model.Now);
+            : AsksToOpenTheCase
+                ? WidgetCopy.OpenTheCaseToShowBattery
+                : WidgetCopy.ReadAge(_model.ShownParts.NewestReadAt, _model.Now);
 
     private static Color MutedInk(Color ink) => Color.FromArgb((int)Math.Round(ink.A * StaleInkOpacity), ink);
 

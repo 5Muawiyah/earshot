@@ -83,8 +83,22 @@ internal static class OwnerCaptureReplay
         return messages.OrderBy(m => m.At).ToList();
     }
 
+    // The two set-up records the replay tests were written for, by name: both hold the owner's pair with both buds
+    // in the case and the lid open (case level known). A record made later says something else (the third, from the
+    // evening of the same day, holds the pair in use with the case level unknown), so the tests never take whatever
+    // happens to be in the folder.
+    public static readonly string[] PinnedSetupRecordNames =
+    [
+        "setup-2026.10.01T01.13.18Z.json",
+        "setup-2026.10.01T01.14.14Z.json",
+    ];
+
+    // The record the pair in use with the case level unknown was saved in, by name.
+    public const string InUseSetupRecordName = "setup-2026.10.01T18.58.14Z.json";
+
+    // The pinned records that are on this machine, in the order named. A caller that needs all of them checks the count.
     public static IReadOnlyList<string> SetupRecordFiles() =>
-        Directory.Exists(SetupFolder) ? Directory.GetFiles(SetupFolder, "setup-*.json").Order().ToArray() : [];
+        PinnedSetupRecordNames.Select(name => Path.Combine(SetupFolder, name)).Where(File.Exists).ToArray();
 
     public static IReadOnlyList<string> CaptureFiles() =>
         Directory.Exists(PhaseZeroFolder) ? Directory.GetFiles(PhaseZeroFolder, "capture-*.log").Order().ToArray() : [];
@@ -258,7 +272,7 @@ public sealed class OwnerCaptureReplayTests
         ReplayResult result = ReplayRunner.Run(Baseline(), OwnersModel);
 
         ShownBattery shown = BatteryFreshness.Shown(
-            result.Left, result.Right, result.Case, PartReading.Unknown, onThisPc: true, result.LastAt + TimeSpan.FromSeconds(1));
+            result.Left, result.Right, result.Case, PartReading.Unknown, onThisPc: true, linked: true, result.LastAt + TimeSpan.FromSeconds(1));
 
         Assert.AreEqual(50, shown.Gauge?.Percent);
     }
@@ -298,9 +312,9 @@ public sealed class OwnerCaptureReplayTests
     public void TheSetupRecordsReplayToFullBudsAndAHalfFullCase()
     {
         IReadOnlyList<string> files = OwnerCaptureReplay.SetupRecordFiles();
-        if (files.Count == 0)
+        if (files.Count != OwnerCaptureReplay.PinnedSetupRecordNames.Length)
         {
-            Assert.Inconclusive("No saved set-up record is on this machine.");
+            Assert.Inconclusive("The two set-up records this test was written for are not both on this machine.");
         }
 
         foreach (string file in files)
@@ -371,7 +385,7 @@ public sealed class OwnerCaptureReplayTests
         Assert.AreEqual(false, snapshot.Case.Charging);
         Assert.AreEqual(true, snapshot.Left.Charging);
         Assert.AreEqual(true, snapshot.Right.Charging);
-        Assert.AreEqual(BroadcastSelectionState.Chosen, snapshot.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, snapshot.Selection);
         Assert.AreEqual(1, snapshot.Counters.Sets, "One set from the two senders.");
         Assert.AreEqual(0, snapshot.Counters.BudOrderDisagree);
         Assert.AreEqual(0, snapshot.Counters.ModelMismatch);
@@ -381,16 +395,16 @@ public sealed class OwnerCaptureReplayTests
             snapshot.Counters.OkForm,
             snapshot.Counters.Chosen + snapshot.Counters.OtherSet + snapshot.Counters.NoPairedModel + snapshot.Counters.ModelMismatch + snapshot.Counters.ColourMismatch,
             "Every documented-form message lands in at most one of the classes.");
-        Assert.AreEqual(50, BatteryFreshness.Shown(snapshot, now).Gauge?.Percent);
+        Assert.AreEqual(50, BatteryFreshness.Shown(snapshot with { Where = AirPodsWhere.ThisPc }, now).Gauge?.Percent, "With the AirPods connected to this PC the lower bud is on the gauge.");
     }
 
     [TestMethod]
     public void ThroughTheServiceTheSetupRecordsShowFullBudsAndAHalfFullCase()
     {
         IReadOnlyList<string> files = OwnerCaptureReplay.SetupRecordFiles();
-        if (files.Count == 0)
+        if (files.Count != OwnerCaptureReplay.PinnedSetupRecordNames.Length)
         {
-            Assert.Inconclusive("No saved set-up record is on this machine.");
+            Assert.Inconclusive("The two set-up records this test was written for are not both on this machine.");
         }
 
         foreach (string file in files)

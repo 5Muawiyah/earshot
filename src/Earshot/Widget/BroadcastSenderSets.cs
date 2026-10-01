@@ -13,9 +13,49 @@ internal static class BroadcastRules
     // Fewer messages than this in the window is a passer-by, not a median.
     public const int MinMessages = 3;
 
-    // The paired model has to have been heard this long before the first choice, so a second set nearby can
-    // show up before the first one is taken. The set with the case open sends about four messages a second.
-    public static readonly TimeSpan FirstChoiceAfter = TimeSpan.FromSeconds(2);
+    // ---- Linking on a case open
+    //
+    // The owner's pair is linked when the owner opens the case next to the PC. A pair in a case with the lid open sends
+    // a message of the paired model with the case level known (the case nibble is a level, not 0xF) about four times a
+    // second between its two buds; a pair in use sends one with the case level unknown, once every second or two. The
+    // case level is what tells the owner opening the case from every pair worn nearby.
+    //
+    // The near-PC level. The owner's pair with both buds in the case and the lid open was recorded three times (the
+    // 30 September capture and two set-up records of 1 October: about 300 messages, about four a second). The median
+    // over each window of five consecutive messages of the set ran from -72 to -51 dBm: the weakest window of all was
+    // -72, the middle window of each record was -61 to -58, and 95% of the weakest record's windows were above -70. A
+    // pair worn nearby in the evening of the same day, which was shown as the owner's, read -64 to -76 dBm with the case
+    // level unknown. So no level separates the owner from a same-model stranger who opens a case at the same distance;
+    // the level only keeps out a pair that is not next to the PC. -70 dBm is above all but a few windows of the weakest
+    // record (a link then waits a moment for a stronger window) and well below what the owner's pair usually read.
+    public const double LinkThresholdDbm = -70;
+
+    // Five case-known messages of one set inside LinkWindow, the first and the last at least LinkSpan apart: a burst of
+    // about two seconds at the case-open rate (nine messages), which one stray message, or the few a pair sends in
+    // passing as a bud leaves the case, cannot make. The window is a little over twice that burst. Of sets that qualify at
+    // the same message the strongest is linked; a set qualifies on its own message, so in practice the first to qualify is
+    // linked, and a set that opens its case later but SwitchMarginDb stronger takes the link.
+    public const int LinkMessages = 5;
+
+    public static readonly TimeSpan LinkWindow = TimeSpan.FromSeconds(5);
+
+    public static readonly TimeSpan LinkSpan = TimeSpan.FromSeconds(2);
+
+    // A linked set that is not heard under any of its addresses is followed to a set that continues its last fields
+    // (the same model, colour, case level and bud levels) only while the last value from the old address is still
+    // current: BatteryFreshness.FreshWindow. After that the new address is not taken to be the old, whatever it says.
+    public static readonly TimeSpan ContinueWithin = TimeSpan.FromSeconds(30);
+
+    // The set that continues has to have been heard this long, with MinMessages in the window, so one passing message
+    // equal to the linked set's is not followed.
+    public static readonly TimeSpan ContinueAfter = TimeSpan.FromSeconds(2);
+
+    // The link is dropped, and nothing is shown, when the linked set has not been heard under any address for this
+    // long. An address change takes seconds (the longest silence of a set in any record is a few seconds; the addresses
+    // change at a time the saved records do not show, so this figure is a margin, not a measurement), so two minutes
+    // covers one and a pair put back in the case for a moment. It does not cover a session: a pair left alone for
+    // longer than this is somebody else's by the time it is heard again, and the next case open links it.
+    public static readonly TimeSpan LostLimit = TimeSpan.FromMinutes(2);
 
     // Two senders are one set when they sent the same case level and the same two bud levels (as an unordered
     // pair) this close together, with the same model and colour. Each bud advertises on its own, so the two buds
@@ -23,7 +63,7 @@ internal static class BroadcastRules
     // with room for a missed message.
     public static readonly TimeSpan SameSetWithin = TimeSpan.FromSeconds(2);
 
-    // A sender that merely merged into the chosen set (it said what an anchor said, near it in time) becomes an anchor
+    // A sender that merely merged into the linked set (it said what an anchor said, near it in time) becomes an anchor
     // only after it has matched anchor messages this many times, the first of the run this long before the last. The
     // design assumes that a passer-by whose levels happen to equal the owner's stops matching after a message or two,
     // while the owner's other bud matches every message it sends. That is an assumption, not something that was measured:
@@ -33,25 +73,18 @@ internal static class BroadcastRules
     // already calls a median rather than a passer-by, and three seconds is the shortest run in which the case-open rate
     // (about four messages a second) gives that many while the in-use rate (a message every few seconds per bud) needs
     // longer, which is harmless: the first sender is an anchor already, and a second bud that is not one yet only means
-    // the set is chosen again, by the first-choice rule, if the first goes quiet for longer than the window. Both are
-    // design choices, not measurements: no second set was ever near the owner.
+    // the set is followed by its fields, if the first goes quiet for longer than the window. Both are design choices,
+    // not measurements: no second set was ever near the owner.
     public const int AnchorMatches = 3;
 
     public static readonly TimeSpan AnchorSpan = TimeSpan.FromSeconds(3);
 
-    // Another set takes over only when its median is at least this far above the chosen set's, for the whole
-    // of SwitchHold. 8 dB is above the largest wander of a set that did not move (6.5 dB), so the set that is
-    // not nearer does not cross it on noise in one window; 30 s is three back-to-back windows, and in the one
-    // capture long enough to check, the 20 s median did not move at all. Someone walking away with one pair
-    // while another stays near is followed within 30 s. Only one set's noise and synthetic sequences have been
+    // Another set that opens its case takes the link from the linked one only when its median is at least this far above
+    // the linked set's. 8 dB is above the largest wander of a set that did not move (6.5 dB, over the 10 s windows of the
+    // saved records), so a pair that is not nearer does not cross it on noise. It is how the owner corrects a link made
+    // to somebody else's pair: open the case next to the PC. Only one set's noise and synthetic sequences have been
     // checked: no second set was ever near the owner.
     public const double SwitchMarginDb = 8;
-
-    public static readonly TimeSpan SwitchHold = TimeSpan.FromSeconds(30);
-
-    // The chosen set and the held colour are dropped after this long with no message from it (the same hour
-    // after which the gauge drops a value), so a wrong first choice cannot lock the owner's pair out for ever.
-    public static readonly TimeSpan ReleaseAfter = TimeSpan.FromHours(1);
 
     // Bounds, so a busy neighbourhood cannot grow the selector without limit.
     public const int MaxSenders = 64;
@@ -183,6 +216,19 @@ internal static class BroadcastSenderSets
         x.Colour == y.Colour &&
         (x.BatteryB & 0x0F) == (y.BatteryB & 0x0F) &&
         SameBudPair(x.BatteryA, y.BatteryA);
+
+    // Whether a message continues what a linked set last said: the same model and colour and the same two bud levels as
+    // an unordered pair, and the same case level unless either message gives none. A pair's case level is sent only while
+    // a bud is in the case with the lid open, so the same set legitimately goes from a level to none (the buds were taken
+    // out) or back, whatever address it sends from; the bud levels and the colour are what stay.
+    internal static bool Continues(ProximityMessage last, ProximityMessage next) =>
+        last.Model == next.Model &&
+        last.Colour == next.Colour &&
+        SameBudPair(last.BatteryA, next.BatteryA) &&
+        ((last.BatteryB & 0x0F) == (next.BatteryB & 0x0F) || !CaseKnown(last) || !CaseKnown(next));
+
+    // A message whose case nibble is a level. 0xF, and 11 to 14, are not.
+    internal static bool CaseKnown(ProximityMessage message) => BatteryNibble.ToPercent(message.BatteryB & 0x0F) is not null;
 
     private static bool SameBudPair(byte first, byte second)
     {

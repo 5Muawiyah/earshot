@@ -123,7 +123,9 @@ internal sealed partial class WidgetCardPresenter
             return null;
         }
 
-        return _callbacks.CurrentSnapshot().BatteryReadAt is { } readAt && readAt >= _refreshStartedAt ? null : view;
+        // A reading that is not shown (the AirPods are not on this PC, or are not linked) does not supersede it.
+        DateTimeOffset? shownAt = BatteryFreshness.Shown(_callbacks.CurrentSnapshot(), _time.GetUtcNow()).NewestReadAt;
+        return shownAt is { } readAt && readAt >= _refreshStartedAt ? null : view;
     }
 
     private void ForgetRefreshOutcome()

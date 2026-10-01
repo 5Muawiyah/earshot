@@ -16,13 +16,37 @@ internal readonly record struct ShownPart(int? Percent, bool? Charging, bool Fre
 internal sealed record GaugeFigure(int Percent, BatterySource Source, int? Left, int? Right, bool Charging, DateTimeOffset ReadAt);
 
 // What every surface shows of the battery, worked out once: the card, the gauge and the low battery alert all
-// read this, so "what is shown" has one definition.
+// read this, so "what is shown" has one definition. Nothing is shown unless the owner's AirPods are connected to this
+// PC: not as current and not greyed, because a figure for AirPods that are not here is a figure for nothing the person
+// can use, and once they are not here it may be another pair's.
 //   Left, Right, Case: the values as last read, each with whether it is fresh.
 //   WindowsPercent: Windows' own Hands-Free figure, set only when it is what is shown: no bud has a fresh
 //   broadcast value and the figure is current. It is one figure for the headset, never a bud's or the case's.
 //   Gauge: the number the gauge draws, or null for the mark alone.
 internal sealed record ShownBattery(
-    ShownPart Left, ShownPart Right, ShownPart Case, int? WindowsPercent, DateTimeOffset? WindowsReadAt, GaugeFigure? Gauge);
+    ShownPart Left, ShownPart Right, ShownPart Case, int? WindowsPercent, DateTimeOffset? WindowsReadAt, GaugeFigure? Gauge)
+{
+    public static ShownBattery None { get; } = new(ShownPart.None, ShownPart.None, ShownPart.None, null, null, null);
+
+    // When the figures that are shown were last read: the newest of the parts', or Windows' figure's time. A part that
+    // is old greys by itself and must not make buds that were just heard read as old. Null when nothing is shown.
+    public DateTimeOffset? NewestReadAt
+    {
+        get
+        {
+            DateTimeOffset? newest = WindowsReadAt;
+            foreach (ShownPart part in new[] { Left, Right, Case })
+            {
+                if (part.ReadAt is DateTimeOffset at && (newest is null || at > newest))
+                {
+                    newest = at;
+                }
+            }
+
+            return newest;
+        }
+    }
+}
 
 // How old a battery value may be and still be shown as current, or at all. Pure: now is handed in.
 internal static class BatteryFreshness
@@ -62,12 +86,29 @@ internal static class BatteryFreshness
     public static ShownBattery Shown(WidgetSnapshot snapshot, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        return Shown(snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset, snapshot.Where == AirPodsWhere.ThisPc, now);
+        return Shown(
+            snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset,
+            onThisPc: snapshot.Where == AirPodsWhere.ThisPc, linked: snapshot.Selection == BroadcastSelectionState.Linked, now);
     }
 
+    // onThisPc: the owner's AirPods are connected to this PC; nothing at all is shown otherwise. linked: the broadcast's
+    // set is the one linked to the owner's pair (a case opened near the PC); the buds and the case are shown only then,
+    // since an unlinked broadcast may be any pair's. Windows' own figure is for the connected headset and needs no link.
     public static ShownBattery Shown(
-        PartReading left, PartReading right, PartReading caseReading, PartReading headset, bool onThisPc, DateTimeOffset now)
+        PartReading left, PartReading right, PartReading caseReading, PartReading headset, bool onThisPc, bool linked, DateTimeOffset now)
     {
+        if (!onThisPc)
+        {
+            return ShownBattery.None;
+        }
+
+        if (!linked)
+        {
+            left = PartReading.Unknown;
+            right = PartReading.Unknown;
+            caseReading = PartReading.Unknown;
+        }
+
         ShownPart l = Part(left, now);
         ShownPart r = Part(right, now);
         ShownPart c = Part(caseReading, now);

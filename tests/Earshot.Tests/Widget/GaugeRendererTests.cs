@@ -203,7 +203,7 @@ public sealed class GaugeRendererTests
     private static GaugeContent ContentAt(int percent, GaugeDisplaySettings settings)
     {
         var buds = new PartReading(percent, null, null) { ReadAt = Now };
-        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc, Left = buds, Right = buds };
+        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc, Selection = BroadcastSelectionState.Linked, Left = buds, Right = buds };
         return GaugeContent.From(snapshot, Now, settings);
     }
 
@@ -372,7 +372,7 @@ public sealed class GaugeRendererTests
     public void ASnapshotDrawsThroughTheContentRules()
     {
         var buds = new PartReading(70, true, null) { ReadAt = Now - TimeSpan.FromMinutes(2) };
-        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc, Left = buds, Right = buds with { Percent = 60 } };
+        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc, Selection = BroadcastSelectionState.Linked, Left = buds, Right = buds with { Percent = 60 } };
         GaugeLayout layout = GaugeLayout.For(96);
 
         using Bitmap bitmap = GaugeRenderer.Render(snapshot, Now, 96, 48, Color.Black, hover: false, FontFamily, accent: Accent);

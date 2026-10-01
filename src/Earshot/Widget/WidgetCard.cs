@@ -705,7 +705,7 @@ internal sealed partial class WidgetCard : Form
             ShownBattery shown = _model.ShownParts;
             DrawEarbudColumn(g, layout.Left, _model.Snapshot.Left, shown.Left, mirror: false);
             DrawEarbudColumn(g, layout.Right, _model.Snapshot.Right, shown.Right, mirror: true);
-            DrawCaseColumn(g, layout.Case, _model.Snapshot.Case, shown.Case);
+            DrawCaseColumn(g, layout.Case, shown.Case);
         }
 
         DrawIconLine(g, layout.WhereLine, FluentGlyphs.Location, WhereLineText, WhereLineText);
@@ -715,7 +715,7 @@ internal sealed partial class WidgetCard : Form
         }
         else
         {
-            DrawIconLine(g, layout.ReadLine, FluentGlyphs.Clock, ReadLineShort, ReadLineText);
+            DrawIconLine(g, layout.ReadLine, AsksToOpenTheCase ? FluentGlyphs.Earbud : FluentGlyphs.Clock, ReadLineShort, ReadLineText);
         }
 
         if (layout.ShowUpdateLine)
@@ -1030,10 +1030,10 @@ internal sealed partial class WidgetCard : Form
             DrawInEarMark(g, column.Glyph, mirror);
         }
 
-        DrawBatteryPart(g, column, part, shown.Fresh);
+        DrawBatteryPart(g, column, shown);
     }
 
-    private void DrawCaseColumn(Graphics g, WidgetCardLayout.ColumnLayout column, PartReading part, ShownPart shown)
+    private void DrawCaseColumn(Graphics g, WidgetCardLayout.ColumnLayout column, ShownPart shown)
     {
         (GraphicsPath lid, GraphicsPath box) = CaseGlyphPaths(column.Glyph);
         using (lid)
@@ -1044,15 +1044,15 @@ internal sealed partial class WidgetCard : Form
             g.FillPath(brush, box);
         }
 
-        DrawBatteryPart(g, column, part, shown.Fresh);
+        DrawBatteryPart(g, column, shown);
     }
 
     // The bar and the charging bolt are absent entirely when Percent is null: there is nothing to show a
     // bar or a bolt for. The words "No reading" take the percent line's own place instead (the owner's own
     // instruction): never a number, never a dash standing in for a reading that was never taken.
-    private void DrawBatteryPart(Graphics g, WidgetCardLayout.ColumnLayout column, PartReading part, bool fresh)
+    private void DrawBatteryPart(Graphics g, WidgetCardLayout.ColumnLayout column, ShownPart shown)
     {
-        if (part.Percent is not { } percent)
+        if (shown.Percent is not { } percent)
         {
             DrawLine(g, column.Percent, WidgetCopy.Percent(null), _palette.Status);
             return;
@@ -1068,17 +1068,17 @@ internal sealed partial class WidgetCard : Form
         {
             // The bar is filled with the accent colour, never a fixed blue, and with the muted ink when the value
             // is not fresh.
-            using var fill = new SolidBrush(fresh ? Colours.Accent : MutedInk(_palette.Title));
+            using var fill = new SolidBrush(shown.Fresh ? Colours.Accent : MutedInk(_palette.Title));
             g.FillRectangle(fill, column.Bar.X, column.Bar.Y, filled, column.Bar.Height);
         }
 
-        if (part.Charging == true)
+        if (shown.Charging == true)
         {
-            DrawBolt(g, column.Bar, fresh);
+            DrawBolt(g, column.Bar, shown.Fresh);
         }
 
         using Font font = _type.Role(TypeRole.Number);
-        using var textBrush = new SolidBrush(fresh ? _palette.Status : MutedInk(_palette.Status));
+        using var textBrush = new SolidBrush(shown.Fresh ? _palette.Status : MutedInk(_palette.Status));
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
         g.DrawString(WidgetCopy.Percent(percent), font, textBrush, new RectangleF(column.Percent.X, column.Percent.Y, column.Percent.Width, column.Percent.Height), format);
     }
