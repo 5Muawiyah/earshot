@@ -78,7 +78,7 @@ appear in the menu.
 
 <br clear="all">
 
-<img src="images/connect-card.png" alt="The small card Earshot shows near the tray after a connect" width="360" align="right">
+<img src="images/connect-card.png" alt="An earlier version of the small card Earshot shows near the tray after a connect" width="360" align="right">
 
 ## The connect and disconnect card
 
@@ -92,7 +92,7 @@ driver refusal.
 
 <br clear="all">
 
-<img src="images/boot-block.png" alt="The card Earshot shows when the AirPods are blocked at boot" width="360" align="right">
+<img src="images/boot-block.png" alt="An earlier version of the card Earshot shows when the AirPods are blocked at boot" width="360" align="right">
 
 ## The boot block
 
@@ -106,7 +106,7 @@ so nothing has to run at shutdown. The power cycle test that checks this (test
 
 <br clear="all">
 
-<img src="images/audio-protection.png" alt="The card Earshot shows when audio quality protection is switched on" width="360" align="right">
+<img src="images/audio-protection.png" alt="An earlier version of the card Earshot shows when audio quality protection is switched on" width="360" align="right">
 
 ## Audio quality protection
 
@@ -431,9 +431,9 @@ display leaves it shown. With one display nothing changes: a full-screen
 application hides the gauge. Presentation settings, which are the owner's own
 switch and not a window, hide it on every display.
 
-<img src="images/widget-gauge.png" alt="An earlier version of Earshot's taskbar gauge, showing made-up values" width="220" align="right">
+<img src="images/widget-gauge.png" alt="Earshot's taskbar gauge: a ring round the earbud mark, the number 55 and a charging bolt" width="220" align="right">
 
-<p align="center"><i>Pending: this picture shows the gauge before the ring design, with made-up values, rendered by Earshot's own code. A new picture is owed.</i></p>
+<p align="center"><i>The taskbar gauge in the light theme, charging, with made-up values, rendered by Earshot's own code.</i></p>
 
 <br clear="all">
 
@@ -454,15 +454,15 @@ not read yet`) beside a refresh control, a line `Version <number> is
 available` when a check found a newer release, and the Connect or Disconnect
 button.
 
-<img src="images/widget-card-light.png" alt="An earlier version of the widget card in the light theme, showing made-up values" width="320" align="right">
+<img src="images/widget-card-light.png" alt="The widget card in the light theme, with the left bud, right bud and case at 70, 60 and 90 percent" width="320" align="right">
 
-<p align="center"><i>Pending: this picture shows the card before the gear and settings page, with made-up values, rendered by Earshot's own code onto one measured sample of Windows' own card backdrop colour. A new picture is owed.</i></p>
+<p align="center"><i>The widget card in the light theme, with made-up values, rendered by Earshot's own code onto one sample of the card's backdrop colour.</i></p>
 
 <br clear="all">
 
-<img src="images/widget-card-dark.png" alt="An earlier version of the widget card in the dark theme, showing made-up values" width="320" align="right">
+<img src="images/widget-card-dark.png" alt="The widget card in the dark theme, with the left bud, right bud and case at 70, 60 and 90 percent" width="320" align="right">
 
-<p align="center"><i>Pending: the same earlier card in the dark theme. A new picture is owed.</i></p>
+<p align="center"><i>The same card in the dark theme, with the same made-up values.</i></p>
 
 <br clear="all">
 
@@ -510,12 +510,6 @@ The low battery alert's own on and off is a tick in the right-click menu.
 taskbar when the AirPods' case is opened near the PC. It never would have
 connected the AirPods by itself. It is off: Earshot does not decode the lid, so
 nothing can show it, and it has no menu item or settings row.
-
-<img src="images/widget-case-open.png" alt="An earlier version of the case-open card, showing made-up values" width="320" align="right">
-
-<p align="center"><i>Pending: an earlier picture of the case-open card, rendered by Earshot's own code from made-up values. The card is off, and no new picture is owed.</i></p>
-
-<br clear="all">
 
 **The low battery alert.** A Windows notification, or the card if a
 notification cannot be shown, the moment a shown value first reads at or below

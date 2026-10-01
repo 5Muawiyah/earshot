@@ -8,7 +8,7 @@
 
 </div>
 
-<p align="center"><img src="docs/images/hero.png" alt="Earshot's icon in the tray, with its card above it saying Connected" width="100%"></p>
+<p align="center"><img src="docs/images/hero.png" alt="An earlier version of Earshot's icon in the tray, with its card above it saying Connected" width="100%"></p>
 
 <p align="center"><i>Earshot in the tray: click the icon, then Connect on the card, and it says what happened.</i></p>
 
