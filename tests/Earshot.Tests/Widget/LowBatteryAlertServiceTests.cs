@@ -190,6 +190,24 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         Assert.AreEqual(0, _notifier.Calls.Count);
     }
 
+    // The alert follows what is shown, and nothing is shown for AirPods that are not on this PC.
+    [TestMethod]
+    public void ALowBroadcastValueNeverAlertsWhileTheAirPodsAreNotOnThisPc()
+    {
+        using LowBatteryAlertService service = NewService();
+
+        foreach (AirPodsWhere where in new[] { AirPodsWhere.Unknown, AirPodsWhere.Elsewhere, AirPodsWhere.NotInUse })
+        {
+            _status.Raise(Snapshot(left: 10, right: 10, box: 10, where: where));
+        }
+
+        Assert.AreEqual(0, _notifier.Calls.Count, "No figure is shown, so none alerts.");
+        Assert.AreEqual(LatchState.Armed, service.LeftLatchStateForTest);
+
+        _status.Raise(Snapshot(left: 10, where: AirPodsWhere.ThisPc));
+        Assert.AreEqual(1, _notifier.Calls.Count, "Once the AirPods are on this PC the same value is shown and alerts.");
+    }
+
     // The setting gates only the notification call. The latch keeps being fed while the setting is off, so its
     // Armed/Fired bookkeeping never falls out of step with the real battery: turning the alert back on must not
     // immediately re-fire for a part that has been low the whole time, only for a genuine new drop.

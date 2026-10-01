@@ -155,6 +155,25 @@ public sealed class BatteryFreshnessTests
         Assert.IsNull(shown.Gauge);
     }
 
+    // Nothing the broadcast or Windows read is a figure for AirPods that are not on this PC: not as current, not greyed.
+    [TestMethod]
+    public void NoFigureOfAnyKindIsShownForAirPodsThatAreNotOnThisPc()
+    {
+        ShownBattery shown = BatteryFreshness.Shown(
+            Part(70, Seconds(1)), Part(60, Seconds(1)), Part(90, Seconds(1)), Part(50, Seconds(1)), onThisPc: false, Now);
+        ShownBattery old = BatteryFreshness.Shown(
+            Part(70, TimeSpan.FromMinutes(5)), Part(60, TimeSpan.FromMinutes(5)), Part(90, TimeSpan.FromMinutes(5)), PartReading.Unknown, onThisPc: false, Now);
+
+        foreach (ShownBattery each in new[] { shown, old })
+        {
+            Assert.IsFalse(each.Left.HasValue, "No left figure.");
+            Assert.IsFalse(each.Right.HasValue, "No right figure.");
+            Assert.IsFalse(each.Case.HasValue, "No case figure.");
+            Assert.IsNull(each.WindowsPercent);
+            Assert.IsNull(each.Gauge);
+        }
+    }
+
     [TestMethod]
     public void WithWindowsFigureAndAnOldBroadcastTheWindowsFigureIsTheGauge()
     {

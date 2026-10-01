@@ -395,7 +395,7 @@ public sealed class OwnerCaptureReplayTests
             snapshot.Counters.OkForm,
             snapshot.Counters.Chosen + snapshot.Counters.OtherSet + snapshot.Counters.NoPairedModel + snapshot.Counters.ModelMismatch + snapshot.Counters.ColourMismatch,
             "Every documented-form message lands in at most one of the classes.");
-        Assert.AreEqual(50, BatteryFreshness.Shown(snapshot, now).Gauge?.Percent);
+        Assert.AreEqual(50, BatteryFreshness.Shown(snapshot with { Where = AirPodsWhere.ThisPc }, now).Gauge?.Percent, "With the AirPods connected to this PC the lower bud is on the gauge.");
     }
 
     [TestMethod]

@@ -19,7 +19,7 @@ internal sealed partial class WidgetCard
         _model.Refresh?.ReadLine is { } refreshing ? refreshing
         : _model.ShownParts.WindowsPercent is int figure
             ? WidgetCopy.WindowsReads(figure)
-            : WidgetCopy.BatteryReadLine(_model.Snapshot.BatteryReadAt, _model.Now);
+            : WidgetCopy.BatteryReadLine(_model.ShownParts.NewestReadAt, _model.Now);
 
     // The same line as drawn beside its clock icon: the age alone ("4 min ago"), since the icon says what is aged. The
     // full line is the tooltip, and what is drawn when no icon font is installed. A line that is not an age (a refresh
@@ -28,7 +28,7 @@ internal sealed partial class WidgetCard
         _model.Refresh?.ReadLine is { } refreshing ? refreshing
         : _model.ShownParts.WindowsPercent is int figure
             ? WidgetCopy.WindowsReads(figure)
-            : WidgetCopy.ReadAge(_model.Snapshot.BatteryReadAt, _model.Now);
+            : WidgetCopy.ReadAge(_model.ShownParts.NewestReadAt, _model.Now);
 
     private static Color MutedInk(Color ink) => Color.FromArgb((int)Math.Round(ink.A * StaleInkOpacity), ink);
 
