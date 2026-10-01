@@ -37,9 +37,14 @@ public sealed class CaseOpenedEventArgs(DateTimeOffset at) : EventArgs
 }
 
 // Every reading of the chosen set, decoded, as WidgetStatusService applied it to its own state.
-public sealed class ReadingAppliedEventArgs(DecodedReading reading, DateTimeOffset at) : EventArgs
+public sealed class ReadingAppliedEventArgs(DecodedReading reading, DateTimeOffset at, long selectionGeneration = 0) : EventArgs
 {
     public DecodedReading Reading { get; } = reading;
 
     public DateTimeOffset At { get; } = at;
+
+    // How many times the chosen set has changed when this reading was applied (a first choice, a switch to another set,
+    // a set chosen again after every chosen sender went quiet, a new paired model). Two readings with different values
+    // come from different sets, so what one set showed is never compared with what another does.
+    public long SelectionGeneration { get; } = selectionGeneration;
 }

@@ -40,6 +40,8 @@ internal sealed class TracingMediaSessions : IMediaSessions
 
     public Func<Task<bool>>? OnPause { get; set; }
 
+    public bool ReportsChanges => true;
+
     public List<string> PauseCalls { get; } = new();
 
     public List<string> PlayCalls { get; } = new();

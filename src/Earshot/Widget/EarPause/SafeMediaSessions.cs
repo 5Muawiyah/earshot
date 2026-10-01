@@ -27,6 +27,8 @@ internal sealed class SafeMediaSessions : IMediaSessions
         remove => _inner.PlaybackInfoChanged -= value;
     }
 
+    public bool ReportsChanges => _inner.ReportsChanges;
+
     public Task<IReadOnlyList<MediaSessionView>> ReadAsync(CancellationToken ct) => _inner.ReadAsync(ct);
 
     public Task<bool> TryPauseAsync(string sessionId, CancellationToken ct) => Refuse("pause");

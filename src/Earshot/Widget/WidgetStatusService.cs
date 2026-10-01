@@ -86,6 +86,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private PartReading _headset = PartReading.Unknown;
     private bool? _lastLeftInEar;
     private bool? _lastRightInEar;
+    private long _selectionGeneration;
     private DateTimeOffset? _earReadAt;
     private DateTimeOffset? _lastChosenAt;
     private bool _lidOpenBitSeen;
@@ -1085,6 +1086,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool caseOpenedEdge = false;
         DateTimeOffset caseOpenedAt = at;
         DecodedReading? applied = null;
+        long generation = 0;
         RefreshState? heard = null;
 
         lock (_gate)
@@ -1130,7 +1132,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             }
             else if (seen.Reacquired)
             {
-                // The values on show stay, greyed as they age, until this set's own messages replace them.
+                // The values on show stay, greyed as they age, until this set's own messages replace them. The in-ear
+                // state does not: a set chosen again may be another pair, so whoever pairs readings by set is told.
+                _selectionGeneration++;
                 _log.Info("Widget: the chosen set went quiet, and a set of AirPods was picked out again (" + seen.SetsInRange + " in range).");
             }
 
@@ -1159,6 +1163,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             CheckBudOrderLocked(reading, tag, at);
             caseOpenedEdge = ApplyDecodedReadingLocked(reading, _table, at);
             applied = reading;
+            generation = _selectionGeneration;
 
             // A message of the chosen set sent after the refresh restarted the listen is the answer it waits for.
             if (_refresh is { } waiting && at >= waiting.StartedAt)
@@ -1179,7 +1184,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         if (applied is DecodedReading decoded)
         {
-            _uiPost(() => ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(decoded, at)));
+            _uiPost(() => ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(decoded, at, generation)));
         }
     }
 
@@ -1209,6 +1214,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // of the old values may be shown against the new pair.
     private void ResetReadingsLocked()
     {
+        _selectionGeneration++;
         _left = PartReading.Unknown;
         _right = PartReading.Unknown;
         _case = PartReading.Unknown;

@@ -20,7 +20,8 @@ public sealed class WindowsMediaSessionsTests
         }
 
         var log = new CapturingLog();
-        var sessions = new WindowsMediaSessions(log);
+        using var sessions = new WindowsMediaSessions(log);
+        Assert.IsFalse(sessions.ReportsChanges, "Nothing is listened to before the manager has been reached.");
 
         IReadOnlyList<MediaSessionView> views = await sessions.ReadAsync(CancellationToken.None);
 
@@ -34,6 +35,36 @@ public sealed class WindowsMediaSessionsTests
         // with nothing open is a valid answer, not a failure. The point of this test is that reading never
         // throws and never controls anything, proved by PauseCalls/PlayCalls not existing on the real type.
         Assert.IsNotNull(views);
+    }
+
+    // The real session manager's own events are attached (the manager's SessionsChanged and each session's
+    // PlaybackInfoChanged): reading is all that is done, nothing is paused or played, and Dispose takes the listening off
+    // again. Whether Windows delivers a change when a player is pressed needs a person at a player and is not claimed here.
+    [TestMethod]
+    public async Task TheRealSourceListensToWindowsChangeEventsAfterItsFirstReadAndStopsOnDispose()
+    {
+        if (!WidgetPlatformGuard.HasMediaSessions)
+        {
+            Assert.Inconclusive("This build of Windows has no media session manager to check.");
+            return;
+        }
+
+        var log = new CapturingLog();
+        var sessions = new WindowsMediaSessions(log);
+        await sessions.ReadAsync(CancellationToken.None);
+
+        if (log.Has(Earshot.Contracts.LogLevel.Warn, "Could not read media sessions"))
+        {
+            sessions.Dispose();
+            Assert.Inconclusive("No media session manager is available on this machine.");
+            return;
+        }
+
+        Assert.IsTrue(sessions.ReportsChanges, "The events were attached." + string.Join(" | ", log.Entries.Select(e => e.Message)));
+        Assert.IsFalse(log.Has(Earshot.Contracts.LogLevel.Warn, "Could not"), "Nothing failed on the way.");
+
+        sessions.Dispose();
+        Assert.IsFalse(sessions.ReportsChanges, "A disposed source is not listening.");
     }
 
     // SourceAppUserModelId is the only session identifier the real API gives, and two sessions from the same

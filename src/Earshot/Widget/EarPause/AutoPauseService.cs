@@ -104,7 +104,8 @@ internal sealed class AutoPauseService : IDisposable
                 current.Where,
                 device.DefaultRenderContainerId,
                 watchedContainerId,
-                ct).ConfigureAwait(false);
+                ct,
+                e.SelectionGeneration).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

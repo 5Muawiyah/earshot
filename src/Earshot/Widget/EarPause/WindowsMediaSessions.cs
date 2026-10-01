@@ -12,11 +12,23 @@ namespace Earshot.Widget.EarPause;
 //
 // Read-only probe on this PC, 2026-09-27, a console exe with no package identity: RequestAsync succeeded,
 // GetSessions().Count was 2, and a session's PlaybackStatus and Controls.IsPauseEnabled read correctly.
-// Nothing was paused by the probe. Stage 2's PlaybackInfoChanged wiring is not built yet: the event exists
-// on the seam and is simply never raised here, which is what leaving stage 2 out looks like.
-internal sealed class WindowsMediaSessions : IMediaSessions
+// Nothing was paused by the probe.
+//
+// PlaybackInfoChanged is raised from the manager's documented events: SessionsChanged (a session came or went) and,
+// for each current session, that session's own PlaybackInfoChanged. The listening starts the first time the manager
+// is reached (the pause path reads before it acts, so it is in place before Earshot pauses anything) and ReportsChanges
+// stays false until it is. A player pressed by hand is therefore seen by whoever listens; its delivery has not had a
+// live run.
+// https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessionmanager.sessionschanged
+// https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession.playbackinfochanged
+internal sealed class WindowsMediaSessions : IMediaSessions, IDisposable
 {
     private readonly ILog _log;
+    private readonly Lock _gate = new();
+    private readonly List<WatchedSession> _watched = new();
+    private GlobalSystemMediaTransportControlsSessionManager? _manager;
+    private bool _reporting;
+    private bool _disposed;
 
     public WindowsMediaSessions(ILog log)
     {
@@ -24,14 +36,226 @@ internal sealed class WindowsMediaSessions : IMediaSessions
         _log = log;
     }
 
-    // Stage 2 is not built: nothing here ever raises this, so the field-like form (which warns on a never
-    // raised event) is replaced with explicit accessors over a field that is genuinely referenced.
     private EventHandler<string>? _playbackInfoChanged;
 
     public event EventHandler<string>? PlaybackInfoChanged
     {
         add => _playbackInfoChanged += value;
         remove => _playbackInfoChanged -= value;
+    }
+
+    // True once the manager's events and every current session's are attached, until this is disposed.
+    public bool ReportsChanges
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _reporting && !_disposed;
+            }
+        }
+    }
+
+    // One session being listened to: the session, the handler attached to it, and the id this class gives it.
+    private sealed class WatchedSession(GlobalSystemMediaTransportControlsSession session, TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs> handler, string id)
+    {
+        public GlobalSystemMediaTransportControlsSession Session { get; } = session;
+
+        public TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs> Handler { get; } = handler;
+
+        public string Id { get; set; } = id;
+    }
+
+    // Starts listening, once, with the manager the caller has just reached. A failure is logged and leaves
+    // ReportsChanges false, so nothing is resumed through a source that is not listening.
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    private void EnsureWatching(GlobalSystemMediaTransportControlsSessionManager manager)
+    {
+        lock (_gate)
+        {
+            if (_manager is not null || _disposed)
+            {
+                return;
+            }
+
+            try
+            {
+                manager.SessionsChanged += OnSessionsChanged;
+                _manager = manager;
+                SyncLocked(manager, announce: null);
+                _reporting = true;
+            }
+            catch (Exception ex)
+            {
+                _reporting = false;
+                LogFailure("listen for media session changes", ex);
+                try
+                {
+                    // Whatever was attached comes off again, so the next time the manager is reached this tries afresh.
+                    DetachLocked();
+                }
+                catch (Exception detachEx)
+                {
+                    LogFailure("undo a partly made listen for media session changes", detachEx);
+                }
+            }
+        }
+    }
+
+    // Brings the listened-to sessions in line with the manager's current ones. Ids of sessions that came or went are
+    // added to announce when it is given (the first sync is silent: those sessions were there already).
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    private void SyncLocked(GlobalSystemMediaTransportControlsSessionManager manager, List<string>? announce)
+    {
+        IReadOnlyList<GlobalSystemMediaTransportControlsSession> current = manager.GetSessions();
+        var seenAppIds = new Dictionary<string, int>(StringComparer.Ordinal);
+        var currentIds = new string[current.Count];
+        for (int i = 0; i < current.Count; i++)
+        {
+            string appId = current[i].SourceAppUserModelId;
+            int index = seenAppIds.TryGetValue(appId, out int count) ? count : 0;
+            seenAppIds[appId] = index + 1;
+            currentIds[i] = ComposeSessionId(appId, index);
+        }
+
+        for (int i = _watched.Count - 1; i >= 0; i--)
+        {
+            WatchedSession watched = _watched[i];
+            if (!current.Any(s => ReferenceEquals(s, watched.Session)))
+            {
+                watched.Session.PlaybackInfoChanged -= watched.Handler;
+                announce?.Add(watched.Id);
+                _watched.RemoveAt(i);
+            }
+        }
+
+        for (int i = 0; i < current.Count; i++)
+        {
+            WatchedSession? existing = _watched.FirstOrDefault(w => ReferenceEquals(w.Session, current[i]));
+            if (existing is not null)
+            {
+                existing.Id = currentIds[i];
+                continue;
+            }
+
+            TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs> handler = OnSessionPlaybackInfoChanged;
+            current[i].PlaybackInfoChanged += handler;
+            _watched.Add(new WatchedSession(current[i], handler, currentIds[i]));
+            announce?.Add(currentIds[i]);
+        }
+    }
+
+    // WinRT calls this on a thread of its own: nothing may escape it.
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, SessionsChangedEventArgs args)
+    {
+        var changed = new List<string>();
+        try
+        {
+            lock (_gate)
+            {
+                if (_disposed || _manager is null)
+                {
+                    return;
+                }
+
+                SyncLocked(_manager, changed);
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (_gate)
+            {
+                _reporting = false;
+            }
+
+            LogFailure("follow a change of media sessions", ex);
+            return;
+        }
+
+        foreach (string id in changed)
+        {
+            Raise(id);
+        }
+    }
+
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    private void OnSessionPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args)
+    {
+        string id;
+        try
+        {
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                id = _watched.FirstOrDefault(w => ReferenceEquals(w.Session, sender))?.Id ?? sender.SourceAppUserModelId;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogFailure("read which media session changed", ex);
+            return;
+        }
+
+        Raise(id);
+    }
+
+    // A subscriber that throws must not take Windows' callback thread down with it.
+    private void Raise(string sessionId)
+    {
+        try
+        {
+            _playbackInfoChanged?.Invoke(this, sessionId);
+        }
+        catch (Exception ex)
+        {
+            LogFailure("tell a listener that media session " + sessionId + " changed", ex);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _reporting = false;
+            try
+            {
+                if (WidgetPlatformGuard.HasMediaSessions)
+                {
+                    DetachLocked();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogFailure("stop listening for media session changes", ex);
+            }
+        }
+    }
+
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    private void DetachLocked()
+    {
+        foreach (WatchedSession watched in _watched)
+        {
+            watched.Session.PlaybackInfoChanged -= watched.Handler;
+        }
+
+        _watched.Clear();
+        if (_manager is not null)
+        {
+            _manager.SessionsChanged -= OnSessionsChanged;
+            _manager = null;
+        }
     }
 
     public async Task<IReadOnlyList<MediaSessionView>> ReadAsync(CancellationToken ct)
@@ -52,6 +276,7 @@ internal sealed class WindowsMediaSessions : IMediaSessions
             return Array.Empty<MediaSessionView>();
         }
 
+        EnsureWatching(manager);
         var views = new List<MediaSessionView>();
         var seenAppIds = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (GlobalSystemMediaTransportControlsSession session in manager.GetSessions())
@@ -92,6 +317,7 @@ internal sealed class WindowsMediaSessions : IMediaSessions
         {
             GlobalSystemMediaTransportControlsSessionManager manager =
                 await GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask(ct).ConfigureAwait(false);
+            EnsureWatching(manager);
             GlobalSystemMediaTransportControlsSession? session = FindSession(manager, sessionId, pause);
             if (session is null)
             {

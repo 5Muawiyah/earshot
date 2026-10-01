@@ -11,6 +11,9 @@ internal sealed class FakeMediaSessions : IMediaSessions
 
     public bool PlayResult { get; set; } = true;
 
+    // False stands in for a source that cannot say when playback changed (it raises no event whatever happens).
+    public bool ReportsChanges { get; set; } = true;
+
     public List<string> PauseCalls { get; } = new();
 
     public List<string> PlayCalls { get; } = new();

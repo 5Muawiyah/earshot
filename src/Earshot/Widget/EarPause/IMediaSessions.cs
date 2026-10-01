@@ -21,6 +21,11 @@ internal interface IMediaSessions
 
     Task<bool> TryPlayAsync(string sessionId, CancellationToken ct);
 
-    // The session id whose playback info changed, for stage 2. Raised on whatever thread Windows calls back on.
+    // The session id whose playback info changed. Raised on whatever thread Windows calls back on.
     event EventHandler<string>? PlaybackInfoChanged;
+
+    // Whether PlaybackInfoChanged is really listening to Windows right now. Resuming what Earshot paused is only safe
+    // when a play or pause made by hand in between would have been reported; a source that cannot say so (or whose
+    // subscription failed) must answer false and nothing is resumed through it.
+    bool ReportsChanges { get; }
 }

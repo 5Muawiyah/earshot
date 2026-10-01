@@ -6,6 +6,11 @@ namespace Earshot.Widget.EarPause;
 // that same session when AutoResume's conditions all hold (see its header). Pause when the AirPods leave this PC is a
 // different feature (PauseOnLeave) and never resumes anything.
 //
+// Nothing is resumed over something the person did by hand only as far as Windows reports it: the session manager's
+// change events cancel the remembered pause, and a read of the sessions just before resuming must still find the
+// paused session paused and nothing else playing. A source that is not listening to those events (ReportsChanges false)
+// resumes nothing, so the guarantee is never made on a read alone.
+//
 // Ear detection is inactive today. The in-ear value comes from two bits of the broadcast's status byte, and neither
 // permitted description of the message says which bits those are, nor does any saved capture, so the decode table
 // sets none and every reading carries a null in-ear value for both buds. Nothing here invents a bit: with null values
@@ -26,6 +31,7 @@ internal sealed class AutoPause : IDisposable
 
     private InEarState _left;
     private InEarState _right;
+    private long _generation;
 
     public AutoPause(IMediaSessions sessions, Func<bool> autoPauseEnabled, ILog log, TimeProvider? time = null)
     {
@@ -76,7 +82,8 @@ internal sealed class AutoPause : IDisposable
         AirPodsWhere where,
         Guid defaultRenderContainerId,
         Guid watchedContainerId,
-        CancellationToken ct)
+        CancellationToken ct,
+        long selectionGeneration = 0)
     {
         bool rendersToAirPods = where == AirPodsWhere.ThisPc && watchedContainerId != Guid.Empty && defaultRenderContainerId == watchedContainerId;
 
@@ -85,8 +92,23 @@ internal sealed class AutoPause : IDisposable
         InEarState beforeLeft;
         InEarState beforeRight;
         ResumeDecision decision;
+        bool setChanged = false;
+        bool forgotPause = false;
         lock (_gate)
         {
+            // In-ear values and a remembered pause belong to one chosen set. When the chosen set is not the one the
+            // earlier readings came from (a first choice, a switch to a nearer pair, a set chosen again after the
+            // addresses rotated), none of that is carried over: a bud of one pair "in" and a bud of another "out" is not
+            // a bud leaving, and another pair's bud being in is not the paused pair's bud coming back.
+            if (selectionGeneration != _generation)
+            {
+                _generation = selectionGeneration;
+                _left = default;
+                _right = default;
+                forgotPause = _resume.Forget();
+                setChanged = true;
+            }
+
             // A bud's bit going true to false since the last reading of the chosen set, taken only against a previous
             // value that is itself fresh: an old "in" must never pair with a new "out". Only the chosen set's readings
             // reach here, so another pair's can neither cause nor hide an edge.
@@ -108,12 +130,23 @@ internal sealed class AutoPause : IDisposable
             decision = _resume.Evaluate(nowUtc, readingAtUtc, _autoPauseEnabled(), rendersToAirPods, watchedContainerId, _left, _right);
         }
 
+        if (setChanged && forgotPause)
+        {
+            _log.Info("Auto-resume cancelled: another set of AirPods was chosen.");
+        }
+
         if (decision.Verdict == ResumeVerdict.Cancel)
         {
             _log.Info("Auto-resume cancelled: " + decision.Reason + ".");
         }
         else if (decision.Verdict == ResumeVerdict.Resume && decision.Pause is { } remembered)
         {
+            if (!_sessions.ReportsChanges)
+            {
+                _log.Info("Auto-resume cancelled: the media sessions are not reporting changes.");
+                return false;
+            }
+
             await ResumeAsync(remembered, ct).ConfigureAwait(false);
             return false;
         }
@@ -151,11 +184,16 @@ internal sealed class AutoPause : IDisposable
                 return false;
             case SessionPauseOutcome.Paused:
                 _log.Info("Auto-pause paused " + result.AppId + ".");
-                if (recorder.PausedSessionId is { } pausedId)
+                if (recorder.PausedSessionId is not null && !_sessions.ReportsChanges)
+                {
+                    // A pause is only resumed when a play or pause made by hand in between would have been reported.
+                    _log.Info("Auto-resume is not armed: the media sessions are not reporting changes, so this pause will not be resumed.");
+                }
+                else if (recorder.PausedSessionId is { } rememberedId)
                 {
                     // The buds that were in the ear before this reading are the ones that have to be back.
                     _resume.Remember(new RememberedPause(
-                        pausedId, result.AppId ?? "(unknown)",
+                        rememberedId, result.AppId ?? "(unknown)",
                         LeftWasIn: beforeLeft.Value == true,
                         RightWasIn: beforeRight.Value == true,
                         watchedContainerId, nowUtc, nowUtc + WidgetTiming.OwnPauseEchoWindow));
@@ -223,6 +261,8 @@ internal sealed class AutoPause : IDisposable
             add => inner.PlaybackInfoChanged += value;
             remove => inner.PlaybackInfoChanged -= value;
         }
+
+        public bool ReportsChanges => inner.ReportsChanges;
 
         public Task<IReadOnlyList<MediaSessionView>> ReadAsync(CancellationToken ct) => inner.ReadAsync(ct);
 

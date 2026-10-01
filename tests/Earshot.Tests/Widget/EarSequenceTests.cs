@@ -17,6 +17,8 @@ internal sealed class FollowingMediaSessions : IMediaSessions
 
     public List<string> PlayCalls { get; } = new();
 
+    public bool ReportsChanges => true;
+
     public event EventHandler<string>? PlaybackInfoChanged;
 
     public static MediaSessionView Session(string id, MediaPlaybackState state) => new(id, state, true, true, id);

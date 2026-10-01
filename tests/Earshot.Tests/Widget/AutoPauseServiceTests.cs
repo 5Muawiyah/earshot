@@ -35,8 +35,8 @@ public sealed class AutoPauseServiceTests : IDisposable
 
         public Task<BatteryRefreshOutcome> RefreshBatteryAsync(CancellationToken ct) => Task.FromResult(BatteryRefreshOutcome.NotListening);
 
-        public void Raise(DecodedReading reading, DateTimeOffset at) =>
-            ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(reading, at));
+        public void Raise(DecodedReading reading, DateTimeOffset at, long generation = 0) =>
+            ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(reading, at, generation));
 
         // Unused by this test class; kept so the type fully implements the interface without a warning.
         internal void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
@@ -74,6 +74,8 @@ public sealed class AutoPauseServiceTests : IDisposable
     // (which AutoPauseTests.cs also uses and whose assertions must not move).
     private sealed class ThrowingMediaSessions : IMediaSessions
     {
+        public bool ReportsChanges => true;
+
         public event EventHandler<string>? PlaybackInfoChanged;
 
         public Task<IReadOnlyList<MediaSessionView>> ReadAsync(CancellationToken ct) =>
@@ -176,6 +178,27 @@ public sealed class AutoPauseServiceTests : IDisposable
         _status.Raise(Reading(left: false, right: null), At);
 
         Assert.AreEqual(1, sessions.PauseCalls.Count, "A stranger verdict would never reach TryPauseAsync at all (AutoPauseTests.DoesNotPauseOnAStrangerReading).");
+    }
+
+    // The readings' generation is carried through the wiring: a bud "in" on one chosen set and "out" on the next chosen
+    // set is two pairs' values.
+    [TestMethod]
+    public void AnInEarValueOfOneChosenSetNeverPairsWithAnOutOfTheNextOne()
+    {
+        var sessions = new FakeMediaSessions
+        {
+            Sessions = { new MediaSessionView("app.exe", MediaPlaybackState.Playing, true, true, "app.exe") },
+        };
+        var autoPause = new AutoPause(sessions, () => true, _log);
+        using AutoPauseService service = NewService(autoPause);
+
+        _deviceMonitor.Current = RendersToAirPods();
+        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
+
+        _status.Raise(Reading(left: true, right: null), At, generation: 1);
+        _status.Raise(Reading(left: false, right: null), At, generation: 2);
+
+        Assert.AreEqual(0, sessions.PauseCalls.Count);
     }
 
     [TestMethod]
