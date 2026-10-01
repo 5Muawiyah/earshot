@@ -144,9 +144,9 @@ public sealed class ProximityParserTests
     public void TheEncryptedBytesAreNotInTheResult()
     {
         // ProximityMessage carries exactly the documented fields; there is no member the 16 encrypted
-        // bytes could have been copied into.
+        // bytes could have been copied into. Model is the two model bytes read as one number, not a member of its own.
         string[] names = typeof(ProximityMessage).GetProperties().Select(p => p.Name).ToArray();
-        string[] expected = { "BatteryA", "BatteryB", "Colour", "Lid", "ModelHigh", "ModelLow", "Reserved", "Status" };
+        string[] expected = { "BatteryA", "BatteryB", "Colour", "Lid", "Model", "ModelHigh", "ModelLow", "Reserved", "Status" };
         Array.Sort(names, StringComparer.Ordinal);
         Array.Sort(expected, StringComparer.Ordinal);
 

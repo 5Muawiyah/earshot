@@ -12,152 +12,180 @@ public sealed class ProximityDecoderTests
         byte status = 0x00, byte batteryA = 0x00, byte batteryB = 0x00, byte lid = 0x00) =>
         new(ModelHigh: 0xEE, ModelLow: 0xEE, Status: status, BatteryA: batteryA, BatteryB: batteryB, Lid: lid, Colour: 0xEE, Reserved: 0x00);
 
-    [TestMethod]
-    public void WithTheUnprovedTableNothingIsDecodedAndOnlyAProvedCaseNibbleIs()
-    {
-        ProximityMessage m = Message(batteryA: 0x53, batteryB: 0x07, lid: 0x02);
-
-        DecodedReading unproved = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved, At);
-        Assert.IsNull(unproved.Case.Percent, "An unproved case nibble is not read.");
-        Assert.IsNull(unproved.Case.ReadAt);
-        Assert.IsNull(unproved.Left.Percent);
-        Assert.IsNull(unproved.Right.Percent);
-
-        DecodedReading reading = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved with { CaseNibbleProved = true }, At);
-
-        Assert.IsNull(reading.Left.Percent);
-        Assert.IsNull(reading.Left.Charging);
-        Assert.IsNull(reading.Left.InEar);
-        Assert.IsNull(reading.Right.Percent);
-        Assert.IsNull(reading.Right.Charging);
-        Assert.IsNull(reading.Right.InEar);
-        Assert.AreEqual(70, reading.Case.Percent);
-        Assert.IsNull(reading.Case.Charging);
-        Assert.IsNull(reading.LidOpen);
-        Assert.IsNull(reading.LidCounter);
-    }
+    private static DecodedReading Decode(ProximityMessage m) => ProximityDecoder.Decode(m, ProximityDecodeTable.Documented, At);
 
     [TestMethod]
-    public void TheCaseNibbleIsReadOnceItIsProvedAndNeedsNothingElse()
+    public void TheHighNibbleIsTheRightBudAndTheLowTheLeftWhenTheFlipBitIsClear()
     {
-        ProximityMessage m = Message(batteryB: 0x39); // low nibble 0x9 = 90%
-
-        DecodedReading reading = ProximityDecoder.Decode(m, ProximityDecodeTable.Unproved with { CaseNibbleProved = true }, At);
-
-        Assert.AreEqual(90, reading.Case.Percent);
-        Assert.AreEqual(At, reading.Case.ReadAt);
-    }
-
-    [TestMethod]
-    public void WithHighNibbleIsRightProvedTheNibblesLandOnTheNamedBuds()
-    {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
-        ProximityMessage m = Message(batteryA: 0x82); // high nibble 8 (80%), low nibble 2 (20%)
-
-        DecodedReading reading = ProximityDecoder.Decode(m, table, At);
+        DecodedReading reading = Decode(Message(status: 0x00, batteryA: 0x82)); // high 8 (80%), low 2 (20%)
 
         Assert.AreEqual(80, reading.Right.Percent);
         Assert.AreEqual(20, reading.Left.Percent);
     }
 
     [TestMethod]
-    public void WithAFlipBitProvedTheSidesSwapWhenItReads()
+    public void StatusBitFiveSwapsTheSides()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, FlipBit = 0, FlipWhenSet = true };
-        ProximityMessage notFlipped = Message(status: 0x00, batteryA: 0x82);
-        ProximityMessage flipped = Message(status: 0x01, batteryA: 0x82);
+        DecodedReading reading = Decode(Message(status: 0x20, batteryA: 0x82));
 
-        DecodedReading notFlippedReading = ProximityDecoder.Decode(notFlipped, table, At);
-        DecodedReading flippedReading = ProximityDecoder.Decode(flipped, table, At);
+        Assert.AreEqual(20, reading.Right.Percent);
+        Assert.AreEqual(80, reading.Left.Percent);
+    }
 
-        Assert.AreEqual(80, notFlippedReading.Right.Percent);
-        Assert.AreEqual(20, notFlippedReading.Left.Percent);
-        Assert.AreEqual(20, flippedReading.Right.Percent);
-        Assert.AreEqual(80, flippedReading.Left.Percent);
+    // The other bits of the status byte are not read: they only ever matter through the flip.
+    [TestMethod]
+    public void NoOtherStatusBitMovesTheSides()
+    {
+        foreach (int bit in new[] { 0, 1, 2, 3, 4, 6, 7 })
+        {
+            DecodedReading reading = Decode(Message(status: (byte)(1 << bit), batteryA: 0x82));
+
+            Assert.AreEqual(80, reading.Right.Percent, "Status bit " + bit);
+            Assert.AreEqual(20, reading.Left.Percent, "Status bit " + bit);
+        }
     }
 
     [TestMethod]
-    public void ChargingBitsFollowTheTable()
+    public void TheCaseLevelIsTheLowNibbleOfTheSecondBatteryByteAndNeedsNoProof()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { CaseNibbleProved = true, CaseChargingBit = 0, RightChargingBit = 1, LeftChargingBit = 2 };
-        ProximityMessage m = Message(batteryB: 0b0000_0101); // bits 0 and 2 set: case and left charging
+        DecodedReading reading = Decode(Message(batteryB: 0x39)); // low nibble 9 = 90%
 
-        DecodedReading reading = ProximityDecoder.Decode(m, table, At);
-
-        Assert.AreEqual(true, reading.Case.Charging);
-        Assert.AreEqual(false, reading.Right.Charging);
-        Assert.AreEqual(true, reading.Left.Charging);
+        Assert.AreEqual(90, reading.Case.Percent);
+        Assert.AreEqual(At, reading.Case.ReadAt);
     }
 
     [TestMethod]
-    public void InEarBitsFollowTheTable()
+    public void ChargingBitsFollowTheirNibblesAndNotTheSides()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
-        ProximityMessage m = Message(status: 0b0000_0001); // left bit set, right bit clear
+        // Bit 6 the case, bit 5 the bud with the high nibble, bit 4 the bud with the low nibble.
+        DecodedReading plain = Decode(Message(status: 0x00, batteryA: 0x82, batteryB: 0x45)); // case charging, nothing else
+        Assert.AreEqual(true, plain.Case.Charging);
+        Assert.AreEqual(false, plain.Right.Charging);
+        Assert.AreEqual(false, plain.Left.Charging);
 
-        DecodedReading reading = ProximityDecoder.Decode(m, table, At);
+        DecodedReading highCharging = Decode(Message(status: 0x00, batteryA: 0x82, batteryB: 0x25));
+        Assert.AreEqual(true, highCharging.Right.Charging, "Unflipped, the high nibble is the right bud and bit 5 goes with it.");
+        Assert.AreEqual(false, highCharging.Left.Charging);
 
-        Assert.AreEqual(true, reading.Left.InEar);
-        Assert.AreEqual(false, reading.Right.InEar);
+        DecodedReading flipped = Decode(Message(status: 0x20, batteryA: 0x82, batteryB: 0x25));
+        Assert.AreEqual(true, flipped.Left.Charging, "Flipped, the high nibble is the left bud and bit 5 goes with it.");
+        Assert.AreEqual(false, flipped.Right.Charging);
+
+        DecodedReading lowCharging = Decode(Message(status: 0x20, batteryA: 0x82, batteryB: 0x15));
+        Assert.AreEqual(true, lowCharging.Right.Charging);
+        Assert.AreEqual(false, lowCharging.Left.Charging);
     }
 
+    // Two senders of one set say the same thing with the nibbles swapped and bit 5 differing: both decode to the
+    // same pair, so the card never alternates.
     [TestMethod]
-    public void LidOpenBitAndCounterFollowTheTable()
+    public void TheTwoBudsOfOneSetDecodeToTheSamePair()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { LidOpenBit = 3, LidCounterMask = 0x0F };
-        ProximityMessage open = Message(lid: 0b0000_1101); // bit 3 set, counter nibble 0xD
-        ProximityMessage closed = Message(lid: 0b0000_0101); // bit 3 clear, counter nibble 0x5
+        // Left 60, right 50, both buds charging, case 100, case not charging.
+        DecodedReading firstBud = Decode(Message(status: 0x00, batteryA: 0x56, batteryB: 0x3A));
+        DecodedReading secondBud = Decode(Message(status: 0x20, batteryA: 0x65, batteryB: 0x3A));
 
-        DecodedReading openReading = ProximityDecoder.Decode(open, table, At);
-        DecodedReading closedReading = ProximityDecoder.Decode(closed, table, At);
-
-        Assert.AreEqual(true, openReading.LidOpen);
-        Assert.AreEqual(0x0D, openReading.LidCounter);
-        Assert.AreEqual(false, closedReading.LidOpen);
-        Assert.AreEqual(0x05, closedReading.LidCounter);
+        Assert.AreEqual(60, firstBud.Left.Percent);
+        Assert.AreEqual(50, firstBud.Right.Percent);
+        Assert.AreEqual(firstBud.Left.Percent, secondBud.Left.Percent);
+        Assert.AreEqual(firstBud.Right.Percent, secondBud.Right.Percent);
+        Assert.AreEqual(100, firstBud.Case.Percent);
+        Assert.AreEqual(true, firstBud.Left.Charging);
+        Assert.AreEqual(true, firstBud.Right.Charging);
+        Assert.AreEqual(false, firstBud.Case.Charging);
+        Assert.AreEqual(secondBud.Left.Charging, firstBud.Left.Charging);
+        Assert.AreEqual(secondBud.Right.Charging, firstBud.Right.Charging);
     }
 
+    // 0xF is not a level: no value, no read time, and no charging flag for that part.
     [TestMethod]
-    public void AnUnknownNibbleStaysUnknownWhateverTheTable()
+    public void AnUnknownNibbleGivesNoValueNoReadTimeAndNoChargingFlag()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true };
-        ProximityMessage m = Message(batteryA: 0xF3, batteryB: 0x0F); // right nibble 0xF, case nibble 0xF
-
-        DecodedReading reading = ProximityDecoder.Decode(m, table, At);
+        DecodedReading reading = Decode(Message(batteryA: 0xF3, batteryB: 0x7F)); // right 0xF, case 0xF, all charging bits set
 
         Assert.IsNull(reading.Right.Percent);
+        Assert.IsNull(reading.Right.ReadAt);
+        Assert.IsNull(reading.Right.Charging, "A charging bit beside an unknown level is not read.");
         Assert.AreEqual(30, reading.Left.Percent);
+        Assert.AreEqual(true, reading.Left.Charging);
+        Assert.IsNull(reading.Case.Percent);
+        Assert.IsNull(reading.Case.ReadAt);
+        Assert.IsNull(reading.Case.Charging);
+    }
+
+    [TestMethod]
+    [DataRow(0xB)]
+    [DataRow(0xC)]
+    [DataRow(0xD)]
+    [DataRow(0xE)]
+    public void ElevenToFourteenAreUnknownToo(int nibble)
+    {
+        DecodedReading reading = Decode(Message(batteryA: (byte)((nibble << 4) | nibble), batteryB: (byte)nibble));
+
+        Assert.IsNull(reading.Left.Percent);
+        Assert.IsNull(reading.Right.Percent);
         Assert.IsNull(reading.Case.Percent);
     }
 
     [TestMethod]
     public void ReadAtIsSetOnlyForAKnownPercent()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Unproved with { HighNibbleIsRight = true, CaseNibbleProved = true };
-        ProximityMessage m = Message(batteryA: 0xF3, batteryB: 0x07); // right unknown, left known, case known
-
-        DecodedReading reading = ProximityDecoder.Decode(m, table, At);
+        DecodedReading reading = Decode(Message(batteryA: 0xF3, batteryB: 0x07)); // right unknown, left and case known
 
         Assert.IsNull(reading.Right.ReadAt);
         Assert.AreEqual(At, reading.Left.ReadAt);
         Assert.AreEqual(At, reading.Case.ReadAt);
     }
 
-    // The owner's own set-ups have not agreed with the case nibble twice: it decodes to no case at all, as if it
-    // had never been read, and so is neither shown nor charged.
     [TestMethod]
-    public void AnUnprovedCaseDecodesNoCase()
+    public void InEarAndTheLidAreNotDecodedByTheDocumentedTable()
     {
-        ProximityMessage m = Message(batteryA: 0x53, batteryB: 0x37);
-        ProximityDecodeTable unproved = ProximityDecodeTable.Unproved with { CaseChargingBit = 4 };
+        DecodedReading reading = Decode(Message(status: 0xFF, lid: 0xFF));
 
-        DecodedReading reading = ProximityDecoder.Decode(m, unproved, At);
+        Assert.IsNull(reading.Left.InEar);
+        Assert.IsNull(reading.Right.InEar);
+        Assert.IsNull(reading.Case.InEar);
+        Assert.IsNull(reading.LidOpen);
+        Assert.IsNull(reading.LidCounter);
+    }
 
-        Assert.IsNull(reading.Case.Percent);
-        Assert.IsNull(reading.Case.Charging, "An unproved case is not shown as charging either.");
-        Assert.IsNull(reading.Case.ReadAt, "No read time for a value that is not shown.");
-        DecodedReading proved = ProximityDecoder.Decode(m, unproved with { CaseNibbleProved = true }, At);
-        Assert.AreEqual(70, proved.Case.Percent, "Sanity: proved, the same message reads 70.");
-        Assert.AreEqual(true, proved.Case.Charging);
+    [TestMethod]
+    public void ATableWithInEarBitsDecodesThem()
+    {
+        ProximityDecodeTable table = ProximityDecodeTable.Documented with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
+
+        DecodedReading reading = ProximityDecoder.Decode(Message(status: 0b0000_0001), table, At);
+
+        Assert.AreEqual(true, reading.Left.InEar);
+        Assert.AreEqual(false, reading.Right.InEar);
+    }
+
+    [TestMethod]
+    public void ATableWithNoOrderDecodesNoBud()
+    {
+        ProximityDecodeTable table = ProximityDecodeTable.Documented with { HighNibbleIsRight = null };
+
+        DecodedReading reading = ProximityDecoder.Decode(Message(batteryA: 0x53, batteryB: 0x07), table, At);
+
+        Assert.IsNull(reading.Left.Percent);
+        Assert.IsNull(reading.Right.Percent);
+        Assert.AreEqual(70, reading.Case.Percent);
+    }
+
+    [TestMethod]
+    public void TheDocumentedTableIsTheOneConstantForTheSideRule()
+    {
+        ProximityDecodeTable t = ProximityDecodeTable.Documented;
+
+        Assert.AreEqual(true, t.HighNibbleIsRight);
+        Assert.AreEqual(5, t.FlipBit);
+        Assert.IsTrue(t.FlipWhenSet);
+        Assert.AreEqual(6, t.CaseChargingBit);
+        Assert.AreEqual(5, t.RightChargingBit);
+        Assert.AreEqual(4, t.LeftChargingBit);
+        Assert.IsNull(t.LeftInEarBit);
+        Assert.IsNull(t.RightInEarBit);
+        Assert.IsNull(t.LidOpenBit);
+        Assert.IsNull(t.LidCounterMask);
     }
 }
