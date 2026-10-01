@@ -18,10 +18,10 @@ internal sealed class InstallerFeed : IDisposable
     private readonly object _gate = new();
     private readonly List<FeedRequest> _requests = new();
 
-    public InstallerFeed(string tag = "v1.3.0", ReleaseZipBuilder? zip = null)
+    public InstallerFeed(string? tag = null, ReleaseZipBuilder? zip = null)
     {
         Server = new FakeReleaseServer();
-        Latest = AddRelease(tag, zip);
+        Latest = AddRelease(tag ?? BuildVersion.NewerTag, zip);
         PublishLatest(Latest);
     }
 

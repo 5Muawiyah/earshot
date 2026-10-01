@@ -111,7 +111,7 @@ public sealed class InstallerScriptStopTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Uninstall";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.RunValue = @"C:\Tools\wrapper.exe """ + world.InstalledExe + "\" --startup";
 
         InstallerRun run = world.Run(shell);
@@ -189,7 +189,7 @@ public sealed class InstallerScriptStopTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Uninstall";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "unusable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "unusable", version: BuildVersion.Current);
 
         InstallerRun run = world.Run(shell);
 
@@ -260,13 +260,13 @@ public sealed class InstallerScriptStopTests
             case "update-refused":
                 world.InstallRealProgram();
                 world.Spec.Action = "Update";
-                world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+                world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
                 world.Spec.ElevateBody = "Write-Outcome 'Refused' 'the update could not be checked' 'update-verify-zip'; [pscustomobject]@{ ExitCode = 3 }";
                 break;
             case "uninstall-fails":
                 world.InstallRealProgram();
                 world.Spec.Action = "Uninstall";
-                world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+                world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
                 world.Spec.ElevateBody = "[pscustomobject]@{ ExitCode = 3 }";
                 break;
             case "elevation-throws":
@@ -284,7 +284,7 @@ public sealed class InstallerScriptStopTests
             case "update-still-running":
                 world.InstallRealProgram();
                 world.Spec.Action = "Update";
-                world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+                world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
                 world.Spec.OutcomeWaitSeconds = 2;
                 world.Spec.ElevateBody = "Write-Outcome 'Installing'; [pscustomobject]@{ ExitCode = 0 }";
                 break;
@@ -393,7 +393,7 @@ public sealed class InstallerScriptStopTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Update";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.OutcomeWaitSeconds = 60;
         world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
         // A real process, as the elevated program is, that ends at once with 0 after it handed the update on.
@@ -453,7 +453,7 @@ public sealed class InstallerScriptStopTests
         world.InstallRealProgram();
         StaleRecord(world);
         world.Spec.Action = "Update";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.OutcomeWaitSeconds = 2;
         world.Spec.ElevateBody = "[pscustomobject]@{ ExitCode = 0 }";
 
@@ -472,7 +472,7 @@ public sealed class InstallerScriptStopTests
         world.InstallRealProgram();
         StaleRecord(world);
         world.Spec.Action = "Update";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.ElevateBody = "Write-Outcome 'Installed'; [pscustomobject]@{ ExitCode = 0 }";
 
         InstallerRun run = world.Run(shell);
@@ -488,7 +488,7 @@ public sealed class InstallerScriptStopTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Update";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.OutcomeWaitSeconds = 2;
         world.Spec.ElevateBody = "Write-Outcome 'Installing'; [IO.File]::WriteAllText(" + InstallerWorld.Q(Path.Combine(world.Machine, "update-outcome.json")) + ", '{ not json'); [pscustomobject]@{ ExitCode = 0 }";
 

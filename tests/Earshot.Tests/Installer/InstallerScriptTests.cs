@@ -422,7 +422,7 @@ public sealed class InstallerScriptTests
 
         InstallerRun run = world.Run(shell);
 
-        StringAssert.StartsWith(run.Final, "Earshot: stopped. The release v1.3.0 does not list ");
+        StringAssert.StartsWith(run.Final, "Earshot: stopped. The release " + world.Feed.Latest.Tag + " does not list ");
         Assert.AreEqual(0, world.Feed.ZipDownloads);
     }
 
@@ -432,7 +432,7 @@ public sealed class InstallerScriptTests
     public void ATagThatIsNotThreeNumbersIsNotOneThisScriptReads(ShellKind shell)
     {
         using var world = new InstallerWorld();
-        world.Feed.PublishLatest(world.Feed.Latest, tagName: "v1.3.0-beta");
+        world.Feed.PublishLatest(world.Feed.Latest, tagName: world.Feed.Latest.Tag + "-beta");
 
         InstallerRun run = world.Run(shell);
 
@@ -449,7 +449,7 @@ public sealed class InstallerScriptTests
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.Action = "Update";
         world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
         world.Spec.ElevateBody = "Write-Outcome 'Installing'; Write-Outcome 'Installed'; [pscustomobject]@{ ExitCode = 0 }";
@@ -478,7 +478,7 @@ public sealed class InstallerScriptTests
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.Action = "Update";
         world.Spec.ElevateBody = "Write-Outcome 'Refused' 'the downloaded update did not match what was checked' 'update-verify-zip'; [pscustomobject]@{ ExitCode = 3 }";
 
@@ -495,7 +495,7 @@ public sealed class InstallerScriptTests
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.Action = "Update";
         world.Spec.OutcomeWaitSeconds = 2;
         world.Spec.ElevateBody = "Write-Outcome 'Installing'; [pscustomobject]@{ ExitCode = 0 }";
@@ -512,13 +512,13 @@ public sealed class InstallerScriptTests
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
-        world.Feed.PublishLatest(world.Feed.AddRelease("v1.2.1"));
+        world.Feed.PublishLatest(world.Feed.AddRelease(BuildVersion.CurrentTag));
         world.Spec.Action = "Update";
 
         InstallerRun run = world.Run(shell);
 
         Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
-        CollectionAssert.Contains(run.Lines, "Earshot 1.2.1 is up to date.");
+        CollectionAssert.Contains(run.Lines, "Earshot " + BuildVersion.Current + " is up to date.");
         Assert.AreEqual(0, world.Feed.ZipDownloads);
         Assert.IsEmpty(run.CallsNamed("Elevate"));
     }
@@ -530,14 +530,14 @@ public sealed class InstallerScriptTests
     {
         using var current = new InstallerWorld();
         current.InstallRealProgram();
-        current.Feed.PublishLatest(current.Feed.AddRelease("v1.2.1"));
+        current.Feed.PublishLatest(current.Feed.AddRelease(BuildVersion.CurrentTag));
         InstallerRun same = current.Run(shell);
-        CollectionAssert.Contains(same.Lines, "Earshot 1.2.1 is already installed.");
+        CollectionAssert.Contains(same.Lines, "Earshot " + BuildVersion.Current + " is already installed.");
         Assert.IsEmpty(same.CallsNamed("Elevate"));
 
         using var older = new InstallerWorld();
         older.InstallRealProgram();
-        older.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        older.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         older.Spec.ElevateBody = "Write-Outcome 'Installed'; [pscustomobject]@{ ExitCode = 0 }";
         InstallerRun run = older.Run(shell);
         Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
@@ -551,8 +551,8 @@ public sealed class InstallerScriptTests
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
-        FeedRelease installed = world.Feed.AddRelease("v1.2.1");
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        FeedRelease installed = world.Feed.AddRelease(BuildVersion.CurrentTag);
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.Action = "Repair";
         world.Spec.ElevateBody = "Write-Outcome 'Installed'; [pscustomobject]@{ ExitCode = 0 }";
 
@@ -560,7 +560,7 @@ public sealed class InstallerScriptTests
 
         Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
         Assert.AreEqual(0, world.Feed.ApiRequests, "A repair never asks which release is the latest.");
-        Assert.IsTrue(world.Feed.Requests.All(r => r.Path.Contains("/v1.2.1/", StringComparison.Ordinal)), "Only the installed version's files were fetched.");
+        Assert.IsTrue(world.Feed.Requests.All(r => r.Path.Contains("/" + BuildVersion.CurrentTag + "/", StringComparison.Ordinal)), "Only the installed version's files were fetched.");
         string[] parts = run.CallsNamed("Elevate").Single().Split('|');
         Assert.AreEqual(world.InstalledExe, parts[1]);
         Assert.IsTrue(Program.TryParseUpdateArgs(ArgvSplitter.Split(string.Join('|', parts.Skip(2))), out UpdateRequest? request, out string? problem), problem);
@@ -595,7 +595,7 @@ public sealed class InstallerScriptTests
         Directory.CreateDirectory(world.Local);
         File.WriteAllText(Path.Combine(world.Roaming, "settings.json"), "{}");
         world.Spec.Action = "Uninstall";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
 
         InstallerRun run = world.Run(shell);
 
@@ -621,7 +621,7 @@ public sealed class InstallerScriptTests
         Directory.CreateDirectory(world.Roaming);
         Directory.CreateDirectory(world.Local);
         world.Spec.Action = "Uninstall";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.RemoveSettings = true;
         world.Spec.RunValue = "\"" + world.InstalledExe + "\" --startup";
 
@@ -642,7 +642,7 @@ public sealed class InstallerScriptTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Uninstall";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.RunValue = "\"C:\\Tools\\Other\\Earshot.exe\" --startup";
 
         InstallerRun run = world.Run(shell);
@@ -693,7 +693,7 @@ public sealed class InstallerScriptTests
         using var world = new InstallerWorld();
         world.InstallRealProgram();
         world.Spec.Action = "Uninstall";
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
         world.Spec.DryRun = true;
 
         InstallerRun run = world.Run(shell);
@@ -868,7 +868,7 @@ public sealed class InstallerScriptTests
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1", ready: false, reason: "not-paired");
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current, ready: false, reason: "not-paired");
         world.Spec.Action = "Update";
 
         InstallerRun run = world.Run(shell);
@@ -887,7 +887,7 @@ public sealed class InstallerScriptTests
     {
         using var world = new InstallerWorld();
         world.InstallRealProgram();
-        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1", ready: false, reason: reason);
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current, ready: false, reason: reason);
         world.Spec.Action = "Update";
 
         InstallerRun run = world.Run(shell);
@@ -1263,7 +1263,7 @@ internal sealed class InstallerWorld : IDisposable
 
     public InstallerWorld(ReleaseZipBuilder? zip = null)
     {
-        Feed = new InstallerFeed("v1.3.0", zip);
+        Feed = new InstallerFeed(zip: zip);
         Directory.CreateDirectory(TempRoot);
         Install = _temp.File(Path.Combine("ProgramFiles", "Earshot"));
         Directory.CreateDirectory(Path.GetDirectoryName(Install)!);
