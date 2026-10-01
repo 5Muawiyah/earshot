@@ -44,6 +44,21 @@ internal sealed class FakeGaugeSurface : IGaugeSurface
 
     public void HideWindow() => Calls.Add("HideWindow");
 
+    public nint OwnerWindow { get; private set; }
+
+    public StepOutcome NextSetOwnerResult { get; set; } = new("set-owner", true, 0, "S_OK", null);
+
+    public StepOutcome SetOwner(nint owner)
+    {
+        Calls.Add("SetOwner 0x" + owner.ToString("X", System.Globalization.CultureInfo.InvariantCulture));
+        if (NextSetOwnerResult.Ok)
+        {
+            OwnerWindow = owner;
+        }
+
+        return NextSetOwnerResult;
+    }
+
     // Every draw the surface was asked for, kept apart from Calls so the order tests of the window's own moves read as they did.
     public List<(Rectangle Bounds, GaugeDisplaySettings Settings)> Renders { get; } = new();
 

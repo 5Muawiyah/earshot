@@ -103,9 +103,9 @@ internal sealed partial class WidgetCard
             height = Math.Min(height, Math.Max(MaxHeight, layout.Frame.Body.Y + CardPlacement.Scale(MinViewportAt96, _dpi)));
         }
 
-        ClientSize = new Size(layout.Frame.Width, height);
+        SetClientSizeIfChanged(new Size(layout.Frame.Width, height));
         _settingsScroll = CardScroll.Clamp(_settingsScroll, layout.Frame.Body.Height, SettingsViewport.Height);
-        Invalidate();
+        RepaintIfChanged();
     }
 
     private const int MinViewportAt96 = 72;
@@ -700,6 +700,9 @@ internal sealed partial class WidgetCard
     protected override void OnVisibleChanged(EventArgs e)
     {
         base.OnVisibleChanged(e);
+
+        // A window that was hidden or shown may not hold the pixels last copied to it.
+        ForgetShownFrame();
         if (!Visible)
         {
             HideTip();

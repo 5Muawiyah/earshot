@@ -437,8 +437,9 @@ resolution beside the name to tell them apart. If a display is plugged in or
 out while the settings page is open, the page redraws with the displays that
 are there, and a choice of a display that has just gone is not stored.
 
-**Staying visible.** When Start, a flyout or a taskbar click covers the gauge,
-Earshot raises it again. Every hide, show, cover and raise is written to the
+**Staying visible.** The gauge belongs to the taskbar it sits on, so Windows keeps it
+above the bar when Start, a flyout or a taskbar click raises the bar. If it cannot,
+Earshot raises it again, less and less often while the bar keeps covering it. Every hide, show, cover and raise is written to the
 log with a reason and the window's class only, never a title. One failed read
 of the taskbar does not move or hide the gauge; it stays where it is until
 three reads in a row have failed.

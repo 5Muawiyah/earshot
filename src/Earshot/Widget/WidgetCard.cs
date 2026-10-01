@@ -62,12 +62,13 @@ internal sealed record WidgetCardModel(
 // CardPresenter, the tray's existing one-line card, has no room for three battery columns, a where-line and
 // an auto-pause switch together, so the gauge gets its own card rather than reusing that one.
 //
-// Owner-painted, no child controls, one Form: OnPaintBackground is empty, OnPaint starts with
+// Owner-painted, no child controls, one Form: OnPaintBackground is empty, RenderContent starts with
 // Graphics.Clear and draws everything else with GDI+ FillPath/DrawString, never TextRenderer: GDI text
 // writes alpha 0, invisible on a window composited through alpha the way this card's translucent backdrop
 // is (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows), the same
-// fact ConnectCard and GaugeRenderer already build on. OptimizedDoubleBuffer stays off so a buffered blit
-// never throws away the alpha the DWM recipe needs.
+// fact ConnectCard and GaugeRenderer already build on. The framework's OptimizedDoubleBuffer stays off;
+// the card buffers itself (WidgetCard.Paint.cs), with the finished pixels copied to the window as they are,
+// alpha included, which is what the DWM recipe needs.
 //
 // Unlike ConnectCard this card takes focus and keyboard input (shown with Show() then Activate(), like the
 // volume flyout), so CreateParams omits WS_EX_NOACTIVATE and ControlStyles.Selectable is left at its
@@ -241,6 +242,7 @@ internal sealed partial class WidgetCard : Form
             DetachAccent();
             StopMotion();
             DisposeTips();
+            DisposeFrames();
         }
 
         base.Dispose(disposing);
@@ -319,8 +321,8 @@ internal sealed partial class WidgetCard : Form
             using var probe = new Bitmap(1, 1);
             using Graphics measure = Graphics.FromImage(probe);
             _setupLayout = ComputeSetupLayout(measure, setup);
-            ClientSize = new Size(_setupLayout.Frame.Width, _setupLayout.Frame.Height);
-            Invalidate();
+            SetClientSizeIfChanged(new Size(_setupLayout.Frame.Width, _setupLayout.Frame.Height));
+            RepaintIfChanged();
             return;
         }
 
@@ -355,8 +357,8 @@ internal sealed partial class WidgetCard : Form
             _focus = WidgetCardFocus.Button;
         }
 
-        ClientSize = new Size(layout.Width, layout.Height);
-        Invalidate();
+        SetClientSizeIfChanged(new Size(layout.Width, layout.Height));
+        RepaintIfChanged();
     }
 
     private WidgetCardLayout.Layout ComputeMainLayout(Graphics measure, WidgetCardModel model)
@@ -407,6 +409,7 @@ internal sealed partial class WidgetCard : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        _darkApplied = null;
         ApplyCorners(Handle);
         ApplyDarkMode(Handle);
         ApplyBackdrop(Handle);
@@ -655,7 +658,9 @@ internal sealed partial class WidgetCard : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
-        RenderContent(e.Graphics);
+
+        // Never RenderContent(e.Graphics): drawing on the window's own surface shows the cleared backdrop until it is done.
+        PaintBuffered(e.Graphics, e.ClipRectangle);
     }
 
     // The card's whole content, factored out of OnPaint so a capture path can paint it straight into an
@@ -860,13 +865,26 @@ internal sealed partial class WidgetCard : Form
         NoteFrame(hr >= 0 ? null : StepOutcomes.FromHResult("dwm-corner-preference:widget-card", hr), "rounded corners");
     }
 
+    // The dark-mode attribute is set when the window is made and when the theme really changes, not at every show: setting it
+    // again to the value it has still makes the compositor draw the frame again.
+    private bool? _darkApplied;
+    private int _darkModeApplications;
+    private int _backdropApplications;
+
+    // How many times the window's dark-mode attribute and its backdrop were set, for tests.
+    internal int DarkModeApplications => _darkModeApplications;
+
+    internal int BackdropApplications => _backdropApplications;
+
     private void ApplyDarkMode(nint handle)
     {
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000) || _darkApplied == _dark)
         {
             return;
         }
 
+        _darkApplied = _dark;
+        _darkModeApplications++;
         int dark = _dark ? 1 : 0;
         int hr = Dwm.DwmSetWindowAttribute(handle, Dwm.DWMWA_USE_IMMERSIVE_DARK_MODE, in dark, sizeof(int));
         NoteFrame(hr >= 0 ? null : StepOutcomes.FromHResult("dwm-dark-mode:widget-card", hr), "dark mode");
@@ -884,6 +902,8 @@ internal sealed partial class WidgetCard : Form
         {
             return;
         }
+
+        _backdropApplications++;
 
         int type = Dwm.DWMSBT_TRANSIENTWINDOW;
         int hr = Dwm.DwmSetWindowAttribute(handle, Dwm.DWMWA_SYSTEMBACKDROP_TYPE, in type, sizeof(int));

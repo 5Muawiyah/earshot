@@ -362,7 +362,9 @@ misses any of these is forgotten, never retried later. Pausing when the AirPods
 leave this PC never resumes.
 
 **The taskbar gauge.** Earshot does not use a taskbar docking API. The gauge is
-an owned, topmost, layered overlay window positioned over free taskbar space, which it finds by
+a topmost, layered overlay window, owned by the taskbar it sits on (an owned window is always above its
+owner in the z-order, so the system keeps the gauge above the bar wherever the shell raises the bar;
+https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#owned-windows), positioned over free taskbar space, which it finds by
 reading the taskbar's own button layout through UI Automation and polling it
 for changes; the window's alpha-zero pixels let a click reach the taskbar
 underneath rather than the gauge
@@ -478,8 +480,11 @@ A change of the foreground window, which Start, a flyout, a taskbar click and
 a full-screen application closing all cause, is watched by one read-only
 `SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND`
 (https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook).
-When something covers the gauge, it raises itself again, and the poll finds
-anything the hook missed. Raises are rate limited. Every hide, show, cover and
+The gauge is the taskbar's owned window, so the taskbar cannot be over it. A gauge that
+could not be owned, or that another program's topmost window covers, is raised again when
+that happens, and the poll finds anything the hook missed. A raise that does not hold is not
+repeated at once: the next one waits a quarter second, then half a second, and so on up to
+eight seconds, until the gauge is found on top a second after a raise. Every hide, show, cover and
 raise is logged on a line starting `Gauge `, with a reason and the covering
 window's class only, never its title. One failed taskbar read keeps the gauge
 where it is; it hides only after three in a row. If there is no free space,
@@ -498,7 +503,11 @@ and the documented DWM extended-frame call
 (https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmextendframeintoclientarea),
 following the system's light or dark theme; on a Windows build older than
 22621, or if either call fails, the card falls back to an opaque colour
-instead of the translucent one. It opens above the gauge, closes
+instead of the translucent one. The card paints itself into a bitmap and copies the
+finished pixels to the window in one step, never a clear followed by drawing on the window, which would
+show the backdrop alone for a moment; a repaint that was asked for is compared with what the window
+shows, and only the pixels that differ are invalidated, so most status updates touch nothing. It
+opens above the gauge, closes
 when it loses focus, and works from the keyboard. The case-open card is the
 same window in a separate, unfocused instance. Nothing shows it, because that
 needs the lid state and Earshot does not decode it, so it stays off and its

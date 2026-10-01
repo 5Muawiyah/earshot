@@ -271,10 +271,10 @@ public sealed class GaugeFlickerTests
         Assert.AreEqual(1, rig.Time.TimersCreated);
     }
 
-    // A burst is not a loop: every change in it is looked at and the taskbar over the gauge is raised over each
-    // time, up to the limit.
+    // A burst is not a loop: every change in it is looked at, the first one raises the gauge, and the taskbar still over it
+    // right after has to wait for the gap (a raise that did not hold is not repeated at once).
     [TestMethod]
-    public void ABurstOfChangesIsAnsweredUpToTheSlidingLimitAndWarnsOnce()
+    public void ABurstOfChangesIsAnsweredOnceAndTheRestWaitForTheGap()
     {
         var rig = new Rig();
         rig.Layout(FreeSpace());
@@ -286,63 +286,28 @@ public sealed class GaugeFlickerTests
             rig.Time.Advance(TimeSpan.FromMilliseconds(10));
         }
 
-        Assert.AreEqual(GaugeController.RaisesPerWindow, rig.Raises, "Four in one second, then the limit.");
-        Assert.AreEqual(1, rig.Log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message == "Gauge raise limit reached (4 in 1 s); the next check will try again."));
+        Assert.AreEqual(1, rig.Raises, "One raise for the burst: the others came before the gap had passed.");
+        rig.Time.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.AreEqual(2, rig.Raises, "A quarter second after the first raise the second is allowed.");
     }
 
-    // The old cap stopped for good until a poll confirmed the gauge was on top, and the gauge stayed covered. The
-    // window slides: a second later the same taskbar is answered again.
+    // The gap is a wait, not a stop: a gauge left covered is the defect this guards against. However long the cover lasts,
+    // the next raise comes when the gap ends.
     [TestMethod]
-    public void TheLimitSlidesSoAGaugeIsNeverLeftCovered()
+    public void TheGapEndsSoAGaugeIsNeverLeftCovered()
     {
         var rig = new Rig();
         rig.Layout(FreeSpace());
         rig.Cover.Next = TaskbarOver;
-        for (int i = 0; i < 8; i++)
+        rig.Controller.OnForegroundChanged("A");
+
+        int last = rig.Raises;
+        for (int round = 0; round < 6; round++)
         {
-            rig.Controller.OnForegroundChanged("A" + i);
-            rig.Time.Advance(TimeSpan.FromMilliseconds(10));
-        }
-
-        Assert.AreEqual(GaugeController.RaisesPerWindow, rig.Raises);
-        rig.Time.Advance(GaugeController.RaiseWindow);
-        int before = rig.Raises;
-        rig.Controller.OnForegroundChanged("Later");
-
-        Assert.AreEqual(before + 1, rig.Raises, "The window slid past the first raises.");
-    }
-
-    // The owner's log: the taskbar covered the gauge again a second or two after each raise, with no event and
-    // often before the poll came round. While it keeps doing so every fast check puts the gauge back, and never more
-    // than the limit in any second.
-    [TestMethod]
-    public void ATaskbarThatKeepsCoveringTheGaugeIsAnsweredEveryTimeWithinTheLimit()
-    {
-        var rig = new Rig();
-        rig.Layout(FreeSpace());
-        rig.Cover.Next = TaskbarOver;
-        var raiseTimes = new List<TimeSpan>();
-        rig.Controller.OnForegroundChanged("Shell_TrayWnd");
-        int seen = rig.Raises;
-        raiseTimes.Add(TimeSpan.Zero);
-
-        TimeSpan elapsed = TimeSpan.Zero;
-        for (int i = 0; i < 40; i++)
-        {
-            rig.Time.Advance(TimeSpan.FromMilliseconds(250));
-            elapsed += TimeSpan.FromMilliseconds(250);
-            while (seen < rig.Raises)
-            {
-                raiseTimes.Add(elapsed);
-                seen++;
-            }
-        }
-
-        Assert.IsGreaterThanOrEqualTo(30, rig.Raises, "Answered at each quarter second for ten seconds, not stuck after four.");
-        foreach (TimeSpan at in raiseTimes)
-        {
-            Assert.IsLessThanOrEqualTo(GaugeController.RaisesPerWindow, raiseTimes.Count(t => t > at - TimeSpan.FromSeconds(1) && t <= at),
-                "No more than four raises in any second.");
+            TimeSpan wait = GaugeController.RaiseGap(rig.Raises);
+            rig.Time.Advance(wait);
+            Assert.IsGreaterThan(last, rig.Raises, "Round " + round + ": the gap of " + wait + " ended and the cover was answered.");
+            last = rig.Raises;
         }
     }
 
@@ -573,7 +538,7 @@ public sealed class GaugeFlickerTests
     }
 
     [TestMethod]
-    public void ThePollsOwnRaiseStillWorksAfterTheCapIsReached()
+    public void ThePollsOwnRaiseStillWorksOnceTheGapAfterTheLastRaiseHasPassed()
     {
         var rig = new Rig();
         rig.Layout(FreeSpace());
@@ -584,10 +549,17 @@ public sealed class GaugeFlickerTests
             rig.Time.Advance(TimeSpan.FromMilliseconds(300));
         }
 
+        // The cover goes away and the gauge is found on top for two seconds: the earlier raises held in the end.
+        rig.Cover.Next = new GaugeCover(IsGauge: true, RootClassName: "");
+        for (int i = 0; i < 8; i++)
+        {
+            rig.Time.Advance(TimeSpan.FromMilliseconds(250));
+        }
+
         int before = rig.Raises;
         rig.Layout(FreeSpace() with { GaugeCentreIsGauge = false, WindowAtGaugeCentre = new WindowIdentity("Shell_TrayWnd", true) });
 
-        Assert.AreEqual(before + 1, rig.Raises, "The poll is the safety net and is never capped.");
+        Assert.AreEqual(before + 1, rig.Raises, "The poll is the safety net: it raises for a new cover at once, not held to the event checks' own limit.");
     }
 
     [TestMethod]
@@ -644,6 +616,6 @@ public sealed class GaugeFlickerTests
             posted.Dequeue()();
         }
 
-        Assert.AreEqual(raisesBefore + 2, surface.Calls.Count(c => c == "Raise"));
+        Assert.AreEqual(raisesBefore + 1, surface.Calls.Count(c => c == "Raise"), "The first of the two raises; the other came before the gap had passed.");
     }
 }

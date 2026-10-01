@@ -119,13 +119,14 @@ internal sealed partial class WidgetCard
             return;
         }
 
-        // Back at rest and opaque for the next show, which sets its own starting frame.
+        // Hidden first, then back at rest and opaque for the next show, which sets its own starting frame. The other way round
+        // the card, faded out and slid away, is made fully opaque and put at rest while it is still on screen: a frame of the
+        // whole card at the end of every close.
+        Hide();
         if (IsHandleCreated)
         {
             PutAtRestAndOpaque();
         }
-
-        Hide();
     }
 
     // The card where it rests and fully opaque. A failed call is logged with its raw code.

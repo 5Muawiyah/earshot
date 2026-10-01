@@ -154,6 +154,7 @@ internal static partial class NativeMethods
     internal const uint SWP_NOREDRAW = 0x0008;
     internal const uint SWP_NOACTIVATE = 0x0010;
     internal const uint SWP_FRAMECHANGED = 0x0020;
+    internal const uint SWP_NOCOPYBITS = 0x0100;
     internal const uint SWP_SHOWWINDOW = 0x0040;
     internal const uint SWP_HIDEWINDOW = 0x0080;
     internal const uint SWP_NOOWNERZORDER = 0x0200;
