@@ -210,7 +210,7 @@ public sealed class BroadcastSelectorTests
     }
 
     [TestMethod]
-    public void WhenTwoSetsOpenTheirCasesTheStrongestIsLinkedWhicheverItIs()
+    public void WhenTwoSetsOpenTheirCasesTheStrongerEndsUpLinkedWhicheverItIs()
     {
         var owner = new SelectorDriver();
         for (int i = 0; i <= 12; i++)

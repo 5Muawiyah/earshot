@@ -32,8 +32,9 @@ internal static class BroadcastRules
 
     // Five case-known messages of one set inside LinkWindow, the first and the last at least LinkSpan apart: a burst of
     // about two seconds at the case-open rate (nine messages), which one stray message, or the few a pair sends in
-    // passing as a bud leaves the case, cannot make. The window is a little over twice that burst. The span also gives a
-    // second set nearby the same two seconds to show up, so that the strongest is the one linked.
+    // passing as a bud leaves the case, cannot make. The window is a little over twice that burst. Of sets that qualify at
+    // the same message the strongest is linked; a set qualifies on its own message, so in practice the first to qualify is
+    // linked, and a set that opens its case later but SwitchMarginDb stronger takes the link.
     public const int LinkMessages = 5;
 
     public static readonly TimeSpan LinkWindow = TimeSpan.FromSeconds(5);

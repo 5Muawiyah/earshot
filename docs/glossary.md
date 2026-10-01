@@ -14,11 +14,14 @@ page at boot. See [architecture.md](architecture.md).
 disabled while they are not in use, so Windows cannot page them when the PC
 starts.
 
-**Broadcast selection.** How the AirPods widget picks the owner's AirPods
-out of the Bluetooth broadcasts it hears, with no set-up: the paired model, the
-set that is nearest, held until another pair is clearly nearer for a sustained
-time, and chosen again after the chosen pair falls silent. Another pair of the
-same model could be read instead, a risk the owner accepts. See
+**Link (broadcast selection).** How the AirPods widget finds the owner's AirPods
+in the Bluetooth broadcasts it hears, with no set-up beyond opening the case: the
+paired model, a case level (which only a pair in an open case sends), a signal of
+at least -70 dBm held for about two seconds (the first such set, unless a pair opening
+its case later is 8 dB stronger). It then
+follows the pair across address changes by the levels it last said, and drops the
+link after two minutes without hearing it. A same-model pair that opens its case
+more strongly could be linked instead, a risk the owner accepts. See
 [overview.md](overview.md#whose-airpods-it-shows).
 
 **Container / container GUID.** Windows groups the several device nodes that

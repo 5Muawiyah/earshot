@@ -96,9 +96,10 @@ Startup on is not covered.
   at the AirPods' microphone when Earshot has a well-formed id for that capture
   endpoint, and the list of sound devices when it has not, with one line on what
   to press. Call quality with it on is unproved until I have tried it.
-- **Shows the battery** of the left bud, the right bud and the case, with no
-  set-up. Earshot listens to the AirPods' own Bluetooth broadcast, so it needs
-  no connection. See [Battery](#battery) for what that does and does not prove.
+- **Shows the battery** of the left bud, the right bud and the case while the
+  AirPods are connected to this PC. Earshot listens to the AirPods' own Bluetooth
+  broadcast, and you link your pair by opening the case next to the PC. See
+  [Battery](#battery) for what that does and does not prove.
 - **Hands the AirPods back at shut down, sleep and Exit**, on for a new
   install. Earshot lets them go, confirms it, and blocks the device nodes again
   before this PC can grab them back. A stuck disconnect still gets the block.
@@ -129,22 +130,39 @@ Startup on is not covered.
 ## Battery
 
 The AirPods broadcast their battery over Bluetooth Low Energy, and Earshot
-reads it with no connection and no set-up. The card shows left, right and case
-together, and the taskbar gauge shows a ring round the earbud mark with the
-lower bud's number. There is a **Refresh** control on the card and in the menu.
-It listens for up to 12 seconds and ends on values or on "Open the case".
+reads it with no set-up beyond opening the case. The card shows left, right and
+case together, and the taskbar gauge shows a ring round the earbud mark with the
+lower bud's number, while the AirPods are connected to this PC. There is a
+**Refresh** control on the card and in the menu. It listens for up to 12 seconds
+and ends on values or on "Open the case".
 **Gauge order** on the settings page changes how the gauge lines up its ring,
 number and charging bolt. **Gauge display** puts the gauge on one display's
 taskbar, or on every display's taskbar at once with **All displays**.
 
 What to know before you trust a number:
 
-- **Which AirPods.** Earshot picks them out by model and by which is nearest,
-  holds that choice, and changes it only when another pair is clearly nearer for
-  a sustained time. Another pair of the same model close by could be read
-  instead. I accept that risk, and you should know it is there.
+- **Which AirPods.** You link them by opening the case next to the PC. A pair in
+  an open case sends its case level and a pair in use does not, so Earshot links
+  the set of your model that sends one, close to the PC (-70 dBm or stronger,
+  steadily for about two seconds). The first set to do that is linked, and a pair
+  that opens its case later but 8 dB stronger takes the link. A pair worn nearby is
+  never linked. Earshot then follows your pair when its addresses change
+  (only to a set that says the levels yours last said, within 30 seconds), and
+  drops the link after two minutes without hearing it, showing nothing until you
+  open the case again. The link is kept in memory only, so a restart, which an
+  update does, needs the case opened once more. With the AirPods connected and
+  nothing linked, the card says "Open the case to show battery".
+- **The risk that remains.** A pair of the same model that opens its case next to
+  the PC more strongly than yours can be linked instead, and one whose levels
+  equal yours, heard within 30 seconds of yours going quiet, can be followed as if
+  it were yours. I accept that risk, and you should know it is there. Opening your
+  own case at least 8 dB stronger takes the link back.
+- **Only while connected.** Nothing is shown for AirPods that are not connected
+  to this PC: not as current and not greyed. Windows' own figure follows the same
+  rule.
 - **Age.** A value older than 30 seconds is greyed, with the time it was read.
-  The gauge drops a value after one hour.
+  The gauge drops a value after one hour, and a link lost for two minutes drops
+  everything it read.
 - **Left and right.** Which bud is left and which right rests partly on a
   published description of the broadcast and partly on one local capture. It is
   unproved.

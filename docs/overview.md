@@ -371,9 +371,10 @@ see [requirements.md](requirements.md#what-it-does-not-do) and
 Alongside the tray icon, Earshot can show a small gauge on the taskbar, and
 from it a card with more detail. It works by listening to the AirPods' own
 Bluetooth broadcast, the same short signal a phone reads for its own battery
-widget, rather than needing them connected to this PC. There is no set-up. That
-is also why it has firm limits; see [below](#what-the-widget-cannot-know). The
-battery has not had a live run.
+widget. There is no set-up: you open the AirPods case next to the PC once and
+Earshot links to your pair. The figures show only while the AirPods are
+connected to this PC. That is also why it has firm limits; see
+[below](#what-the-widget-cannot-know). The battery has not had a live run.
 
 **The gauge.** The earbud mark with a ring round it in your Windows accent
 colour. The ring fills to the lower bud's battery, that number sits beside it,
@@ -480,10 +481,12 @@ button.
 
 The refresh control on the card, and **Refresh battery** in the menu, ask the
 AirPods for a fresh reading by listening again. Earshot restarts its listener
-and waits up to 12 seconds for a message from your AirPods. The card says it is
-reading while it waits, and the refresh ends one of these ways:
+and waits up to 12 seconds for a message from your linked AirPods or, when none
+is linked, for the case to be opened. The card says it is reading while it waits,
+and the refresh ends one of these ways:
 
-- **Values.** A message arrived, and the card shows them as current.
+- **Values.** A message arrived, or the case was opened and linked, and the card
+  shows them as current.
 - **Windows' figure.** Nothing was heard, but Windows has a Hands-Free figure.
 - **"Nothing heard. Open the case."** A closed case sends nothing, so open it
   by the PC and refresh again.
@@ -566,7 +569,9 @@ address, so it does not depend on the mode.
 - **Battery is a snapshot, never live.** It is read in steps of 10% (0, 10,
   20 to 100) from the last broadcast Earshot heard. A value older than 30
   seconds is greyed with its age, it is never interpolated, and the gauge
-  drops a reading older than an hour.
+  drops a reading older than an hour. It shows only while the AirPods are
+  connected to this PC, and only for the pair you linked by opening the case.
+  When they disconnect, nothing is shown, not even greyed.
 - **Left and right rest partly on a published description of the broadcast
   and partly on one local capture, and are unproved.** No permitted source
   documents the bit that swaps the two buds. If it is read the wrong way round,
@@ -582,19 +587,32 @@ address, so it does not depend on the mode.
 
 ### Whose AirPods it shows
 
-There is no set-up, so Earshot has to pick your AirPods out of what it hears.
-It takes the model of the AirPods paired to this PC from Windows. Among the
-broadcasts of that model it chooses the set that is nearest, learns its
-colour, and holds it. Your two buds count as one set. The choice stays until
-another pair is clearly nearer for a sustained time. After the chosen pair has
-been silent for a while, the choice is made again, and the values already shown
-stay on the card, greying as they age, until the new choice's own messages
-replace them. Being connected to this PC does not change any of this.
+There is no set-up, so Earshot has to find your AirPods in what it hears. It takes
+the model of the AirPods paired to this PC from Windows. **You link them by opening
+the case next to the PC.** A pair in an open case sends its case level, and a pair
+in use does not, so Earshot links the set of that model that sends a case level,
+close to the PC (a signal of at least -70 dBm), steadily for about two seconds. The
+first set to do that is linked, and a pair that opens its case later but 8 dB stronger
+takes the link. Your two buds count as one set. A pair worn nearby
+is never linked, however near.
+
+After that Earshot follows your pair when its Bluetooth addresses change, which it
+does by the levels the pair last said: a set with other levels is never taken for
+yours. If it cannot hear your pair for two minutes it drops the link and shows
+nothing until you open the case again. The link is kept in memory only, so
+restarting Earshot, as an update does, needs the case opened once more.
+
+With the AirPods connected and nothing linked, the card and the gauge's tooltip say
+"Open the case to show battery", and **Refresh** listens for the case to be opened.
+Windows' own Hands-Free figure, when it has one, shows for the connected AirPods
+whether or not a pair is linked.
 
 **The accepted risk.** A pair of the same model, and the same colour once one is
-held, that sits nearer than yours for long enough can be shown in place of
-yours. The owner accepted that risk rather than add a set-up step to rule it
-out.
+held, that opens its case next to the PC more strongly than yours can be linked
+instead, and one whose levels equal your pair's last, heard within 30 seconds of
+yours going quiet, can be followed as if it were yours. The owner accepted that risk
+rather than add a set-up step to rule it out. Opening your own case next to the PC,
+at least 8 dB stronger than the other pair, takes the link back.
 
 ### What still needs a kernel driver
 
@@ -608,7 +626,7 @@ full list and why, with sources.
 
 The widget only listens. It never connects to, or sends anything to, a
 Bluetooth device to get this data, and it does not need the AirPods connected
-to this PC at all. It does read the paired AirPods' model from Windows to know
-which broadcast to pick. What it hears is held in memory for the selection and
-is not written to disk. A device that is not chosen is counted and nothing else
-about it is kept.
+to this PC to listen. It does read the paired AirPods' model from Windows to know
+which broadcast to link. What it hears is held in memory for the link and is not
+written to disk. A device that is not linked is counted and nothing else about it
+is kept.
