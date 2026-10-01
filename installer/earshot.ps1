@@ -30,6 +30,9 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     # so this script waits 60 s, a little longer, before it says the tray did not close. The record of an update is waited for
     # 300 s, as long as the first install's own wait for the install it starts (UpdateActions.InstallWait).
     $TrayWaitSecondsDefault = 60
+    # An update or a repair ends with the program that did the install starting the tray itself. This script looks for that
+    # tray for this long before it starts one of its own.
+    $TrayAppearSecondsDefault = 16
     $OutcomeWaitSecondsDefault = 300
 
     # State shared by the functions below. Nothing here outlives the script block.
@@ -514,6 +517,22 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         [void](Start-Process -FilePath $Exe -WorkingDirectory (Split-Path -Parent $Exe))
     }
 
+    # The install an update or a repair runs starts the tray itself when it has finished, a moment before or after this script
+    # learns that it has. A second start is told to show the running tray's status card, which can cover the one-time notice of
+    # how the update went. So the installed program is looked for first, for about 16 seconds, and one is started only when none
+    # appears. True when the installed program is running.
+    function Wait-TrayAppears($Pth, [string]$Exe) {
+        $seconds = $TrayAppearSecondsDefault
+        if ($null -ne $hk.TrayAppearSeconds) { $seconds = [double]$hk.TrayAppearSeconds }
+        $deadline = [DateTime]::UtcNow.AddSeconds($seconds)
+        while ($true) {
+            $found = @(Find-Tray $Pth | Where-Object { ([string]$_.Path).Equals($Exe, [StringComparison]::OrdinalIgnoreCase) })
+            if ($found.Count -gt 0) { return $true }
+            if ([DateTime]::UtcNow -ge $deadline) { return $false }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+
     # A run that stops after it closed the tray starts that tray again, so Earshot is not left closed with the AirPods
     # unprotected until the next sign-in. It does not when the run reported success (the run's own ending starts the program),
     # when the elevated program may still be working in the install folder (a program started now could be half replaced), or
@@ -804,8 +823,14 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         }
 
         Remove-UserCopy $Pth
-        Write-Line 'Starting Earshot...'
-        Start-Tray $installedExe
+        if ($route -ne 'install-zip' -and (Wait-TrayAppears $Pth $installedExe)) {
+            Write-Line 'Earshot is running.'
+        }
+        else {
+            Write-Line 'Starting Earshot...'
+            Start-Tray $installedExe
+        }
+
         Write-Line 'Earshot is installed.'
     }
 

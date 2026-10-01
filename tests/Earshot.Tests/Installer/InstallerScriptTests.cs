@@ -487,6 +487,91 @@ public sealed class InstallerScriptTests
         Assert.AreEqual(1, world.Feed.ApiRequests);
     }
 
+    // The install an update runs starts the tray itself when it has finished. A second start is told to show the running tray's
+    // status card, which can cover the one-time notice of how the update went, so the script finds the tray the install started
+    // and starts none of its own.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void AnUpdateWhoseInstallStartedTheTrayStartsNoSecondOne(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.InstallRealProgram();
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
+        world.Spec.Action = "Update";
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.ElevateBody = "Write-Outcome 'Installing'; Write-Outcome 'Installed'; $global:TrayRunning = $true; [pscustomobject]@{ ExitCode = 0 }";
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
+        Assert.AreEqual(1, run.CallsNamed("ExitTray").Length, "The tray was closed for the update.");
+        Assert.IsEmpty(run.CallsNamed("StartTray"), "The tray the install started is the one that runs: " + run.Describe());
+        CollectionAssert.Contains(run.Lines, "Earshot is running.");
+        Assert.IsFalse(run.Lines.Contains("Starting Earshot..."));
+    }
+
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void ARepairWhoseInstallStartedTheTrayStartsNoSecondOne(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.InstallRealProgram();
+        world.Feed.AddRelease(BuildVersion.CurrentTag);
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
+        world.Spec.Action = "Repair";
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.ElevateBody = "Write-Outcome 'Installed'; $global:TrayRunning = $true; [pscustomobject]@{ ExitCode = 0 }";
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
+        Assert.IsEmpty(run.CallsNamed("StartTray"), run.Describe());
+    }
+
+    // The tray the install starts can appear a few seconds after the install says it has finished: it is waited for, not started
+    // again at once.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void AnUpdateWhoseTrayAppearsAMomentAfterTheInstallEndedWaitsForItAndStartsNoSecondOne(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.InstallRealProgram();
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
+        world.Spec.Action = "Update";
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.TrayAppearSeconds = 8;
+        world.Spec.ElevateBody = "Write-Outcome 'Installing'; Write-Outcome 'Installed'; $global:TrayAppearAt = [DateTime]::UtcNow.AddSeconds(1.5); [pscustomobject]@{ ExitCode = 0 }";
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
+        Assert.IsEmpty(run.CallsNamed("StartTray"), run.Describe());
+    }
+
+    // When the install started none (it could not), the script starts the installed program once, after the wait.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void AnUpdateWhoseInstallStartedNoTrayStartsTheInstalledProgramOnceAfterTheWait(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.InstallRealProgram();
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: BuildVersion.Current);
+        world.Spec.Action = "Update";
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.TrayAppearSeconds = 0.6;
+        world.Spec.ElevateBody = "Write-Outcome 'Installing'; Write-Outcome 'Installed'; [pscustomobject]@{ ExitCode = 0 }";
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
+        CollectionAssert.AreEqual(new[] { world.InstalledExe }, run.CallsNamed("StartTray").Select(c => c.Split('|')[1]).ToArray());
+        CollectionAssert.Contains(run.Lines, "Starting Earshot...");
+    }
+
     [TestMethod]
     [DataRow(ShellKind.WindowsPowerShell)]
     [DataRow(ShellKind.PowerShell7)]
@@ -1204,6 +1289,9 @@ internal sealed class RunSpec
 
     public double TrayWaitSeconds { get; set; } = 5;
 
+    // How long the script looks for the tray an update's or a repair's install started before it starts one itself.
+    public double TrayAppearSeconds { get; set; } = 0.3;
+
     // When set, the tray is found running this many times and is gone from the next look on, whatever asked it to exit: a
     // tray that was slow to close and was gone by the time the script looked again.
     public int? TrayFindsBeforeGone { get; set; }
@@ -1517,7 +1605,7 @@ internal sealed class InstallerWorld : IDisposable
 
         if (Spec.Tray is { } tray)
         {
-            string present = "if ($global:TrayRunning)";
+            string present = "if ($global:TrayRunning -or ($global:TrayAppearAt -and [DateTime]::UtcNow -ge $global:TrayAppearAt))";
             if (Spec.TrayFindsBeforeGone is int finds)
             {
                 d.AppendLine("$global:FindTrayCalls = 0");
@@ -1540,6 +1628,7 @@ internal sealed class InstallerWorld : IDisposable
         }
 
         d.AppendLine("$h.TrayWaitSeconds = " + Spec.TrayWaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        d.AppendLine("$h.TrayAppearSeconds = " + Spec.TrayAppearSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
         d.AppendLine("$h.OutcomeWaitSeconds = " + Spec.OutcomeWaitSeconds);
 
         d.AppendLine("$roots = @{ Install = " + Q(Install) + "; Machine = " + Q(Machine) + "; UserPrograms = " + Q(UserPrograms) + "; Roaming = " + Q(Roaming) +
