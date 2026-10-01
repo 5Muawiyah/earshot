@@ -159,21 +159,52 @@ internal static partial class Program
             {
                 // Task Scheduler COM runs on an MTA thread, as it does in the tray.
                 using var worker = new SystemWorker(log);
-                InstallResult result = worker.RunAsync(_ => CreateInstallActions(layout, log).Run(request))
-                    .GetAwaiter().GetResult();
-
-                // An install the update started completes the record the update run left; any other install leaves
-                // it alone (UpdateOutcomes.ForInstallRun). The end of an update also starts the tray again.
-                var recorder = new UpdateOutcomeRecorder(paths.MachineFolder, new NtfsFolderSecurity(), log, TimeProvider.System);
-                var restarter = new TrayRestarter(new MutexTrayInstanceProbe(TrayInstanceName), new ComTaskRegistrar(), new ComTaskRunner(), log);
-                return CompleteInstall(result, recorder, Earshot.Update.ReleaseVersion.Running(typeof(Program).Assembly)?.ToString(),
-                    () => worker.RunAsync(_ => restarter.Restart(request.UserSid, layout.InstallFolder)).GetAwaiter().GetResult());
+                return RunInstallAndComplete(
+                    request,
+                    work => worker.RunAsync(_ => CreateInstallActions(layout, log).Run(work)).GetAwaiter().GetResult(),
+                    new InstallCompletion(
+                        paths.MachineFolder, layout.InstallFolder, new NtfsFolderSecurity(), TimeProvider.System,
+                        Earshot.Update.ReleaseVersion.Running(typeof(Program).Assembly)?.ToString(),
+                        new MutexTrayInstanceProbe(TrayInstanceName), new ComTaskRegistrar(), new ComTaskRunner(), log,
+                        restart => worker.RunAsync(_ => restart()).GetAwaiter().GetResult()));
             }));
         }
         finally
         {
             log.FlushTo(MachineLog(paths, new NtfsFolderSecurity(), out string whyNot), whyNot);
         }
+    }
+
+    // What the end of an install is made of, apart from the install itself: where the update's record is kept, the folder the
+    // tray is started from, the release this program is (null when it cannot be read), and the parts the start of the tray is
+    // made through. The install verb gives it the real ones and the test of the whole hand-over gives it fakes, so both run the
+    // same RunInstallAndComplete. OnTaskThread runs the start where Task Scheduler COM may be called (the install's MTA worker).
+    internal sealed record InstallCompletion(
+        string MachineFolder, string InstallFolder, IFolderSecurity Folders, TimeProvider Time, string? Version,
+        ITrayInstanceProbe Probe, ITaskRegistrar Tasks, ITaskRunner Runner, ILog Log,
+        Func<Func<IReadOnlyList<StepOutcome>>, IReadOnlyList<StepOutcome>> OnTaskThread)
+    {
+        // For tests: the wait between two looks for the new tray.
+        public Func<TimeSpan, bool>? Wait { get; init; }
+    }
+
+    // An install and everything that finishes it, in one place: the install runs, an update's install completes the record the
+    // update run left (any other install leaves it alone, UpdateOutcomes.ForInstallRun), and the end of an update starts the
+    // tray again (CompleteInstall). The install verb runs this, and so does the test that follows a whole hand-over, so a step
+    // lost here is lost there, and fails it.
+    internal static InstallResult RunInstallAndComplete(InstallRequest request, Func<InstallRequest, InstallResult> install, InstallCompletion completion)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(install);
+        ArgumentNullException.ThrowIfNull(completion);
+        InstallResult result = install(request);
+        var recorder = new UpdateOutcomeRecorder(completion.MachineFolder, completion.Folders, completion.Log, completion.Time);
+        var restarter = new TrayRestarter(completion.Probe, completion.Tasks, completion.Runner, completion.Log)
+        {
+            Wait = completion.Wait ?? DeviceChangeLock.SleepAndContinue,
+        };
+        return CompleteInstall(result, recorder, completion.Version,
+            () => completion.OnTaskThread(() => restarter.Restart(request.UserSid, completion.InstallFolder)));
     }
 
     // What follows a finished install. Records how an update's install ended, when this install is one (version is the

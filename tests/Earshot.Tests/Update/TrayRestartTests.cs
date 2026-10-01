@@ -307,6 +307,71 @@ public sealed class TrayRestartTests
         StringAssert.Contains(Final(steps).Detail, "ended when its start task was removed");
     }
 
+    // The tray seen at the moment its task is removed may still end a moment later: survival is reported only after it has been
+    // looked at for about two seconds.
+    [TestMethod]
+    public void ATrayThatEndsAFewLooksAfterItsTaskIsRemovedIsReportedAsNotStarted()
+    {
+        var rig = new Rig();
+        int removedAfter = -1;
+        int probes = 0;
+        int waits = 0;
+        rig.Probe.Script = () =>
+        {
+            probes++;
+            if (probes == 1)
+            {
+                return TrayInstance.NotRunning;
+            }
+
+            // Running for the look that finds it after the run and the first five looks after the removal (about 1.25 s).
+            if (removedAfter < 0 && rig.Tasks.Tasks.Count == 0)
+            {
+                removedAfter = probes;
+            }
+
+            return removedAfter < 0 || probes < removedAfter + 5 ? TrayInstance.Running : TrayInstance.NotRunning;
+        };
+        rig.Restarter = new TrayRestarter(rig.Probe, rig.Registrar, rig.Runner, rig.Log)
+        {
+            Wait = _ =>
+            {
+                waits++;
+                return true;
+            },
+        };
+
+        IReadOnlyList<StepOutcome> steps = rig.Restart();
+
+        StepOutcome after = steps.Single(s => s.Step == "install-start-tray-after-remove");
+        Assert.IsFalse(after.Ok, "The tray was gone at a later look: " + Describe(steps));
+        Assert.IsFalse(Final(steps).Ok);
+        StringAssert.Contains(Final(steps).Detail, "ended when its start task was removed");
+        Assert.IsGreaterThan(0, waits, "It looked again after the first look.");
+    }
+
+    [TestMethod]
+    public void ATrayThatIsStillRunningAfterAboutTwoSecondsIsReportedAsStartedAfterTheLooks()
+    {
+        var rig = new Rig();
+        int waits = 0;
+        rig.Restarter = new TrayRestarter(rig.Probe, rig.Registrar, rig.Runner, rig.Log)
+        {
+            Wait = _ =>
+            {
+                waits++;
+                return true;
+            },
+        };
+
+        IReadOnlyList<StepOutcome> steps = rig.Restart();
+
+        Assert.IsTrue(steps.Single(s => s.Step == "install-start-tray-after-remove").Ok, Describe(steps));
+        Assert.IsTrue(Final(steps).Ok);
+        Assert.AreEqual(TrayRestarter.SurvivalLooks - 1, waits, "Eight looks, a quarter of a second apart: seven waits, about two seconds.");
+        Assert.IsGreaterThanOrEqualTo(TimeSpan.FromSeconds(1.75), TrayRestarter.PollEvery * (TrayRestarter.SurvivalLooks - 1));
+    }
+
     // ----- the install that ends an update -----
 
     private static InstallResult Done(GateExitCode outcome = GateExitCode.Success) =>
@@ -528,13 +593,18 @@ public sealed class TrayRestartTests
         var probe = new FakeProbe();
         var runner = new FakeRunner(probe);
         var capturing = new CapturingRegistrar(tasks);
-        var restarter = new TrayRestarter(probe, capturing, runner, log) { Wait = _ => true };
         string work = starter.Starts[0].WorkingDirectory;
         InstallResult? finished = null;
+
+        // The same RunInstallAndComplete the install verb runs, given fakes for the tasks, the probe and the clock.
+        var completion = new Program.InstallCompletion(
+            data.MachineFolder, install, folders, time, "1.3.0", probe, capturing, runner, log, restart => restart())
+        {
+            Wait = _ => true,
+        };
         GateExitCode installed = Program.RunInstall(installArgs, FakeToken.ElevatedUser, log, request =>
         {
-            InstallResult result = RunInstall(work, request);
-            finished = Program.CompleteInstall(result, recorder, "1.3.0", () => restarter.Restart(request.UserSid, install));
+            finished = Program.RunInstallAndComplete(request, install: r => RunInstall(work, r), completion);
             return finished;
         }, []);
 

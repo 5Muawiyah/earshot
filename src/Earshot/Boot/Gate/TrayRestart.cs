@@ -151,6 +151,11 @@ internal sealed class TrayRestarter
 
     public static readonly TimeSpan PollEvery = TimeSpan.FromMilliseconds(250);
 
+    // How many times the tray is looked at after its task was removed, PollEvery apart: eight looks cover about two seconds.
+    // The documentation does not say whether, or how soon, removing a task ends an instance it started, so one look at the
+    // moment of removal could find a tray that is about to end. A waiting budget chosen here, not a measured figure.
+    public const int SurvivalLooks = 8;
+
     private readonly ITrayInstanceProbe _probe;
     private readonly ITaskRegistrar _tasks;
     private readonly ITaskRunner _runner;
@@ -232,13 +237,24 @@ internal sealed class TrayRestarter
         steps.Add(StepOutcomes.FromHResult("install-start-tray-remove", hr, hr < 0 ? "The next install removes it." : null));
 
         // The tray is a child of the task. The documentation does not say what removing a task does to an instance that is
-        // running, so what is left afterwards is looked at and recorded.
+        // running, nor how soon, so what is left is looked at for about two seconds and recorded: survival is reported only
+        // for a tray still running at the last look, and a tray gone at any look is reported as gone.
         if (started)
         {
             TrayProbe after = _probe.Probe();
+            for (int look = 1; look < SurvivalLooks && after.State == TrayInstance.Running; look++)
+            {
+                if (!Wait(PollEvery))
+                {
+                    break;
+                }
+
+                after = _probe.Probe();
+            }
+
             bool survived = after.State == TrayInstance.Running;
             steps.Add(new StepOutcome("install-start-tray-after-remove", survived, survived ? 0 : NativeCodes.NotAttempted, survived ? "S_OK" : NativeCodes.Name(NativeCodes.NotAttempted),
-                survived ? "The tray was still running after its task was removed." : "The tray was no longer running after its task was removed."));
+                survived ? "The tray was still running about two seconds after its task was removed." : "The tray was no longer running after its task was removed."));
             if (!survived)
             {
                 return Ended(steps, started: false, "the tray ended when its start task was removed");
