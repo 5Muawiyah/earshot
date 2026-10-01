@@ -96,7 +96,9 @@ internal sealed class SecondaryGauge : IDisposable
     public event EventHandler<Point>? MenuRequested;
 
     // A read of this display's taskbar, on the UI thread. A read that fell back to another display's taskbar (this display
-    // is gone, or shows none) is no taskbar for this gauge: it must not be drawn on the main display's bar a second time.
+    // is gone, or shows none) is no taskbar for this gauge: it must not be drawn on the main display's bar a second time. Nor is
+    // a read of the main taskbar that says nothing of falling back, which is what this display's reader gives once Windows has made
+    // this display the main one.
     private void OnResult(ITaskbarReader.Result result)
     {
         if (Disposed)
@@ -107,7 +109,7 @@ internal sealed class SecondaryGauge : IDisposable
         ITaskbarReader.Result applied = result;
         if (result.Layout is { } layout)
         {
-            if (layout.DisplayFallback != DisplayFallbackReason.None)
+            if (layout.DisplayFallback != DisplayFallbackReason.None || !layout.IsSecondary)
             {
                 applied = ITaskbarReader.Result.Fail(new TaskbarReadFailure(
                     TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_SecondaryTrayWnd", 0, ok: false)));

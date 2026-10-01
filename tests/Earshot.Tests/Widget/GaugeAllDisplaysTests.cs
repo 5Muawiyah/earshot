@@ -640,6 +640,27 @@ public sealed class GaugeAllDisplaysTests
 
     // The card is placed where the clicked gauge is: above it, in the work area of its display, at its display's scale. Checked on the
     // rectangle the card was put at, which an anchor taken from somewhere else (no gauge, the cursor) would not give.
+    // The display this gauge is for has become the main one: its reader now reads the main taskbar with no fallback to name, and the
+    // main gauge is already on that bar.
+    [TestMethod]
+    public void AReadOfTheMainTaskbarThatDoesNotSayItFellBackIsNotDrawnAsASecondGaugeThere()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
+            TrayHarness.PumpUntil(() => rig.ReaderFor(IdTwo) is not null, "No reader for Display 2.");
+
+            rig.ReaderFor(IdTwo)!.SetNextResult(ITaskbarReader.Result.Ok(BarLayout(One, secondary: false)));
+            TrayHarness.PumpUntil(() => rig.ReaderFor(IdTwo)!.ReadCount >= 3, "The reader did not read.");
+            rig.Tray.PumpUntilIdle();
+
+            Assert.AreEqual(
+                1, rig.Surfaces.Count(s => s.ShowCount > 0 && !s.IsDisposed && !s.Hidden && Left1080.Contains(s.Bounds!.Value)),
+                "Two gauges on the main taskbar. " + Why(rig));
+            Assert.IsInstanceOfType<GaugeState.Hidden>(rig.Tray.Context.SecondaryGaugesForTest.Single().State);
+        });
+    }
+
     [TestMethod]
     public void AClickOnEachGaugeOpensTheCardAboveThatGaugeOnItsOwnDisplayAtThatDisplaysScale()
     {
