@@ -688,6 +688,13 @@ public sealed class WidgetAtRestTests
                 {
                     return true;
                 }
+
+                // The interface every System.Windows.Forms accessible object implements. The card describes its own controls
+                // to screen readers, and that reaches no device path: it is the framework's UI Automation face.
+                if (ns == "Accessibility" && candidate.Name == "IAccessible")
+                {
+                    return true;
+                }
             }
 
             Type key = candidate.IsGenericType && !candidate.IsGenericTypeDefinition

@@ -235,6 +235,7 @@ internal sealed partial class WidgetCard : Form
         {
             DetachAccent();
             StopMotion();
+            DisposeTips();
         }
 
         base.Dispose(disposing);
@@ -545,6 +546,7 @@ internal sealed partial class WidgetCard : Form
         base.OnMouseDown(e);
         ArgumentNullException.ThrowIfNull(e);
         NoteMouseForFocusCue();
+        HideTip();
         if (OnSettingsPage)
         {
             SettingsMouseDown(e);
@@ -690,8 +692,10 @@ internal sealed partial class WidgetCard : Form
             DrawCaseColumn(g, layout.Case, _model.Snapshot.Case);
         }
 
-        DrawLine(g, layout.WhereLine, WhereLineText, _palette.Status);
-        DrawLine(g, layout.ReadLine, WidgetCopy.BatteryReadLine(_model.Snapshot.BatteryReadAt, _model.Now), _palette.Status);
+        DrawIconLine(g, layout.WhereLine, FluentGlyphs.Location, WhereLineText, WhereLineText);
+        DrawIconLine(
+            g, layout.ReadLine, FluentGlyphs.Clock, WidgetCopy.ReadAge(_model.Snapshot.BatteryReadAt, _model.Now),
+            WidgetCopy.BatteryReadLine(_model.Snapshot.BatteryReadAt, _model.Now));
         if (layout.ShowSetupButton)
         {
             DrawSetupButton(g, layout);
@@ -719,7 +723,11 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
-        CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
+        if (!CardPaint.TryGlyph(g, FluentGlyphs.Settings, layout.Gear, colours.Text, _dpi))
+        {
+            CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
+        }
+
         if (_focus == WidgetCardFocus.Gear && FocusShown)
         {
             CardPaint.Focus(g, layout.Gear, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
@@ -732,8 +740,14 @@ internal sealed partial class WidgetCard : Form
     {
         CardColours colours = Colours;
         CardPaint.Divider(g, layout.UpdateLine.Left, layout.UpdateLine.Right, layout.UpdateLine.Top, colours);
+        string version = _model.UpdateVersion ?? string.Empty;
+        int box = CardPlacement.Scale(CardPaint.GlyphSizeAt96, _dpi);
+        var iconRect = new Rectangle(layout.UpdateCaption.X, layout.UpdateCaption.Y + ((layout.UpdateCaption.Height - box) / 2), box, box);
+        bool hasIcon = CardPaint.TryGlyph(g, FluentGlyphs.Download, iconRect, colours.TextSecondary, _dpi);
+        int indent = hasIcon ? box + CardPlacement.Scale(8, _dpi) : 0;
         CardPaint.Text(
-            g, WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption, _type,
+            g, hasIcon ? WidgetCopy.UpdateAvailableShort(version) : WidgetCopy.UpdateAvailable(version),
+            new Rectangle(layout.UpdateCaption.X + indent, layout.UpdateCaption.Y, Math.Max(1, layout.UpdateCaption.Width - indent), layout.UpdateCaption.Height), _type,
             CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
         CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _type, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && FocusShown);
     }
@@ -767,6 +781,7 @@ internal sealed partial class WidgetCard : Form
         int at = order.IndexOf(_focus);
         _focus = order[(at + 1) % order.Count];
         Invalidate();
+        NoteFocusMoved();
     }
 
     private void ActivateFocused()
@@ -1068,6 +1083,22 @@ internal sealed partial class WidgetCard : Form
         g.FillPolygon(brush, points);
     }
 
+    // A line of text with its icon: the icon at the left, then the words. With no icon font the line says it in full
+    // words instead, since the icon is what made the short ones clear.
+    private void DrawIconLine(Graphics g, Rectangle bounds, char glyph, string text, string fullText, TypeRole role = TypeRole.Caption)
+    {
+        int box = CardPlacement.Scale(CardPaint.GlyphSizeAt96, _dpi);
+        var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
+        if (!CardPaint.TryGlyph(g, glyph, iconRect, _palette.Status, _dpi))
+        {
+            DrawLine(g, bounds, fullText, _palette.Status, role);
+            return;
+        }
+
+        int indent = box + CardPlacement.Scale(8, _dpi);
+        DrawLine(g, new Rectangle(bounds.X + indent, bounds.Y, Math.Max(1, bounds.Width - indent), bounds.Height), text, _palette.Status, role);
+    }
+
     private void DrawLine(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role = TypeRole.Caption)
     {
         using Font font = _type.Role(role);
@@ -1116,7 +1147,7 @@ internal sealed partial class WidgetCard : Form
         int trackWidth = CardPlacement.Scale(WidgetCardLayout.ToggleWidthAt96, _dpi);
         int trackHeight = CardPlacement.Scale(WidgetCardLayout.ToggleHeightAt96, _dpi);
         var labelRect = new Rectangle(rect.X, rect.Y, Math.Max(0, rect.Width - trackWidth - 8), rect.Height);
-        DrawLine(g, labelRect, WidgetCopy.AutoPauseSwitch, _palette.Status, TypeRole.Body);
+        DrawIconLine(g, labelRect, FluentGlyphs.EarbudForThisPc(), WidgetCopy.AutoPauseSwitch, WidgetCopy.NamePauseBud, TypeRole.Body);
 
         var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
         CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi);
@@ -1233,6 +1264,7 @@ internal sealed partial class WidgetCard : Form
                 index = index < 0 ? 0 : (index + (shift ? targets.Count - 1 : 1)) % targets.Count;
                 _setupFocus = targets[index];
                 Invalidate();
+                NoteFocusMoved();
                 break;
             case Keys.Escape:
                 SetupActionRequested?.Invoke(this, SetupAction.Back);

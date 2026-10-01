@@ -48,7 +48,9 @@ public sealed class GaugeOrderPickerTests
                     Assert.AreEqual(new Size(104, 52), tiles[0].Size, "104 by 52 at 100%.");
                 }
 
-                Assert.IsTrue(row.Bounds.Contains(tiles[5]));
+                Assert.IsTrue(row.Bounds.Contains(tiles[0]) && row.Bounds.Contains(tiles[5]), "Every picture is inside its row.");
+                Assert.IsTrue(row.Bounds.Contains(row.IconRect), "And so is the icon.");
+                Assert.IsGreaterThanOrEqualTo(card.CurrentSettingsLayout!.Frame.Body.Top, tiles[0].Top, "Below the header, not under it.");
             }
         });
     }

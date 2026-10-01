@@ -139,13 +139,17 @@ internal static partial class CardPaint
     // Draws one icon centred in bounds, 16 epx at 96 dpi and scaled with dpi. Draws nothing when no icon font is
     // installed. Text rendering is GDI+ like the rest of the card, so the glyph keeps its alpha on the translucent
     // backdrop.
-    public static void Glyph(Graphics g, char codePoint, Rectangle bounds, Color colour, int dpi)
+    public static void Glyph(Graphics g, char codePoint, Rectangle bounds, Color colour, int dpi) =>
+        _ = TryGlyph(g, codePoint, bounds, colour, dpi);
+
+    // The same, answering false when no icon font is installed, so a caller can draw its own shape instead.
+    public static bool TryGlyph(Graphics g, char codePoint, Rectangle bounds, Color colour, int dpi)
     {
         ArgumentNullException.ThrowIfNull(g);
         string? family = FluentGlyphs.Family;
         if (family is null)
         {
-            return;
+            return false;
         }
 
         float size = Math.Max(1, Scale(GlyphSizeAt96, dpi));
@@ -159,5 +163,6 @@ internal static partial class CardPaint
         };
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.DrawString(codePoint.ToString(), font, brush, bounds, format);
+        return true;
     }
 }

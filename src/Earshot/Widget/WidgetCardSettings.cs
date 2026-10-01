@@ -508,6 +508,8 @@ internal static class SettingsPageLayout
                 A = Shift(item.A, offset),
                 B = Shift(item.B, offset),
                 Value = Shift(item.Value, offset),
+                IconRect = Shift(item.IconRect, offset),
+                Tiles = item.Tiles.Select(t => Shift(t, offset)).ToList(),
             });
         }
 

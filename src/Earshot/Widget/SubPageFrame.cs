@@ -96,7 +96,11 @@ internal static class SubPageFrame
             CardPaint.Focus(g, layout.Back, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, dpi), colours, dpi);
         }
 
-        CardPaint.BackArrow(g, layout.Back, colours.Text, dpi);
+        if (!CardPaint.TryGlyph(g, FluentGlyphs.Back, layout.Back, colours.Text, dpi))
+        {
+            CardPaint.BackArrow(g, layout.Back, colours.Text, dpi);
+        }
+
         CardPaint.Text(g, title, layout.Title, type, CardPlacement.Scale(14, dpi), bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
         if (step is not null)
         {
@@ -450,7 +454,12 @@ internal static partial class CardPaint
             g.DrawPath(pen, path);
         }
 
-        Glyph10(g, rect, kind, Color.FromArgb(alpha, bordered ? colours.Text : colours.TextSecondary), dpi);
+        Color ink = Color.FromArgb(alpha, bordered ? colours.Text : colours.TextSecondary);
+        if (kind != GlyphKind.Cross || !TryGlyph(g, FluentGlyphs.Cancel, rect, ink, dpi))
+        {
+            Glyph10(g, rect, kind, ink, dpi);
+        }
+
         if (focused)
         {
             Focus(g, rect, radius, colours, dpi);

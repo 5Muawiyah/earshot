@@ -145,6 +145,9 @@ internal static class WidgetCopy
     // The update line on the card: the version a check found, from the release itself.
     public static string UpdateAvailable(string version) => "Version " + version + " is available";
 
+    // The update line's words beside its download icon; the full sentence above is its tooltip.
+    public static string UpdateAvailableShort(string version) => version + " available";
+
     // "Left AirPod at 20%" and so on: the low battery alert's one line, from the literal percent the reading
     // carried, never rounded or interpolated (there is no other figure to show).
     public static string LowBatteryLeftText(int percent) => LowBatteryText(LeftAirPodLabel, percent);
@@ -170,13 +173,19 @@ internal static class WidgetCopy
     };
 
     // "Battery read <n> s|min|h ago", never "live".
-    public static string BatteryReadLine(DateTimeOffset? readAt, DateTimeOffset now)
-    {
-        if (readAt is not { } at)
-        {
-            return BatteryNotReadYet;
-        }
+    public static string BatteryReadLine(DateTimeOffset? readAt, DateTimeOffset now) =>
+        readAt is null ? BatteryNotReadYet : "Battery read " + Age(readAt.Value, now);
 
+    // The card's read line beside its clock icon: "2 min ago", and "Not read yet" before any reading. The full words are
+    // the line's tooltip.
+    public static string ReadAge(DateTimeOffset? readAt, DateTimeOffset now) =>
+        readAt is null ? NotReadYet : Age(readAt.Value, now);
+
+    public const string NotReadYet = "Not read yet";
+
+    // "2 min ago": the amount in seconds, minutes or hours, rounded to the nearest whole, never negative.
+    private static string Age(DateTimeOffset at, DateTimeOffset now)
+    {
         TimeSpan age = now - at;
         if (age < TimeSpan.Zero)
         {
@@ -188,7 +197,7 @@ internal static class WidgetCopy
             : age.TotalMinutes >= 1
                 ? Round(age.TotalMinutes) + " min"
                 : Round(Math.Max(0, age.TotalSeconds)) + " s";
-        return "Battery read " + amount + " ago";
+        return amount + " ago";
     }
 
     // The gauge's tooltip. Three lines when there is a reading, one line otherwise.

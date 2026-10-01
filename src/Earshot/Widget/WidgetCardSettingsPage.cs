@@ -293,6 +293,7 @@ internal sealed partial class WidgetCard
         {
             _settingsFocus = _settingsFocus with { Index = next };
             Invalidate();
+            NoteFocusMoved();
         }
     }
 
@@ -315,6 +316,7 @@ internal sealed partial class WidgetCard
 
         _settingsFocus = targets[(at + (backwards ? targets.Count - 1 : 1)) % targets.Count];
         Invalidate();
+        NoteFocusMoved();
     }
 
     private static bool IsModifierKey(Keys key) =>
@@ -482,6 +484,7 @@ internal sealed partial class WidgetCard
         base.OnVisibleChanged(e);
         if (!Visible)
         {
+            HideTip();
             EndEdits(commit: true);
         }
     }

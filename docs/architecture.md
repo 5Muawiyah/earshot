@@ -417,6 +417,67 @@ so it follows the owner's own accessibility setting, and its Connect or
 Disconnect button only ever fires on a genuine click on that button; nothing
 else in its code path can press it.
 
+**Type and text size.** Text is Segoe UI Variable in the Windows 11 type ramp
+(https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography):
+12 on 16 for captions, 14 on 20 for body text, semibold for titles and section heads,
+and 20 on 24 semibold for the battery figure. GDI+ cannot pick the font's optical size on its
+own, so each style names one of the font's own instances (Small, Text or Display), found by name
+among the installed families (GDI+ cuts family names at 31 characters); where one is missing the
+card falls back to Segoe UI, then to the system message font. Every size is multiplied by
+Settings > Accessibility > Text size
+([`UISettings.TextScaleFactor`](https://learn.microsoft.com/en-us/uwp/api/windows.ui.viewmanagement.uisettings.textscalefactor),
+1 to 2.25), and the heights of the rows that hold text grow with it while widths and paddings follow
+the display scale only. The card keeps its 360 epx width, so a row whose control would squeeze its
+label puts the control under the label, and text that still does not fit ends in an ellipsis. The
+gauge is the exception: its width is fixed and its number sits in a 22 px slot, so its type does not
+follow the text size. Whether `TextScaleFactorChanged` is raised in a process with no core window is
+not documented, so an open card also reads the look afresh on every `WM_SETTINGCHANGE` and every
+show.
+
+**Theme, accent, contrast and transparency.** The theme, the accent, a high-contrast theme and the
+Transparency effects setting are followed while the card is open. On a settings change the card takes
+the taskbar's ink again, re-applies the dark-mode attribute, reads the look and draws again, keeping
+its bottom edge. With Transparency effects off, or under high contrast, it paints its own opaque
+colour over the whole window instead of leaving it clear for the backdrop; Windows shows a solid colour
+there itself, but painting it makes the result the same on every build.
+
+**Motion.** Taskbar flyouts slide up when they are invoked and down when they are dismissed
+(https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/motion). The card enters
+over 250 ms and leaves over 167 ms on the page's cubic-bezier(0, 0, 0, 1) curve, fading in over 83 ms
+and out over its 167 ms, and travels one taskbar thickness (read from where the gauge sits relative to
+the work area; 48 px at 100% when that is not known), away from the taskbar's edge. The curve is
+`3t^(2/3) - 2t`, which the tests use as an oracle. The motion is a pure function of the elapsed time,
+driven by a timer on the tray's clock and tested on a fake one. With Windows' Animation effects off
+(`SPI_GETCLIENTAREAANIMATION`, read at each show and hide) nothing moves and nothing fades. The fade is
+a constant window opacity (a layered window with `SetLayeredWindowAttributes`), and Microsoft does not
+say whether the system backdrop and the rounded corners survive that style, so there is one switch,
+`CardMotion.UseAlphaFade`, that turns the fade off and drops the layered style if they do not.
+
+**Focus.** No control draws a dotted focus rectangle. Keyboard focus draws the Windows 11 focus visual:
+a gap of 1 px, a 1 px inner stroke and a 2 px outer stroke round the control, scaled with the display, in
+the colours of Microsoft's WinUI theme resources (white over black at 70% on dark, black at 89% over white
+at 70% on light, the system's own window text and window colours under high contrast). It shows only for
+keyboard use: from a Tab, an arrow key, Home or End, or when the card was opened from the keyboard, and
+a mouse press hides it. The dialogs use a button that draws the same visual just inside its own bounds,
+since a child control cannot paint outside itself, and a list view that keeps its own item rectangle
+hidden.
+
+**Icons and words.** The icons are Segoe Fluent Icons, from the system font and never bundled, and a
+Segoe MDL2 Assets glyph stands in on a PC without it. A settings row is an icon and one to three words,
+the old description is its tooltip, and the card says less where an icon will do (a pin and the place, a
+clock and the age, a download arrow and the version). Every icon-only control has a tooltip and an
+accessible name, and the card describes its current controls to assistive technology as children in the
+keyboard's order.
+
+**Gauge order.** The setting **Gauge order** lays the ring (with the earbud mark inside it), the number
+and the charging bolt in any of their six orders. The window, its padding and each piece's width stay
+the design's, so the gauge never changes size and the bolt's slot is always kept. The gap the default order
+leaves between ring and number goes next to the ring when it is at an end, and half each side when it is in
+the middle. The number sits against the ring when it is next to it, and otherwise against the window's outer
+edge, so it never meets the bolt. The settings page shows each order as a picture of the gauge itself, drawn
+by the same renderer, with a neutral bar where there is no number and an outlined bolt when it is not
+charging; choosing one changes the gauge on the taskbar at once.
+
 **Probe target.** `Earshot.exe probe widget --out <folder>` renders the
 gauge, the card and the case-open card from fixed, synthetic snapshots, at
 three DPIs and in both taskbar inks, straight to PNG files, the same
@@ -429,12 +490,13 @@ made this way actually show and do not show.
 itself, with no child controls. Its rows are read from the real settings each
 time it is drawn, so a row shows what is saved and never what was last asked
 for. Every change goes through the same path the tray menu's own item uses.
-The rows are, in order: Gauge position, Gauge display (a button that steps through
-Main display and the connected displays), Other device, Pause when a bud comes
-out, Pause when AirPods leave this PC, Case-open card, Low battery alert (the
-threshold), Left click connects, Hand back on shut down, sleep and Exit; then
-the shortcuts for Connect and Disconnect; then Check for updates and Check
-automatically. The two rows for features that need in-ear or lid proof carry
+The rows are, in order: Position, Display (a button that steps through
+Main display and the connected displays), Order (six pictures of the gauge),
+Other device, Pause on removal, Pause on leave, Case card, Low battery (the
+threshold), Click connects, Hand back; then the shortcuts for Connect and
+Disconnect; then the installed version with Check, Repair when an install
+exists, and Auto check. Each is an icon and its words; what each row does is
+its tooltip. The two rows for features that need in-ear or lid proof carry
 a caption saying Earshot cannot yet tell, while that proof is missing.
 
 ### Shortcuts and switch timing
