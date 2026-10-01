@@ -139,6 +139,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     // For tests: how wide the card is, which follows the scale it is drawn at. Zero until a card exists.
     internal int CardWidthForTest => _card?.ClientSize.Width ?? 0;
 
+    // For tests: where the card sits, or is moving to. Null until a card exists.
+    internal Rectangle? CardRestBoundsForTest => _card is { IsDisposed: false } card ? card.RestBounds : null;
+
     // Shows the card above gaugeBounds, or above a zero-size rectangle at fallbackPoint when the gauge is
     // hidden and the click came from the tray icon fallback instead: a simpler fallback than the gauge
     // case, since the tray icon has no free taskbar rectangle of its own to anchor above, unlike the full

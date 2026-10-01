@@ -638,27 +638,38 @@ public sealed class GaugeAllDisplaysTests
         });
     }
 
+    // The card is placed where the clicked gauge is: above it, in the work area of its display, at its display's scale. Checked on the
+    // rectangle the card was put at, which an anchor taken from somewhere else (no gauge, the cursor) would not give.
     [TestMethod]
-    public void AClickOnEachGaugeOpensTheCardAboveThatGaugeOnItsOwnDisplay()
+    public void AClickOnEachGaugeOpensTheCardAboveThatGaugeOnItsOwnDisplayAtThatDisplaysScale()
     {
         Phase5.CardDesktop.Run(() =>
         {
-            using Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
-            FeedSecondary(rig, Two);
+            DisplayInfo scaled = Two with { Dpi = 144 };
+            using Rig rig = StartRig(GaugeDisplayChoice.AllDisplays, One, scaled);
+            FeedSecondary(rig, scaled);
             TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null && rig.ShownOn(Right1080) is not null, "The gauges were never shown.");
             TestSurface second = rig.ShownOn(Right1080)!;
             TestSurface first = rig.ShownOn(Left1080)!;
 
             second.Click();
-            TrayHarness.PumpUntil(() => rig.Tray.Context.LastCardAnchorForTest == second.Bounds, "A click on the second gauge did not anchor the card on it. " + Why(rig));
-            TrayHarness.PumpUntil(() => rig.Tray.Context.WidgetCardIsShownForTest, "The card never opened from the second gauge.");
+            TrayHarness.PumpUntil(() => rig.Tray.Context.WidgetCardIsShownForTest, "The card never opened from the second gauge. " + Why(rig));
 
-            Assert.AreEqual(second.Bounds, rig.Tray.Context.LastCardAnchorForTest, "The card is anchored on the gauge that was clicked.");
-            Assert.IsTrue(Right1080.Contains(rig.Tray.Context.LastCardAnchorForTest!.Value), "On the second display.");
-            // The main gauge keeps its own window, which a fake surface is not, so with fakes it has no bounds to anchor on and the card
-            // goes by the cursor: what matters is that it is not anchored on the second display's gauge any longer.
+            Rectangle onSecond = rig.Tray.Context.WidgetCardRestBoundsForTest!.Value;
+            GaugePosition position = rig.Tray.Settings.Current.Widget.GaugePosition;
+            Assert.AreEqual(
+                WidgetCardPlacement.Above(second.Bounds!.Value, onSecond.Size, scaled.WorkArea, 144, position), onSecond,
+                "The card sits above the gauge that was clicked, in its display's work area, at its display's scale.");
+            Assert.IsTrue(scaled.WorkArea.Contains(onSecond) && onSecond.Bottom <= second.Bounds.Value.Top, "On the second display and above its gauge.");
+
+            // A second click on the same gauge closes it. The main gauge keeps its own window, which a fake surface is not, so with
+            // fakes it has no bounds to anchor on and the card goes by the cursor, which is on the main display.
+            second.Click();
+            TrayHarness.PumpUntil(() => !rig.Tray.Context.WidgetCardIsShownForTest, "A second click on the gauge did not close the card.");
             first.Click();
-            TrayHarness.PumpUntil(() => rig.Tray.Context.LastCardAnchorForTest != second.Bounds, "A click on the main gauge kept the card anchored on the second display's.");
+            TrayHarness.PumpUntil(() => rig.Tray.Context.WidgetCardIsShownForTest, "The card never opened from the main gauge.");
+            Rectangle onMain = rig.Tray.Context.WidgetCardRestBoundsForTest!.Value;
+            Assert.IsTrue(One.WorkArea.Contains(onMain), "A click on the main gauge opens the card on the main display: " + onMain);
         });
     }
 

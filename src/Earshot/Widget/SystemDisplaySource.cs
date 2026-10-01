@@ -131,9 +131,13 @@ internal sealed class SystemDisplaySource : IDisplaySource
     }
 
     // The work area of the display a card's anchor is on, over the displays connected now.
-    public static Rectangle WorkAreaFor(Rectangle anchor)
+    public static Rectangle WorkAreaFor(Rectangle anchor) => WorkAreaFor(new SystemDisplaySource(), anchor);
+
+    // The same over the given source of displays, which is how the tray's cards follow whatever display list the tray itself works
+    // from.
+    public static Rectangle WorkAreaFor(IDisplaySource source, Rectangle anchor)
     {
-        DisplayReading reading = new SystemDisplaySource().Read();
+        DisplayReading reading = source.Read();
         List<DisplayArea> areas = reading.Displays.Select(d => new DisplayArea(d.Bounds, d.WorkArea, d.IsPrimary)).ToList();
         return WidgetCardPlacement.WorkAreaFor(anchor, areas, Rectangle.Empty);
     }

@@ -357,6 +357,9 @@ internal sealed partial class TrayContext
     // (OnWidgetCardRequested) or close would change.
     internal bool WidgetCardIsShownForTest => _widgetCardPresenter?.IsShown ?? false;
 
+    // Where the card sits (or is on its way to), or null while there is no card.
+    internal Rectangle? WidgetCardRestBoundsForTest => _widgetCardPresenter?.CardRestBoundsForTest;
+
     // Which page the gauge-anchored card is on, for tests: null when no card presenter exists.
     internal WidgetCardView? WidgetCardViewForTest => _widgetCardPresenter?.ViewForTest;
 
@@ -452,7 +455,7 @@ internal sealed partial class TrayContext
     {
         if (_widgetCardPresenter is null)
         {
-            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost, CardAnimationsEnabled());
+            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost, CardAnimationsEnabled(), anchor => SystemDisplaySource.WorkAreaFor(_displaySource, anchor));
             WireLook();
         }
 
@@ -590,12 +593,10 @@ internal sealed partial class TrayContext
 
         if (GaugeBoundsIfShown() is { } bounds)
         {
-            LastCardAnchorForTest = bounds;
             presenter.RequestShow(bounds, bounds.Location, openedByKeyboard);
         }
         else
         {
-            LastCardAnchorForTest = null;
             presenter.RequestShow(gaugeBounds: null, _cursorPosition(), openedByKeyboard);
         }
     }

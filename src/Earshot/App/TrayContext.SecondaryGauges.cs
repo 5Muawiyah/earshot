@@ -13,9 +13,6 @@ internal sealed partial class TrayContext
     private TrayIconVotes? _iconVotes;
     private readonly Func<SecondaryTaskbarReading> _secondaryTaskbarSource;
 
-    // Where the last card request was anchored, for tests: the gauge the click was on, or null for a request with no gauge.
-    internal Rectangle? LastCardAnchorForTest { get; private set; }
-
     // How many gauges are on other displays' taskbars now, and their states, for tests.
     internal int SecondaryGaugeCountForTest => _secondaryGauges?.Count ?? 0;
 
@@ -76,7 +73,6 @@ internal sealed partial class TrayContext
         }
 
         _caseOpenCardPresenter?.Hide();
-        LastCardAnchorForTest = bounds;
 
         // The scale goes with the request: the main gauge's own scale (_widgetLayoutDpi) is read from the main taskbar and is not
         // this display's, and a read of it between the click and the card being shown must not change what the card is drawn at.
