@@ -118,6 +118,9 @@ internal sealed class GaugeController : IDisposable
 
     private const string ShellTrayWndClass = "Shell_TrayWnd";
 
+    // The taskbar on every other display is a window of this class, so a gauge on one is covered by it, not by the main taskbar's.
+    private const string ShellSecondaryTrayWndClass = "Shell_SecondaryTrayWnd";
+
     private readonly Func<IGaugeSurface> _createSurface;
     private readonly ITrayIconVisibility _trayIcon;
     private readonly Func<GaugeControllerSettings> _settings;
@@ -509,7 +512,8 @@ internal sealed class GaugeController : IDisposable
         }
 
         NoteCover();
-        if (!string.Equals(cover.RootClassName, ShellTrayWndClass, StringComparison.Ordinal))
+        if (!string.Equals(cover.RootClassName, ShellTrayWndClass, StringComparison.Ordinal) &&
+            !string.Equals(cover.RootClassName, ShellSecondaryTrayWndClass, StringComparison.Ordinal))
         {
             // Once per window class: a flyout that stays open is found by every recheck.
             if (!string.Equals(_lastLeftUnderClass, cover.RootClassName, StringComparison.Ordinal))

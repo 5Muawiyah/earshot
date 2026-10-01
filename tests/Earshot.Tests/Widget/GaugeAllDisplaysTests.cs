@@ -675,7 +675,8 @@ public sealed class GaugeAllDisplaysTests
 
         public SecondaryGaugeSet Set { get; }
 
-        public SetRig(bool deferred = false, string coverClass = "Shell_TrayWnd")
+        // The taskbar over a gauge on another display is that display's own, a Shell_SecondaryTrayWnd.
+        public SetRig(bool deferred = false)
         {
             Taskbars.Set(BarOn(Two, 0x5000), BarOn(Three, 0x5001));
             var parts = new SecondaryGaugeParts(
@@ -702,7 +703,7 @@ public sealed class GaugeAllDisplaysTests
                 () => new GaugeControllerSettings(Enabled: true, LeftClickConnects: false),
                 Log,
                 TimeProvider.System,
-                () => new FakeCoverProbe { Next = new GaugeCover(IsGauge: false, RootClassName: coverClass, BelongsToExplorer: true) },
+                () => new FakeCoverProbe { Next = new GaugeCover(IsGauge: false, RootClassName: "Shell_SecondaryTrayWnd", BelongsToExplorer: true) },
                 action =>
                 {
                     if (deferred)
@@ -862,6 +863,25 @@ public sealed class GaugeAllDisplaysTests
 
         Assert.AreEqual(GaugeController.RaisesPerWindow, busySurface.RaiseCount, "The busy gauge is held to the limit.");
         Assert.AreEqual(1, quietSurface.RaiseCount, "The other gauge's raise is not refused for the busy one's.");
+    }
+
+    // ----- the raise -----
+
+    // Under its own display's taskbar a gauge is raised by the shell events the same as the main one: the cover there is a
+    // Shell_SecondaryTrayWnd, not a Shell_TrayWnd.
+    [TestMethod]
+    public void ASecondaryGaugeCoveredByItsOwnDisplaysTaskbarIsRaisedWhenAWindowTakesTheForeground()
+    {
+        using var rig = new SetRig();
+        rig.Set.Reconcile(wanted: true);
+        rig.Feed();
+        TrayHarness.PumpUntil(() => rig.Surfaces.Count == 2 && rig.Surfaces.All(s => s.ShowCount > 0), "Both gauges were not shown.");
+        SecondaryGauge gauge = rig.Set.Gauges.Single(g => g.DisplayId == IdTwo);
+        TestSurface surface = rig.Surfaces.Single(s => Right1080.Contains(s.Bounds!.Value));
+
+        gauge.OnForegroundChanged("Shell_SecondaryTrayWnd");
+
+        Assert.AreEqual(1, surface.RaiseCount, "The gauge under its own taskbar was not raised.");
     }
 
     // ----- the card's scale -----
