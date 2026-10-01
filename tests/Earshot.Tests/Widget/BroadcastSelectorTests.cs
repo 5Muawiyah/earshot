@@ -352,6 +352,23 @@ public sealed class BroadcastSelectorTests
     }
 
     [TestMethod]
+    public void AnAddressChangeThatIsFollowedWithinTheThirtySecondsIsFollowedEvenWhenItIsHeardLate()
+    {
+        SelectorDriver d = Linked();
+        InUseRun(d, 5);
+        d.Tick(26.5);
+
+        bool followed = false;
+        for (int i = 0; i < 6; i++)
+        {
+            followed |= d.Send(SetANewAddress, InUse(true), -55).Followed;
+            d.Tick(0.5);
+        }
+
+        Assert.IsTrue(followed, "Twenty nine seconds after the old address's last message is inside the thirty.");
+    }
+
+    [TestMethod]
     public void EqualFieldsFromANewAddressWhileTheLinkedSetStillSendsAreNotItsContinuation()
     {
         SelectorDriver d = Linked();
@@ -500,6 +517,27 @@ public sealed class BroadcastSelectorTests
         }
 
         Assert.IsFalse(switched, "Five decibels is under the eight it takes.");
+    }
+
+    // The margin is exact: seven decibels nearer never takes the link and eight does.
+    [TestMethod]
+    public void TheMarginForTakingTheLinkIsEightDecibelsExactly()
+    {
+        foreach ((sbyte rssi, bool expected) in new[] { ((sbyte)-53, false), ((sbyte)-52, true) })
+        {
+            SelectorDriver d = Linked(rssi: -60);
+            bool switched = false;
+            for (int i = 0; i <= 16; i++)
+            {
+                d.Send(SetA, InUse(true), -60);
+                d.Send(SetAOtherBud, InUse(false), -60);
+                switched |= d.Send(SetB, OtherSet(), rssi).Switched;
+                switched |= d.Send(SetBOtherBud, Bud(first: false, caseNibble: 0x2, pairHigh: 0x3, pairLow: 0x1), rssi).Switched;
+                d.Tick(0.25);
+            }
+
+            Assert.AreEqual(expected, switched, rssi + " dBm against -60.");
+        }
     }
 
     [TestMethod]
