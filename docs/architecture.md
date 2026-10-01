@@ -141,8 +141,9 @@ When a start check fails the service logs why and stops at once, reporting
 service error 1066 (`ERROR_SERVICE_SPECIFIC_ERROR`) with the failure's own
 code; it does not stay idle. At pre-shutdown it reads the settings and the
 device from the machine folder only. It acts only when Block at boot and Hand
-back are both on, and Hand back reads as off when it is absent, so a fresh
-install does nothing at shut down until Hand back is ticked. If either is off,
+back are both on. Hand back reads as off when it is absent from the machine
+folder, which is the case until the tray has first started and copied its
+choice there (a new install does that on its first start). If either is off,
 or the AirPods are already fully blocked, it makes no call. It never
 disconnects. Otherwise it blocks them through the
 same routine the boot-time task uses, retries a vetoed node once when there is
@@ -221,6 +222,20 @@ service back, so Earshot re-reads the installed services after a connect and aft
 boot and re-applies it when it has reverted, so it can take effect a moment
 after a connect rather than instantly.
 
+**Microphone off mode.** An opt-in alternative on the settings page, off by
+default. Turning it on turns Protect audio quality off, so the Hands-Free link
+stays up, and opens Windows' own sound settings at the AirPods' input with one
+line of guidance: set the AirPods microphone to "Don't allow". Earshot cannot
+switch that microphone off itself: the Core Audio documentation lets a program
+read an endpoint's state and gives no call that sets it, and the interface that
+does is undocumented, so Earshot does not use it. The mode changes only the
+saved protection choice. The idle block, the boot block and the hand-back still
+select the AirPods' nodes by container and address, so a Hands-Free service
+the mode leaves installed is blocked with the rest and the AirPods stay unpaged
+at rest. Choosing Protect audio quality on its own turns the mode off. Whether
+call quality is acceptable with the mode on is unproved until the owner has
+tried it; the full block stays the default.
+
 Connect can take the protection off for a moment: the one-shot reconnect used
 to bring the AirPods back is a Hands-Free property, so turning Hands-Free off
 also removes the filter that carries the request. If the A2DP filter refuses
@@ -251,61 +266,79 @@ source is copied into this repository; both are cited by URL only. The
 watcher is read-only throughout: nothing it does ever writes to a Bluetooth
 device, and it is stopped and restarted around sleep.
 
-**Battery set-up and proof.** The message's battery, charging, in-ear and lid
-fields are held as unproved until the owner's own set-ups prove them. **Set up
-battery** (on the card and in the menu) listens for 20 seconds while the owner
-opens the case by the PC. Only senders of the documented message form are
-candidates; senders of other forms (a nearby iPhone sends one) are kept as
-evidence and never compete. The two buds of one set broadcast from two
-addresses, with the bud values in swapped order, so senders with the same
-model, colour and case value, and the same two bud values in either order
-within two seconds, are merged into one set. It picks the one set it treats as
-yours: the strongest by median signal, with at least three messages, and ten
-decibels clear of the next set. It sets the signal threshold ten decibels under
-that set's weakest message. Those three figures are design choices held as named
-constants (`SetupRules`), not facts about the device. The owner then answers
-three pickers (left bud, right bud, case, in steps of 10) and a Charging
-toggle for each, to match what the iPhone shows.
+**Which AirPods it shows.** There is no set-up step. Earshot reads the paired
+device's model from Windows (the device's own record, never a guess) and keeps
+only messages of the documented 25-byte form of that model. The two buds of
+one set broadcast from two addresses, with the bud values in swapped order, so
+senders with the same model, colour and case value, and the same two bud
+values in either order within two seconds, are merged into one set. Earshot
+then chooses the set by model and by which is nearest, by signal strength over
+a short window, once the model has been heard for a moment and the set has sent
+more than a passer-by would. It learns that set's colour and holds it.
 
-What one set-up saw is kept as a record under `%LOCALAPPDATA%\Earshot\widget`,
-written once and never replaced. A message of the documented form is kept as
-its first nine bytes only. Each sender is named by a tag, a hash of its
-address under a key made for that listen and never stored, so no address is
-kept. There is no field for a name. The picker values are evidence for `DecodeProof` and are never
-shown as a reading.
+The choice is held. Another pair takes over only when it is clearly nearer
+for a sustained time, so one loud message from a stranger does not move it.
+After the chosen pair falls silent the choice is made again among the sets of
+the paired model and the held colour. The values already shown are kept, and
+grey as they age, until the new choice's own messages replace them. The
+figures behind this are named constants in `BroadcastRules`
+(`src/Earshot/Widget/BroadcastSenderSets.cs`). They are design choices, not
+facts about the device. They were checked against one capture of one set and
+synthetic sequences; no second set was ever near the owner.
 
-`DecodeProof` works out, from the records alone, which fields can be read, and
-its result is saved as the proof. Every rule needs its evidence twice:
+Nothing about the selection is written to disk, and no address is kept. A
+message from a device that is not chosen is counted and nothing else about it
+is recorded.
 
-- **Bud order and the case nibble** each need two records that agree with the
-  owner's picks (within one 10% step, since the iPhone's rounding is not
-  established). A record that disagrees withdraws what an earlier pair
-  proved. A status bit that flips the bud order needs four discriminating
-  records.
-- **A charging bit** is proved only when it equals the owner's flag in every
-  record, the flag varies, and no other bit or part varies the same way.
-- **In-ear and lid are marked not provable by set-up**, because three battery
-  pickers carry no truth about ears or the lid. Nothing then decodes them, so
-  ear detection, auto-pause and the case-open card stay off, and the settings
-  rows for them say "Earshot cannot yet tell...".
+**The accepted risk.** A pair of the same model, and the same colour once one
+is held, that sits nearer than the owner's for long enough can be chosen
+instead. This is an owner decision, not an oversight: the owner accepted that
+risk rather than ask for a set-up step to rule it out.
 
-Only fields the proof holds as proved reach the snapshot. A reading older than
-one hour counts as no recent reading. A claim is tied to its set-up record.
+**What is read, and how old it may be.** From the chosen set Earshot reads the
+left bud, the right bud and the case, each in steps of 10% (that is what the
+message carries), and the charging bits. Each part keeps its own read time. A
+value read within 30 seconds is current. An older value is drawn greyed with
+its age, never as current. A closed case sends nothing, so values grey about
+half a minute after the lid closes. The gauge is stricter about when it stops:
+its number is the lower of the buds read within the last hour, and with none
+that recent it shows the earbud mark alone (`BatteryFreshness`).
 
-**Whose AirPods it shows.** A room can hold several sets of the same model.
-`OwnershipRule` decides, on every advertisement, whether it is the owner's:
-model and colour bytes must match the claim a set-up made; the signal must
-clear the strength recorded at that claim; and the battery must be consistent
-with the last reading held for him, where "consistent" means the same, lower,
-or exactly one 10% step higher, and higher by more than that only while the
-matching charging bit is set. A live connection to this PC does not shortcut
-any of these checks; the same rule runs every time, and re-syncing after a
-jump the rule cannot explain is a re-claim (opening the case by the PC).
-Anything that fails is counted and nothing else is recorded about it. This is
-an owner decision, not an oversight: a same-model stranger with a lower
-battery reading than the owner's last one can pass the rule, and he chose to
-accept that risk rather than tighten it and risk the widget missing his own
-AirPods.
+**Left and right.** Which bud is the left and which the right rests partly on
+a published description of the message and partly on one local capture. No
+permitted source documents the status bit that swaps the two, so the
+capture's reading of it is unproved, and with it which physical side a figure
+belongs to. The charging bits come from the labels of a published figure and
+are not proved here either. In-ear and the lid are in neither source and in no
+saved capture, so they are not decoded.
+
+**Windows' own Hands-Free figure.** When no bud has a current broadcast value
+and the AirPods are on this PC, Earshot also reads the Hands-Free battery
+property Windows may hold for the device. It reads the paired device's device
+nodes only, once a minute, and the figure counts as current for two minutes.
+The slower query through the paired device's association object (about a minute
+each, measured) is used by `probe battery` and the sweep, never by the
+background read. With Hands-Free off, which is the default, it was seen empty
+on this PC. Whether Windows fills it with Hands-Free up has not been observed
+here. The figure is one number for the headset, never a bud's or the case's.
+
+**Refresh.** The card has a refresh control and the menu has **Refresh
+battery**. It restarts the listener and waits up to 12 seconds for a message
+of the chosen pair. It ends on values, on Windows' figure when that is what it
+finds, or on "Nothing heard. Open the case.", because a shut case sends
+nothing. It also ends when Bluetooth is off or the listener is not running, and
+says so. The 12 seconds is a design choice sized to the longest gap seen
+between messages.
+
+**Ear detection.** Pausing when a bud comes out, and playing again when it
+goes back, is built but inactive: there is no documented in-ear value to read,
+so the settings row says "Earshot cannot yet tell when a bud is in your ear."
+and nothing acts. The resume half is strict by design. It resumes only the
+session Earshot paused, only within 60 seconds of the pause, only while the
+AirPods are still this PC's output, only if nothing was played or paused by hand
+since, and only when every bud that was in is back in on fresh values. A
+resume that misses any of these is forgotten, never retried later. Pausing
+when the AirPods leave this PC never resumes.
 
 **The taskbar gauge.** Earshot does not use a taskbar docking API. The gauge is
 an owned, topmost, layered overlay window positioned over free taskbar space, which it finds by
@@ -314,7 +347,8 @@ for changes; the window's alpha-zero pixels let a click reach the taskbar
 underneath rather than the gauge
 (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
 It draws the earbud mark with a ring in the Windows accent colour, filled to
-the lower proved bud's battery, and that number.
+the lower bud's battery, and that number. The setting **Gauge order** puts the
+ring, the number and the charging bolt in one of six orders.
 
 The setting **Gauge position** chooses between two placements. At the right
 end (the default), its right edge sits 8 pixels (scaled for DPI) left of the
@@ -415,8 +449,9 @@ following the system's light or dark theme; on a Windows build older than
 22621, or if either call fails, the card falls back to an opaque colour
 instead of the translucent one. It opens above the gauge, closes
 when it loses focus, and works from the keyboard. The case-open card is the
-same window in a separate, unfocused instance: the case-open event shows it
-(which needs the lid state, so it stays off until that is proved), it reads its own dismiss time from
+same window in a separate, unfocused instance. Nothing shows it, because that
+needs the lid state and Earshot does not decode it, so it stays off and its
+menu item and settings row are hidden. It reads its own dismiss time from
 [`SystemParametersInfoW(SPI_GETMESSAGEDURATION)`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow)
 so it follows the owner's own accessibility setting, and its Connect or
 Disconnect button only ever fires on a genuine click on that button; nothing
@@ -497,12 +532,16 @@ time it is drawn, so a row shows what is saved and never what was last asked
 for. Every change goes through the same path the tray menu's own item uses.
 The rows are, in order: Position, Display (a button that steps through
 Main display and the connected displays), Order (six pictures of the gauge),
-Other device, Pause on removal, Pause on leave, Case card, Low battery (the
-threshold), Click connects, Hand back; then the shortcuts for Connect and
+Other device, Pause on removal, Pause on leave, Low battery (the
+threshold), Click connects, Hand back, Microphone off (with a Sound settings
+button while it is on); then the shortcuts for Connect and
 Disconnect; then the installed version with Check, Repair when an install
 exists, and Auto check. Each is an icon and its words; what each row does is
-its tooltip. The two rows for features that need in-ear or lid proof carry
-a caption saying Earshot cannot yet tell, while that proof is missing.
+its tooltip. The Pause on removal row carries a caption saying Earshot cannot
+yet tell when a bud is in the ear, while there is no in-ear value to read. The
+card and the settings page follow the Windows 11 look: text size, accent
+colour, light and dark theme, reduced motion and keyboard focus, read at run
+time and re-read when Windows changes them.
 
 ### Shortcuts and switch timing
 
@@ -671,7 +710,6 @@ check that fails is not retried until the next day.
 | `%APPDATA%\Earshot\settings.json` | The owner's settings |
 | `%LOCALAPPDATA%\Earshot\logs` | The log |
 | `%LOCALAPPDATA%\Earshot\livetest` | Live-test evidence |
-| `%LOCALAPPDATA%\Earshot\widget` | The widget's claim, set-up records and proof |
 | `%ProgramData%\Earshot` | Machine files the elevated tasks and the service read: `device.json`, `config.json`, `protection.json`, `protection-intent.json` and the per-run status files |
 
 ### What still needs a kernel driver
@@ -686,9 +724,9 @@ Not built, and not close to being built, on Windows without one:
 - Personalised volume.
 - Renaming the AirPods.
 - The hearing features.
-- Real-time in-ear detection and the lid state. Battery set-up cannot prove
-  either, so they stay off; whether the advertisement can give them at all is
-  still an open question.
+- Real-time in-ear detection and the lid state. No documented source gives
+  either in the advertisement, so they stay off; whether the advertisement can
+  give them at all is still an open question.
 
 **Why.** These all go through Apple's own accessory protocol, carried over a
 Bluetooth L2CAP channel, not through anything in the
@@ -825,9 +863,11 @@ through the tray's own Exit (`Earshot.exe --exit`) and never stops the process.
 When Hand back is on, that Exit lets go of AirPods in use and blocks them
 first; with it off, Exit leaves them as they are. Then it shows the one
 administrator prompt. `-DryRun` does everything up to that prompt and prints
-the command it would have run, and changes nothing: not the settings, not the
-Open on startup entry, not a per-user copy. Afterwards it starts Earshot
-unelevated.
+the command it would have run, and changes nothing the install would change:
+not the settings, not the Open on startup entry, not a per-user copy. The one
+thing it writes is Earshot's own log, because the unpacked copy's read-only
+`probe setup-values` writes a line there as every probe does. Afterwards it
+starts Earshot unelevated.
 
 **When a run stops.** A run that stopped after it closed the tray starts that
 tray again, so Earshot is not left closed until the next sign-in (the closed
@@ -835,7 +875,9 @@ tray's program must still be there). It does not when the run reported success,
 and it does not when the elevated program may still be working in the install
 folder: a first install or an update still running when the script stopped
 waiting (the script says so, and that the install was left to finish) is not
-started over. The waits are budgets chosen in the script, not measured: 60 s
+started over. The restart runs when the script ends by stopping with a
+message. If the script is stopped with Ctrl+C the tray may need starting by hand.
+The waits are budgets chosen in the script, not measured: 60 s
 for the tray to close, a little over the 45 s the update gives it, and 300 s,
 as long as a first install's own wait, for the update's record.
 

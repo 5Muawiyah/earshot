@@ -37,7 +37,8 @@ stays pending until a run on the device has written the evidence for it.
 | Pause when the AirPods leave this PC (`tools\live-tests\21-PauseOnLeave.ps1`) | Pending: no live run yet |
 | Service hand-back with the tray not running (`tools\live-tests\22-ServiceHandBack.ps1`) | Pending: no live run yet |
 | The service finds nothing to do after the tray's hand-back (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
-| The AirPods widget: the taskbar gauge, its card, battery set-up and what shows before and after it (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet |
+| The AirPods widget: the taskbar gauge, its card, the broadcast battery with greying, and Refresh (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet |
+| Microphone off mode: call quality with it on | Pending: the owner's own test. Unproved until then |
 | Updating a real install from a published release | Pending: no live run, and no live test script covers it |
 
 ## Live tests

@@ -90,6 +90,10 @@ Startup on is not covered.
 - **Connects and disconnects them** from the card.
 - **Blocks the Hands-Free profile**, on by default. This turns off the AirPods
   microphone on this PC while it is on.
+- **Microphone off mode**, an opt-in alternative, off by default. It turns audio
+  protection off and opens Windows' sound settings at the AirPods' input, with
+  one line on what to press. Call quality with it on is unproved until I have
+  tried it.
 - **Shows the battery** of the left bud, the right bud and the case, with no
   set-up. Earshot listens to the AirPods' own Bluetooth broadcast, so it needs
   no connection. See [Battery](#battery) for what that does and does not prove.
@@ -126,24 +130,27 @@ The AirPods broadcast their battery over Bluetooth Low Energy, and Earshot
 reads it with no connection and no set-up. The card shows left, right and case
 together, and the taskbar gauge shows a ring round the earbud mark with the
 lower bud's number. There is a **Refresh** control on the card and in the menu.
+It listens for up to 12 seconds and ends on values or on "Open the case".
 **Gauge order** on the settings page changes how the gauge lines up its ring,
 number and charging bolt.
 
 What to know before you trust a number:
 
-- **Which AirPods.** Earshot picks them out by model and by which is nearest.
-  Another pair of the same model close by could be read instead. I accept that
-  risk, and you should know it is there.
+- **Which AirPods.** Earshot picks them out by model and by which is nearest,
+  holds that choice, and changes it only when another pair is clearly nearer for
+  a sustained time. Another pair of the same model close by could be read
+  instead. I accept that risk, and you should know it is there.
 - **Age.** A value older than 30 seconds is greyed, with the time it was read.
   The gauge drops a value after one hour.
-- **Left and right.** Which bud is which rests on a published description of
-  the broadcast. It is not yet proved on these AirPods.
+- **Left and right.** Which bud is left and which right rests partly on a
+  published description of the broadcast and partly on one local capture. It is
+  unproved.
 - **Windows' own figure.** When Windows has a Hands-Free battery reading for the
-  AirPods, Earshot reads it too. Normally it does not, because Earshot turns
-  Hands-Free off to protect audio quality.
-- **Ear detection is not active.** Pausing when a bud comes out and resuming
-  when it goes back needs a documented in-ear value, and there is none yet. It
-  does nothing today.
+  AirPods, Earshot reads it too, from the AirPods' device nodes only. With
+  Hands-Free off, the default, it was seen empty on this PC.
+- **Ear detection is built but inactive.** Pausing when a bud comes out, and
+  resuming when it goes back, needs a documented in-ear value, and there is none.
+  It does nothing today.
 - **Not yet live-tested.** The battery has not had a live run on a real PC
   (test 19 is pending).
 

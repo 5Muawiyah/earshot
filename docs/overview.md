@@ -55,22 +55,21 @@ Top to bottom, with the exact wording. Separators sit between the groups.
 | `Block at boot` | A tick. Keeps the AirPods' device nodes disabled while they are not in use. Turning it on before setup has run starts setup. The tick shows what is in force; when the setting cannot be read it shows neither state. |
 | `Hand back on shut down, sleep and Exit` | A tick. Releases the AirPods and blocks the device nodes again when you shut down, restart, sleep or choose Exit. See [below](#handing-the-airpods-back). |
 | `Protect audio quality` | A tick, on by default. Turns off the Hands-Free profile, described above. |
-| `Turns off the AirPods microphone` | A caption under that setting, always visible and never clickable, telling you plainly what it costs. |
+| `Turns off the AirPods microphone` | A caption under that setting, always visible and never clickable, telling you plainly what it costs. While the Hands-Free microphone off mode is on it reads `Microphone off mode` instead. The mode is switched on the settings page. |
 | `Open on startup` | A tick, on by default. Writes one value named `Earshot` under the current user's `Run` key, with the `--startup` argument. Earshot has to be running for it to put the block back once you stop using the AirPods, so this keeps it running from sign-in. |
 | `Speak status`, or `Speak status (no voice)` when no speech voice is installed | A tick, off by default. Clicking it does not itself speak anything. |
 | `Show on the taskbar` | A tick. Whether the gauge (or, when it cannot be placed, the tray icon) shows the AirPods widget. |
 | `Left click connects straight away` | A tick, off by default. A left click on the gauge or icon then connects or disconnects at once instead of opening the card. |
-| `Card when the case opens` | A tick. Whether the case-open card may appear. It stays off in practice until Earshot can tell the lid is open, which set-up cannot prove. |
 | `Low battery alert` | A tick. |
 | `Threshold` | A submenu of 10% to 90% in steps of 10, greyed out while the alert is off. |
-| `Set up battery` | Starts battery set-up. Reads `Set up battery (Bluetooth is off)` and is greyed out while Earshot's listener is not running. |
+| `Refresh battery` | Opens the card and starts a battery refresh. See [Refresh](#refresh). Shown while the widget is shown on the taskbar. |
 | `Name your other device...` | Sets the label used in "On your <name>". |
 | `Choose device...` | Lists the Bluetooth devices paired to this PC, so you can point Earshot at a different one, for instance if your AirPods were renamed, so that the default match "AirPods" no longer fits. Choosing one pins it, and points the elevated worker at the same device. A device that cannot play audio from this PC, a phone for instance, is refused. |
 | `Set up Earshot...` | Runs the one-time setup. Offered only when nothing is installed. Once Earshot is installed, in any state, the next item takes its place. |
 | `Repair Earshot...` | Offered whenever Earshot is installed, healthy, damaged, older or newer than the running copy. At most one administrator prompt. Disabled, with the reason in its text, while a setup, repair or update is running. See [Repair](#repair). |
 | `Check for updates` | Looks for a newer release. Downloads nothing. See [Updates](#updates). |
 | `Check automatically` | A tick, off by default. Contacts GitHub once a day when on. |
-| `Exit` | Closes Earshot. With Block at boot on and the AirPods not in use, it blocks the device nodes first. With Hand back ticked and the AirPods in use on this PC, it lets them go first, then blocks the device nodes. With Hand back off, which is the default, and the AirPods in use, it closes without blocking and says so: "Closed while in use, so the AirPods are not blocked." |
+| `Exit` | Closes Earshot. With Block at boot on and the AirPods not in use, it blocks the device nodes first. With Hand back ticked and the AirPods in use on this PC, it lets them go first, then blocks the device nodes. With Hand back off and the AirPods in use, it closes without blocking and says so: "Closed while in use, so the AirPods are not blocked." |
 
 A shortcut typed into the settings file for connect, audio protection or block
 at boot is shown beside the item's own label, as `Block at boot
@@ -125,6 +124,8 @@ the protection off, connects, then turns it back on, and the microphone works
 again on this PC while that runs. If putting the protection back fails, the
 card says "Connected, but audio quality protection did not apply." and the
 microphone stays available until the next connect fixes it.
+
+There is an opt-in alternative, off by default: [Microphone off mode](#microphone-off-mode).
 
 <p align="center"><i>The notice Earshot shows when audio quality protection is switched on.</i></p>
 
@@ -202,10 +203,13 @@ application far less time to act before the computer actually sleeps than it
 gives at shut down. Exit has no Windows deadline, so it uses the shut-down
 cap, and a stuck disconnect does not stop the block.
 
-**Hand back on shut down, sleep and Exit** is off by default. Tick it in the
-right-click menu, or on the settings page. Until you do, Exit while the AirPods
-are in use does not block them, and the hand-back service does nothing at shut
-down. The tests cover the hand-back against stand-ins. It has
+**Hand back on shut down, sleep and Exit** is on for a new install: a PC with
+no settings file gets it on, and Open on startup on, the first time Earshot
+starts. An existing install keeps the choice it has saved, and an older settings
+file with no entry for it reads as off. Tick or untick it in the right-click
+menu, or on the settings page. While it is off, Exit while the AirPods are in use
+does not block them, and the hand-back service does nothing at shut down. The
+tests cover the hand-back against stand-ins. It has
 not been tried on a real shut down, sleep or Exit (tests 17, 18 and 20 are
 pending).
 
@@ -330,7 +334,7 @@ install folder can be changed only by administrators. Then:
   elevated while an install exists.
 - If nothing is installed, the menu offers Set up instead.
 
-Your settings, battery set-up and chosen AirPods are kept. How the repair ended
+Your settings and chosen AirPods are kept. How the repair ended
 is recorded where the next start can say it, in case the card has gone.
 
 What the checksum does and does not protect against: it catches a damaged or
@@ -353,8 +357,7 @@ can start a change that would fight what the hand-back is doing.
 
 If the Earshot icon has been closed, a small background service, installed by
 setup and removed by uninstall, can block the AirPods at shut down instead. It
-acts only when Block at boot and Hand back are both on, and Hand back is off by
-default. It blocks and never disconnects them, so the AirPods may stay
+acts only when Block at boot and Hand back are both on. It blocks and never disconnects them, so the AirPods may stay
 connected until the computer is off. It has not had a live run, does not cover a shut down with Fast Startup
 on, and whether a restart gives it the shut-down notice is not proved. See
 [architecture.md](architecture.md#handing-the-airpods-back-at-shut-down-and-sleep).
@@ -368,26 +371,30 @@ see [requirements.md](requirements.md#what-it-does-not-do) and
 Alongside the tray icon, Earshot can show a small gauge on the taskbar, and
 from it a card with more detail. It works by listening to the AirPods' own
 Bluetooth broadcast, the same short signal a phone reads for its own battery
-widget, rather than needing them connected to this PC. That is also why it has
-firm limits; see [below](#what-the-widget-cannot-know). The widget has not had
-a live run.
+widget, rather than needing them connected to this PC. There is no set-up. That
+is also why it has firm limits; see [below](#what-the-widget-cannot-know). The
+battery has not had a live run.
 
 **The gauge.** The earbud mark with a ring round it in your Windows accent
-colour. The ring fills to the lower proved bud's battery, that number sits
-beside it, and a charging mark appears when a bud is proved to be charging.
-The ring changes colour when the battery is at or below the low battery
-threshold. The gauge has four looks, and its tooltip says why:
+colour. The ring fills to the lower bud's battery, that number sits beside it,
+and a bolt appears when a bud it is drawn from says it is charging. The ring
+changes colour when the battery is at or below the low battery threshold. The
+gauge has four looks, and its tooltip says why:
 
 | When | What the gauge shows | Tooltip |
 |---|---|---|
-| On this PC with a proved reading no older than an hour | The ring, the number, and a charging mark when it applies | Three lines: `AirPods` (or `Charging`, or `Low battery`), then the buds with a proved figure such as `L 70%   R 60%`, then `Read just now` or `Read 2 min ago` |
-| On this PC, no reading yet because battery is not set up | The earbud mark alone | `Battery not set up` |
-| On this PC, but the last reading is older than an hour | The earbud mark alone | `No recent reading` |
+| On this PC with a bud read within the last hour | The ring, the number, and a bolt when it applies | Three lines: `AirPods` (or `Charging`, or `Low battery`), then the buds that have a reading such as `L 70%   R 60%`, then how long ago it was read |
+| On this PC, with no bud read within the last hour | The earbud mark alone | `No recent reading` |
 | Not on this PC | The earbud mark, faded | `Not on this PC` |
 | Not on this PC, and your AirPods are near and in use on another device | The earbud mark and a phone | `On your iPhone`, or the label you set |
 
-A reading older than one hour counts as no recent reading. A bud with no
-proved figure is left out of the tooltip, never shown as a dash or a guess.
+A reading older than one hour counts as no recent reading, and the gauge
+drops it. A bud with no reading is left out of the tooltip, never shown as a
+dash or a guess. When no bud has a current broadcast value, the AirPods are on
+this PC and Windows has a Hands-Free figure for them, the gauge shows that
+figure and the tooltip says `Windows reads 70%`. **Gauge order** on the
+settings page chooses how the ring, the number and the bolt line up, from six
+pictures of the gauge.
 
 **Where it sits.** On the taskbar, at the right end by default, 8 pixels left
 of the notification area, or next to the apps, 4 pixels after the last app
@@ -424,9 +431,9 @@ display leaves it shown. With one display nothing changes: a full-screen
 application hides the gauge. Presentation settings, which are the owner's own
 switch and not a window, hide it on every display.
 
-<img src="images/widget-gauge.png" alt="An earlier version of Earshot's taskbar gauge, drawn from made-up values" width="220" align="right">
+<img src="images/widget-gauge.png" alt="An earlier version of Earshot's taskbar gauge, showing made-up values" width="220" align="right">
 
-<p align="center"><i>Pending: this picture shows the gauge before the ring design, drawn by Earshot's own code from made-up values. A new capture is owed.</i></p>
+<p align="center"><i>Pending: this picture shows the gauge before the ring design, with made-up values, rendered by Earshot's own code. A new picture is owed.</i></p>
 
 <br clear="all">
 
@@ -434,60 +441,46 @@ Left-click the gauge, or the tray icon when that is what is showing, to open
 the card. With **Left click connects straight away** on, a left click connects
 or disconnects immediately instead. It is off by default.
 
-**The card.** A title with a gear that opens the settings page. Then three columns, left bud, right bud and
-case, each with a bar, its number and a charging mark when proved. A column
-whose figure is not proved says "No reading". Once any part has a proved figure the
-columns show; with none at all they are replaced by one **Set up battery** button. Below them: one line
-for where the AirPods are (`On this PC`, `On your iPhone` or the label you
-set, `Not in use`, or `Not seen yet`), one line for when the battery was last
-read (`Battery read 2 min ago`, or `Battery not read yet`), a line
-`Version <number> is available` when a check found a newer release, and the
-Connect or Disconnect button.
+**The card.** A title with a gear that opens the settings page. Then three
+columns, left bud, right bud and case, each with a bar, its number and a
+charging mark when it applies. The bars use your Windows accent colour, and
+switch to the caution colour at or below the low battery threshold. A value
+read within the last 30 seconds is drawn as current. An older one is greyed,
+and the read line says how long ago it was read. A column with no value says
+"No reading". Below them: one line for where the AirPods are (`On this PC`,
+`On your iPhone` or the label you set, `Not in use`, or `Not seen yet`), one
+line for when the battery was last read (`Battery read 2 min ago`, or `Battery
+not read yet`) beside a refresh control, a line `Version <number> is
+available` when a check found a newer release, and the Connect or Disconnect
+button.
 
-<img src="images/widget-card-light.png" alt="An earlier version of the widget card in the light theme, drawn from made-up values" width="320" align="right">
+<img src="images/widget-card-light.png" alt="An earlier version of the widget card in the light theme, showing made-up values" width="320" align="right">
 
-<p align="center"><i>Pending: this picture shows the card before the gear and settings page, drawn by Earshot's own code from made-up values and composited onto one measured sample of Windows' own card backdrop colour. A new capture is owed.</i></p>
-
-<br clear="all">
-
-<img src="images/widget-card-dark.png" alt="An earlier version of the widget card in the dark theme, drawn from made-up values" width="320" align="right">
-
-<p align="center"><i>Pending: the same earlier card in the dark theme. A new capture is owed.</i></p>
+<p align="center"><i>Pending: this picture shows the card before the gear and settings page, with made-up values, rendered by Earshot's own code onto one measured sample of Windows' own card backdrop colour. A new picture is owed.</i></p>
 
 <br clear="all">
 
-### Set up battery
+<img src="images/widget-card-dark.png" alt="An earlier version of the widget card in the dark theme, showing made-up values" width="320" align="right">
 
-**Set up battery** is on the card (in place of the columns while nothing is
-proved) and in the menu. It has three steps.
+<p align="center"><i>Pending: the same earlier card in the dark theme. A new picture is owed.</i></p>
 
-1. **Open your AirPods case next to this PC.** Earshot listens for 20 seconds
-   and looks for one set it can call yours: your two buds count as one set,
-   and messages from a nearby iPhone are ignored. It takes the strongest set,
-   with at least three messages, clearly stronger than any other. If it hears none,
-   it says "Couldn't find your AirPods"; if more than one set is near, "More
-   than one set of AirPods is near". If Bluetooth is off it says so.
-2. **What does your iPhone show?** Three pickers, left bud, right bud and
-   case, each in steps of 10 (pick the nearest 10; if it ends in 5, pick the
-   lower), plus a **Charging** toggle for each.
-3. **Done.** The card says what was saved.
+<br clear="all">
 
-The picker values are evidence only. They are never shown as a reading. Earshot
-keeps what it saw on this PC, and a field is shown only once that evidence
-proves it:
+### Refresh
 
-- **Bud order and the case each need two set-ups that agree with your
-  iPhone.** A first set-up says "Set up once more to confirm it". Set-ups
-  where both buds read the same say so, and are no help for bud order.
-- **A set-up that disagrees withdraws the field** an earlier pair had proved.
-- **Charging marks** show only when their own evidence agrees.
-- **In-ear and the lid cannot be proved by set-up**, because three battery
-  pickers say nothing about ears or the lid. So ear detection, auto-pause and
-  the case-open card stay off.
+The refresh control on the card, and **Refresh battery** in the menu, ask the
+AirPods for a fresh reading by listening again. Earshot restarts its listener
+and waits up to 12 seconds for a message from your AirPods. The card says it is
+reading while it waits, and the refresh ends one of these ways:
 
-The threshold for "your case, near this PC" is set 10 decibels under the
-weakest message the case sent. That, the three messages and the 10 decibel gap
-are choices made in the code, not measured facts about the AirPods.
+- **Values.** A message arrived, and the card shows them as current.
+- **Windows' figure.** Nothing was heard, but Windows has a Hands-Free figure.
+- **"Nothing heard. Open the case."** A closed case sends nothing, so open it
+  by the PC and refresh again.
+- **Bluetooth is off, or the listener is not running.** It says so.
+
+The 12 seconds is a choice made in the code, sized to the longest gap seen
+between two messages, not a measured guarantee.
 
 ### The settings page
 
@@ -498,12 +491,13 @@ The gear on the card opens it. Rows, top to bottom:
 | Gauge position | Right end | Right end, or next to apps |
 | Gauge display | Main display | Main display, or one of the connected displays; a line under the row says when the chosen one is not connected or shows no taskbar |
 | Other device | `iPhone` | The label used in "On your <name>", up to 40 characters |
-| Pause when a bud comes out | On | Says "Earshot cannot yet tell when a bud is in your ear." while in-ear is not proved, and does nothing until it is |
+| Gauge order | Ring, number, bolt | Six pictures of the gauge; pick one |
+| Pause when a bud comes out | On | Says "Earshot cannot yet tell when a bud is in your ear." and does nothing, because there is no documented in-ear value to read |
 | Pause when AirPods leave this PC | On | See [above](#pausing-when-the-airpods-leave-this-pc) |
-| Case-open card | On | Says "Earshot cannot yet tell when the case lid is open." while the lid is not proved |
 | Low battery alert | 20% | A stepper, 10% to 90% in steps of 10 |
 | Left click connects | Off | |
-| Hand back on shut down, sleep and Exit | A tick, as in the menu | See [above](#handing-the-airpods-back) |
+| Hand back on shut down, sleep and Exit | On for a new install | A tick, as in the menu. See [above](#handing-the-airpods-back) |
+| Microphone off | Off | See [Microphone off mode](#microphone-off-mode). While on, a line under the row says what to do next, and a Sound settings row with an Open button appears |
 | Shortcuts: Connect | Ctrl+Alt+Shift+A | Press keys to change, Clear to remove; a chord another app holds is named under the row |
 | Shortcuts: Disconnect | Ctrl+Alt+Shift+D | The same |
 | Updates: Check for updates | | A Check button, and the version you have |
@@ -512,30 +506,50 @@ The gear on the card opens it. Rows, top to bottom:
 
 The low battery alert's own on and off is a tick in the right-click menu.
 
-**The case-open card.** When the AirPods' own case is opened near the PC, the
-same card would appear by itself near the taskbar for a few seconds, then
-close, using the same timing Windows' own notifications use on this PC. It
-never connects the AirPods by itself: opening a case only ever shows the card;
-pressing its button still takes a real click. Because a set-up cannot prove
-the lid, it does not appear yet.
+**The case-open card.** The card was designed to appear by itself near the
+taskbar when the AirPods' case is opened near the PC. It never would have
+connected the AirPods by itself. It is off: Earshot does not decode the lid, so
+nothing can show it, and it has no menu item or settings row.
 
-<img src="images/widget-case-open.png" alt="An earlier version of the case-open card, drawn from made-up values" width="320" align="right">
+<img src="images/widget-case-open.png" alt="An earlier version of the case-open card, showing made-up values" width="320" align="right">
 
-<p align="center"><i>Pending: an earlier drawing of the case-open card from made-up values. A new capture is owed.</i></p>
+<p align="center"><i>Pending: an earlier picture of the case-open card, rendered by Earshot's own code from made-up values. The card is off, and no new picture is owed.</i></p>
 
 <br clear="all">
 
 **The low battery alert.** A Windows notification, or the card if a
-notification cannot be shown, the moment a part with a proved figure first
-reads at or below a threshold, 20% by default. It only fires again once that
-part has read at least one 10% step back above the threshold, so a value
-sitting on the edge does not repeat itself. Nothing fires for a field that has
-not been proved.
+notification cannot be shown, the moment a shown value first reads at or below
+a threshold, 20% by default. It only fires again once that part has read at
+least one 10% step back above the threshold, so a value sitting on the edge
+does not repeat itself.
 
-**Pausing when a bud comes out.** A row on the settings page, on by default.
-It would pause what this PC is playing to the AirPods when a bud is taken out,
-and never resume something the owner paused himself. It acts only once in-ear
-state has been proved, which set-up cannot do, so it does nothing today.
+**Pausing when a bud comes out.** A row on the settings page, on by default,
+and inactive. It is built to pause what this PC is playing to the AirPods when a
+bud is taken out, and to play it again if the bud goes back: only the session it
+paused, only within 60 seconds, only while the AirPods are still this PC's
+output, only if nothing was played or paused by hand since, and only with every
+bud that was in back in. It reads the in-ear state from the broadcast, and no
+documented source gives that value, so it does nothing today. Nothing resumes
+after the AirPods leave this PC.
+
+<a id="microphone-off-mode"></a>
+
+### Microphone off mode
+
+An option on the settings page, off by default. It is for someone who wants
+Windows to keep the Hands-Free link up, so Windows can hold a battery figure,
+without apps being able to use the AirPods' microphone. Turning it on turns
+Protect audio quality off and opens Windows' sound settings at the AirPods'
+input, with one line: set the AirPods microphone to "Don't allow". Earshot
+cannot do that for you, because Windows documents no call that switches that
+microphone off. The Open button opens the page again, and the row says when
+Windows already lists the microphone as off. Choosing Protect audio quality on
+its own turns the mode off.
+
+Call quality with the mode on is unproved until the owner has tried it, and the
+full block, Protect audio quality, stays the default. The block that keeps the
+AirPods unpaged at rest picks the AirPods' device nodes by container and
+address, so it does not depend on the mode.
 
 ### What the widget cannot know
 
@@ -544,40 +558,37 @@ state has been proved, which set-up cannot do, so it does nothing today.
   name for "in use, somewhere that is not this PC"; the AirPods never say what
   they are actually connected to.
 - **Battery is a snapshot, never live.** It is read in steps of 10% (0, 10,
-  20 to 100) from the last broadcast Earshot heard, and the tooltip and card
-  say how long ago that was. It is never interpolated and never shown as
-  current, and a reading older than an hour counts as none.
-- **Ear detection and the lid cannot be proved by set-up.** Until something
-  else proves them, ear detection, auto-pause and the case-open card stay off.
+  20 to 100) from the last broadcast Earshot heard. A value older than 30
+  seconds is greyed with its age, it is never interpolated, and the gauge
+  drops a reading older than an hour.
+- **Left and right rest partly on a published description of the broadcast
+  and partly on one local capture, and are unproved.** No permitted source
+  documents the bit that swaps the two buds. If it is read the wrong way round,
+  the left and right figures are swapped. The lower bud's number on the gauge
+  is not affected by that.
+- **Ear detection and the lid are not read.** No documented source gives
+  either, so ear detection and the case-open card stay off.
+- **Windows' own figure is usually empty.** Earshot reads the Hands-Free
+  battery property from the AirPods' device nodes only. With Hands-Free off, the
+  default, it was seen empty on this PC.
 - **The widget hears everyone's AirPods nearby, not only yours.** A room full
-  of the same model broadcasts the same way yours do. What keeps a stranger's
-  AirPods off the card is the rule below.
+  of the same model broadcasts the same way yours do. See below.
 
 ### Whose AirPods it shows
 
-Set-up records your AirPods' model, colour and the strength of the broadcast
-as your claim. After that, a broadcast is only shown as yours if all of the
-following hold:
+There is no set-up, so Earshot has to pick your AirPods out of what it hears.
+It takes the model of the AirPods paired to this PC from Windows. Among the
+broadcasts of that model it chooses the set that is nearest, learns its
+colour, and holds it. Your two buds count as one set. The choice stays until
+another pair is clearly nearer for a sustained time. After the chosen pair has
+been silent for a while, the choice is made again, and the values already shown
+stay on the card, greying as they age, until the new choice's own messages
+replace them. Being connected to this PC does not change any of this.
 
-- the model and colour match the claim;
-- the signal clears the strength recorded at that claim;
-- and the battery is consistent with the last reading Earshot has for you:
-  the same, lower, or one step (10%) higher, and higher by more than that
-  only while the matching charging mark is set.
-
-Being connected to this PC does not, by itself, count as proof: the same
-checks run every time, connected or not. Re-syncing after a jump the rule
-cannot explain is a re-claim, which means opening the case by the PC again.
-
-Short of all of the above, Earshot fails closed: no battery, no case-open
-card, no pause. Nothing is recorded about an unmatched device beyond a count
-of how many were seen.
-
-**The accepted risk.** Because "the same or lower" always passes, a
-stranger's AirPods of the same model and colour, near the PC with a lower
-battery reading than your last one, could be shown as yours. The owner
-accepted that risk rather than make the rule stricter and risk missing his own
-AirPods on a false alarm.
+**The accepted risk.** A pair of the same model, and the same colour once one is
+held, that sits nearer than yours for long enough can be shown in place of
+yours. The owner accepted that risk rather than add a set-up step to rule it
+out.
 
 ### What still needs a kernel driver
 
@@ -590,8 +601,8 @@ full list and why, with sources.
 ### Privacy
 
 The widget only listens. It never connects to, or sends anything to, a
-Bluetooth device to get this data, and it does not need the AirPods paired
-to this PC at all. Nothing about a device that turns out not to be yours is
-kept, beyond a count of how many were seen. Your set-up records, claim and
-proof stay on this PC, in `%LOCALAPPDATA%\Earshot\widget`; they are never part
-of the repository.
+Bluetooth device to get this data, and it does not need the AirPods connected
+to this PC at all. It does read the paired AirPods' model from Windows to know
+which broadcast to pick. What it hears is held in memory for the selection and
+is not written to disk. A device that is not chosen is counted and nothing else
+about it is kept.

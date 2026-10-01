@@ -13,7 +13,7 @@ and the evidence behind each run.
 | 1 | Stop Windows paging the AirPods at boot | The persistent-disable unit tests confirm the disable and block matching logic | Test 04 (block survives a restart) and Test 08 (the full power cycle acceptance test), both pending a live run |
 | 2 | Connect and disconnect the AirPods: left-click the tray icon, then Connect or Disconnect on the card | Connection-state unit tests confirm the state machine each click drives | Test 01 passed on the AirPods on 19 September 2026 with Protect audio quality on. It sent the driver requests directly; it did not click the tray icon. The click itself is scored by Test 08's `left-click-connects`, pending. Test 02, disconnect in detail, is pending |
 | 3 | Keep the AirPods on A2DP, so a browser tab or a game cannot drop them to call quality | The read-only walk from the audio endpoints to both the A2DP and Hands-Free filters shows both filters answer, so the connect path is reachable | Test 06, pending |
-| 4 | Show no battery figure that was not read off the device | Three independent read-only checks, each run against a positive control so a broken query could not be mistaken for a missing value | Done, see [What it does not do](#what-it-does-not-do). The same check with the AirPods disconnected is Test 11, pending |
+| 4 | Show a battery figure only from the documented broadcast of the AirPods Earshot has selected, or from Windows' own Hands-Free figure read from the paired device's device nodes; never interpolate or invent one | `BatteryFreshnessTests.cs`, `ProximityDecoderTests.cs`, `HandsFreeBatteryTests.cs` and `HandsFreeBatteryRealQueryTests.cs` in `tests/Earshot.Tests/Widget` | Test 19, pending. Windows' figure was seen empty on this PC with Hands-Free off; see [What it does not do](#what-it-does-not-do) |
 | 5 | Ask for one administrator prompt at setup and one per update, and none in everyday use | The elevated worker's argument-validation unit tests confirm it refuses anything it does not expect | Test 15, Uninstall reversal, which exercises the live setup and its reversal, pending |
 | 6 | Hand the AirPods back at shut down, sleep and Exit, once Hand back is ticked (it is on for a new install and never changed for an existing one; a settings file with no member for it reads as off): release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting; `tests/Earshot.Tests/Integration/Coordinator/ExitHandBackTests.cs` proves the same order for Exit | No live run yet. Tests 17, 18 and 20, pending; see [verification.md](verification.md) |
 
@@ -26,33 +26,35 @@ Every test below runs against a stand-in. None of these has had a live run.
 | 7 | Keyboard shortcuts: Ctrl+Alt+Shift+A switches to this PC and Ctrl+Alt+Shift+D to the phone, on by default, editable and clearable; a chord another app holds is reported; the last press wins; older settings files are migrated and a typed chord is kept | `tests/Earshot.Tests/Hotkeys` (including `HotkeyDefaultsMigrationTests.cs`) and the tray wiring in `tests/Earshot.Tests/Phase1` | Test 16, pending |
 | 8 | Spoken status, off until the owner turns it on from the menu | `tests/Earshot.Tests/Voice` and the tray wiring in `tests/Earshot.Tests/Phase1` | None yet |
 | 9 | Play from a phone, off until the owner turns it on in the settings file | `tests/Earshot.Tests/Streaming` and the tray wiring in `tests/Earshot.Tests/Phase1` | None yet |
-| 10 | The taskbar gauge: the earbud mark with a ring and the lower proved bud's number, placed at the right end or next to the apps, raised again when covered, every hide, show, cover and raise logged with a reason and window class only, one failed read keeping it in place, the tray icon as the fallback | `GaugeContentTests.cs`, `GaugeRendererTests.cs`, `GaugePlacementTests.cs`, `GaugeControllerTests.cs`, `GaugeEventLogTests.cs`, `ForegroundChangeHookTests.cs` and `WindowCoverProbeTests.cs` in `tests/Earshot.Tests/Widget` | Test 19, pending |
-| 11 | Show a battery, charging, in-ear or lid field only once it is proved: bud order and the case each need two set-ups that agree with the iPhone, a disagreeing set-up withdraws the field, in-ear and lid cannot be proved by set-up | `DecodeProofTests.cs`, `DecodeProofStoreTests.cs`, `BatterySetupFlowTests.cs`, `ClaimStoreTests.cs` and `OwnershipRuleTests.cs` in `tests/Earshot.Tests/Widget` | Test 19, pending |
+| 10 | The taskbar gauge: the earbud mark with a ring and the lower bud's number (a bud read within the last hour), in one of six orders, placed at the right end or next to the apps, raised again when covered, every hide, show, cover and raise logged with a reason and window class only, one failed read keeping it in place, the tray icon as the fallback | `GaugeContentTests.cs`, `GaugeOrderLayoutTests.cs`, `GaugeRendererTests.cs`, `GaugePlacementTests.cs`, `GaugeControllerTests.cs`, `GaugeEventLogTests.cs`, `ForegroundChangeHookTests.cs` and `WindowCoverProbeTests.cs` in `tests/Earshot.Tests/Widget` | Test 19, pending |
+| 11 | Pick the owner's AirPods out of the broadcast by the paired model and which is nearest, with no set-up; hold the choice; change it only when another pair is clearly nearer for a sustained time; choose again after the chosen pair falls silent; grey a value after 30 seconds with its read time; Refresh (card and menu) waits up to 12 seconds and ends on values, Windows' figure or "Open the case". In-ear and the lid are not decoded | `BroadcastSelectorTests.cs`, `BroadcastSenderSetsTests.cs`, `BatteryRefreshTests.cs`, `WidgetRefreshWiringTests.cs`, `WidgetCardRefreshTests.cs` and `BatteryFreshnessTests.cs` in `tests/Earshot.Tests/Widget` | Test 19, pending |
 | 12 | The card's settings page, with the rows in order and their defaults | `WidgetCardSettingsTests.cs`, `WidgetCardHostTests.cs` and `WidgetCardLayoutTests.cs` | None yet |
 | 13 | Pause when the AirPods leave this PC: only when this PC was playing to them, before Earshot's own disconnects, never resumes, none when two sessions play | `PauseOnLeaveTests.cs` and `WindowsMediaSessionsTests.cs` | Test 21, pending |
 | 14 | Updates: nothing downloads before Update, the zip is checked against the published `.sha256`, the installed copy checks it again and installs after one administrator prompt, Update is offered only by an installed copy | `tests/Earshot.Tests/Update` | None yet. Nothing has updated a real install |
 | 15 | Switch timing: one `Switch to-pc:` or `Switch to-phone:` log line per switch | `tests/Earshot.Tests/App/SwitchTimelineTextTests.cs` | Test 16, pending |
 | 16 | The install script: one line installs, updates, repairs or uninstalls; the zip's SHA-256 is checked before anything is unzipped and any mismatch ends the run with one plain line; one administrator prompt, handed to Earshot's own verbs, which check the zip again in an administrators-only folder; no menu when no one can answer; Uninstall keeps the settings unless asked. The checksum catches a damaged download, not a compromised release, because the script and the zip come from the same release | `tests/Earshot.Tests/Installer` runs `installer\earshot.ps1` in Windows PowerShell 5.1 and PowerShell 7 against a local release feed and a stub install root; `tests/Earshot.Tests/Update/InstallZipTests.cs`, `tests/Earshot.Tests/App/ProbeSetupValuesTests.cs` and `tests/Earshot.Tests/App/TrayExitCommandTests.cs` cover the verbs it uses. The PowerShell 7 rows run on the hosted build | None yet. Nothing has installed, updated or repaired a real PC with it, and the real administrator prompt has not been shown by any test |
 | 17 | New installs: Hand back on shut down, sleep and Exit on, and Open on startup on; an existing settings file keeps its saved values | `tests/Earshot.Tests/Infra/JsonSettingsStoreTests.cs` (no file and no backup gives both on; a file, a backup, a file without the member and a reset file do not) | None yet |
+| 18 | Hands-Free microphone off mode: off by default; turning it on turns Protect audio quality off and opens Windows' sound settings at the AirPods' input with one line of guidance; it uses no undocumented interface; Protect audio quality on its own turns it off | `HandsFreeMicrophoneModeTests.cs` in `tests/Earshot.Tests/Widget` | None yet. Call quality with the mode on is unproved until the owner has tried it |
+| 19 | Ear detection resume: resume only the session Earshot paused, within 60 seconds, on the same output, with nothing touched by hand, and only when every bud that was in is back in on fresh values | `AutoResumeTests.cs` and `EarSequenceTests.cs` in `tests/Earshot.Tests/Widget` | None. It is built and inactive, because no documented in-ear value exists to read |
 
 ## What it does not do
 
-- **Show a battery level Windows itself exposes for the device.** It does
-  not expose one at all. Three read-only checks on 15 September 2026, with
-  the AirPods connected to this PC, found no battery value Windows exposes
-  for them: the PnP battery query returned nothing, a dump of every
-  property on the AirPods' device nodes held no battery key, and WinRT
+- **Count on Windows for a battery figure.** Three read-only checks on 15
+  September 2026, with the AirPods connected to this PC, found no battery value
+  Windows exposes for them: the PnP battery query returned nothing, a dump of
+  every property on the AirPods' device nodes held no battery key, and WinRT
   returned the standard battery key empty for the AirPods' audio endpoint.
   Each check carried a positive control in the same read, so a broken query
-  could not be mistaken for a missing value. The same check with the
-  AirPods disconnected has not been run yet; it is Test 11 in the live
-  tests, and it cannot change the outcome, because a value would only be
-  expected while connected. The AirPods widget reads battery a different
-  way, from the AirPods' own Bluetooth broadcast rather than from Windows;
-  see [overview.md](overview.md#the-airpods-widget) for what it can show
-  and its limits. Noise control and battery read to the nearest 1% ride on
-  Apple's own protocol over a channel Windows does not open to ordinary
-  programs, which needs a kernel driver and is out of scope here; see
+  could not be mistaken for a missing value. The same check with the AirPods
+  disconnected has not been run yet; it is Test 11 in the live tests. Earshot
+  still reads Windows' Hands-Free battery property, from the device nodes only,
+  and uses it only when no bud has a current broadcast value. It was seen empty
+  on this PC with Hands-Free off, which is the default. The battery shown comes
+  from the AirPods' own Bluetooth broadcast instead; see
+  [overview.md](overview.md#the-airpods-widget) for what it can show and its
+  limits. Noise control and battery read to the nearest 1% ride on Apple's
+  own protocol over a channel Windows does not open to ordinary programs, which
+  needs a kernel driver and is out of scope here; see
   [architecture.md](architecture.md#what-still-needs-a-kernel-driver).
 - **Disable a device node that is not present.** Connect the AirPods to this
   PC once from Windows Bluetooth settings before blocking; Earshot reports
@@ -87,11 +89,19 @@ Every test below runs against a stand-in. None of these has had a live run.
   reports honestly when the AirPods still do not arrive. Disconnect always
   ends in a block when Block at boot is on, so it works either way.
 - **Tell whether a bud is in your ear or whether the case lid is open.**
-  Battery set-up cannot prove either, so ear detection, auto-pause and the
-  case-open card stay off.
-- **Rule out a stranger's AirPods completely.** A same-model stranger with a
-  lower battery reading than yours can pass the ownership rule. The owner
-  accepted that risk.
+  No documented source gives either in the broadcast, so Earshot does not
+  decode them. Ear detection, auto-pause on removal and the case-open card stay
+  off.
+- **Prove which bud is the left and which the right.** That rests partly on a
+  published description of the broadcast and partly on one local capture. No
+  permitted source documents the bit that swaps the two, so it is unproved.
+- **Rule out a stranger's AirPods completely.** Earshot picks the pair by model
+  and by which is nearest. A pair of the same model that sits nearer than yours
+  for long enough can be shown instead. The owner accepted that risk.
+- **Promise call quality in microphone off mode.** The mode turns audio
+  protection off and leaves the AirPods' Hands-Free microphone for the person
+  to switch off in Windows' sound settings. Earshot cannot switch it off, and
+  call quality with the mode on is unproved until the owner has tried it.
 - **Protect an update or an install against a compromised release or account.**
   The checksum comes from the same release as the zip, and, for the install
   script, as the script itself, so it catches a damaged download and not a
