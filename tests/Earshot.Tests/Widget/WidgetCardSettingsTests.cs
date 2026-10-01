@@ -273,7 +273,7 @@ public sealed class WidgetCardSettingsTests
             using WidgetCard card = CardKit.NewCard(dark: false);
             card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
 
-            Assert.IsFalse(card.CurrentSettingsLayout!.Items.Any(i => i.Label.Contains("Case-open card", StringComparison.OrdinalIgnoreCase)));
+            Assert.IsFalse(card.CurrentSettingsLayout!.Items.Any(i => i.Label.Contains("Case", StringComparison.OrdinalIgnoreCase)));
         });
     }
 
