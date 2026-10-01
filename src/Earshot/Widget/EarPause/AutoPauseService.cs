@@ -3,15 +3,10 @@ using Earshot.Contracts;
 
 namespace Earshot.Widget.EarPause;
 
-// Wires IWidgetStatus.OwnedReadingApplied into AutoPause.ApplyAsync: every owned reading is fed the two
+// Wires IWidgetStatus.ReadingApplied into AutoPause.ApplyAsync: every reading of the chosen set is fed the two
 // in-ear bits, when the reading was taken and the render facts AutoPause needs (Where, the default render
 // endpoint's container, the container this build watches). See AutoPause's own header for what it decides
 // with that feed; this class only wires it, it decides nothing about pausing itself.
-//
-// AutoPause.ApplyAsync takes an OwnershipVerdict only to check "is this owned"; OwnedReadingApplied is
-// raised only for an Owned verdict (see WidgetStatusService's own header on that event), and this class is
-// never handed the raw verdict (the event carries only the decoded reading), so Owned is passed as the
-// literal it necessarily was.
 internal sealed class AutoPauseService : IDisposable
 {
     private readonly IWidgetStatus _status;
@@ -49,27 +44,27 @@ internal sealed class AutoPauseService : IDisposable
         _time = time;
         _log = log;
 
-        _status.OwnedReadingApplied += OnOwnedReadingApplied;
+        _status.ReadingApplied += OnReadingApplied;
     }
 
-    // Runs on the UI thread (OwnedReadingApplied is documented as raised there). Kicks off the async work
+    // Runs on the UI thread (ReadingApplied is documented as raised there). Kicks off the async work
     // and returns at once, the same way TrayContext's own tray-icon and menu handlers do
     // (_ = _coordinator.RefreshStatusAsync(); Launch/RunReportedAsync): the discarded task is an
     // async Task method that wraps its own body in try/catch, so nothing here is an unobserved-task crash
     // waiting to happen.
-    private void OnOwnedReadingApplied(object? sender, OwnedReadingEventArgs e) => _ = RunAsync(e);
+    private void OnReadingApplied(object? sender, ReadingAppliedEventArgs e) => _ = RunAsync(e);
 
     // The media-session boundary (Windows Media Controls, reached through IMediaSessions/AutoPause): no
     // silent catch, every exception is logged before it is swallowed, so a Windows Media Controls failure
     // can never crash the process or take the event handler down with it.
-    private async Task RunAsync(OwnedReadingEventArgs e)
+    private async Task RunAsync(ReadingAppliedEventArgs e)
     {
         CancellationToken ct = _lifetime.Token;
         try
         {
-            // WidgetStatusService applies a reading's state (the in-ear bits, Where, _lastOwnedAt) under its
-            // own lock before it ever posts OwnedReadingApplied (ApplyOwnedMessage locks, mutates, unlocks,
-            // then posts); PublishAndNotify, which only reads that already-updated state to build the
+            // WidgetStatusService applies a reading's state (the in-ear bits, Where, the time of the last
+            // reading) under its own lock before it ever posts ReadingApplied (ApplyMessage locks, mutates,
+            // unlocks, then posts); PublishAndNotify, which only reads that already-updated state to build the
             // snapshot it caches, runs synchronously straight after, still ahead of this posted delegate
             // ever running. So by the time this handler is invoked, Current already reflects at least this
             // reading. It could in principle reflect a still newer one if another advertisement was parsed
@@ -80,7 +75,6 @@ internal sealed class AutoPauseService : IDisposable
             Guid watchedContainerId = CoordinatorRules.WatchedContainer(_blockStatus(), _settings.Current, device);
 
             await _autoPause.ApplyAsync(
-                OwnershipVerdict.Owned,
                 e.Reading.Left.InEar,
                 e.Reading.Right.InEar,
                 e.At,
@@ -108,7 +102,7 @@ internal sealed class AutoPauseService : IDisposable
         }
 
         _disposed = true;
-        _status.OwnedReadingApplied -= OnOwnedReadingApplied;
+        _status.ReadingApplied -= OnReadingApplied;
         _lifetime.Cancel();
         _lifetime.Dispose();
     }

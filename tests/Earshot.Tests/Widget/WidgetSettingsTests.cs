@@ -34,10 +34,10 @@ public sealed class WidgetSettingsTests : IDisposable
     }
 
     // Enabled - the flag WidgetStatusService itself reads to start or stop the BLE
-    // watcher - is the OR of the four consumers, so turning the gauge off alone never stops the watcher
+    // watcher - is the OR of the three consumers, so turning the gauge off alone never stops the watcher
     // another consumer still wants.
     [TestMethod]
-    public void WithWatcherRecomputedIsTheOrOfTheFourConsumers()
+    public void WithWatcherRecomputedIsTheOrOfTheThreeConsumers()
     {
         WidgetSettings allOff = WidgetSettings.Default with
         {
@@ -47,7 +47,7 @@ public sealed class WidgetSettingsTests : IDisposable
 
         Assert.IsTrue((allOff with { ShowOnTaskbar = true }).WithWatcherRecomputed().Enabled);
         Assert.IsTrue((allOff with { LowBatteryAlert = true }).WithWatcherRecomputed().Enabled);
-        Assert.IsTrue((allOff with { CaseOpenCard = true }).WithWatcherRecomputed().Enabled);
+        Assert.IsFalse((allOff with { CaseOpenCard = true }).WithWatcherRecomputed().Enabled, "The lid is not read, so the case-open card is no consumer.");
         Assert.IsTrue((allOff with { AutoPause = true }).WithWatcherRecomputed().Enabled);
 
         // The gauge going off while another consumer is still on must not turn the watcher off with it.

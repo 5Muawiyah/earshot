@@ -25,7 +25,6 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
         var log = new CapturingLog();
         var settings = new JsonSettingsStore(temp.File("settings.json"), log);
         var deviceMonitor = new FakeDeviceMonitor(TimeProvider.System);
-        var claimStore = new ClaimStore(temp.File("claim.json"), log);
         // A named real execution: each real source the service builds is declared to the assembly-wide
         // guard as it is built (a passive watcher, no window, nothing sent to any device).
         using var service = new WidgetStatusService(
@@ -34,9 +33,9 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
                 WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.AdvertisementSource);
                 return new WinRtAdvertisementSource();
             },
-            claimStore, settings, deviceMonitor, () => null, log,
+            settings, deviceMonitor, () => null, log,
             action => action(), TimeProvider.System,
-            new DecodeProofStore(temp.File("setup"), temp.File("proof.json"), log, TimeProvider.System));
+            new FakePairedModelSource());
 
         service.Start();
 
@@ -46,14 +45,13 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
 
             // The documented outcome with the Bluetooth radio switched off: the real Start threw 0x800710DF.
             // The service must show it as it shows RadioNotAvailable, keep the raw code in its log, and
-            // report the set-up as unavailable, exactly as for any other stopped watcher. The literal is
-            // written here so the raw code is proved rather than compared with the product's own constant.
+            // keep the watcher stopped, exactly as for any other stopped watcher. The literal is written here so
+            // the raw code is proved rather than compared with the product's own constant.
             if (log.Has(LogLevel.Warn, "0x800710DF"))
             {
                 Assert.AreEqual(WidgetWatcherState.Stopped, snapshot.Watcher);
                 Assert.AreEqual(1, snapshot.WatcherErrorCode, "BluetoothError.RadioNotAvailable is 1.");
                 Assert.AreEqual("RadioNotAvailable", snapshot.WatcherErrorName);
-                Assert.IsFalse(service.SetupAvailable, "With Bluetooth off there is nothing for a set-up to listen through.");
                 return;
             }
 

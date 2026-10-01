@@ -24,10 +24,9 @@ public sealed class ProbeWidgetTests
 
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
-        // Gauge: 2 snapshots x 3 DPIs x 2 inks = 12. Card: 5 variants (this-pc, elsewhere,
-        // auto-pause-preview, claim-link-preview, claim-link-disabled-preview) x 3 DPIs x 2 inks = 30.
-        // Case-open card: 3 DPIs x 2 inks = 6. 12+30+6 = 48.
-        Assert.HasCount(12 + (AllCardVariants.Length * 6) + 6, files, "12 gauge files, every card variant, and the case-open card.");
+        // Gauge: 3 snapshots x 3 DPIs x 2 inks = 18. Card: every variant x 3 DPIs x 2 inks. Case-open card:
+        // 3 DPIs x 2 inks = 6.
+        Assert.HasCount(18 + (AllCardVariants.Length * 6) + 6, files, "18 gauge files, every card variant, and the case-open card.");
         foreach (Program.ProbeWidgetFile file in files)
         {
             Assert.IsTrue(file.Bytes > 0, file.Snapshot + " " + file.Dpi + " " + file.Ink + ": " + file.Problem);
@@ -35,59 +34,51 @@ public sealed class ProbeWidgetTests
             Assert.IsTrue(File.Exists(file.Path));
         }
 
-        Assert.HasCount(12, Directory.GetFiles(temp.Path, "gauge-*.png"));
+        Assert.HasCount(18, Directory.GetFiles(temp.Path, "gauge-*.png"));
     }
 
     [TestMethod]
-    public void TheTwoSnapshotsAreThisPcAndElsewhere()
+    public void TheSnapshotsAreThisPcElsewhereAndTheSameReadingGreyed()
     {
-        var snapshots = Earshot.Program.ProbeWidgetSnapshots(DateTimeOffset.UtcNow);
-        Assert.HasCount(2, snapshots);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var snapshots = Earshot.Program.ProbeWidgetSnapshots(now);
+        Assert.HasCount(3, snapshots);
         Assert.AreEqual(Earshot.Widget.AirPodsWhere.ThisPc, snapshots[0].Snapshot.Where);
         Assert.AreEqual(Earshot.Widget.AirPodsWhere.Elsewhere, snapshots[1].Snapshot.Where);
+        Assert.AreEqual(Earshot.Widget.AirPodsWhere.ThisPc, snapshots[2].Snapshot.Where);
+        Assert.IsTrue(BatteryFreshness.IsFresh(snapshots[0].Snapshot.Left, now), "this-pc shows fresh values.");
+        Assert.IsFalse(BatteryFreshness.IsFresh(snapshots[2].Snapshot.Left, now), "greyed shows values that are not fresh.");
+        Assert.IsTrue(BatteryFreshness.IsRecent(snapshots[2].Snapshot.Left, now), "...and still recent, so the gauge draws them.");
     }
 
-    private static readonly string[] SetupVariants =
-    [
-        "setup-listening", "setup-pick", "setup-done-battery-set-up", "setup-done-case-set-up", "setup-done-buds-same",
-        "setup-done-could-not-read", "setup-failed-not-found", "setup-failed-ambiguous", "setup-failed-bluetooth-off",
-    ];
+    private static readonly string[] AllCardVariants = ["this-pc", "elsewhere", "greyed", "no-reading", "auto-pause-preview", "refresh-reading", "refresh-nothing-heard"];
 
-    private static readonly string[] AllCardVariants =
-        ["this-pc", "elsewhere", "auto-pause-preview", "set-up-button", "set-up-button-cannot-read", .. SetupVariants];
-
-    // The files of one variant only: "card-set-up-button-" is also the start of "card-set-up-button-cannot-read-",
-    // so the name is matched up to the DPI that always follows it.
+    // The files of one variant only, matched up to the DPI that always follows the name.
     private static string[] VariantFiles(string folder, string variant) =>
         Directory.GetFiles(folder, "card-*.png")
             .Where(f => System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(f), "^card-" + System.Text.RegularExpressions.Regex.Escape(variant) + @"-\d+dpi-"))
             .ToArray();
 
     [TestMethod]
-    public void TheCardVariantsAreTheReadingCardsTheSetupButtonAndEverySetupPage()
+    public void TheCardVariantsAreFreshGreyedAndEmpty()
     {
-        var variants = Program.ProbeWidgetCardVariants(DateTimeOffset.UtcNow);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var variants = Program.ProbeWidgetCardVariants(now);
 
         CollectionAssert.AreEqual(AllCardVariants, variants.Select(v => v.Variant).ToArray());
         Assert.IsFalse(variants[0].Model.ConnectIntent, "On this PC, connected, so the button reads Disconnect.");
         Assert.IsFalse(variants[0].Model.ShowSwitch, "Production never has AutoPauseAvailable true today.");
-        Assert.IsFalse(variants[0].Model.ShowSetupButton, "A reading is showing, so no set-up button.");
         Assert.IsTrue(variants[1].Model.ConnectIntent, "Elsewhere, not connected here, so the button reads Connect.");
-        Assert.IsTrue(variants[2].Model.ShowSwitch, "The preview variant exists to show the switch row.");
-        Assert.IsTrue(variants[2].Model.Snapshot.AutoPauseAvailable);
-
-        Assert.IsTrue(variants[3].Model.ShowSetupButton, "No reading: the set-up button.");
-        Assert.IsFalse(variants[3].Model.Snapshot.SetupCouldNotRead);
-        Assert.IsTrue(variants[4].Model.Snapshot.SetupCouldNotRead, "After a set-up that could not read: the caption and Try again.");
-
-        foreach ((string name, WidgetCardModel model) in variants.Where(v => v.Variant.StartsWith("setup-", StringComparison.Ordinal)))
-        {
-            Assert.AreNotEqual(WidgetCardView.Main, model.View, name);
-            Assert.IsNotNull(model.Setup, name);
-        }
-
-        Assert.AreEqual(new BatterySetupPicks(80, 60, 90, true, true, false), variants.Single(v => v.Variant == "setup-pick").Model.Setup!.Picks,
-            "The pick page previews 80, 60 and 90 with two Charging toggles on.");
+        Assert.IsTrue(variants[0].Model.ShownParts.Left.Fresh, "The first card shows fresh values.");
+        Assert.IsFalse(variants[2].Model.ShownParts.Left.Fresh, "The greyed card shows values that are not fresh.");
+        Assert.AreEqual(70, variants[2].Model.ShownParts.Left.Percent, "...and still shows them.");
+        Assert.IsNull(variants[3].Model.Snapshot.Left.Percent, "The empty card has no value for any part.");
+        Assert.IsTrue(variants[4].Model.ShowSwitch, "The preview variant exists to show the switch row.");
+        Assert.IsTrue(variants[4].Model.Snapshot.AutoPauseAvailable);
+        Assert.IsTrue(variants[5].Model.Refresh!.Reading, "The refresh-reading variant shows the icon mid-turn.");
+        Assert.AreEqual("Reading the battery", variants[5].Model.Refresh!.ReadLine);
+        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, variants[6].Model.Refresh!.Outcome);
+        Assert.AreEqual("Nothing heard. Open the case", variants[6].Model.Refresh!.ReadLine);
     }
 
     [TestMethod]
@@ -111,15 +102,15 @@ public sealed class ProbeWidgetTests
         Assert.IsNull(cardEntry.Problem);
     }
 
-    // The set-up pages are drawn for both themes at every DPI with the file names the rest of the probe uses.
+    // Every variant is drawn for both themes at every DPI with the file names the rest of the probe uses.
     [TestMethod]
-    public void TheSetupPageFilesExistInLightAndDark()
+    public void EveryVariantFileExistsInLightAndDark()
     {
         using var temp = new TempFolder();
 
         RenderUnderSafeMode(temp.Path);
 
-        foreach (string variant in SetupVariants)
+        foreach (string variant in AllCardVariants)
         {
             string[] at96 = VariantFiles(temp.Path, variant).Where(f => Path.GetFileName(f).Contains("-96dpi-", StringComparison.Ordinal)).ToArray();
             Assert.HasCount(1, at96.Where(f => f.EndsWith("-dark-taskbar-white-ink.png", StringComparison.Ordinal)).ToArray(), variant + " in dark");
@@ -184,8 +175,8 @@ public sealed class ProbeWidgetTests
 
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-this-pc-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-elsewhere-", StringComparison.Ordinal)));
-        Assert.IsTrue(files.Any(f => f.Path.Contains("card-set-up-button-", StringComparison.Ordinal)));
-        Assert.IsTrue(files.Any(f => f.Path.Contains("card-setup-pick-", StringComparison.Ordinal)));
+        Assert.IsTrue(files.Any(f => f.Path.Contains("card-greyed-", StringComparison.Ordinal)));
+        Assert.IsTrue(files.Any(f => f.Path.Contains("card-no-reading-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("card-auto-pause-preview-", StringComparison.Ordinal)));
         Assert.IsTrue(files.Any(f => f.Path.Contains("case-open-card-", StringComparison.Ordinal)));
     }
@@ -197,7 +188,7 @@ public sealed class ProbeWidgetTests
 
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
-        Assert.HasCount(12 + (AllCardVariants.Length * 6) + 6, files, "12 gauge files, every card variant, and the case-open card.");
+        Assert.HasCount(18 + (AllCardVariants.Length * 6) + 6, files, "18 gauge files, every card variant, and the case-open card.");
         Assert.IsTrue(files.All(f => f.Bytes > 0));
         Assert.IsTrue(Directory.Exists(temp.Path));
         // TempFolder's own Dispose (below, via `using`) deletes temp.Path once this test ends, so no

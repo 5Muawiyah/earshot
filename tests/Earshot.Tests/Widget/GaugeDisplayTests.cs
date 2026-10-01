@@ -420,7 +420,7 @@ public sealed class GaugeDisplayTests : IDisposable
         Assert.AreEqual(3734 - CardPlacement.Scale(8, dpi), result.Bounds.Value.Right);
         Assert.IsFalse(layout.Occupied.Any(o => o.IntersectsWith(result.Bounds.Value)), "Never overlapping.");
         using Bitmap bitmap = GaugeRenderer.Render(
-            new GaugeContent(GaugeMode.Reading, 60, false, false, "", false), GaugePalette.Create(true, Color.FromArgb(12, 160, 88), highContrast: false, Color.Black),
+            new GaugeContent(GaugeMode.Reading, 60, false, false, ""), GaugePalette.Create(true, Color.FromArgb(12, 160, 88), highContrast: false, Color.Black),
             GaugeLayout.For(layout.Dpi), hover: false, "Segoe UI");
         Assert.AreEqual(result.Bounds.Value.Size, bitmap.Size, "The bitmap is the placed rectangle's size at that display's scale.");
     }

@@ -22,9 +22,9 @@ public sealed class GaugeRendererTests
         GaugeRenderer.Render(content, Palette(light), GaugeLayout.For(dpi), hover, FontFamily);
 
     private static GaugeContent Reading(int percent, bool charging = false, int low = 20) =>
-        new(GaugeMode.Reading, percent, percent <= low, charging, "", false);
+        new(GaugeMode.Reading, percent, percent <= low, charging, "");
 
-    private static GaugeContent Of(GaugeMode mode) => new(mode, null, false, false, "", false);
+    private static GaugeContent Of(GaugeMode mode) => new(mode, null, false, false, "");
 
     // The pixel on the ring's centre line at an angle measured clockwise from 12 o'clock.
     private static Color RingPixel(Bitmap bitmap, GaugeLayout layout, double degrees)
@@ -203,7 +203,7 @@ public sealed class GaugeRendererTests
     private static GaugeContent ContentAt(int percent, GaugeDisplaySettings settings)
     {
         var buds = new PartReading(percent, null, null) { ReadAt = Now };
-        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { Where = AirPodsWhere.ThisPc, Left = buds, Right = buds };
+        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc, Left = buds, Right = buds };
         return GaugeContent.From(snapshot, Now, settings);
     }
 
@@ -372,7 +372,7 @@ public sealed class GaugeRendererTests
     public void ASnapshotDrawsThroughTheContentRules()
     {
         var buds = new PartReading(70, true, null) { ReadAt = Now - TimeSpan.FromMinutes(2) };
-        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { Where = AirPodsWhere.ThisPc, Left = buds, Right = buds with { Percent = 60 } };
+        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc, Left = buds, Right = buds with { Percent = 60 } };
         GaugeLayout layout = GaugeLayout.For(96);
 
         using Bitmap bitmap = GaugeRenderer.Render(snapshot, Now, 96, 48, Color.Black, hover: false, FontFamily, accent: Accent);
@@ -385,7 +385,7 @@ public sealed class GaugeRendererTests
     [TestMethod]
     public void ANumberIsNeverDrawnForAnUnprovedReading()
     {
-        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { Where = AirPodsWhere.ThisPc };
+        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
         GaugeLayout layout = GaugeLayout.For(96);
 
         using Bitmap bitmap = GaugeRenderer.Render(snapshot, Now, 96, 48, Color.Black, hover: false, FontFamily, accent: Accent);

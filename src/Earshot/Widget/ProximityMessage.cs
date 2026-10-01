@@ -13,15 +13,22 @@ public enum ProximityParseStatus
 }
 
 // The documented fields, raw. Nothing here says which nibble is which bud or what a bit means: that is
-// ProximityDecodeTable's job, once the owner's battery set-ups have proved it.
+// ProximityDecodeTable's job.
 public readonly record struct ProximityMessage(
-    byte ModelHigh, byte ModelLow,  // the two model bytes in wire order
+    byte ModelHigh, byte ModelLow,  // the two model bytes in wire order, not in order of significance
     byte Status,
     byte BatteryA,                  // the two bud nibbles
     byte BatteryB,                  // charging flags and the case nibble
     byte Lid,
     byte Colour,
-    byte Reserved);                 // the documented 0x00, recorded as read
+    byte Reserved)                  // the documented 0x00, recorded as read
+{
+    // The model as the number Windows holds as the device's product id. The first wire byte is the low byte:
+    // bytes 1 and 2 of the value read 0x27 then 0x20 for the product id 0x2027. ModelHigh and ModelLow name the
+    // first and second position on the wire, not which byte is the more significant.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public ushort Model => (ushort)(ModelHigh | (ModelLow << 8));
+}
 
 public sealed record ProximityParse(
     ProximityParseStatus Status,

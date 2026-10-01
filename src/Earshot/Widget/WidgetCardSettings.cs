@@ -4,15 +4,13 @@ using Earshot.Popup;
 namespace Earshot.Widget;
 
 // Everything the settings page shows, read from the real settings by the host each time the page is drawn, so a
-// row always shows what is saved and never what was last asked for. The two Missing flags are not settings: they
-// say a feature is switched on or off but cannot act yet, because the field battery set-up would have to prove
-// has not been proved.
+// row always shows what is saved and never what was last asked for. InEarProofMissing is not a setting: it says
+// a feature is switched on or off but cannot act yet, because the in-ear signal is not known.
 internal sealed record CardSettingsValues(
     GaugePosition GaugePosition,
     string OtherDeviceLabel,
     bool PauseWhenBudComesOut,
     bool PauseWhenAirPodsLeave,
-    bool CaseOpenCard,
     int LowBatteryPercent,
     bool LeftClickConnects,
     bool HandBack,
@@ -23,7 +21,6 @@ internal sealed record CardSettingsValues(
     string? InstalledVersion,    // "1.2.0", or null when the running version cannot be read
     bool CheckAutomatically,
     bool InEarProofMissing,
-    bool LidProofMissing,
     bool InstallExists = false)    // an install exists in any state, so Repair is offered beside Check for updates
 {
     // Which display the gauge is on (GaugeDisplayChoice.MainDisplay, "", for the main one), the list the row offers
@@ -69,8 +66,6 @@ internal interface IWidgetCardHost
     void SetPauseWhenBudComesOut(bool on, CardPlace place);
 
     void SetPauseWhenAirPodsLeave(bool on, CardPlace place);
-
-    void SetCaseOpenCard(bool on, CardPlace place);
 
     void SetLowBatteryPercent(int percent, CardPlace place);
 
@@ -126,7 +121,6 @@ internal enum SettingsRowId
     OtherDevice,
     PauseBud,
     PauseLeave,
-    CaseCard,
     LowBattery,
     LeftClick,
     HandBack,
@@ -422,7 +416,6 @@ internal static class SettingsPageLayout
 
         ToggleRow(SettingsRowId.PauseBud, WidgetCopy.SettingsPauseBud, values.InEarProofMissing ? WidgetCopy.SettingsWaitsOnInEar : null);
         ToggleRow(SettingsRowId.PauseLeave, WidgetCopy.SettingsPauseLeave, null);
-        ToggleRow(SettingsRowId.CaseCard, WidgetCopy.SettingsCaseCard, values.LidProofMissing ? WidgetCopy.SettingsWaitsOnLid : null);
 
         int valueW = CardPlacement.Scale(StepperValueWidthAt96, dpi);
         int stepGap = CardPlacement.Scale(ControlGapAt96, dpi);

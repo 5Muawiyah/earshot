@@ -10,7 +10,7 @@ internal sealed partial class WidgetCard
     private void DrawOrderTiles(Graphics g, SettingsItem item, CardSettingsValues values, CardColours colours, bool focusVisible, SettingsTarget focus)
     {
         GaugeContent content = values.GaugePreview
-            ?? GaugeContent.From(WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false), DateTimeOffset.UtcNow, GaugeDisplaySettings.Default);
+            ?? GaugeContent.From(WidgetSnapshot.Empty(WidgetWatcherState.NotStarted), DateTimeOffset.UtcNow, GaugeDisplaySettings.Default);
         GaugePalette palette = GaugePalette.Create(!_dark, colours.Accent, colours.HighContrast, colours.Text);
         string family = TypeRamp.FamilyFor(TypeRole.Gauge);
         int radius = CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi);

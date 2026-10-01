@@ -10,7 +10,7 @@ namespace Earshot.Tests.Widget;
 // JsonSettingsStore over a private TempFolder, not FakeSettingsStore (Phase2Fakes): that fake's Copy()
 // predates the v1.1 members and drops Widget on every read, which would make every case here look like
 // the setting was off. EARSHOT_DATA_ROOT is redirected to the same folder for the life of each test, so
-// BuildWidget's ClaimStore (Paths.Current.WidgetClaimFile) never reaches the owner's real
+// BuildWidget never reaches the owner's real
 // %LOCALAPPDATA%\Earshot.
 [TestClass]
 public sealed class CompositionRootWidgetTests
@@ -81,27 +81,5 @@ public sealed class CompositionRootWidgetTests
         }
 
         public void Dispose() => Environment.SetEnvironmentVariable(_name, _previous);
-    }
-
-    // The proof store is built under the widget folder of the data root: its summary is written at start, and the
-    // set-up records it reads live beside it.
-    [TestMethod]
-    public void BuildWidgetConstructsTheProofStoreUnderTheWidgetFolder()
-    {
-        using var temp = new TempFolder();
-        using var dataRoot = new EnvironmentVariableScope(DataRootVariable, temp.Path);
-        var log = new CapturingLog();
-        var settings = new JsonSettingsStore(temp.File("settings.json"), log);
-        settings.Update(s => s.Widget = s.Widget with { Enabled = true });
-        var registry = new Earshot.Composition.ServiceRegistry(log, settings, action => action(), safeMode: true);
-        Paths paths = Paths.Current;
-
-        IWidgetStatus? status = CompositionRoot.BuildWidget(registry, () => null, TimeProvider.System);
-
-        Assert.IsNotNull(status);
-        string proofFile = Path.Combine(paths.WidgetFolder, "proof.json");
-        Assert.AreEqual(proofFile, CompositionRoot.WidgetProofFile(paths));
-        Assert.IsTrue(File.Exists(proofFile), "The summary is written when the store is built: " + proofFile);
-        Assert.IsTrue(proofFile.StartsWith(temp.Path, StringComparison.OrdinalIgnoreCase), "Under the redirected data root, never the real profile.");
     }
 }

@@ -7,38 +7,38 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// Step 6 of the widget plan: wiring AutoPause end to end from IWidgetStatus.OwnedReadingApplied, not
+// Step 6 of the widget plan: wiring AutoPause end to end from IWidgetStatus.ReadingApplied, not
 // AutoPause's own decision logic (AutoPauseTests already covers that) and not WidgetStatusService's own
-// contract that OwnedReadingApplied fires only for an owned reading (WidgetStatusServiceTests already pins
+// contract that ReadingApplied fires only for an owned reading (WidgetStatusServiceTests already pins
 // that from the previous pass).
 [TestClass]
 public sealed class AutoPauseServiceTests : IDisposable
 {
-    // IWidgetStatus's whole public surface, with only OwnedReadingApplied actually driven and Current
+    // IWidgetStatus's whole public surface, with only ReadingApplied actually driven and Current
     // settable, the same shape LowBatteryAlertServiceTests' own FakeWidgetStatus uses for the same reason:
     // this proves the WIRING, not IWidgetStatus or WidgetStatusService themselves.
     private sealed class FakeWidgetStatus : IWidgetStatus
     {
-        public WidgetSnapshot Current { get; set; } = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true);
+        public WidgetSnapshot Current { get; set; } = WidgetSnapshot.Empty(WidgetWatcherState.Started);
 
-        public bool SetupAvailable => false;
 
         public event EventHandler? Changed;
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
-        public event EventHandler<OwnedReadingEventArgs>? OwnedReadingApplied;
+        public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
-        public Task<BatterySetupListen> ListenForSetupAsync(CancellationToken ct) => throw new NotSupportedException();
 
-        public BatterySetupResult CompleteSetup(BatterySetupListen listen, BatterySetupPicks picks) => throw new NotSupportedException();
 
-        public void ForgetClaim() => throw new NotSupportedException();
+
+        public bool BatteryRefreshAvailable => false;
 
         public Task RefreshAsync() => Task.CompletedTask;
 
+        public Task<BatteryRefreshOutcome> RefreshBatteryAsync(CancellationToken ct) => Task.FromResult(BatteryRefreshOutcome.NotListening);
+
         public void Raise(DecodedReading reading, DateTimeOffset at) =>
-            OwnedReadingApplied?.Invoke(this, new OwnedReadingEventArgs(reading, at));
+            ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(reading, at));
 
         // Unused by this test class; kept so the type fully implements the interface without a warning.
         internal void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
@@ -137,11 +137,11 @@ public sealed class AutoPauseServiceTests : IDisposable
         {
             Sessions = { new MediaSessionView("app.exe", MediaPlaybackState.Playing, true, true, "app.exe") },
         };
-        var autoPause = new AutoPause(sessions, () => true, () => true, _log);
+        var autoPause = new AutoPause(sessions, () => true, _log);
         using AutoPauseService service = NewService(autoPause);
 
         _deviceMonitor.Current = RendersToAirPods();
-        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { Where = AirPodsWhere.ThisPc };
+        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
 
         _status.Raise(Reading(left: true, right: null), At);
         _status.Raise(Reading(left: false, right: null), At);
@@ -150,7 +150,7 @@ public sealed class AutoPauseServiceTests : IDisposable
         CollectionAssert.AreEqual(expected, sessions.PauseCalls);
     }
 
-    // AutoPauseService always passes Owned, the only verdict that raises OwnedReadingApplied; the only
+    // AutoPauseService always passes Owned, the only verdict that raises ReadingApplied; the only
     // way to observe, from outside AutoPause, which literal AutoPauseService actually passes is behavioural:
     // if a stranger verdict (NoClaim, ModelOrColourMismatch, ...) reached ApplyAsync instead, the pause below
     // would never happen (AutoPauseTests.DoesNotPauseOnAStrangerReading proves that from AutoPause's own
@@ -163,11 +163,11 @@ public sealed class AutoPauseServiceTests : IDisposable
         {
             Sessions = { new MediaSessionView("app.exe", MediaPlaybackState.Playing, true, true, "app.exe") },
         };
-        var autoPause = new AutoPause(sessions, () => true, () => true, _log);
+        var autoPause = new AutoPause(sessions, () => true, _log);
         using AutoPauseService service = NewService(autoPause);
 
         _deviceMonitor.Current = RendersToAirPods();
-        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { Where = AirPodsWhere.ThisPc };
+        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
 
         _status.Raise(Reading(left: true, right: null), At);
         _status.Raise(Reading(left: false, right: null), At);
@@ -182,21 +182,21 @@ public sealed class AutoPauseServiceTests : IDisposable
         {
             Sessions = { new MediaSessionView("app.exe", MediaPlaybackState.Playing, true, true, "app.exe") },
         };
-        var autoPause = new AutoPause(sessions, () => true, () => true, _log);
+        var autoPause = new AutoPause(sessions, () => true, _log);
         using AutoPauseService service = NewService(autoPause);
         _deviceMonitor.Current = RendersToAirPods();
 
-        Assert.AreEqual(0, sessions.PauseCalls.Count, "Nothing was ever raised: OwnedReadingApplied's own only-for-owned-readings contract is WidgetStatusServiceTests' to pin, not this class'.");
+        Assert.AreEqual(0, sessions.PauseCalls.Count, "Nothing was ever raised: ReadingApplied's own only-for-owned-readings contract is WidgetStatusServiceTests' to pin, not this class'.");
     }
 
     [TestMethod]
     public void AnExceptionFromApplyAsyncIsCaughtAndLoggedNotThrown()
     {
-        var autoPause = new AutoPause(new ThrowingMediaSessions(), () => true, () => true, _log);
+        var autoPause = new AutoPause(new ThrowingMediaSessions(), () => true, _log);
         using AutoPauseService service = NewService(autoPause);
 
         _deviceMonitor.Current = RendersToAirPods();
-        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { Where = AirPodsWhere.ThisPc };
+        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
 
         _status.Raise(Reading(left: true, right: null), At);
         _status.Raise(Reading(left: false, right: null), At); // would otherwise trigger the read that throws
@@ -211,10 +211,10 @@ public sealed class AutoPauseServiceTests : IDisposable
         {
             Sessions = { new MediaSessionView("app.exe", MediaPlaybackState.Playing, true, true, "app.exe") },
         };
-        var autoPause = new AutoPause(sessions, () => true, () => true, _log);
+        var autoPause = new AutoPause(sessions, () => true, _log);
         var service = NewService(autoPause);
         _deviceMonitor.Current = RendersToAirPods();
-        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with { Where = AirPodsWhere.ThisPc };
+        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
         _status.Raise(Reading(left: true, right: null), At);
 
         service.Dispose();

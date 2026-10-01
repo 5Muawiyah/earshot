@@ -32,8 +32,9 @@ namespace Earshot.App;
 //   no installed program to run (Earshot.exe is truly absent: its folder lists without it, or the folder is one a
 //                               standard user can write) this copy's own setup puts a new install in place.
 //
-// The settings, the battery set-up records and the pinned device are not touched by any of these: they are the same
-// install over the same data folders that setup over an install already keeps.
+// The settings, the pinned device and the old battery set-up records (an earlier build kept them, nothing reads them now)
+// are not touched by any of these: they are the same install over the same data folders that setup over an install
+// already keeps.
 internal sealed partial class TrayContext
 {
     private Func<string, InstalledFilesReport> _checkInstalledFiles = InstalledFileCheck.Check;

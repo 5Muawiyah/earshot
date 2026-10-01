@@ -14,15 +14,14 @@ public sealed class WidgetCardAccessibilityTests
     private const int WM_MOUSEMOVE = 0x0200;
     private const int WM_MOUSELEAVE = 0x02A3;
 
-    private static readonly string[] PlainNames = ["Connect", "Settings"];
-    private static readonly string[] FullNames = ["Connect", "Pause when a bud comes out", "Update", "Settings"];
-    private static readonly string[] SetupNames = ["Connect", "Set up battery", "Settings"];
+    private static readonly string[] PlainNames = ["Connect", "Settings", "Refresh battery"];
+    private static readonly string[] FullNames = ["Connect", "Pause when a bud comes out", "Update", "Settings", "Refresh battery"];
     private static readonly bool[] OnOff = [false, true];
 
     private static readonly string[] SettingsNames =
     [
         "Right end", "Next to apps", "Gauge display", "Other device name", "Pause when a bud comes out", "Pause when AirPods leave this PC",
-        "Case-open card", "Lower the low battery level", "Raise the low battery level", "Left click connects", "Hand back on shut down, sleep and Exit",
+        "Lower the low battery level", "Raise the low battery level", "Left click connects", "Hand back on shut down, sleep and Exit",
         "Connect shortcut", "Disconnect shortcut", "Clear connect shortcut", "Clear disconnect shortcut", "Check for updates", "Repair Earshot",
         "Check for updates automatically",
     ];
@@ -61,12 +60,10 @@ public sealed class WidgetCardAccessibilityTests
         {
             WidgetCardModel plain = CardKit.MainModel();
             WidgetCardModel full = CardKit.MainModel(CardKit.Snapshot() with { AutoPauseAvailable = true }, updateVersion: "1.3.0") with { ShowSwitch = true, AutoPauseOn = true };
-            WidgetCardModel setup = CardKit.MainModel(showSetupButton: true);
             foreach ((WidgetCardModel model, string[] names) in new (WidgetCardModel, string[])[]
             {
                 (plain, PlainNames),
                 (full, FullNames),
-                (setup, SetupNames),
             })
             {
                 using WidgetCard card = ShownMain(model);

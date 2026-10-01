@@ -31,8 +31,8 @@ public sealed record WidgetSettings
     public bool Enabled { get; set; } = true;
 
     // The gauge and its card specifically: whether the taskbar (or tray icon fallback) shows anything at
-    // all. Independent of Enabled above, which the low battery alert, the case-open card and auto-pause can
-    // each keep true on their own even while this is off.
+    // all. Independent of Enabled above, which the low battery alert and auto-pause can each keep true on their
+    // own even while this is off.
     public bool ShowOnTaskbar { get; set; } = true;
 
     // The owner's own label for "in use, not on this PC" (WidgetCopy.OtherDeviceCaption says so on the
@@ -41,12 +41,14 @@ public sealed record WidgetSettings
     // (WidgetCopy.OnElsewhere) for an owner who clears it.
     public string OtherDeviceLabel { get; set; } = "iPhone";
 
-    public bool AutoPause { get; set; } = true;                // acts only once the in-ear field is proved, which a set-up cannot do yet
+    public bool AutoPause { get; set; } = true;                // acts only once the in-ear signal is known
 
     public bool LowBatteryAlert { get; set; } = true;          // an addition: an off switch beside the threshold
 
     public int LowBatteryThresholdPercent { get; set; } = DefaultLowBatteryThresholdPercent; // 10 to 90 in steps of 10
 
+    // No longer read: the lid is not used and the case-open card stays off. Kept as a member so an older settings
+    // file still loads and what it held is written back unchanged.
     public bool CaseOpenCard { get; set; } = true;
 
     public bool LeftClickConnects { get; set; }                // false: a left click opens the card
@@ -69,11 +71,11 @@ public sealed record WidgetSettings
 
     public static WidgetSettings Default => new();
 
-    // Recomputes Enabled from the four consumers (ShowOnTaskbar, LowBatteryAlert, CaseOpenCard, AutoPause):
+    // Recomputes Enabled from the three consumers (ShowOnTaskbar, LowBatteryAlert, AutoPause):
     // called after any write to one of them, so Enabled - the flag the watcher itself reads - always tells
     // the truth about whether something still needs it, never just mirroring whichever one was last touched.
     public WidgetSettings WithWatcherRecomputed() =>
-        this with { Enabled = ShowOnTaskbar || LowBatteryAlert || CaseOpenCard || AutoPause };
+        this with { Enabled = ShowOnTaskbar || LowBatteryAlert || AutoPause };
 
     // A threshold that is not a multiple of 10 or is outside 10 to 90 (the same list the menu itself
     // offers) becomes the default and is recorded; the label has its control, format and separator

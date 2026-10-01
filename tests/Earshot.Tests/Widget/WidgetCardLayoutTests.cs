@@ -64,59 +64,20 @@ public sealed class WidgetCardLayoutTests
         Assert.IsGreaterThan(without.Height, with_.Height);
     }
 
+    // The three columns are always laid out: a part with no value says so in its own column.
     [TestMethod]
-    public void TheSetupButtonIsAbsentByDefault()
+    public void TheColumnsAreAlwaysLaidOut()
     {
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
-        Assert.IsFalse(layout.ShowSetupButton);
-        Assert.AreEqual(Rectangle.Empty, layout.SetupButton);
+
         Assert.IsTrue(layout.ShowColumns);
+        Assert.IsFalse(layout.Left.Label.IsEmpty);
     }
 
-    // No reading: the grid is replaced by one 32 px primary button, 16 px below the read line, and the three
-    // columns are not laid out at all.
-    [TestMethod]
-    public void TheSetupButtonReplacesTheGridSixteenPixelsBelowTheReadLine()
-    {
-        foreach (int dpi in new[] { 96, 120, 144 })
-        {
-            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(dpi, showSwitch: false, showSetupButton: true);
+    // ---- The sub-pages, on the sub-page frame, per DPI
 
-            Assert.IsTrue(layout.ShowSetupButton);
-            Assert.IsFalse(layout.ShowColumns, "The grid gives way to the button at " + dpi + " DPI.");
-            Assert.AreEqual(Earshot.Popup.CardPlacement.Scale(32, dpi), layout.SetupButton.Height, "A 32 px button at " + dpi + " DPI.");
-            Assert.AreEqual(layout.ReadLine.Bottom + Earshot.Popup.CardPlacement.Scale(16, dpi), layout.SetupButton.Top, "16 px above at " + dpi + " DPI.");
-            Assert.IsTrue(layout.Button.Top >= layout.SetupButton.Bottom, "The Connect button stays below it.");
-            Assert.AreEqual(Rectangle.Empty, layout.Left.Label);
-        }
-
-        WidgetCardLayout.Layout withGrid = WidgetCardLayout.Compute(96, showSwitch: false);
-        WidgetCardLayout.Layout withButton = WidgetCardLayout.Compute(96, showSwitch: false, showSetupButton: true);
-        Assert.IsLessThan(withGrid.Height, withButton.Height, "The card is shorter without the grid.");
-    }
-
-    [TestMethod]
-    public void TheSetupButtonTakesItsMeasuredWidthAndAtMostTheContentWidth()
-    {
-        Assert.AreEqual(100, WidgetCardLayout.Compute(96, showSwitch: false, showSetupButton: true, setupButtonWidth: 100).SetupButton.Width);
-        int content = WidgetCardLayout.Compute(96, showSwitch: false, showSetupButton: true).SetupButton.Width;
-        Assert.AreEqual(WidgetCardLayout.WidthAt96 - (2 * WidgetCardLayout.PaddingAt96), content, "No measured width: the full content width.");
-        Assert.AreEqual(content, WidgetCardLayout.Compute(96, showSwitch: false, showSetupButton: true, setupButtonWidth: 5000).SetupButton.Width);
-    }
-
-    // The caption line after a set-up that could not read sits between the read line and the button.
-    [TestMethod]
-    public void TheSetupCaptionSitsAboveTheButton()
-    {
-        WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false, showSetupButton: true, showSetupCaption: true);
-
-        Assert.IsTrue(layout.SetupCaption.Top >= layout.ReadLine.Bottom);
-        Assert.IsTrue(layout.SetupButton.Top >= layout.SetupCaption.Bottom);
-    }
-
-    // ---- The set-up pages, on the sub-page frame, per DPI
-
-    private static SetupViewModel PickPage() => SetupViewModel.Pick(BatterySetupPicks.Default);
+    private static SetupViewModel Page(string? prompt, string? caption, string? status, string? sub, params SetupButton[] buttons) =>
+        new("Updates", null, prompt, caption, SetupIcon.Spinner, status, sub, buttons, 0);
 
     [TestMethod]
     public void TheFrameHasA48pxHeaderWithBackTitleAndStepAndA64pxFooter()
@@ -157,42 +118,11 @@ public sealed class WidgetCardLayoutTests
         Assert.AreEqual(48 + 100, none.Height);
     }
 
-    // Three equal columns 8 apart, each 148 high with the value, both chevrons and the Charging row inside.
-    [TestMethod]
-    public void ThePickersAreThreeEqualColumnsEachOneHundredAndFortyEightHigh()
-    {
-        foreach (int dpi in new[] { 96, 120, 144 })
-        {
-            int S(int v) => Earshot.Popup.CardPlacement.Scale(v, dpi);
-            WidgetCardLayout.SetupLayout layout = WidgetCardLayout.Setup(PickPage(), dpi);
-
-            Assert.HasCount(3, layout.Pickers);
-            foreach (WidgetCardLayout.PickerLayout picker in layout.Pickers)
-            {
-                Assert.IsTrue(Math.Abs(S(148) - picker.Box.Height) <= 3, "148 high at " + dpi + " (each part is scaled on its own): " + picker.Box.Height);
-                Assert.IsTrue(picker.Box.Contains(picker.Label) && picker.Box.Contains(picker.Up) && picker.Box.Contains(picker.Value)
-                    && picker.Box.Contains(picker.Down) && picker.Box.Contains(picker.Toggle), "Everything sits inside the box.");
-                Assert.AreEqual(new Size(S(40), S(24)), picker.Up.Size, "Chevron 40 by 24.");
-                Assert.AreEqual(new Size(S(40), S(24)), picker.Down.Size);
-                Assert.AreEqual(S(28), picker.Value.Height, "The value is 28 high.");
-                Assert.AreEqual(new Size(S(40), S(20)), picker.Toggle.Size, "The toggle is 40 by 20.");
-                Assert.IsTrue(picker.Up.Bottom <= picker.Value.Top && picker.Value.Bottom <= picker.Down.Top && picker.Down.Bottom <= picker.Toggle.Top,
-                    "Label, up, value, down, then the Charging row.");
-            }
-
-            Assert.AreEqual(S(8), layout.Pickers[1].Box.Left - layout.Pickers[0].Box.Right, "An 8 px gap at " + dpi);
-            Assert.AreEqual(S(8), layout.Pickers[2].Box.Left - layout.Pickers[1].Box.Right);
-            Assert.AreEqual(S(16), layout.Pickers[0].Box.Left, "16 px side padding.");
-            Assert.AreEqual(S(16), layout.Frame.Width - layout.Pickers[2].Box.Right);
-            Assert.IsTrue(Math.Abs(layout.Pickers[0].Box.Width - layout.Pickers[1].Box.Width) <= 1, "Equal columns.");
-        }
-    }
-
     [TestMethod]
     public void ThePromptAndTheStatusRowFollowTheBodyRules()
     {
-        SetupViewModel listening = SetupViewModel.Listening();
-        WidgetCardLayout.SetupLayout layout = WidgetCardLayout.Setup(listening, 96);
+        SetupViewModel page = Page("A prompt", null, "A status", null, new SetupButton("Cancel", false, SetupAction.Cancel));
+        WidgetCardLayout.SetupLayout layout = WidgetCardLayout.Setup(page, 96);
 
         Assert.AreEqual(48 + 4, layout.Prompt.Top, "The body has 4 px of top padding under the 48 px header.");
         Assert.AreEqual(20, layout.Prompt.Height, "The prompt is 20 high.");
@@ -204,16 +134,18 @@ public sealed class WidgetCardLayoutTests
     }
 
     [TestMethod]
-    public void EverySetupPageLaysOutInsideItsFrame()
+    public void EverySubPageLaysOutInsideItsFrame()
     {
+        var one = new SetupButton("Update", true, SetupAction.Update);
+        var two = new SetupButton("Cancel", false, SetupAction.Cancel);
         SetupViewModel[] pages =
         [
-            SetupViewModel.Listening(), PickPage(),
-            SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp), SetupViewModel.Done(BatterySetupResultStatus.CaseSetUp),
-            SetupViewModel.Done(BatterySetupResultStatus.CaseSetUpBudsSame), SetupViewModel.Done(BatterySetupResultStatus.SavedNeedsAnother), SetupViewModel.Done(BatterySetupResultStatus.NotSaved),
-            SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead),
-            SetupViewModel.Failed(BatterySetupListenStatus.NotFound), SetupViewModel.Failed(BatterySetupListenStatus.Ambiguous),
-            SetupViewModel.Failed(BatterySetupListenStatus.WatcherNotStarted),
+            Page("A prompt", null, "A status", null, two),
+            Page("A prompt", "A caption under it", "A status", "A line under the status", one, two),
+            Page(null, null, "A status", "A line under the status", one),
+            Page(null, "A caption on its own", "A status", null, one),
+            Page(null, null, null, null),
+            Page(null, null, "Downloading", null, two) with { ShowProgress = true, ProgressPercent = 40 },
         ];
         foreach (int dpi in new[] { 96, 120, 144 })
         {
@@ -221,7 +153,7 @@ public sealed class WidgetCardLayoutTests
             {
                 WidgetCardLayout.SetupLayout layout = WidgetCardLayout.Setup(page, dpi);
                 var body = layout.Frame.Body;
-                foreach (Rectangle part in new[] { layout.Prompt, layout.Caption, layout.StatusIcon, layout.StatusText, layout.StatusSub })
+                foreach (Rectangle part in new[] { layout.Prompt, layout.Caption, layout.StatusIcon, layout.StatusText, layout.StatusSub, layout.Progress })
                 {
                     Assert.IsTrue(part.IsEmpty || body.Contains(part), "A part of '" + page.Status + page.Prompt + "' is outside the body at " + dpi);
                 }

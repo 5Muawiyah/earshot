@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// What the gauge shows and says, from a snapshot and a time. The first matching state wins, only proved
-// fields count, and a reading older than an hour is no reading.
+// What the gauge shows and says, from a snapshot and a time. The first matching state wins, a bud with no value
+// is left out, and a value older than an hour is dropped bud by bud.
 [TestClass]
 public sealed class GaugeContentTests
 {
@@ -15,12 +15,13 @@ public sealed class GaugeContentTests
     private static PartReading Bud(int percent, bool? charging = null, TimeSpan? age = null) =>
         new(percent, charging, null) { ReadAt = Now - (age ?? TimeSpan.FromMinutes(2)) };
 
-    private static WidgetSnapshot Snapshot(AirPodsWhere where, PartReading? left = null, PartReading? right = null, bool claim = true) =>
-        WidgetSnapshot.Empty(WidgetWatcherState.Started, claim) with
+    private static WidgetSnapshot Snapshot(AirPodsWhere where, PartReading? left = null, PartReading? right = null, PartReading? headset = null) =>
+        WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = where,
             Left = left ?? PartReading.Unknown,
             Right = right ?? PartReading.Unknown,
+            Headset = headset ?? PartReading.Unknown,
         };
 
     // ---- Precedence ----
@@ -56,7 +57,7 @@ public sealed class GaugeContentTests
     }
 
     [TestMethod]
-    public void OnThisPcWithAFreshProvedReadingIsTheRing()
+    public void OnThisPcWithAValueTheGaugeCanDrawIsTheRing()
     {
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70), Bud(60)), Now, Settings);
 
@@ -76,26 +77,16 @@ public sealed class GaugeContentTests
         Assert.IsNull(c.Percent);
     }
 
-    // ---- The no reading tooltips ----
+    // ---- The no reading tooltip ----
 
     [TestMethod]
-    public void WithNoSetUpTheTooltipSaysTheBatteryIsNotSetUp()
+    public void WithNoRecentReadingTheTooltipSaysSo()
     {
-        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, claim: false), Now, Settings);
-
-        Assert.AreEqual("Battery not set up", c.Tooltip);
-        Assert.IsTrue(c.BatteryNotSetUp);
-    }
-
-    [TestMethod]
-    public void AfterSetUpWithNoRecentReadingTheTooltipSaysSo()
-    {
-        GaugeContent none = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, claim: true), Now, Settings);
+        GaugeContent none = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc), Now, Settings);
         GaugeContent old = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromHours(3)), Bud(60, age: TimeSpan.FromHours(3))), Now, Settings);
 
         Assert.AreEqual("No recent reading", none.Tooltip);
         Assert.AreEqual("No recent reading", old.Tooltip);
-        Assert.IsFalse(old.BatteryNotSetUp);
         Assert.AreEqual(GaugeMode.MarkOnly, old.Mode);
     }
 
@@ -125,15 +116,16 @@ public sealed class GaugeContentTests
         Assert.AreEqual(GaugeMode.MarkOnly, at61.Mode);
     }
 
-    // The number is the lower bud, so a stale bud could be the lower one: one stale bud is no reading, not a
-    // reading of the other bud.
+    // A value older than an hour is dropped bud by bud: the bud that is still recent is the number, and the bud
+    // that is not is left out of the tooltip as well.
     [TestMethod]
-    public void OneStaleBudMeansNoRecentReadingNotTheOtherBudsFigure()
+    public void OneBudOlderThanAnHourIsDroppedAndTheOtherIsTheNumber()
     {
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromMinutes(2)), Bud(30, age: TimeSpan.FromHours(2))), Now, Settings);
 
-        Assert.AreEqual(GaugeMode.MarkOnly, c.Mode);
-        Assert.IsNull(c.Percent);
+        Assert.AreEqual(GaugeMode.Reading, c.Mode);
+        Assert.AreEqual(70, c.Percent, "The old low bud no longer pulls the number down.");
+        Assert.AreEqual("AirPods\r\nL 70%\r\nRead 2 min ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -156,10 +148,10 @@ public sealed class GaugeContentTests
         Assert.AreEqual("Read 1 min ago", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(119)));
     }
 
-    // ---- Only proved fields ----
+    // ---- Only what has a value ----
 
     [TestMethod]
-    public void OneProvedBudIsShownAloneAndAnUnprovedBudIsLeftOutNotDashed()
+    public void OneBudIsShownAloneAndABudWithNoValueIsLeftOutNotDashed()
     {
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70), PartReading.Unknown), Now, Settings);
 
@@ -169,7 +161,7 @@ public sealed class GaugeContentTests
     }
 
     [TestMethod]
-    public void AnUnprovedChargingFlagIsNotABolt()
+    public void AChargingFlagThatIsNotTrueIsNotABolt()
     {
         GaugeContent unknown = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, charging: null), Bud(60, charging: null)), Now, Settings);
         GaugeContent notCharging = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, charging: false), Bud(60, charging: false)), Now, Settings);
@@ -214,5 +206,52 @@ public sealed class GaugeContentTests
         Assert.AreEqual(0, empty.Percent);
         Assert.IsTrue(empty.Low);
         Assert.AreEqual(100, full.Percent);
+    }
+
+    // ---- Windows' own figure ----
+
+    [TestMethod]
+    public void WindowsFigureIsTheNumberWhenNoBudHasAFreshValueAndItIsCurrent()
+    {
+        PartReading windows = new(70, null, null) { ReadAt = Now - TimeSpan.FromSeconds(10) };
+
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(30, age: TimeSpan.FromMinutes(5)), headset: windows), Now, Settings);
+
+        Assert.AreEqual(GaugeMode.Reading, c.Mode);
+        Assert.AreEqual(70, c.Percent);
+        Assert.AreEqual("AirPods\r\nWindows reads 70%\r\nRead just now", c.Tooltip);
+        Assert.IsFalse(c.Charging, "Windows' figure carries no charging flag.");
+    }
+
+    [TestMethod]
+    public void AFreshBudBeatsWindowsFigure()
+    {
+        PartReading windows = new(70, null, null) { ReadAt = Now - TimeSpan.FromSeconds(10) };
+
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(30, age: TimeSpan.FromSeconds(5)), headset: windows), Now, Settings);
+
+        Assert.AreEqual(30, c.Percent);
+        Assert.AreEqual("AirPods\r\nL 30%\r\nRead just now", c.Tooltip);
+    }
+
+    [TestMethod]
+    public void WindowsFigureIsNeverTheNumberForAirPodsThatAreNotOnThisPc()
+    {
+        PartReading windows = new(70, null, null) { ReadAt = Now - TimeSpan.FromSeconds(10) };
+
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.NotInUse, headset: windows), Now, Settings);
+
+        Assert.AreEqual(GaugeMode.NotOnThisPc, c.Mode);
+        Assert.IsNull(c.Percent);
+    }
+
+    [TestMethod]
+    public void AnOldWindowsFigureIsNotShown()
+    {
+        PartReading windows = new(70, null, null) { ReadAt = Now - TimeSpan.FromSeconds(121) };
+
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, headset: windows), Now, Settings);
+
+        Assert.AreEqual(GaugeMode.MarkOnly, c.Mode);
     }
 }

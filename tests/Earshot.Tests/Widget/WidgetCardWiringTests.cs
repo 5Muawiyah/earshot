@@ -16,7 +16,7 @@ public sealed class WidgetCardWiringTests
     private const int WM_CAPTURECHANGED = 0x0215;
     private const int WM_CANCELMODE = 0x001F;
 
-    private static readonly string[] Controls = ["Connect", "Gear", "Update", "Switch", "Set up"];
+    private static readonly string[] Controls = ["Connect", "Gear", "Update", "Switch"];
 
     // ---- Accent
 
@@ -230,8 +230,7 @@ public sealed class WidgetCardWiringTests
             {
                 using var card = new WidgetCard(new CapturingLog());
                 card.SetTheme(Color.Black, highContrast: false);
-                bool setup = control == "Set up";
-                card.Render(CardKit.MainModel(updateVersion: control == "Update" ? "1.2.0" : null, showSetupButton: setup) with { ShowSwitch = control == "Switch" }, 96);
+                card.Render(CardKit.MainModel(updateVersion: control == "Update" ? "1.2.0" : null) with { ShowSwitch = control == "Switch" }, 96);
                 card.Location = new Point(50, 50);
                 card.Show();
                 card.Activate();
@@ -241,15 +240,13 @@ public sealed class WidgetCardWiringTests
                 card.SettingsRequested += (_, _) => activated.Add("Gear");
                 card.UpdateRequested += (_, _) => activated.Add("Update");
                 card.AutoPauseChanged += (_, _) => activated.Add("Switch");
-                card.SetupRequested += (_, _) => activated.Add("Set up");
                 WidgetCardLayout.Layout layout = card.CurrentMainLayout;
                 Rectangle rect = control switch
                 {
                     "Connect" => layout.Button,
                     "Gear" => layout.Gear,
                     "Update" => layout.UpdateButton,
-                    "Switch" => layout.Switch,
-                    _ => layout.SetupButton,
+                    _ => layout.Switch,
                 };
                 nint lParam = (nint)((((rect.Y + (rect.Height / 2)) & 0xFFFF) << 16) | ((rect.X + (rect.Width / 2)) & 0xFFFF));
 

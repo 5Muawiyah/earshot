@@ -112,11 +112,11 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'sh-app-bar-message:abm-new'; Text = 'AppBar: sh-app-bar-message:abm-new ok S_OK (0x00000000)' }
     [ordered]@{ Pattern = 'Widget watcher start:'; Text = 'Widget watcher start: start Started.' }
     [ordered]@{ Pattern = 'Widget watcher stopped:'; Text = 'Widget watcher stopped: RadioNotAvailable (1).' }
-    [ordered]@{ Pattern = 'Widget counters:'; Text = 'Widget counters: watcher=Started allSections=4 apple=4 other=0 items=4 ok=4 truncated=0 unknownForm=0 owned=0 noClaim=4 modelOrColourMismatch=0 signalBelowThreshold=0 nibbleOrderMismatch=0 batteryUnreadable=0 batteryInconsistent=0 unknownFormShapes=[]' }
+    [ordered]@{ Pattern = 'Widget counters:'; Text = 'Widget counters: watcher=Started allSections=4 apple=4 other=0 items=4 ok=4 truncated=0 unknownForm=0 modelMismatch=0 colourMismatch=0 otherSet=0 chosen=4 noPairedModel=0 budOrderDisagree=0 switches=0 sets=1 unknownFormShapes=[]' }
+    [ordered]@{ Pattern = 'Widget: picked out a set of AirPods to show'; Text = 'Widget: picked out a set of AirPods to show (1 in range).' }
+    [ordered]@{ Pattern = 'Widget: battery refresh ended:'; Text = 'Widget: battery refresh ended: Heard.' }
     [ordered]@{ Pattern = 'Gauge raised:'; Text = 'Gauge raised: Shell_TrayWnd (Explorer) was over it after a foreground change to Windows.UI.Core.CoreWindow.' }
     [ordered]@{ Pattern = 'Gauge left under'; Text = 'Gauge left under Windows.UI.Core.CoreWindow after a foreground change: not the taskbar.' }
-    [ordered]@{ Pattern = 'AirPods claimed:'; Text = 'AirPods claimed: model and colour recorded, signal threshold -60 dBm.' }
-    [ordered]@{ Pattern = 'Claim not made:'; Text = 'Claim not made: No AirPods seen. Open the case next to the PC and try again.' }
     [ordered]@{ Pattern = 'Auto-pause paused'; Text = 'Auto-pause paused com.example.player.' }
     [ordered]@{ Pattern = 'connect: '; Text = 'connect: Success. Connected.' }
 )
@@ -225,14 +225,14 @@ $script:Answers = [ordered]@{
     'did the gauge and the card both redraw crisply'                         = 'yes'
     'did the ink on the gauge flip so it stays readable'                     = 'yes'
     'right-click the gauge: does the same menu'                              = 'yes'
-    'is there a "set up battery" item in the menu'                           = 'yes'
-    'is that item available to click'                                        = 'yes'
-    'did the card go through the three steps'                                = 'yes'
-    'compare the card with what your iphone shows now'                       = 'yes'
+    'is there a "refresh battery" item in the menu'                        = 'yes'
+    'compare the card with what your iphone shows'                           = 'yes'
+    'a minute later, are the battery figures greyed'                         = 'yes'
+    'after about twelve seconds, does the card say "nothing heard'            = 'yes'
+    'did the arrow turn while the card said'                                 = 'yes'
     'is there a ring round the earbud mark'                                  = 'yes'
     'was the ring filled in your windows accent colour'                      = 'yes'
     'more than an hour after the airpods were last heard'                    = 'yes'
-    'does the card say "no reading" for the battery'                         = 'yes'
     'does the "where" line on the card say "on this pc"'                     = 'yes'
     'did the audio keep playing on this pc'                                  = 'yes'
     'with the airpods not connected to this pc, does the card say'           = 'yes'

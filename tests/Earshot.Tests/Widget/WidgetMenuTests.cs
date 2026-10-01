@@ -81,18 +81,16 @@ public sealed class WidgetMenuTests
         });
     }
 
+    // The lid is not read, so the case-open card never shows and the menu does not offer a switch for it.
     [TestMethod]
-    public void ClickingCardWhenTheCaseOpensFlipsItThroughTheRealSettingsWritePath()
+    public void TheCaseOpenCardItemIsNotShownInTheMenu()
     {
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness();
-            bool before = tray.Settings.Current.Widget.CaseOpenCard;
+            tray.Context.Menu.Refresh();
 
-            tray.ClickMenu(WidgetCopy.CardWhenCaseOpens);
-            tray.PumpUntilIdle();
-
-            Assert.AreEqual(!before, tray.Settings.Current.Widget.CaseOpenCard);
+            Assert.IsFalse(tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Any(i => i.Available && i.Text == WidgetCopy.CardWhenCaseOpens));
         });
     }
 
@@ -111,22 +109,9 @@ public sealed class WidgetMenuTests
         });
     }
 
-    // The set-up item is in the menu whatever the widget is doing. With the widget off there is no watcher, so
-    // it reads disabled with its reason, and a click cannot start a listen that would fail.
+    // Battery needs no set-up, so the menu has no such item, with the widget running or not.
     [TestMethod]
-    public void TheSetUpItemIsDisabledWithItsReasonWhileNothingRuns()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var tray = new TrayHarness();
-            tray.Context.Menu.Refresh();
-
-            Assert.IsFalse(tray.MenuItem(WidgetCopy.SetUpBatteryBluetoothOff).Enabled, "No watcher: the item is disabled and says why.");
-        });
-    }
-
-    [TestMethod]
-    public void TheSetUpItemIsEnabledWhileTheWatcherRuns()
+    public void TheMenuHasNoSetUpBatteryItem()
     {
         Phase5.CardDesktop.Run(() =>
         {
@@ -134,24 +119,7 @@ public sealed class WidgetMenuTests
             tray.PumpUntilIdle();
             tray.Context.Menu.Refresh();
 
-            Assert.IsTrue(tray.MenuItem(WidgetCopy.SetUpBattery).Enabled, "With the watcher running the item is enabled.");
-        });
-    }
-
-    [TestMethod]
-    public void TheSetUpItemOpensTheCardAtListening()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var tray = new TrayHarness(settings: s => s.Widget = s.Widget with { Enabled = true });
-            tray.PumpUntilIdle();
-            Assert.IsFalse(tray.Context.WidgetCardIsShownForTest);
-
-            tray.ClickMenu(WidgetCopy.SetUpBattery);
-            tray.PumpUntilIdle();
-
-            Assert.IsTrue(tray.Context.WidgetCardIsShownForTest, "The set-up opens the widget card.");
-            Assert.AreEqual(WidgetCardView.SetupListening, tray.Context.WidgetCardViewForTest, "At the first page: listening.");
+            Assert.IsFalse(tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Any(i => i.Text is { } text && text.StartsWith("Set up battery", StringComparison.Ordinal)));
         });
     }
 

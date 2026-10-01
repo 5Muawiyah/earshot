@@ -4,9 +4,15 @@ using Earshot.Contracts;
 namespace Earshot.Widget;
 
 // Owns the advertisement source's lifetime and turns what it receives into the one snapshot the UI reads.
-// Parsing runs on the callback thread the source calls back on; the ownership rule, the decoder, the
-// snapshot and the events run after a post through uiPost, so every state change the UI can see happens on
-// one thread. Counters are Interlocked so they can always be read without that post.
+// Parsing runs on the callback thread the source calls back on; the selection of the owner's AirPods, the
+// decoder, the snapshot and the events run after a post through uiPost, so every state change the UI can see
+// happens on one thread. Counters are Interlocked so they can always be read without that post.
+//
+// Which AirPods are the owner's is decided with no step from the owner: the paired AirPods' model (read once at
+// start and again when the pinned device changes) picks the candidates, and BroadcastSelector picks the set.
+// Only the chosen set's messages ever reach the values the card, the gauge and the alert show. Windows' own
+// Hands-Free battery figure, when it has one, is read beside them (every minute while the AirPods are on this PC, at
+// each connect, and when asked) and held apart: it fills in only when no bud has a fresh broadcast value.
 //
 // Start, Suspend, Resume and Close are not on IWidgetStatus: they are called directly by whatever wires the
 // widget into the tray (out of scope here), the way the device monitor's own Start is called once and its
@@ -14,31 +20,23 @@ namespace Earshot.Widget;
 internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 {
     private readonly Func<IAdvertisementSource> _sourceFactory;
-    private readonly ClaimStore _claimStore;
     private readonly ISettingsStore _settings;
     private readonly IDeviceMonitor _deviceMonitor;
     private readonly Func<BootBlockStatus?> _blockStatus;
     private readonly ILog _log;
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _timeProvider;
+    private readonly IPairedModelSource _pairedModel;
+    private readonly IHandsFreeBatterySource? _handsFree;
+    private readonly Action<Action> _runInBackground;
 
-    // Reads what the owner's own set-up records have proved. In production this is the proof store's table,
-    // which only moves when a set-up is completed; there is no constant to read. Tests supply a fixed table
-    // so the proved paths are exercised directly.
-    private readonly Func<ProximityDecodeTable> _decodeTable;
-
-    // Whether the AirPods were observed to keep broadcasting while this PC plays to them: true once observed,
-    // null before. In production the proof store's observation.
-    private readonly Func<bool?> _broadcastsWhilePlaying;
-
-    // Where a set-up's record and proof are kept. Null only in tests that never complete a set-up.
-    private readonly DecodeProofStore? _proof;
-
-    // True while the newest set-up saw only forms the parser does not read and nothing has been claimed since.
-    private bool _setupCouldNotRead;
+    // The decode table is the documented one. Only a test hands in another, to exercise bits the documented table
+    // does not set (in-ear, the lid).
+    private readonly ProximityDecodeTable _table;
 
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
+    private readonly BroadcastSelector _selector = new();
 
     // Rebuilding the shapes list is skipped unless _unknownForms actually changed since the last build: most
     // adverts never touch it at all, so re-allocating it on every one of them would be pointless churn, and
@@ -65,107 +63,112 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private ITimer? _retryTimer;
     private TimeSpan _retryDelay;
     private ITimer? _countersLogTimer;
+    private ITimer? _headsetTimer;
     private WidgetCounters? _lastLoggedCounters;
     private WidgetWatcherState? _lastLoggedWatcherState;
 
     private long _allSections, _appleSections, _otherCompanySections, _proximityItems;
     private long _okForm, _truncated, _unknownForm;
-    private long _owned, _noClaim, _modelOrColourMismatch;
-    private long _signalBelowThreshold, _nibbleOrderMismatch, _batteryUnreadable, _batteryInconsistent;
+    private long _modelMismatch, _colourMismatch, _otherSet, _chosen, _noPairedModel;
+    private long _budOrderDisagree, _switches;
+    private int _setsInRange;
 
-    // Set once a NibbleOrderMismatch has been logged, so a whole run of adverts against a stale claim
-    // produces one line, not one per advert; cleared whenever the claim changes (a redone claim, or one
-    // forgotten), since either might fix or remove the mismatch.
-    private bool _nibbleOrderMismatchLogged;
+    // One line per run, not per message: a form that drifted, and two senders of the chosen set disagreeing on
+    // which bud is which. Written and read only on the UI thread, under _gate.
+    private bool _driftLogged;
+    private bool _budOrderLogged;
 
-    // Everything below is read and written only while holding _gate, so a ClaimAsync/ForgetClaim call (from
-    // whatever thread the owner's UI runs on) and a Received/Stopped callback never race each other.
+    // Everything below is read and written only while holding _gate, so a call from whatever thread the owner's
+    // UI runs on and a Received/Stopped callback never race each other.
     private PartReading _left = PartReading.Unknown;
     private PartReading _right = PartReading.Unknown;
     private PartReading _case = PartReading.Unknown;
+    private PartReading _headset = PartReading.Unknown;
     private bool? _lastLeftInEar;
     private bool? _lastRightInEar;
     private DateTimeOffset? _earReadAt;
-    private DateTimeOffset? _lastOwnedAt;
+    private DateTimeOffset? _lastChosenAt;
     private bool _lidOpenBitSeen;
     private bool _lastLidOpenState;
     private int? _lastLidCounter;
     private bool _thisPcActive;
-    private WidgetClaim? _claim;
     private WidgetWatcherState _watcherState = WidgetWatcherState.NotStarted;
     private int? _watcherErrorCode;
     private string? _watcherErrorName;
     private WidgetSnapshot? _lastPublished;
 
-    // Production entry point: the decode table and the broadcast observation are always the proof store's own,
-    // so nothing composing this service can wire up a different table.
+    // The pinned device the paired model was last read for, so a settings change that leaves it alone reads nothing.
+    private (Guid Container, string Address)? _pairedModelFor;
+
+    // The container this PC renders to when the AirPods are on it (where Windows' figure would be), and whether a
+    // read of that figure is running: one at a time, so a read still running skips the next tick.
+    private Guid _watchedContainer;
+    private bool _headsetBusy;
+    private string? _lastHeadsetNote;
+
+    // The refresh in progress, if any; a second request joins it. Read and written only under _gate.
+    private RefreshState? _refresh;
+
     public WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
-        ClaimStore claimStore,
         ISettingsStore settings,
         IDeviceMonitor deviceMonitor,
         Func<BootBlockStatus?> blockStatus,
         ILog log,
         Action<Action> uiPost,
         TimeProvider timeProvider,
-        DecodeProofStore proof)
-        : this(
-            sourceFactory, claimStore, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider,
-            RequireProof(proof).ReadTable, proof.ReadBroadcast, proof)
+        IPairedModelSource pairedModel,
+        IHandsFreeBatterySource? handsFree = null)
+        : this(sourceFactory, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, pairedModel, handsFree, ProximityDecodeTable.Documented)
     {
     }
 
-    private static DecodeProofStore RequireProof(DecodeProofStore? proof) =>
-        proof ?? throw new ArgumentNullException(nameof(proof));
-
-    // Test-only: supplies the decode table and the broadcast observation directly, so a test can exercise the
-    // proved paths without a set-up having proved anything. proof is needed only by a test that completes a
-    // set-up or counts owned messages while this PC plays.
+    // Test-only: supplies the decode table directly, so a test can exercise bits the documented table does not set, and
+    // the way a Hands-Free read is run off the UI thread, so a test can run it where it stands.
     internal WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
-        ClaimStore claimStore,
         ISettingsStore settings,
         IDeviceMonitor deviceMonitor,
         Func<BootBlockStatus?> blockStatus,
         ILog log,
         Action<Action> uiPost,
         TimeProvider timeProvider,
-        Func<ProximityDecodeTable> decodeTable,
-        Func<bool?>? broadcastsWhilePlaying = null,
-        DecodeProofStore? proof = null)
+        IPairedModelSource pairedModel,
+        IHandsFreeBatterySource? handsFree,
+        ProximityDecodeTable table,
+        Action<Action>? runInBackground = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFactory);
-        ArgumentNullException.ThrowIfNull(claimStore);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(deviceMonitor);
         ArgumentNullException.ThrowIfNull(blockStatus);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(uiPost);
         ArgumentNullException.ThrowIfNull(timeProvider);
-        ArgumentNullException.ThrowIfNull(decodeTable);
+        ArgumentNullException.ThrowIfNull(pairedModel);
+        ArgumentNullException.ThrowIfNull(table);
 
         _sourceFactory = sourceFactory;
-        _claimStore = claimStore;
-        _broadcastsWhilePlaying = broadcastsWhilePlaying ?? (static () => null);
-        _proof = proof;
         _settings = settings;
         _deviceMonitor = deviceMonitor;
         _blockStatus = blockStatus;
-        _decodeTable = decodeTable;
         _log = log;
         _uiPost = uiPost;
         _timeProvider = timeProvider;
-        _claim = claimStore.Current;
-        _setupCouldNotRead = _claim is null && proof?.Newest is { ListenStatus: BatterySetupListenStatus.ShortFormOnly };
+        _pairedModel = pairedModel;
+        _handsFree = handsFree;
+        _runInBackground = runInBackground ?? (static work => _ = Task.Run(work));
+        _table = table;
     }
 
     public event EventHandler? Changed;
 
+    // Raised when the lid opens, which needs a lid bit or counter in the decode table. The documented table has
+    // neither, so nothing raises it today.
     public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
-    // Raised for every owned reading (an Owned verdict): the seam LowBatteryAlertService feeds
-    // from, and a later auto-pause step will reuse. See ApplyOwnedMessage for exactly where.
-    public event EventHandler<OwnedReadingEventArgs>? OwnedReadingApplied;
+    // Raised for every reading of the chosen set: the seam auto-pause is fed from.
+    public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
     public WidgetSnapshot Current
     {
@@ -178,23 +181,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    // Whether the AirPods were observed to keep broadcasting while this PC plays to them: true once observed,
-    // null before. What auto-pause's gate reads.
-    public bool? BroadcastObserved() => _broadcastsWhilePlaying();
-
-    // True while the watcher runs: a set-up listens through it, so with it stopped the trigger is disabled
-    // rather than left to fail after the owner has opened his case.
-    public bool SetupAvailable
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return !_closed && _watcherState == WidgetWatcherState.Started;
-            }
-        }
-    }
-
     // Constructed and started only while the setting is on; hooks the device monitor and settings change
     // regardless, so turning the setting on later (TurningTheSettingOnStartsOne) still works. Idempotent: a
     // second call does nothing, rather than double-subscribing the device monitor and settings events and
@@ -203,6 +189,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         IAdvertisementSource? sourceToStart = null;
         int generation = 0;
+        bool startOnThisPc;
         lock (_gate)
         {
             if (_started || _closed)
@@ -212,6 +199,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             _started = true;
             RecomputeThisPcLocked(_deviceMonitor.Current);
+            startOnThisPc = _thisPcActive;
             _deviceMonitor.SnapshotChanged += OnDeviceSnapshotChanged;
 
             if (!_settingsHooked)
@@ -235,15 +223,33 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _countersLogTimer ??= _timeProvider.CreateTimer(
                 static state => ((WidgetStatusService)state!).OnCountersLogDue(), this,
                 WidgetTiming.CountersLogInterval, WidgetTiming.CountersLogInterval);
+
+            // Windows' own figure is read once a minute, only while the AirPods are on this PC (the tick checks).
+            if (_handsFree is not null)
+            {
+                _headsetTimer ??= _timeProvider.CreateTimer(
+                    static state => ((WidgetStatusService)state!).OnHeadsetPollDue(), this,
+                    WidgetTiming.HeadsetPollInterval, WidgetTiming.HeadsetPollInterval);
+            }
         }
 
         if (sourceToStart is not null)
         {
+            // The model is read before the source starts, so a message heard at once already has a paired model to
+            // be compared with.
+            ReadPairedModel(force: true, publish: false);
+
             // Unlike every other call site of RunStartOutsideLock, the very first Start() never publishes:
             // nothing has anything to compare its first snapshot against yet, and it matches what the
             // original, single-lock version of this method did (a caller watching uiPost's own queue,
             // ChangedAndCaseOpenedAreRaisedThroughUiPost, pins it).
             RunStartOutsideLock(sourceToStart, generation, publish: false);
+
+            // Already on this PC when the widget starts: Windows' figure is read once now.
+            if (startOnThisPc)
+            {
+                RequestHeadsetRead();
+            }
         }
     }
 
@@ -266,6 +272,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             RunStopOutsideLock(sourceToStop, disposeSource: false);
         }
 
+        CompleteAnyRefresh(BatteryRefreshOutcome.NotListening);
         PublishAndNotify();
     }
 
@@ -290,9 +297,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         RunStartOutsideLock(sourceToStart, generation);
     }
 
-    // Idempotent, and final: once closed, nothing on this service saves the claim or raises Changed or
-    // CaseOpened again, whatever calls it (or an in-flight callback that was already dispatched before this
-    // ran) tries next.
+    // Idempotent, and final: once closed, nothing on this service raises Changed or CaseOpened again, whatever
+    // calls it (or an in-flight callback that was already dispatched before this ran) tries next.
     public void Close()
     {
         IAdvertisementSource? sourceToStop;
@@ -313,6 +319,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             _countersLogTimer?.Dispose();
             _countersLogTimer = null;
+            _headsetTimer?.Dispose();
+            _headsetTimer = null;
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
@@ -322,209 +330,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             RunStopOutsideLock(sourceToStop, disposeSource: true);
         }
+
+        CompleteAnyRefresh(BatteryRefreshOutcome.NotListening);
     }
 
     public void Dispose() => Close();
-
-    public async Task<BatterySetupListen> ListenForSetupAsync(CancellationToken ct)
-    {
-        IAdvertisementSource? source;
-        lock (_gate)
-        {
-            source = _closed ? null : _source;
-        }
-
-        if (source is null)
-        {
-            DateTimeOffset now = _timeProvider.GetUtcNow();
-            _log.Warn("Battery set-up: the watcher is not running, so nothing was listened for.");
-            return new BatterySetupListen(
-                BatterySetupListenStatus.WatcherNotStarted, WidgetCopy.SetupBluetoothOff, Candidate: null, [], now, now, 0, 0);
-        }
-
-        return await BatterySetupFlow.ListenAsync(source, _timeProvider, WidgetTiming.SetupListenWindow, _log, ct).ConfigureAwait(false);
-    }
-
-    // The owner has answered step 2. The record is written and proof updated first, so the claim's
-    // NibblesAreNamedOrder matches the table the run-time rule will use: the other order would make the very
-    // first reading after the proving set-up a NibbleOrderMismatch.
-    public BatterySetupResult CompleteSetup(BatterySetupListen listen, BatterySetupPicks picks)
-    {
-        ArgumentNullException.ThrowIfNull(listen);
-        ArgumentNullException.ThrowIfNull(picks);
-        if (_proof is not { } proof)
-        {
-            throw new InvalidOperationException("This service was built without a proof store, so a set-up cannot be completed.");
-        }
-
-        if (listen.Status is not (BatterySetupListenStatus.Found or BatterySetupListenStatus.ShortFormOnly) || listen.Candidate is not { } candidate)
-        {
-            throw new ArgumentException("Only a listen that found the owner's case can be completed.", nameof(listen));
-        }
-
-        if (!picks.IsValid)
-        {
-            throw new ArgumentOutOfRangeException(nameof(picks), "Picks are 0 to 100 in steps of 10.");
-        }
-
-        var record = new BatterySetupRecord(
-            BatterySetupRecord.CurrentSchemaVersion, listen.StartedAtUtc, listen.EndedAtUtc, listen.Status, AppVersion(),
-            listen.AppleSectionsSeen, listen.ProximityItemsSeen, candidate, listen.OtherSenders, picks);
-
-        string? saved = proof.Setups.Save(record);
-        if (saved is null)
-        {
-            // Without the record on disk the proof would count a set-up that is gone at the next start, and a claim
-            // would name a record nobody can read: neither is updated, and the owner is told plainly.
-            _log.Warn("Battery set-up: the record " + record.FileName + " could not be saved, so the proof and the claim were left as they were.");
-            return new BatterySetupResult(BatterySetupResultStatus.NotSaved, record.FileName, proof.Result);
-        }
-
-        _log.Info(
-            "Battery set-up saved: " + saved + "; picks L " + picks.Left + " R " + picks.Right + " Case " + picks.Case +
-            ", charging " + YesNo(picks.LeftCharging) + "/" + YesNo(picks.RightCharging) + "/" + YesNo(picks.CaseCharging) + ".");
-
-        proof.AddRecord(record);
-        ProximityDecodeTable table = proof.Table;
-        BudOrderEvidence evidence = DecodeProof.Discriminate(record);
-        DecodeProofResult result = proof.Result;
-
-        if (candidate.LastOkMessage is not ProximityMessage message)
-        {
-            lock (_gate)
-            {
-                _setupCouldNotRead = _claim is null;
-            }
-
-            PublishAndNotify();
-            return new BatterySetupResult(BatterySetupResultStatus.CouldNotRead, record.FileName, result);
-        }
-
-        // A set-up always supersedes the claim before it: the store keeps only the newer of two claims, so a
-        // clock that reads earlier than the old claim's date must not make the new one lose.
-        DateTimeOffset claimedAt = _timeProvider.GetUtcNow();
-        if (_claimStore.Current is { } previousClaim && claimedAt <= previousClaim.ClaimedAtUtc)
-        {
-            claimedAt = previousClaim.ClaimedAtUtc + TimeSpan.FromSeconds(1);
-        }
-
-        var claim = new WidgetClaim(
-            SchemaVersion: WidgetClaim.CurrentSchemaVersion,
-            ModelHigh: message.ModelHigh,
-            ModelLow: message.ModelLow,
-            Colour: message.Colour,
-            SignalThresholdDbm: candidate.ThresholdDbm,
-            SignalMinDbm: candidate.RssiMin,
-            SignalMedianDbm: candidate.RssiMedian,
-            SignalMaxDbm: candidate.RssiMax,
-            SignalSamples: candidate.Messages,
-            SetupRecord: record.FileName,
-            ClaimedAtUtc: claimedAt,
-            Last: OwnedBattery.FromMessage(message, table, previous: null, at: listen.EndedAtUtc),
-            NibblesAreNamedOrder: table.HighNibbleIsRight is not null);
-
-        bool closed;
-        bool nothingShown = false;
-        lock (_gate)
-        {
-            closed = _closed;
-            if (!closed)
-            {
-                _claimStore.Save(claim);
-                _claim = claim;
-                _setupCouldNotRead = false;
-                ResetReadingsLocked();
-            }
-        }
-
-        if (!closed)
-        {
-            _log.Info("AirPods claimed from set-up " + record.FileName + ": threshold " + candidate.ThresholdDbm + " dBm.");
-
-            // The first reading is applied at once, so the card has something to show: the case, or all three
-            // once the order is proved. It goes through the same rule as every later one.
-            ApplyOwnedMessage(message, candidate.RssiMedian, listen.EndedAtUtc);
-            lock (_gate)
-            {
-                // A set-up that leaves nothing to show (the case and the buds not proved yet) never says "battery set
-                // up": it says the record is kept and, unless the case reading was contradicted, that it needs another.
-                nothingShown = _left.Percent is null && _right.Percent is null && _case.Percent is null;
-                _setupCouldNotRead = nothingShown;
-            }
-
-            PublishAndNotify();
-        }
-
-        if (nothingShown)
-        {
-            // Another record helps only when this one could be read and simply is not enough yet. A case nibble this
-            // message does not carry, or one the owner's picks contradict, is a set-up that read nothing.
-            bool needsAnother = BatteryNibble.ToPercent(message.BatteryB & 0x0F) is not null &&
-                                result.Fields[DecodeField.CaseNibble].Status != FieldProofStatus.Withdrawn;
-            return new BatterySetupResult(
-                needsAnother ? BatterySetupResultStatus.SavedNeedsAnother : BatterySetupResultStatus.CouldNotRead, record.FileName, result);
-        }
-
-        BatterySetupResultStatus status = table.HighNibbleIsRight is not null
-            ? BatterySetupResultStatus.BatterySetUp
-            : evidence.HighNibbleIsRight is null
-                ? BatterySetupResultStatus.CaseSetUpBudsSame
-                : BatterySetupResultStatus.CaseSetUp;
-        return new BatterySetupResult(status, record.FileName, result);
-    }
-
-    private static string YesNo(bool value) => value ? "yes" : "no";
-
-    // The build's own version, without the source revision suffix a build may append.
-    private static string AppVersion()
-    {
-        string? version = typeof(WidgetStatusService).Assembly
-            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), inherit: false)
-            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
-            .FirstOrDefault()?.InformationalVersion;
-        if (string.IsNullOrEmpty(version))
-        {
-            return "unknown";
-        }
-
-        int plus = version.IndexOf('+', StringComparison.Ordinal);
-        return plus > 0 ? version[..plus] : version;
-    }
-
-    public void ForgetClaim()
-    {
-        lock (_gate)
-        {
-            if (_closed)
-            {
-                return;
-            }
-
-            _claimStore.ForgetClaim();
-            _claim = null;
-            ResetReadingsLocked();
-        }
-
-        PublishAndNotify();
-    }
-
-    // A redone claim is a different set of AirPods as far as the widget knows (the owner was told to
-    // open his case for it), and forgetting a claim starts over; neither may keep the old battery, ear or
-    // lid state around to be shown against, or compared for consistency by, whatever is claimed next.
-    private void ResetReadingsLocked()
-    {
-        _left = PartReading.Unknown;
-        _right = PartReading.Unknown;
-        _case = PartReading.Unknown;
-        _lastLeftInEar = null;
-        _lastRightInEar = null;
-        _earReadAt = null;
-        _lastOwnedAt = null;
-        _lidOpenBitSeen = false;
-        _lastLidOpenState = false;
-        _lastLidCounter = null;
-        _nibbleOrderMismatchLogged = false;
-    }
 
     // One immediate retry when the watcher is not running; the doubling timer keeps trying regardless.
     public Task RefreshAsync()
@@ -753,6 +563,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         if (sourceToStart is not null)
         {
+            ReadPairedModel(force: true, publish: false);
             RunStartOutsideLock(sourceToStart, generation); // publishes itself
             return;
         }
@@ -760,6 +571,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         if (sourceToStop is not null)
         {
             RunStopOutsideLock(sourceToStop, disposeSource: true);
+        }
+
+        // A different pinned device is a different pair of AirPods: its model is read again, with the widget on.
+        if (settings.Widget.Enabled)
+        {
+            ReadPairedModel(force: false, publish: true);
         }
 
         if (changed)
@@ -770,9 +587,18 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     private void OnDeviceSnapshotChanged(object? sender, DeviceSnapshotEventArgs e)
     {
+        bool justConnected;
         lock (_gate)
         {
+            bool wasThisPc = _thisPcActive;
             RecomputeThisPcLocked(e.Snapshot);
+            justConnected = _thisPcActive && !wasThisPc;
+        }
+
+        // Windows' figure is read once at each connect.
+        if (justConnected)
+        {
+            RequestHeadsetRead();
         }
 
         PublishAndNotify();
@@ -781,7 +607,367 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private void RecomputeThisPcLocked(DeviceSnapshot snapshot)
     {
         Guid watched = CoordinatorRules.WatchedContainer(_blockStatus(), _settings.Current, snapshot);
+        _watchedContainer = watched;
         _thisPcActive = CoordinatorRules.RenderOf(snapshot, watched) == RenderState.Active;
+    }
+
+    // ---- Battery refresh
+
+    // What a refresh in progress is waiting for. WindowsFigure is set when a read of Windows' own figure found one
+    // while it waited.
+    private sealed class RefreshState(DateTimeOffset startedAt)
+    {
+        public DateTimeOffset StartedAt { get; } = startedAt;
+
+        public TaskCompletionSource<BatteryRefreshOutcome> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ITimer? Timer { get; set; }
+
+        public bool WindowsFigure { get; set; }
+    }
+
+    // True while the watcher runs.
+    public bool BatteryRefreshAvailable
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_closed && !_suspended && _watcherState == WidgetWatcherState.Started;
+            }
+        }
+    }
+
+    // Restarts the passive listen through the same outside-the-lock stop and start every other restart uses (a new
+    // generation, so the old run's own Stopped never reads as the current one), starts a read of Windows' own figure,
+    // and waits for a message of the chosen set sent after the restart, or for WidgetTiming.RefreshWindow to pass.
+    // A passive watcher sends no scan request and connects to nothing, so restarting it pages nothing, and the figure
+    // read is a property read: the AirPods stay unpaged at rest. No value is cleared. A second request while one runs
+    // joins it; cancelling ends only the caller's own wait.
+    public Task<BatteryRefreshOutcome> RefreshBatteryAsync(CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+        {
+            return Task.FromCanceled<BatteryRefreshOutcome>(ct);
+        }
+
+        RefreshState state;
+        lock (_gate)
+        {
+            if (_refresh is { } running)
+            {
+                return running.Completion.Task.WaitAsync(ct);
+            }
+
+            if (_closed || _source is null || _suspended)
+            {
+                return Task.FromResult(BatteryRefreshOutcome.NotListening);
+            }
+
+            state = new RefreshState(_timeProvider.GetUtcNow());
+            _refresh = state;
+        }
+
+        StartRefresh(state);
+        return state.Completion.Task.WaitAsync(ct);
+    }
+
+    private void StartRefresh(RefreshState state)
+    {
+        bool running;
+        lock (_gate)
+        {
+            running = _watcherState == WidgetWatcherState.Started;
+        }
+
+        if (running)
+        {
+            RestartWatcherForRefresh();
+        }
+        else
+        {
+            // Stopped (Bluetooth was off, or a start failed): one immediate attempt, the way RefreshAsync makes one.
+            RetryStartNow();
+        }
+
+        BatteryRefreshOutcome? failed;
+        lock (_gate)
+        {
+            failed = _watcherState == WidgetWatcherState.Started
+                ? null
+                : _watcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode ? BatteryRefreshOutcome.BluetoothOff : BatteryRefreshOutcome.NotListening;
+        }
+
+        if (failed is { } outcome)
+        {
+            CompleteRefresh(state, outcome);
+            return;
+        }
+
+        ITimer timer = _timeProvider.CreateTimer(
+            static box => ((RefreshTimerBox)box!).Service.OnRefreshWindowElapsed(((RefreshTimerBox)box).State), new RefreshTimerBox(this, state),
+            WidgetTiming.RefreshWindow, Timeout.InfiniteTimeSpan);
+        bool done;
+        lock (_gate)
+        {
+            done = state.Completion.Task.IsCompleted;
+            if (!done)
+            {
+                state.Timer = timer;
+            }
+        }
+
+        if (done)
+        {
+            timer.Dispose();
+            return;
+        }
+
+        RequestHeadsetRead();
+    }
+
+    private sealed record RefreshTimerBox(WidgetStatusService Service, RefreshState State);
+
+    private void OnRefreshWindowElapsed(RefreshState state)
+    {
+        bool windows;
+        lock (_gate)
+        {
+            windows = state.WindowsFigure;
+        }
+
+        CompleteRefresh(state, windows ? BatteryRefreshOutcome.WindowsFigure : BatteryRefreshOutcome.NothingHeard);
+    }
+
+    // The stop and start of Suspend and Resume without the suspended flag between them, so nothing else is held off.
+    private void RestartWatcherForRefresh()
+    {
+        IAdvertisementSource? stop;
+        lock (_gate)
+        {
+            if (_source is null || _closed || _suspended)
+            {
+                return;
+            }
+
+            stop = BeginStopLocked();
+        }
+
+        if (stop is not null)
+        {
+            RunStopOutsideLock(stop, disposeSource: false);
+        }
+
+        IAdvertisementSource? start;
+        int generation;
+        lock (_gate)
+        {
+            if (_closed || _suspended || !ReferenceEquals(_source, stop))
+            {
+                return;
+            }
+
+            _stopRequested = false;
+            _generation++;
+            generation = _generation;
+            start = _source;
+        }
+
+        RunStartOutsideLock(start, generation);
+    }
+
+    // Ends the refresh in progress with this outcome, once. The completion runs its continuations off this thread.
+    private void CompleteRefresh(RefreshState state, BatteryRefreshOutcome outcome)
+    {
+        ITimer? timer;
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_refresh, state))
+            {
+                return;
+            }
+
+            _refresh = null;
+            timer = state.Timer;
+            state.Timer = null;
+        }
+
+        timer?.Dispose();
+        _log.Info("Widget: battery refresh ended: " + outcome + ".");
+        state.Completion.TrySetResult(outcome);
+    }
+
+    private void CompleteAnyRefresh(BatteryRefreshOutcome outcome)
+    {
+        RefreshState? state;
+        lock (_gate)
+        {
+            state = _refresh;
+        }
+
+        if (state is not null)
+        {
+            CompleteRefresh(state, outcome);
+        }
+    }
+
+    // ---- Windows' Hands-Free figure
+
+    private void OnHeadsetPollDue()
+    {
+        lock (_gate)
+        {
+            if (!_thisPcActive)
+            {
+                return; // Windows' figure is never shown for AirPods that are not on this PC, so it is not read for them
+            }
+        }
+
+        RequestHeadsetRead();
+    }
+
+    // Starts one read of Windows' figure off the UI thread, unless one is running, the widget is off or suspended, or
+    // there is no source. The result comes back through uiPost.
+    internal void RequestHeadsetRead()
+    {
+        Guid container;
+        string address;
+        lock (_gate)
+        {
+            if (_handsFree is null || _closed || _suspended || _source is null || _headsetBusy)
+            {
+                return;
+            }
+
+            _headsetBusy = true;
+            container = _watchedContainer != Guid.Empty ? _watchedContainer : _settings.Current.PinnedContainerId;
+            address = _settings.Current.PinnedAddress;
+        }
+
+        _runInBackground(() => ReadHeadsetOffTheUiThread(container, address));
+    }
+
+    // The source never throws for anything Windows did; the one catch is a bug in this process on a worker thread, which
+    // would otherwise end it. The raw code is logged, never swallowed.
+    private void ReadHeadsetOffTheUiThread(Guid container, string address)
+    {
+        HandsFreeBatteryRead? read = null;
+        try
+        {
+            read = _handsFree!.Read(container, address);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Widget: reading Windows' Hands-Free battery failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+        }
+
+        DateTimeOffset at = _timeProvider.GetUtcNow();
+        _uiPost(() => ApplyHeadsetRead(read, at));
+    }
+
+    private void ApplyHeadsetRead(HandsFreeBatteryRead? read, DateTimeOffset at)
+    {
+        lock (_gate)
+        {
+            _headsetBusy = false;
+            if (_closed || read is null)
+            {
+                return;
+            }
+
+            if (read.Percent is int percent)
+            {
+                _headset = new PartReading(percent, null, null) { ReadAt = at };
+                if (_refresh is { } waiting)
+                {
+                    waiting.WindowsFigure = true;
+                }
+            }
+        }
+
+        // What was found is logged when it changes, not every minute: the raw code of a failing step, and the one line
+        // that says why there was no figure.
+        string text = string.Join(
+            "; ", read.Steps.Where(step => !step.Ok).Select(step => step.Step + " " + step.CodeName)
+                .Append(read.Percent is int found ? "a figure from a " + read.Origin : read.Note ?? "no figure"));
+        bool changed;
+        lock (_gate)
+        {
+            changed = _lastHeadsetNote != text;
+            _lastHeadsetNote = text;
+        }
+
+        if (changed)
+        {
+            bool failed = read.Steps.Any(step => !step.Ok);
+            string line = "Widget: Windows' Hands-Free battery: " + text + ".";
+            if (failed)
+            {
+                _log.Warn(line);
+            }
+            else
+            {
+                _log.Info(line);
+            }
+        }
+
+        PublishAndNotify();
+    }
+
+    // Reads the paired AirPods' model for the pinned device and hands it to the selector. The read is CfgMgr32 work
+    // and runs outside the lock. A read that finds no model says so in the log with the raw code of every step that
+    // failed, and while there is none the card shows no reading. A model that differs from the last one starts the
+    // selection over, so whatever values were kept (they belonged to another pair) are dropped. publish is false
+    // where the caller publishes itself, or where nothing has anything to compare a snapshot against yet.
+    private void ReadPairedModel(bool force, bool publish)
+    {
+        EarshotSettings current = _settings.Current;
+        Guid container = current.PinnedContainerId;
+        string address = current.PinnedAddress;
+        lock (_gate)
+        {
+            if (_closed || (!force && _pairedModelFor is { } last && last.Container == container && last.Address == address))
+            {
+                return;
+            }
+
+            _pairedModelFor = (container, address);
+        }
+
+        PairedModelRead read = _pairedModel.Read(container, address);
+        bool reset;
+        lock (_gate)
+        {
+            if (_closed)
+            {
+                return;
+            }
+
+            reset = _selector.SetPairedModel(read.Model);
+            if (reset)
+            {
+                ResetReadingsLocked();
+            }
+        }
+
+        foreach (StepOutcome step in read.Steps.Where(s => !s.Ok))
+        {
+            _log.Warn("Widget paired model: " + step.Step + " " + step.CodeName + (step.Detail is string detail ? " (" + detail + ")" : string.Empty) + ".");
+        }
+
+        if (read.Model is ushort model)
+        {
+            _log.Info("Widget: the paired AirPods' model is 0x" + model.ToString("X4", System.Globalization.CultureInfo.InvariantCulture) + ".");
+        }
+        else
+        {
+            _log.Warn("Widget: no paired AirPods model could be read, so no battery is shown.");
+        }
+
+        if (reset && publish)
+        {
+            PublishAndNotify();
+        }
     }
 
     // Runs on whatever thread the source calls back on: the parse happens here, and every state change the
@@ -820,7 +1006,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         DateTimeOffset at = sample.Timestamp;
-        _uiPost(() => HandleParsedOnUiThread(parse, sample.Rssi, at));
+        uint tag = sample.SenderTag;
+        sbyte rssi = sample.Rssi;
+        _uiPost(() => HandleParsedOnUiThread(parse, tag, rssi, at));
     }
 
     private void RecordUnknownForm(byte? prefix, int length)
@@ -841,116 +1029,107 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    private void HandleParsedOnUiThread(ProximityParse parse, sbyte rssi, DateTimeOffset at)
+    private void HandleParsedOnUiThread(ProximityParse parse, uint tag, sbyte rssi, DateTimeOffset at)
     {
+        // Only the documented 25-byte form is ever decoded or compared: the 17-byte form and every other shape stay
+        // unknown forms, counted by shape.
         if (parse.Status == ProximityParseStatus.Ok && parse.Message is ProximityMessage message)
         {
-            ApplyOwnedMessage(message, rssi, at);
+            ApplyMessage(message, tag, rssi, at);
         }
 
         PublishAndNotify();
     }
 
-    private void ApplyOwnedMessage(ProximityMessage message, sbyte rssi, DateTimeOffset at)
+    private void ApplyMessage(ProximityMessage message, uint tag, sbyte rssi, DateTimeOffset at)
     {
-        ProximityDecodeTable table = _decodeTable();
         bool caseOpenedEdge = false;
         DateTimeOffset caseOpenedAt = at;
-        DecodedReading? ownedReading = null;
-
-        // 11 to 14 are a shape neither permitted source describes at all (unlike the documented 0xF
-        // "unknown"), so it is logged as the form drifting rather than treated the same as ordinary unknown.
-        // Never the nibble value itself: only that one was out of range.
-        if (BatteryNibble.IsOutOfRange((message.BatteryA >> 4) & 0x0F) ||
-            BatteryNibble.IsOutOfRange(message.BatteryA & 0x0F) ||
-            BatteryNibble.IsOutOfRange(message.BatteryB & 0x0F))
-        {
-            _log.Warn("Widget: a battery nibble read 11 to 14, a shape the documented form does not describe: the form may have drifted.");
-        }
+        DecodedReading? applied = null;
+        RefreshState? heard = null;
 
         lock (_gate)
         {
             if (_closed)
             {
-                return; // nothing after Close saves the claim or raises CaseOpened
+                return; // nothing after Close raises an event
             }
 
-            // Owner decision, 2026-09-27 ("same checks always"): a live connection to this PC used to waive
-            // battery consistency for one candidate. It no longer does; the same checks run every time,
-            // whether or not this PC renders to the AirPods, so there is nothing here to read from Core Audio
-            // and no sender tag to track across messages any more.
-            var input = new OwnershipInput(
-                new ProximityParse(ProximityParseStatus.Ok, message, null, null, 1, Array.Empty<byte>()),
-                rssi, _claim, table, at);
-            OwnershipResult result = OwnershipRule.Evaluate(input);
-
-            switch (result.Verdict)
+            // 11 to 14 are a shape neither permitted source describes at all (unlike the documented 0xF
+            // "unknown"), so it is logged as the form drifting rather than treated the same as ordinary unknown.
+            // Never the nibble value itself: only that one was out of range, and once a run rather than once a
+            // message.
+            if (!_driftLogged &&
+                (BatteryNibble.IsOutOfRange((message.BatteryA >> 4) & 0x0F) ||
+                 BatteryNibble.IsOutOfRange(message.BatteryA & 0x0F) ||
+                 BatteryNibble.IsOutOfRange(message.BatteryB & 0x0F)))
             {
-                case OwnershipVerdict.Owned:
-                    Interlocked.Increment(ref _owned);
-
-                    // The one place this run watches for the AirPods still broadcasting while this PC plays to
-                    // them: what auto-pause needs to know before it may ever act.
-                    if (_thisPcActive)
-                    {
-                        _proof?.NoteOwnedWhileThisPcRenders(at);
-                    }
-
-                    break;
-                case OwnershipVerdict.NoClaim:
-                    Interlocked.Increment(ref _noClaim);
-                    return;
-                case OwnershipVerdict.ModelOrColourMismatch:
-                    Interlocked.Increment(ref _modelOrColourMismatch);
-                    return;
-                case OwnershipVerdict.SignalBelowThreshold:
-                    Interlocked.Increment(ref _signalBelowThreshold);
-                    return;
-                case OwnershipVerdict.NibbleOrderMismatch:
-                    Interlocked.Increment(ref _nibbleOrderMismatch);
-                    if (!_nibbleOrderMismatchLogged)
-                    {
-                        _nibbleOrderMismatchLogged = true;
-                        _log.Warn(
-                            "Widget: the claim's battery nibble order no longer matches the decode table's, so nothing is shown until the claim is redone.");
-                    }
-
-                    return;
-                case OwnershipVerdict.BatteryUnreadable:
-                    Interlocked.Increment(ref _batteryUnreadable);
-                    return;
-                case OwnershipVerdict.BatteryInconsistent:
-                    Interlocked.Increment(ref _batteryInconsistent);
-                    return;
-                default:
-                    return;
+                _driftLogged = true;
+                _log.Warn("Widget: a battery nibble read 11 to 14, a shape the documented form does not describe: the form may have drifted.");
             }
 
-            if (result.UpdatedLast is OwnedBattery updated && _claim is not null)
+            SelectionObservation seen = _selector.Observe(message, tag, rssi, at);
+            if (seen.SetsInRange > 0)
             {
-                // Every owned advertisement carries a fresh read time, so Last as a whole (with its AtUtc)
-                // never equals what is on disk two adverts running: saving whenever Last changed would save
-                // on every single one. Only the nibbles decide whether the disk actually needs touching; the
-                // read time itself simply moves on in memory and rides along with whatever save a later
-                // value change makes.
-                //
-                // While the bud order is unproved the two nibbles are BatteryA's wire high and low, and the two
-                // buds of one set are two senders that each lead with their own bud, so their messages alternate
-                // the pair. The rule compares that pair unordered, and so does this: a swap is no change.
-                bool budsChanged = _claim.NibblesAreNamedOrder
-                    ? updated.NibbleHigh != _claim.Last.NibbleHigh || updated.NibbleLow != _claim.Last.NibbleLow
-                    : !SameUnorderedPair(updated, _claim.Last);
-                bool valueChanged = budsChanged || updated.Case != _claim.Last.Case;
-                _claim = _claim with { Last = updated };
-                if (valueChanged)
+                _setsInRange = seen.SetsInRange;
+            }
+
+            if (seen.NewChoice)
+            {
+                // A set was chosen that is not the one whose values are held (the first choice, a switch, a choice
+                // after a release): those values were another pair's, so they are dropped.
+                ResetReadingsLocked();
+                if (seen.Switched)
                 {
-                    _claimStore.Save(_claim);
+                    _switches++;
+                    _log.Info("Widget: another set of AirPods stayed clearly nearer for long enough, so it is the one shown now.");
+                }
+                else
+                {
+                    _log.Info("Widget: picked out a set of AirPods to show (" + seen.SetsInRange + " in range).");
                 }
             }
+            else if (seen.Continued)
+            {
+                _log.Info("Widget: the chosen set came back under new addresses, so its values stand.");
+            }
 
-            DecodedReading reading = ProximityDecoder.Decode(message, table, at);
-            caseOpenedEdge = ApplyDecodedReadingLocked(reading, table, at);
-            ownedReading = reading;
+            switch (seen.Class)
+            {
+                case BroadcastClass.NoPairedModel:
+                    Interlocked.Increment(ref _noPairedModel);
+                    return;
+                case BroadcastClass.ModelMismatch:
+                    Interlocked.Increment(ref _modelMismatch);
+                    return;
+                case BroadcastClass.ColourMismatch:
+                    Interlocked.Increment(ref _colourMismatch);
+                    return;
+                case BroadcastClass.Choosing:
+                    return;
+                case BroadcastClass.OtherSet:
+                    Interlocked.Increment(ref _otherSet);
+                    return;
+                default:
+                    Interlocked.Increment(ref _chosen);
+                    break;
+            }
+
+            DecodedReading reading = ProximityDecoder.Decode(message, _table, at);
+            CheckBudOrderLocked(reading, tag, at);
+            caseOpenedEdge = ApplyDecodedReadingLocked(reading, _table, at);
+            applied = reading;
+
+            // A message of the chosen set sent after the refresh restarted the listen is the answer it waits for.
+            if (_refresh is { } waiting && at >= waiting.StartedAt)
+            {
+                heard = waiting;
+            }
+        }
+
+        if (heard is not null)
+        {
+            CompleteRefresh(heard, BatteryRefreshOutcome.Heard);
         }
 
         if (caseOpenedEdge)
@@ -958,16 +1137,49 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _uiPost(() => CaseOpened?.Invoke(this, new CaseOpenedEventArgs(caseOpenedAt)));
         }
 
-        // Every verdict other than Owned returned before this point (inside the lock above), so
-        // ownedReading being set at all already means Owned: no verdict check is repeated here.
-        if (ownedReading is DecodedReading applied)
+        if (applied is DecodedReading decoded)
         {
-            _uiPost(() => OwnedReadingApplied?.Invoke(this, new OwnedReadingEventArgs(applied, at)));
+            _uiPost(() => ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(decoded, at)));
         }
     }
 
-    private static bool SameUnorderedPair(OwnedBattery a, OwnedBattery b) =>
-        (a.NibbleHigh == b.NibbleHigh && a.NibbleLow == b.NibbleLow) || (a.NibbleHigh == b.NibbleLow && a.NibbleLow == b.NibbleHigh);
+    // The two buds of the chosen set each send on their own address and each carry the pair swapped. Both decode to
+    // the same left and right under the decode table's rule; if two of them, heard within two seconds, do not, the
+    // rule is wrong about which side is which for some message. Counted, and logged once per run.
+    private void CheckBudOrderLocked(DecodedReading reading, uint tag, DateTimeOffset at)
+    {
+        foreach (SenderMessage other in _selector.OtherChosenSenders(tag, at, BroadcastRules.SameSetWithin))
+        {
+            DecodedReading counterpart = ProximityDecoder.Decode(other.Message, _table, other.At);
+            if (Differs(reading.Left.Percent, counterpart.Left.Percent) || Differs(reading.Right.Percent, counterpart.Right.Percent))
+            {
+                Interlocked.Increment(ref _budOrderDisagree);
+                if (!_budOrderLogged)
+                {
+                    _budOrderLogged = true;
+                    _log.Warn("Widget: two senders of the chosen set, heard within two seconds, read different left and right levels.");
+                }
+            }
+        }
+    }
+
+    private static bool Differs(int? a, int? b) => a is int x && b is int y && x != y;
+
+    // Whatever the chosen set held is dropped: after a choice that is another set, or a new paired model, nothing
+    // of the old values may be shown against the new pair.
+    private void ResetReadingsLocked()
+    {
+        _left = PartReading.Unknown;
+        _right = PartReading.Unknown;
+        _case = PartReading.Unknown;
+        _lastLeftInEar = null;
+        _lastRightInEar = null;
+        _earReadAt = null;
+        _lastChosenAt = null;
+        _lidOpenBitSeen = false;
+        _lastLidOpenState = false;
+        _lastLidCounter = null;
+    }
 
     // Must be called holding _gate. Returns true when this reading raised the lid's rising edge or a new
     // counter value, for CaseOpened.
@@ -976,7 +1188,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _left = MergePart(_left, reading.Left);
         _right = MergePart(_right, reading.Right);
         _case = MergePart(_case, reading.Case);
-        _lastOwnedAt = at;
+        _lastChosenAt = at;
 
         if (reading.Left.InEar is bool li)
         {
@@ -1003,7 +1215,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         else if (table.LidCounterMask is not null && reading.LidCounter is int counter)
         {
             // Unlike the lid-bit path (an assumed-false baseline, so a true first reading is a genuine rising
-            // edge), there is no "previous" counter value to compare on the very first owned reading: it only
+            // edge), there is no "previous" counter value to compare on the very first reading of the chosen set: it only
             // establishes the baseline, and never raises CaseOpened by itself.
             caseOpenedEdge = _lastLidCounter is int last && last != counter;
             _lastLidCounter = counter;
@@ -1061,6 +1273,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         if (!ownStop)
         {
             ScheduleRetry();
+            CompleteAnyRefresh(stopped.ErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode
+                ? BatteryRefreshOutcome.BluetoothOff
+                : BatteryRefreshOutcome.NotListening);
         }
 
         PublishAndNotify();
@@ -1274,13 +1489,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             previous.Watcher != current.Watcher ||
             previous.WatcherErrorCode != current.WatcherErrorCode ||
             previous.WatcherErrorName != current.WatcherErrorName ||
-            previous.ClaimExists != current.ClaimExists ||
-            previous.SetupCouldNotRead != current.SetupCouldNotRead ||
+            previous.Headset != current.Headset ||
+            previous.Selection != current.Selection ||
             previous.AutoPauseAvailable != current.AutoPauseAvailable;
     }
 
     private bool IsFreshLocked(DateTimeOffset now) =>
-        _lastOwnedAt is DateTimeOffset at && now - at <= WidgetTiming.EarFreshWindow;
+        _lastChosenAt is DateTimeOffset at && now - at <= WidgetTiming.EarFreshWindow;
 
     private AirPodsWhere ComputeWhereLocked(bool fresh)
     {
@@ -1304,23 +1519,22 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         AirPodsWhere where = ComputeWhereLocked(fresh);
         DateTimeOffset? earReadAt = fresh ? _earReadAt : null;
         DateTimeOffset? batteryReadAt = OldestReadAt(_left, _right, _case);
-        ProximityDecodeTable table = _decodeTable();
-        bool? lidOpen = _lidOpenBitSeen ? _lastLidOpenState : null;
-        bool autoPauseAvailable = _broadcastsWhilePlaying() == true &&
-            (table.LeftInEarBit is not null || table.RightInEarBit is not null);
+        bool autoPauseAvailable = _table.LeftInEarBit is not null || _table.RightInEarBit is not null;
 
-        // Per-bud InEar is only as good as the reading it came from. Battery never expires, so Percent,
-        // Charging and ReadAt stand whatever the age; InEar is cleared once the reading is no longer fresh,
-        // whatever the table proves, so a stale reading never keeps reporting a bud as in or out of the ear.
+        // Per-bud InEar is only as good as the reading it came from. Percent, Charging and ReadAt stand whatever
+        // the age (BatteryFreshness says how old a value may be and still be shown as current); InEar is cleared
+        // once the reading is no longer fresh, whatever the table sets, so a stale reading never keeps reporting a
+        // bud as in or out of the ear.
         PartReading left = fresh ? _left : _left with { InEar = null };
         PartReading right = fresh ? _right : _right with { InEar = null };
 
         return new WidgetSnapshot(
-            where, left, right, _case, batteryReadAt, earReadAt, lidOpen,
+            where, left, right, _case, batteryReadAt, earReadAt, _lidOpenBitSeen ? _lastLidOpenState : null,
             _watcherState, _watcherErrorCode, _watcherErrorName,
-            _claim is not null, autoPauseAvailable, BuildCountersLocked())
+            autoPauseAvailable, BuildCountersLocked())
         {
-            SetupCouldNotRead = _setupCouldNotRead,
+            Headset = _headset,
+            Selection = _selector.StateAt(now),
         };
     }
 
@@ -1361,13 +1575,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Interlocked.Read(ref _okForm),
             Interlocked.Read(ref _truncated),
             Interlocked.Read(ref _unknownForm),
-            Interlocked.Read(ref _owned),
-            Interlocked.Read(ref _noClaim),
-            Interlocked.Read(ref _modelOrColourMismatch),
-            Interlocked.Read(ref _signalBelowThreshold),
-            Interlocked.Read(ref _nibbleOrderMismatch),
-            Interlocked.Read(ref _batteryUnreadable),
-            Interlocked.Read(ref _batteryInconsistent),
+            Interlocked.Read(ref _modelMismatch),
+            Interlocked.Read(ref _colourMismatch),
+            Interlocked.Read(ref _otherSet),
+            Interlocked.Read(ref _chosen),
+            Interlocked.Read(ref _noPairedModel),
+            Interlocked.Read(ref _budOrderDisagree),
+            Interlocked.Read(ref _switches),
+            _setsInRange,
             _cachedUnknownForms);
     }
 
@@ -1412,16 +1627,18 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         a.OkForm == b.OkForm &&
         a.Truncated == b.Truncated &&
         a.UnknownForm == b.UnknownForm &&
-        a.Owned == b.Owned &&
-        a.NoClaim == b.NoClaim &&
-        a.ModelOrColourMismatch == b.ModelOrColourMismatch &&
-        a.SignalBelowThreshold == b.SignalBelowThreshold &&
-        a.NibbleOrderMismatch == b.NibbleOrderMismatch &&
-        a.BatteryUnreadable == b.BatteryUnreadable &&
-        a.BatteryInconsistent == b.BatteryInconsistent &&
+        a.ModelMismatch == b.ModelMismatch &&
+        a.ColourMismatch == b.ColourMismatch &&
+        a.OtherSet == b.OtherSet &&
+        a.Chosen == b.Chosen &&
+        a.NoPairedModel == b.NoPairedModel &&
+        a.BudOrderDisagree == b.BudOrderDisagree &&
+        a.Switches == b.Switches &&
+        a.Sets == b.Sets &&
         a.UnknownForms.SequenceEqual(b.UnknownForms);
 
-    // Numbers and shapes only: prefix and length describe an unknown form's shape, never its bytes.
+    // Numbers and shapes only: prefix and length describe an unknown form's shape, never its bytes. The first
+    // seven fields keep their names and order: the live test reads them.
     private static string FormatCountersLine(WidgetCounters c, WidgetWatcherState watcherState)
     {
         string shapes = string.Join(
@@ -1436,13 +1653,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             " ok=" + c.OkForm +
             " truncated=" + c.Truncated +
             " unknownForm=" + c.UnknownForm +
-            " owned=" + c.Owned +
-            " noClaim=" + c.NoClaim +
-            " modelOrColourMismatch=" + c.ModelOrColourMismatch +
-            " signalBelowThreshold=" + c.SignalBelowThreshold +
-            " nibbleOrderMismatch=" + c.NibbleOrderMismatch +
-            " batteryUnreadable=" + c.BatteryUnreadable +
-            " batteryInconsistent=" + c.BatteryInconsistent +
+            " modelMismatch=" + c.ModelMismatch +
+            " colourMismatch=" + c.ColourMismatch +
+            " otherSet=" + c.OtherSet +
+            " chosen=" + c.Chosen +
+            " noPairedModel=" + c.NoPairedModel +
+            " budOrderDisagree=" + c.BudOrderDisagree +
+            " switches=" + c.Switches +
+            " sets=" + c.Sets +
             " unknownFormShapes=[" + shapes + "]";
     }
 }
