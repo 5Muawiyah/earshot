@@ -483,7 +483,7 @@ internal sealed partial class WidgetCard : Form
             case Keys.Right:
             case Keys.Home:
             case Keys.End:
-                return _editingText || base.IsInputKey(keyData);
+                return _editingText || (OnSettingsPage && _settingsFocus.Part == SettingsPart.Tile) || base.IsInputKey(keyData);
             default:
                 return base.IsInputKey(keyData);
         }

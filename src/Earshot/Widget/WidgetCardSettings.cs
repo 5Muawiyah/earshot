@@ -35,6 +35,12 @@ internal sealed record CardSettingsValues(
 
     public string? GaugeDisplayNote { get; init; }
 
+    // How the gauge's ring, number and bolt line up, and what the gauge shows now, so each picture of an order is drawn
+    // with the real thing. Init-only for the same reason as the members above.
+    public GaugeOrder GaugeOrder { get; init; } = GaugeOrder.RingNumberBolt;
+
+    public GaugeContent? GaugePreview { get; init; }
+
     // Why Check for updates and Repair do nothing now (a setup, repair or update is running), or null. The rows say it in place
     // of their usual line, and the tray refuses the buttons with the same words.
     public string? ElevatedRunNote { get; init; }
@@ -55,6 +61,8 @@ internal interface IWidgetCardHost
     void SetGaugePosition(GaugePosition value, CardPlace place);
 
     void SetGaugeDisplay(string id, CardPlace place);
+
+    void SetGaugeOrder(GaugeOrder value, CardPlace place);
 
     void SetOtherDeviceLabel(string value, CardPlace place);
 
@@ -114,6 +122,7 @@ internal enum SettingsRowId
     None,
     GaugePosition,
     GaugeDisplay,
+    GaugeOrder,
     OtherDevice,
     PauseBud,
     PauseLeave,
@@ -128,10 +137,16 @@ internal enum SettingsRowId
     CheckAutomatically,
 }
 
-internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button, Choice }
+internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button, Choice, Tile }
 
-// One control of the settings page, for the keyboard order, the mouse and the focus rectangle.
-internal readonly record struct SettingsTarget(SettingsRowId Row, SettingsPart Part);
+// One control of the settings page, for the keyboard order, the mouse and the focus visual. Index is which picture of a
+// group of pictures (the gauge orders), 0 for everything else.
+internal readonly record struct SettingsTarget(SettingsRowId Row, SettingsPart Part, int Index = 0)
+{
+    // True when both are the same stop in the keyboard order: the pictures of a group are one stop, and the arrow keys
+    // move among them.
+    public bool SameStop(SettingsTarget other) => Row == other.Row && Part == other.Part;
+}
 
 // A change the person made on the settings page, raised by the card and applied by the presenter.
 internal abstract record SettingChange
@@ -146,6 +161,8 @@ internal sealed record ToggleChange(SettingsRowId Row, bool On) : SettingChange;
 internal sealed record PositionChange(GaugePosition Value) : SettingChange;
 
 internal sealed record DisplayChange(string Id) : SettingChange;
+
+internal sealed record OrderChange(GaugeOrder Value) : SettingChange;
 
 internal sealed record TextChange(string Value) : SettingChange;
 
@@ -196,7 +213,20 @@ internal sealed record SettingsItem(
     Rectangle SubRect,
     Rectangle A,
     Rectangle B,
-    Rectangle Value);
+    Rectangle Value)
+{
+    // The icon beside the label, where it goes, the tooltip and the accessible name. The pictures of the gauge orders,
+    // for the one row that has them. Init-only, so a row built without them is a row with no icon.
+    public char Glyph { get; init; }
+
+    public Rectangle IconRect { get; init; }
+
+    public string? Tip { get; init; }
+
+    public string? AccessibleName { get; init; }
+
+    public IReadOnlyList<Rectangle> Tiles { get; init; } = [];
+}
 
 internal sealed record SettingsLayout(SubPageFrame.FrameLayout Frame, IReadOnlyList<SettingsItem> Items, IReadOnlyList<SettingsTarget> Targets);
 
@@ -222,6 +252,10 @@ internal static class SettingsPageLayout
     public const int LabelLineAt96 = 20;
     public const int SubLineAt96 = 16;
     public const int MinLabelWidthAt96 = 80;
+    public const int IconSizeAt96 = 16;
+    public const int IconGapAt96 = 12;
+    public const int OrderTileGapAt96 = 8;
+    public const int OrderTileHeightAt96 = 52;
     public const int StackGapAt96 = 4;
 
     public static SettingsLayout Compute(CardSettingsValues values, int dpi, ICardTextMeasure measure, double textScale = 1.0)
@@ -247,38 +281,55 @@ internal static class SettingsPageLayout
         var targets = new List<SettingsTarget> { new(SettingsRowId.None, SettingsPart.Back) };
         int y = 0;
 
-        // One row: the label (and a sub-line) on the left, the control block, and its height.
+        // The icon sits at the side padding and the label after it. A label (and its note) take the width from there to
+        // the right padding.
+        int iconBox = CardPlacement.Scale(IconSizeAt96, dpi);
+        int labelLeft = side + iconBox + CardPlacement.Scale(IconGapAt96, dpi);
+        int labelArea = width - side - labelLeft;
+
+        // The icon is centred on the label's first line.
+        Rectangle IconAt(Rectangle labelRect) => new(side, labelRect.Y + ((labelLine - iconBox) / 2), iconBox, iconBox);
+
+        SettingsItem Dressed(SettingsItem item) =>
+            item with
+            {
+                Glyph = SettingsRows.For(item.Row).Glyph,
+                IconRect = IconAt(item.LabelRect),
+                Tip = SettingsRows.For(item.Row).Tip,
+                AccessibleName = SettingsRows.For(item.Row).Name,
+            };
+
+        // One row: an icon and the label (and a note) on the left, the control block, and its height.
         void Row(
             SettingsRowId id, string label, string? sub, bool subIsProblem, bool subFullWidth, int controlWidth,
             Func<int, int, (Rectangle A, Rectangle B, Rectangle Value)> place, params SettingsPart[] parts)
         {
-            int labelWidth = Math.Max(1, contentWidth - controlWidth - gap);
+            int labelWidth = Math.Max(1, labelArea - controlWidth - gap);
 
             // A control that leaves the label too little room (long text at a large text size) goes under the label,
             // at the right, instead of squeezing it.
             bool stacked = labelWidth < CardPlacement.Scale(MinLabelWidthAt96, dpi);
             if (stacked)
             {
-                labelWidth = contentWidth;
+                labelWidth = labelArea;
             }
 
             int labelLines = measure.Lines(label, labelWidth, fourteen, labelLine);
             int textHeight = labelLine * labelLines;
-            int subWidth = subFullWidth || stacked ? contentWidth : labelWidth;
+            int subWidth = subFullWidth || stacked ? labelArea : labelWidth;
             int subLines = sub is null ? 0 : measure.Lines(sub, subWidth, twelve, subLine);
             int subHeight = subLine * subLines;
 
             if (stacked)
             {
                 int stackGap = CardPlacement.Scale(StackGapAt96, dpi);
-                int labelTopStacked = y + rowPad;
-                var stackedLabel = new Rectangle(side, labelTopStacked, labelWidth, textHeight);
-                Rectangle stackedSub = sub is null ? Rectangle.Empty : new Rectangle(side, stackedLabel.Bottom, contentWidth, subHeight);
+                var stackedLabel = new Rectangle(labelLeft, y + rowPad, labelWidth, textHeight);
+                Rectangle stackedSub = sub is null ? Rectangle.Empty : new Rectangle(labelLeft, stackedLabel.Bottom, labelArea, subHeight);
                 int controlTop = (sub is null ? stackedLabel.Bottom : stackedSub.Bottom) + stackGap;
                 (Rectangle sa, Rectangle sb, Rectangle sv) = place(controlTop, controlTop + (control / 2));
                 int stackedHeight = Math.Max(minRow, controlTop + control + rowPad - y);
-                items.Add(new SettingsItem(
-                    SettingsItemKind.Row, id, label, sub, subIsProblem, new Rectangle(0, y, width, stackedHeight), stackedLabel, stackedSub, sa, sb, sv));
+                items.Add(Dressed(new SettingsItem(
+                    SettingsItemKind.Row, id, label, sub, subIsProblem, new Rectangle(0, y, width, stackedHeight), stackedLabel, stackedSub, sa, sb, sv)));
                 foreach (SettingsPart part in parts)
                 {
                     targets.Add(new SettingsTarget(id, part));
@@ -293,17 +344,17 @@ internal static class SettingsPageLayout
             var bounds = new Rectangle(0, y, width, height);
             int labelBlock = textHeight + (subFullWidth ? 0 : subHeight);
             int labelTop = y + rowPad + ((lineHeight - labelBlock) / 2);
-            var labelRect = new Rectangle(side, labelTop, labelWidth, textHeight);
+            var labelRect = new Rectangle(labelLeft, labelTop, labelWidth, textHeight);
             Rectangle subRect = Rectangle.Empty;
             if (sub is not null)
             {
                 subRect = subFullWidth
-                    ? new Rectangle(side, y + rowPad + lineHeight, contentWidth, subHeight)
-                    : new Rectangle(side, labelRect.Bottom, labelWidth, subHeight);
+                    ? new Rectangle(labelLeft, y + rowPad + lineHeight, labelArea, subHeight)
+                    : new Rectangle(labelLeft, labelRect.Bottom, labelWidth, subHeight);
             }
 
             (Rectangle a, Rectangle b, Rectangle value) = place(y + rowPad + ((lineHeight - control) / 2), y + rowPad + (lineHeight / 2));
-            items.Add(new SettingsItem(SettingsItemKind.Row, id, label, sub, subIsProblem, bounds, labelRect, subRect, a, b, value));
+            items.Add(Dressed(new SettingsItem(SettingsItemKind.Row, id, label, sub, subIsProblem, bounds, labelRect, subRect, a, b, value)));
             foreach (SettingsPart part in parts)
             {
                 targets.Add(new SettingsTarget(id, part));
@@ -334,6 +385,28 @@ internal static class SettingsPageLayout
             SettingsRowId.GaugeDisplay, WidgetCopy.SettingsGaugeDisplay, values.GaugeDisplayNote, false, false, choiceW,
             (top, _) => (new Rectangle(right - choiceW, top, choiceW, control), Rectangle.Empty, Rectangle.Empty),
             SettingsPart.Choice);
+
+        // Gauge order: the label, then six pictures of the gauge in a grid of three across, each holding the gauge itself in
+        // that order. One stop in the keyboard order; the arrow keys move among the pictures.
+        {
+            var orderLabel = new Rectangle(labelLeft, y + rowPad, labelArea, labelLine);
+            int tileGap = CardPlacement.Scale(OrderTileGapAt96, dpi);
+            int tileWidth = (contentWidth - (2 * tileGap)) / 3;
+            int tileHeight = CardPlacement.Scale(OrderTileHeightAt96, dpi);
+            int tilesTop = orderLabel.Bottom + CardPlacement.Scale(OrderTileGapAt96, dpi);
+            var tiles = new List<Rectangle>(6);
+            for (int i = 0; i < 6; i++)
+            {
+                tiles.Add(new Rectangle(side + ((i % 3) * (tileWidth + tileGap)), tilesTop + ((i / 3) * (tileHeight + tileGap)), tileWidth, tileHeight));
+            }
+
+            int orderHeight = tiles[^1].Bottom + rowPad - y;
+            items.Add(Dressed(new SettingsItem(
+                SettingsItemKind.Row, SettingsRowId.GaugeOrder, WidgetCopy.SettingsOrder, null, false, new Rectangle(0, y, width, orderHeight), orderLabel,
+                Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty)) with { Tiles = tiles });
+            targets.Add(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, (int)GaugeOrders.FromStored(values.GaugeOrder)));
+            y += orderHeight;
+        }
 
         int textW = CardPlacement.Scale(TextBoxWidthAt96, dpi);
         Row(
@@ -401,11 +474,11 @@ internal static class SettingsPageLayout
         Divider();
         Head(WidgetCopy.SettingsUpdates);
 
-        string checkLabel = WidgetCopy.CheckForUpdates;
+        // The row says which version is installed, and keeps its note only when an update or repair is under way.
+        string checkLabel = values.InstalledVersion is null ? WidgetCopy.CheckForUpdates : "Version " + values.InstalledVersion;
         int checkW = measure.Width(WidgetCopy.CheckButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
-        string? installed = values.ElevatedRunNote ?? (values.InstalledVersion is null ? null : "Version " + values.InstalledVersion);
         Row(
-            SettingsRowId.CheckForUpdates, checkLabel, installed, subIsProblem: false, subFullWidth: false, checkW,
+            SettingsRowId.CheckForUpdates, checkLabel, values.ElevatedRunNote, subIsProblem: false, subFullWidth: false, checkW,
             (top, _) => (new Rectangle(right - checkW, top, checkW, control), Rectangle.Empty, Rectangle.Empty),
             SettingsPart.Button);
 
@@ -414,12 +487,12 @@ internal static class SettingsPageLayout
         {
             int repairW = measure.Width(WidgetCopy.RepairButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
             Row(
-                SettingsRowId.Repair, WidgetCopy.RepairEarshot, values.ElevatedRunNote ?? WidgetCopy.RepairSub, subIsProblem: false, subFullWidth: false, repairW,
+                SettingsRowId.Repair, WidgetCopy.RepairEarshot, values.ElevatedRunNote, subIsProblem: false, subFullWidth: false, repairW,
                 (top, _) => (new Rectangle(right - repairW, top, repairW, control), Rectangle.Empty, Rectangle.Empty),
                 SettingsPart.Button);
         }
 
-        ToggleRow(SettingsRowId.CheckAutomatically, WidgetCopy.CheckAutomatically, null);
+        ToggleRow(SettingsRowId.CheckAutomatically, WidgetCopy.SettingsAutoCheck, null);
 
         int bodyHeight = y + CardPlacement.Scale(BodyBottomAt96, dpi);
         SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight, buttonCount: 0, textScale);

@@ -486,6 +486,9 @@ internal sealed class WidgetCardPresenter : IDisposable
             case DisplayChange display:
                 _host.SetGaugeDisplay(display.Id, place);
                 break;
+            case OrderChange order:
+                _host.SetGaugeOrder(order.Value, place);
+                break;
             case TextChange text:
                 _host.SetOtherDeviceLabel(text.Value, place);
                 break;

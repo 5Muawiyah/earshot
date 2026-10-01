@@ -57,6 +57,12 @@ internal sealed class FakeCardHost : IWidgetCardHost
         Values = Values with { GaugeDisplayId = id };
     }
 
+    public void SetGaugeOrder(GaugeOrder value, CardPlace place)
+    {
+        Calls.Add("order:" + value);
+        Values = Values with { GaugeOrder = value };
+    }
+
     public void SetOtherDeviceLabel(string value, CardPlace place)
     {
         Calls.Add("label:" + value);

@@ -90,12 +90,17 @@ internal sealed partial class TrayContext
                 GaugeDisplayId = widget.GaugeDisplay,
                 GaugeDisplayOptions = displayOptions,
                 GaugeDisplayNote = displayNote,
+                GaugeOrder = widget.GaugeOrder,
+                GaugePreview = GaugeContent.From(snapshot, _tray._time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel)),
                 ElevatedRunNote = _tray._elevatedRun is { } run ? FinishingMessage(run) : null,
             };
         }
 
         public void SetGaugePosition(GaugePosition value, CardPlace place) =>
             Write("gauge position (card)", s => s.Widget = s.Widget with { GaugePosition = value }, place);
+
+        public void SetGaugeOrder(GaugeOrder value, CardPlace place) =>
+            Write("gauge order (card)", s => s.Widget = s.Widget with { GaugeOrder = GaugeOrders.FromStored(value) }, place);
 
         // A display that has gone since the list was drawn is not stored: the choice would be one nothing can honour, and the
         // page is redrawn with the displays that are there.

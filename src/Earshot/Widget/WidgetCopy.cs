@@ -14,7 +14,7 @@ internal static class WidgetCopy
     public const string BatteryNotReadYet = "Battery not read yet";
     public const string Connect = "Connect";
     public const string Disconnect = "Disconnect";
-    public const string AutoPauseSwitch = "Pause when a bud comes out";
+    public const string AutoPauseSwitch = "Pause on removal";
     public const string CaseOpen = "Case open";
     public const string CardTitle = "AirPods";
 
@@ -36,19 +36,19 @@ internal static class WidgetCopy
     // The settings page: row labels, the two gauge positions, section heads and the captions that say why a
     // switched-on row cannot act yet.
     public const string SettingsTitle = "Settings";
-    public const string SettingsGaugePosition = "Gauge position";
-    public const string SettingsGaugeDisplay = "Gauge display";
+    public const string SettingsGaugePosition = "Position";
+    public const string SettingsGaugeDisplay = "Display";
     public const string DisplayChosenNotConnected = "That display is not connected. The gauge is on the main display.";
     public const string DisplayChosenNoTaskbar = "That display shows no taskbar. The gauge is on the main display.";
     public const string PositionRightEnd = "Right end";
     public const string PositionNextToApps = "Next to apps";
     public const string SettingsOtherDevice = "Other device";
     public const string SettingsPauseBud = AutoPauseSwitch;
-    public const string SettingsPauseLeave = "Pause when AirPods leave this PC";
-    public const string SettingsCaseCard = "Case-open card";
-    public const string SettingsLowBattery = "Low battery alert";
-    public const string SettingsLeftClick = "Left click connects";
-    public const string SettingsHandBack = Earshot.Tray.MenuModel.HandBackOnShutdownAndSleep;
+    public const string SettingsPauseLeave = "Pause on leave";
+    public const string SettingsCaseCard = "Case card";
+    public const string SettingsLowBattery = "Low battery";
+    public const string SettingsLeftClick = "Click connects";
+    public const string SettingsHandBack = "Hand back";
     public const string SettingsShortcuts = "Shortcuts";
     public const string SettingsUpdates = "Updates";
     public const string SettingsWaitsOnInEar = "Earshot cannot yet tell when a bud is in your ear.";
@@ -64,6 +64,48 @@ internal static class WidgetCopy
     public const string CheckAutomatically = "Check automatically";
     public const string UpdateButton = "Update";
     public const string ShortcutNotSaved = "Couldn't save that shortcut.";
+
+    // Settings rows are an icon and one to three words. What used to be the row's description is its tooltip, and
+    // every control has an accessible name that says the whole thing, because an icon says nothing to a screen reader.
+    public const string SettingsOrder = "Order";
+    public const string SettingsAutoCheck = "Auto check";
+    public const string TipSettings = "Settings";
+    public const string TipBack = "Back";
+    public const string TipGaugePosition = "Where the gauge sits on the taskbar";
+    public const string TipGaugeDisplay = "Which display's taskbar shows the gauge";
+    public const string TipGaugeOrder = "Pick how the gauge's ring, number and bolt line up";
+    public const string TipOtherDevice = "The name shown when your AirPods are on another device";
+    public const string TipPauseBud = "Pause when a bud comes out, and play again when it goes back";
+    public const string TipPauseLeave = "Pause this PC when the AirPods move to another device. It never plays again by itself.";
+    public const string TipCaseCard = "Show a card when the case opens";
+    public const string TipLowBattery = "Alert me at this level";
+    public const string TipLeftClick = "A left click on the gauge connects or disconnects";
+    public const string TipHandBack = "Let go of the AirPods at shut down, sleep and Exit";
+    public const string TipConnectShortcut = "Shortcut to connect";
+    public const string TipDisconnectShortcut = "Shortcut to disconnect";
+    public const string TipClear = "Clear";
+    public const string TipCheckForUpdates = "Check for a newer version now";
+    public const string TipRepair = RepairSub;
+    public const string TipAutoCheck = "Look for a newer version once a day";
+    public const string NameGaugePosition = "Gauge position";
+    public const string NameGaugeDisplay = "Gauge display";
+    public const string NameGaugeOrder = "Gauge order";
+    public const string NameOtherDeviceBox = "Other device name";
+    public const string NamePauseBud = "Pause when a bud comes out";
+    public const string NamePauseLeave = "Pause when AirPods leave this PC";
+    public const string NameCaseCard = "Case-open card";
+    public const string NameLowBattery = "Low battery alert";
+    public const string NameLowerLowBattery = "Lower the low battery level";
+    public const string NameRaiseLowBattery = "Raise the low battery level";
+    public const string NameLeftClick = "Left click connects";
+    public const string NameHandBack = "Hand back on shut down, sleep and Exit";
+    public const string NameConnectShortcut = "Connect shortcut";
+    public const string NameDisconnectShortcut = "Disconnect shortcut";
+    public const string NameClearConnectShortcut = "Clear connect shortcut";
+    public const string NameClearDisconnectShortcut = "Clear disconnect shortcut";
+    public const string NameCheckForUpdates = CheckForUpdates;
+    public const string NameRepair = RepairEarshot;
+    public const string NameAutoCheck = "Check for updates automatically";
 
     // Battery set-up: the card's button, the menu item, the three steps and their outcomes. Plain, short,
     // never a figure the set-up did not prove.

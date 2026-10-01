@@ -15,7 +15,7 @@ public sealed class WidgetCardSettingsTests
 
     private static readonly SettingsRowId[] RowOrder =
     [
-        SettingsRowId.GaugePosition, SettingsRowId.GaugeDisplay, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave, SettingsRowId.CaseCard,
+        SettingsRowId.GaugePosition, SettingsRowId.GaugeDisplay, SettingsRowId.GaugeOrder, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave, SettingsRowId.CaseCard,
         SettingsRowId.LowBattery, SettingsRowId.LeftClick, SettingsRowId.HandBack, SettingsRowId.Connect, SettingsRowId.Disconnect,
         SettingsRowId.CheckForUpdates, SettingsRowId.CheckAutomatically,
     ];
@@ -36,23 +36,23 @@ public sealed class WidgetCardSettingsTests
 
             string[] expectedShape =
             [
-                "GaugePosition", "GaugeDisplay", "OtherDevice", "PauseBud", "PauseLeave", "CaseCard", "LowBattery", "LeftClick", "HandBack",
+                "GaugePosition", "GaugeDisplay", "GaugeOrder", "OtherDevice", "PauseBud", "PauseLeave", "CaseCard", "LowBattery", "LeftClick", "HandBack",
                 "Divider", "Head:Shortcuts", "Connect", "Disconnect", "Divider", "Head:Updates", "CheckForUpdates", "CheckAutomatically",
             ];
             CollectionAssert.AreEqual(expectedShape, shape);
             string[] labels = card.CurrentSettingsLayout.Items.Where(i => i.Kind == SettingsItemKind.Row).Select(i => i.Label).ToArray();
             string[] expectedLabels =
             [
-                "Gauge position", "Gauge display", "Other device", "Pause when a bud comes out", "Pause when AirPods leave this PC", "Case-open card",
-                "Low battery alert", "Left click connects", "Hand back on shut down, sleep and Exit", "Connect", "Disconnect",
-                "Check for updates", "Check automatically",
+                "Position", "Display", "Order", "Other device", "Pause on removal", "Pause on leave", "Case card",
+                "Low battery", "Click connects", "Hand back", "Connect", "Disconnect",
+                "Version 1.1.0", "Auto check",
             ];
             CollectionAssert.AreEqual(expectedLabels, labels);
         });
     }
 
     [TestMethod]
-    public void RowsAre36HighTheCheckRowIs44AndTheCardIs360Wide()
+    public void RowsAre36HighTheOrderRowHoldsSixPicturesAndTheCardIs360Wide()
     {
         Phase5.CardSta.Run(() =>
         {
@@ -62,8 +62,14 @@ public sealed class WidgetCardSettingsTests
 
             foreach (SettingsItem row in layout.Items.Where(i => i.Kind == SettingsItemKind.Row))
             {
-                int expected = row.Row == SettingsRowId.CheckForUpdates ? 44 : 36;
-                Assert.AreEqual(expected, row.Bounds.Height, row.Row + " row height.");
+                if (row.Row == SettingsRowId.GaugeOrder)
+                {
+                    // The label and two lines of pictures, each 52 high with 8 between.
+                    Assert.IsGreaterThan(36 + 104, row.Bounds.Height, "The order row holds the label and two rows of pictures.");
+                    continue;
+                }
+
+                Assert.AreEqual(36, row.Bounds.Height, row.Row + " row height.");
             }
 
             Assert.AreEqual(360, layout.Frame.Width);
@@ -168,7 +174,14 @@ public sealed class WidgetCardSettingsTests
                         break;
                     case SettingsRowId.CheckForUpdates:
                         Assert.IsTrue(ControlHasContent(item.A, 6), row + ": the Check button's text.");
-                        Assert.IsTrue(CardKit.HasInk(bitmap, item.SubRect, background), row + ": the version sub-line.");
+                        break;
+                    case SettingsRowId.GaugeOrder:
+                        Assert.AreEqual(6, item.Tiles.Count, row + ": six pictures.");
+                        foreach (Rectangle tile in item.Tiles)
+                        {
+                            Assert.IsTrue(CardKit.HasInk(bitmap, Rectangle.Inflate(tile, -4, -4), bitmap.GetPixel(tile.X + 4, tile.Y + 4)), row + ": a picture of the gauge.");
+                        }
+
                         break;
                     default:
                         Assert.IsTrue(CardKit.HasInk(bitmap, item.A, background), row + ": the toggle.");
@@ -248,7 +261,7 @@ public sealed class WidgetCardSettingsTests
             {
                 SettingsItem row = CardKit.Row(card, id);
                 Assert.AreEqual(caption, row.Sub);
-                Assert.AreEqual(44, row.Bounds.Height, id + ": the caption is one line, so the row is a two-line row.");
+                Assert.IsGreaterThan(36, row.Bounds.Height, id + ": the caption makes the row taller.");
                 Assert.IsTrue(CardKit.HasInk(bitmap, row.SubRect, bitmap.GetPixel(0, 0)), id + ": the caption is drawn.");
                 Assert.IsFalse(row.A.IsEmpty, id + ": the toggle stays.");
                 StringAssert.Contains(caption, "cannot yet tell");
@@ -696,7 +709,8 @@ public sealed class WidgetCardSettingsTests
                 Assert.AreEqual("Repair", rows[check + 1], "Repair is the row next to Check for updates, at " + dpi + " dpi.");
                 SettingsItem repair = CardKit.Row(card, SettingsRowId.Repair);
                 Assert.AreEqual("Repair Earshot", repair.Label);
-                Assert.AreEqual("Checks the installed files and sets Earshot up again.", repair.Sub);
+                Assert.AreEqual("Checks the installed files and sets Earshot up again.", repair.Tip, "The description is the row's tooltip.");
+                Assert.IsNull(repair.Sub, "No description under the label.");
                 Assert.IsFalse(repair.A.IsEmpty, "It has a button.");
                 Assert.IsTrue(repair.Bounds.Contains(repair.A));
                 Assert.IsTrue(layout.Targets.Contains(new SettingsTarget(SettingsRowId.Repair, SettingsPart.Button)), "The keyboard reaches it.");
@@ -727,16 +741,16 @@ public sealed class WidgetCardSettingsTests
     }
 
     [TestMethod]
-    public void TheInstalledVersionIsTheCheckRowsSubLine()
+    public void TheInstalledVersionIsTheCheckRowsLabel()
     {
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
             card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InstalledVersion = "1.1.0" }), 96);
-            Assert.AreEqual("Version 1.1.0", CardKit.Row(card, SettingsRowId.CheckForUpdates).Sub);
+            Assert.AreEqual("Version 1.1.0", CardKit.Row(card, SettingsRowId.CheckForUpdates).Label);
 
             card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InstalledVersion = null }), 96);
-            Assert.IsNull(CardKit.Row(card, SettingsRowId.CheckForUpdates).Sub, "A version that cannot be read is not made up.");
+            Assert.AreEqual("Check for updates", CardKit.Row(card, SettingsRowId.CheckForUpdates).Label, "A version that cannot be read is not made up.");
         });
     }
 

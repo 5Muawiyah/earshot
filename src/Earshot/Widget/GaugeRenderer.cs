@@ -97,6 +97,35 @@ internal static class GaugeRenderer
         return bitmap;
     }
 
+    // The gauge for a picture of an order on the settings page: the gauge as it is, with the number's place marked by a
+    // neutral bar when there is no number to show and the bolt drawn as an outline when it is not charging, so all three
+    // pieces show in every picture. Nothing here is a figure: a bar is not a reading.
+    public static Bitmap RenderPreview(GaugeContent content, GaugePalette palette, GaugeLayout layout, string fontFamily, Color placeholder)
+    {
+        Bitmap bitmap = Render(content, palette, layout, hover: false, fontFamily);
+        using Graphics g = Graphics.FromImage(bitmap);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        // The phone mark fills the number's place on its own.
+        if (content.Mode is not (GaugeMode.Reading or GaugeMode.OnOtherDevice))
+        {
+            float height = Math.Max(1f, layout.Dpi / 48f);
+            var bar = new RectangleF(layout.NumberSlot.X, (layout.Height - height) / 2f, layout.NumberSlot.Width, height);
+            using GraphicsPath path = RoundedRectangle(bar, height / 2f);
+            using var brush = new SolidBrush(placeholder);
+            g.FillPath(brush, path);
+        }
+
+        if (!(content.Mode == GaugeMode.Reading && content.Charging))
+        {
+            using var pen = new Pen(placeholder, Math.Max(1f, layout.Dpi / 96f)) { LineJoin = LineJoin.Round };
+            g.DrawPolygon(pen, BoltPoints(layout));
+        }
+
+        return bitmap;
+    }
+
     // The centre of the ring, and the ring's own square.
     internal static PointF RingCentre(GaugeLayout layout) =>
         new(layout.RingBox.X + (layout.RingBox.Width / 2f), layout.RingBox.Y + (layout.RingBox.Height / 2f));
@@ -194,6 +223,13 @@ internal static class GaugeRenderer
 
     private static void DrawBolt(Graphics g, GaugeLayout layout, Color ink)
     {
+        using var brush = new SolidBrush(ink);
+        g.FillPolygon(brush, BoltPoints(layout));
+    }
+
+    // The bolt's corners, centred in its slot.
+    private static PointF[] BoltPoints(GaugeLayout layout)
+    {
         float k = Math.Min(layout.Bolt.Width / BoltGridWidth, layout.Bolt.Height / BoltGridHeight);
         float left = layout.ChargingSlot.X + ((layout.ChargingSlot.Width - (BoltGridWidth * k)) / 2f);
         float top = (layout.Height - (BoltGridHeight * k)) / 2f;
@@ -203,8 +239,7 @@ internal static class GaugeRenderer
             points[i] = new PointF(left + (BoltGrid[i].X * k), top + (BoltGrid[i].Y * k));
         }
 
-        using var brush = new SolidBrush(ink);
-        g.FillPolygon(brush, points);
+        return points;
     }
 
     // The phone, in the number slot: an outlined rounded rectangle on a 16 unit grid, drawn at full ink.

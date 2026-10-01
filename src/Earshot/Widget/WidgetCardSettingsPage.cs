@@ -54,7 +54,7 @@ internal sealed partial class WidgetCard
         _settingsLayout = layout;
 
         // The focus must point at a control the page still draws (the Clear button goes when its chord does).
-        if (!layout.Targets.Contains(_settingsFocus))
+        if (!layout.Targets.Any(t => t.SameStop(_settingsFocus)))
         {
             _settingsFocus = new SettingsTarget(SettingsRowId.None, SettingsPart.Back);
         }
@@ -84,9 +84,17 @@ internal sealed partial class WidgetCard
                 continue;
             }
 
+            for (int i = 0; i < item.Tiles.Count; i++)
+            {
+                if (item.Tiles[i].Contains(point))
+                {
+                    return new SettingsTarget(item.Row, SettingsPart.Tile, i);
+                }
+            }
+
             foreach (SettingsTarget target in layout.Targets)
             {
-                if (target.Row == item.Row && PartRectangle(item, target.Part).Contains(point))
+                if (target.Row == item.Row && target.Part != SettingsPart.Tile && PartRectangle(item, target.Part).Contains(point))
                 {
                     return target;
                 }
@@ -158,6 +166,9 @@ internal sealed partial class WidgetCard
                 break;
             case SettingsPart.Choice:
                 Raise(new DisplayChange(GaugeDisplayOptions.Next(values.GaugeDisplayOptions, values.GaugeDisplayId)));
+                break;
+            case SettingsPart.Tile:
+                Raise(new OrderChange(GaugeOrders.FromStored((GaugeOrder)target.Index)));
                 break;
             case SettingsPart.Text:
                 BeginTextEdit(values.OtherDeviceLabel);
@@ -252,12 +263,36 @@ internal sealed partial class WidgetCard
             case Keys.Space:
                 ActivateSettingsTarget(_settingsFocus);
                 break;
+            case Keys.Left when _settingsFocus.Part == SettingsPart.Tile:
+                MoveTile(-1);
+                break;
+            case Keys.Right when _settingsFocus.Part == SettingsPart.Tile:
+                MoveTile(1);
+                break;
+            case Keys.Up when _settingsFocus.Part == SettingsPart.Tile:
+                MoveTile(-3);
+                break;
+            case Keys.Down when _settingsFocus.Part == SettingsPart.Tile:
+                MoveTile(3);
+                break;
             case Keys.Up when _settingsFocus.Part is SettingsPart.Minus or SettingsPart.Plus && _model.Settings is { } up:
                 StepThreshold(up, CardSettingsValues.LowBatteryStep);
                 break;
             case Keys.Down when _settingsFocus.Part is SettingsPart.Minus or SettingsPart.Plus && _model.Settings is { } down:
                 StepThreshold(down, -CardSettingsValues.LowBatteryStep);
                 break;
+        }
+    }
+
+    // The focus among the pictures of the gauge orders, in a grid of three across; a key that would leave the grid does
+    // nothing. Moving the focus does not choose: Enter or Space does.
+    private void MoveTile(int by)
+    {
+        int next = _settingsFocus.Index + by;
+        if (next is >= 0 and <= 5)
+        {
+            _settingsFocus = _settingsFocus with { Index = next };
+            Invalidate();
         }
     }
 
@@ -272,7 +307,7 @@ internal sealed partial class WidgetCard
         int at = 0;
         for (int i = 0; i < targets.Count; i++)
         {
-            if (targets[i] == _settingsFocus)
+            if (targets[i].SameStop(_settingsFocus))
             {
                 at = i;
             }
@@ -477,6 +512,11 @@ internal sealed partial class WidgetCard
                     continue;
             }
 
+            if (item.Glyph != '\0')
+            {
+                CardPaint.Glyph(g, item.Glyph, item.IconRect, colours.Text, _dpi);
+            }
+
             CardPaint.Wrapped(g, item.Label, item.LabelRect, _type, fourteen, bold: false, colours.Text);
             if (item.Sub is not null)
             {
@@ -491,6 +531,9 @@ internal sealed partial class WidgetCard
                     break;
                 case SettingsRowId.GaugeDisplay:
                     CardPaint.SmallButton(g, item.A, GaugeDisplayOptions.LabelFor(values.GaugeDisplayOptions, values.GaugeDisplayId), colours, _type, _dpi, Focused(item.Row, SettingsPart.Choice));
+                    break;
+                case SettingsRowId.GaugeOrder:
+                    DrawOrderTiles(g, item, values, colours, focusVisible, focus);
                     break;
                 case SettingsRowId.OtherDevice:
                     DrawTextBox(g, item.A, colours, values.OtherDeviceLabel, Focused(item.Row, SettingsPart.Text));
