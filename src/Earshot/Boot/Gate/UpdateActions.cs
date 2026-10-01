@@ -153,6 +153,68 @@ internal sealed class ChildInstallStarter : IInstallStarter
     }
 }
 
+// Starts the unpacked, checked release's own Earshot.exe with the install verb and waits for it to end, for a first install
+// that has no installed program to hand over to and no machine folder yet to hold a record of how it went: the exit code of
+// the install is the record. The process ends with the code of a gate run (GateExitCode); a wait that runs out leaves the
+// install running and says so.
+internal interface IInstallRunner
+{
+    // exitCode is the install's own exit code, or -1 when it did not start or did not end within timeout.
+    StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, out int exitCode);
+}
+
+// https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexit
+internal sealed class ChildInstallRunner : IInstallRunner
+{
+    public const string Step = "install-zip-run-install";
+
+    public StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, out int exitCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
+        ArgumentNullException.ThrowIfNull(arguments);
+        exitCode = -1;
+        var info = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = workingDirectory,
+        };
+        foreach (string argument in arguments)
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        try
+        {
+            using Process? process = Process.Start(info);
+            if (process is null)
+            {
+                return StepOutcomes.NotAttempted(Step, "No process was started for " + executable + ".");
+            }
+
+            if (!process.WaitForExit(timeout))
+            {
+                return StepOutcomes.NotAttempted(Step,
+                    executable + " was still running after " + timeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) + " s, and is left to finish.");
+            }
+
+            exitCode = process.ExitCode;
+            string name = GateExitCodes.NameOf(exitCode) ?? "unknown";
+            return exitCode == 0
+                ? new StepOutcome(Step, true, 0, "S_OK", executable + " ended with exit code 0.")
+                : StepOutcomes.NotAttempted(Step, executable + " ended with exit code " + exitCode.ToString(CultureInfo.InvariantCulture) + " (" + name + ").");
+        }
+        catch (Win32Exception ex)
+        {
+            return StepOutcomes.FromWin32(Step, unchecked((uint)ex.NativeErrorCode), executable + ": " + ex.Message, ok: false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StepOutcomes.FromHResult(Step, ex.HResult, executable + ": " + ex.Message, ok: false);
+        }
+    }
+}
+
 // The elevated half of an update, run by the installed, administrator-owned Earshot.exe. It never trusts anything the
 // tray, or any program the signed-in user runs, left in a folder that user can write:
 //   1. it must be running from the install folder, and that folder must grant no one but administrators write;
@@ -173,6 +235,16 @@ internal sealed class ChildInstallStarter : IInstallStarter
 //      install retries the folder move for a few seconds (InstallActions.FolderMoveAttempts) in case it has not yet.
 // The install runs from the work folder and no program is left to remove it when the install ends, so the next update
 // run removes it.
+//
+// RunFirstInstall is the same steps for a PC with no usable install, run by the verified download's own Earshot.exe
+// (install-zip), because there is no installed, administrator-owned program to hand over to. It differs in three ways:
+// it does not need to run from the install folder, it refuses when a usable install is already there (that is an update
+// or a repair), and there is no tray to wait for. It also waits for the install it starts and ends with that install's
+// exit code, because a first install has no machine folder yet to hold a record, and it removes its own work folder once
+// the install has ended. What it proves is the same: the install runs from a folder only administrators can change,
+// from a zip that matched the hash on the command line and a release whose every file matched its file list. What it
+// does not prove is the program doing the checking: on a first install that is the download's own Earshot.exe, in a
+// folder the person can write.
 //
 // The tray has exited before any of this ends, so how it ended is written to update-outcome.json in the machine folder
 // (UpdateOutcomeRecorder): this run records that it handed over, or why it stopped, and the install it started records
@@ -225,9 +297,26 @@ internal sealed class UpdateActions
     // How long the run waits for the lock before it refuses.
     internal TimeSpan LockWait { get; init; } = InstallRunLock.WaitBeforeRefusing;
 
-    public InstallResult Run(UpdateRequest request)
+    // A first install runs the install it starts and waits for it. The real runner by default; a test gives its own.
+    internal IInstallRunner InstallRunner { get; init; } = new ChildInstallRunner();
+
+    // How long a first install waits for the install it started. The install ends in well under a minute; five minutes
+    // is a waiting budget chosen for a slow disk, not a measured figure.
+    internal TimeSpan InstallWait { get; init; } = TimeSpan.FromMinutes(5);
+
+    // The exit code of install-zip when a usable install is already there. It continues the numbering of GateExitCode
+    // (the last member is Busy, 25), so it can never be taken for a result of the install itself.
+    internal const GateExitCode AlreadyInstalled = (GateExitCode)26;
+
+    public InstallResult Run(UpdateRequest request) => Run(request, firstInstall: false);
+
+    // A first install from a checked download; see the comment above the class. The request's tray process id is not used.
+    public InstallResult RunFirstInstall(UpdateRequest request) => Run(request, firstInstall: true);
+
+    private InstallResult Run(UpdateRequest request, bool firstInstall)
     {
         ArgumentNullException.ThrowIfNull(request);
+        string mode = firstInstall ? "install-zip" : "update";
         var steps = new List<StepOutcome>();
         IDisposable? held = null;
         try
@@ -238,16 +327,21 @@ internal sealed class UpdateActions
             if (held is null)
             {
                 bool busy = steps.Any(InstallRunLock.IsBusy);
-                _log.Warn("update: the machine-wide lock was not taken, so nothing was changed" + (busy ? " (another setup, update or repair holds it)." : "."));
+                _log.Warn(mode + ": the machine-wide lock was not taken, so nothing was changed" + (busy ? " (another setup, update or repair holds it)." : "."));
                 return new InstallResult(busy ? GateExitCode.Busy : GateExitCode.Failed, steps);
             }
 
-            return RunSteps(request, steps);
+            // A first install lets the lock go before the install it starts runs, because that install takes the lock itself.
+            return RunSteps(request, steps, firstInstall, () =>
+            {
+                held?.Dispose();
+                held = null;
+            });
         }
         catch (Exception ex)
         {
-            steps.Add(ElevatedFailure.Step("update", ex));
-            _log.Error("update stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
+            steps.Add(ElevatedFailure.Step(mode, ex));
+            _log.Error(mode + " stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
             return new InstallResult(GateExitCode.Failed, steps);
         }
         finally
@@ -256,21 +350,37 @@ internal sealed class UpdateActions
         }
     }
 
-    private InstallResult RunSteps(UpdateRequest request, List<StepOutcome> steps)
+    private InstallResult RunSteps(UpdateRequest request, List<StepOutcome> steps, bool firstInstall, Action releaseLock)
     {
         string install = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.InstallFolder));
-        string running = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.SourceFolder));
-        if (!string.Equals(running, install, StringComparison.OrdinalIgnoreCase))
+        if (firstInstall)
         {
-            steps.Add(StepOutcomes.NotAttempted("update-running-from",
-                "The update runs only from the installed copy, " + install + ", and this program is in " + running + "."));
-            return new InstallResult(GateExitCode.NotFromInstallFolder, steps);
-        }
+            // A usable install is updated or repaired through its own program, which is checked before it is trusted. Only a
+            // PC with nothing, or with an install that cannot be handed over to, is set up from the download.
+            InstallAssessment found = InstalledCopy.Assess(Path.Combine(install, TaskPlan.ExecutableName), File.Exists, Directory.Exists, _folders);
+            if (found.State == InstallState.Usable)
+            {
+                steps.Add(StepOutcomes.NotAttempted("install-zip-already-installed", "Earshot is already installed. Use Update or Repair."));
+                return new InstallResult(AlreadyInstalled, steps);
+            }
 
-        steps.Add(new StepOutcome("update-running-from", true, 0, "S_OK", install));
-        if (!FolderTrust.IsTrusted(_folders, install, AclCheck.CheckInstallFolder, "install-folder-acl", steps))
+            steps.Add(new StepOutcome("install-zip-state", true, 0, "S_OK", found.State + ": " + found.Detail));
+        }
+        else
         {
-            return new InstallResult(GateExitCode.FolderNotSecure, steps);
+            string running = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_layout.SourceFolder));
+            if (!string.Equals(running, install, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(StepOutcomes.NotAttempted("update-running-from",
+                    "The update runs only from the installed copy, " + install + ", and this program is in " + running + "."));
+                return new InstallResult(GateExitCode.NotFromInstallFolder, steps);
+            }
+
+            steps.Add(new StepOutcome("update-running-from", true, 0, "S_OK", install));
+            if (!FolderTrust.IsTrusted(_folders, install, AclCheck.CheckInstallFolder, "install-folder-acl", steps))
+            {
+                return new InstallResult(GateExitCode.FolderNotSecure, steps);
+            }
         }
 
         RemoveEarlierWorkFolders(install, steps);
@@ -293,6 +403,11 @@ internal sealed class UpdateActions
         {
             FileSteps.DeleteTree(work, "remove-update-work", steps);
             return new InstallResult(GateExitCode.Failed, steps);
+        }
+
+        if (firstInstall)
+        {
+            return RunInstallAndWait(request, work, steps, releaseLock);
         }
 
         // Nothing has touched the install folder yet. It is only touched once the tray has ended.
@@ -320,6 +435,30 @@ internal sealed class UpdateActions
 
         _log.Info("update: the checked release is installing from " + app + ".");
         return new InstallResult(GateExitCode.Success, steps);
+    }
+
+    // First install: runs the unpacked release's own install and ends with its exit code. The lock is let go first, since the
+    // install takes it. The work folder is removed once the install has ended; one whose install is still running is kept.
+    private InstallResult RunInstallAndWait(UpdateRequest request, string work, List<StepOutcome> steps, Action releaseLock)
+    {
+        string app = Path.Combine(work, ReleaseArchive.AppFolderName);
+        releaseLock();
+        StepOutcome ran = InstallRunner.RunAndWait(
+            Path.Combine(app, TaskPlan.ExecutableName),
+            UpdateHandover.InstallArguments(new HandoverIdentity(request.Install.UserSid, request.Install.Address, request.Install.ContainerId)),
+            app,
+            InstallWait,
+            out int exitCode);
+        steps.Add(ran);
+        if (exitCode == -1)
+        {
+            _log.Warn("install-zip: the install from " + app + " did not report an exit code, so the work folder is left where it is.");
+            return new InstallResult(GateExitCode.Failed, steps);
+        }
+
+        FileSteps.DeleteTree(work, "remove-update-work", steps);
+        _log.Info("install-zip: the install from " + app + " ended with exit code " + exitCode.ToString(CultureInfo.InvariantCulture) + ".");
+        return new InstallResult((GateExitCode)exitCode, steps);
     }
 
     private static string WorkFolderPath(string install, string suffix) =>
