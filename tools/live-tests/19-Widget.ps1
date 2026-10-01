@@ -233,17 +233,32 @@ try
         Write-Section -Run $run -Title 'Half C: the battery, from the broadcast'
         $batteryStartUtc = (Get-Date).ToUniversalTime()
         Wait-Owner -Run $run -Text 'Take your AirPods out of the case, or open the case lid next to this computer, then left-click the Earshot icon or the gauge to open the card.'
+        # A set that is picked out stays picked out for an hour, so one chosen earlier in this sitting (or just before it)
+        # is not picked out again and logs no new line here. Either a picked-out line anywhere since the sitting began, or
+        # the counters' chosen figure rising since the first counters line of the sitting, shows the widget has a set and
+        # is hearing it.
+        $firstChosen = $(if (@($counterLines).Count -gt 0) { Get-CounterFigure -Line (@($counterLines)[0]) -Name 'chosen' } else { $null })
+        $lastChosen = $null
+        $chosenRose = $false
         $pickedLines = @()
-        for ($step = 0; $step -lt 3 -and @($pickedLines).Count -eq 0; $step++)
+        for ($step = 0; $step -lt 7 -and @($pickedLines).Count -eq 0 -and -not $chosenRose; $step++)
         {
             Wait-Seconds -Run $run -Seconds 10 -Reason 'waiting for the widget to pick out your AirPods'
-            $pickedLines = Get-EarshotLogLines -Run $run -Pattern 'Widget: picked out a set of AirPods to show' -SinceUtc $batteryStartUtc
+            $pickedLines = Get-EarshotLogLines -Run $run -Pattern 'Widget: picked out a set of AirPods to show' -SinceUtc $testStartUtc
+            $sittingCounterLines = Get-EarshotLogLines -Run $run -Pattern 'Widget counters:' -SinceUtc $testStartUtc
+            if (@($sittingCounterLines).Count -gt 0)
+            {
+                $firstChosen = Get-CounterFigure -Line (@($sittingCounterLines)[0]) -Name 'chosen'
+                $lastChosen = Get-CounterFigure -Line (@($sittingCounterLines)[-1]) -Name 'chosen'
+                $chosenRose = ($null -ne $firstChosen -and $null -ne $lastChosen -and $lastChosen -gt $firstChosen)
+            }
         }
 
-        Add-Finding -Run $run -Name 'airPodsPickedOutLines' -Value @($pickedLines).Count -Detail 'Log lines saying the widget picked out a set of AirPods to show, in the wait above'
-        Add-Criterion -Run $run -Id 'airpods-picked-out' -Criterion 'With the AirPods out of the case or the case open, the widget picks out a set of AirPods to show from what it hears.' `
-            -Outcome $(if (@($pickedLines).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
-            -Detail $(if (@($pickedLines).Count -gt 0) { [string]@($pickedLines).Count + ' line(s) logged.' } else { 'Nothing was picked out in half a minute: either the AirPods were not broadcasting or the watcher is not running.' })
+        Add-Finding -Run $run -Name 'airPodsPickedOutLines' -Value @($pickedLines).Count -Detail 'Log lines saying the widget picked out a set of AirPods to show, since the sitting began'
+        Add-Finding -Run $run -Name 'chosenCounterRose' -Value $(if ($chosenRose) { 'yes' } else { 'no' }) -Detail 'Whether the counters'' chosen figure was higher in the newest counters line of the sitting than in its first'
+        Add-Criterion -Run $run -Id 'airpods-picked-out' -Criterion 'With the AirPods out of the case or the case open, the widget has a set of AirPods to show from what it hears: it picked one out during the sitting, or its chosen counter is rising.' `
+            -Outcome $(if (@($pickedLines).Count -gt 0 -or $chosenRose) { 'pass' } else { 'inconclusive' }) `
+            -Detail $(if (@($pickedLines).Count -gt 0 -or $chosenRose) { [string]@($pickedLines).Count + ' picked-out line(s) since the sitting began; the chosen counter ' + $(if ($chosenRose) { 'rose from ' + $firstChosen + ' to ' + $lastChosen + '.' } else { 'did not rise.' }) } else { 'Nothing was picked out since the sitting began and the chosen counter did not rise in about a minute: the AirPods were not broadcasting, or the watcher is not running. A set picked out before this sitting keeps being shown without a new line, so its counter is the thing to look at.' })
         $batteryAnswer = Read-Answer -Run $run -Question 'Compare the card with what your iPhone shows. Does every battery figure the card shows agree with the iPhone (give or take one step of 10), with nothing shown for a part the card has no figure for?'
         Add-Criterion -Run $run -Id 'battery-matches-iphone' -Criterion 'Every battery figure the card shows agrees with the iPhone, and nothing is shown for a part with no figure.' `
             -Outcome $(if ($batteryAnswer -eq 'yes') { 'pass' } elseif ($batteryAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
@@ -269,9 +284,12 @@ try
             -Detail ('You answered ' + $refreshedAnswer + '.')
         $endedLines = Get-EarshotLogLines -Run $run -Pattern 'Widget: battery refresh ended:' -SinceUtc $batteryStartUtc
         Add-Finding -Run $run -Name 'refreshEndedLines' -Value @($endedLines).Count -Detail 'Log lines saying a battery refresh ended, since the battery steps began'
+        # Each click the owner reports (the arrow turned, or the card said nothing was heard) ran one refresh, and each
+        # refresh logs its own end: two clicks need two lines, so a single line cannot stand for both.
+        $refreshesSeen = @($nothingHeardAnswer, $refreshedAnswer | Where-Object { $_ -eq 'yes' }).Count
         Add-Criterion -Run $run -Id 'refresh-logged' -Criterion 'Each refresh the card started is on the log with how it ended.' `
-            -Outcome $(if (@($endedLines).Count -gt 0) { 'pass' } elseif ($refreshedAnswer -eq 'yes' -or $nothingHeardAnswer -eq 'yes') { 'fail' } else { 'inconclusive' }) `
-            -Detail ([string]@($endedLines).Count + ' "battery refresh ended" line(s) logged; there should be one for each click.')
+            -Outcome $(if ($refreshesSeen -eq 0) { 'inconclusive' } elseif (@($endedLines).Count -ge $refreshesSeen) { 'pass' } else { 'fail' }) `
+            -Detail ([string]@($endedLines).Count + ' "battery refresh ended" line(s) logged for the ' + $refreshesSeen + ' refresh(es) you reported; there should be one for each click.')
 
         Write-Section -Run $run -Title 'Half E: where, connected'
         Wait-Owner -Run $run -Text 'Connect the AirPods to this PC: left-click the Earshot icon or the gauge, then click Connect on the card.'

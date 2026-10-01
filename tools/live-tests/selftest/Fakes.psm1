@@ -284,7 +284,7 @@ $script:CaseItemCounts = @{
     'atrest-render-active' = 0; 'atrest-disconnect-declined' = 0; 'atrest-disconnect-not-confirmed' = 0; 'atrest-audio-unreadable' = 0
     'declined-start' = 0
     'handback-cut-short' = 0; 'handback-not-reached' = 0; 'no-sleep-event' = 1; 'repaged-at-wake' = 1
-    'exit-cut-short' = 0; 'pause-declined' = 0
+    'exit-cut-short' = 0; 'pause-declined' = 0; 'chosen-rising' = 0
     'switch-timed-out' = 0; 'switch-not-at-rest' = 1; 'switch-rejected' = 1; 'switch-unparsable' = 0
 
     # test 17 and test 22: the hand-back service's own cases. Each looks like the shared "one" for every log line and
@@ -320,7 +320,7 @@ function Initialize-FakeMachine
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-            'exit-cut-short', 'pause-declined',
+            'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
             'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
     )
@@ -382,7 +382,7 @@ function New-FakeSandbox
             'atrest-setup-unknown', 'atrest-config-missing', 'atrest-nodes-probe-fails', 'atrest-nodes-stay-unreadable',
             'atrest-render-active', 'atrest-disconnect-declined', 'atrest-disconnect-not-confirmed', 'atrest-audio-unreadable',
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
-            'exit-cut-short', 'pause-declined',
+            'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
             'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
     )
@@ -511,6 +511,17 @@ function New-FakeSandbox
     {
         $index = $index + 1; $p1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
         $lines = $lines + @([string]$p1 + ' INFO  Pause on leave: the AirPods left this PC (change seen at ' + $p1 + '). Not paused: this PC was not playing to them (last reading: silent).')
+    }
+
+    # test 19, chosen-rising: the widget picked its set out before this sitting (a choice lasts an hour), so no
+    # "picked out" line is logged in it, and what shows the choice is the counters line: its chosen figure is higher in
+    # the newest line than in the first. A script that read only the picked-out line would call this nothing picked out.
+    if ($Case -eq 'chosen-rising')
+    {
+        $index = $index + 1; $c1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$c1 + ' INFO  Widget counters: watcher=Started allSections=40 apple=40 other=0 items=40 ok=40 truncated=0 unknownForm=0 modelMismatch=0 colourMismatch=0 otherSet=0 chosen=2 noPairedModel=0 budOrderDisagree=0 switches=0 sets=1 unknownFormShapes=[]')
+        $index = $index + 1; $c2 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        $lines = $lines + @([string]$c2 + ' INFO  Widget counters: watcher=Started allSections=90 apple=90 other=0 items=90 ok=90 truncated=0 unknownForm=0 modelMismatch=0 colourMismatch=0 otherSet=0 chosen=9 noPairedModel=0 budOrderDisagree=0 switches=0 sets=1 unknownFormShapes=[]')
     }
 
     # test 16, switch-timed-out: a switch to this PC that did not become active, the line Earshot writes when its own
