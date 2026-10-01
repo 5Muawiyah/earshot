@@ -789,7 +789,7 @@ public sealed class InstallerScriptTests
     [TestMethod]
     [DataRow(ShellKind.WindowsPowerShell)]
     [DataRow(ShellKind.PowerShell7)]
-    public void CtrlCAfterTheTrayWasClosedStartsTheTrayAgain(ShellKind shell)
+    public void CtrlCAtTheAdministratorPromptLeavesTheClosedTrayUnstartedAndSaysSo(ShellKind shell)
     {
         using var world = new InstallerWorld();
         world.PlaceProgramFile();
@@ -799,8 +799,9 @@ public sealed class InstallerScriptTests
         InstallerRun run = world.Run(shell);
 
         CollectionAssert.AreEqual(ClosedThenElevated, run.Calls.Where(c => c.StartsWith("ExitTray|", StringComparison.Ordinal) || c.StartsWith("Elevate|", StringComparison.Ordinal)).Select(c => c.StartsWith("Elevate", StringComparison.Ordinal) ? "Elevate" : c).ToArray(), "The tray was closed, then the run was stopped at the administrator prompt.");
-        CollectionAssert.AreEqual(new[] { world.InstalledExe }, run.CallsNamed("StartTray").Select(c => c.Split('|')[1]).ToArray(), run.Describe());
-        CollectionAssert.Contains(run.Lines, "Earshot was started again.");
+        Assert.IsEmpty(run.CallsNamed("StartTray"), "The prompt may still be approved, and the program it starts would be replacing files under a tray started now." + Environment.NewLine + run.Describe());
+        Assert.IsFalse(run.Lines.Contains("Earshot was started again."), run.Describe());
+        Assert.IsTrue(run.Lines.Any(l => l.StartsWith("Ctrl+C came while Windows was asking for administrator approval.", StringComparison.Ordinal)), run.Describe());
         Assert.IsFalse(run.Lines.Any(l => l.StartsWith("Earshot: done.", StringComparison.Ordinal)), "A run that was stopped by Ctrl+C is not a finished one.");
     }
 

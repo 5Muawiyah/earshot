@@ -901,11 +901,18 @@ tray's program must still be there). It does not when the run reported success,
 and it does not when the elevated program may still be working in the install
 folder: a first install or an update still running when the script stopped
 waiting (the script says so, and that the install was left to finish) is not
-started over. The hold begins when the elevated process has started and ends
-when its exit code has been read (for an update, when its record has been read),
-so Ctrl+C at any point while it works leaves it to finish, says that setup is
-still running, and starts nothing; a Ctrl+C before the prompt, or after the
-program has reported, starts the closed tray again. Otherwise the restart runs
+started over. The hold begins before the administrator prompt is shown and ends
+when the elevated program's exit code has been read (for an update, when its
+record has been read). A declined prompt or a failed launch ends it at once,
+because no program was started. Ctrl+C while the prompt is still shown leaves the
+hold on, because approving the prompt afterwards starts the program: the script
+says that Earshot was not started and that setup may still be approved and run.
+Ctrl+C while the program works leaves it to finish, says that setup is still
+running, and starts nothing. Both messages say to start Earshot from the Start
+menu, or from the installed program's path, once setup has finished, because
+running the line again on an install that is current prints done and starts
+nothing. A Ctrl+C before the prompt, or after the program has reported, starts
+the closed tray again. Otherwise the restart runs
 whenever the script ends after closing the tray, including when it is stopped
 with Ctrl+C, and it is skipped for a tray that is still running (one that was
 slow to close). Closing the PowerShell window itself is not covered; then start

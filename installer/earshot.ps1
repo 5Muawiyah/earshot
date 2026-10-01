@@ -38,7 +38,8 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         Paths = $null           # the folders of this PC's install, set once they are known, so a stop can look for a tray still running
         ClosedTrays = @()       # the trays this script asked to exit, so a stop can start them again
         Succeeded = $false      # an install, update, repair or uninstall reported success: nothing is started again
-        NoRestart = $false      # the elevated program may still be working in the install folder: nothing is started
+        NoRestart = $false      # the elevated program may still be working in the install folder, or its prompt is still shown: nothing is started
+        ElevatedStarted = $false # the elevated program was started (the prompt was approved), as against a prompt still shown
         OutcomeProblem = ''     # why the last read of the update's record failed, if it did
     }
     $hk = $TestHooks
@@ -538,28 +539,48 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
 
     function Invoke-Elevated([string]$Exe, [string]$Line, [bool]$KeepHold = $false) {
         $result = $null
-        if ($hk.Elevate) { $result = & $hk.Elevate $Exe $Line }
-        else {
-            foreach ($name in @('EARSHOT_SAFE_MODE', 'EARSHOT_DATA_ROOT')) {
-                if ([Environment]::GetEnvironmentVariable($name)) {
-                    Stop-Run ("Earshot's setup does not run while " + $name + ' is set.')
+        # The hold starts before the prompt is shown, not after it returns: the prompt stays on the screen when Ctrl+C ends this
+        # script, and approving it then starts the elevated program, which goes on in the install folder. A tray started by
+        # the stop would run from files that may be half replaced. An error or a decline means no program was started, so the
+        # hold ends at once; a Ctrl+C is not caught here (a pipeline stop skips a catch and runs the finally blocks), so it
+        # keeps the hold.
+        $st.NoRestart = $true
+        try {
+            if ($hk.Elevate) { $result = & $hk.Elevate $Exe $Line }
+            else {
+                foreach ($name in @('EARSHOT_SAFE_MODE', 'EARSHOT_DATA_ROOT')) {
+                    if ([Environment]::GetEnvironmentVariable($name)) {
+                        Stop-Run ("Earshot's setup does not run while " + $name + ' is set.')
+                    }
                 }
+                $result = Start-Process -FilePath $Exe -ArgumentList $Line -Verb RunAs -PassThru -WorkingDirectory (Join-Path $env:SystemRoot 'System32')
             }
-            $result = Start-Process -FilePath $Exe -ArgumentList $Line -Verb RunAs -PassThru -WorkingDirectory (Join-Path $env:SystemRoot 'System32')
+        }
+        catch {
+            $st.NoRestart = $false
+            throw
         }
         if ($result -is [Diagnostics.Process]) {
             $null = $result.Handle
-            # From here the elevated program is working in the install folder, and a Ctrl+C ends only this script: the program
-            # goes on. A tray started by the stop would run from files that may be half replaced, so nothing is started until
-            # the exit code has been read. A caller that still has the program's record to wait for keeps the hold itself.
-            $st.NoRestart = $true
+            # The elevated program is working in the install folder, and nothing is started until its exit code has been read.
+            # A caller that still has the program's record to wait for keeps the hold itself.
+            $st.ElevatedStarted = $true
             Wait-WithSpinner $result
             $code = [int]$result.ExitCode
             if (-not $KeepHold) { $st.NoRestart = $false }
             return $code
         }
+        $st.NoRestart = $false
         Write-Line 'Installing...'
         return [int]$result.ExitCode
+    }
+
+    # What to tell a person whose setup was left running: a second run of this line on an install that is current starts
+    # nothing, and the Start menu shortcut is written by Earshot itself the first time it runs.
+    function Get-StartAdvice {
+        $where = ''
+        if ($null -ne $st.Paths) { $where = ' or open ' + (Join-Path $st.Paths.Install 'Earshot.exe') }
+        return ('If Earshot has not started once setup has finished, start it from the Start menu' + $where + '.')
     }
 
     # The wait is a loop of short waits, so a Ctrl+C is heard within a moment whether or not the output is a console.
@@ -759,7 +780,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
             if ($code -eq 27) {
                 # The install it started was left running; a program started now could be half replaced.
                 $st.NoRestart = $true
-                Stop-Run 'Setup was still running when this script stopped waiting for it. It was left to finish. Run this line again in a few minutes to see where it got to.'
+                Stop-Run ('Setup was still running when this script stopped waiting for it. It was left to finish. ' + (Get-StartAdvice))
             }
             if ($code -ne 0) { Stop-Run ('Setup did not finish (' + (Get-ExitCodeMeaning $code) + ', code ' + $code + ').') }
             $st.Succeeded = $true
@@ -930,10 +951,16 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         # reaching the catch above (a pipeline stop is not caught) but does run this. A run that reached its own end has
         # started whatever it meant to start.
         if (-not $reachedTheEnd) {
-            # A stop that was not reported (Ctrl+C) while the elevated program works leaves it working: say so.
+            # A stop that was not reported (Ctrl+C) while the elevated program works leaves it working: say so. One that came
+            # while the prompt was still shown may have left nothing running, or may be followed by an approval: say that.
             if (-not $reported -and $st.NoRestart) {
                 if (-not $st.Redirected) { [Console]::Write("`r" + (' ' * 20) + "`r") }
-                Write-Line 'Setup is still running and was left to finish. Earshot was not started, because its files may be half replaced. Run this line again in a few minutes to see where it got to.'
+                if ($st.ElevatedStarted) {
+                    Write-Line ('Setup is still running and was left to finish. Earshot was not started, because its files may be half replaced. ' + (Get-StartAdvice))
+                }
+                else {
+                    Write-Line ('Ctrl+C came while Windows was asking for administrator approval. Earshot was not started, because setup may still be approved and run. ' + (Get-StartAdvice))
+                }
             }
             try { Restart-ClosedTrays }
             catch { Write-Line ('Earshot could not be started again: ' + $_.Exception.Message) }

@@ -237,12 +237,12 @@ public sealed class InstallerScriptStopTests
     [DataRow(ShellKind.WindowsPowerShell, "uninstall-fails", "Earshot: stopped. Uninstall did not finish (a step of setup failed, code 3).", true)]
     [DataRow(ShellKind.WindowsPowerShell, "elevation-throws", "Earshot: stopped. Something went wrong: the prompt could not be shown", true)]
     [DataRow(ShellKind.WindowsPowerShell, "tray-program-gone", "Earshot: stopped. Setup did not finish (a step of setup failed, code 3).", false)]
-    [DataRow(ShellKind.WindowsPowerShell, "install-still-running", "Earshot: stopped. Setup was still running when this script stopped waiting for it. It was left to finish. Run this line again in a few minutes to see where it got to.", false)]
+    [DataRow(ShellKind.WindowsPowerShell, "install-still-running", "Earshot: stopped. Setup was still running when this script stopped waiting for it. It was left to finish. If Earshot has not started once setup has finished, start it from the Start menu or open {exe}.", false)]
     [DataRow(ShellKind.WindowsPowerShell, "update-still-running", "Earshot: stopped. The update was still running when this script stopped waiting for it. Earshot will say how it went when it starts.", false)]
     [DataRow(ShellKind.PowerShell7, "install-fails", "Earshot: stopped. Setup did not finish (a step of setup failed, code 3).", true)]
     [DataRow(ShellKind.PowerShell7, "update-refused", "Earshot: stopped. the update could not be checked. (update-verify-zip)", true)]
     [DataRow(ShellKind.PowerShell7, "uninstall-fails", "Earshot: stopped. Uninstall did not finish (a step of setup failed, code 3).", true)]
-    [DataRow(ShellKind.PowerShell7, "install-still-running", "Earshot: stopped. Setup was still running when this script stopped waiting for it. It was left to finish. Run this line again in a few minutes to see where it got to.", false)]
+    [DataRow(ShellKind.PowerShell7, "install-still-running", "Earshot: stopped. Setup was still running when this script stopped waiting for it. It was left to finish. If Earshot has not started once setup has finished, start it from the Start menu or open {exe}.", false)]
     public void ARunThatStopsAfterItClosedTheTrayStartsItAgainUnlessSetupMayStillBeWorkingOrTheProgramIsGone(ShellKind shell, string scenario, string expectedFinal, bool started)
     {
         using var world = new InstallerWorld();
@@ -297,7 +297,7 @@ public sealed class InstallerScriptStopTests
 
         InstallerRun run = world.Run(shell);
 
-        Assert.AreEqual(expectedFinal, run.Final, run.Describe());
+        Assert.AreEqual(expectedFinal.Replace("{exe}", world.InstalledExe, StringComparison.Ordinal), run.Final, run.Describe());
         CollectionAssert.AreEqual(ClosedFirst, run.CallsNamed("ExitTray"), "The tray was closed first.");
         if (started)
         {
@@ -374,6 +374,9 @@ public sealed class InstallerScriptStopTests
             Assert.IsTrue(run.Lines.Any(l => l[(l.LastIndexOf('\r') + 1)..].StartsWith("Setup is still running", StringComparison.Ordinal)), run.Describe());
             Assert.IsFalse(run.Lines.Any(l => l.StartsWith("Earshot: done.", StringComparison.Ordinal)), "A run that was stopped is not a finished one.");
             Assert.IsFalse(run.Lines.Contains("Earshot was started again."), run.Describe());
+            // Running the line again on an install that is current starts nothing, so the person is told to start it.
+            Assert.IsFalse(run.Out.Contains("Run this line again", StringComparison.Ordinal), "A second run does not start Earshot on a current install." + Environment.NewLine + run.Describe());
+            Assert.IsTrue(run.Out.Contains("start it from the Start menu or open " + world.InstalledExe + ".", StringComparison.Ordinal), run.Describe());
         }
         finally
         {
@@ -382,6 +385,30 @@ public sealed class InstallerScriptStopTests
                 EndStandIn(run);
             }
         }
+    }
+
+    // The prompt for administrator approval is open: the call that shows it has been made and has not returned. Approving it
+    // would start the program, so a stop here must not start the tray over an install that may be about to begin.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void CtrlCWhileTheAdministratorPromptIsStillShownDoesNotStartTheTray(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.PlaceProgramFile();
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.ElevateBody = "Start-Sleep -Seconds 60";
+        world.Spec.StopAfterCall = "Elevate|";
+        world.Spec.StopDelaySeconds = 1.5;
+
+        InstallerRun run = world.Run(shell);
+
+        CollectionAssert.AreEqual(ClosedFirst, run.CallsNamed("ExitTray"), run.Describe());
+        Assert.IsEmpty(run.CallsNamed("StartTray"), "Approval given after the stop starts the program, and a tray started now would run over it." + Environment.NewLine + run.Describe());
+        Assert.IsFalse(run.Lines.Contains("Earshot was started again."), run.Describe());
+        Assert.IsTrue(run.Lines.Any(l => l.StartsWith("Ctrl+C came while Windows was asking for administrator approval.", StringComparison.Ordinal)), run.Describe());
+        Assert.IsTrue(run.Out.Contains("start it from the Start menu or open " + world.InstalledExe + ".", StringComparison.Ordinal), run.Describe());
+        Assert.IsFalse(run.Lines.Any(l => l.StartsWith("Earshot: done.", StringComparison.Ordinal)), "A run that was stopped is not a finished one.");
     }
 
     // The same stop while the script waits for the update's record, after the elevated program handed over and exited.
