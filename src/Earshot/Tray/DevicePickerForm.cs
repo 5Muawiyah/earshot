@@ -1,4 +1,6 @@
 using Earshot.Contracts;
+using Earshot.Interop;
+using Earshot.Widget;
 
 namespace Earshot.Tray;
 
@@ -31,6 +33,11 @@ internal sealed class DevicePickerForm : Form
     private readonly Label _hint;
     private readonly Button _ok;
     private IReadOnlyList<PairedDevice> _devices = [];
+    private TableLayoutPanel? _listLayout;
+    private bool _listKeyboardCue;
+
+    // Room round the list for the focus visual, in pixels at 96 dpi: the visual reaches 4 px beyond a control.
+    private const int FocusVisualMarginAt96 = 4;
 
     public DevicePickerForm(string currentMatch, Guid pinnedContainer)
     {
@@ -48,7 +55,7 @@ internal sealed class DevicePickerForm : Form
         MinimumSize = new Size(360, 260);
         Padding = new Padding(12);
 
-        _list = new ListView
+        _list = new QuietFocusListView
         {
             Dock = DockStyle.Fill,
             View = View.Details,
@@ -61,6 +68,14 @@ internal sealed class DevicePickerForm : Form
         _list.Columns.Add(AddressColumn, 140);
         _list.SelectedIndexChanged += (_, _) => OnSelectionChanged();
         _list.DoubleClick += (_, _) => AcceptIfReady();
+
+        // The list shows its keyboard position with the selected row's highlight, and the form draws the Windows 11
+        // focus visual round the whole list while the keyboard is in use there. The margin leaves room for it.
+        _list.Margin = new Padding(FocusVisualMarginAt96);
+        _list.KeyDown += (_, _) => SetListKeyboardCue(true);
+        _list.MouseDown += (_, _) => SetListKeyboardCue(false);
+        _list.GotFocus += (_, _) => _listLayout?.Invalidate();
+        _list.LostFocus += (_, _) => _listLayout?.Invalidate();
 
         var matchLabel = new Label
         {
@@ -85,8 +100,8 @@ internal sealed class DevicePickerForm : Form
             Margin = new Padding(0, 4, 0, 0),
         };
 
-        _ok = new Button { Text = OkText, DialogResult = DialogResult.OK, AutoSize = true, Enabled = false };
-        var cancel = new Button { Text = CancelText, DialogResult = DialogResult.Cancel, AutoSize = true };
+        _ok = new FluentButton { Text = OkText, DialogResult = DialogResult.OK, AutoSize = true, Enabled = false };
+        var cancel = new FluentButton { Text = CancelText, DialogResult = DialogResult.Cancel, AutoSize = true };
 
         var buttons = new FlowLayoutPanel
         {
@@ -118,10 +133,36 @@ internal sealed class DevicePickerForm : Form
         layout.Controls.Add(_hint, 1, 2);
         layout.Controls.Add(buttons, 0, 3);
         layout.SetColumnSpan(buttons, 2);
+        layout.Paint += (_, e) => PaintListFocus(e.Graphics);
+        _listLayout = layout;
         Controls.Add(layout);
 
         AcceptButton = _ok;
         CancelButton = cancel;
+    }
+
+    private void SetListKeyboardCue(bool on)
+    {
+        if (_listKeyboardCue != on)
+        {
+            _listKeyboardCue = on;
+            _listLayout?.Invalidate();
+        }
+    }
+
+    // True while the focus visual round the list shows: the list has the focus and the keyboard is the way it
+    // is being used. For tests.
+    internal bool ListFocusVisualShowing => _list.Focused && _listKeyboardCue;
+
+    private void PaintListFocus(Graphics g)
+    {
+        if (!ListFocusVisualShowing)
+        {
+            return;
+        }
+
+        int dpi = DeviceDpi;
+        FocusVisual.Draw(g, _list.Bounds, 0, dpi, FocusPalette.For(dark: false, SystemInformation.HighContrast));
     }
 
     // Formats a 12-hex address as pairs, for example 0A:1B:2C:3D:4E:8C.
@@ -247,5 +288,39 @@ internal sealed class DevicePickerForm : Form
             DialogResult = DialogResult.OK;
             Close();
         }
+    }
+}
+
+// A list view that never draws its dotted item focus rectangle. UISF_HIDEFOCUS on the control stops it, and
+// Windows clears that flag whenever the keyboard is used, so the clear is taken out of the update message before
+// the control sees it.
+// https://learn.microsoft.com/en-us/windows/win32/menurc/wm-changeuistate
+// https://learn.microsoft.com/en-us/windows/win32/menurc/wm-updateuistate
+internal sealed class QuietFocusListView : ListView
+{
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Message set = Message.Create(Handle, NativeMethods.WM_CHANGEUISTATE, (nint)((NativeMethods.UISF_HIDEFOCUS << 16) | NativeMethods.UIS_SET), 0);
+        WndProc(ref set);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg is NativeMethods.WM_UPDATEUISTATE or NativeMethods.WM_CHANGEUISTATE
+            && ((int)m.WParam & 0xFFFF) == NativeMethods.UIS_CLEAR)
+        {
+            int flags = (int)m.WParam >> 16 & 0xFFFF;
+            flags &= ~NativeMethods.UISF_HIDEFOCUS;
+            if (flags == 0)
+            {
+                m.Result = 0;
+                return;
+            }
+
+            m.WParam = (nint)((flags << 16) | NativeMethods.UIS_CLEAR);
+        }
+
+        base.WndProc(ref m);
     }
 }

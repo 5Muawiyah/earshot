@@ -256,4 +256,24 @@ internal static partial class NativeMethods
     [LibraryImport(User32, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool UnregisterHotKey(nint hWnd, int id);
+
+    // UI state messages. A window that must never draw its own focus rectangle sets UISF_HIDEFOCUS on itself;
+    // Windows clears it again whenever the keyboard is used, so such a window also swallows the clear.
+    // https://learn.microsoft.com/en-us/windows/win32/menurc/wm-changeuistate
+    // https://learn.microsoft.com/en-us/windows/win32/menurc/wm-updateuistate
+    // https://learn.microsoft.com/en-us/windows/win32/menurc/wm-queryuistate
+    internal const int WM_UPDATEUISTATE = 0x0128;
+    internal const int WM_QUERYUISTATE = 0x0129;
+    internal const int WM_CHANGEUISTATE = 0x0127;
+    internal const int UIS_SET = 1;
+    internal const int UIS_CLEAR = 2;
+    internal const int UISF_HIDEFOCUS = 0x1;
+
+    // GetGlyphIndices with GGI_MARK_NONEXISTING_GLYPHS: a character the font has no glyph for gets index
+    // 0xFFFF instead of the default glyph.
+    // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-getglyphindicesw
+    internal const uint GGI_MARK_NONEXISTING_GLYPHS = 0x0001;
+
+    [LibraryImport("gdi32.dll", EntryPoint = "GetGlyphIndicesW", StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial uint GetGlyphIndices(nint hdc, string text, int count, out ushort indices, uint flags);
 }

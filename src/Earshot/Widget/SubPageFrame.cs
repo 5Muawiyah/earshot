@@ -93,7 +93,7 @@ internal static class SubPageFrame
 
         if (backFocused)
         {
-            CardPaint.FocusRectangle(g, layout.Back, colours.Text);
+            CardPaint.Focus(g, layout.Back, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, dpi), colours, dpi);
         }
 
         CardPaint.BackArrow(g, layout.Back, colours.Text, dpi);
@@ -140,7 +140,7 @@ internal static class SubPageFrame
 // text vanishes on the translucent backdrop), pixel sizes scaled from the design's 96 DPI values.
 internal enum GlyphKind { Minus, Plus, Cross }
 
-internal static class CardPaint
+internal static partial class CardPaint
 {
     public static void Text(
         Graphics g, string text, Rectangle bounds, string fontFamily, int pixelSize, bool bold, Color colour, StringAlignment horizontal, StringAlignment vertical)
@@ -204,7 +204,7 @@ internal static class CardPaint
         Text(g, label, rect, fontFamily, Scale(14, dpi), bold: false, primary ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
-            FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
+            Focus(g, rect, radius, colours, dpi);
         }
     }
 
@@ -227,14 +227,16 @@ internal static class CardPaint
         Text(g, label, rect, fontFamily, Scale(12, dpi), bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
-            FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
+            Focus(g, rect, radius, colours, dpi);
         }
     }
 
-    public static void FocusRectangle(Graphics g, Rectangle rect, Color colour)
+    // The Windows 11 focus visual round a control, in the theme's own colours. Callers draw it only for keyboard
+    // focus (KeyboardFocusCue); radius is the control's own corner radius.
+    public static void Focus(Graphics g, Rectangle control, int radius, CardColours colours, int dpi)
     {
-        using var pen = new Pen(colour) { DashStyle = DashStyle.Dot };
-        g.DrawRectangle(pen, Rectangle.Inflate(rect, -1, -1));
+        ArgumentNullException.ThrowIfNull(colours);
+        FocusVisual.Draw(g, control, radius, dpi, colours.Focus);
     }
 
     // The arrow of the back button, a 16 px line icon with a 1.2 px stroke and round caps.
@@ -426,7 +428,7 @@ internal static class CardPaint
         Text(g, label, rect, fontFamily, Scale(12, dpi), bold: false, selected ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
-            FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
+            Focus(g, rect, radius, colours, dpi);
         }
     }
 
@@ -451,7 +453,7 @@ internal static class CardPaint
         Glyph10(g, rect, kind, Color.FromArgb(alpha, bordered ? colours.Text : colours.TextSecondary), dpi);
         if (focused)
         {
-            FocusRectangle(g, Rectangle.Inflate(rect, Scale(2, dpi), Scale(2, dpi)), colours.Text);
+            Focus(g, rect, radius, colours, dpi);
         }
     }
 

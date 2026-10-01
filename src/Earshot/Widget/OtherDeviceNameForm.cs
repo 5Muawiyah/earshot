@@ -58,8 +58,8 @@ internal sealed class OtherDeviceNameForm : Form
             MaxLength = WidgetSettings.MaxOtherDeviceLabelLength,
         };
 
-        var ok = new Button { Text = OkText, DialogResult = DialogResult.OK, AutoSize = true };
-        var cancel = new Button { Text = CancelText, DialogResult = DialogResult.Cancel, AutoSize = true };
+        var ok = new FluentButton { Text = OkText, DialogResult = DialogResult.OK, AutoSize = true };
+        var cancel = new FluentButton { Text = CancelText, DialogResult = DialogResult.Cancel, AutoSize = true };
 
         var buttons = new FlowLayoutPanel
         {

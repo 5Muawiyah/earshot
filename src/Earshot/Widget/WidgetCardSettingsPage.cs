@@ -222,6 +222,7 @@ internal sealed partial class WidgetCard
     // the focus, Enter and Space use what has it, Up and Down step the low battery value, and Escape goes back.
     internal void HandleSettingsKey(Keys keyData)
     {
+        NoteKeyForFocusCue(keyData);
         Keys key = keyData & Keys.KeyCode;
         bool ctrl = (keyData & Keys.Control) != 0;
         bool alt = (keyData & Keys.Alt) != 0;
@@ -455,7 +456,7 @@ internal sealed partial class WidgetCard
     private void DrawSettings(Graphics g, CardSettingsValues values, SettingsLayout layout)
     {
         CardColours colours = Colours;
-        bool focusVisible = ContainsFocus;
+        bool focusVisible = FocusShown;
         SettingsTarget focus = _settingsFocus;
         int fourteen = CardPlacement.Scale(14, _dpi);
         int twelve = CardPlacement.Scale(12, _dpi);
@@ -516,7 +517,7 @@ internal sealed partial class WidgetCard
                     CardPaint.Toggle(g, item.A, ToggleValue(values, item.Row), colours, _dpi);
                     if (Focused(item.Row, SettingsPart.Toggle))
                     {
-                        CardPaint.FocusRectangle(g, Rectangle.Inflate(item.A, CardPlacement.Scale(2, _dpi), CardPlacement.Scale(2, _dpi)), colours.Text);
+                        CardPaint.Focus(g, item.A, item.A.Height / 2, colours, _dpi);
                     }
 
                     break;
@@ -558,7 +559,7 @@ internal sealed partial class WidgetCard
         }
         else if (focused)
         {
-            CardPaint.FocusRectangle(g, Rectangle.Inflate(rect, CardPlacement.Scale(2, _dpi), CardPlacement.Scale(2, _dpi)), colours.Text);
+            CardPaint.Focus(g, rect, radius, colours, _dpi);
         }
     }
 
@@ -593,7 +594,7 @@ internal sealed partial class WidgetCard
         CardPaint.Text(g, text, textRect, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, ink, StringAlignment.Near, StringAlignment.Center);
         if (focusVisible && focus == new SettingsTarget(item.Row, SettingsPart.Shortcut))
         {
-            CardPaint.FocusRectangle(g, Rectangle.Inflate(item.A, CardPlacement.Scale(2, _dpi), CardPlacement.Scale(2, _dpi)), colours.Text);
+            CardPaint.Focus(g, item.A, radius, colours, _dpi);
         }
 
         CardPaint.IconButton(g, item.B, GlyphKind.Cross, enabled: !empty && !waiting, colours, _dpi, focusVisible && focus == new SettingsTarget(item.Row, SettingsPart.Clear), bordered: false);

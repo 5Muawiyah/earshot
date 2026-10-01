@@ -134,8 +134,11 @@ internal sealed class WidgetCardPresenter : IDisposable
     // click-anchor rule the tray's other cards use. A click within SystemInformation.DoubleClickTime of the
     // card's last close-through-deactivation is the second half of that gesture: it closes, it does not
     // reopen.
-    public void RequestShow(Rectangle? gaugeBounds, Point fallbackPoint) =>
-        _uiPost(() => RequestShowOnUiThread(gaugeBounds, fallbackPoint));
+    //
+    // openedByKeyboard is true when the open came from the keyboard, so the focus visual shows from the start;
+    // a click opens the card with none.
+    public void RequestShow(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false) =>
+        _uiPost(() => RequestShowOnUiThread(gaugeBounds, fallbackPoint, openedByKeyboard));
 
     // Opens the card at the first set-up page (or switches an open card to it) and starts listening. From the
     // tray menu's "Set up battery", placed the same way a gauge click places the card.
@@ -178,7 +181,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         }
     }
 
-    private void RequestShowOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint)
+    private void RequestShowOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard)
     {
         if (_disposed)
         {
@@ -221,7 +224,7 @@ internal sealed class WidgetCardPresenter : IDisposable
             return;
         }
 
-        ShowAt(gaugeBounds, fallbackPoint);
+        ShowAt(gaugeBounds, fallbackPoint, openedByKeyboard);
     }
 
     private void RequestSetupOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint)
@@ -267,7 +270,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         SyncSpinner();
     }
 
-    private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint)
+    private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false)
     {
         Rectangle anchor = gaugeBounds ?? new Rectangle(fallbackPoint, Size.Empty);
         _place = CardPlace.AtClick(gaugeBounds is { } gauge ? new Point(gauge.X + (gauge.Width / 2), gauge.Y) : fallbackPoint);
@@ -276,6 +279,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
         card.Render(BuildModel(), _callbacks.Dpi());
         card.Bounds = PlaceAbove(card, anchor);
+        card.ResetFocusCue(openedByKeyboard);
         card.Show();
         card.Activate();
         StartRefreshTimer();

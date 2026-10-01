@@ -493,12 +493,13 @@ internal sealed partial class WidgetCard : Form
         ArgumentNullException.ThrowIfNull(e);
         if (_notice)
         {
-            // No focus, no focus rectangle, keyboard does nothing: a notice-mode card is never activated
+            // No focus, no focus visual, keyboard does nothing: a notice-mode card is never activated
             // (WS_EX_NOACTIVATE), so it should never receive a key in practice; this guard makes that true
             // even if a key event ever reached it regardless.
             return;
         }
 
+        NoteKeyForFocusCue(e.KeyData);
         if (OnSettingsPage)
         {
             HandleSettingsKey(e.KeyData);
@@ -542,6 +543,7 @@ internal sealed partial class WidgetCard : Form
     {
         base.OnMouseDown(e);
         ArgumentNullException.ThrowIfNull(e);
+        NoteMouseForFocusCue();
         if (OnSettingsPage)
         {
             SettingsMouseDown(e);
@@ -717,9 +719,9 @@ internal sealed partial class WidgetCard : Form
         }
 
         CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
-        if (_focus == WidgetCardFocus.Gear && ContainsFocus)
+        if (_focus == WidgetCardFocus.Gear && FocusShown)
         {
-            CardPaint.FocusRectangle(g, layout.Gear, colours.Text);
+            CardPaint.Focus(g, layout.Gear, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
         }
     }
 
@@ -732,7 +734,7 @@ internal sealed partial class WidgetCard : Form
         CardPaint.Text(
             g, WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption, _fontFamily,
             CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
-        CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _fontFamily, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && ContainsFocus);
+        CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _fontFamily, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && FocusShown);
     }
 
     // Cycles Button, Switch (when shown), SetupButton (when shown), UpdateButton (when shown), Gear (when the view
@@ -1099,9 +1101,9 @@ internal sealed partial class WidgetCard : Form
             g.DrawString(connect ? WidgetCopy.Connect : WidgetCopy.Disconnect, font, textBrush, rect, format);
         }
 
-        if (!_notice && _focus == WidgetCardFocus.Button && ContainsFocus)
+        if (!_notice && _focus == WidgetCardFocus.Button && FocusShown)
         {
-            DrawFocusRectangle(g, rect);
+            CardPaint.Focus(g, rect, rect.Height / 2, Colours, _dpi);
         }
     }
 
@@ -1118,9 +1120,9 @@ internal sealed partial class WidgetCard : Form
         var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
         CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi);
 
-        if (!_notice && _focus == WidgetCardFocus.Switch && ContainsFocus)
+        if (!_notice && _focus == WidgetCardFocus.Switch && FocusShown)
         {
-            DrawFocusRectangle(g, rect);
+            CardPaint.Focus(g, rect, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
         }
     }
 
@@ -1133,7 +1135,7 @@ internal sealed partial class WidgetCard : Form
             DrawLine(g, layout.SetupCaption, WidgetCopy.SetupCannotReadYet, _palette.Status);
         }
 
-        bool focused = !_notice && _focus == WidgetCardFocus.SetupButton && ContainsFocus;
+        bool focused = !_notice && _focus == WidgetCardFocus.SetupButton && FocusShown;
         CardPaint.Button(g, layout.SetupButton, SetupButtonLabel, primary: true, Colours, _fontFamily, _dpi, focused);
     }
 
@@ -1213,6 +1215,7 @@ internal sealed partial class WidgetCard : Form
     // Escape is Back.
     internal void HandleSetupKey(Keys key, bool shift = false)
     {
+        NoteKeyForFocusCue(key);
         List<SetupTarget> targets = SetupTargets();
         int index = -1;
         for (int i = 0; i < targets.Count; i++)
@@ -1340,7 +1343,7 @@ internal sealed partial class WidgetCard : Form
     private void DrawSetup(Graphics g, SetupViewModel setup, WidgetCardLayout.SetupLayout layout)
     {
         CardColours colours = Colours;
-        bool focusVisible = ContainsFocus;
+        bool focusVisible = FocusShown;
         SetupTarget focus = _setupFocus;
 
         SubPageFrame.DrawHeader(g, layout.Frame, setup.Title, setup.Step, colours, _fontFamily, _dpi, backFocused: focusVisible && focus.Kind == SetupTargetKind.Back);
@@ -1445,13 +1448,13 @@ internal sealed partial class WidgetCard : Form
             switch (f.Kind)
             {
                 case SetupTargetKind.Up:
-                    CardPaint.FocusRectangle(g, picker.Up, colours.Text);
+                    CardPaint.Focus(g, picker.Up, radius, colours, _dpi);
                     break;
                 case SetupTargetKind.Down:
-                    CardPaint.FocusRectangle(g, picker.Down, colours.Text);
+                    CardPaint.Focus(g, picker.Down, radius, colours, _dpi);
                     break;
                 case SetupTargetKind.Charging:
-                    CardPaint.FocusRectangle(g, Rectangle.Union(picker.ChargingLabel, picker.Toggle), colours.Text);
+                    CardPaint.Focus(g, Rectangle.Union(picker.ChargingLabel, picker.Toggle), radius, colours, _dpi);
                     break;
             }
         }
@@ -1478,12 +1481,5 @@ internal sealed partial class WidgetCard : Form
 
         using var percentBrush = new SolidBrush(colours.Text);
         g.DrawString("%", small, percentBrush, new RectangleF(x + 1, bounds.Y + (bounds.Height * 0.12f), percentWidth + 2, bounds.Height), format);
-    }
-
-    private void DrawFocusRectangle(Graphics g, Rectangle rect)
-    {
-        using var pen = new Pen(_palette.Title) { DashStyle = DashStyle.Dot };
-        Rectangle inset = Rectangle.Inflate(rect, -1, -1);
-        g.DrawRectangle(pen, inset);
     }
 }

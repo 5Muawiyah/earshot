@@ -46,8 +46,12 @@ internal sealed record CardColours(
     Color ControlFill,
     Color ControlStroke,
     Color SubtleHover,
-    bool HighContrast)
+    bool HighContrast,
+    bool Dark = false)
 {
+    // The focus visual's colours for this theme.
+    public FocusPalette Focus => FocusPalette.For(Dark, HighContrast);
+
     public static CardColours For(bool dark, CardPalette palette, Color accent)
     {
         ArgumentNullException.ThrowIfNull(palette);
@@ -55,7 +59,7 @@ internal sealed record CardColours(
         {
             return new CardColours(
                 palette.Title, palette.Status, palette.Status, SystemColors.Highlight, SystemColors.HighlightText, palette.Title, palette.Background,
-                palette.Border, palette.Border, palette.Background, palette.Border, palette.Border, HighContrast: true);
+                palette.Border, palette.Border, palette.Background, palette.Border, palette.Border, HighContrast: true, Dark: false);
         }
 
         Color onAccent = accent.GetBrightness() > 0.55f ? Color.Black : Color.White;
@@ -63,7 +67,7 @@ internal sealed record CardColours(
             ? new CardColours(
                 Color.FromArgb(0xFF, 0xFF, 0xFF), Color.FromArgb(0xC8, 0xC8, 0xC8), Color.FromArgb(0x9D, 0x9D, 0x9D), accent, onAccent, Color.FromArgb(0xFC, 0xE1, 0x00),
                 Color.FromArgb(0x20, 0x20, 0x20), Color.FromArgb(15, 255, 255, 255), Color.FromArgb(41, 255, 255, 255),
-                Color.FromArgb(15, 255, 255, 255), Color.FromArgb(23, 255, 255, 255), Color.FromArgb(31, 128, 128, 128), HighContrast: false)
+                Color.FromArgb(15, 255, 255, 255), Color.FromArgb(23, 255, 255, 255), Color.FromArgb(31, 128, 128, 128), HighContrast: false, Dark: true)
             : new CardColours(
                 Color.FromArgb(0x1B, 0x1B, 0x1B), Color.FromArgb(0x5D, 0x5D, 0x5D), Color.FromArgb(0x70, 0x70, 0x70), accent, onAccent, Color.FromArgb(0x9D, 0x5D, 0x00),
                 Color.FromArgb(0xF3, 0xF3, 0xF3), Color.FromArgb(15, 0, 0, 0), Color.FromArgb(36, 0, 0, 0),
