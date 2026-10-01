@@ -63,6 +63,7 @@ internal static class MenuModel
     public const string HandBackOnShutdownAndSleep = "Hand back on shut down, sleep and Exit";
     public const string ProtectAudioQuality = "Protect audio quality";
     public const string ProtectCaveat = "Turns off the AirPods microphone";
+    public const string ProtectCaveatMicrophoneOffMode = "Microphone off mode";
     public const string OpenOnStartup = "Open on startup";
     // Kept exactly as AnnouncerCopy has it, referenced rather than duplicated: AnnouncerCopy is where
     // every string a person hears or reads about VoiceOver lives.
@@ -133,7 +134,8 @@ internal static class MenuModel
                 Enabled: !busy,
                 Visible: true,
                 Indeterminate: ProtectionDisagrees(settings.ProtectAudioQuality, protection)),
-            ProtectCaveat: new MenuItemState(ProtectCaveat, Checked: false, Enabled: false, Visible: true),
+            // While the "microphone off" mode is on, protection is off and the line says which mode the AirPods are in.
+            ProtectCaveat: new MenuItemState(settings.HandsFreeMicrophoneOffMode ? ProtectCaveatMicrophoneOffMode : ProtectCaveat, Checked: false, Enabled: false, Visible: true),
             OpenOnStartup: new MenuItemState(OpenOnStartup, Checked: startup == StartupState.On, Enabled: !busy, Visible: true),
             SpeakStatus: new MenuItemState(
                 voiceKnownMissing ? SpeakStatusNoVoice : SpeakStatusText,

@@ -1,4 +1,5 @@
 using Earshot.App;
+using Earshot.Contracts;
 using Earshot.Popup;
 
 namespace Earshot.Widget;
@@ -38,6 +39,12 @@ internal sealed record CardSettingsValues(
 
     public GaugeContent? GaugePreview { get; init; }
 
+    // The "microphone off" Hands-Free mode as saved, and where the AirPods' Hands-Free microphone stands in Windows, which
+    // decides the line under the row and whether the row offers to open sound settings. Init-only for the same reason.
+    public bool HandsFreeMicrophoneOff { get; init; }
+
+    public MicrophoneRowState MicrophoneState { get; init; } = MicrophoneRowState.OpenSettings;
+
     // Why Check for updates and Repair do nothing now (a setup, repair or update is running), or null. The rows say it in place
     // of their usual line, and the tray refuses the buttons with the same words.
     public string? ElevatedRunNote { get; init; }
@@ -72,6 +79,12 @@ internal interface IWidgetCardHost
     void SetLeftClickConnects(bool on, CardPlace place);
 
     void SetHandBack(bool on, CardPlace place);
+
+    // The "microphone off" mode: on turns Protect audio quality off through the menu item's own path, off turns it back on.
+    void SetHandsFreeMicrophoneOff(bool on, CardPlace place);
+
+    // Opens Windows' sound settings at the AirPods' microphone. Opens a page and changes nothing.
+    void OpenSoundSettings(CardPlace place);
 
     void SetCheckAutomatically(bool on, CardPlace place);
 
@@ -129,6 +142,8 @@ internal enum SettingsRowId
     CheckForUpdates,
     Repair,
     CheckAutomatically,
+    MicrophoneOff,
+    SoundSettings,
 }
 
 internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button, Choice, Tile }
@@ -169,6 +184,8 @@ internal sealed record ShortcutClear(CardShortcut Shortcut) : SettingChange;
 internal sealed record CheckRequest : SettingChange;
 
 internal sealed record RepairRequest : SettingChange;
+
+internal sealed record OpenSoundSettingsRequest : SettingChange;
 
 // How wide a run of text is and how many lines it wraps to, so the layout can size rows without drawing. The
 // card's own is measured with GDI+ in the card's font; a test hands in the same over an off-screen bitmap.
@@ -430,6 +447,27 @@ internal static class SettingsPageLayout
 
         ToggleRow(SettingsRowId.LeftClick, WidgetCopy.SettingsLeftClick, null);
         ToggleRow(SettingsRowId.HandBack, WidgetCopy.SettingsHandBack, null);
+
+        // The Hands-Free "microphone off" mode. While it is on the row says what to do next in one line under it, and a
+        // second row opens sound settings, unless Windows already lists the microphone as disabled.
+        string? micNote = !values.HandsFreeMicrophoneOff ? null : values.MicrophoneState switch
+        {
+            MicrophoneRowState.ConnectFirst => WidgetCopy.MicConnectFirst,
+            MicrophoneRowState.OffInWindows => WidgetCopy.MicOffInWindows,
+            _ => WidgetCopy.MicGuidance,
+        };
+        Row(
+            SettingsRowId.MicrophoneOff, WidgetCopy.SettingsMicOff, micNote, subIsProblem: false, subFullWidth: true, toggleW,
+            (_, mid) => (new Rectangle(right - toggleW, mid - (toggleH / 2), toggleW, toggleH), Rectangle.Empty, Rectangle.Empty),
+            SettingsPart.Toggle);
+        if (values.HandsFreeMicrophoneOff && values.MicrophoneState != MicrophoneRowState.OffInWindows)
+        {
+            int openW = measure.Width(WidgetCopy.OpenButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+            Row(
+                SettingsRowId.SoundSettings, WidgetCopy.SettingsSoundSettings, null, subIsProblem: false, subFullWidth: false, openW,
+                (top, _) => (new Rectangle(right - openW, top, openW, control), Rectangle.Empty, Rectangle.Empty),
+                SettingsPart.Button);
+        }
 
         void Divider()
         {

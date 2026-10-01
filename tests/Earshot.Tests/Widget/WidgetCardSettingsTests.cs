@@ -16,7 +16,7 @@ public sealed class WidgetCardSettingsTests
     private static readonly SettingsRowId[] RowOrder =
     [
         SettingsRowId.GaugePosition, SettingsRowId.GaugeDisplay, SettingsRowId.GaugeOrder, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave,
-        SettingsRowId.LowBattery, SettingsRowId.LeftClick, SettingsRowId.HandBack, SettingsRowId.Connect, SettingsRowId.Disconnect,
+        SettingsRowId.LowBattery, SettingsRowId.LeftClick, SettingsRowId.HandBack, SettingsRowId.MicrophoneOff, SettingsRowId.Connect, SettingsRowId.Disconnect,
         SettingsRowId.CheckForUpdates, SettingsRowId.CheckAutomatically,
     ];
 
@@ -37,14 +37,14 @@ public sealed class WidgetCardSettingsTests
             string[] expectedShape =
             [
                 "GaugePosition", "GaugeDisplay", "GaugeOrder", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "LeftClick", "HandBack",
-                "Divider", "Head:Shortcuts", "Connect", "Disconnect", "Divider", "Head:Updates", "CheckForUpdates", "CheckAutomatically",
+                "MicrophoneOff", "Divider", "Head:Shortcuts", "Connect", "Disconnect", "Divider", "Head:Updates", "CheckForUpdates", "CheckAutomatically",
             ];
             CollectionAssert.AreEqual(expectedShape, shape);
             string[] labels = card.CurrentSettingsLayout.Items.Where(i => i.Kind == SettingsItemKind.Row).Select(i => i.Label).ToArray();
             string[] expectedLabels =
             [
                 "Position", "Display", "Order", "Other device", "Pause on removal", "Pause on leave",
-                "Low battery", "Click connects", "Hand back", "Connect", "Disconnect",
+                "Low battery", "Click connects", "Hand back", "Microphone off", "Connect", "Disconnect",
                 "Version 1.1.0", "Auto check",
             ];
             CollectionAssert.AreEqual(expectedLabels, labels);

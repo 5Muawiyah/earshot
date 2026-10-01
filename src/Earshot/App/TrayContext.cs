@@ -39,6 +39,10 @@ internal sealed record TrayStartOptions(
 
     public Earshot.Update.IUpdateLauncher? UpdateLauncher { get; init; }
 
+    // What opens a page of Windows Settings for the "microphone off" mode's button: the real one when null (or a refusing
+    // one in safe mode and with a redirected data root), a fake in tests, so a tray-level test never opens a window.
+    public Earshot.Infra.ISettingsLauncher? SettingsLauncher { get; init; }
+
     // Where the tray reads how the last update ended, and which outcome it has already shown, or null to read
     // none: tests, safe mode and a redirected data root never look at the machine's own folder.
     public UpdateOutcomeSource? UpdateOutcome { get; init; }
@@ -529,6 +533,7 @@ internal sealed partial class TrayContext : ApplicationContext
         ApplyStreaming();
         WireWidget();
         WireUpdates(options);
+        WireSoundSettings(options);
         InitPauseOnLeave();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
@@ -2195,7 +2200,7 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         bool protect = !_registry.Settings.Current.ProtectAudioQuality;
-        if (!TryUpdateSettings("protect audio quality", s => s.ProtectAudioQuality = protect, place))
+        if (!TryUpdateSettings("protect audio quality", s => HandsFreeMicrophoneMode.ChooseProtection(s, protect), place))
         {
             return;
         }

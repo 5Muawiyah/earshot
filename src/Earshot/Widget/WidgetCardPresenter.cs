@@ -476,6 +476,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 _host.ClearShortcut(clear.Shortcut, place);
                 _shortcutNote = null;
                 break;
+            case OpenSoundSettingsRequest:
+                _host.OpenSoundSettings(place);
+                break;
             case RepairRequest:
                 // One administrator prompt, asked for by the click. The result comes back on a card of its own.
                 _host.RepairEarshot();
@@ -514,6 +517,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 break;
             case SettingsRowId.CheckAutomatically:
                 _host!.SetCheckAutomatically(toggle.On, place);
+                break;
+            case SettingsRowId.MicrophoneOff:
+                _host!.SetHandsFreeMicrophoneOff(toggle.On, place);
                 break;
         }
     }

@@ -52,7 +52,8 @@ internal sealed class UpdateTrayHarness : IDisposable
         DeviceSnapshot? snapshot = null,
         TimeSpan? elevatedExitWait = null,
         bool elevated = false,
-        TimeSpan? exitNoticeTime = null)
+        TimeSpan? exitNoticeTime = null,
+        Earshot.Infra.ISettingsLauncher? settingsLauncher = null)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
         Ui = new WindowsFormsSynchronizationContext();
@@ -123,6 +124,7 @@ internal sealed class UpdateTrayHarness : IDisposable
             GaugeCoverProbeFactory = () => new FakeCoverProbe(),
             UpdateSourceFactory = sourceFactory ?? (() => Source),
             UpdateLauncher = Launcher,
+            SettingsLauncher = settingsLauncher,
             UpdateOutcome = outcomeSource,
             ElevatedExitWait = elevatedExitWait ?? TimeSpan.FromSeconds(30),
             IsElevated = () => elevated,

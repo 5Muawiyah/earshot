@@ -23,6 +23,8 @@ internal static class SettingsRows
         SettingsRowId.CheckForUpdates => new(FluentGlyphs.Sync, WidgetCopy.TipCheckForUpdates, WidgetCopy.NameCheckForUpdates),
         SettingsRowId.Repair => new(FluentGlyphs.Repair, WidgetCopy.TipRepair, WidgetCopy.NameRepair),
         SettingsRowId.CheckAutomatically => new(FluentGlyphs.UpdateRestore, WidgetCopy.TipAutoCheck, WidgetCopy.NameAutoCheck),
+        SettingsRowId.MicrophoneOff => new(FluentGlyphs.MicOff, WidgetCopy.TipMicOff, WidgetCopy.NameMicOff),
+        SettingsRowId.SoundSettings => new(FluentGlyphs.Settings, WidgetCopy.TipSoundSettings, WidgetCopy.NameSoundSettings),
         _ => new('\0', null, null),
     };
 

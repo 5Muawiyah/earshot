@@ -192,7 +192,12 @@ internal sealed partial class WidgetCard
 
                 break;
             case SettingsPart.Button:
-                Raise(target.Row == SettingsRowId.Repair ? new RepairRequest() : new CheckRequest());
+                Raise(target.Row switch
+                {
+                    SettingsRowId.Repair => new RepairRequest(),
+                    SettingsRowId.SoundSettings => new OpenSoundSettingsRequest(),
+                    _ => new CheckRequest(),
+                });
                 break;
         }
     }
@@ -204,6 +209,7 @@ internal sealed partial class WidgetCard
         SettingsRowId.LeftClick => values.LeftClickConnects,
         SettingsRowId.HandBack => values.HandBack,
         SettingsRowId.CheckAutomatically => values.CheckAutomatically,
+        SettingsRowId.MicrophoneOff => values.HandsFreeMicrophoneOff,
         _ => false,
     };
 
@@ -557,6 +563,9 @@ internal sealed partial class WidgetCard
                     break;
                 case SettingsRowId.Repair:
                     CardPaint.SmallButton(g, item.A, WidgetCopy.RepairButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
+                    break;
+                case SettingsRowId.SoundSettings:
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.OpenButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
                     break;
                 default:
                     CardPaint.Toggle(g, item.A, ToggleValue(values, item.Row), colours, _dpi);

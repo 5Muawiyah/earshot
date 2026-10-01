@@ -67,6 +67,9 @@ internal static class WidgetCopy
     // every control has an accessible name that says the whole thing, because an icon says nothing to a screen reader.
     public const string SettingsOrder = "Order";
     public const string SettingsAutoCheck = "Auto check";
+    public const string SettingsMicOff = "Microphone off";
+    public const string SettingsSoundSettings = "Sound settings";
+    public const string OpenButton = "Open";
     public const string TipSettings = "Settings";
     public const string TipBack = "Back";
     public const string TipGaugePosition = "Where the gauge sits on the taskbar";
@@ -84,6 +87,8 @@ internal static class WidgetCopy
     public const string TipCheckForUpdates = "Check for a newer version now";
     public const string TipRepair = RepairSub;
     public const string TipAutoCheck = "Look for a newer version once a day";
+    public const string TipMicOff = "Keep the Hands-Free link up so Windows can read the battery, and turn only the AirPods microphone off in Windows' sound settings. Off by default.";
+    public const string TipSoundSettings = "Open Windows sound settings at the AirPods microphone";
     public const string NameGaugePosition = "Gauge position";
     public const string NameGaugeDisplay = "Gauge display";
     public const string NameGaugeOrder = "Gauge order";
@@ -102,6 +107,14 @@ internal static class WidgetCopy
     public const string NameCheckForUpdates = CheckForUpdates;
     public const string NameRepair = RepairEarshot;
     public const string NameAutoCheck = "Check for updates automatically";
+    public const string NameMicOff = "Microphone off mode";
+    public const string NameSoundSettings = "Open sound settings";
+
+    // The one line under the Microphone off row while the mode is on: what to do next, or that it is done.
+    public const string MicGuidance = "In Sound settings, set the AirPods microphone to Don't allow.";
+    public const string MicConnectFirst = "Connect the AirPods, then open sound settings.";
+    public const string MicOffInWindows = "Microphone is off in Windows";
+    public const string SoundSettingsNotOpened = "Couldn't open sound settings.";
 
     private const string LeftAirPodLabel = "Left AirPod";
     private const string RightAirPodLabel = "Right AirPod";

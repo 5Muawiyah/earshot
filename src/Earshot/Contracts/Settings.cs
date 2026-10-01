@@ -7,6 +7,20 @@ public sealed class EarshotSettings
     public string DeviceMatch           { get; set; } = "AirPods";  // configurable; matched OrdinalIgnoreCase
     public bool   ProtectAudioQuality   { get; set; } = true;       // owner: default ON (intent)
     public bool   ProtectAudioNoticeShown { get; set; }             // one-time mic-notice latch
+
+    // The "microphone off" Hands-Free mode, opt-in and off by default, so a file with no member reads off. It is
+    // Protect audio quality turned off plus a note that the person means to switch the AirPods' Hands-Free
+    // microphone off in Windows' own sound settings, so an app opening a microphone has nothing to switch to. It reads
+    // true only while protection is off: Protect audio quality is the full block and wins, so a hand-edited file
+    // holding both true reads the mode as off, and the next save writes it off. The member follows ProtectAudioQuality
+    // so a written file always lists the two in that order.
+    private bool _microphoneOffMode;
+
+    public bool   HandsFreeMicrophoneOffMode
+    {
+        get => _microphoneOffMode && !ProtectAudioQuality;
+        set => _microphoneOffMode = value;
+    }
     public bool   OpenOnStartup         { get; set; } = true;       // tray must run to enforce the invariant
     public Guid   PinnedContainerId     { get; set; } = Guid.Empty; // learned once from discovery
     public string PinnedAddress         { get; set; } = "";         // 12 hex uppercase, e.g. "0A1B2C3D4E8C"

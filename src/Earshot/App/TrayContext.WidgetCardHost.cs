@@ -84,6 +84,8 @@ internal sealed partial class TrayContext
                 InEarProofMissing: !snapshot.AutoPauseAvailable,
                 InstallExists: _tray.BlockStatus is { InstallExists: true })
             {
+                HandsFreeMicrophoneOff = HandsFreeMicrophoneMode.IsOn(settings),
+                MicrophoneState = HandsFreeMicrophoneMode.Describe(_tray._snapshot).State,
                 GaugeDisplayId = widget.GaugeDisplay,
                 GaugeDisplayOptions = displayOptions,
                 GaugeDisplayNote = displayNote,
@@ -145,6 +147,10 @@ internal sealed partial class TrayContext
                 _tray.MirrorHandBackSetting(on, place);
             }
         }
+
+        public void SetHandsFreeMicrophoneOff(bool on, CardPlace place) => _tray.SetHandsFreeMicrophoneOff(on, place);
+
+        public void OpenSoundSettings(CardPlace place) => _tray.OpenSoundSettings(place);
 
         public void SetCheckAutomatically(bool on, CardPlace place) =>
             Write("check for updates automatically (card)", s => s.CheckForUpdatesAutomatically = on, place);

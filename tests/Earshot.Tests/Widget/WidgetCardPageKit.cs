@@ -99,6 +99,14 @@ internal sealed class FakeCardHost : IWidgetCardHost
         Values = Values with { HandBack = on };
     }
 
+    public void SetHandsFreeMicrophoneOff(bool on, CardPlace place)
+    {
+        Calls.Add("micOff:" + on);
+        Values = Values with { HandsFreeMicrophoneOff = on };
+    }
+
+    public void OpenSoundSettings(CardPlace place) => Calls.Add("openSound");
+
     public void SetCheckAutomatically(bool on, CardPlace place)
     {
         Calls.Add("checkAuto:" + on);
