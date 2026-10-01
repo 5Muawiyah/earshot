@@ -21,6 +21,14 @@ internal sealed partial class WidgetCard
     private int _travel;
     private string? _lastMotionProblem;
 
+    // The two window calls motion makes. They are the real calls; a test replaces one to make it fail. A failed call's raw
+    // code is read from the last P/Invoke error straight after it returns false.
+    internal Func<nint, int, int, bool> MoveWindow = static (handle, x, y) =>
+        NativeMethods.SetWindowPos(handle, 0, x, y, 0, 0, NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+
+    internal Func<nint, byte, bool> SetWindowAlpha = static (handle, alpha) =>
+        NativeMethods.SetLayeredWindowAttributes(handle, 0, alpha, NativeMethods.LWA_ALPHA);
+
     // Gives the card motion. Called before the card has a window handle: the layered style is chosen when the
     // handle is created.
     internal void AttachMotion(TimeProvider time, Action<Action> uiPost, Func<bool> animationsEnabled)
@@ -38,6 +46,9 @@ internal sealed partial class WidgetCard
 
     // True from the moment the card starts to leave until it is hidden.
     internal bool IsExiting => _exiting;
+
+    // Whether the card was given motion, for tests.
+    internal bool HasMotion => _animator is not null;
 
     // Whether a motion is running, for tests.
     internal bool IsMoving => _animator?.Running ?? false;
@@ -93,7 +104,10 @@ internal sealed partial class WidgetCard
             return;
         }
 
+        // A press that began before the exit is over with it, and nothing pressed from here on is answered (OnKeyDown,
+        // OnMouseDown and OnMouseUp ask IsExiting): the card has been closed, so it must not connect or toggle anything.
         _exiting = true;
+        ClearPressedFlags();
         _animator.Exit(_rest, _travel, FinishExit);
     }
 
@@ -108,19 +122,40 @@ internal sealed partial class WidgetCard
         // Back at rest and opaque for the next show, which sets its own starting frame.
         if (IsHandleCreated)
         {
-            RestoreOpacity();
-            _ = NativeMethods.SetWindowPos(Handle, 0, _rest.X, _rest.Y, 0, 0, NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+            PutAtRestAndOpaque();
         }
 
         Hide();
     }
 
+    // The card where it rests and fully opaque. A failed call is logged with its raw code.
+    private void PutAtRestAndOpaque()
+    {
+        RestoreOpacity();
+        if (!MoveWindow(Handle, _rest.X, _rest.Y))
+        {
+            RecordMotionProblem("set-window-pos:widget-card-rest", Marshal.GetLastPInvokeError(), "the card may be left off its place");
+        }
+    }
+
+    // Makes the card opaque. A layered window whose opacity was never set is not drawn at all, so when the call fails the
+    // card gives the layered style up (the handle is made again without it) rather than stay on screen and invisible.
     private void RestoreOpacity()
     {
-        if (_layered && IsHandleCreated)
+        if (!_layered || !IsHandleCreated)
         {
-            _ = NativeMethods.SetLayeredWindowAttributes(Handle, 0, 255, NativeMethods.LWA_ALPHA);
+            return;
         }
+
+        if (SetWindowAlpha(Handle, 255))
+        {
+            return;
+        }
+
+        RecordMotionProblem("set-layered-window-attributes:widget-card-opacity", Marshal.GetLastPInvokeError(), "the card gives up its fade so that it is drawn");
+        _layered = false;
+        _motionBroken = true;
+        RecreateHandle();
     }
 
     private void StopMotion()
@@ -134,35 +169,51 @@ internal sealed partial class WidgetCard
     // good, showing and hiding at rest from then on.
     private sealed class WindowMotion(WidgetCard card) : ICardWindowMotion
     {
-        public void Apply(Rectangle rest, int offsetPx, byte alpha)
+        public bool Apply(Rectangle rest, int offsetPx, byte alpha)
         {
             if (card.IsDisposed || card._motionBroken)
             {
-                return;
+                return false;
             }
 
             nint handle = card.Handle;
-            if (!NativeMethods.SetWindowPos(handle, 0, rest.X, rest.Y + offsetPx, 0, 0, NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE))
+            if (!card.MoveWindow(handle, rest.X, rest.Y + offsetPx))
             {
                 card.GiveUpMotion("set-window-pos:widget-card-motion", Marshal.GetLastPInvokeError());
-                return;
+                return false;
             }
 
-            if (card._layered && !NativeMethods.SetLayeredWindowAttributes(handle, 0, alpha, NativeMethods.LWA_ALPHA))
+            if (card._layered && !card.SetWindowAlpha(handle, alpha))
             {
                 card.GiveUpMotion("set-layered-window-attributes:widget-card-motion", Marshal.GetLastPInvokeError());
+                return false;
             }
+
+            return true;
         }
     }
 
+    // A window call of the motion failed: the card gives up motion for good and is left where it rests and opaque, so it
+    // is shown, and hidden, like a card with no motion. Without that, a card whose fade had begun would stay on screen,
+    // active and drawn at no opacity at all.
     private void GiveUpMotion(string step, int win32Error)
     {
         _motionBroken = true;
-        string problem = TrayReport.DescribeStep(StepOutcomes.FromWin32(step, (uint)win32Error));
-        if (problem != _lastMotionProblem)
+        RecordMotionProblem(step, win32Error, "the card cannot slide in and out, so it is shown and hidden without motion");
+        if (IsHandleCreated)
         {
-            _lastMotionProblem = problem;
-            _log.Warn("The widget card cannot slide in and out, so it is shown and hidden without motion: " + problem);
+            PutAtRestAndOpaque();
+        }
+    }
+
+    private void RecordMotionProblem(string step, int win32Error, string consequence)
+    {
+        string problem = TrayReport.DescribeStep(StepOutcomes.FromWin32(step, (uint)win32Error));
+        string line = "The widget card: " + consequence + ": " + problem;
+        if (line != _lastMotionProblem)
+        {
+            _lastMotionProblem = line;
+            _log.Warn(line);
         }
     }
 }

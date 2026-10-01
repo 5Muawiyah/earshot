@@ -589,6 +589,34 @@ public sealed class UpdateActionsTests
         Assert.IsTrue(result.Steps.Any(s => s.Step == "remove-earlier-update-work" && !s.Ok), "It says to remove that one by hand.");
     }
 
+    [TestMethod]
+    public void AnEarlierWorkFolderWhoseProgramIsInUseIsNotDeletedEvenWhenItsSecurityChecksOut()
+    {
+        using var w = new World();
+        string parent = Path.GetDirectoryName(w.Install)!;
+        string running = Path.Combine(parent, "Earshot.update-cccc");
+        string app = Path.Combine(running, "app");
+        Directory.CreateDirectory(app);
+        string program = Path.Combine(app, "Earshot.exe");
+        File.WriteAllText(program, "exe 1.2.0");
+        File.WriteAllText(Path.Combine(app, "Earshot.dll"), "dll 1.2.0");
+        w.Folders.SddlFor = path => string.Equals(path, running, StringComparison.OrdinalIgnoreCase) ? UpdateActions.WorkFolderSddl : null;
+        UpdateRequest request = w.Stage(World.ReleaseFiles("1.2.0").Build());
+        w.StarterRunsTheRealInstall([]);
+
+        InstallResult result;
+        using (new FileStream(program, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // Open for reading with writing denied: what a running program's file looks like to anything that tries to write it.
+            result = w.Actions().Run(request);
+        }
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Steps(result));
+        Assert.IsTrue(File.Exists(program), "The program of an install that may be running from that folder is still there.");
+        Assert.IsTrue(File.Exists(Path.Combine(app, "Earshot.dll")), "So are the files beside it: a half-deleted folder is worse than a left one.");
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "remove-earlier-update-work" && !s.Ok && s.Detail is not null && s.Detail.Contains("in use", StringComparison.Ordinal)), Steps(result));
+    }
+
     // ----- where it runs and what it waits for -----
 
     [TestMethod]

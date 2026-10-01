@@ -294,6 +294,30 @@ public sealed class GaugeDisplayWiringTests
         });
     }
 
+    // ----- the gauge follows its order -----
+
+    [TestMethod]
+    public void TheTaskbarGaugeIsDrawnAgainWhenTheOwnerChoosesAnotherOrder()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            // The order is read by the tray's own real gauge window, so this is the one execution that builds one, on a private desktop.
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
+            var displays = new FakeDisplaySource(One);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), displaySource: displays, taskbarWatcherPollIntervalMs: 30, settings: WidgetOn());
+            tray.PumpUntilIdle();
+            tray.LastTaskbarReader!.SetNextResult(ITaskbarReader.Result.Ok(BarOn(Left1080)));
+            TrayHarness.PumpUntil(() => tray.Context.WidgetGaugeStateForTest is GaugeState.Shown, "The gauge was never shown.");
+            TrayHarness.PumpUntil(() => tray.Context.WidgetGaugePushCountForTest > 0, "The gauge never drew.");
+            int pushes = tray.Context.WidgetGaugePushCountForTest;
+
+            tray.Context.WidgetCardHostForTest.SetGaugeOrder(GaugeOrder.BoltNumberRing, CardPlace.NearTray);
+
+            TrayHarness.PumpUntil(() => tray.Context.WidgetGaugePushCountForTest > pushes, "The taskbar gauge kept drawing the old order.");
+            Assert.AreEqual(GaugeOrder.BoltNumberRing, tray.Settings.Current.Widget.GaugeOrder);
+        });
+    }
+
     // ----- the settings page follows the displays -----
 
     [TestMethod]

@@ -16,8 +16,9 @@ namespace Earshot;
 // The three values a first install needs and the install script would otherwise have to ask for (the signed-in user's SID,
 // the AirPods' address and their container), and what is installed now. Read-only: it reads the settings file, the
 // machine folder's device file (only when that folder passes the same permission check the gate applies), the paired
-// Bluetooth devices and the installed program's folder, and changes nothing. It never shows a window, takes no elevation
-// and is allowed in safe mode. The report is always JSON, whatever --json says, so the script can read the file it names.
+// Bluetooth devices and the installed program's folder, and changes nothing but its own log and the file --out names. It
+// never shows a window, takes no elevation and is allowed in safe mode. The report is always JSON, whatever --json says, so
+// the script can read the file it names.
 //
 // Which device is chosen is SetupValues.Select: the first of the machine's device file, the settings' pin, or exactly one
 // paired device named like the match string; each of the first two only when it still names a paired device of that address

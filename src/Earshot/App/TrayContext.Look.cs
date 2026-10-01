@@ -20,13 +20,19 @@ internal sealed partial class TrayContext
             return;
         }
 
-        SystemLookService look = SystemLookService.Shared(_log);
+        SystemLookService look = LookService();
         _look = look;
         _lookChanged = (_, _) => ReapplyCardLook();
         _lookSettingChanged = (_, _) =>
         {
+            // Poke raises Changed, and so a re-draw, when the look itself changed. A settings change that is not the look (the
+            // theme or the accent) still needs the cards drawn again; one draw for either, not two.
+            int before = _lookReappliesAsked;
             look.Poke();
-            ReapplyCardLook();
+            if (_lookReappliesAsked == before)
+            {
+                ReapplyCardLook();
+            }
         };
         look.Changed += _lookChanged;
         _window.SettingChanged += _lookSettingChanged;
@@ -51,8 +57,11 @@ internal sealed partial class TrayContext
         _lookSettingChanged = null;
     }
 
+    private int _lookReappliesAsked;
+
     private void ReapplyCardLook()
     {
+        _lookReappliesAsked++;
         _widgetCardPresenter?.ReapplyLook();
         _caseOpenCardPresenter?.ReapplyLook();
     }

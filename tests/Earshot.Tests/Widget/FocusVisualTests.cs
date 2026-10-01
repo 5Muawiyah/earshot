@@ -248,6 +248,30 @@ public sealed class FocusVisualTests
         });
     }
 
+    // Tab into the list is taken by the dialog and the list is never given a key; Windows says the keyboard is in use by
+    // clearing the hide-focus flag, and that is what shows the visual.
+    [TestMethod]
+    public void ThePickersListShowsTheFocusVisualWhenWindowsClearsTheHideFocusFlagWithoutTheListBeingGivenAKey()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var form = new DevicePickerForm("AirPods", Guid.Empty);
+            form.Show();
+            Application.DoEvents();
+            var list = (ListView)typeof(DevicePickerForm).GetField("_list", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!;
+            list.Focus();
+            Application.DoEvents();
+            Assert.IsFalse(form.ListFocusVisualShowing, "Focus alone shows nothing.");
+
+            const int WM_UPDATEUISTATE = 0x0128;
+            Phase5.TestWindows.Send(list.Handle, WM_UPDATEUISTATE, (nint)((0x3 << 16) | 2), 0);
+            Assert.IsTrue(form.ListFocusVisualShowing, "Windows clearing the flag for keyboard use shows it, as a Tab into the list does.");
+
+            Phase5.TestWindows.Send(list.Handle, WM_LBUTTONDOWN, 1, (nint)((5 << 16) | 5));
+            Assert.IsFalse(form.ListFocusVisualShowing, "A mouse press hides it.");
+        });
+    }
+
     [TestMethod]
     public void TheCueStartsHiddenForAMouseOpenAndShowsFromTheKeysThatMoveFocus()
     {

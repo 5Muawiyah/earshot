@@ -159,8 +159,15 @@ internal sealed class ChildInstallStarter : IInstallStarter
 // install running and says so.
 internal interface IInstallRunner
 {
-    // exitCode is the install's own exit code, or -1 when it did not start or did not end within timeout.
-    StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, out int exitCode);
+    // exitCode is the install's own exit code, DidNotStart when it did not start, or StillRunning when it was still running
+    // when timeout ran out. afterStart is called once, as soon as the process has started and before the wait, so the caller
+    // can let go of a lock the started program takes itself (never when nothing started).
+    StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, Action? afterStart, out int exitCode);
+
+    // The values exitCode takes when there is no exit code of the install. They are not gate exit codes.
+    public const int DidNotStart = -1;
+
+    public const int StillRunning = -2;
 }
 
 // https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexit
@@ -168,11 +175,11 @@ internal sealed class ChildInstallRunner : IInstallRunner
 {
     public const string Step = "install-zip-run-install";
 
-    public StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, out int exitCode)
+    public StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, Action? afterStart, out int exitCode)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(arguments);
-        exitCode = -1;
+        exitCode = IInstallRunner.DidNotStart;
         var info = new ProcessStartInfo(executable)
         {
             UseShellExecute = false,
@@ -192,8 +199,10 @@ internal sealed class ChildInstallRunner : IInstallRunner
                 return StepOutcomes.NotAttempted(Step, "No process was started for " + executable + ".");
             }
 
+            afterStart?.Invoke();
             if (!process.WaitForExit(timeout))
             {
+                exitCode = IInstallRunner.StillRunning;
                 return StepOutcomes.NotAttempted(Step,
                     executable + " was still running after " + timeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) + " s, and is left to finish.");
             }
@@ -300,13 +309,16 @@ internal sealed class UpdateActions
     // A first install runs the install it starts and waits for it. The real runner by default; a test gives its own.
     internal IInstallRunner InstallRunner { get; init; } = new ChildInstallRunner();
 
-    // How long a first install waits for the install it started. The install ends in well under a minute; five minutes
-    // is a waiting budget chosen for a slow disk, not a measured figure.
+    // How long a first install waits for the install it started. Five minutes is a waiting budget chosen here, not a
+    // measured figure; an install that is still running when it runs out is left running and said to be.
     internal TimeSpan InstallWait { get; init; } = TimeSpan.FromMinutes(5);
 
-    // The exit code of install-zip when a usable install is already there. It continues the numbering of GateExitCode
-    // (the last member is Busy, 25), so it can never be taken for a result of the install itself.
+    // The exit codes of install-zip that are not the install's own. They continue the numbering of GateExitCode (the last
+    // member is Busy, 25), so neither can be taken for a result of the install itself: AlreadyInstalled when a usable install
+    // is already there, StillRunning when the install it started had not ended when the wait ran out.
     internal const GateExitCode AlreadyInstalled = (GateExitCode)26;
+
+    internal const GateExitCode StillRunning = (GateExitCode)27;
 
     public InstallResult Run(UpdateRequest request) => Run(request, firstInstall: false);
 
@@ -437,20 +449,31 @@ internal sealed class UpdateActions
         return new InstallResult(GateExitCode.Success, steps);
     }
 
-    // First install: runs the unpacked release's own install and ends with its exit code. The lock is let go first, since the
-    // install takes it. The work folder is removed once the install has ended; one whose install is still running is kept.
+    // First install: runs the unpacked release's own install and ends with its exit code. The lock is let go as the install
+    // starts, since the install takes it. The work folder is removed once the install has ended; one whose install is still
+    // running is kept.
     private InstallResult RunInstallAndWait(UpdateRequest request, string work, List<StepOutcome> steps, Action releaseLock)
     {
         string app = Path.Combine(work, ReleaseArchive.AppFolderName);
-        releaseLock();
+
+        // The lock is let go once the install has started and not before: between the two, another run could take it and
+        // remove this run's work folder before the program in it had started.
         StepOutcome ran = InstallRunner.RunAndWait(
             Path.Combine(app, TaskPlan.ExecutableName),
             UpdateHandover.InstallArguments(new HandoverIdentity(request.Install.UserSid, request.Install.Address, request.Install.ContainerId)),
             app,
             InstallWait,
+            releaseLock,
             out int exitCode);
+        releaseLock();
         steps.Add(ran);
-        if (exitCode == -1)
+        if (exitCode == IInstallRunner.StillRunning)
+        {
+            _log.Warn("install-zip: the install from " + app + " was still running when the wait ended, so it is left to finish and its work folder is left where it is.");
+            return new InstallResult(StillRunning, steps);
+        }
+
+        if (exitCode == IInstallRunner.DidNotStart)
         {
             _log.Warn("install-zip: the install from " + app + " did not report an exit code, so the work folder is left where it is.");
             return new InstallResult(GateExitCode.Failed, steps);
@@ -488,6 +511,14 @@ internal sealed class UpdateActions
 
         foreach (string folder in earlier)
         {
+            // An install started from that folder may be running, or about to run, from it: its program cannot be written to
+            // while it runs. Deleting the rest of the folder would leave that install without its files.
+            if (ProgramInUse(folder, out string inUse))
+            {
+                steps.Add(StepOutcomes.NotAttempted("remove-earlier-update-work", folder + " holds a program that is in use (" + inUse + "), so it was left."));
+                continue;
+            }
+
             var trust = new List<StepOutcome>();
             if (FolderTrust.IsTrusted(_folders, folder, CheckWorkFolder, "earlier-update-work-acl", trust))
             {
@@ -500,6 +531,41 @@ internal sealed class UpdateActions
                 steps.AddRange(trust);
                 steps.Add(StepOutcomes.NotAttempted("remove-earlier-update-work", folder + " did not pass its check, so it was left. Remove it by hand."));
             }
+        }
+    }
+
+    // True when the release program unpacked in a work folder cannot be opened for writing, which is so while it runs (Windows
+    // refuses a write to the file of a running image) and while anything holds it open. A program that is not there is not in
+    // use. A refusal other than a sharing violation is not told apart from use, so the folder is left rather than deleted.
+    // https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-
+    private static bool ProgramInUse(string workFolder, out string detail)
+    {
+        string program = Path.Combine(workFolder, ReleaseArchive.AppFolderName, TaskPlan.ExecutableName);
+        try
+        {
+            using var probe = new FileStream(program, FileMode.Open, FileAccess.Write, FileShare.None);
+            detail = "";
+            return false;
+        }
+        catch (FileNotFoundException)
+        {
+            detail = "";
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            detail = "";
+            return false;
+        }
+        catch (IOException ex)
+        {
+            detail = "0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ": " + ex.Message;
+            return true;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            detail = "0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ": " + ex.Message;
+            return true;
         }
     }
 

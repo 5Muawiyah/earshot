@@ -28,7 +28,7 @@ internal sealed class DevicePickerForm : Form
     public const string CancelText = "Cancel";
 
     private readonly Guid _pinnedContainer;
-    private readonly ListView _list;
+    private readonly QuietFocusListView _list;
     private readonly TextBox _match;
     private readonly Label _hint;
     private readonly Button _ok;
@@ -73,6 +73,7 @@ internal sealed class DevicePickerForm : Form
         // focus visual round the whole list while the keyboard is in use there. The margin leaves room for it.
         _list.Margin = new Padding(FocusVisualMarginAt96);
         _list.KeyDown += (_, _) => SetListKeyboardCue(true);
+        _list.KeyboardUsed += (_, _) => SetListKeyboardCue(true);
         _list.MouseDown += (_, _) => SetListKeyboardCue(false);
         _list.GotFocus += (_, _) => _listLayout?.Invalidate();
         _list.LostFocus += (_, _) => _listLayout?.Invalidate();
@@ -293,11 +294,15 @@ internal sealed class DevicePickerForm : Form
 
 // A list view that never draws its dotted item focus rectangle. UISF_HIDEFOCUS on the control stops it, and
 // Windows clears that flag whenever the keyboard is used, so the clear is taken out of the update message before
-// the control sees it.
+// the control sees it. That clear is also the one sign that the keyboard is in use when focus arrives by Tab, which the
+// dialog takes before the list is given a key, so it is raised as KeyboardUsed for the form to show its own focus visual.
 // https://learn.microsoft.com/en-us/windows/win32/menurc/wm-changeuistate
 // https://learn.microsoft.com/en-us/windows/win32/menurc/wm-updateuistate
 internal sealed class QuietFocusListView : ListView
 {
+    // Windows cleared the hide-focus flag: the keyboard has been used.
+    public event EventHandler? KeyboardUsed;
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
@@ -311,6 +316,11 @@ internal sealed class QuietFocusListView : ListView
             && ((int)m.WParam & 0xFFFF) == NativeMethods.UIS_CLEAR)
         {
             int flags = (int)m.WParam >> 16 & 0xFFFF;
+            if ((flags & NativeMethods.UISF_HIDEFOCUS) != 0)
+            {
+                KeyboardUsed?.Invoke(this, EventArgs.Empty);
+            }
+
             flags &= ~NativeMethods.UISF_HIDEFOCUS;
             if (flags == 0)
             {

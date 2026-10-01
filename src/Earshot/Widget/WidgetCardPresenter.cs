@@ -120,6 +120,11 @@ internal sealed class WidgetCardPresenter : IDisposable
     // For tests: the reason WidgetCardPresenter believes the card last closed for, or null.
     internal bool HasPendingToggleCloseWindow => _closedByDeactivateAtTimestamp is not null;
 
+    // For tests: whether the card's keyboard focus cue is on, and whether the card was given motion. Null until a card exists.
+    internal bool? FocusCueVisibleForTest => _card?.FocusCueVisible;
+
+    internal bool? HasMotionForTest => _card?.HasMotion;
+
     // For tests: which page the presenter has the card on, and whether the spinner timer is running.
     internal WidgetCardView ViewForTest => _view;
 
@@ -312,7 +317,7 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     private void ReapplyLookOnUiThread()
     {
-        if (_disposed || _card is not { IsDisposed: false, Visible: true } card)
+        if (_disposed || _card is not { IsDisposed: false, Visible: true, IsExiting: false } card)
         {
             return;
         }
@@ -759,7 +764,9 @@ internal sealed class WidgetCardPresenter : IDisposable
     // instead of into the taskbar.
     private void RenderKeepingBottom()
     {
-        if (_card is not { IsDisposed: false, Visible: true } card)
+        // A card that is fading out keeps the page it was closed on: closing switched the presenter's page, and drawing that
+        // page now, or growing the card to fit it, would show the wrong page for the rest of the exit.
+        if (_card is not { IsDisposed: false, Visible: true, IsExiting: false } card)
         {
             return;
         }

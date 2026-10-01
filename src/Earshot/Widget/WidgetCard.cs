@@ -501,6 +501,13 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
+        if (_exiting)
+        {
+            // The card has been closed and is only fading out: a key must not act on a card that is going away.
+            e.Handled = true;
+            return;
+        }
+
         NoteKeyForFocusCue(e.KeyData);
         if (OnSettingsPage)
         {
@@ -545,6 +552,13 @@ internal sealed partial class WidgetCard : Form
     {
         base.OnMouseDown(e);
         ArgumentNullException.ThrowIfNull(e);
+        if (_exiting)
+        {
+            // Nothing pressed on a card that is fading out counts, so there is nothing for a later up to complete.
+            ClearPressedFlags();
+            return;
+        }
+
         NoteMouseForFocusCue();
         HideTip();
         if (OnSettingsPage)
@@ -571,6 +585,12 @@ internal sealed partial class WidgetCard : Form
     {
         base.OnMouseUp(e);
         ArgumentNullException.ThrowIfNull(e);
+        if (_exiting)
+        {
+            ClearPressedFlags();
+            return;
+        }
+
         if (OnSettingsPage)
         {
             SettingsMouseUp(e);

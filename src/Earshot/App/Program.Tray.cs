@@ -36,9 +36,10 @@ internal static partial class Program
 {
     internal const string TrayUsage = "Usage: Earshot.exe [--startup | --exit]";
 
-    // Earshot.exe --exit asks the running tray to exit, by the menu's own Exit (so AirPods in use are let go and blocked), and
-    // ends. The install script uses it to close the tray before it replaces the files, without ending the process from
-    // outside. Any process of the same user in the same session can already end the tray, so it grants nothing new.
+    // Earshot.exe --exit asks the running tray to exit, by the menu's own Exit (which lets go of the AirPods in use and
+    // blocks them when Hand back is on), and ends. The install script uses it to close the tray before it replaces the files,
+    // without ending the process from outside. Any process of the same user in the same session can already end the tray, so
+    // it grants nothing new.
     internal const string ExitArgument = "--exit";
 
     // The exit code of --exit when no tray is running (EX_TEMPFAIL): distinct from 0, which means the tray was asked.
@@ -213,16 +214,52 @@ internal static partial class Program
 
     // The event a copy started with --exit sets, created beside the show event with the same owner and session. Null, logged,
     // when it cannot be created.
-    private static EventWaitHandle? TryCreateExitEvent(ILog log)
+    private static EventWaitHandle? TryCreateExitEvent(ILog log, string instanceName)
     {
         try
         {
-            return new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName(TrayInstanceName), TrayInstanceOptions, out _);
+            return new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName(instanceName), TrayInstanceOptions, out _);
         }
         catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or IOException)
         {
             log.Error("The exit event could not be created, so a copy started with --exit cannot ask this tray to exit.", ex);
             return null;
+        }
+    }
+
+    // Makes a request to exit (RequestTrayExit for the same instance name) end in the tray's own Exit: the event is created, and
+    // each time it is set the tray's ExitFromSignal is posted on to the UI context. Null, logged, when the event could not be
+    // created (the tray still runs; a copy started with --exit then finds no tray to ask). Dispose the result, waiting for a
+    // callback that is already running, before the tray is closed. The instance name is a parameter so a test can use its own.
+    internal static IDisposable? WireExitSignal(ILog log, string instanceName, SynchronizationContext ui, TrayContext tray)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
+        ArgumentNullException.ThrowIfNull(ui);
+        ArgumentNullException.ThrowIfNull(tray);
+        EventWaitHandle? exitEvent = TryCreateExitEvent(log, instanceName);
+        if (exitEvent is null)
+        {
+            return null;
+        }
+
+        RegisteredWaitHandle wait = RegisterExitWait(exitEvent, () => ui.Post(static state => ((TrayContext)state!).ExitFromSignal(), tray));
+        return new ExitSignal(exitEvent, wait);
+    }
+
+    private sealed class ExitSignal(EventWaitHandle exitEvent, RegisteredWaitHandle wait) : IDisposable
+    {
+        public void Dispose()
+        {
+            using (var unregistered = new ManualResetEvent(false))
+            {
+                if (wait.Unregister(unregistered))
+                {
+                    unregistered.WaitOne();
+                }
+            }
+
+            exitEvent.Dispose();
         }
     }
 
@@ -314,8 +351,7 @@ internal static partial class Program
             ServiceRegistry? registry = null;
             BlockCoordinator? coordinator = null;
             RegisteredWaitHandle? showWait = null;
-            RegisteredWaitHandle? exitWait = null;
-            EventWaitHandle? exitEvent = null;
+            IDisposable? exitSignal = null;
             try
             {
                 var settings = new JsonSettingsStore(paths.SettingsFile, log);
@@ -367,12 +403,7 @@ internal static partial class Program
                     Timeout.Infinite,
                     executeOnlyOnce: false);
 
-                // Without the exit event the tray still runs; a copy started with --exit then finds no tray to ask.
-                exitEvent = TryCreateExitEvent(log);
-                if (exitEvent is not null)
-                {
-                    exitWait = RegisterExitWait(exitEvent, () => ui.Post(static state => ((TrayContext)state!).ExitFromSignal(), shown));
-                }
+                exitSignal = WireExitSignal(log, TrayInstanceName, ui, shown);
 
                 coordinator.Start();
                 registry.Monitor.Start();
@@ -404,16 +435,7 @@ internal static partial class Program
                     }
                 }
 
-                if (exitWait is not null)
-                {
-                    using var exitUnregistered = new ManualResetEvent(false);
-                    if (exitWait.Unregister(exitUnregistered))
-                    {
-                        exitUnregistered.WaitOne();
-                    }
-                }
-
-                exitEvent?.Dispose();
+                exitSignal?.Dispose();
 
                 // Nothing after this point may resume on the UI thread: its message loop has ended. The card
                 // window and its timer belong to this thread, so the presenter is disposed here too.

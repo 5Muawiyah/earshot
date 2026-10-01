@@ -56,9 +56,14 @@ public sealed class InstallZipTests
 
         public Action<string>? During { get; set; }
 
-        public StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, out int exitCode)
+        // Called as the process starts, before the caller is told it has: what the lock is at that moment.
+        public Action? AtStart { get; set; }
+
+        public StepOutcome RunAndWait(string executable, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, Action? afterStart, out int exitCode)
         {
             Runs.Add((executable, arguments.ToArray(), workingDirectory, timeout));
+            AtStart?.Invoke();
+            afterStart?.Invoke();
             During?.Invoke(executable);
             exitCode = ExitCode;
             return OnRun?.Invoke() ?? (ExitCode == 0
@@ -245,6 +250,8 @@ public sealed class InstallZipTests
         UpdateRequest request = w.Stage(Release());
         string? workDuringInstall = null;
         bool? lockHeldDuringInstall = null;
+        bool? lockHeldAtStart = null;
+        w.Runner.AtStart = () => lockHeldAtStart = w.Lock.Held;
         w.Runner.During = exe =>
         {
             workDuringInstall = Path.GetDirectoryName(Path.GetDirectoryName(exe));
@@ -264,7 +271,8 @@ public sealed class InstallZipTests
         Assert.IsTrue(Program.TryParseInstallArgs(arguments, out InstallRequest? parsed, out string? problem), problem);
         Assert.AreEqual(TaskPrincipalMode.System, parsed.Principal);
         Assert.AreEqual(UpdateActions.WorkFolderSddl, w.Folders.CreatedWith[workDuringInstall!], "The work folder is the administrators-only one.");
-        Assert.IsFalse(lockHeldDuringInstall, "The install takes the machine-wide lock itself, so this run lets it go first.");
+        Assert.IsTrue(lockHeldAtStart, "The lock is still held while the install starts, so no other run can remove the work folder before the program in it has started.");
+        Assert.IsFalse(lockHeldDuringInstall, "The install takes the machine-wide lock itself, so this run lets it go once the install has started.");
         Assert.AreEqual(1, w.Lock.Entered);
         Assert.AreEqual(TimeSpan.FromMinutes(5), timeout);
         Assert.IsEmpty(w.WorkFolders(), "The work folder is removed once the install has ended.");
@@ -398,12 +406,27 @@ public sealed class InstallZipTests
     {
         using var w = new World();
         UpdateRequest request = w.Stage(Release());
-        w.Runner.ExitCode = -1;
-        w.Runner.OnRun = () => StepOutcomes.NotAttempted(ChildInstallRunner.Step, "still running");
+        w.Runner.ExitCode = IInstallRunner.DidNotStart;
+        w.Runner.OnRun = () => StepOutcomes.NotAttempted(ChildInstallRunner.Step, "did not start");
 
         InstallResult result = w.Actions().RunFirstInstall(request);
 
         Assert.AreEqual(GateExitCode.Failed, result.Outcome);
+        Assert.HasCount(1, w.WorkFolders(), "The work folder is left where it is.");
+    }
+
+    [TestMethod]
+    public void AnInstallStillRunningWhenTheWaitRunsOutEndsWithItsOwnCodeAndLeavesItsWorkFolder()
+    {
+        using var w = new World();
+        UpdateRequest request = w.Stage(Release());
+        w.Runner.ExitCode = IInstallRunner.StillRunning;
+        w.Runner.OnRun = () => StepOutcomes.NotAttempted(ChildInstallRunner.Step, "still running");
+
+        InstallResult result = w.Actions().RunFirstInstall(request);
+
+        Assert.AreEqual(UpdateActions.StillRunning, result.Outcome, "Not the code of a failed install: it has not failed.");
+        Assert.AreEqual(27, (int)result.Outcome);
         Assert.HasCount(1, w.WorkFolders(), "The install may still be running from it, so it is not removed.");
     }
 
@@ -427,10 +450,12 @@ public sealed class InstallZipTests
     {
         var runner = new ChildInstallRunner();
 
-        StepOutcome ok = runner.RunAndWait(CmdExe, ["/c", "exit 0"], Environment.SystemDirectory, TimeSpan.FromSeconds(30), out int okCode);
-        StepOutcome bad = runner.RunAndWait(CmdExe, ["/c", "exit 3"], Environment.SystemDirectory, TimeSpan.FromSeconds(30), out int badCode);
+        int started = 0;
+        StepOutcome ok = runner.RunAndWait(CmdExe, ["/c", "exit 0"], Environment.SystemDirectory, TimeSpan.FromSeconds(30), () => started++, out int okCode);
+        StepOutcome bad = runner.RunAndWait(CmdExe, ["/c", "exit 3"], Environment.SystemDirectory, TimeSpan.FromSeconds(30), null, out int badCode);
 
         Assert.IsTrue(ok.Ok, ok.Detail);
+        Assert.AreEqual(1, started, "The caller is told the program has started.");
         Assert.AreEqual(0, okCode);
         Assert.IsFalse(bad.Ok);
         Assert.AreEqual(3, badCode);
@@ -442,13 +467,17 @@ public sealed class InstallZipTests
     {
         var runner = new ChildInstallRunner();
 
-        StepOutcome slow = runner.RunAndWait(CmdExe, ["/c", "ping -n 4 127.0.0.1 >nul"], Environment.SystemDirectory, TimeSpan.FromMilliseconds(200), out int slowCode);
-        StepOutcome missing = runner.RunAndWait(Path.Combine(Path.GetTempPath(), "earshot-tests", "no-such-program.exe"), [], Path.GetTempPath(), TimeSpan.FromSeconds(5), out int missingCode);
+        int started = 0;
+        StepOutcome slow = runner.RunAndWait(CmdExe, ["/c", "ping -n 4 127.0.0.1 >nul"], Environment.SystemDirectory, TimeSpan.FromMilliseconds(200), () => started++, out int slowCode);
+        int startedMissing = 0;
+        StepOutcome missing = runner.RunAndWait(Path.Combine(Path.GetTempPath(), "earshot-tests", "no-such-program.exe"), [], Path.GetTempPath(), TimeSpan.FromSeconds(5), () => startedMissing++, out int missingCode);
 
         Assert.IsFalse(slow.Ok);
-        Assert.AreEqual(-1, slowCode);
+        Assert.AreEqual(IInstallRunner.StillRunning, slowCode, "Still running is told apart from not started.");
+        Assert.AreEqual(1, started);
         StringAssert.Contains(slow.Detail, "left to finish");
         Assert.IsFalse(missing.Ok);
-        Assert.AreEqual(-1, missingCode);
+        Assert.AreEqual(IInstallRunner.DidNotStart, missingCode);
+        Assert.AreEqual(0, startedMissing, "Nothing started, so the caller is not told it did.");
     }
 }
