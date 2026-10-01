@@ -43,8 +43,20 @@ public sealed class StatusCardInPlaceTests
         }
     }
 
+    // A screen no larger than a hosted test machine's (about 1024x768), so the card is placed where that
+    // machine's screen can show it: a window wholly off the screen is never sent a paint.
+    private static readonly Rectangle SmallScreen = new(0, 0, 1024, 768);
+
+    private static readonly Point Click = new(900, 748);
+
+    private static PlacementScene SmallScene() => new(
+        Click,
+        [new DisplayArea(SmallScreen, new Rectangle(0, 0, 1024, 728), IsPrimary: true)],
+        Taskbar: Rectangle.FromLTRB(0, 728, 1024, 768),
+        TaskbarAutoHide: false);
+
     private static CardPresenter RealCardPresenter(ConnectCard card, CapturingLog log) =>
-        new(log, static action => action(), new FakeCardEnvironment(), () => card, static () => new FakeCardTimer(), TimeProvider.System);
+        new(log, static action => action(), new FakeCardEnvironment { Scene = SmallScene() }, () => card, static () => new FakeCardTimer(), TimeProvider.System);
 
     // The real card on a private desktop: a new text of the same size is a repaint and nothing else.
     [TestMethod]
@@ -55,7 +67,7 @@ public sealed class StatusCardInPlaceTests
             var log = new CapturingLog();
             using var card = new ConnectCard(log);
             using CardPresenter presenter = RealCardPresenter(card, log);
-            var click = new Point(1661, 1036);
+            Point click = Click;
 
             presenter.Show(new CardContent(Device, "Connecting"), CardAnchor.NearCursor, click);
             Settle();
@@ -87,7 +99,7 @@ public sealed class StatusCardInPlaceTests
             var log = new CapturingLog();
             using var card = new ConnectCard(log);
             using CardPresenter presenter = RealCardPresenter(card, log);
-            var click = new Point(1661, 1036);
+            Point click = Click;
             presenter.Show(new CardContent(Device, "Connecting"), CardAnchor.NearCursor, click);
             Settle();
             Size before = card.Size;
@@ -115,7 +127,7 @@ public sealed class StatusCardInPlaceTests
             var log = new CapturingLog();
             using var card = new ConnectCard(log);
             using CardPresenter presenter = RealCardPresenter(card, log);
-            var click = new Point(1661, 1036);
+            Point click = Click;
             presenter.Show(new CardContent(Device, "Connected"), CardAnchor.NearCursor, click);
             Settle();
             using var counter = new WindowMessageCounter(card.Handle);
