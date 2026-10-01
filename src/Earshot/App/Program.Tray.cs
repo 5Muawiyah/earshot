@@ -425,6 +425,9 @@ internal static partial class Program
             }
             finally
             {
+                // A tray that stopped on an error has not closed its gauge, and the waits below do not pump: the gauge is
+                // not left owned by a window of the shell across them.
+                context?.ReleaseGaugeOwners();
                 if (showWait is not null)
                 {
                     // Waits for a show callback that is already running, so nothing posts to a closed tray.

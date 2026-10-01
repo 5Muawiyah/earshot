@@ -121,6 +121,15 @@ internal static class GaugeEventLog
         return "Gauge could not be owned by the taskbar: " + outcome.CodeName + " (" + Number(outcome.Code) + "); it is raised instead when the bar covers it.";
     }
 
+    public static string OwnerReleased() =>
+        "Gauge taken off the taskbar's ownership before a wait on this thread.";
+
+    public static string OwnerReleaseFailed(StepOutcome outcome)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        return "Gauge could not be taken off the taskbar's ownership: " + outcome.CodeName + " (" + Number(outcome.Code) + ").";
+    }
+
     public static string PlacementFailed(PlacementFailure failure) => "Gauge placement found no room: " + failure + ".";
 
     // "x,y WxH" in physical pixels.

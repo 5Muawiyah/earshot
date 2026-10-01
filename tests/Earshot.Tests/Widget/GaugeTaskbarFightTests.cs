@@ -202,6 +202,54 @@ public sealed class GaugeTaskbarFightTests
         Assert.AreEqual(1, rig.Raises, "The safety net still works.");
     }
 
+    // Before a wait this thread makes that holds it up (the hand-back at shut down and sleep, the closing of the tray), the gauge
+    // is taken off the taskbar and the next layouts do not own it again until the machine has woken.
+    [TestMethod]
+    public void ReleasingTheOwnerTakesTheGaugeOffTheTaskbarAndKeepsItOffUntilResumed()
+    {
+        var rig = new Rig(taskbar: 0x777);
+        Assert.AreEqual((nint)0x777, rig.Surface.OwnerWindow, "Sanity: owned.");
+
+        rig.Controller.ReleaseOwner();
+
+        Assert.AreEqual((nint)0, rig.Surface.OwnerWindow);
+        Assert.IsTrue(rig.Log.Has(LogLevel.Info, "taken off the taskbar's ownership"));
+        rig.Controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpace(0x777)));
+        rig.Controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpace(0x888)));
+        Assert.AreEqual((nint)0, rig.Surface.OwnerWindow, "A layout during the wait does not own it again.");
+        Assert.IsInstanceOfType<GaugeState.Shown>(rig.Controller.State, "The gauge is still shown.");
+
+        rig.Controller.ResumeOwner();
+        rig.Controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpace(0x888)));
+
+        Assert.AreEqual((nint)0x888, rig.Surface.OwnerWindow, "Owned again by the first layout after the machine woke.");
+    }
+
+    [TestMethod]
+    public void ReleasingTheOwnerOfAGaugeThatWasNeverOwnedOnlyHoldsOffOwning()
+    {
+        var rig = new Rig(taskbar: 0);
+
+        rig.Controller.ReleaseOwner();
+        rig.Controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpace(0x777)));
+
+        Assert.IsFalse(rig.Surface.Calls.Any(c => c.StartsWith("SetOwner", StringComparison.Ordinal)), "Nothing to take off, and nothing owned while held off.");
+        rig.Controller.ResumeOwner();
+        rig.Controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpace(0x777)));
+        Assert.AreEqual((nint)0x777, rig.Surface.OwnerWindow);
+    }
+
+    [TestMethod]
+    public void AGaugeThatCannotBeTakenOffTheTaskbarIsOneWarningWithTheRawCode()
+    {
+        var rig = new Rig(taskbar: 0x777);
+        rig.Surface.NextSetOwnerResult = StepOutcomes.FromWin32("set-window-long-ptr:gauge-owner", 1400);
+
+        rig.Controller.ReleaseOwner();
+
+        Assert.AreEqual(1, rig.Log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.StartsWith("Gauge could not be taken off the taskbar's ownership: ", StringComparison.Ordinal) && e.Message.Contains("(1400)", StringComparison.Ordinal)));
+    }
+
     [TestMethod]
     public void ARealGaugeWindowTakesItsOwnerReadsItBackAndReportsTheCodeOfAnOwnerThatIsNotThere()
     {
@@ -227,6 +275,104 @@ public sealed class GaugeTaskbarFightTests
             Assert.IsTrue(gauge.SetOwner(0).Ok);
             Assert.AreEqual((nint)0, gauge.OwnerWindow, "Zero clears the owner.");
         });
+    }
+
+    // ---- The owner does not join Earshot to the shell's input queue ----
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, [MarshalAs(UnmanagedType.Bool)] bool attachIt);
+
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint process);
+
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern nint SetActiveWindow(nint window);
+
+    // Owning a window of another process joins the two threads' input queues, which no page says and a probe showed: it is the
+    // reason the shell's GetActiveWindow answered with the gauge. Earshot must not stay joined to Explorer. The check is the
+    // call that undoes a join: it succeeds only when there was one (so it would also undo it, which is the point), and fails with
+    // ERROR_INVALID_PARAMETER when the two are apart. Made right after the owner is set, and again after the gauge has been shown,
+    // activated and the shell has raised its own window on its own for a while.
+    [TestMethod]
+    public void AGaugeOwnedByATaskbarInAnotherProcessIsNotLeftJoinedToItsInputQueue()
+    {
+        Phase5.CardDesktop.Run(
+            desktop =>
+            {
+                var bar = new Rectangle(100, 300, 700, 48);
+                using FakeShellProcess shell = FakeShellProcess.Start(desktop, "Shell_TrayWnd", bar, raiseEveryMs: 100, seconds: 30);
+                using var gauge = new GaugeWindow(new CapturingLog());
+                WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
+                Application.DoEvents();
+                uint shellThread = GetWindowThreadProcessId(shell.Handle, out _);
+                uint ownThread = GetWindowThreadProcessId(gauge.Handle, out _);
+                Assert.AreNotEqual(0u, shellThread);
+                Assert.AreNotEqual(shellThread, ownThread, "Sanity: the shell's window is on another thread, in another process.");
+
+                StepOutcome set = gauge.SetOwner(shell.Handle);
+
+                Assert.IsTrue(set.Ok, "SetOwner: " + set.Step + " " + set.CodeName + " " + set.Detail);
+                Assert.AreEqual(shell.Handle, gauge.OwnerWindow, "Still owned: the z-order rule is what the gauge keeps.");
+                bool joined = AttachThreadInput(ownThread, shellThread, false);
+                Assert.IsFalse(joined, "The gauge's input queue was still joined to the shell's right after it was owned.");
+                Assert.AreEqual(87, Marshal.GetLastPInvokeError(), "ERROR_INVALID_PARAMETER: the two were apart.");
+
+                Assert.IsTrue(gauge.ShowAt(new Rectangle(120, 300, 74, 40)).Ok);
+                _ = SetActiveWindow(gauge.Handle);
+                var clock = Stopwatch.StartNew();
+                while (clock.Elapsed < TimeSpan.FromSeconds(1))
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(5);
+                }
+
+                Assert.IsFalse(AttachThreadInput(ownThread, shellThread, false), "Shown, activated and with the shell raising itself, the two joined again.");
+                Assert.AreEqual(shell.Handle, gauge.OwnerWindow);
+                Assert.IsFalse(IsAbove(shell.Handle, gauge.Handle), "Apart from the shell's input queue, the gauge is still above the shell's window.");
+            },
+            TimeSpan.FromSeconds(90));
+    }
+
+    // A gauge whose input queue cannot be separated from the shell's is not left owned: it stays joined to Explorer otherwise.
+    // The code the system gave is kept. ERROR_INVALID_PARAMETER is the one answer that is not a failure: the two were not joined.
+    [TestMethod]
+    public void AGaugeThatCannotBeSeparatedFromTheShellsInputIsNotLeftOwnedAndTheCodeIsKept()
+    {
+        Phase5.CardDesktop.Run(
+            desktop =>
+            {
+                using FakeShellProcess shell = FakeShellProcess.Start(desktop, "Shell_TrayWnd", new Rectangle(100, 300, 700, 48), raiseEveryMs: 0, seconds: 20);
+                using var gauge = new GaugeWindow(new CapturingLog());
+                WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
+                Application.DoEvents();
+
+                gauge.SeparateThreads = (_, _, _) =>
+                {
+                    Marshal.SetLastPInvokeError(5);
+                    return false;
+                };
+                StepOutcome refused = gauge.SetOwner(shell.Handle);
+
+                Assert.IsFalse(refused.Ok);
+                Assert.AreEqual(5, refused.Code, "ERROR_ACCESS_DENIED, as the system said it.");
+                StringAssert.StartsWith(refused.Step, "attach-thread-input");
+                Assert.AreEqual((nint)0, gauge.OwnerWindow, "Not left owned, so not left joined.");
+
+                gauge.SeparateThreads = (_, _, _) =>
+                {
+                    Marshal.SetLastPInvokeError(87);
+                    return false;
+                };
+                StepOutcome notJoined = gauge.SetOwner(shell.Handle);
+
+                Assert.IsTrue(notJoined.Ok, "Nothing to separate is not a failure: " + notJoined.CodeName);
+                Assert.AreEqual(shell.Handle, gauge.OwnerWindow);
+            },
+            TimeSpan.FromSeconds(90));
     }
 
     // ---- The real chain against a taskbar in another process ----

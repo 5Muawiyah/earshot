@@ -20,6 +20,7 @@ internal sealed class SecondaryGaugeSet : IDisposable
     private bool _reconciling;
     private bool _reconcileAgain;
     private bool _wantedNext;
+    private bool _ownersReleased;
 
     public SecondaryGaugeSet(SecondaryGaugeParts parts, IDisplaySource displays, Func<SecondaryTaskbarReading> taskbars)
     {
@@ -135,6 +136,11 @@ internal sealed class SecondaryGaugeSet : IDisposable
         gauge.CardRequested += (_, _) => CardRequested?.Invoke(this, gauge);
         gauge.ToggleRequested += (_, _) => ToggleRequested?.Invoke(this, gauge);
         gauge.MenuRequested += (_, point) => MenuRequested?.Invoke(this, (gauge, point));
+        if (_ownersReleased)
+        {
+            gauge.ReleaseOwner();
+        }
+
         _gauges[display.Id] = gauge;
         _parts.Log.Info("Gauge: a gauge is added for " + name + " (All displays).");
     }
@@ -170,6 +176,26 @@ internal sealed class SecondaryGaugeSet : IDisposable
         foreach (SecondaryGauge gauge in _gauges.Values.ToList())
         {
             gauge.NotifyFullScreenApp(opening);
+        }
+    }
+
+    // Every gauge is taken off its taskbar's ownership, and a gauge added while this holds is not owned either, until
+    // ResumeOwners: the wait the caller is about to make must not find one still tied to a window of the shell.
+    public void ReleaseOwners()
+    {
+        _ownersReleased = true;
+        foreach (SecondaryGauge gauge in _gauges.Values.ToList())
+        {
+            gauge.ReleaseOwner();
+        }
+    }
+
+    public void ResumeOwners()
+    {
+        _ownersReleased = false;
+        foreach (SecondaryGauge gauge in _gauges.Values.ToList())
+        {
+            gauge.ResumeOwner();
         }
     }
 

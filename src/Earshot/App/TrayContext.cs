@@ -685,6 +685,9 @@ internal sealed partial class TrayContext : ApplicationContext
         // (the loop ending, Dispose) only stops it: nothing would be left to run a block.
         _closing = true;
         _closed = true;
+
+        // Before anything that waits: no gauge stays owned by a window of the shell across the waits below.
+        ReleaseGaugeOwners();
         _coordinator.Stop();
         _lifetime.Cancel();
         _registry.Cards.Hide();
@@ -1057,6 +1060,9 @@ internal sealed partial class TrayContext : ApplicationContext
         // A query is not acted on: the session end may still be cancelled, and the owner's music with it.
         if (!e.IsQuery && e.Ending)
         {
+            // Before the hand-back's hold below: the gauge is not owned by a window of the shell while this handler waits.
+            ReleaseGaugeOwners();
+
             // Read before StopStreaming claims it: the Started line the hand-back writes describes the world as
             // it stood the instant the session began ending, not after this same handler has already let go of it.
             bool streamingHeld = _streaming is not null;
@@ -1150,6 +1156,8 @@ internal sealed partial class TrayContext : ApplicationContext
         switch (e.Kind)
         {
             case PowerEventKind.Suspend:
+                // Before the hand-back's hold below. Owned again by the first layout after the machine wakes.
+                ReleaseGaugeOwners();
                 if (_registry.Settings.Current.HandBackOnShutdownAndSleep)
                 {
                     // The same first step as the shut-down hand-back: a held streaming link is let go before the
@@ -1179,6 +1187,7 @@ internal sealed partial class TrayContext : ApplicationContext
                 // cleared by the time this arrives (the suspend handler above has returned).
                 _ = _coordinator.ResumeCheckAsync();
                 ResumeWidget();
+                ResumeGaugeOwners();
                 break;
 
             case PowerEventKind.ResumeSuspend:

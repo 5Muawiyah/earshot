@@ -26,4 +26,13 @@ internal static partial class NativeMethods
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindow
     [LibraryImport(User32, SetLastError = true)]
     internal static partial nint GetWindow(nint hWnd, uint uCmd);
+
+    // Joins (attach true) or separates (attach false) the input processing of two threads. Owning a window of another
+    // process joins the two threads' input queues as a side effect that no page documents; a probe on this machine showed
+    // AttachThreadInput(own thread, owner's thread, FALSE) succeeding right after the owner is set and failing with
+    // ERROR_INVALID_PARAMETER (87) when the two are not joined. Separating them does not change where the owned window is in
+    // the z-order. https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-attachthreadinput
+    [LibraryImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool AttachThreadInput(uint idAttach, uint idAttachTo, [MarshalAs(UnmanagedType.Bool)] bool fAttach);
 }

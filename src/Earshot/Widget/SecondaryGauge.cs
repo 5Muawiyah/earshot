@@ -142,6 +142,10 @@ internal sealed class SecondaryGauge : IDisposable
 
     public void NotifyFullScreenApp(bool opening) => _controller.NotifyFullScreenApp(opening);
 
+    public void ReleaseOwner() => _controller.ReleaseOwner();
+
+    public void ResumeOwner() => _controller.ResumeOwner();
+
     public void Poke() => _watcher.Poke();
 
     public void ResetBackoff() => _watcher.ResetBackoff();

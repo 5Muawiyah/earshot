@@ -623,6 +623,22 @@ internal sealed partial class TrayContext
     // math standing between the assertion and the fact being proved.
     internal Rectangle? GaugeBoundsIfShownForTest => GaugeBoundsIfShown();
 
+    // Takes every gauge off the taskbar's ownership before this thread makes a wait that holds it up: a shut-down or sleep
+    // hand-back, or the closing of the tray. A gauge owned by a window of the shell has the shell's queue to answer to, so
+    // none is left owned across a wait. Kept off until ResumeGaugeOwners (the machine woke); the gauge stays on top by being
+    // raised when it is covered.
+    internal void ReleaseGaugeOwners()
+    {
+        _gaugeController?.ReleaseOwner();
+        _secondaryGauges?.ReleaseOwners();
+    }
+
+    private void ResumeGaugeOwners()
+    {
+        _gaugeController?.ResumeOwner();
+        _secondaryGauges?.ResumeOwners();
+    }
+
     // Suspends the widget's BLE watcher. Called only once a shut-down or sleep hand-back has finished
     // (TrayContext.OnSessionEnding, OnPowerChanged): never before it, never concurrently with it.
     private void SuspendWidget()

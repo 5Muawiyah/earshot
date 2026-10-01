@@ -200,8 +200,9 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         return StepOutcomes.FromWin32(Step, 0);
     }
 
-    // The window this one is owned by, or 0. Read from the window, not remembered: an Explorer that ended leaves the
-    // handle it was given behind, and the controller compares it with the taskbar window there is now.
+    // The window this one is owned by, or 0. Read from the window, not remembered: when an owner window is destroyed (an
+    // Explorer that ended) this window is left with no owner and reads 0, where a remembered handle would still say it
+    // is owned. The controller compares it with the taskbar window there is now.
     public nint OwnerWindow => IsHandleCreated ? NativeMethods.GetWindow(Handle, NativeMethods.GW_OWNER) : 0;
 
     // Makes the gauge the owned window of the taskbar. "An owned window is always above its owner in the z-order": when
@@ -210,6 +211,13 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     // of the taskbar's window, which the XAML taskbar draws over). The owner may belong to another process.
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#owned-windows
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowlongptrw
+    //
+    // Owning a window of another process also joins this thread's input queue to the owner's thread. No page says so; a
+    // probe on this machine showed it: the shell's GetActiveWindow then answers with this window, and a wait this thread
+    // makes without pumping stalls the shell's input. Earshot must not stay joined to Explorer, so the two are separated
+    // straight after the owner is set (DetachInputFrom). The z-order rule does not depend on the join: the probe held the
+    // gauge above a shell window that raised itself hundreds of times, with the join undone. A gauge that cannot be
+    // separated is not left owned. An owner of 0 clears the owner, and a window with no owner is joined to nothing.
     public StepOutcome SetOwner(nint owner)
     {
         const string Step = "set-window-long-ptr:gauge-owner";
@@ -222,9 +230,52 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
             return StepOutcomes.FromWin32(Step, error);
         }
 
-        return OwnerWindow == owner
-            ? StepOutcomes.FromWin32(Step, 0)
-            : StepOutcomes.FromWin32(Step, 0, "The window did not take the owner.", ok: false);
+        if (OwnerWindow != owner)
+        {
+            return StepOutcomes.FromWin32(Step, 0, "The window did not take the owner.", ok: false);
+        }
+
+        return owner == 0 ? StepOutcomes.FromWin32(Step, 0) : DetachInputFrom(owner);
+    }
+
+    // AttachThreadInput, replaceable by a test that needs it to fail with a code the system does not give on demand. It
+    // leaves the last error where the call it stands for would.
+    internal Func<uint, uint, bool, bool> SeparateThreads = NativeMethods.AttachThreadInput;
+
+    // Separates this window's thread from the owner's: the input queues the owner call joined. ERROR_INVALID_PARAMETER from
+    // AttachThreadInput means the two were not joined (an owner on this thread, or one the system did not join), so there is
+    // nothing to undo. Any other failure leaves the gauge joined to the shell's queue, so the owner is taken off again, which
+    // also ends the join (probe), and the failure is reported with its raw code.
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-attachthreadinput
+    private StepOutcome DetachInputFrom(nint owner)
+    {
+        const string Step = "attach-thread-input:detach-gauge-owner";
+        uint ownerThread = NativeMethods.GetWindowThreadProcessId(owner, out _);
+        uint ownThread = NativeMethods.GetWindowThreadProcessId(Handle, out _);
+        if (ownerThread == 0 || ownThread == 0 || ownerThread == ownThread)
+        {
+            return StepOutcomes.FromWin32(Step, 0);
+        }
+
+        if (SeparateThreads(ownThread, ownerThread, false))
+        {
+            _log.Write(LogLevel.Debug, "Gauge: the input queue was separated from the owner's thread.");
+            return StepOutcomes.FromWin32(Step, 0);
+        }
+
+        const uint ErrorInvalidParameter = 87;
+        uint code = unchecked((uint)Marshal.GetLastPInvokeError());
+        if (code == ErrorInvalidParameter)
+        {
+            return StepOutcomes.FromWin32(Step, 0);
+        }
+
+        _ = NativeMethods.SetWindowLongPtrW(Handle, NativeMethods.GWLP_HWNDPARENT, 0);
+        uint clearCode = unchecked((uint)Marshal.GetLastPInvokeError());
+        string detail = OwnerWindow == 0
+            ? "The owner was taken off again."
+            : "The owner could not be taken off again (" + StepOutcomes.FromWin32(Step, clearCode).CodeName + ").";
+        return StepOutcomes.FromWin32(Step, code, detail);
     }
 
     public void HideWindow()

@@ -180,6 +180,7 @@ internal sealed class GaugeController : IDisposable
     private int _unheldRaises;
     private long _lastRaiseTimestamp;
     private nint _ownerFailedFor;
+    private bool _ownerHeldOff;
     private long _lastLimitWarnTimestamp;
     private bool _limitWarnedBefore;
     private ITimer? _secondLook;
@@ -466,6 +467,31 @@ internal sealed class GaugeController : IDisposable
     // window disposed. Idempotent.
     public void TurnOff() => TransitionOff();
 
+    // Takes the gauge off the taskbar's ownership and keeps it off until ResumeOwner. Called before this thread makes a wait
+    // that holds it up (a shut-down or sleep hand-back, the closing of the tray): the gauge is then tied to no window of the
+    // shell, whatever the state of its input queue. The safety net (raising when covered) still keeps the gauge on top
+    // meanwhile. A gauge that was not owned only has the hold-off set.
+    public void ReleaseOwner()
+    {
+        _ownerHeldOff = true;
+        if (_surface is not { IsDisposed: false } surface || surface.OwnerWindow == 0)
+        {
+            return;
+        }
+
+        StepOutcome outcome = surface.SetOwner(0);
+        if (outcome.Ok)
+        {
+            _log.Info(GaugeEventLog.OwnerReleased());
+            return;
+        }
+
+        _log.Warn(GaugeEventLog.OwnerReleaseFailed(outcome));
+    }
+
+    // Lets the next layout own the gauge again (the machine woke).
+    public void ResumeOwner() => _ownerHeldOff = false;
+
     public void Dispose()
     {
         if (_disposed)
@@ -658,7 +684,7 @@ internal sealed class GaugeController : IDisposable
     private void EnsureOwner(IGaugeSurface surface, TaskbarLayout layout)
     {
         nint taskbar = layout.TaskbarHandle;
-        if (taskbar == 0 || taskbar == _ownerFailedFor || surface.OwnerWindow == taskbar)
+        if (_ownerHeldOff || taskbar == 0 || taskbar == _ownerFailedFor || surface.OwnerWindow == taskbar)
         {
             return;
         }

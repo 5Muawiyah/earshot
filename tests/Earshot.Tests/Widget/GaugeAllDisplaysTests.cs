@@ -348,7 +348,7 @@ public sealed class GaugeAllDisplaysTests
         public void Dispose() => Tray.Dispose();
     }
 
-    private static TaskbarLayout BarLayout(DisplayInfo display, bool secondary, DisplayFallbackReason fallback = DisplayFallbackReason.None)
+    private static TaskbarLayout BarLayout(DisplayInfo display, bool secondary, DisplayFallbackReason fallback = DisplayFallbackReason.None, nint taskbar = 0)
     {
         Rectangle monitor = display.Bounds;
         int thickness = 48 * display.Dpi / 96;
@@ -358,7 +358,7 @@ public sealed class GaugeAllDisplaysTests
         var buttons = Enumerable.Range(0, 8).Select(i => new Rectangle(monitor.X + 807 + (i * step), bar.Top, step, thickness)).ToList();
         var tray = new Rectangle(monitor.Right - 242, bar.Top, 242, thickness);
         return new TaskbarLayout(
-            0, bar, TaskbarEdge.Bottom, false, monitor, [start, .. buttons, tray], start, display.Dpi, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
+            taskbar, bar, TaskbarEdge.Bottom, false, monitor, [start, .. buttons, tray], start, display.Dpi, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
             NotificationArea: tray, DisplayCount: 2, ForegroundWindow: null, IsSecondary: secondary, DisplayLabel: "Display " + display.DeviceName[^1], DisplayFallback: fallback);
     }
 
@@ -414,10 +414,10 @@ public sealed class GaugeAllDisplaysTests
     }
 
     // Gives every other display's reader the read its display's taskbar would give.
-    private static void FeedSecondary(Rig rig, DisplayInfo display)
+    private static void FeedSecondary(Rig rig, DisplayInfo display, nint taskbar = 0)
     {
         TrayHarness.PumpUntil(() => rig.ReaderFor(display.Id) is not null, "No reader was ever asked for " + display.DeviceName + ".");
-        rig.ReaderFor(display.Id)!.SetNextResult(ITaskbarReader.Result.Ok(BarLayout(display, secondary: true)));
+        rig.ReaderFor(display.Id)!.SetNextResult(ITaskbarReader.Result.Ok(BarLayout(display, secondary: true, taskbar: taskbar)));
     }
 
     [TestMethod]
@@ -550,6 +550,45 @@ public sealed class GaugeAllDisplaysTests
 
             rig.Taskbars.Set(BarOn(Two, 0x5000), BarOn(Three, 0x5001));
             TrayHarness.PumpUntil(() => rig.Tray.Context.SecondaryGaugeCountForTest == 2, "The taskbar came back and no gauge was added.");
+        });
+    }
+
+    // Before a wait this thread makes that holds it up, every gauge on every display is taken off its taskbar's ownership, the
+    // layouts that keep coming do not own one again (a gauge added while the hold lasts included), and the first layout after the
+    // machine wakes owns them all again.
+    [TestMethod]
+    public void ReleasingTheOwnersTakesEveryGaugeOffItsTaskbarUntilTheMachineWakes()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
+            rig.Tray.TaskbarReaders[0].SetNextResult(ITaskbarReader.Result.Ok(BarLayout(One, secondary: false, taskbar: 0x5900)));
+            FeedSecondary(rig, Two, 0x6000);
+            TrayHarness.PumpUntil(
+                () => rig.ShownOn(Left1080) is { OwnerWindow: 0x5900 } && rig.ShownOn(Right1080) is { OwnerWindow: 0x6000 },
+                "Sanity: each gauge is owned by its own taskbar. " + Why(rig));
+
+            rig.Tray.Context.ReleaseGaugeOwners();
+
+            Assert.AreEqual((nint)0, rig.ShownOn(Left1080)!.OwnerWindow, "The main gauge was taken off.");
+            Assert.AreEqual((nint)0, rig.ShownOn(Right1080)!.OwnerWindow, "The other display's gauge was taken off.");
+            PumpFor(TimeSpan.FromMilliseconds(300));
+            Assert.AreEqual((nint)0, rig.ShownOn(Left1080)!.OwnerWindow, "Layouts that kept coming owned the main gauge again.");
+            Assert.AreEqual((nint)0, rig.ShownOn(Right1080)!.OwnerWindow, "Layouts that kept coming owned the other gauge again.");
+
+            rig.Displays.Set(One, Two, Three);
+            rig.Taskbars.Set(BarOn(Two, 0x6000), BarOn(Three, 0x6001));
+            var changed = Message.Create(rig.Tray.Context.Window.Handle, 0x007E, 0, 0);
+            rig.Tray.Context.Window.Dispatch(ref changed);
+            FeedSecondary(rig, Three, 0x6001);
+            TrayHarness.PumpUntil(() => rig.ShownOn(Far1080) is not null, "The third display's gauge was never shown. " + Why(rig));
+            PumpFor(TimeSpan.FromMilliseconds(300));
+            Assert.AreEqual((nint)0, rig.ShownOn(Far1080)!.OwnerWindow, "A gauge added during the hold was owned.");
+
+            rig.Tray.Context.OnPowerChanged(null, new PowerEventArgs(PowerEventKind.ResumeAutomatic));
+            TrayHarness.PumpUntil(
+                () => rig.ShownOn(Left1080) is { OwnerWindow: 0x5900 } && rig.ShownOn(Right1080) is { OwnerWindow: 0x6000 } && rig.ShownOn(Far1080) is { OwnerWindow: 0x6001 },
+                "After the machine woke the gauges were not owned again. " + Why(rig));
         });
     }
 

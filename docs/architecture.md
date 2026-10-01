@@ -522,7 +522,17 @@ A change of the foreground window, which Start, a flyout, a taskbar click and
 a full-screen application closing all cause, is watched by one read-only
 `SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND`
 (https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook).
-The gauge is the taskbar's owned window, so the taskbar cannot be over it. A gauge that
+The gauge is the taskbar's owned window, so the taskbar cannot be over it. Owning a window of
+another process also joins this thread's input queue to Explorer's taskbar thread. No Microsoft page
+says so; a probe on this machine showed it (the shell's `GetActiveWindow` answered with the gauge, and
+`AttachThreadInput` with FALSE succeeded right after the owner was set and failed with error 87 when
+the threads were apart). Earshot separates the two straight after it sets the owner
+(https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-attachthreadinput); the probe
+held the gauge above a shell window that raised itself hundreds of times with the queues apart, and the
+separation survived showing, activating and focusing the gauge. A gauge that cannot be separated is not
+left owned, and the raw code is logged. Before a wait that holds the UI thread up (the hand-back at shut
+down and sleep, the closing of the tray) every gauge is taken off its taskbar's ownership, and is owned
+again by the first layout after the machine wakes. A gauge that
 could not be owned, or that another program's topmost window covers, is raised again when
 that happens, and the poll finds anything the hook missed. A raise that does not hold is not
 repeated at once: the next one waits a quarter second, then half a second, and so on up to

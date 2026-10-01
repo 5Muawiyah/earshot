@@ -1,7 +1,9 @@
 using System.Drawing;
+using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Popup;
+using Earshot.Tray;
 using Earshot.Tests.Phase1;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -15,12 +17,12 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class TrayWidgetWiringTests
 {
-    private static TaskbarLayout FreeSpaceLayout()
+    private static TaskbarLayout FreeSpaceLayout(nint taskbar = 0)
     {
         var bar = new Rectangle(0, 1032, 1920, 48);
         var start = new Rectangle(762, 1032, 45, 48);
         List<Rectangle> buttons = Enumerable.Range(0, 8).Select(i => new Rectangle(807 + (i * 44), 1032, 44, 48)).ToList();
-        return new TaskbarLayout(0, bar, TaskbarEdge.Bottom, AutoHide: false,
+        return new TaskbarLayout(taskbar, bar, TaskbarEdge.Bottom, AutoHide: false,
             new Rectangle(0, 0, 1920, 1080), [start, .. buttons, new Rectangle(1678, 1032, 242, 48)], start,
             Dpi: 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
             NotificationArea: new Rectangle(1678, 1032, 242, 48));
@@ -52,6 +54,111 @@ public sealed class TrayWidgetWiringTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(before + 1, surface.Renders.Count, "The change drew the gauge itself, once, before any new layout came.");
+        });
+    }
+
+    private static SessionEndingEventArgs WmEndSession() => new(isQuery: false, ending: true, flags: 0);
+
+    private static TrayHarness OwnedGaugeTray(FakeGaugeSurface surface)
+    {
+        var tray = new TrayHarness(
+            snapshot: Target(ConnectionState.Connected), gaugeSurfaceFactory: () => surface, taskbarWatcherPollIntervalMs: 600_000,
+            time: TimeProvider.System,
+            settings: s =>
+            {
+                s.HandBackOnShutdownAndSleep = true;
+                s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true };
+            },
+            handBackBudget: TimeSpan.FromSeconds(2),
+            disconnectHandBackWait: TimeSpan.FromMilliseconds(500));
+        tray.PumpUntilIdle();
+        ShowOwned(tray, surface);
+        return tray;
+    }
+
+    // A layout that names a taskbar window is read, which shows the gauge and owns it by that window.
+    private static void ShowOwned(TrayHarness tray, FakeGaugeSurface surface)
+    {
+        tray.LastTaskbarReader!.SetNextResult(ITaskbarReader.Result.Ok(FreeSpaceLayout(0x777)));
+        tray.Settings.Update(s => s.Widget = s.Widget with { LeftClickConnects = !s.Widget.LeftClickConnects });
+        TrayHarness.PumpUntil(() => tray.Context.WidgetGaugeStateForTest is GaugeState.Shown, "Sanity: a free-space layout must show the gauge.");
+        tray.PumpUntilIdle();
+        Assert.AreEqual((nint)0x777, surface.OwnerWindow, "Sanity: the gauge is owned by the taskbar.");
+    }
+
+    // The hand-back at shut down holds this thread (it pumps, but it is a wait): the gauge must already be off the taskbar's
+    // ownership when the hold begins and while it lasts, however many layouts arrive meanwhile.
+    [TestMethod]
+    public void TheGaugeIsOffTheTaskbarsOwnershipWhileTheShutDownHandBackHolds()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var surface = new FakeGaugeSurface();
+            using TrayHarness tray = OwnedGaugeTray(surface);
+            nint ownerDuringHold = -1;
+            nint ownerAfterLayoutDuringHold = -1;
+            tray.Block.OnBlock = _ => Task.Run(async () =>
+            {
+                ownerDuringHold = surface.OwnerWindow;
+
+                // A new taskbar window is read while the hold is pumping this thread's messages.
+                tray.LastTaskbarReader!.SetNextResult(ITaskbarReader.Result.Ok(FreeSpaceLayout(0x888)));
+                tray.Ui.Post(_ => tray.Settings.Update(s => s.Widget = s.Widget with { LeftClickConnects = !s.Widget.LeftClickConnects }), null);
+                await Task.Delay(TimeSpan.FromMilliseconds(600));
+                ownerAfterLayoutDuringHold = surface.OwnerWindow;
+                return ControllerResult.Ok("Blocked at boot");
+            });
+
+            tray.Context.OnSessionEnding(null, WmEndSession());
+
+            Assert.AreNotEqual((nint)(-1), ownerDuringHold, "The hand-back's block step ran, so the hold was on.");
+            Assert.AreEqual((nint)0, ownerDuringHold, "Owned by the taskbar when the hold began.");
+            Assert.AreEqual((nint)0, ownerAfterLayoutDuringHold, "A layout read during the hold owned the gauge again.");
+        });
+    }
+
+    // Sleep the same, and the gauge is owned again by the first layout once the machine has woken.
+    [TestMethod]
+    public void TheGaugeIsOffTheTaskbarsOwnershipWhileTheSleepHandBackHoldsAndOwnedAgainAfterWaking()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var surface = new FakeGaugeSurface();
+            using TrayHarness tray = OwnedGaugeTray(surface);
+            nint ownerDuringHold = -1;
+            tray.Block.OnBlock = _ =>
+            {
+                ownerDuringHold = surface.OwnerWindow;
+                return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
+            };
+
+            tray.Context.OnPowerChanged(null, new PowerEventArgs(PowerEventKind.Suspend));
+
+            Assert.AreNotEqual((nint)(-1), ownerDuringHold, "The hand-back's block step ran, so the hold was on.");
+            Assert.AreEqual((nint)0, ownerDuringHold);
+
+            tray.Context.OnPowerChanged(null, new PowerEventArgs(PowerEventKind.ResumeAutomatic));
+            tray.LastTaskbarReader!.SetNextResult(ITaskbarReader.Result.Ok(FreeSpaceLayout(0x777)));
+            tray.Settings.Update(s => s.Widget = s.Widget with { LeftClickConnects = !s.Widget.LeftClickConnects });
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual((nint)0x777, surface.OwnerWindow, "Owned again by the first layout after waking.");
+        });
+    }
+
+    // Closing the tray lets go of the gauge's owner before its waits (a stopping coordinator, a speech engine, a streaming
+    // release): the gauge's window is disposed by then, which ends ownership, but the release is made first on purpose.
+    [TestMethod]
+    public void ClosingTheTrayTakesTheGaugeOffTheTaskbarsOwnership()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var surface = new FakeGaugeSurface();
+            using TrayHarness tray = OwnedGaugeTray(surface);
+
+            tray.Context.Dispose();
+
+            Assert.AreEqual((nint)0, surface.OwnerWindow, "The gauge was taken off the taskbar when the tray closed.");
         });
     }
 
