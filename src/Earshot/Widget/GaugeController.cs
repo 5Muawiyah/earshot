@@ -52,6 +52,9 @@ internal interface IGaugeSurface : IDisposable
     // opened after it.
     StepOutcome Raise();
 
+    // Draws the gauge for this snapshot at these bounds.
+    void Render(WidgetSnapshot snapshot, DateTimeOffset now, GaugeDisplaySettings settings, int dpi, Rectangle bounds, Color ink, string fontFamily);
+
     void HideWindow();
 }
 

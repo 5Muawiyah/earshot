@@ -1413,7 +1413,8 @@ internal sealed class TrayHarness : IDisposable
         Func<IReadOnlyList<Earshot.Widget.DisplayInfo>, Earshot.Widget.ForegroundWindowReading?>? foregroundWindowProbe = null,
         Earshot.Widget.SystemLookService? lookService = null,
         Func<bool>? cardAnimationsEnabled = null,
-        Func<MouseButtons>? mouseButtonsDown = null)
+        Func<MouseButtons>? mouseButtonsDown = null,
+        bool realTrayIconSurface = false)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1524,7 +1525,9 @@ internal sealed class TrayHarness : IDisposable
                 LastTaskbarReader = reader;
                 return reader;
             },
-            TrayIconVisibilityFactory = () => new FakeTrayIcon(),
+            // Left out only by a test that reads whether the tray has real surfaces (the card animation choice follows that),
+            // with the widget off so nothing real is ever built from it.
+            TrayIconVisibilityFactory = realTrayIconSurface ? null : () => new FakeTrayIcon(),
             ForegroundChangeSourceFactory = () =>
             {
                 var source = new FakeForegroundChangeSource();

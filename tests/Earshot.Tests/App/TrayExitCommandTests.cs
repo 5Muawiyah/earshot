@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Earshot.Contracts;
 using Earshot.Tests.Integration.Coordinator;
 using Earshot.Tests.Phase1;
+using Earshot.Tests.TestWindow;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
@@ -147,6 +148,25 @@ public sealed class TrayExitCommandTests
                 Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Hand-back: off, so nothing runs for this Exit."));
             }
         });
+    }
+
+    // The one line the test below cannot run: RunPrimaryTray wires the exit event under the tray's one fixed instance name, the
+    // name its single-instance lock and the --exit command use, so only a real tray start could execute it, and a real start
+    // here would take that lock or signal the owner's own tray when it is running. So this pins the source instead: it is a
+    // pin and not a proof, and it fails when the call is removed, renamed to another instance, or moved after the message loop.
+    [TestMethod]
+    public void TheTraysStartWiresTheExitEventUnderTheInstanceNameItsLockAndTheExitCommandUseBeforeTheMessageLoopRuns()
+    {
+        string text = File.ReadAllText(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot", "App", "Program.Tray.cs"));
+        int wired = text.IndexOf("exitSignal = WireExitSignal(log, TrayInstanceName, ui, shown);", StringComparison.Ordinal);
+        int loop = text.IndexOf("Application.Run(context);", StringComparison.Ordinal);
+
+        Assert.IsGreaterThan(-1, wired, "RunPrimaryTray no longer wires the exit event for the tray's own instance name.");
+        Assert.IsGreaterThan(-1, loop);
+        Assert.IsLessThan(loop, wired, "The exit event must be wired before the message loop runs.");
+        StringAssert.Contains(text, "new Mutex(initiallyOwned: true, TrayInstanceName,", "The lock and the exit event use the same instance name.");
+        StringAssert.Contains(text, "RequestTrayExit(log, TrayInstanceName)", "The --exit command asks the same instance.");
+        StringAssert.Contains(text, "exitSignal?.Dispose()", "The wiring is let go when the tray ends.");
     }
 
     // The wiring the tray's start makes: a request for the instance sets the event, the registered wait posts the tray's own

@@ -32,6 +32,10 @@ internal sealed partial class TrayContext
     private AppBarRegistration? _appBarRegistration;
     private ThemeReader? _widgetTheme;
     private GaugeWindow? _gaugeWindow;
+
+    // The surface the gauge is drawn on: the window above in production, whatever the factory gave in a test. The window
+    // field is the real one only; this is what a redraw goes to.
+    private IGaugeSurface? _gaugeSurface;
     private WidgetCardPresenter? _widgetCardPresenter;
     private CaseOpenCardPresenter? _caseOpenCardPresenter;
     private WidgetCardPresenterCallbacks? _widgetCardCallbacks;
@@ -377,6 +381,9 @@ internal sealed partial class TrayContext
     internal int WidgetGaugePushCountForTest => _gaugeWindow?.PushCount ?? 0;
     internal bool? WidgetCardFocusCueVisibleForTest => _widgetCardPresenter?.FocusCueVisibleForTest;
     internal bool? WidgetCardHasMotionForTest => _widgetCardPresenter?.HasMotionForTest;
+
+    // Whether the cards this tray makes would slide and fade, from the same choice both presenters are given.
+    internal bool WidgetCardAnimationsChosenForTest => CardAnimationsEnabled() is not null;
     internal bool? WidgetCaseOpenCardHasMotionForTest => _caseOpenCardPresenter?.HasMotionForTest;
 
     // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
@@ -488,11 +495,13 @@ internal sealed partial class TrayContext
     {
         if (_gaugeSurfaceFactory is { } factory)
         {
-            return factory();
+            _gaugeSurface = factory();
+            return _gaugeSurface;
         }
 
         var window = new GaugeWindow(_log, order: () => _registry.Settings.Current.Widget.GaugeOrder);
         _gaugeWindow = window;
+        _gaugeSurface = window;
         return window;
     }
 
@@ -530,10 +539,10 @@ internal sealed partial class TrayContext
 
     private void RenderGaugeIfShown()
     {
-        if (_gaugeController?.State is GaugeState.Shown shown && _gaugeWindow is { IsDisposed: false } window && _widgetTheme is not null)
+        if (_gaugeController?.State is GaugeState.Shown shown && _gaugeSurface is { IsDisposed: false } surface && _widgetTheme is not null)
         {
             WidgetSettings widget = _registry.Settings.Current.Widget;
-            window.Render(
+            surface.Render(
                 _widgetSnapshotCache, _time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel),
                 _widgetLayoutDpi, shown.Bounds, _widgetTheme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
         }
@@ -662,6 +671,7 @@ internal sealed partial class TrayContext
         _gaugeController = null;
         _gaugeWindow?.Dispose();
         _gaugeWindow = null;
+        _gaugeSurface = null;
         _shownGaugeForWorker = null;
 
         if (_widgetCloseForTest is { } hook)
