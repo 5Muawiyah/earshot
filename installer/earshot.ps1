@@ -35,6 +35,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     # State shared by the functions below. Nothing here outlives the script block.
     $st = @{
         Folder = $null; Verified = $false; Redirected = [Console]::IsOutputRedirected
+        Paths = $null           # the folders of this PC's install, set once they are known, so a stop can look for a tray still running
         ClosedTrays = @()       # the trays this script asked to exit, so a stop can start them again
         Succeeded = $false      # an install, update, repair or uninstall reported success: nothing is started again
         NoRestart = $false      # the elevated program may still be working in the install folder: nothing is started
@@ -499,8 +500,10 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
                 Write-Line 'Earshot is running. Choose Exit in its menu, then press Enter here.'
                 [void](Read-Answer)
             }
-            if (-not (Wait-TrayGone $Pth $tray)) { Stop-Run 'Earshot did not close. Choose Exit in its menu and run this again.' }
+            # Noted before the wait: a tray that was asked to exit and is slow may have gone by the time the stop below is
+            # reached, and a stop starts every tray that was asked and is no longer running.
             $st.ClosedTrays = @($st.ClosedTrays) + @($tray)
+            if (-not (Wait-TrayGone $Pth $tray)) { Stop-Run 'Earshot did not close. Choose Exit in its menu and run this again.' }
         }
         return $first
     }
@@ -513,13 +516,17 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     # A run that stops after it closed the tray starts that tray again, so Earshot is not left closed with the AirPods
     # unprotected until the next sign-in. It does not when the run reported success (the run's own ending starts the program),
     # when the elevated program may still be working in the install folder (a program started now could be half replaced), or
-    # when the tray's program is no longer there. Each program is started once.
+    # when the tray's program is no longer there, or when that very tray is still running (one that was asked to exit and
+    # never did). Each program is started once.
     function Restart-ClosedTrays {
         if ($st.Succeeded -or $st.NoRestart) { return }
+        $running = @()
+        if ($null -ne $st.Paths) { $running = @(Find-Tray $st.Paths) }
         $seen = @{}
         foreach ($tray in @($st.ClosedTrays)) {
             $exe = [string]$tray.Path
             if (-not $exe -or $seen.ContainsKey($exe.ToLowerInvariant())) { continue }
+            if (@($running | Where-Object { $_.Id -eq $tray.Id }).Count -gt 0) { continue }
             $seen[$exe.ToLowerInvariant()] = $true
             if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
             try { Start-Tray $exe; Write-Line 'Earshot was started again.' }
@@ -664,6 +671,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         Write-Line ('Earshot is set up for you only, in ' + $target + '.')
         Start-Tray (Join-Path $target 'Earshot.exe')
         Write-Line 'Pair your AirPods with this PC in Bluetooth settings, then run this line again to finish installing. Until then Earshot cannot stop this PC paging them.'
+        Write-Line "Already paired under a name without 'AirPods' in it? Choose them in Earshot's menu (Choose device), then run this line again."
     }
 
     function Remove-UserCopy($Pth) {
@@ -700,14 +708,17 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         if (-not [bool]$values.ready) {
             if ($route -ne 'install-zip') {
                 if ([string]$values.reason -eq 'several') { Stop-Run "Earshot is installed, but several AirPods are paired. Choose yours in Earshot's menu (Choose device), then run this again." }
+                if (@('unreadable', 'incomplete') -contains [string]$values.reason) { Stop-Run 'Earshot is installed, but Windows did not list all of your paired Bluetooth devices, so no AirPods could be found to set it up for. Check that Bluetooth is on, then run this again.' }
                 Stop-Run 'Earshot is installed, but no paired AirPods were found to set it up for. Pair them in Bluetooth settings, then run this again.'
             }
             # The per-user copy has no part that runs before sign-in, so it cannot keep the PC from paging AirPods that are
-            # already paired. It is only for a PC with none paired yet; with several, or a list that could not be read, an
-            # install for the machine has no device to be set up for, and a copy that does not protect would look like one that does.
+            # already paired. It is only for a PC with none paired yet; with several, or a list that could not be read in
+            # full, an install for the machine has no device to be set up for, and a copy that does not protect would look
+            # like one that does. "Not paired" is only said of a list that was read without a problem.
             $why = [string]$values.reason
             if ($why -eq 'several') { Stop-Run 'Several AirPods are paired with this PC, so Earshot cannot tell which are yours. Remove the ones you do not use in Bluetooth settings, then run this again.' }
             if ($why -eq 'unreadable') { Stop-Run 'Windows did not list your paired Bluetooth devices. Check that Bluetooth is on, then run this again.' }
+            if ($why -eq 'incomplete') { Stop-Run 'Windows listed only some of your paired Bluetooth devices, so Earshot cannot tell whether your AirPods are paired. Check that Bluetooth is on, then run this again.' }
             if ($why -ne 'not-paired') { Stop-Run 'Earshot could not tell which AirPods to set up for, so nothing was installed.' }
             if ($DryRun) { Write-Line ('Would copy Earshot to ' + $Pth.UserPrograms + ' and start it. No administrator approval is needed.'); return }
             [void](Close-Tray $Pth $false)
@@ -863,6 +874,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         if (-not [Environment]::Is64BitOperatingSystem) { Stop-Run 'Earshot needs 64-bit Windows.' }
         Enable-Tls12
         $pth = Get-RootSet
+        $st.Paths = $pth
         $addresses = Get-FeedAddresses
         $installedExe = Join-Path $pth.Install 'Earshot.exe'
         $local = Get-ProgramVersion $installedExe
@@ -885,14 +897,27 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
 
     $final = 'Earshot: done.'
     $keepFolder = $false
-    try { Invoke-Main }
-    catch {
-        $message = [string]$_.Exception.Message
-        if ($message.StartsWith($StopMarker)) { $final = 'Earshot: stopped. ' + $message.Substring($StopMarker.Length) }
-        else { $final = 'Earshot: stopped. Something went wrong: ' + $message }
-        $keepFolder = $st.Verified
-        try { Restart-ClosedTrays }
-        catch { Write-Line ('Earshot could not be started again: ' + $_.Exception.Message) }
+    $reachedTheEnd = $false
+    try {
+        try {
+            Invoke-Main
+            $reachedTheEnd = $true
+        }
+        catch {
+            $message = [string]$_.Exception.Message
+            if ($message.StartsWith($StopMarker)) { $final = 'Earshot: stopped. ' + $message.Substring($StopMarker.Length) }
+            else { $final = 'Earshot: stopped. Something went wrong: ' + $message }
+            $keepFolder = $st.Verified
+        }
+    }
+    finally {
+        # A stop of any kind starts again the tray this script closed, and so does Ctrl+C, which ends the run without
+        # reaching the catch above (a pipeline stop is not caught) but does run this. A run that reached its own end has
+        # started whatever it meant to start.
+        if (-not $reachedTheEnd) {
+            try { Restart-ClosedTrays }
+            catch { Write-Line ('Earshot could not be started again: ' + $_.Exception.Message) }
+        }
     }
     try { Remove-WorkFolder $keepFolder }
     catch { Write-Line ('The downloaded files in ' + $st.Folder + ' could not be removed: ' + $_.Exception.Message) }
