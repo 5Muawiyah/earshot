@@ -117,7 +117,7 @@ internal static partial class Program
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         var files = new List<ProbeWidgetFile>();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        string fontFamily = SystemFonts.MessageBoxFont?.Name ?? FontFamily.GenericSansSerif.Name;
+        string fontFamily = TypeRamp.FamilyFor(TypeRole.Gauge);
 
         foreach ((string snapshotName, WidgetSnapshot snapshot) in ProbeWidgetSnapshots(now))
         {

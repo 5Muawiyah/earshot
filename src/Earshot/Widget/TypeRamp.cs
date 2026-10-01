@@ -116,6 +116,14 @@ internal static class TypeRamp
         return new Font(face.Family, SizePx(role, dpi, textScale), face.Style, GraphicsUnit.Pixel);
     }
 
+    // The family a style draws with here, for a caller that takes a family name (the gauge's renderer). Regular-weight
+    // styles only: a semibold style needs its style flag as well, which Font(role, ...) carries.
+    public static string FamilyFor(TypeRole role)
+    {
+        TypeFace face = Resolve(role, Installed(out string message), message);
+        return face.Family;
+    }
+
     // A pixel-unit font of an explicit size in one optical instance. The caller disposes it.
     public static Font FontOfSize(OpticalSize optical, bool semibold, int pixels)
     {

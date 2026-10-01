@@ -183,8 +183,9 @@ internal static class GaugeRenderer
         using var font = new Font(fontFamily, layout.TypePixels, FontStyle.Regular, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(content.Low ? palette.Caution : palette.Ink);
         using var format = new StringFormat(StringFormat.GenericTypographic) { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
-        float x = layout.NumberSlot.X;
-        foreach (char digit in percent.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        string digits = percent.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        float x = layout.NumberAlignRight ? layout.NumberSlot.Right - (cell * digits.Length) : layout.NumberSlot.X;
+        foreach (char digit in digits)
         {
             g.DrawString(digit.ToString(), font, brush, new RectangleF(x, layout.NumberSlot.Y, cell, layout.NumberSlot.Height), format);
             x += cell;
@@ -210,7 +211,7 @@ internal static class GaugeRenderer
     private static void DrawPhone(Graphics g, GaugeLayout layout, Color ink)
     {
         float k = layout.PhoneSize / PhoneGrid;
-        float left = layout.NumberSlot.X;
+        float left = layout.NumberAlignRight ? layout.NumberSlot.Right - layout.PhoneSize : layout.NumberSlot.X;
         float top = (layout.Height - layout.PhoneSize) / 2f;
         var rect = new RectangleF(left + (PhoneX * k), top + (PhoneY * k), PhoneWidth * k, PhoneHeight * k);
         using GraphicsPath path = RoundedRectangle(rect, PhoneCorner * k);

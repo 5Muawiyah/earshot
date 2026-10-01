@@ -38,14 +38,75 @@ internal readonly record struct GaugeLayout(
     Size Bolt,                // the bolt's own box
     int PhoneSize,            // the phone mark in the number slot
     int TypePixels,           // the number's type size, in pixels
-    int CornerRadius)         // the hover fill's corner radius
+    int CornerRadius,         // the hover fill's corner radius
+    bool NumberAlignRight = false)   // the digits (and the phone mark) sit at the slot's right edge rather than its left
 {
     // The type is 12 px at 100%; a line box is 16 px.
     private const int TypeAt96 = 12;
     private const int PhoneAt96 = 16;
     private const int CornerAt96 = 4;
 
-    public static GaugeLayout For(int dpi) => dpi switch
+    public static GaugeLayout For(int dpi) => For(dpi, GaugeOrder.RingNumberBolt);
+
+    // The layout with the three pieces in the given order. The window, its padding and each piece's width are the
+    // same for every order, so the gauge never changes size; only where the pieces sit changes. The gap budget (the
+    // space the default order puts between the ring and the number) goes between the ring and its neighbour when
+    // the ring is at an end, and half each side of the ring when it is in the middle (the left half rounded down).
+    // The number and the bolt touch: the bolt is centred in its slot, which already carries its margin. The number
+    // sits against the ring when it is next to it, and otherwise against the window's outer edge.
+    public static GaugeLayout For(int dpi, GaugeOrder order)
+    {
+        GaugeLayout layout = Default(dpi);
+        GaugeOrder known = GaugeOrders.FromStored(order);
+        return known == GaugeOrder.RingNumberBolt ? layout : layout.Arranged(known);
+    }
+
+    private GaugeLayout Arranged(GaugeOrder order)
+    {
+        int gap = NumberSlot.X - RingBox.Right;
+        (GaugePiece first, GaugePiece second, GaugePiece third) = GaugeOrders.Sequence(order);
+        GaugePiece[] pieces = [first, second, third];
+
+        int x = RingBox.X;
+        int ringX = 0;
+        int numberX = 0;
+        int boltX = 0;
+        int ringIndex = Array.IndexOf(pieces, GaugePiece.Ring);
+        int numberIndex = Array.IndexOf(pieces, GaugePiece.Number);
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            switch (pieces[i])
+            {
+                case GaugePiece.Ring:
+                    x += i == 0 ? 0 : i == 2 ? gap : gap / 2;
+                    ringX = x;
+                    x += RingBox.Width + (i == 0 ? gap : i == 2 ? 0 : gap - (gap / 2));
+                    break;
+                case GaugePiece.Number:
+                    numberX = x;
+                    x += NumberSlot.Width;
+                    break;
+                default:
+                    boltX = x;
+                    x += ChargingSlot.Width;
+                    break;
+            }
+        }
+
+        bool nextToRing = Math.Abs(numberIndex - ringIndex) == 1;
+        bool alignRight = nextToRing ? ringIndex > numberIndex : numberIndex == 2;
+        int shift = ringX - RingBox.X;
+        return this with
+        {
+            RingBox = RingBox with { X = ringX },
+            Mark = Mark with { X = Mark.X + shift },
+            NumberSlot = NumberSlot with { X = numberX },
+            ChargingSlot = ChargingSlot with { X = boltX },
+            NumberAlignRight = alignRight,
+        };
+    }
+
+    private static GaugeLayout Default(int dpi) => dpi switch
     {
         96 => Build(96, 74, 40, 7, 24, 10.5f, 2f, (13, 14, 12), (35, 22), (57, 10), (8, 12)),
         120 => Build(120, 93, 50, 9, 30, 13f, 2.5f, (16, 17, 15), (44, 28), (72, 12), (10, 15)),

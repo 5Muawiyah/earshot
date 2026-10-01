@@ -506,7 +506,7 @@ internal sealed partial class TrayContext
             return factory();
         }
 
-        var window = new GaugeWindow(_log);
+        var window = new GaugeWindow(_log, order: () => _registry.Settings.Current.Widget.GaugeOrder);
         _gaugeWindow = window;
         return window;
     }
@@ -550,14 +550,8 @@ internal sealed partial class TrayContext
             WidgetSettings widget = _registry.Settings.Current.Widget;
             window.Render(
                 _widgetSnapshotCache, _time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel),
-                _widgetLayoutDpi, shown.Bounds, _widgetTheme.Ink(), MessageBoxFontFamily());
+                _widgetLayoutDpi, shown.Bounds, _widgetTheme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
         }
-    }
-
-    private static string MessageBoxFontFamily()
-    {
-        using Font? font = SystemFonts.MessageBoxFont;
-        return font?.Name ?? FontFamily.GenericSansSerif.Name;
     }
 
     // A left click on the gauge, LeftClickConnects off (the default): opens the dedicated three-column
@@ -724,6 +718,10 @@ internal sealed partial class TrayContext
         if (widget.ShowOnTaskbar)
         {
             _taskbarWatcher?.Poke();
+
+            // A setting that changes how the gauge is drawn (its order) shows on the taskbar at once, rather than at
+            // the poll's next answer.
+            RenderGaugeIfShown();
         }
         else if (_taskbarWatcher is not null)
         {

@@ -34,10 +34,11 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
 
     // accent: where the ring's colour comes from; null means the real Windows accent colour (the shared
     // AccentColourService), which is what production uses.
-    public GaugeWindow(ILog log, IAccentColours? accent = null)
+    public GaugeWindow(ILog log, IAccentColours? accent = null, Func<GaugeOrder>? order = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
+        _order = order ?? (static () => GaugeOrder.RingNumberBolt);
         _accent = accent ?? AccentColourService.Shared(log);
         _accent.Changed += OnAccentChanged;
         Interlocked.Increment(ref ConstructionCount);
@@ -92,6 +93,7 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     private sealed record PushKey(GaugeContent Content, GaugePalette Palette, GaugeLayout Layout, bool Hover, string FontFamily, Point Location);
 
     private readonly IAccentColours _accent;
+    private readonly Func<GaugeOrder> _order;
     private readonly ToolTip _tip = new() { ShowAlways = true };
     // Test seam only: how many bitmaps have been pushed, so a test can tell a repaint that changed something
     // from one that was skipped as identical. Never read in production.
@@ -119,7 +121,7 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         bool light = r.Ink.GetBrightness() < 0.5f;
         GaugePalette palette = GaugePalette.Create(light, _accent.AccentFor(light), SystemInformation.HighContrast, r.Ink);
         GaugeContent content = GaugeContent.From(r.Snapshot, r.Now, r.Settings);
-        GaugeLayout layout = GaugeLayout.For(r.Dpi);
+        GaugeLayout layout = GaugeLayout.For(r.Dpi, _order());
         var key = new PushKey(content, palette, layout, _hover, r.FontFamily, r.Bounds.Location);
         if (key == _lastPush)
         {

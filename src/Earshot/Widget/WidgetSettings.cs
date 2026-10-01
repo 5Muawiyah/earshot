@@ -55,6 +55,10 @@ public sealed record WidgetSettings
     // Written as its number; a number that names neither position is read as RightEnd (Clamped records it).
     public GaugePosition GaugePosition { get; set; } = GaugePosition.RightEnd;
 
+    // How the gauge's ring, number and charging bolt line up. Written as its number; a number that names none of the
+    // six orders is read as RingNumberBolt, the layout the gauge has always had (Clamped records it).
+    public GaugeOrder GaugeOrder { get; set; } = GaugeOrder.RingNumberBolt;
+
     // Which display's taskbar holds the gauge: "" for the main display (the default), or the stored identity of one
     // display (DisplayInfo.Id, the monitor's device interface path, not its place in a list). A display that is not
     // connected, or shows no taskbar, leaves the gauge on the main display's taskbar until it is back.
@@ -108,6 +112,18 @@ public sealed record WidgetSettings
             position = GaugePosition.RightEnd;
         }
 
+        GaugeOrder order = GaugeOrder;
+        if (!Enum.IsDefined(order))
+        {
+            list.Add(new StepOutcome(
+                "clamp:GaugeOrder",
+                Ok: true,
+                Code: 0,
+                CodeName: "S_OK",
+                Detail: ((int)order).ToString(CultureInfo.InvariantCulture) + " is not one of the six gauge orders, so ring, number, bolt is used."));
+            order = GaugeOrder.RingNumberBolt;
+        }
+
         string display = (GaugeDisplay ?? "").Trim();
         if (display.Length > MaxGaugeDisplayLength || display.Any(char.IsControl))
         {
@@ -120,7 +136,7 @@ public sealed record WidgetSettings
             display = "";
         }
 
-        WidgetSettings result = this with { LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label, GaugePosition = position, GaugeDisplay = display };
+        WidgetSettings result = this with { LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label, GaugePosition = position, GaugeOrder = order, GaugeDisplay = display };
         notes = list;
         return result;
     }
