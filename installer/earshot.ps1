@@ -536,7 +536,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
 
     # ---------------------------------------------------------------- the one administrator prompt
 
-    function Invoke-Elevated([string]$Exe, [string]$Line) {
+    function Invoke-Elevated([string]$Exe, [string]$Line, [bool]$KeepHold = $false) {
         $result = $null
         if ($hk.Elevate) { $result = & $hk.Elevate $Exe $Line }
         else {
@@ -549,17 +549,24 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         }
         if ($result -is [Diagnostics.Process]) {
             $null = $result.Handle
+            # From here the elevated program is working in the install folder, and a Ctrl+C ends only this script: the program
+            # goes on. A tray started by the stop would run from files that may be half replaced, so nothing is started until
+            # the exit code has been read. A caller that still has the program's record to wait for keeps the hold itself.
+            $st.NoRestart = $true
             Wait-WithSpinner $result
-            return [int]$result.ExitCode
+            $code = [int]$result.ExitCode
+            if (-not $KeepHold) { $st.NoRestart = $false }
+            return $code
         }
         Write-Line 'Installing...'
         return [int]$result.ExitCode
     }
 
+    # The wait is a loop of short waits, so a Ctrl+C is heard within a moment whether or not the output is a console.
     function Wait-WithSpinner([Diagnostics.Process]$Process) {
         if ($st.Redirected) {
             Write-Line 'Installing...'
-            $Process.WaitForExit()
+            while (-not $Process.WaitForExit(250)) { }
             return
         }
         $frames = @('|', '/', '-', '\')
@@ -572,9 +579,9 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     }
 
     # Runs the one elevated command, taking care of a declined prompt. Returns the exit code of the elevated program.
-    function Invoke-ElevatedStep([string]$Exe, [string]$Line) {
+    function Invoke-ElevatedStep([string]$Exe, [string]$Line, [bool]$KeepHold = $false) {
         Write-Line 'Windows will ask for administrator approval once.'
-        try { return (Invoke-Elevated $Exe $Line) }
+        try { return (Invoke-Elevated $Exe $Line $KeepHold) }
         catch {
             if (Test-Declined $_.Exception) { Stop-Run 'Administrator approval was declined, so nothing was changed.' }
             throw
@@ -639,13 +646,18 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         $outcome = Wait-Outcome $Pth $beforeId $ExitCode
         if (-not $st.Redirected) { [Console]::Write("`r" + (' ' * 20) + "`r") }
         if ($null -eq $outcome) {
-            if ($ExitCode -ne 0) { Stop-Run ('The update did not start (' + (Get-ExitCodeMeaning $ExitCode) + ', code ' + $ExitCode + ').') }
+            if ($ExitCode -ne 0) {
+                $st.NoRestart = $false
+                Stop-Run ('The update did not start (' + (Get-ExitCodeMeaning $ExitCode) + ', code ' + $ExitCode + ').')
+            }
             # The update may still be replacing files, so the closed tray is not started over it.
             $st.NoRestart = $true
             $more = ''
             if ($st.OutcomeProblem) { $more = ' The record of the update could not be read: ' + $st.OutcomeProblem }
             Stop-Run ('The update was still running when this script stopped waiting for it. Earshot will say how it went when it starts.' + $more)
         }
+        # The update has said how it went, so it is no longer working in the install folder.
+        $st.NoRestart = $false
         $kind = [string]$outcome.Kind
         if ($kind -eq 'Installed' -or $kind -eq 'Repaired') { $st.Succeeded = $true; return }
         $reason = [string]$outcome.Reason
@@ -765,7 +777,8 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
                 return
             }
             $before = Read-OutcomeFile $Pth
-            $code = Invoke-ElevatedStep $installedExe $line
+            # The program that was started may have handed the update on, so the hold stays until its record is read.
+            $code = Invoke-ElevatedStep $installedExe $line $true
             Complete-Update $Pth $before $code
         }
 
@@ -898,12 +911,14 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     $final = 'Earshot: done.'
     $keepFolder = $false
     $reachedTheEnd = $false
+    $reported = $false
     try {
         try {
             Invoke-Main
             $reachedTheEnd = $true
         }
         catch {
+            $reported = $true
             $message = [string]$_.Exception.Message
             if ($message.StartsWith($StopMarker)) { $final = 'Earshot: stopped. ' + $message.Substring($StopMarker.Length) }
             else { $final = 'Earshot: stopped. Something went wrong: ' + $message }
@@ -915,6 +930,11 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         # reaching the catch above (a pipeline stop is not caught) but does run this. A run that reached its own end has
         # started whatever it meant to start.
         if (-not $reachedTheEnd) {
+            # A stop that was not reported (Ctrl+C) while the elevated program works leaves it working: say so.
+            if (-not $reported -and $st.NoRestart) {
+                if (-not $st.Redirected) { [Console]::Write("`r" + (' ' * 20) + "`r") }
+                Write-Line 'Setup is still running and was left to finish. Earshot was not started, because its files may be half replaced. Run this line again in a few minutes to see where it got to.'
+            }
             try { Restart-ClosedTrays }
             catch { Write-Line ('Earshot could not be started again: ' + $_.Exception.Message) }
         }

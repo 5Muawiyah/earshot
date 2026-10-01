@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -307,6 +308,121 @@ public sealed class InstallerScriptStopTests
         {
             Assert.IsEmpty(run.CallsNamed("StartTray"), run.Describe());
         }
+    }
+
+    // ----- Ctrl+C while the elevated program is working -----
+
+    // A real process that takes a while and is not elevated stands in for the elevated program; its id is recorded so the test
+    // can see it was still running when the run was stopped.
+    private const string SlowStandIn =
+        "$p = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\cmd.exe') -ArgumentList '/c ping -n 20 127.0.0.1 >nul' -PassThru -WindowStyle Hidden; Note ('StandIn|' + $p.Id); $p";
+
+    private static bool IsRunning(int id)
+    {
+        try
+        {
+            using Process process = Process.GetProcessById(id);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static void EndStandIn(InstallerRun run)
+    {
+        foreach (string call in run.CallsNamed("StandIn"))
+        {
+            try
+            {
+                using Process process = Process.GetProcessById(int.Parse(call.Split('|')[1], System.Globalization.CultureInfo.InvariantCulture));
+                process.Kill(entireProcessTree: true);
+            }
+            catch (ArgumentException)
+            {
+                // Already gone.
+            }
+        }
+    }
+
+    // The closed tray is not started from a folder the elevated program is still replacing. The stop is made in the middle of
+    // the script's own wait for a process that is really running, in both its forms (a spinner on a console, plain output).
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell, false)]
+    [DataRow(ShellKind.WindowsPowerShell, true)]
+    [DataRow(ShellKind.PowerShell7, false)]
+    [DataRow(ShellKind.PowerShell7, true)]
+    public void CtrlCWhileTheElevatedProgramIsRunningDoesNotStartTheTrayAndSaysSetupIsStillRunning(ShellKind shell, bool onAConsole)
+    {
+        using var world = new InstallerWorld();
+        world.PlaceProgramFile();
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.NotRedirected = onAConsole;
+        world.Spec.ElevateBody = SlowStandIn;
+        world.Spec.StopAfterCall = "StandIn|";
+        InstallerRun? run = null;
+        try
+        {
+            run = world.Run(shell);
+
+            CollectionAssert.AreEqual(ClosedFirst, run.CallsNamed("ExitTray"), run.Describe());
+            int standIn = int.Parse(run.CallsNamed("StandIn").Single().Split('|')[1], System.Globalization.CultureInfo.InvariantCulture);
+            Assert.IsTrue(IsRunning(standIn), "The stop came while the elevated program was still working." + Environment.NewLine + run.Describe());
+            Assert.IsEmpty(run.CallsNamed("StartTray"), "A program started now could be half replaced." + Environment.NewLine + run.Describe());
+            // What a console shows of a line is what follows its last carriage return (the spinner is drawn over itself).
+            Assert.IsTrue(run.Lines.Any(l => l[(l.LastIndexOf('\r') + 1)..].StartsWith("Setup is still running", StringComparison.Ordinal)), run.Describe());
+            Assert.IsFalse(run.Lines.Any(l => l.StartsWith("Earshot: done.", StringComparison.Ordinal)), "A run that was stopped is not a finished one.");
+            Assert.IsFalse(run.Lines.Contains("Earshot was started again."), run.Describe());
+        }
+        finally
+        {
+            if (run is not null)
+            {
+                EndStandIn(run);
+            }
+        }
+    }
+
+    // The same stop while the script waits for the update's record, after the elevated program handed over and exited.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void CtrlCWhileTheScriptWaitsForTheUpdatesRecordDoesNotStartTheTray(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.InstallRealProgram();
+        world.Spec.Action = "Update";
+        world.Spec.Setup = InstallerWorld.SetupJson(state: "usable", version: "1.2.1");
+        world.Spec.OutcomeWaitSeconds = 60;
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        // A real process, as the elevated program is, that ends at once with 0 after it handed the update on.
+        world.Spec.ElevateBody = "Write-Outcome 'Installing'; Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\cmd.exe') -ArgumentList '/c exit 0' -PassThru -WindowStyle Hidden";
+        world.Spec.StopAfterCall = "Elevate|";
+        world.Spec.StopDelaySeconds = 2;
+
+        InstallerRun run = world.Run(shell);
+
+        CollectionAssert.AreEqual(ClosedFirst, run.CallsNamed("ExitTray"), run.Describe());
+        Assert.IsEmpty(run.CallsNamed("StartTray"), "The update may still be replacing files." + Environment.NewLine + run.Describe());
+        Assert.IsTrue(run.Lines.Any(l => l.StartsWith("Setup is still running", StringComparison.Ordinal)), run.Describe());
+    }
+
+    // The hold ends when the exit code is read: a real elevated program that fails lets the tray start again.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void ARealElevatedProgramThatEndsInFailureStillLetsTheClosedTrayStartAgain(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.PlaceProgramFile();
+        world.Spec.Tray = new TrayStub(4242, world.InstalledExe, "1.3.0");
+        world.Spec.ElevateBody = "Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\cmd.exe') -ArgumentList '/c exit 3' -PassThru -WindowStyle Hidden";
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("Earshot: stopped. Setup did not finish (a step of setup failed, code 3).", run.Final, run.Describe());
+        CollectionAssert.AreEqual(new[] { world.InstalledExe }, run.CallsNamed("StartTray").Select(c => c.Split('|')[1]).ToArray(), run.Describe());
     }
 
     // ----- the update's own record -----

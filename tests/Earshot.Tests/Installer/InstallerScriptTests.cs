@@ -1209,6 +1209,13 @@ internal sealed class RunSpec
     public bool Raw { get; set; }
 
     public string RawScript { get; set; } = "";
+
+    // When set, the driver runs in a runspace of its own and its pipeline is stopped, the way Ctrl+C stops it, a while after a
+    // line starting with this text was recorded in the calls log: the stop lands wherever the script is then, and its finally
+    // blocks run.
+    public string? StopAfterCall { get; set; }
+
+    public double StopDelaySeconds { get; set; } = 1.5;
 }
 
 internal sealed class InstallerRun
@@ -1408,6 +1415,26 @@ internal sealed class InstallerWorld : IDisposable
     public InstallerRun Run(ShellKind shell)
     {
         string driver = Spec.Raw ? RawDriver() : BuildDriver();
+        if (Spec.StopAfterCall is string stopAfter)
+        {
+            string inner = WriteFile("driver-inner.ps1", driver);
+            driver =
+                "$rs = [runspacefactory]::CreateRunspace($Host)\r\n" +
+                "$rs.Open()\r\n" +
+                "$ps = [powershell]::Create()\r\n" +
+                "$ps.Runspace = $rs\r\n" +
+                "[void]$ps.AddScript('& ' + " + Q(inner) + ")\r\n" +
+                "$async = $ps.BeginInvoke()\r\n" +
+                "$limit = [DateTime]::UtcNow.AddSeconds(90)\r\n" +
+                "while (-not $async.IsCompleted -and [DateTime]::UtcNow -lt $limit) {\r\n" +
+                "  if ((Test-Path -LiteralPath " + Q(LogFile) + ") -and (@(Get-Content -LiteralPath " + Q(LogFile) + ") | Where-Object { $_.StartsWith(" + Q(stopAfter) + ") }).Count -gt 0) { break }\r\n" +
+                "  Start-Sleep -Milliseconds 100\r\n" +
+                "}\r\n" +
+                "Start-Sleep -Milliseconds " + (int)(Spec.StopDelaySeconds * 1000) + "\r\n" +
+                "$ps.Stop()\r\n" +
+                "$rs.Close()\r\n";
+        }
+
         string path = WriteFile("driver.ps1", driver);
         var arguments = new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass" };
         arguments.AddRange(Spec.ExtraShellArguments);
