@@ -16,6 +16,16 @@ public sealed class StatusCardInPlaceTests
 {
     private const string Device = "Jonathan’s AirPods Pro";
 
+    // Lets everything the first show set going (the system's own messages for the new window) finish before anything is counted.
+    private static void Settle()
+    {
+        for (int i = 0; i < 15; i++)
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        }
+    }
+
     private static CardPresenter RealCardPresenter(ConnectCard card, CapturingLog log) =>
         new(log, static action => action(), new FakeCardEnvironment(), () => card, static () => new FakeCardTimer(), TimeProvider.System);
 
@@ -31,7 +41,7 @@ public sealed class StatusCardInPlaceTests
             var click = new Point(1661, 1036);
 
             presenter.Show(new CardContent(Device, "Connecting"), CardAnchor.NearCursor, click);
-            Application.DoEvents();
+            Settle();
             Assert.IsTrue(card.IsShownOnScreen(), "Sanity: the first card is on screen.");
             Rectangle placed = card.Bounds;
             var visibleChanges = new List<bool>();
@@ -61,7 +71,7 @@ public sealed class StatusCardInPlaceTests
             using CardPresenter presenter = RealCardPresenter(card, log);
             var click = new Point(1661, 1036);
             presenter.Show(new CardContent(Device, "Connecting"), CardAnchor.NearCursor, click);
-            Application.DoEvents();
+            Settle();
             Size before = card.Size;
             var visibleChanges = new List<bool>();
             card.VisibleChanged += (_, _) => visibleChanges.Add(card.Visible);
@@ -89,7 +99,7 @@ public sealed class StatusCardInPlaceTests
             using CardPresenter presenter = RealCardPresenter(card, log);
             var click = new Point(1661, 1036);
             presenter.Show(new CardContent(Device, "Connected"), CardAnchor.NearCursor, click);
-            Application.DoEvents();
+            Settle();
             using var counter = new WindowMessageCounter(card.Handle);
 
             presenter.Show(new CardContent(Device, "Connected"), CardAnchor.NearCursor, click);
