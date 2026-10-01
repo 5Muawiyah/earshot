@@ -91,6 +91,53 @@ public sealed class StatusCardHoldTests
         Assert.IsEmpty(h.Card.ShownAt);
     }
 
+    // The timer's callback runs on a pool thread and reaches the UI thread later. A hold that was cancelled and replaced by another in
+    // between must not be cut short by the callback of the first: it was found ending the second at once, a card put up
+    // without its hold.
+    [TestMethod]
+    public void ATimerThatFiredForAHoldThatIsOverDoesNotEndTheNewHold()
+    {
+        var h = new Held(CardPresenter.SettleDelay);
+        var click = new Point(960, 1056);
+        h.Presenter.Show(new CardContent(Device, "Connecting"), CardAnchor.NearCursor, click);
+        h.Ui.RunAll();
+
+        // Already on the UI thread's queue, ahead of the callback of the first timer, which fires now.
+        h.Presenter.Hide();
+        h.Presenter.Show(new CardContent(Device, "Connected"), CardAnchor.NearCursor, click);
+        h.Time.Advance(CardPresenter.SettleDelay);
+        h.Ui.RunAll();
+
+        Assert.IsEmpty(h.Card.ShownAt, "The second hold has only just begun: the first hold's timer must not end it.");
+        Assert.IsTrue(h.Log.Has(LogLevel.Debug, "no longer the hold's"), "The stale timer was ignored, and said so.");
+
+        h.Time.Advance(CardPresenter.SettleDelay);
+        h.Ui.RunAll();
+
+        Assert.HasCount(1, h.Card.ShownAt, "The second hold ends by its own timer.");
+        Assert.AreEqual("Connected", h.Drawn[0]);
+    }
+
+    // The end of a hold runs from the message loop, so what goes wrong in it is logged and not thrown there.
+    [TestMethod]
+    public void AFailureWhenAHeldCardIsShownIsLoggedNotThrownIntoTheMessageLoop()
+    {
+        var environment = new FakeCardEnvironment { NotificationFailure = new InvalidOperationException("the shell call failed") };
+        var log = new CapturingLog();
+        var time = new Streaming.TestTimeProvider();
+        var ui = new QueuedUi();
+        var card = new FakeCardSurface();
+        var presenter = new CardPresenter(log, ui.Post, environment, () => card, () => new FakeCardTimer(), time, CardPresenter.SettleDelay);
+        presenter.Show(new CardContent(Device, "Connecting"), CardAnchor.NearTray);
+        ui.RunAll();
+
+        time.Advance(CardPresenter.SettleDelay);
+        ui.RunAll();
+
+        Assert.IsTrue(log.Has(LogLevel.Error, "could not be shown (InvalidOperationException)"));
+        Assert.IsEmpty(card.ShownAt);
+    }
+
     [TestMethod]
     public void AStatusOnACardThatIsOnScreenGoesStraightToItWithNoHold()
     {

@@ -15,6 +15,9 @@ internal sealed class FakeCardEnvironment : ICardEnvironment
 
     public NotificationStateReading Notifications { get; set; } = new(0, Shell.QUNS_ACCEPTS_NOTIFICATIONS);
 
+    // Set to make the query of the notification state throw, as a call into the shell that fails badly can.
+    public Exception? NotificationFailure { get; set; }
+
     public CardPalette Palette { get; set; } = CardTheme.Dark;
 
     public int NotificationQueries { get; private set; }
@@ -39,6 +42,11 @@ internal sealed class FakeCardEnvironment : ICardEnvironment
     {
         ThreadIds.Add(Environment.CurrentManagedThreadId);
         NotificationQueries++;
+        if (NotificationFailure is { } failure)
+        {
+            throw failure;
+        }
+
         return Notifications;
     }
 

@@ -57,9 +57,9 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     // that comes later still goes to the cursor on the taskbar or the corner near the notification area.
     public static readonly TimeSpan ClickAnchorLifetime = TimeSpan.FromSeconds(60);
 
-    // How long a card that is not on screen is held before it first appears. A UI timing choice: under the 100 ms to 200 ms
-    // within which a response to a click still feels instant, and long enough to take in the second of two statuses that
-    // follow each other (43 ms apart in the owner's log).
+    // How long a card that is not on screen is held before it first appears. A figure chosen here, not measured and not taken
+    // from any documentation: short enough that the card still seems to answer the click, and long enough to take in the second
+    // of two statuses that follow each other (43 ms apart in the owner's log).
     public static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(150);
 
     private readonly ILog _log;
@@ -199,16 +199,39 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         }
 
         _pending = new PendingCard(content, anchor, clickPoint);
-        _settleTimer ??= _time.CreateTimer(_ => _uiPost(OnHoldEnded), null, _settle, Timeout.InfiniteTimeSpan);
+        if (_settleTimer is null)
+        {
+            // The callback carries the timer that fired it: it runs on a pool thread and reaches the UI thread later, by when the
+            // hold it ended may be over and another begun.
+            ITimer? created = null;
+            created = _time.CreateTimer(_ => _uiPost(() => OnHoldEnded(created)), null, _settle, Timeout.InfiniteTimeSpan);
+            _settleTimer = created;
+        }
     }
 
-    private void OnHoldEnded()
+    // The hold ended by the timer that was made for it. A timer that is no longer the hold's (the hold was cancelled, or ended
+    // and another began, before this reached the UI thread) ends nothing: it must not cut the newer hold short. Whatever else
+    // goes wrong is logged here and not thrown, since this runs from the message loop.
+    private void OnHoldEnded(ITimer? fired)
     {
-        PendingCard? pending = _pending;
-        CancelHold();
-        if (pending is not null)
+        if (!ReferenceEquals(fired, _settleTimer))
         {
-            ShowOnUiThread(pending.Content, pending.Anchor, pending.ClickPoint);
+            _log.Write(LogLevel.Debug, "A hold timer that was no longer the hold's fired and was ignored.");
+            return;
+        }
+
+        try
+        {
+            PendingCard? pending = _pending;
+            CancelHold();
+            if (pending is not null)
+            {
+                ShowOnUiThread(pending.Content, pending.Anchor, pending.ClickPoint);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Card: the card held for a moment could not be shown (" + ex.GetType().Name + ").", ex);
         }
     }
 
