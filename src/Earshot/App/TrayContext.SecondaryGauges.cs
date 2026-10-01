@@ -13,11 +13,6 @@ internal sealed partial class TrayContext
     private TrayIconVotes? _iconVotes;
     private readonly Func<SecondaryTaskbarReading> _secondaryTaskbarSource;
 
-    // The main display's own scale, from its last read. The card is drawn at the scale of the display of the gauge it was opened
-    // from, which for a card opened from another display's gauge is not this one.
-    private int _mainLayoutDpi = CardPlacement96;
-    private bool _cardOpenedFromSecondaryGauge;
-
     // Where the last card request was anchored, for tests: the gauge the click was on, or null for a request with no gauge.
     internal Rectangle? LastCardAnchorForTest { get; private set; }
 
@@ -81,27 +76,11 @@ internal sealed partial class TrayContext
         }
 
         _caseOpenCardPresenter?.Hide();
-        _widgetLayoutDpi = gauge.Dpi;
-        _cardOpenedFromSecondaryGauge = true;
         LastCardAnchorForTest = bounds;
-        presenter.RequestShow(bounds, bounds.Location, openedByKeyboard: false);
-    }
 
-    // The scale the card is drawn at when it is opened from the main gauge or the tray icon.
-    private void UseMainDisplayScaleForCard()
-    {
-        _cardOpenedFromSecondaryGauge = false;
-        _widgetLayoutDpi = _mainLayoutDpi;
-    }
-
-    // The main display's read gives its scale; a card that is open on another display's gauge keeps the scale it was opened at.
-    private void NoteMainLayoutDpi(int dpi)
-    {
-        _mainLayoutDpi = dpi;
-        if (!_cardOpenedFromSecondaryGauge || !(_widgetCardPresenter?.IsShown ?? false))
-        {
-            _widgetLayoutDpi = dpi;
-        }
+        // The scale goes with the request: the main gauge's own scale (_widgetLayoutDpi) is read from the main taskbar and is not
+        // this display's, and a read of it between the click and the card being shown must not change what the card is drawn at.
+        presenter.RequestShow(bounds, bounds.Location, openedByKeyboard: false, dpi: gauge.Dpi);
     }
 
     private void RenderSecondaryGauge(SecondaryGauge gauge)

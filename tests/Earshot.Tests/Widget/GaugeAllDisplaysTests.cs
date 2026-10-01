@@ -247,6 +247,24 @@ public sealed class GaugeAllDisplaysTests
             RenderCount++;
             LastRenderBounds = bounds;
             LastRenderDpi = dpi;
+            lock (_drawnScales)
+            {
+                _drawnScales.Add(dpi);
+            }
+        }
+
+        private readonly List<int> _drawnScales = [];
+
+        // The scale of every draw, in order.
+        public IReadOnlyList<int> DrawnScales
+        {
+            get
+            {
+                lock (_drawnScales)
+                {
+                    return [.. _drawnScales];
+                }
+            }
         }
 
         public void HideWindow() => Hidden = true;
@@ -327,7 +345,7 @@ public sealed class GaugeAllDisplaysTests
     // reader is given its read when the tray asks for it.
     private static Rig StartRig(string gaugeDisplay, params DisplayInfo[] displays) => StartRigCore(gaugeDisplay, secondaryBars: true, displays);
 
-    private static Rig StartRigCore(string gaugeDisplay, bool secondaryBars, DisplayInfo[] displays)
+    private static Rig StartRigCore(string gaugeDisplay, bool secondaryBars, DisplayInfo[] displays, int pollIntervalMs = 30)
     {
         DisplayInfo[] shown = displays.Length > 0 ? displays : [One, Two];
         var fakeDisplays = new FakeDisplays(shown);
@@ -335,7 +353,7 @@ public sealed class GaugeAllDisplaysTests
         taskbars.Set(secondaryBars ? shown.Where(d => !d.IsPrimary).Select((d, i) => BarOn(d, 0x5000 + i)).ToArray() : []);
         Rig? rig = null;
         var tray = new TrayHarness(
-            snapshot: Target(ConnectionState.Disconnected), displaySource: fakeDisplays, taskbarWatcherPollIntervalMs: 30,
+            snapshot: Target(ConnectionState.Disconnected), displaySource: fakeDisplays, taskbarWatcherPollIntervalMs: pollIntervalMs,
             gaugeSurfaceFactory: () => rig!.Make(), foregroundWindowProbe: _ => rig!.Foreground,
             secondaryTaskbars: taskbars.Read, settings: WidgetOn(gaugeDisplay));
         rig = new Rig { Tray = tray, Displays = fakeDisplays, Taskbars = taskbars };
@@ -495,7 +513,9 @@ public sealed class GaugeAllDisplaysTests
 
             rig.Taskbars.SetProblem(StepOutcomes.FromWin32("get-window-rect:Shell_SecondaryTrayWnd", 1400, ok: false));
             rig.Taskbars.Set();
-            Thread.Sleep(300);
+            var pumpWatch = System.Diagnostics.Stopwatch.StartNew(); int mainReads = rig.Tray.TaskbarReaders[0].ReadCount;
+            while (pumpWatch.ElapsedMilliseconds < 400) { Application.DoEvents(); Thread.Sleep(1); }
+            Assert.IsTrue(rig.Tray.TaskbarReaders[0].ReadCount > mainReads + 3, "main reads did not run");
 
             Assert.AreEqual(1, rig.Tray.Context.SecondaryGaugeCountForTest, "A taskbar missing because it could not be read is not a taskbar that is gone.");
             Assert.IsFalse(rig.ShownOn(Right1080)!.IsDisposed);
@@ -655,7 +675,7 @@ public sealed class GaugeAllDisplaysTests
 
         public SecondaryGaugeSet Set { get; }
 
-        public SetRig(bool deferred = false)
+        public SetRig(bool deferred = false, string coverClass = "Shell_TrayWnd")
         {
             Taskbars.Set(BarOn(Two, 0x5000), BarOn(Three, 0x5001));
             var parts = new SecondaryGaugeParts(
@@ -682,7 +702,7 @@ public sealed class GaugeAllDisplaysTests
                 () => new GaugeControllerSettings(Enabled: true, LeftClickConnects: false),
                 Log,
                 TimeProvider.System,
-                () => new FakeCoverProbe { Next = new GaugeCover(IsGauge: false, RootClassName: "Shell_TrayWnd", BelongsToExplorer: true) },
+                () => new FakeCoverProbe { Next = new GaugeCover(IsGauge: false, RootClassName: coverClass, BelongsToExplorer: true) },
                 action =>
                 {
                     if (deferred)
@@ -842,5 +862,44 @@ public sealed class GaugeAllDisplaysTests
 
         Assert.AreEqual(GaugeController.RaisesPerWindow, busySurface.RaiseCount, "The busy gauge is held to the limit.");
         Assert.AreEqual(1, quietSurface.RaiseCount, "The other gauge's raise is not refused for the busy one's.");
+    }
+
+    // ----- the card's scale -----
+
+    // The card opened from another display's gauge is drawn at that gauge's scale. The main gauge is read from the main taskbar and is
+    // drawn at the main display's own scale, with the card open or not: here the main taskbar is read again after the click, which is
+    // when the tray learns the main display's scale.
+    [TestMethod]
+    public void AReadOfTheMainTaskbarWhileTheCardIsOpenFromAnotherDisplaysGaugeDrawsTheMainGaugeAtItsOwnScale()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            DisplayInfo scaled = Two with { Dpi = 144 };
+            using Rig rig = StartRigCore(GaugeDisplayChoice.AllDisplays, secondaryBars: true, [One, scaled], pollIntervalMs: 600000);
+            FeedSecondary(rig, scaled);
+            Poke(rig);
+            TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is { RenderCount: > 0 } && rig.ShownOn(Right1080) is { RenderCount: > 0 }, "A gauge was never drawn. " + Why(rig));
+            TestSurface second = rig.ShownOn(Right1080)!;
+            TestSurface first = rig.ShownOn(Left1080)!;
+
+            second.Click();
+            TrayHarness.PumpUntil(() => rig.Tray.Context.WidgetCardIsShownForTest, "The card never opened from the second display's gauge.");
+            int mark = first.DrawnScales.Count;
+            int reads = rig.Tray.TaskbarReaders[0].ReadCount;
+            Poke(rig);
+            TrayHarness.PumpUntil(() => rig.Tray.TaskbarReaders[0].ReadCount > reads && first.DrawnScales.Count > mark, "The main taskbar was not read and drawn again.");
+            rig.Tray.PumpUntilIdle();
+
+            List<int> after = first.DrawnScales.Skip(mark).ToList();
+            Assert.IsTrue(rig.Tray.Context.WidgetCardIsShownForTest, "The card closed before the draws were seen, so they prove nothing.");
+            Assert.IsTrue(after.Count > 0 && after.All(dpi => dpi == 96), "The main gauge was drawn at: " + string.Join(",", after));
+        });
+    }
+
+    // A settings change broadcast, which makes the tray measure the main taskbar again at once.
+    private static void Poke(Rig rig)
+    {
+        var poke = Message.Create(rig.Tray.Context.Window.Handle, 0x001A, 0, 0);
+        rig.Tray.Context.Window.Dispatch(ref poke);
     }
 }

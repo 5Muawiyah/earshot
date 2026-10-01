@@ -58,6 +58,12 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     private readonly Func<WidgetCard> _createCard;
     private readonly WidgetCardPresenterCallbacks _callbacks;
+
+    // The scale a card opened from another display's gauge is drawn at, kept for as long as it is open; null for a card that follows
+    // the host's.
+    private int? _cardDpi;
+
+    private int CardDpi => _cardDpi ?? _callbacks.Dpi();
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _time;
     private readonly ILog _log;
@@ -130,6 +136,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     internal bool SpinnerRunningForTest => _spinnerTimer is not null;
 
+    // For tests: how wide the card is, which follows the scale it is drawn at. Zero until a card exists.
+    internal int CardWidthForTest => _card?.ClientSize.Width ?? 0;
+
     // Shows the card above gaugeBounds, or above a zero-size rectangle at fallbackPoint when the gauge is
     // hidden and the click came from the tray icon fallback instead: a simpler fallback than the gauge
     // case, since the tray icon has no free taskbar rectangle of its own to anchor above, unlike the full
@@ -139,8 +148,11 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     //
     // openedByKeyboard is true when the open came from the keyboard, so the focus visual shows from the start;
     // a click opens the card with none.
-    public void RequestShow(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false) =>
-        _uiPost(() => RequestShowOnUiThread(gaugeBounds, fallbackPoint, openedByKeyboard));
+    //
+    // dpi is the scale of the display the gauge is on, for a gauge that is not the main display's. The card is drawn at it for as
+    // long as it stays open, whatever the main gauge reads in the meantime. Null draws the card at the scale the host gives.
+    public void RequestShow(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false, int? dpi = null) =>
+        _uiPost(() => RequestShowOnUiThread(gaugeBounds, fallbackPoint, openedByKeyboard, dpi));
 
     // Opens the card at the update page (or switches an open card to it), placed the same way a gauge click places the
     // card. From the tray menu's "Check for updates" once a newer version is found, so the Update button is there.
@@ -184,7 +196,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         }
     }
 
-    private void RequestShowOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard)
+    private void RequestShowOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard, int? dpi)
     {
         if (_disposed)
         {
@@ -227,7 +239,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             return;
         }
 
-        ShowAt(gaugeBounds, fallbackPoint, openedByKeyboard);
+        ShowAt(gaugeBounds, fallbackPoint, openedByKeyboard, dpi);
     }
 
     private void RequestUpdatePageOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint)
@@ -252,18 +264,19 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         SyncSpinner();
     }
 
-    private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false)
+    private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false, int? dpi = null)
     {
+        _cardDpi = dpi;
         Rectangle anchor = gaugeBounds ?? new Rectangle(fallbackPoint, Size.Empty);
         _place = CardPlace.AtClick(gaugeBounds is { } gauge ? new Point(gauge.X + (gauge.Width / 2), gauge.Y) : fallbackPoint);
 
         WidgetCard card = EnsureCard();
         card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
-        card.MaxHeight = WidgetCardPlacement.MaxHeight(anchor, _workAreaFor(anchor), _callbacks.Dpi());
-        card.Render(BuildModel(), _callbacks.Dpi());
+        card.MaxHeight = WidgetCardPlacement.MaxHeight(anchor, _workAreaFor(anchor), CardDpi);
+        card.Render(BuildModel(), CardDpi);
         Rectangle rest = PlaceAbove(card, anchor);
         card.ResetFocusCue(openedByKeyboard);
-        card.PresentAnimated(rest, CardMotion.TravelFor(gaugeBounds ?? Rectangle.Empty, _workAreaFor(anchor), _callbacks.Dpi()));
+        card.PresentAnimated(rest, CardMotion.TravelFor(gaugeBounds ?? Rectangle.Empty, _workAreaFor(anchor), CardDpi));
         card.Activate();
         StartRefreshTimer();
         SyncRefreshSpinner();
@@ -273,7 +286,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     {
         Size cardSize = card.ClientSize;
         Rectangle workArea = _workAreaFor(anchor);
-        return WidgetCardPlacement.Above(anchor, cardSize, workArea, _callbacks.Dpi(), _callbacks.CurrentGaugePosition);
+        return WidgetCardPlacement.Above(anchor, cardSize, workArea, CardDpi, _callbacks.CurrentGaugePosition);
     }
 
     private void HideOnUiThread()
@@ -617,8 +630,8 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
         Rectangle before = card.RestBounds;
         Rectangle workArea = _workAreaFor(before);
-        card.MaxHeight = Math.Max(1, before.Bottom - (workArea.Top + CardPlacement.Scale(WidgetCardPlacement.GapAt96, _callbacks.Dpi())));
-        card.Render(BuildModel(), _callbacks.Dpi());
+        card.MaxHeight = Math.Max(1, before.Bottom - (workArea.Top + CardPlacement.Scale(WidgetCardPlacement.GapAt96, CardDpi)));
+        card.Render(BuildModel(), CardDpi);
 
         Size size = card.ClientSize;
         if (size != before.Size)

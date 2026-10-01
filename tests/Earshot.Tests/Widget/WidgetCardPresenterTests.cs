@@ -270,6 +270,48 @@ public sealed class WidgetCardPresenterTests
 
     private const int WM_KEYDOWN = 0x0100;
 
+    // A card opened with a scale of its own (from another display's gauge) is drawn at that scale for as long as it is open, whatever
+    // the host's scale becomes in the meantime; one opened without follows the host's.
+    [TestMethod]
+    public void ACardOpenedWithAScaleKeepsItWhileOpenAndTheNextCardOpenedWithoutOneFollowsTheHost()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            int WidthShownAt(int hostDpi, int? cardDpi)
+            {
+                var callbacks = new FakeCallbacks { Dpi = hostDpi };
+                var log = new CapturingLog();
+                using var plain = new WidgetCardPresenter(() => new WidgetCard(log), callbacks.Build(), Inline, new Streaming.TestTimeProvider(), log);
+                plain.RequestShow(Gauge, Gauge.Location, dpi: cardDpi);
+                Application.DoEvents();
+                return plain.CardWidthForTest;
+            }
+
+            int at96 = WidthShownAt(96, null);
+            int at120 = WidthShownAt(120, null);
+            int at144 = WidthShownAt(144, null);
+            Assert.IsTrue(at144 > at96, "Sanity: a larger scale gives a wider card.");
+            Assert.AreEqual(at144, WidthShownAt(96, 144), "The scale that came with the request is the card's, not the host's.");
+
+            var hostCallbacks = new FakeCallbacks { Dpi = 96 };
+            var hostLog = new CapturingLog();
+            using var presenter = new WidgetCardPresenter(() => new WidgetCard(hostLog), hostCallbacks.Build(), Inline, new Streaming.TestTimeProvider(), hostLog);
+            presenter.RequestShow(Gauge, Gauge.Location, dpi: 144);
+            Application.DoEvents();
+            hostCallbacks.Dpi = 120;
+            presenter.Refresh();
+            Application.DoEvents();
+            Assert.AreEqual(at144, presenter.CardWidthForTest, "A host scale read while the card is open does not change it.");
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            Assert.IsFalse(presenter.IsShown, "Sanity: the second click closed it.");
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+            Assert.AreEqual(at120, presenter.CardWidthForTest, "The next card, opened without a scale, follows the host's.");
+        });
+    }
+
     private static void Inline(Action action) => action();
 
     private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false, DateTimeOffset? readAt = null) =>

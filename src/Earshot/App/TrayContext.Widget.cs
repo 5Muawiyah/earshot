@@ -39,6 +39,9 @@ internal sealed partial class TrayContext
     private WidgetCardPresenter? _widgetCardPresenter;
     private CaseOpenCardPresenter? _caseOpenCardPresenter;
     private WidgetCardPresenterCallbacks? _widgetCardCallbacks;
+
+    // The main display's own scale, from the last read of its taskbar: what the main gauge and a card opened from it or the tray icon
+    // are drawn at. A card opened from another display's gauge brings that display's scale with the request instead.
     private int _widgetLayoutDpi = CardPlacement96;
     private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted);
 
@@ -526,7 +529,7 @@ internal sealed partial class TrayContext
 
         if (result.Layout is { } layout)
         {
-            NoteMainLayoutDpi(layout.Dpi);
+            _widgetLayoutDpi = layout.Dpi;
         }
 
         controller.OnLayout(result);
@@ -584,7 +587,6 @@ internal sealed partial class TrayContext
         }
 
         _caseOpenCardPresenter?.Hide();
-        UseMainDisplayScaleForCard();
 
         if (GaugeBoundsIfShown() is { } bounds)
         {
@@ -604,7 +606,6 @@ internal sealed partial class TrayContext
     // rectangle OnWidgetCardRequested already uses for "above the gauge".
     private void OnCaseOpened(object? sender, CaseOpenedEventArgs e)
     {
-        UseMainDisplayScaleForCard();
         _caseOpenCardPresenter?.RequestShow(GaugeBoundsIfShown());
     }
 
