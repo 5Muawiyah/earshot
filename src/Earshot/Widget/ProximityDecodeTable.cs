@@ -15,11 +15,8 @@ public sealed record ProximityDecodeTable(
     bool InEarWhenSet,
     int? LidOpenBit,           // a bit of Lid that reads open, or null when the lid is a counter only
     byte? LidCounterMask,      // the bits of Lid that count lid opens, or null
-    bool? CaseNibbleReadsOnlyWithLidOpen, // the paper's claim, once observed
-    bool CaseNibbleProved = false)        // the case nibble may be read
+    bool? CaseNibbleReadsOnlyWithLidOpen) // the paper's claim, once observed
 {
-    public static ProximityDecodeTable Unproved => new(null, null, false, null, null, null, null, null, false, null, null, null);
-
     // The documented 25-byte form, as the permitted sources and the saved capture settle it.
     //
     // Bud nibbles (byte 4): the high nibble is the right bud and the low nibble the left, in the message's own
@@ -49,6 +46,5 @@ public sealed record ProximityDecodeTable(
         InEarWhenSet: false,
         LidOpenBit: null,
         LidCounterMask: null,
-        CaseNibbleReadsOnlyWithLidOpen: null,
-        CaseNibbleProved: true);
+        CaseNibbleReadsOnlyWithLidOpen: null);
 }

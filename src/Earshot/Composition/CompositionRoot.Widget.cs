@@ -61,19 +61,6 @@ internal static partial class CompositionRoot
         return status;
     }
 
-    // The set-up records and the proof summary sit beside claim.json, under the same data root.
-    internal static string WidgetSetupFolder(Paths paths)
-    {
-        ArgumentNullException.ThrowIfNull(paths);
-        return Path.Combine(paths.WidgetFolder, "setup");
-    }
-
-    internal static string WidgetProofFile(Paths paths)
-    {
-        ArgumentNullException.ThrowIfNull(paths);
-        return Path.Combine(paths.WidgetFolder, "proof.json");
-    }
-
     // The low battery alert's real notifier chain: a toast, falling back to the card the tray already shows
     // its other one-off notices through; in safe mode or with a redirected data root the whole notifier is
     // that card alone, so a test run or a safe-mode run never writes a Start menu shortcut or shows a real

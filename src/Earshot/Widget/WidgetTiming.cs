@@ -4,11 +4,8 @@ namespace Earshot.Widget;
 // measurement.
 public static class WidgetTiming
 {
-    // How fresh an owned reading has to be for the ear state (Elsewhere/NotInUse) to be shown at all.
+    // How fresh a reading of the chosen set has to be for the ear state (Elsewhere/NotInUse) to be shown at all.
     public static readonly TimeSpan EarFreshWindow = TimeSpan.FromSeconds(10);
-
-    // How long the battery set-up listens for the owner's case before deciding.
-    public static readonly TimeSpan SetupListenWindow = TimeSpan.FromSeconds(20);
 
     public static readonly TimeSpan WatcherRetryDelay = TimeSpan.FromSeconds(30);
 
