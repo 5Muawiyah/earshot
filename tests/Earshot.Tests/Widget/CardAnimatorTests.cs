@@ -16,7 +16,14 @@ public sealed class CardAnimatorTests
     {
         public List<(Rectangle At, int Offset, byte Alpha)> Frames { get; } = [];
 
-        public void Apply(Rectangle rest, int offsetPx, byte alpha) => Frames.Add((rest, offsetPx, alpha));
+        // The frame number (from 1) from which every frame fails, or 0 for none.
+        public int FailFrom { get; set; }
+
+        public bool Apply(Rectangle rest, int offsetPx, byte alpha)
+        {
+            Frames.Add((rest, offsetPx, alpha));
+            return FailFrom == 0 || Frames.Count < FailFrom;
+        }
     }
 
     private static TimeSpan Ms(double milliseconds) => TimeSpan.FromTicks((long)Math.Round(milliseconds * TimeSpan.TicksPerMillisecond));
@@ -47,6 +54,59 @@ public sealed class CardAnimatorTests
         Assert.IsFalse(animator.Running, "The timer stops when the motion is over.");
         Assert.AreEqual(0, time.LiveTimers);
         Assert.AreEqual((Rest, 0, (byte)255), sink.Frames[^1]);
+    }
+
+    // A frame the window could not take ends the motion at once: no timer is left running, and an exit goes on to hide the card
+    // (the sink has already put the window at rest and made it opaque), so the card is never left half way.
+    [TestMethod]
+    public void AnExitWhoseFirstFrameFailsHidesTheCardAtOnceAndLeavesNoTimer()
+    {
+        var time = new TestTimeProvider();
+        var sink = new RecordingSink { FailFrom = 1 };
+        using var animator = new CardAnimator(time, sink, () => true, static a => a());
+        int hidden = 0;
+
+        animator.Exit(Rest, 48, () => hidden++);
+
+        Assert.AreEqual(1, hidden, "The exit is finished, not abandoned.");
+        Assert.IsFalse(animator.Running);
+        Assert.AreEqual(0, time.LiveTimers);
+        time.Advance(Ms(500));
+        Assert.AreEqual(1, hidden, "Once.");
+        Assert.HasCount(1, sink.Frames, "No further frame is tried.");
+    }
+
+    [TestMethod]
+    public void AnEntranceWhoseFirstFrameFailsLeavesNoTimerAndHidesNothing()
+    {
+        var time = new TestTimeProvider();
+        var sink = new RecordingSink { FailFrom = 1 };
+        using var animator = new CardAnimator(time, sink, () => true, static a => a());
+
+        animator.Enter(Rest, 48);
+
+        Assert.IsFalse(animator.Running);
+        Assert.AreEqual(0, time.LiveTimers);
+        time.Advance(Ms(500));
+        Assert.HasCount(1, sink.Frames, "No further frame is tried.");
+    }
+
+    [TestMethod]
+    public void AnExitWhoseLaterFrameFailsStopsTheTimerAndHidesTheCard()
+    {
+        var time = new TestTimeProvider();
+        var sink = new RecordingSink { FailFrom = 3 };
+        using var animator = new CardAnimator(time, sink, () => true, static a => a());
+        int hidden = 0;
+
+        animator.Exit(Rest, 48, () => hidden++);
+        time.Advance(Ms(16));
+        Assert.AreEqual(0, hidden);
+        time.Advance(Ms(16));
+
+        Assert.AreEqual(1, hidden, "The third frame failed, so the exit ended there.");
+        Assert.IsFalse(animator.Running);
+        Assert.AreEqual(0, time.LiveTimers);
     }
 
     [TestMethod]

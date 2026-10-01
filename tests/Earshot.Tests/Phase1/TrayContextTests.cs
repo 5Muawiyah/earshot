@@ -1410,7 +1410,10 @@ internal sealed class TrayHarness : IDisposable
         Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null,
         Earshot.Widget.IDisplaySource? displaySource = null,
         Func<Earshot.Widget.IGaugeSurface>? gaugeSurfaceFactory = null,
-        Func<IReadOnlyList<Earshot.Widget.DisplayInfo>, Earshot.Widget.ForegroundWindowReading?>? foregroundWindowProbe = null)
+        Func<IReadOnlyList<Earshot.Widget.DisplayInfo>, Earshot.Widget.ForegroundWindowReading?>? foregroundWindowProbe = null,
+        Earshot.Widget.SystemLookService? lookService = null,
+        Func<bool>? cardAnimationsEnabled = null,
+        Func<MouseButtons>? mouseButtonsDown = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1549,6 +1552,11 @@ internal sealed class TrayHarness : IDisposable
         if (displaySource is not null)
         {
             options = options with { DisplaySource = displaySource };
+        }
+
+        if (lookService is not null || cardAnimationsEnabled is not null || mouseButtonsDown is not null)
+        {
+            options = options with { LookService = lookService, CardAnimationsEnabled = cardAnimationsEnabled, MouseButtonsDown = mouseButtonsDown };
         }
 
         if (gaugeSurfaceFactory is not null)

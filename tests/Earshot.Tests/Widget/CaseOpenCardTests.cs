@@ -392,6 +392,66 @@ public sealed class CaseOpenCardTests
         });
     }
 
+    // A new look (a bigger text size, here a bigger scale) makes the notice larger. It keeps its bottom edge, grows upward and
+    // stays inside the work area, instead of growing down into the taskbar from where its top-left was.
+    [TestMethod]
+    public void ALookChangeThatMakesTheNoticeLargerKeepsItsBottomEdgeAndItStaysInTheWorkArea()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            WidgetCard? card = null;
+            using var presenter = new CaseOpenCardPresenter(
+                () => card = new WidgetCard(log, notice: true), callbacks.Build(), Gate(), new Earshot.Tests.Phase5.FakeCardEnvironment(), Inline, new Streaming.TestTimeProvider(), log);
+            Rectangle work = SystemDisplaySource.WorkAreaFor(new Rectangle(0, 0, 1, 1));
+            var gauge = new Rectangle(work.Right - 200, work.Bottom + 4, 74, 40);
+
+            presenter.RequestShow(gauge);
+            Application.DoEvents();
+            Rectangle before = card!.RestBounds;
+
+            callbacks.Dpi = 144;
+            presenter.ReapplyLook();
+            Application.DoEvents();
+
+            Rectangle after = card.RestBounds;
+            Assert.IsGreaterThan(before.Height, after.Height, "The card is larger at the new scale.");
+            Assert.AreEqual(before.Bottom, after.Bottom, "It kept its bottom edge.");
+            Assert.IsTrue(work.Contains(after), "And it is inside the work area: " + after + " in " + work);
+            Assert.AreEqual(1, presenter.LookReappliesForTest);
+        });
+    }
+
+    [TestMethod]
+    public void ALookChangeWhileTheNoticeIsLeavingDrawsNothing()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            var time = new Streaming.TestTimeProvider();
+            WidgetCard? card = null;
+            using var presenter = new CaseOpenCardPresenter(
+                () => card = new WidgetCard(log, notice: true), callbacks.Build(), Gate(), new Earshot.Tests.Phase5.FakeCardEnvironment(), Inline, time, log,
+                animationsEnabled: () => true);
+            presenter.RequestShow(gaugeBounds: null);
+            Application.DoEvents();
+            time.Advance(TimeSpan.FromMilliseconds(300));
+            presenter.Hide();
+            Application.DoEvents();
+            Assert.IsTrue(card!.IsExiting);
+            Rectangle before = card.RestBounds;
+
+            callbacks.Dpi = 144;
+            presenter.ReapplyLook();
+            Application.DoEvents();
+
+            Assert.AreEqual(before, card.RestBounds, "A card that is leaving is not resized.");
+            Assert.AreEqual(0, presenter.LookReappliesForTest);
+        });
+    }
+
     private static void Inline(Action action) => action();
 
     private static WidgetCard ThrowingFactory() =>

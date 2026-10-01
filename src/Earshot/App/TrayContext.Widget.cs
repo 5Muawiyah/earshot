@@ -46,6 +46,8 @@ internal sealed partial class TrayContext
     private readonly int _taskbarWatcherPollIntervalMs;
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
     private readonly Func<ICardEnvironment>? _cardEnvironmentFactory;
+    private readonly SystemLookService? _lookServiceOverride;
+    private readonly Func<bool>? _cardAnimationsOverride;
     private readonly Func<IForegroundChangeSource>? _foregroundChangeSourceFactory;
     private readonly Func<IGaugeCoverProbe>? _gaugeCoverProbeFactory;
     private IForegroundChangeSource? _foregroundSource;
@@ -369,6 +371,15 @@ internal sealed partial class TrayContext
     // an actual click on the real GaugeWindow this pipeline builds.
     internal void RequestWidgetCardForTest() => OnWidgetCardRequested(this, EventArgs.Empty);
 
+    // How many times a shown gauge-anchored card was given the look again, how many frames the real taskbar gauge has pushed,
+    // whether the card's focus cue is on, and whether the cards were given motion, for tests.
+    internal int WidgetCardLookReappliesForTest => _widgetCardPresenter?.LookReappliesForTest ?? 0;
+    internal int WidgetCaseOpenCardLookReappliesForTest => _caseOpenCardPresenter?.LookReappliesForTest ?? 0;
+    internal int WidgetGaugePushCountForTest => _gaugeWindow?.PushCount ?? 0;
+    internal bool? WidgetCardFocusCueVisibleForTest => _widgetCardPresenter?.FocusCueVisibleForTest;
+    internal bool? WidgetCardHasMotionForTest => _widgetCardPresenter?.HasMotionForTest;
+    internal bool? WidgetCaseOpenCardHasMotionForTest => _caseOpenCardPresenter?.HasMotionForTest;
+
     // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
     // left click and the menu's toggle item already use (Launch -> ToggleAsync -> BlockCoordinator), just
     // with the card placed above the gauge instead of at the cursor. Safe mode is unchanged: ToggleAsync's
@@ -386,11 +397,22 @@ internal sealed partial class TrayContext
 
     // Whether the cards slide and fade: Windows' own Animation effects setting, read at each show and hide. A tray
     // whose surfaces are replaced by fakes (a test) has no motion at all, so its cards are shown and hidden in one step.
-    private Func<bool>? CardAnimationsEnabled() => _trayIconVisibilityFactory is null ? new SystemAnimationSetting(_log).Enabled : null;
+    private Func<bool>? CardAnimationsEnabled() => ChooseCardAnimations(_cardAnimationsOverride, _trayIconVisibilityFactory is not null, _log);
+
+    // The rule above on its own: what is supplied wins, otherwise a tray with real surfaces reads Windows' setting and one with
+    // fakes has no motion. Both card presenters are given the result, so every card the tray makes either has motion or none.
+    internal static Func<bool>? ChooseCardAnimations(Func<bool>? supplied, bool surfacesAreFakes, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        return supplied ?? (surfacesAreFakes ? null : new SystemAnimationSetting(log).Enabled);
+    }
+
+    // The look the cards read: the one the tray was given, or the shared one.
+    private SystemLookService LookService() => _lookServiceOverride ?? SystemLookService.Shared(_log);
 
     // Every widget card is made here, so what all of them share is set in one place: the accent is the owner's
     // Windows accent colour, the same one the gauge's ring uses, and an open card repaints when it changes.
-    private WidgetCard CreateWidgetCard(bool notice) => CreateWidgetCard(_log, notice, AccentColourService.Shared(_log), SystemLookService.Shared(_log));
+    private WidgetCard CreateWidgetCard(bool notice) => CreateWidgetCard(_log, notice, AccentColourService.Shared(_log), LookService());
 
     internal static WidgetCard CreateWidgetCard(ILog log, bool notice, IAccentColours accent, SystemLookService? look = null)
     {
@@ -563,7 +585,11 @@ internal sealed partial class TrayContext
     // was already open left it sitting there, one Earshot window stacked on another, until its own dismiss
     // timer eventually cleared it. Hide is a no-op when nothing is open, so this runs unconditionally
     // rather than only when the notice happens to be showing.
-    private void OnWidgetCardRequested(object? sender, EventArgs e)
+    private void OnWidgetCardRequested(object? sender, EventArgs e) => OpenWidgetCard(openedByKeyboard: false);
+
+    // openedByKeyboard is true when the tray icon was selected from the keyboard, so the card shows its focus visual from the
+    // start; the gauge takes no keyboard focus, so a click on it is always a click.
+    private void OpenWidgetCard(bool openedByKeyboard)
     {
         if (_widgetCardPresenter is not { } presenter)
         {
@@ -574,11 +600,11 @@ internal sealed partial class TrayContext
 
         if (GaugeBoundsIfShown() is { } bounds)
         {
-            presenter.RequestShow(bounds, bounds.Location);
+            presenter.RequestShow(bounds, bounds.Location, openedByKeyboard);
         }
         else
         {
-            presenter.RequestShow(gaugeBounds: null, _cursorPosition());
+            presenter.RequestShow(gaugeBounds: null, _cursorPosition(), openedByKeyboard);
         }
     }
 

@@ -89,6 +89,9 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // True while the card is on screen. For tests; the UI thread only.
     internal bool IsShown => _card is { IsDisposed: false, Visible: true };
 
+    // Whether the card was given motion, for tests. Null until a card exists.
+    internal bool? HasMotionForTest => _card?.HasMotion;
+
     // The open notice's own last-rendered model, for tests: null when no notice is open. Matches
     // WidgetCardPresenter.CurrentModelForTest exactly, so a test can prove Refresh() actually reached the
     // real card and re-rendered it, not only that Refresh() itself was called.
@@ -197,25 +200,47 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         StartDismissTimer();
     }
 
+    private int _lookReapplies;
+
+    // How many times a shown card was given the look again, for tests.
+    internal int LookReappliesForTest => _lookReapplies;
+
     private void ReapplyLookOnUiThread()
     {
-        if (_disposed || _card is not { IsDisposed: false, Visible: true } card)
+        if (_disposed || _card is not { IsDisposed: false, Visible: true, IsExiting: false } card)
         {
             return;
         }
 
         card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
-        card.Render(WidgetCardPresenter.BuildModel(_callbacks, _time), _callbacks.Dpi());
+        RenderKeepingBottom(card);
+        _lookReapplies++;
     }
 
     private void RefreshOnUiThread()
     {
-        if (_card is not { IsDisposed: false, Visible: true } card)
+        if (_card is not { IsDisposed: false, Visible: true, IsExiting: false } card)
         {
             return;
         }
 
+        RenderKeepingBottom(card);
+    }
+
+    // Draws the card again. A new text size or scale changes its size, so it keeps its bottom edge where it was and grows
+    // upward, clamped to the work area, as the gauge's own card does; a card that is leaving is left as it is.
+    private void RenderKeepingBottom(WidgetCard card)
+    {
+        Rectangle before = card.RestBounds;
         card.Render(WidgetCardPresenter.BuildModel(_callbacks, _time), _callbacks.Dpi());
+
+        Size size = card.ClientSize;
+        if (size != before.Size)
+        {
+            Rectangle workArea = SystemDisplaySource.WorkAreaFor(before);
+            var resized = new Rectangle(before.X, before.Bottom - size.Height, size.Width, size.Height);
+            card.PlaceAtRest(CardPlacement.Clamp(resized, workArea));
+        }
     }
 
     private void HideOnUiThread()

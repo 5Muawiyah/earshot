@@ -5,10 +5,11 @@ using Earshot.Interop;
 namespace Earshot.Widget;
 
 // What the animator moves: the window, set to a rest position plus an offset and a constant alpha. The real one
-// is in WidgetCard.Motion.cs; a test records the calls.
+// is in WidgetCard.Motion.cs; a test records the calls. False says the frame could not be applied and the window has been
+// put at rest and made opaque: the motion is over, and an exit goes on to hide the card.
 internal interface ICardWindowMotion
 {
-    void Apply(Rectangle rest, int offsetPx, byte alpha);
+    bool Apply(Rectangle rest, int offsetPx, byte alpha);
 }
 
 // Drives a CardMotionPlan with a timer on the given clock: a tick about every frame asks the plan for the frame at
@@ -108,9 +109,9 @@ internal sealed class CardAnimator : IDisposable
     public void Rebase(Rectangle rest)
     {
         _rest = rest;
-        if (Running)
+        if (Running && !_sink.Apply(rest, _last.OffsetPx, _last.Alpha))
         {
-            _sink.Apply(rest, _last.OffsetPx, _last.Alpha);
+            GiveUp();
         }
     }
 
@@ -134,7 +135,12 @@ internal sealed class CardAnimator : IDisposable
         _plan = plan;
         _startedAt = _time.GetTimestamp();
         int generation = ++_generation;
-        Apply(CardMotion.FrameAt(plan, TimeSpan.Zero));
+        if (!Apply(CardMotion.FrameAt(plan, TimeSpan.Zero)))
+        {
+            GiveUp();
+            return;
+        }
+
         _timer = _time.CreateTimer(_ => _uiPost(() => Tick(generation)), null, FrameInterval, FrameInterval);
     }
 
@@ -146,7 +152,12 @@ internal sealed class CardAnimator : IDisposable
         }
 
         MotionFrame frame = CardMotion.FrameAt(plan, _time.GetElapsedTime(_startedAt));
-        Apply(frame);
+        if (!Apply(frame))
+        {
+            GiveUp();
+            return;
+        }
+
         if (!frame.Done)
         {
             return;
@@ -158,10 +169,20 @@ internal sealed class CardAnimator : IDisposable
         hidden?.Invoke();
     }
 
-    private void Apply(MotionFrame frame)
+    private bool Apply(MotionFrame frame)
     {
         _last = frame;
-        _sink.Apply(_rest, frame.OffsetPx, frame.Alpha);
+        return _sink.Apply(_rest, frame.OffsetPx, frame.Alpha);
+    }
+
+    // A frame could not be applied. The window has been left at rest and opaque, so the motion simply ends: no further
+    // timer tick, and the card is hidden when an exit was under way, as it would have been at its end.
+    private void GiveUp()
+    {
+        Stop();
+        Action? hidden = _hidden;
+        _hidden = null;
+        hidden?.Invoke();
     }
 
     private void Stop()

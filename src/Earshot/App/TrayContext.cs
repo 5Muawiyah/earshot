@@ -159,6 +159,20 @@ internal sealed record TrayStartOptions(
     // test desktop (recorded where it is exercised).
     public Func<ICardEnvironment>? CardEnvironmentFactory { get; init; }
 
+    // The service the cards read the Windows look from (text size, transparency, high contrast) and are told of a change by.
+    // Null (the default) means the shared one over UISettings; a test supplies one over a fake source, so a look change can be
+    // driven through the tray to the open card.
+    public SystemLookService? LookService { get; init; }
+
+    // Whether the cards slide and fade, read at each show and hide. Null (the default) means Windows' own setting when the
+    // tray's surfaces are real, and no motion at all when they are replaced by fakes; a test that proves the tray gives its
+    // cards motion supplies one.
+    public Func<bool>? CardAnimationsEnabled { get; init; }
+
+    // Which mouse buttons are physically down now. Control.MouseButtons by default; a test supplies its own to say whether a
+    // click on the tray icon had a real press behind it.
+    public Func<MouseButtons>? MouseButtonsDown { get; init; }
+
     // Builds the source of foreground window changes the gauge uses to put itself back on top when the shell
     // raises the taskbar over it. Null (the default) means "the real hook" (ForegroundChangeHook); a
     // widget-enabled tray-level test injects a fake instead, so no test hooks the desktop.
@@ -439,6 +453,9 @@ internal sealed partial class TrayContext : ApplicationContext
         _taskbarWatcherPollIntervalMs = options.TaskbarWatcherPollIntervalMs;
         _trayIconVisibilityFactory = options.TrayIconVisibilityFactory;
         _cardEnvironmentFactory = options.CardEnvironmentFactory;
+        _lookServiceOverride = options.LookService;
+        _cardAnimationsOverride = options.CardAnimationsEnabled;
+        _mouseButtonsDown = options.MouseButtonsDown ?? (static () => Control.MouseButtons);
         _foregroundChangeSourceFactory = options.ForegroundChangeSourceFactory;
         _shellWindowSourceFactory = options.ShellWindowSourceFactory;
         _gaugeCoverProbeFactory = options.GaugeCoverProbeFactory;
@@ -486,6 +503,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _notifyIcon = new NotifyIcon { ContextMenuStrip = _menu.Strip };
         _notifyIconVisibility = new NotifyIconVisibility(_notifyIcon);
         _notifyIcon.MouseClick += OnIconMouseClick;
+        _notifyIcon.MouseDown += OnIconMouseDownForKeyboard;
         _notifyIcon.MouseDown += (_, _) => _ = _coordinator.RefreshStatusAsync();
         _notifyIcon.MouseDown += OnIconMouseDownForStreaming;
         UpdatePresentation(forceIcon: true);
@@ -574,6 +592,9 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
+        bool byKeyboard = _iconPressedByKeyboard;
+        _iconPressedByKeyboard = false;
+
         if (_registry.Settings.Current.Widget.LeftClickConnects)
         {
             StartToggle();
@@ -582,12 +603,24 @@ internal sealed partial class TrayContext : ApplicationContext
 
         if (_widgetCardPresenter is not null)
         {
-            OnWidgetCardRequested(this, EventArgs.Empty);
+            OpenWidgetCard(byKeyboard);
         }
         else
         {
             ShowStatusCard();
         }
+    }
+
+    private bool _iconPressedByKeyboard;
+    private readonly Func<MouseButtons> _mouseButtonsDown;
+
+    // Windows delivers a selection of the tray icon from the keyboard (Enter on it, after Win+B or in the overflow) as a left
+    // button down and up with no press behind them. So a left button down at a moment when the left button is not physically
+    // down is the keyboard, and the card it opens shows its focus visual from the start. A real click has the button down.
+    internal void OnIconMouseDownForKeyboard(object? sender, MouseEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        _iconPressedByKeyboard = e.Button == MouseButtons.Left && (_mouseButtonsDown() & MouseButtons.Left) == 0;
     }
 
     protected override void ExitThreadCore()
@@ -608,6 +641,7 @@ internal sealed partial class TrayContext : ApplicationContext
             _window.PowerChanged -= OnPowerChanged;
             _notifyIcon.MouseClick -= OnIconMouseClick;
             _notifyIcon.MouseDown -= OnIconMouseDownForStreaming;
+            _notifyIcon.MouseDown -= OnIconMouseDownForKeyboard;
             _menu.PlayFromPhoneItemClicked -= OnPlayFromPhoneItemClicked;
             _hotkeys.Activated -= OnHotkeyActivated;
 
