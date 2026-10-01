@@ -429,21 +429,28 @@ Every other connected display that shows a taskbar of its own (a visible `Shell_
 its monitor) gets a `SecondaryGauge`: its own `GaugeController`, window, `TaskbarWatcher` (one UI
 Automation worker thread reading that display's taskbar, as `Read(shown, displayId)` does for a
 chosen display) and its own scale. Each gauge is therefore placed, raised and hidden for a
-full-screen window by the same code as the main one, against its own display's bounds, and the sliding
+full-screen window by the same code as the main one, against its own display's bounds. A gauge
+that its display's own taskbar covers (a `Shell_SecondaryTrayWnd`, where the main gauge's is a
+`Shell_TrayWnd`) is raised when the foreground window or a shell window changes, and the sliding
 raise limit is counted per controller. `SecondaryGaugeSet.Reconcile` makes the set match the
 displays and taskbars that are there now; it runs on the UI thread after each read of the main
 taskbar, on `WM_DISPLAYCHANGE` and when the setting changes, adds a gauge for a display or taskbar
 that appeared and stops and disposes the gauge of one that went (watcher first, then controller
 and window), and a result already posted for a gauge that was removed is dropped. A taskbar window
 whose rectangle could not be read removes nothing. A read that fell back to another display's
-taskbar is no taskbar for that gauge and is not drawn. The foreground and shell-window hooks, the
+taskbar, or that is of the main taskbar with no fallback to name (the display has become the main
+one), is no taskbar for that gauge and is not drawn. The foreground and shell-window hooks, the
 appbar notices and the pokes go to every gauge. The tray icon goes through one vote per controller
-(`TrayIconVotes`) and is visible only when no gauge wants it hidden. A click on a gauge opens the
+(`TrayIconVotes`) and is visible only when no gauge wants it hidden; once Earshot is closing the icon
+is held hidden, so taking the gauges down does not show it again. A click on a gauge opens the
 card above that gauge's own rectangle, which `WidgetCardPlacement.WorkAreaFor` places on that
-display, at that display's scale. Choosing another value removes every secondary gauge at once.
-`GaugeAllDisplaysTests` proves these with fake displays and windows through the real tray; the
-real secondary taskbar read stays under the existing real UI Automation test, which finds none on
-a private desktop.
+display, at that display's scale. That scale goes with the show request and the card keeps it while
+it is open; the main gauge keeps the scale of its own last read, so a read of the main taskbar
+neither changes the card's scale nor is drawn at the other display's. Choosing another value, turning
+the gauge off and closing Earshot each remove every secondary gauge at once. `GaugeAllDisplaysTests`
+covers the set, the per-gauge raise, the icon vote, the card's placement and scale and those removals
+with fake displays, taskbar windows and gauge windows through the real tray; the real secondary
+taskbar read stays under the existing real UI Automation test, which finds none on a private desktop.
 
 If the chosen display is not connected, or is connected but its taskbar is not
 shown, the reader returns the main display's taskbar and says why in the

@@ -407,9 +407,10 @@ page chooses whose taskbar holds the gauge: **Main display** (the default),
 **All displays**, or one of the connected displays, named plainly, for example
 `Display 2 (1920 x 1080)`. Click the button to step through the list. **All
 displays** puts a gauge on the taskbar of every display that has one, at once, all
-with the same content, order and tooltip; each is placed, scaled, raised and
-hidden for full-screen applications by the rules of its own display, so a
-full-screen game on Display 2 hides only Display 2's gauge. A click on a gauge
+with the same content, order and tooltip; each is placed and scaled for its own
+display, raised when its own taskbar covers it, and hidden when a full-screen
+application is on its own display, so a full-screen game on Display 2 hides only
+Display 2's gauge. A click on a gauge
 opens the card above that gauge, on its display, and the hover tooltip and the
 right-click menu work on each. A display or a taskbar that is plugged in or
 turned on gets a gauge, and one that goes loses it, within about a second; with
