@@ -9,19 +9,21 @@ internal enum SettingsLoadStatus
 {
     Loaded,                // settings.json read and valid
     CreatedDefaults,       // no settings.json; defaults written
-    RestoredFromBackup,    // settings.json unusable; settings.json.bak used
+    RestoredFromBackup,    // settings.json unusable or gone with a backup left; settings.json.bak used
     ResetAfterCorruption,  // settings.json and the backup unusable; defaults written
     ReadFailed,            // settings.json, or the backup of an unusable settings.json, could not be opened; defaults in memory only
     NewerSchema,           // settings.json is from a newer Earshot; its values (or defaults) in memory, nothing written
     DefaultsReadOnly,      // read-only store, no settings.json; defaults in memory, nothing written
-    UnusableReadOnly       // read-only store, settings.json unusable; backup or defaults in memory, nothing moved or written
+    UnusableReadOnly       // read-only store, settings.json unusable or gone with a backup left; backup or defaults in memory, nothing moved or written
 }
 
 // User settings in %APPDATA%\Earshot\settings.json.
 //
 // Load:
 //   missing file              the new-install defaults (Hand back and Open on startup on) when there is no backup either,
-//                             otherwise the plain defaults; then save
+//                             then save. With a backup left (a replace that was cut short can leave only that) the backup is
+//                             the settings, as for an unusable file; one that cannot be opened is waited for, as there; one
+//                             that is unusable or newer gives the plain defaults, then save
 //   valid file                use it (unknown members are ignored)
 //   newer schema version      the file was written by a newer Earshot. Use the members this build
 //                             knows if they are valid, otherwise defaults; never move or rewrite the
@@ -266,8 +268,37 @@ internal sealed class JsonSettingsStore : ISettingsStore
         if (main.Kind == ReadKind.Missing)
         {
             // A PC that has never had an Earshot settings file gets the new-install defaults. A backup with no file means
-            // someone had settings here before, so that case, and every recovery below, keeps the plain defaults.
-            _current = File.Exists(BackupPath) ? new EarshotSettings() : EarshotSettings.NewInstallDefaults();
+            // someone had settings here before (File.Replace can be cut short between its two renames and leave exactly
+            // this), so the backup is their settings, and the next save must not push defaults over it.
+            bool hasBackup = File.Exists(BackupPath);
+            ReadResult left = hasBackup ? TryRead(BackupPath) : ReadResult.Missing;
+            if (hasBackup && left.Kind == ReadKind.Valid)
+            {
+                _current = left.Settings!;
+                if (_openedReadOnly)
+                {
+                    LastLoadStatus = SettingsLoadStatus.UnusableReadOnly;
+                    _log.Warn("No settings file at " + FilePath + ". The backup is used for this run, and nothing is written because this store is read-only.");
+                    return;
+                }
+
+                LastLoadStatus = SettingsLoadStatus.RestoredFromBackup;
+                _log.Warn("No settings file at " + FilePath + ". Restored the previous copy from " + BackupPath + ".");
+                TrySaveDuringLoad();
+                return;
+            }
+
+            if (hasBackup && !_openedReadOnly && left.Kind == ReadKind.Unreadable)
+            {
+                // The backup may be the only good copy; saving defaults now would be replaced over it by the next save.
+                _current = new EarshotSettings();
+                LastLoadStatus = SettingsLoadStatus.ReadFailed;
+                _loadUnsettled = true;
+                _log.Error("No settings file at " + FilePath + " and its backup could not be opened, so defaults are used for now and nothing is written: " + BackupPath, left.Error);
+                return;
+            }
+
+            _current = hasBackup ? new EarshotSettings() : EarshotSettings.NewInstallDefaults();
             if (_openedReadOnly)
             {
                 LastLoadStatus = SettingsLoadStatus.DefaultsReadOnly;

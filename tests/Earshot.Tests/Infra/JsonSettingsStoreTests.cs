@@ -734,15 +734,79 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.IsFalse(s.OpenOnStartup);
     }
 
+    // File.Replace renames the file to the backup and the temporary file to the file; cut short between the two it leaves a
+    // backup and no file. The backup is the person's settings, and the next save must not push defaults over it.
     [TestMethod]
-    public void ASettingsFileThatIsGoneButLeftABackupIsNotANewInstall()
+    public void ASettingsFileThatIsGoneButLeftAValidBackupIsRestoredFromThatBackup()
     {
         File.WriteAllText(SettingsPath + ".bak", ValidJson);
 
         JsonSettingsStore store = Open();
 
+        Assert.AreEqual(SettingsLoadStatus.RestoredFromBackup, store.LastLoadStatus);
+        Assert.AreEqual("Beats", store.Current.DeviceMatch, "The values are the backup's, not defaults.");
+        Assert.IsFalse(store.Current.ProtectAudioQuality);
+        Assert.AreEqual("0A1B2C3D4E8C", store.Current.PinnedAddress);
+        Assert.IsNull(store.QuarantinedFile, "There was no file to put aside.");
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "Restored the previous copy"));
+        Assert.IsTrue(File.Exists(SettingsPath), "The restored settings are saved as the file again.");
+
+        store.Update(s => s.OpenOnStartup = false);
+
+        EarshotSettings reopened = Open().Current;
+        Assert.AreEqual("Beats", reopened.DeviceMatch, "A later save kept the person's settings.");
+        Assert.IsFalse(reopened.ProtectAudioQuality);
+        Assert.IsFalse(reopened.OpenOnStartup);
+        StringAssert.Contains(File.ReadAllText(SettingsPath + ".bak"), "Beats", "The backup now holds the restored settings, not defaults.");
+    }
+
+    [TestMethod]
+    public void ASettingsFileThatIsGoneButLeftAnUnusableBackupGetsThePlainDefaults()
+    {
+        File.WriteAllText(SettingsPath + ".bak", "{ \"DeviceMatch\": \"Lat");
+
+        JsonSettingsStore store = Open();
+
         Assert.AreEqual(SettingsLoadStatus.CreatedDefaults, store.LastLoadStatus);
         Assert.IsFalse(store.Current.HandBackOnShutdownAndSleep, "Someone had settings here before; the plain defaults apply.");
+    }
+
+    [TestMethod]
+    public void ASettingsFileThatIsGoneBesideABackupThatCannotBeOpenedWaitsForTheBackup()
+    {
+        File.WriteAllText(SettingsPath + ".bak", ValidJson);
+
+        JsonSettingsStore store;
+        using (new FileStream(SettingsPath + ".bak", FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            store = Open();
+
+            Assert.AreEqual(SettingsLoadStatus.ReadFailed, store.LastLoadStatus);
+            AssertDefaults(store.Current);
+            Assert.IsFalse(File.Exists(SettingsPath), "Nothing was written while the only good copy could not be read.");
+            Assert.IsTrue(_log.Has(LogLevel.Error, "its backup could not be opened"));
+        }
+
+        Assert.AreEqual(ValidJson, File.ReadAllText(SettingsPath + ".bak"));
+
+        store.Update(s => s.OpenOnStartup = false);
+
+        EarshotSettings reopened = Open().Current;
+        Assert.AreEqual("Beats", reopened.DeviceMatch, "Once the backup could be read, it was the settings.");
+        Assert.IsFalse(reopened.OpenOnStartup);
+    }
+
+    [TestMethod]
+    public void AReadOnlyStoreWithNoFileAndAValidBackupUsesTheBackupAndWritesNothing()
+    {
+        File.WriteAllText(SettingsPath + ".bak", ValidJson);
+
+        var store = new JsonSettingsStore(SettingsPath, _log, readOnly: true);
+
+        Assert.AreEqual(SettingsLoadStatus.UnusableReadOnly, store.LastLoadStatus);
+        Assert.AreEqual("Beats", store.Current.DeviceMatch);
+        Assert.IsFalse(File.Exists(SettingsPath), "A read-only store writes no file.");
+        Assert.AreEqual(ValidJson, File.ReadAllText(SettingsPath + ".bak"));
     }
 
     [TestMethod]
