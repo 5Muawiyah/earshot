@@ -82,7 +82,9 @@ internal static partial class Program
             return;
         }
 
-        IReadOnlyList<ProbeWidgetFile> files = RenderProbeWidgets(target);
+        IReadOnlyList<ProbeWidgetFile> files = ctx.Set == ProbeWidgetDesignSet
+            ? RenderProbeWidgetDesignSet(target)
+            : RenderProbeWidgets(target);
         WriteProbeWidgets(ctx, target, files);
         ctx.ExitCode = files.Any(f => f.Bytes == 0) ? ExitCodes.IoError : ExitCodes.Ok;
     }

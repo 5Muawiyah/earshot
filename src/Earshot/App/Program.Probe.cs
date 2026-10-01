@@ -21,7 +21,7 @@ namespace Earshot;
 internal static partial class Program
 {
     internal const string ProbeUsage =
-        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json] | probe service [--json] [--out <path>] | probe setup-values [--out <path>]";
+        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json] | probe service [--json] [--out <path>] | probe widget --out <folder> [--set design] | probe setup-values [--out <path>]";
 
     internal const string ProbeIconTarget = "icon";
 
@@ -36,7 +36,7 @@ internal static partial class Program
     internal static readonly IReadOnlyList<string> ProbeTargets =
         ["audio", "topology", "nodes", "services", "task", "battery"];
 
-    internal sealed record ProbeRequest(IReadOnlyList<string> Targets, bool Json, string? OutPath);
+    internal sealed record ProbeRequest(IReadOnlyList<string> Targets, bool Json, string? OutPath, string? Set = null);
 
     static partial void TryRunProbe(RunContext ctx)
     {
@@ -75,6 +75,7 @@ internal static partial class Program
         request = null;
         string? target = null;
         string? outPath = null;
+        string? set = null;
         bool json = false;
 
         for (int i = 1; i < args.Count; i++)
@@ -106,6 +107,22 @@ internal static partial class Program
 
                 outPath = args[++i];
             }
+            else if (a == "--set")
+            {
+                if (set is not null)
+                {
+                    error = "--set was given twice.";
+                    return false;
+                }
+
+                if (i + 1 >= args.Count || args[i + 1] != ProbeWidgetDesignSet)
+                {
+                    error = "--set needs the name of a set: " + ProbeWidgetDesignSet + ".";
+                    return false;
+                }
+
+                set = args[++i];
+            }
             else if (a == "all" || a == ProbeIconTarget || a == ProbeWidgetTarget || a == ProbeServiceTarget || a == ProbeSetupValuesTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
             {
                 if (target is not null)
@@ -135,10 +152,16 @@ internal static partial class Program
             return false;
         }
 
+        if (set is not null && target != ProbeWidgetTarget)
+        {
+            error = "--set belongs to probe widget.";
+            return false;
+        }
+
         IReadOnlyList<string> targets = target is null or "all" ? ProbeTargets : [target];
 
         // setup-values is read by a script, so its report is always the JSON, with no heading above it.
-        request = new ProbeRequest(targets, json || target == ProbeSetupValuesTarget, outPath);
+        request = new ProbeRequest(targets, json || target == ProbeSetupValuesTarget, outPath, set);
         error = null;
         return true;
     }
@@ -185,7 +208,7 @@ internal static partial class Program
                 output.WriteLine("== " + target + " ==");
             }
 
-            var probe = new ProbeContext(target, targetOut, request.Json, services);
+            var probe = new ProbeContext(target, targetOut, request.Json, services) { Set = request.Set };
             RunProbeTarget(probe, request.OutPath);
             if (!probe.Handled)
             {

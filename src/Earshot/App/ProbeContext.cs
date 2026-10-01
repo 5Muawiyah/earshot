@@ -40,6 +40,9 @@ internal sealed class ProbeContext
 
     public bool Json { get; }
 
+    // probe widget's --set: which set of pictures to render, or null for the default set.
+    public string? Set { get; init; }
+
     // Built on first use, with the same composition as the tray (safe mode applies).
     public ServiceRegistry Services => _services();
 
