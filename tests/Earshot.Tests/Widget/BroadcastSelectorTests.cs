@@ -528,6 +528,159 @@ public sealed class BroadcastSelectorTests
         Assert.IsNull(d.Selector.HeldColour);
     }
 
+    // ---- Anchors: what the selection stands on
+
+    // A far stranger said exactly what the chosen set said, once, so it merged into the set for a moment. It was never
+    // chosen by the first-choice rule or a switch, so it is not what the selection stands on: while it merged, and while
+    // the owner is quiet for less than the window, none of its different messages is the chosen set's.
+    [TestMethod]
+    public void AStrangerHeardOnceWithEqualFieldsDoesNotTakeOverWhenTheOwnerGoesQuiet()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -50, 3);
+        d.Tick(0.5);
+        Assert.AreEqual(BroadcastClass.Chosen, d.Send(Stranger, Bud(first: true), -85).Class, "Sanity: the equal message merged for the moment.");
+
+        int chosen = 0;
+        bool changed = false;
+        for (int i = 0; i < 17; i++)
+        {
+            d.Tick(0.5);
+            SelectionObservation seen = d.Send(Stranger, OtherSet(), -85);
+            chosen += seen.Class == BroadcastClass.Chosen ? 1 : 0;
+            changed |= seen.NewChoice || seen.Switched || seen.Reacquired;
+        }
+
+        Assert.AreEqual(0, chosen, "Eight and a half seconds with the owner quiet: the stranger's own messages are not the chosen set's.");
+        Assert.IsFalse(changed);
+
+        d.Tick(0.5);
+        SelectionObservation owner = d.Send(SetA, Bud(first: true), -50);
+        Assert.AreEqual(BroadcastClass.Chosen, owner.Class, "The owner is back and is still the chosen set.");
+        Assert.IsFalse(owner.NewChoice || owner.Switched || owner.Reacquired);
+    }
+
+    // The same stranger while the owner keeps sending: its different messages are another set's, every one.
+    [TestMethod]
+    public void TheDifferentMessagesOfAStrangerThatMergedOnceAreNeverTheChosenSets()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -50, 3);
+        d.Tick(0.5);
+        d.Send(Stranger, Bud(first: true), -85);
+
+        int chosen = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            d.Tick(0.5);
+            d.Send(SetA, Bud(first: true), -50);
+            chosen += d.Send(Stranger, OtherSet(), -85).Class == BroadcastClass.Chosen ? 1 : 0;
+        }
+
+        Assert.AreEqual(0, chosen, "Twenty different messages of a stranger that matched once.");
+    }
+
+    // A message of a tag that is not an anchor is the chosen set's only when it says what an anchor said just before.
+    [TestMethod]
+    public void AMessageOfATagThatIsNotAnAnchorIsChosenOnlyWhenItMatchesAnAnchorsMessageNearInTime()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -50, 3);
+        d.Tick(0.5);
+
+        Assert.AreEqual(BroadcastClass.Chosen, d.Send(Stranger, Bud(first: true), -85).Class);
+        d.Tick(0.5);
+        Assert.AreEqual(BroadcastClass.OtherSet, d.Send(Stranger, OtherSet(), -85).Class);
+        d.Tick(0.5);
+        Assert.AreEqual(BroadcastClass.Chosen, d.Send(Stranger, Bud(first: true), -85).Class, "Back to what the anchor says, inside two seconds of it.");
+    }
+
+    // A second sender of the set (the other bud) that matches for long enough is an anchor too, so the set stays chosen
+    // through a quiet of the first sender longer than the window.
+    [TestMethod]
+    public void ASecondBudThatMatchesForThreeSecondsBecomesAnAnchorAndHoldsTheSetWhenTheFirstGoesQuiet()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -58, 3);
+        d.Tick(0.5);
+        for (int i = 0; i <= 7; i++)
+        {
+            d.Send(SetA, Bud(first: true), -58);
+            d.Send(SetAOtherBud, Bud(first: false), -56);
+            d.Tick(0.5);
+        }
+
+        // Both go quiet for a few seconds, longer than the two a message needs to match, and then only the second
+        // bud sends: nothing of the first is there to match, so what holds the set is the second bud's own standing.
+        d.Tick(3.0);
+        bool reacquired = false;
+        BroadcastClass last = BroadcastClass.OtherSet;
+        for (int i = 0; i < 40; i++)
+        {
+            SelectionObservation seen = d.Send(SetAOtherBud, Bud(first: false), -56);
+            reacquired |= seen.Reacquired || seen.NewChoice;
+            last = seen.Class;
+            d.Tick(0.5);
+        }
+
+        Assert.IsFalse(reacquired, "Twenty seconds with only the second bud: it was an anchor, so nothing was chosen again.");
+        Assert.AreEqual(BroadcastClass.Chosen, last);
+    }
+
+    [TestMethod]
+    public void ASecondSenderThatMatchedForOnlyTwoSecondsIsNotAnAnchorSoTheSetIsChosenAgainWhenTheFirstGoesQuiet()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -58, 3);
+        d.Tick(0.5);
+        // Matching messages at 0, 1 and 2 seconds: three of them, but not over three seconds.
+        for (int i = 0; i <= 2; i++)
+        {
+            d.Send(SetA, Bud(first: true), -58);
+            d.Send(SetAOtherBud, Bud(first: false), -56);
+            d.Tick(1);
+        }
+
+        d.Tick(2.5);
+        bool reacquired = false;
+        for (int i = 0; i < 40; i++)
+        {
+            reacquired |= d.Send(SetAOtherBud, Bud(first: false), -56).Reacquired;
+            d.Tick(0.5);
+        }
+
+        Assert.IsTrue(reacquired, "Not an anchor: with the first sender quiet for longer than the window the set is chosen again.");
+    }
+
+    // The residual risk, stated as it behaves: once every anchor has been silent for longer than the window, whatever
+    // set of the paired model and colour is heard, for two seconds and three messages, is chosen by the first-choice rule.
+    [TestMethod]
+    public void OnceEveryAnchorHasBeenQuietForLongerThanTheWindowALoneSetIsChosenByTheFirstChoiceRuleAndNotBefore()
+    {
+        var d = new SelectorDriver();
+        d.Run(SetA, Bud(first: true), -50, 3);
+        d.Tick(0.5);
+        d.Send(Stranger, Bud(first: true), -85);
+
+        SelectionObservation seen = default;
+        double firstChosenAt = -1;
+        double elapsed = 0;
+        for (int i = 0; i < 60; i++)
+        {
+            d.Tick(0.5);
+            elapsed += 0.5;
+            seen = d.Send(Stranger, OtherSet(), -85);
+            if (seen.Class == BroadcastClass.Chosen && firstChosenAt < 0)
+            {
+                firstChosenAt = elapsed;
+                Assert.IsTrue(seen.Reacquired, "It is a choice made again, by the first-choice rule.");
+            }
+        }
+
+        Assert.IsGreaterThan(10.0, firstChosenAt, "Not while the owner's last message was inside the window.");
+        Assert.IsLessThan(16.0, firstChosenAt, "Within two seconds and three messages of the window running out.");
+    }
+
     [TestMethod]
     public void TheOtherBudsLatestMessageIsAvailableForTheBudOrderCheck()
     {

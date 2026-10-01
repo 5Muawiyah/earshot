@@ -36,24 +36,30 @@ internal readonly record struct SelectionObservation(
 //   - One set can broadcast from two addresses, one per bud: BroadcastSenderSets merges them.
 //   - The first choice is the set with the highest median signal over the window, once the model has been heard
 //     for FirstChoiceAfter and the set has MinMessages in the window. Its colour is learned and held.
-//   - The chosen set stays chosen, and at each message its tags are exactly the tags of the one set that holds the
-//     longest-standing chosen sender. A sender that merged into the set for a moment (equal fields heard together)
-//     and then differs is its own set again, and a set of its own is held to the next rule.
-//   - Another set takes over only when its median is SwitchMarginDb above the chosen set's for SwitchHold without a
-//     break; while the chosen set is silent its last median is held. Nothing else makes a different set the chosen
-//     one while any chosen sender has sent inside the window, however equal its fields.
-//   - Addresses rotate, and the case closes: when every chosen sender has been silent for longer than the window the
+//   - The selection stands on its anchors: the tags that were in the set when the first-choice rule or a switch made
+//     it the chosen one. The chosen set is the one set that holds the longest-standing anchor that sent inside the
+//     window. A sender that merely merged into it (it said exactly what the set said, near it in time) is not an
+//     anchor: it becomes one only after it has matched anchor messages for AnchorMatches messages over AnchorSpan, and
+//     one message of it counts as the chosen set's only when that message matches an anchor's message within
+//     SameSetWithin. A merged sender that then differs is another set, held to the next rule.
+//   - Another set takes over only when its median is SwitchMarginDb above the chosen set's (taken over the anchors'
+//     messages) for SwitchHold without a break; while the chosen set is silent its last median is held. Nothing else
+//     makes a different set the chosen one while any anchor has sent inside the window, however equal its fields.
+//   - Addresses rotate, and the case closes: when every anchor has been silent for longer than the window the
 //     selection is acquired again by the first-choice rule among the sets of the paired model and the held colour.
-//   - After ReleaseAfter with no message from the chosen set it and the colour are dropped.
+//   - After ReleaseAfter with no message from an anchor the chosen set and the colour are dropped.
 // Pure and single threaded: time comes from the messages' own timestamps, nothing here reads a clock, and
 // nothing is written to disk.
 internal sealed class BroadcastSelector
 {
     private readonly Dictionary<uint, List<SenderMessage>> _senders = new();
 
-    // The chosen tags, each with the order it became a chosen tag in: the lowest order among the tags that sent
-    // inside the window anchors which set is the chosen one when a sender that had merged splits off again.
-    private readonly Dictionary<uint, long> _chosenOrder = new();
+    // The anchors, each with the order it became one in: the lowest order among the anchors that sent inside the
+    // window says which set is the chosen one when a sender that had merged splits off again.
+    private readonly Dictionary<uint, long> _anchors = new();
+
+    // The senders that are in the chosen set's group without being anchors, and how long they have matched.
+    private readonly Dictionary<uint, MergeProgress> _merged = new();
     private readonly Dictionary<uint, DateTimeOffset> _challengerSince = new();
 
     private ushort? _model;
@@ -74,7 +80,7 @@ internal sealed class BroadcastSelector
 
     public int SetsInRange => _setsInRange;
 
-    public bool HasChosen => _chosenOrder.Count > 0;
+    public bool HasChosen => _anchors.Count > 0;
 
     public BroadcastSelectionState StateAt(DateTimeOffset now)
     {
@@ -104,7 +110,8 @@ internal sealed class BroadcastSelector
     private void Reset()
     {
         _senders.Clear();
-        _chosenOrder.Clear();
+        _anchors.Clear();
+        _merged.Clear();
         _challengerSince.Clear();
         _colour = null;
         _firstHeardAt = null;
@@ -175,7 +182,7 @@ internal sealed class BroadcastSelector
             }
         }
 
-        return chosen is null ? Choose(sets, tag, at) : Follow(sets, chosen, tag, at);
+        return chosen is null ? Choose(sets, tag, at) : Follow(sets, chosen, own[^1], at);
     }
 
     // A first choice, a choice after a release, or a choice again after every chosen sender fell silent.
@@ -212,16 +219,17 @@ internal sealed class BroadcastSelector
         _chosenMedian = best.MedianRssi;
         _challengerSince.Clear();
         return new SelectionObservation(
-            _chosenOrder.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
+            _anchors.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
             NewChoice: !again, Reacquired: again, SetsInRange: _setsInRange);
     }
 
-    private SelectionObservation Follow(List<BroadcastSet> sets, BroadcastSet chosen, uint tag, DateTimeOffset at)
+    private SelectionObservation Follow(List<BroadcastSet> sets, BroadcastSet chosen, SenderMessage message, DateTimeOffset at)
     {
-        // The chosen tags are the tags of the chosen set and no others: a second sender of the set (the other bud)
-        // joins here, and one that merged for a moment and then differs is dropped.
-        AdoptSet(chosen);
-        if (chosen.MedianRssi is double median)
+        // The anchors are the chosen set's tags that were anchors already and no others: one that merged for a moment
+        // and then differs is dropped, and a sender that joined the set is watched until it has matched long enough.
+        FollowSet(chosen);
+        bool chosenMessage = ClassifyMessage(message, at);
+        if (AnchorMedian(chosen) is double median)
         {
             _chosenMedian = median;
         }
@@ -233,16 +241,75 @@ internal sealed class BroadcastSelector
             _chosenMedian = winner.MedianRssi;
             _challengerSince.Clear();
             return new SelectionObservation(
-                _chosenOrder.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
+                _anchors.ContainsKey(message.Tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
                 NewChoice: true, Switched: true, SetsInRange: _setsInRange);
         }
 
         return new SelectionObservation(
-            _chosenOrder.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet, SetsInRange: _setsInRange);
+            chosenMessage ? BroadcastClass.Chosen : BroadcastClass.OtherSet, SetsInRange: _setsInRange);
     }
 
-    // The set that holds the longest-standing chosen tag among the senders that sent inside the window, or null when
-    // none of them did.
+    // Whether one message is the chosen set's. An anchor's always is. A sender that is only in the group is judged by
+    // the message itself: it counts when it says what an anchor said within SameSetWithin of it, and the senders that
+    // go on matching become anchors. A message that does not match resets that sender's run of matches.
+    private bool ClassifyMessage(SenderMessage message, DateTimeOffset at)
+    {
+        if (_anchors.ContainsKey(message.Tag))
+        {
+            return true;
+        }
+
+        bool matches = false;
+        foreach (uint anchor in _anchors.Keys)
+        {
+            if (!_senders.TryGetValue(anchor, out List<SenderMessage>? list))
+            {
+                continue;
+            }
+
+            foreach (SenderMessage seen in list)
+            {
+                if (BroadcastSenderSets.SameSet(message, seen))
+                {
+                    matches = true;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                break;
+            }
+        }
+
+        // A sender outside the chosen set's group is not the chosen set's, whatever it says.
+        if (!_merged.TryGetValue(message.Tag, out MergeProgress progress))
+        {
+            return false;
+        }
+
+        if (!matches)
+        {
+            _merged[message.Tag] = default;
+            return false;
+        }
+
+        progress = progress.Matches == 0 ? new MergeProgress(1, at) : progress with { Matches = progress.Matches + 1 };
+        if (progress.Matches >= BroadcastRules.AnchorMatches && at - progress.FirstAt >= BroadcastRules.AnchorSpan)
+        {
+            _anchors[message.Tag] = ++_order;
+            _merged.Remove(message.Tag);
+        }
+        else
+        {
+            _merged[message.Tag] = progress;
+        }
+
+        return true;
+    }
+
+    // The set that holds the longest-standing anchor among those that sent inside the window, or null when none
+    // of them did.
     private BroadcastSet? ChosenSetOf(List<BroadcastSet> sets)
     {
         BroadcastSet? found = null;
@@ -251,7 +318,7 @@ internal sealed class BroadcastSelector
         {
             foreach (uint t in set.Tags)
             {
-                if (_chosenOrder.TryGetValue(t, out long order) && order < foundOrder)
+                if (_anchors.TryGetValue(t, out long order) && order < foundOrder)
                 {
                     found = set;
                     foundOrder = order;
@@ -262,9 +329,24 @@ internal sealed class BroadcastSelector
         return found;
     }
 
+    // The median signal over the anchors' own messages in the set, or null with fewer than BroadcastRules.MinMessages:
+    // a sender that only merged does not move what the chosen set is compared with.
+    private double? AnchorMedian(BroadcastSet set)
+    {
+        double[] sorted = set.Messages.Where(m => _anchors.ContainsKey(m.Tag)).Select(m => (double)m.Rssi).Order().ToArray();
+        if (sorted.Length < BroadcastRules.MinMessages)
+        {
+            return null;
+        }
+
+        int mid = sorted.Length / 2;
+        return sorted.Length % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0;
+    }
+
     private void BeginReacquire(DateTimeOffset at)
     {
-        _chosenOrder.Clear();
+        _anchors.Clear();
+        _merged.Clear();
         _challengerSince.Clear();
         _chosenMedian = null;
         _firstHeardAt = at;
@@ -331,42 +413,75 @@ internal sealed class BroadcastSelector
         return false;
     }
 
-    // Makes set the chosen one: its tags are the chosen tags (a tag already chosen keeps its order, a new one takes
-    // the next, one that is not in the set is dropped), and the time of its newest message is the chosen set's last.
-    private void AdoptSet(BroadcastSet set, bool replace = false)
+    // Makes set the chosen one by the first-choice rule or a switch: all of its tags are anchors, in the order they
+    // were first heard, and nothing of an earlier choice is kept.
+    private void AdoptSet(BroadcastSet set, bool replace)
     {
         if (replace)
         {
-            _chosenOrder.Clear();
-        }
-        else
-        {
-            foreach (uint t in _chosenOrder.Keys.Where(k => !set.Tags.Contains(k)).ToList())
-            {
-                _chosenOrder.Remove(t);
-            }
+            _anchors.Clear();
+            _merged.Clear();
         }
 
         foreach (uint t in set.Tags)
         {
-            if (!_chosenOrder.ContainsKey(t))
+            if (!_anchors.ContainsKey(t))
             {
-                _chosenOrder[t] = ++_order;
+                _anchors[t] = ++_order;
             }
         }
 
-        DateTimeOffset newest = set.Newest.At;
-        if (_chosenLastAt is null || newest >= _chosenLastAt || replace)
+        _chosenLastAt = set.Newest.At;
+    }
+
+    // The chosen set at a later message: the anchors that are still in the set stay, one that is not (it said something
+    // else, so it is its own set now) is dropped, and a tag that is in the set and is no anchor is a merged sender, its
+    // run of matches kept. The time of the newest anchor message is the chosen set's last.
+    private void FollowSet(BroadcastSet set)
+    {
+        foreach (uint t in _anchors.Keys.Where(k => !set.Tags.Contains(k)).ToList())
         {
-            _chosenLastAt = newest;
+            _anchors.Remove(t);
+        }
+
+        foreach (uint t in _merged.Keys.Where(k => !set.Tags.Contains(k)).ToList())
+        {
+            _merged.Remove(t);
+        }
+
+        foreach (uint t in set.Tags)
+        {
+            if (!_anchors.ContainsKey(t) && !_merged.ContainsKey(t))
+            {
+                _merged[t] = default;
+            }
+        }
+
+        DateTimeOffset? newest = null;
+        foreach (SenderMessage m in set.Messages)
+        {
+            if (_anchors.ContainsKey(m.Tag) && (newest is null || m.At > newest))
+            {
+                newest = m.At;
+            }
+        }
+
+        if (newest is DateTimeOffset at && (_chosenLastAt is null || at >= _chosenLastAt))
+        {
+            _chosenLastAt = at;
         }
     }
+
+    // How long a sender that is in the chosen set's group without being an anchor has matched an anchor's messages: how
+    // many messages did, and when the first of the run did.
+    private readonly record struct MergeProgress(int Matches, DateTimeOffset FirstAt);
 
     private void ReleaseIfStale()
     {
         if (_chosenLastAt is DateTimeOffset last && _latest - last > BroadcastRules.ReleaseAfter)
         {
-            _chosenOrder.Clear();
+            _anchors.Clear();
+            _merged.Clear();
             _challengerSince.Clear();
             _chosenLastAt = null;
             _chosenMedian = null;
@@ -401,7 +516,7 @@ internal sealed class BroadcastSelector
     public IReadOnlyList<SenderMessage> OtherChosenSenders(uint tag, DateTimeOffset at, TimeSpan within)
     {
         var result = new List<SenderMessage>();
-        foreach (uint other in _chosenOrder.Keys)
+        foreach (uint other in _anchors.Keys)
         {
             if (other == tag || !_senders.TryGetValue(other, out List<SenderMessage>? list) || list.Count == 0)
             {

@@ -414,6 +414,58 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsTrue(_readingEvents.Skip(applied).All(e => e.Reading.Case.Percent == 90 && e.Reading.Left.Percent == 40 && e.Reading.Right.Percent == 70));
     }
 
+    // The same stranger heard in the ten seconds after its one equal message, while it still merges into the set: its
+    // own fields do not reach the card then either.
+    [TestMethod]
+    public void AStrangerThatMergedOnceNeverShowsItsDifferentValuesWhileItStillMerges()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        ProximityMessage owner = BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4);
+        ProximityMessage strangers = BroadcastFixtures.Bud(first: true, caseNibble: 0x2, pairHigh: 0x3, pairLow: 0x1);
+        Send(1, owner, -50, 3);
+        Tick(0.5);
+        Raise(5, owner, -85);
+        int applied = _readingEvents.Count;
+
+        for (int i = 0; i < 20; i++)
+        {
+            Tick(0.5);
+            Raise(1, owner, -50);
+            Raise(5, strangers, -85);
+        }
+
+        Assert.AreEqual(applied + 20, _readingEvents.Count, "Only the owner's twenty messages were applied.");
+        Assert.IsTrue(_readingEvents.Skip(applied).All(e => e.Reading.Case.Percent == 90 && e.Reading.Left.Percent == 40 && e.Reading.Right.Percent == 70));
+        Assert.AreEqual(90, service.Current.Case.Percent);
+        Assert.AreEqual(40, service.Current.Left.Percent);
+        Assert.AreEqual(70, service.Current.Right.Percent);
+    }
+
+    // What pairs readings by chosen set (ear detection) is told when the chosen set changes.
+    [TestMethod]
+    public void TheSelectionGenerationOfAReadingGrowsWhenAnotherSetIsChosenAndHoldsWhileTheSameSetIsHeard()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        ProximityMessage a = BroadcastFixtures.Bud(first: true);
+        ProximityMessage b = BroadcastFixtures.OtherSet();
+        Send(1, a, -60, 3);
+        long[] firstSet = _readingEvents.Select(e => e.SelectionGeneration).ToArray();
+        Assert.IsNotEmpty(firstSet);
+        Assert.AreEqual(1, firstSet.Distinct().Count(), "One chosen set, one generation.");
+
+        for (int i = 0; i <= 62; i++)
+        {
+            Raise(1, a, -60);
+            Raise(3, b, -51);
+            Tick(0.5);
+        }
+
+        long last = _readingEvents[^1].SelectionGeneration;
+        Assert.IsGreaterThan(firstSet[0], last, "Another set was chosen: its readings carry a later generation.");
+    }
+
     [TestMethod]
     public void TheChosenSetIsReleasedAfterAnHourWithNoMessageFromIt()
     {

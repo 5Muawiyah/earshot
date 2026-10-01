@@ -23,6 +23,19 @@ internal static class BroadcastRules
     // with room for a missed message.
     public static readonly TimeSpan SameSetWithin = TimeSpan.FromSeconds(2);
 
+    // A sender that merely merged into the chosen set (it said what an anchor said, near it in time) becomes an anchor
+    // only after it has matched anchor messages this many times, the first of the run this long before the last. A
+    // passer-by whose levels happen to equal the owner's is heard once or twice before the next of its messages differs;
+    // the owner's other bud matches every message it sends. Three matches is the count BroadcastRules.MinMessages
+    // already calls a median rather than a passer-by, and three seconds is the shortest run in which the case-open rate
+    // (about four messages a second) gives that many while the in-use rate (a message every few seconds per bud) needs
+    // longer, which is harmless: the first sender is an anchor already, and a second bud that is not one yet only means
+    // the set is chosen again, by the first-choice rule, if the first goes quiet for longer than the window. Both are
+    // design choices, not measurements: no second set was ever near the owner.
+    public const int AnchorMatches = 3;
+
+    public static readonly TimeSpan AnchorSpan = TimeSpan.FromSeconds(3);
+
     // Another set takes over only when its median is at least this far above the chosen set's, for the whole
     // of SwitchHold. 8 dB is above the largest wander of a set that did not move (6.5 dB), so the set that is
     // not nearer does not cross it on noise in one window; 30 s is three back-to-back windows, and in the one
