@@ -20,7 +20,8 @@ internal enum SettingsLoadStatus
 // User settings in %APPDATA%\Earshot\settings.json.
 //
 // Load:
-//   missing file              defaults, then save
+//   missing file              the new-install defaults (Hand back and Open on startup on) when there is no backup either,
+//                             otherwise the plain defaults; then save
 //   valid file                use it (unknown members are ignored)
 //   newer schema version      the file was written by a newer Earshot. Use the members this build
 //                             knows if they are valid, otherwise defaults; never move or rewrite the
@@ -264,7 +265,9 @@ internal sealed class JsonSettingsStore : ISettingsStore
 
         if (main.Kind == ReadKind.Missing)
         {
-            _current = new EarshotSettings();
+            // A PC that has never had an Earshot settings file gets the new-install defaults. A backup with no file means
+            // someone had settings here before, so that case, and every recovery below, keeps the plain defaults.
+            _current = File.Exists(BackupPath) ? new EarshotSettings() : EarshotSettings.NewInstallDefaults();
             if (_openedReadOnly)
             {
                 LastLoadStatus = SettingsLoadStatus.DefaultsReadOnly;

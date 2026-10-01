@@ -13,12 +13,18 @@ public sealed class EarshotSettings
     // NOTE: BlockAtBoot is NOT here. Its authority is the SYSTEM-owned GateConfig, because the
     // BootBlock task (SYSTEM, no user session) must read it and cannot read HKCU/%APPDATA%.
 
-    // v1.1: hand back the AirPods (release, then block) at shut down, at sleep and on Exit from the menu while
-    // they are connected to this PC. Defaults off, so a new settings file and an older one with no member read as
-    // off: the owner has not yet said it ships on before the live tests have passed, and an unanswered question
-    // leaves the feature off. A file that holds the member keeps its value. SchemaVersion stays 1; an older file
-    // without this member still reads as this build's current schema, not a newer one.
+    // Hand back the AirPods (release, then block) at shut down, at sleep and on Exit from the menu while they are
+    // connected to this PC. Off in the class, so a settings file with no member (one written before this setting
+    // existed) reads as off; a file that holds the member keeps its value. A PC with no settings file and no backup, a
+    // new install, gets it on from NewInstallDefaults: the owner decided new installs hand back, and an existing
+    // install's saved choice is never changed. SchemaVersion stays 1; an older file without this member still reads as
+    // this build's current schema, not a newer one.
     public bool   HandBackOnShutdownAndSleep { get; set; }
+
+    // What a PC with no settings file and no backup gets: the initialisers, with Hand back and Open on startup on.
+    // Open on startup is already on in the class, and is named here so the two choices that belong to a new install
+    // are read in one place.
+    public static EarshotSettings NewInstallDefaults() => new() { HandBackOnShutdownAndSleep = true, OpenOnStartup = true };
 
     // "Check automatically": look for a newer release once a day, after startup. Defaults off, because a check
     // contacts GitHub, so an older settings file with no member reads as off and nothing is contacted until the

@@ -687,4 +687,86 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.IsFalse(reopened.ProtectAudioQuality);
         Assert.IsFalse(reopened.OpenOnStartup);
     }
-}
+
+    // ----- a new install writes Hand back and Open on startup on; an existing file keeps what it holds -----
+
+    [TestMethod]
+    public void ANewInstallWithNoSettingsFileAndNoBackupWritesHandBackAndOpenOnStartupOn()
+    {
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.CreatedDefaults, store.LastLoadStatus);
+        Assert.IsTrue(store.Current.HandBackOnShutdownAndSleep, "Hand back is on for a new install.");
+        Assert.IsTrue(store.Current.OpenOnStartup, "Open on startup is on for a new install.");
+
+        JsonSettingsStore reopened = Open();
+        Assert.AreEqual(SettingsLoadStatus.Loaded, reopened.LastLoadStatus);
+        Assert.IsTrue(reopened.Current.HandBackOnShutdownAndSleep, "The saved file holds the value, not only the memory.");
+        StringAssert.Contains(File.ReadAllText(SettingsPath), "\"HandBackOnShutdownAndSleep\": true");
+    }
+
+    [TestMethod]
+    public void AnExistingFileKeepsItsSavedValuesWhateverTheyAre()
+    {
+        File.WriteAllText(SettingsPath, "{ \"SchemaVersion\": 1, \"OpenOnStartup\": false, \"HandBackOnShutdownAndSleep\": false }");
+
+        EarshotSettings off = Open().Current;
+
+        Assert.IsFalse(off.OpenOnStartup);
+        Assert.IsFalse(off.HandBackOnShutdownAndSleep);
+
+        File.WriteAllText(SettingsPath, "{ \"SchemaVersion\": 1, \"OpenOnStartup\": true, \"HandBackOnShutdownAndSleep\": true }");
+
+        EarshotSettings on = Open().Current;
+
+        Assert.IsTrue(on.OpenOnStartup);
+        Assert.IsTrue(on.HandBackOnShutdownAndSleep);
+    }
+
+    [TestMethod]
+    public void AnExistingFileWithNoHandBackMemberStillReadsHandBackOffAndKeepsOpenOnStartupOff()
+    {
+        File.WriteAllText(SettingsPath, "{ \"SchemaVersion\": 1, \"OpenOnStartup\": false }");
+
+        EarshotSettings s = Open().Current;
+
+        Assert.IsFalse(s.HandBackOnShutdownAndSleep, "A missing member is not a new install.");
+        Assert.IsFalse(s.OpenOnStartup);
+    }
+
+    [TestMethod]
+    public void ASettingsFileThatIsGoneButLeftABackupIsNotANewInstall()
+    {
+        File.WriteAllText(SettingsPath + ".bak", ValidJson);
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.CreatedDefaults, store.LastLoadStatus);
+        Assert.IsFalse(store.Current.HandBackOnShutdownAndSleep, "Someone had settings here before; the plain defaults apply.");
+    }
+
+    [TestMethod]
+    public void AFileResetAfterCorruptionGetsThePlainDefaultsNotTheNewInstallOnes()
+    {
+        File.WriteAllText(SettingsPath, "{ \"DeviceMatch\": \"Lat");
+
+        JsonSettingsStore store = Open();
+
+        Assert.AreEqual(SettingsLoadStatus.ResetAfterCorruption, store.LastLoadStatus);
+        Assert.IsFalse(store.Current.HandBackOnShutdownAndSleep);
+    }
+
+    [TestMethod]
+    public void TheNewInstallDefaultsAreTheInitialisersWithOnlyThoseTwoChanged()
+    {
+        EarshotSettings plain = new();
+        EarshotSettings fresh = EarshotSettings.NewInstallDefaults();
+
+        Assert.IsTrue(fresh.HandBackOnShutdownAndSleep);
+        Assert.IsTrue(fresh.OpenOnStartup);
+        Assert.AreEqual(plain.ProtectAudioQuality, fresh.ProtectAudioQuality);
+        Assert.AreEqual(plain.CheckForUpdatesAutomatically, fresh.CheckForUpdatesAutomatically);
+        Assert.AreEqual(plain.PauseWhenAirPodsLeave, fresh.PauseWhenAirPodsLeave);
+        Assert.AreEqual(plain.DeviceMatch, fresh.DeviceMatch);
+        Assert.IsFalse(plain.HandBackOnShutdownAndSleep, "The class initialiser stays off, so a file without the member reads off.");
+    }}
