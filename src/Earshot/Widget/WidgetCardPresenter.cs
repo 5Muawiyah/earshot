@@ -153,6 +153,11 @@ internal sealed class WidgetCardPresenter : IDisposable
     // Forces the card to hide, for example when a settings change turns the widget off.
     public void Hide() => _uiPost(HideOnUiThread);
 
+    // The system's look changed (the theme, the accent, the text size, transparency or a high-contrast theme): the
+    // card on screen takes the theme again, reads the look and is laid out and drawn again, keeping its bottom edge.
+    // A card that is not on screen reads the look when it is next shown.
+    public void ReapplyLook() => _uiPost(ReapplyLookOnUiThread);
+
     // Re-renders the card with the latest snapshot, if it is on screen. IWidgetStatus.Changed is documented
     // as already raised on the UI thread, but this still posts, so a test or a future caller on another
     // thread is safe too.
@@ -302,6 +307,23 @@ internal sealed class WidgetCardPresenter : IDisposable
 
         StopRefreshTimer();
     }
+
+    private void ReapplyLookOnUiThread()
+    {
+        if (_disposed || _card is not { IsDisposed: false, Visible: true } card)
+        {
+            return;
+        }
+
+        card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
+        RenderKeepingBottom();
+        _lookReapplies++;
+    }
+
+    private int _lookReapplies;
+
+    // How many times a shown card was given the look again, for tests.
+    internal int LookReappliesForTest => _lookReapplies;
 
     private void RefreshOnUiThread()
     {

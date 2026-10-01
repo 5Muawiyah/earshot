@@ -116,6 +116,9 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // when no notice is open.
     public void Refresh() => _uiPost(RefreshOnUiThread);
 
+    // The system's look changed: a notice on screen takes the theme and the look again, in place.
+    public void ReapplyLook() => _uiPost(ReapplyLookOnUiThread);
+
     public void Dispose()
     {
         if (_disposed)
@@ -186,6 +189,17 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         card.Bounds = PlaceCard(gaugeBounds, card.ClientSize);
         card.Show();
         StartDismissTimer();
+    }
+
+    private void ReapplyLookOnUiThread()
+    {
+        if (_disposed || _card is not { IsDisposed: false, Visible: true } card)
+        {
+            return;
+        }
+
+        card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
+        card.Render(WidgetCardPresenter.BuildModel(_callbacks, _time), _callbacks.Dpi());
     }
 
     private void RefreshOnUiThread()

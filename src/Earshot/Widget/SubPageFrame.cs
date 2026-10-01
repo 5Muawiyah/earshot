@@ -37,7 +37,7 @@ internal static class SubPageFrame
         IReadOnlyList<Rectangle> Buttons);
 
     // bodyHeight is the page's own content height at dpi, in pixels; buttonCount is 0, 1 or 2.
-    public static FrameLayout Compute(int dpi, int bodyHeight, int buttonCount)
+    public static FrameLayout Compute(int dpi, int bodyHeight, int buttonCount, double textScale = 1.0)
     {
         if (buttonCount is < 0 or > 2)
         {
@@ -45,16 +45,16 @@ internal static class SubPageFrame
         }
 
         int width = CardPlacement.Scale(WidthAt96, dpi);
-        int headerHeight = CardPlacement.Scale(HeaderHeightAt96, dpi);
+        int headerHeight = TextFit.Fit(HeaderHeightAt96, TypeRole.BodyStrong, 28, dpi, textScale);
         int backSize = CardPlacement.Scale(BackSizeAt96, dpi);
         int backLeft = CardPlacement.Scale(BackLeftAt96, dpi);
         int titleGap = CardPlacement.Scale(TitleGapAt96, dpi);
         int stepRight = CardPlacement.Scale(StepRightAt96, dpi);
-        int stepHeight = CardPlacement.Scale(StepHeightAt96, dpi);
+        int stepHeight = TextFit.Grow(StepHeightAt96, dpi, textScale);
         int stepWidth = CardPlacement.Scale(StepWidthAt96, dpi);
-        int footerHeight = buttonCount == 0 ? 0 : CardPlacement.Scale(FooterHeightAt96, dpi);
         int footerPad = CardPlacement.Scale(FooterPaddingAt96, dpi);
-        int buttonHeight = CardPlacement.Scale(ButtonHeightAt96, dpi);
+        int buttonHeight = TextFit.Fit(ButtonHeightAt96, TypeRole.Body, 12, dpi, textScale);
+        int footerHeight = buttonCount == 0 ? 0 : buttonHeight + (2 * footerPad);
         int buttonGap = CardPlacement.Scale(ButtonGapAt96, dpi);
 
         var header = new Rectangle(0, 0, width, headerHeight);
@@ -85,7 +85,7 @@ internal static class SubPageFrame
     // The header: the back button's arrow (with a hover-style fill when it has the keyboard focus), the title
     // in semibold and the step counter in the caption size.
     public static void DrawHeader(
-        Graphics g, FrameLayout layout, string title, string? step, CardColours colours, string fontFamily, int dpi, bool backFocused)
+        Graphics g, FrameLayout layout, string title, string? step, CardColours colours, CardType type, int dpi, bool backFocused)
     {
         ArgumentNullException.ThrowIfNull(g);
         ArgumentNullException.ThrowIfNull(layout);
@@ -97,17 +97,17 @@ internal static class SubPageFrame
         }
 
         CardPaint.BackArrow(g, layout.Back, colours.Text, dpi);
-        CardPaint.Text(g, title, layout.Title, fontFamily, CardPlacement.Scale(14, dpi), bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.Text(g, title, layout.Title, type, CardPlacement.Scale(14, dpi), bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
         if (step is not null)
         {
-            CardPaint.Text(g, step, layout.Step, fontFamily, CardPlacement.Scale(12, dpi), bold: false, colours.TextSecondary, StringAlignment.Far, StringAlignment.Center);
+            CardPaint.Text(g, step, layout.Step, type, CardPlacement.Scale(12, dpi), bold: false, colours.TextSecondary, StringAlignment.Far, StringAlignment.Center);
         }
     }
 
     // The footer: a divider on top, the footer fill, and the buttons. focusedButton is the index of the button
     // that has the keyboard focus, or -1.
     public static void DrawFooter(
-        Graphics g, FrameLayout layout, IReadOnlyList<(string Label, bool Primary)> buttons, CardColours colours, string fontFamily, int dpi, int focusedButton)
+        Graphics g, FrameLayout layout, IReadOnlyList<(string Label, bool Primary)> buttons, CardColours colours, CardType type, int dpi, int focusedButton)
     {
         ArgumentNullException.ThrowIfNull(g);
         ArgumentNullException.ThrowIfNull(layout);
@@ -131,7 +131,7 @@ internal static class SubPageFrame
 
         for (int i = 0; i < layout.Buttons.Count && i < buttons.Count; i++)
         {
-            CardPaint.Button(g, layout.Buttons[i], buttons[i].Label, buttons[i].Primary, colours, fontFamily, dpi, focused: i == focusedButton);
+            CardPaint.Button(g, layout.Buttons[i], buttons[i].Label, buttons[i].Primary, colours, type, dpi, focused: i == focusedButton);
         }
     }
 }
@@ -143,27 +143,27 @@ internal enum GlyphKind { Minus, Plus, Cross }
 internal static partial class CardPaint
 {
     public static void Text(
-        Graphics g, string text, Rectangle bounds, string fontFamily, int pixelSize, bool bold, Color colour, StringAlignment horizontal, StringAlignment vertical)
+        Graphics g, string text, Rectangle bounds, CardType type, int pixelSize, bool bold, Color colour, StringAlignment horizontal, StringAlignment vertical)
     {
-        using var font = new Font(fontFamily, Math.Max(1, pixelSize), bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+        using Font font = type.Font(pixelSize, bold);
         using var brush = new SolidBrush(colour);
         using var format = new StringFormat { Alignment = horizontal, LineAlignment = vertical, Trimming = StringTrimming.EllipsisCharacter };
         g.DrawString(text, font, brush, bounds, format);
     }
 
     // Text that wraps inside bounds, top-aligned.
-    public static void Wrapped(Graphics g, string text, Rectangle bounds, string fontFamily, int pixelSize, bool bold, Color colour)
+    public static void Wrapped(Graphics g, string text, Rectangle bounds, CardType type, int pixelSize, bool bold, Color colour)
     {
-        using var font = new Font(fontFamily, Math.Max(1, pixelSize), bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+        using Font font = type.Font(pixelSize, bold);
         using var brush = new SolidBrush(colour);
         using var format = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisWord };
         g.DrawString(text, font, brush, bounds, format);
     }
 
     // How many lines text takes when wrapped to width, at the given size; at least 1.
-    public static int Lines(Graphics g, string text, int width, string fontFamily, int pixelSize, bool bold, int lineHeight)
+    public static int Lines(Graphics g, string text, int width, CardType type, int pixelSize, bool bold, int lineHeight)
     {
-        using var font = new Font(fontFamily, Math.Max(1, pixelSize), bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+        using Font font = type.Font(pixelSize, bold);
         SizeF size = g.MeasureString(text, font, Math.Max(1, width), StringFormat.GenericTypographic);
         return Math.Max(1, (int)Math.Ceiling(size.Height / Math.Max(1, lineHeight) - 0.01));
     }
@@ -187,7 +187,7 @@ internal static partial class CardPaint
         return path;
     }
 
-    public static void Button(Graphics g, Rectangle rect, string label, bool primary, CardColours colours, string fontFamily, int dpi, bool focused)
+    public static void Button(Graphics g, Rectangle rect, string label, bool primary, CardColours colours, CardType type, int dpi, bool focused)
     {
         int radius = Scale(4, dpi);
         using GraphicsPath path = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
@@ -201,7 +201,7 @@ internal static partial class CardPaint
             g.DrawPath(pen, path);
         }
 
-        Text(g, label, rect, fontFamily, Scale(14, dpi), bold: false, primary ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
+        Text(g, label, rect, type, Scale(14, dpi), bold: false, primary ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
             Focus(g, rect, radius, colours, dpi);
@@ -209,7 +209,7 @@ internal static partial class CardPaint
     }
 
     // The 24 px button of the update line: the standard control fill and stroke, the caption size.
-    public static void SmallButton(Graphics g, Rectangle rect, string label, CardColours colours, string fontFamily, int dpi, bool focused)
+    public static void SmallButton(Graphics g, Rectangle rect, string label, CardColours colours, CardType type, int dpi, bool focused)
     {
         ArgumentNullException.ThrowIfNull(colours);
         int radius = Scale(4, dpi);
@@ -224,7 +224,7 @@ internal static partial class CardPaint
             g.DrawPath(pen, path);
         }
 
-        Text(g, label, rect, fontFamily, Scale(12, dpi), bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
+        Text(g, label, rect, type, Scale(12, dpi), bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
             Focus(g, rect, radius, colours, dpi);
@@ -410,7 +410,7 @@ internal static partial class CardPaint
     }
 
     // One of the settings page's two-choice buttons: the accent when it is the choice, the standard control when not.
-    public static void Segment(Graphics g, Rectangle rect, string label, bool selected, CardColours colours, string fontFamily, int dpi, bool focused)
+    public static void Segment(Graphics g, Rectangle rect, string label, bool selected, CardColours colours, CardType type, int dpi, bool focused)
     {
         ArgumentNullException.ThrowIfNull(colours);
         int radius = Scale(4, dpi);
@@ -425,7 +425,7 @@ internal static partial class CardPaint
             g.DrawPath(pen, path);
         }
 
-        Text(g, label, rect, fontFamily, Scale(12, dpi), bold: false, selected ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
+        Text(g, label, rect, type, Scale(12, dpi), bold: false, selected ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
             Focus(g, rect, radius, colours, dpi);

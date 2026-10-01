@@ -168,16 +168,16 @@ internal interface ICardTextMeasure
     int Lines(string text, int width, int pixelSize, int lineHeight);
 }
 
-internal sealed class GraphicsTextMeasure(Graphics graphics, string fontFamily) : ICardTextMeasure
+internal sealed class GraphicsTextMeasure(Graphics graphics, CardType type) : ICardTextMeasure
 {
     public int Width(string text, int pixelSize)
     {
-        using var font = new Font(fontFamily, Math.Max(1, pixelSize), FontStyle.Regular, GraphicsUnit.Pixel);
+        using Font font = type.Font(pixelSize, bold: false);
         return (int)Math.Ceiling(graphics.MeasureString(text, font, int.MaxValue, StringFormat.GenericTypographic).Width);
     }
 
     public int Lines(string text, int width, int pixelSize, int lineHeight) =>
-        CardPaint.Lines(graphics, text, width, fontFamily, pixelSize, bold: false, lineHeight);
+        CardPaint.Lines(graphics, text, width, type, pixelSize, bold: false, lineHeight);
 }
 
 internal enum SettingsItemKind { Row, Divider, Head }
@@ -221,8 +221,10 @@ internal static class SettingsPageLayout
     public const int ControlGapAt96 = 2;
     public const int LabelLineAt96 = 20;
     public const int SubLineAt96 = 16;
+    public const int MinLabelWidthAt96 = 80;
+    public const int StackGapAt96 = 4;
 
-    public static SettingsLayout Compute(CardSettingsValues values, int dpi, ICardTextMeasure measure)
+    public static SettingsLayout Compute(CardSettingsValues values, int dpi, ICardTextMeasure measure, double textScale = 1.0)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(measure);
@@ -232,9 +234,9 @@ internal static class SettingsPageLayout
         int gap = CardPlacement.Scale(LabelControlGapAt96, dpi);
         int minRow = CardPlacement.Scale(RowMinHeightAt96, dpi);
         int rowPad = CardPlacement.Scale(RowPaddingAt96, dpi);
-        int control = CardPlacement.Scale(ControlHeightAt96, dpi);
-        int labelLine = CardPlacement.Scale(LabelLineAt96, dpi);
-        int subLine = CardPlacement.Scale(SubLineAt96, dpi);
+        int control = TextFit.Fit(ControlHeightAt96, TypeRole.Body, 8, dpi, textScale);
+        int labelLine = TextFit.Grow(LabelLineAt96, dpi, textScale);
+        int subLine = TextFit.Grow(SubLineAt96, dpi, textScale);
         int fourteen = CardPlacement.Scale(14, dpi);
         int twelve = CardPlacement.Scale(12, dpi);
         int toggleW = CardPlacement.Scale(WidgetCardLayout.ToggleWidthAt96, dpi);
@@ -251,11 +253,40 @@ internal static class SettingsPageLayout
             Func<int, int, (Rectangle A, Rectangle B, Rectangle Value)> place, params SettingsPart[] parts)
         {
             int labelWidth = Math.Max(1, contentWidth - controlWidth - gap);
+
+            // A control that leaves the label too little room (long text at a large text size) goes under the label,
+            // at the right, instead of squeezing it.
+            bool stacked = labelWidth < CardPlacement.Scale(MinLabelWidthAt96, dpi);
+            if (stacked)
+            {
+                labelWidth = contentWidth;
+            }
+
             int labelLines = measure.Lines(label, labelWidth, fourteen, labelLine);
             int textHeight = labelLine * labelLines;
-            int subWidth = subFullWidth ? contentWidth : labelWidth;
+            int subWidth = subFullWidth || stacked ? contentWidth : labelWidth;
             int subLines = sub is null ? 0 : measure.Lines(sub, subWidth, twelve, subLine);
             int subHeight = subLine * subLines;
+
+            if (stacked)
+            {
+                int stackGap = CardPlacement.Scale(StackGapAt96, dpi);
+                int labelTopStacked = y + rowPad;
+                var stackedLabel = new Rectangle(side, labelTopStacked, labelWidth, textHeight);
+                Rectangle stackedSub = sub is null ? Rectangle.Empty : new Rectangle(side, stackedLabel.Bottom, contentWidth, subHeight);
+                int controlTop = (sub is null ? stackedLabel.Bottom : stackedSub.Bottom) + stackGap;
+                (Rectangle sa, Rectangle sb, Rectangle sv) = place(controlTop, controlTop + (control / 2));
+                int stackedHeight = Math.Max(minRow, controlTop + control + rowPad - y);
+                items.Add(new SettingsItem(
+                    SettingsItemKind.Row, id, label, sub, subIsProblem, new Rectangle(0, y, width, stackedHeight), stackedLabel, stackedSub, sa, sb, sv));
+                foreach (SettingsPart part in parts)
+                {
+                    targets.Add(new SettingsTarget(id, part));
+                }
+
+                y += stackedHeight;
+                return;
+            }
 
             int lineHeight = Math.Max(textHeight + (subFullWidth ? 0 : subHeight), control);
             int height = Math.Max(minRow, (2 * rowPad) + lineHeight + (subFullWidth ? subHeight : 0));
@@ -345,7 +376,7 @@ internal static class SettingsPageLayout
 
         void Head(string text)
         {
-            int headHeight = CardPlacement.Scale(HeadHeightAt96, dpi);
+            int headHeight = TextFit.Grow(HeadHeightAt96, dpi, textScale);
             var bounds = new Rectangle(side, y, contentWidth, headHeight);
             items.Add(new SettingsItem(SettingsItemKind.Head, SettingsRowId.None, text, null, false, bounds, bounds, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty));
             y += headHeight;
@@ -391,7 +422,7 @@ internal static class SettingsPageLayout
         ToggleRow(SettingsRowId.CheckAutomatically, WidgetCopy.CheckAutomatically, null);
 
         int bodyHeight = y + CardPlacement.Scale(BodyBottomAt96, dpi);
-        SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight, buttonCount: 0);
+        SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight, buttonCount: 0, textScale);
         int offset = frame.Body.Y;
         var shifted = new List<SettingsItem>(items.Count);
         foreach (SettingsItem item in items)

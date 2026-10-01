@@ -83,7 +83,6 @@ internal sealed partial class WidgetCard : Form
 
     private readonly ILog _log;
     private readonly bool _notice;
-    private readonly string _fontFamily;
     private WidgetCardModel _model = WidgetCardModel.Empty;
     private int _dpi = CardPlacement.BaseDpi;
     private CardPalette _palette = CardTheme.Light;
@@ -108,11 +107,6 @@ internal sealed partial class WidgetCard : Form
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
         _notice = notice;
-
-        using (Font? messageFont = SystemFonts.MessageBoxFont)
-        {
-            _fontFamily = messageFont?.Name ?? FontFamily.GenericSansSerif.Name;
-        }
 
         Text = TrayStatus.AppName;
         // AccessibleName was never set (null, confirmed by reading it directly rather than assuming a
@@ -283,6 +277,7 @@ internal sealed partial class WidgetCard : Form
         ArgumentNullException.ThrowIfNull(model);
         _model = model;
         _dpi = dpi > 0 ? dpi : CardPlacement.BaseDpi;
+        ReadLook();
 
         if (EffectiveView == WidgetCardView.Settings && model.Settings is { } settingsValues)
         {
@@ -364,7 +359,7 @@ internal sealed partial class WidgetCard : Form
         int buttonWidth = 0;
         if (showSetup)
         {
-            using var font = new Font(_fontFamily, CardPlacement.Scale(14, _dpi), FontStyle.Regular, GraphicsUnit.Pixel);
+            using Font font = _type.Font(CardPlacement.Scale(14, _dpi), bold: false);
             SizeF size = measure.MeasureString(SetupButtonLabel, font, int.MaxValue, StringFormat.GenericTypographic);
             buttonWidth = (int)Math.Ceiling(size.Width) + (2 * CardPlacement.Scale(12, _dpi));
         }
@@ -373,7 +368,7 @@ internal sealed partial class WidgetCard : Form
         int updateButtonWidth = 0;
         if (showUpdate)
         {
-            using var font = new Font(_fontFamily, CardPlacement.Scale(12, _dpi), FontStyle.Regular, GraphicsUnit.Pixel);
+            using Font font = _type.Font(CardPlacement.Scale(12, _dpi), bold: false);
             SizeF size = measure.MeasureString(WidgetCopy.UpdateButton, font, int.MaxValue, StringFormat.GenericTypographic);
             updateButtonWidth = Math.Max(
                 CardPlacement.Scale(WidgetCardLayout.UpdateButtonMinWidthAt96, _dpi),
@@ -382,7 +377,7 @@ internal sealed partial class WidgetCard : Form
 
         return WidgetCardLayout.Compute(
             _dpi, model.ShowSwitch, showSetup, showSetup && model.Snapshot.SetupCouldNotRead, buttonWidth,
-            showGear: !_notice, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth);
+            showGear: !_notice, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, textScale: _look.TextScale);
     }
 
     private WidgetCardLayout.SetupLayout ComputeSetupLayout(Graphics measure, SetupViewModel setup)
@@ -390,10 +385,10 @@ internal sealed partial class WidgetCard : Form
         int side = CardPlacement.Scale(WidgetCardLayout.BodySideAt96, _dpi);
         int contentWidth = CardPlacement.Scale(SubPageFrame.WidthAt96, _dpi) - (2 * side);
         int textWidth = contentWidth - CardPlacement.Scale(WidgetCardLayout.StatusIconAt96 + WidgetCardLayout.StatusIconGapAt96, _dpi);
-        int promptLines = setup.Prompt is null ? 1 : CardPaint.Lines(measure, setup.Prompt, contentWidth, _fontFamily, CardPlacement.Scale(14, _dpi), bold: true, CardPlacement.Scale(WidgetCardLayout.PromptLineAt96, _dpi));
-        int captionLines = setup.Caption is null ? 1 : CardPaint.Lines(measure, setup.Caption, contentWidth, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
-        int subLines = setup.StatusSub is null ? 1 : CardPaint.Lines(measure, setup.StatusSub, textWidth, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
-        return WidgetCardLayout.Setup(setup, _dpi, promptLines, captionLines, subLines);
+        int promptLines = setup.Prompt is null ? 1 : CardPaint.Lines(measure, setup.Prompt, contentWidth, _type, CardPlacement.Scale(14, _dpi), bold: true, CardPlacement.Scale(WidgetCardLayout.PromptLineAt96, _dpi));
+        int captionLines = setup.Caption is null ? 1 : CardPaint.Lines(measure, setup.Caption, contentWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
+        int subLines = setup.StatusSub is null ? 1 : CardPaint.Lines(measure, setup.StatusSub, textWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
+        return WidgetCardLayout.Setup(setup, _dpi, promptLines, captionLines, subLines, _look.TextScale);
     }
 
     // Advances the spinner to frame and repaints only its icon. The presenter's 100 ms timer calls this; a
@@ -663,7 +658,7 @@ internal sealed partial class WidgetCard : Form
         // two rows at half strength, which is what made a thin outline look faint on a dark card.
         g.PixelOffsetMode = PixelOffsetMode.Half;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        g.Clear(OverrideBackgroundForCaptureOnly ?? (_dwmBackdropOk ? Color.FromArgb(0, 0, 0, 0) : _palette.Background));
+        g.Clear(OverrideBackgroundForCaptureOnly ?? (PaintsOpaqueBackground ? _palette.Background : Color.FromArgb(0, 0, 0, 0)));
 
         if (OnSettingsPage && _model.Settings is { } settingsValues && _settingsLayout is { } settingsLayout)
         {
@@ -712,7 +707,7 @@ internal sealed partial class WidgetCard : Form
     private void DrawTitleRow(Graphics g, WidgetCardLayout.Layout layout)
     {
         CardColours colours = Colours;
-        CardPaint.Text(g, WidgetCopy.CardTitle, layout.Title, _fontFamily, CardPlacement.Scale(14, _dpi), bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.Text(g, WidgetCopy.CardTitle, layout.Title, _type, CardPlacement.Scale(14, _dpi), bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
         if (layout.Gear.IsEmpty)
         {
             return;
@@ -732,9 +727,9 @@ internal sealed partial class WidgetCard : Form
         CardColours colours = Colours;
         CardPaint.Divider(g, layout.UpdateLine.Left, layout.UpdateLine.Right, layout.UpdateLine.Top, colours);
         CardPaint.Text(
-            g, WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption, _fontFamily,
+            g, WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption, _type,
             CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
-        CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _fontFamily, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && FocusShown);
+        CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _type, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && FocusShown);
     }
 
     // Cycles Button, Switch (when shown), SetupButton (when shown), UpdateButton (when shown), Gear (when the view
@@ -966,7 +961,7 @@ internal sealed partial class WidgetCard : Form
     // "L", "R" or "Case" above the glyph, centred, in the same status ink the where/read lines use.
     private void DrawColumnLabel(Graphics g, Rectangle bounds, string text)
     {
-        using var font = new Font(_fontFamily, bounds.Height * 0.75f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using Font font = _type.Role(TypeRole.CaptionStrong);
         using var brush = new SolidBrush(_palette.Status);
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near };
         g.DrawString(text, font, brush, bounds, format);
@@ -1031,9 +1026,9 @@ internal sealed partial class WidgetCard : Form
             DrawBolt(g, column.Bar);
         }
 
-        using var font = new Font(_fontFamily, column.Percent.Height * 0.6f, FontStyle.Regular, GraphicsUnit.Pixel);
+        using Font font = _type.Role(TypeRole.Number);
         using var textBrush = new SolidBrush(_palette.Status);
-        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near };
+        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
         g.DrawString(WidgetCopy.Percent(percent), font, textBrush, new RectangleF(column.Percent.X, column.Percent.Y, column.Percent.Width, column.Percent.Height), format);
     }
 
@@ -1067,9 +1062,9 @@ internal sealed partial class WidgetCard : Form
         g.FillPolygon(brush, points);
     }
 
-    private void DrawLine(Graphics g, Rectangle bounds, string text, Color colour)
+    private void DrawLine(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role = TypeRole.Caption)
     {
-        using var font = new Font(_fontFamily, bounds.Height * 0.62f, FontStyle.Regular, GraphicsUnit.Pixel);
+        using Font font = _type.Role(role);
         using var brush = new SolidBrush(colour);
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
         g.DrawString(text, font, brush, bounds, format);
@@ -1094,7 +1089,7 @@ internal sealed partial class WidgetCard : Form
             g.FillPath(brush, path);
         }
 
-        using (var font = new Font(_fontFamily, rect.Height * 0.45f, FontStyle.Regular, GraphicsUnit.Pixel))
+        using (Font font = _type.Role(TypeRole.Body))
         using (var textBrush = new SolidBrush(text))
         using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
         {
@@ -1115,7 +1110,7 @@ internal sealed partial class WidgetCard : Form
         int trackWidth = CardPlacement.Scale(WidgetCardLayout.ToggleWidthAt96, _dpi);
         int trackHeight = CardPlacement.Scale(WidgetCardLayout.ToggleHeightAt96, _dpi);
         var labelRect = new Rectangle(rect.X, rect.Y, Math.Max(0, rect.Width - trackWidth - 8), rect.Height);
-        DrawLine(g, labelRect, WidgetCopy.AutoPauseSwitch, _palette.Status);
+        DrawLine(g, labelRect, WidgetCopy.AutoPauseSwitch, _palette.Status, TypeRole.Body);
 
         var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
         CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi);
@@ -1136,7 +1131,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         bool focused = !_notice && _focus == WidgetCardFocus.SetupButton && FocusShown;
-        CardPaint.Button(g, layout.SetupButton, SetupButtonLabel, primary: true, Colours, _fontFamily, _dpi, focused);
+        CardPaint.Button(g, layout.SetupButton, SetupButtonLabel, primary: true, Colours, _type, _dpi, focused);
     }
 
     // ---- The set-up pages
@@ -1346,16 +1341,16 @@ internal sealed partial class WidgetCard : Form
         bool focusVisible = FocusShown;
         SetupTarget focus = _setupFocus;
 
-        SubPageFrame.DrawHeader(g, layout.Frame, setup.Title, setup.Step, colours, _fontFamily, _dpi, backFocused: focusVisible && focus.Kind == SetupTargetKind.Back);
+        SubPageFrame.DrawHeader(g, layout.Frame, setup.Title, setup.Step, colours, _type, _dpi, backFocused: focusVisible && focus.Kind == SetupTargetKind.Back);
 
         if (setup.Prompt is not null)
         {
-            CardPaint.Wrapped(g, setup.Prompt, layout.Prompt, _fontFamily, CardPlacement.Scale(14, _dpi), bold: true, colours.Text);
+            CardPaint.Wrapped(g, setup.Prompt, layout.Prompt, _type, CardPlacement.Scale(14, _dpi), bold: true, colours.Text);
         }
 
         if (setup.Caption is not null)
         {
-            CardPaint.Wrapped(g, setup.Caption, layout.Caption, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary);
+            CardPaint.Wrapped(g, setup.Caption, layout.Caption, _type, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary);
         }
 
         if (setup.Status is not null)
@@ -1379,10 +1374,10 @@ internal sealed partial class WidgetCard : Form
                     break;
             }
 
-            CardPaint.Text(g, setup.Status, layout.StatusText, _fontFamily, CardPlacement.Scale(14, _dpi), bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
+            CardPaint.Text(g, setup.Status, layout.StatusText, _type, CardPlacement.Scale(14, _dpi), bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
             if (setup.StatusSub is not null)
             {
-                CardPaint.Wrapped(g, setup.StatusSub, layout.StatusSub, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary);
+                CardPaint.Wrapped(g, setup.StatusSub, layout.StatusSub, _type, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary);
             }
         }
 
@@ -1404,7 +1399,7 @@ internal sealed partial class WidgetCard : Form
 
         var buttons = setup.Buttons.Select(b => (b.Label, b.Primary)).ToList();
         int focusedButton = focusVisible && focus.Kind == SetupTargetKind.Button ? focus.Index : -1;
-        SubPageFrame.DrawFooter(g, layout.Frame, buttons, colours, _fontFamily, _dpi, focusedButton);
+        SubPageFrame.DrawFooter(g, layout.Frame, buttons, colours, _type, _dpi, focusedButton);
     }
 
     // The download's bar, 4 px, with its percentage 36 wide at the right. While the size is not known the bar has
@@ -1420,7 +1415,7 @@ internal sealed partial class WidgetCard : Form
         {
             var textRect = new Rectangle(row.Right - textWidth, row.Y, textWidth, row.Height);
             CardPaint.Text(
-                g, percent.ToString(System.Globalization.CultureInfo.InvariantCulture) + "%", textRect, _fontFamily, CardPlacement.Scale(12, _dpi),
+                g, percent.ToString(System.Globalization.CultureInfo.InvariantCulture) + "%", textRect, _type, CardPlacement.Scale(12, _dpi),
                 bold: false, colours.TextSecondary, StringAlignment.Far, StringAlignment.Center);
         }
     }
@@ -1436,11 +1431,11 @@ internal sealed partial class WidgetCard : Form
             g.DrawPath(pen, box);
         }
 
-        CardPaint.Text(g, label, picker.Label, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Center, StringAlignment.Center);
+        CardPaint.Text(g, label, picker.Label, _type, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Center, StringAlignment.Center);
         CardPaint.Chevron(g, picker.Up, up: true, colours.Text, _dpi);
         CardPaint.Chevron(g, picker.Down, up: false, colours.Text, _dpi);
         DrawPickerValue(g, picker.Value, value, colours);
-        CardPaint.Text(g, WidgetCopy.Charging, picker.ChargingLabel, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.Text(g, WidgetCopy.Charging, picker.ChargingLabel, _type, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
         CardPaint.Toggle(g, picker.Toggle, charging, colours, _dpi);
 
         if (focus is { } f && f.Index == index)
@@ -1465,8 +1460,8 @@ internal sealed partial class WidgetCard : Form
     private void DrawPickerValue(Graphics g, Rectangle bounds, int value, CardColours colours)
     {
         string digits = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        using var big = new Font(_fontFamily, CardPlacement.Scale(20, _dpi), FontStyle.Bold, GraphicsUnit.Pixel);
-        using var small = new Font(_fontFamily, CardPlacement.Scale(12, _dpi), FontStyle.Regular, GraphicsUnit.Pixel);
+        using Font big = _type.Font(CardPlacement.Scale(20, _dpi), bold: true);
+        using Font small = _type.Font(CardPlacement.Scale(12, _dpi), bold: false);
         using var brush = new SolidBrush(colours.Text);
         using var format = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         float cell = g.MeasureString("0", big, int.MaxValue, StringFormat.GenericTypographic).Width;

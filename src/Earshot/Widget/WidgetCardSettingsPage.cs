@@ -50,7 +50,7 @@ internal sealed partial class WidgetCard
         _setupLayout = null;
         using var probe = new Bitmap(1, 1);
         using Graphics measure = Graphics.FromImage(probe);
-        SettingsLayout layout = SettingsPageLayout.Compute(values, _dpi, new GraphicsTextMeasure(measure, _fontFamily));
+        SettingsLayout layout = SettingsPageLayout.Compute(values, _dpi, new GraphicsTextMeasure(measure, _type), _look.TextScale);
         _settingsLayout = layout;
 
         // The focus must point at a control the page still draws (the Clear button goes when its chord does).
@@ -461,7 +461,7 @@ internal sealed partial class WidgetCard
         int fourteen = CardPlacement.Scale(14, _dpi);
         int twelve = CardPlacement.Scale(12, _dpi);
 
-        SubPageFrame.DrawHeader(g, layout.Frame, WidgetCopy.SettingsTitle, null, colours, _fontFamily, _dpi, backFocused: focusVisible && focus.Part == SettingsPart.Back);
+        SubPageFrame.DrawHeader(g, layout.Frame, WidgetCopy.SettingsTitle, null, colours, _type, _dpi, backFocused: focusVisible && focus.Part == SettingsPart.Back);
 
         bool Focused(SettingsRowId row, SettingsPart part) => focusVisible && focus == new SettingsTarget(row, part);
 
@@ -473,24 +473,24 @@ internal sealed partial class WidgetCard
                     CardPaint.Divider(g, item.Bounds.Left, item.Bounds.Right, item.Bounds.Y, colours);
                     continue;
                 case SettingsItemKind.Head:
-                    CardPaint.Text(g, item.Label, item.Bounds, _fontFamily, twelve, bold: true, colours.TextSecondary, StringAlignment.Near, StringAlignment.Far);
+                    CardPaint.Text(g, item.Label, item.Bounds, _type, twelve, bold: true, colours.TextSecondary, StringAlignment.Near, StringAlignment.Far);
                     continue;
             }
 
-            CardPaint.Wrapped(g, item.Label, item.LabelRect, _fontFamily, fourteen, bold: false, colours.Text);
+            CardPaint.Wrapped(g, item.Label, item.LabelRect, _type, fourteen, bold: false, colours.Text);
             if (item.Sub is not null)
             {
-                CardPaint.Wrapped(g, item.Sub, item.SubRect, _fontFamily, twelve, bold: false, item.SubIsProblem ? colours.Caution : colours.TextSecondary);
+                CardPaint.Wrapped(g, item.Sub, item.SubRect, _type, twelve, bold: false, item.SubIsProblem ? colours.Caution : colours.TextSecondary);
             }
 
             switch (item.Row)
             {
                 case SettingsRowId.GaugePosition:
-                    CardPaint.Segment(g, item.A, WidgetCopy.PositionRightEnd, values.GaugePosition == GaugePosition.RightEnd, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.SegmentFirst));
-                    CardPaint.Segment(g, item.B, WidgetCopy.PositionNextToApps, values.GaugePosition == GaugePosition.NextToApps, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.SegmentSecond));
+                    CardPaint.Segment(g, item.A, WidgetCopy.PositionRightEnd, values.GaugePosition == GaugePosition.RightEnd, colours, _type, _dpi, Focused(item.Row, SettingsPart.SegmentFirst));
+                    CardPaint.Segment(g, item.B, WidgetCopy.PositionNextToApps, values.GaugePosition == GaugePosition.NextToApps, colours, _type, _dpi, Focused(item.Row, SettingsPart.SegmentSecond));
                     break;
                 case SettingsRowId.GaugeDisplay:
-                    CardPaint.SmallButton(g, item.A, GaugeDisplayOptions.LabelFor(values.GaugeDisplayOptions, values.GaugeDisplayId), colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Choice));
+                    CardPaint.SmallButton(g, item.A, GaugeDisplayOptions.LabelFor(values.GaugeDisplayOptions, values.GaugeDisplayId), colours, _type, _dpi, Focused(item.Row, SettingsPart.Choice));
                     break;
                 case SettingsRowId.OtherDevice:
                     DrawTextBox(g, item.A, colours, values.OtherDeviceLabel, Focused(item.Row, SettingsPart.Text));
@@ -499,7 +499,7 @@ internal sealed partial class WidgetCard
                     bool atMin = values.LowBatteryPercent <= CardSettingsValues.LowBatteryMin;
                     bool atMax = values.LowBatteryPercent >= CardSettingsValues.LowBatteryMax;
                     CardPaint.IconButton(g, item.A, GlyphKind.Minus, enabled: !atMin, colours, _dpi, Focused(item.Row, SettingsPart.Minus));
-                    CardPaint.Text(g, values.LowBatteryPercent.ToString(System.Globalization.CultureInfo.InvariantCulture) + "%", item.Value, _fontFamily, fourteen, bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
+                    CardPaint.Text(g, values.LowBatteryPercent.ToString(System.Globalization.CultureInfo.InvariantCulture) + "%", item.Value, _type, fourteen, bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
                     CardPaint.IconButton(g, item.B, GlyphKind.Plus, enabled: !atMax, colours, _dpi, Focused(item.Row, SettingsPart.Plus));
                     break;
                 case SettingsRowId.Connect:
@@ -508,10 +508,10 @@ internal sealed partial class WidgetCard
                     DrawShortcut(g, item, colours, chord, focusVisible, focus);
                     break;
                 case SettingsRowId.CheckForUpdates:
-                    CardPaint.SmallButton(g, item.A, WidgetCopy.CheckButton, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Button));
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.CheckButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
                     break;
                 case SettingsRowId.Repair:
-                    CardPaint.SmallButton(g, item.A, WidgetCopy.RepairButton, colours, _fontFamily, _dpi, Focused(item.Row, SettingsPart.Button));
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.RepairButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
                     break;
                 default:
                     CardPaint.Toggle(g, item.A, ToggleValue(values, item.Row), colours, _dpi);
@@ -547,10 +547,10 @@ internal sealed partial class WidgetCard
         var textRect = new Rectangle(rect.X + padding, rect.Y, Math.Max(1, rect.Width - (2 * padding)), rect.Height);
         string text = _editingText ? _textBuffer : saved;
         int size = CardPlacement.Scale(14, _dpi);
-        CardPaint.Text(g, text, textRect, _fontFamily, size, bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.Text(g, text, textRect, _type, size, bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
         if (_editingText)
         {
-            using var font = new Font(_fontFamily, size, FontStyle.Regular, GraphicsUnit.Pixel);
+            using Font font = _type.Font(size, bold: false);
             using var format = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoWrap };
             float advance = _caret == 0 ? 0f : g.MeasureString(_textBuffer[.._caret], font, int.MaxValue, format).Width;
             float x = Math.Min(textRect.Right - 1, textRect.X + advance);
@@ -591,7 +591,7 @@ internal sealed partial class WidgetCard
         int padding = CardPlacement.Scale(8, _dpi);
         var textRect = new Rectangle(item.A.X + padding, item.A.Y, Math.Max(1, item.A.Width - (2 * padding)), item.A.Height);
         Color ink = waiting ? colours.Accent : empty ? colours.TextTertiary : colours.Text;
-        CardPaint.Text(g, text, textRect, _fontFamily, CardPlacement.Scale(12, _dpi), bold: false, ink, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.Text(g, text, textRect, _type, CardPlacement.Scale(12, _dpi), bold: false, ink, StringAlignment.Near, StringAlignment.Center);
         if (focusVisible && focus == new SettingsTarget(item.Row, SettingsPart.Shortcut))
         {
             CardPaint.Focus(g, item.A, radius, colours, _dpi);

@@ -385,19 +385,32 @@ internal sealed partial class TrayContext
 
     // Every widget card is made here, so what all of them share is set in one place: the accent is the owner's
     // Windows accent colour, the same one the gauge's ring uses, and an open card repaints when it changes.
-    private WidgetCard CreateWidgetCard(bool notice) => CreateWidgetCard(_log, notice, AccentColourService.Shared(_log));
+    private WidgetCard CreateWidgetCard(bool notice) => CreateWidgetCard(_log, notice, AccentColourService.Shared(_log), SystemLookService.Shared(_log));
 
-    internal static WidgetCard CreateWidgetCard(ILog log, bool notice, IAccentColours accent)
+    internal static WidgetCard CreateWidgetCard(ILog log, bool notice, IAccentColours accent, SystemLookService? look = null)
     {
         var card = new WidgetCard(log, notice);
         card.AttachAccent(accent);
+        if (look is not null)
+        {
+            card.AttachLook(() => look.Current);
+        }
+
         return card;
     }
 
     // The gauge-anchored card's presenter, built once. The gauge's own pipeline builds it, and so does the
     // tray menu's "Set up battery" when the gauge is off, since the set-up pages are drawn on that card.
-    private WidgetCardPresenter EnsureWidgetCardPresenter() =>
-        _widgetCardPresenter ??= new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost);
+    private WidgetCardPresenter EnsureWidgetCardPresenter()
+    {
+        if (_widgetCardPresenter is null)
+        {
+            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost);
+            WireLook();
+        }
+
+        return _widgetCardPresenter;
+    }
 
     // The tray menu's "Set up battery": the widget card opens at its first page, above the gauge when it is
     // shown, else near the cursor. Not a device action: it listens to advertisements and shows its own pages.
@@ -646,6 +659,7 @@ internal sealed partial class TrayContext
         _autoPauseService = null;
         _lowBatteryAlertService?.Dispose();
         _lowBatteryAlertService = null;
+        UnwireLook();
         _widgetCardPresenter?.Dispose();
         _widgetCardPresenter = null;
         _caseOpenCardPresenter?.Dispose();

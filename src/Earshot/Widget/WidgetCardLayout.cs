@@ -23,6 +23,9 @@ internal static class WidgetCardLayout
     public const int ColumnBarHeightAt96 = 6;
     public const int ColumnGapToBarAt96 = 4;
     public const int TextLineHeightAt96 = 18;
+
+    // The battery percent under a bar is the type ramp's number style, 20 px on a 24 px line.
+    public const int ColumnNumberHeightAt96 = 24;
     public const int ColumnLabelHeightAt96 = 14;
     public const int ColumnGapToLabelAt96 = 2;
     public const int ButtonHeightAt96 = 32;
@@ -107,7 +110,7 @@ internal static class WidgetCardLayout
     // least width the design gives it.
     public static Layout Compute(
         int dpi, bool showSwitch, bool showSetupButton = false, bool showSetupCaption = false, int setupButtonWidth = 0,
-        bool showGear = true, bool showUpdateLine = false, int updateButtonWidth = 0)
+        bool showGear = true, bool showUpdateLine = false, int updateButtonWidth = 0, double textScale = 1.0)
     {
         int width = WidthFor(dpi);
         int pad = CardPlacement.Scale(PaddingAt96, dpi);
@@ -117,16 +120,17 @@ internal static class WidgetCardLayout
         int barWidth = CardPlacement.Scale(ColumnBarWidthAt96, dpi);
         int barHeight = CardPlacement.Scale(ColumnBarHeightAt96, dpi);
         int gapToBar = CardPlacement.Scale(ColumnGapToBarAt96, dpi);
-        int lineHeight = CardPlacement.Scale(TextLineHeightAt96, dpi);
-        int labelHeight = CardPlacement.Scale(ColumnLabelHeightAt96, dpi);
+        int lineHeight = TextFit.Grow(TextLineHeightAt96, dpi, textScale);
+        int numberHeight = TextFit.Grow(ColumnNumberHeightAt96, dpi, textScale);
+        int labelHeight = TextFit.Grow(ColumnLabelHeightAt96, dpi, textScale);
         int gapToLabel = CardPlacement.Scale(ColumnGapToLabelAt96, dpi);
-        int buttonHeight = CardPlacement.Scale(ButtonHeightAt96, dpi);
-        int switchHeight = CardPlacement.Scale(SwitchRowHeightAt96, dpi);
+        int buttonHeight = TextFit.Fit(ButtonHeightAt96, TypeRole.Body, 12, dpi, textScale);
+        int switchHeight = TextFit.Grow(SwitchRowHeightAt96, dpi, textScale);
 
         int contentWidth = Math.Max(1, width - (2 * pad));
         int colWidth = Math.Max(1, (contentWidth - (2 * colGap)) / 3);
 
-        int titleRowHeight = CardPlacement.Scale(TitleRowAt96, dpi);
+        int titleRowHeight = Math.Max(CardPlacement.Scale(TitleRowAt96, dpi), TypeRamp.LineHeight(TypeRole.BodyStrong, dpi, textScale) + CardPlacement.Scale(12, dpi));
         int gearSize = CardPlacement.Scale(GearSizeAt96, dpi);
         int gearOverhang = CardPlacement.Scale(GearOverhangAt96, dpi);
         int titleTop = CardPlacement.Scale(TopPaddingAt96, dpi);
@@ -159,7 +163,7 @@ internal static class WidgetCardLayout
             }
 
             int setupWidth = setupButtonWidth > 0 ? Math.Min(setupButtonWidth, contentWidth) : contentWidth;
-            setupButton = new Rectangle(pad, buttonTop, setupWidth, CardPlacement.Scale(SetupButtonHeightAt96, dpi));
+            setupButton = new Rectangle(pad, buttonTop, setupWidth, TextFit.Fit(SetupButtonHeightAt96, TypeRole.Body, 12, dpi, textScale));
             afterLines = setupButton.Bottom;
         }
         else
@@ -167,9 +171,9 @@ internal static class WidgetCardLayout
             int leftX = pad;
             int midX = leftX + colWidth + colGap;
             int rightX = midX + colWidth + colGap;
-            left = Column(leftX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
-            right = Column(midX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
-            box = Column(rightX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, lineHeight);
+            left = Column(leftX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, numberHeight);
+            right = Column(midX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, numberHeight);
+            box = Column(rightX, y, colWidth, labelHeight, gapToLabel, glyphSize, barWidth, barHeight, gapToBar, numberHeight);
 
             int rowsBottom = left.Percent.Bottom;
             whereLine = new Rectangle(pad, rowsBottom + rowGap, contentWidth, lineHeight);
@@ -183,9 +187,9 @@ internal static class WidgetCardLayout
         int buttonY = afterLines + rowGap;
         if (showUpdateLine)
         {
-            int updateLineHeight = CardPlacement.Scale(UpdateLineHeightAt96, dpi);
+            int updateLineHeight = TextFit.Grow(UpdateLineHeightAt96, dpi, textScale);
             int linePad = CardPlacement.Scale(UpdateLinePaddingAt96, dpi);
-            int updateButtonHeight = CardPlacement.Scale(UpdateButtonHeightAt96, dpi);
+            int updateButtonHeight = TextFit.Fit(UpdateButtonHeightAt96, TypeRole.Caption, 8, dpi, textScale);
             int buttonWidth = updateButtonWidth > 0 ? updateButtonWidth : CardPlacement.Scale(UpdateButtonMinWidthAt96, dpi);
             updateLine = new Rectangle(0, afterLines + rowGap, width, updateLineHeight);
             updateButton = new Rectangle(width - pad - buttonWidth, updateLine.Y + linePad, buttonWidth, updateButtonHeight);
@@ -235,14 +239,14 @@ internal static class WidgetCardLayout
 
     // promptLines, captionLines and subLines: how many lines the prompt (14 px), the caption (12 px) and the
     // status sub-line (12 px) wrap to at this width, measured by the caller since this layout draws nothing.
-    public static SetupLayout Setup(SetupViewModel view, int dpi, int promptLines = 1, int captionLines = 1, int subLines = 1)
+    public static SetupLayout Setup(SetupViewModel view, int dpi, int promptLines = 1, int captionLines = 1, int subLines = 1, double textScale = 1.0)
     {
         ArgumentNullException.ThrowIfNull(view);
 
         int side = CardPlacement.Scale(BodySideAt96, dpi);
         int itemGap = CardPlacement.Scale(BodyItemGapAt96, dpi);
-        int promptLine = CardPlacement.Scale(PromptLineAt96, dpi);
-        int captionLine = CardPlacement.Scale(CaptionLineAt96, dpi);
+        int promptLine = TextFit.Grow(PromptLineAt96, dpi, textScale);
+        int captionLine = TextFit.Grow(CaptionLineAt96, dpi, textScale);
         int iconSize = CardPlacement.Scale(StatusIconAt96, dpi);
         int iconGap = CardPlacement.Scale(StatusIconGapAt96, dpi);
         int width = CardPlacement.Scale(SubPageFrame.WidthAt96, dpi);
@@ -350,7 +354,7 @@ internal static class WidgetCardLayout
         }
 
         int bodyHeight = y + CardPlacement.Scale(BodyBottomAt96, dpi);
-        SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight, view.Buttons.Count);
+        SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight, view.Buttons.Count, textScale);
         int offset = frame.Body.Y;
         return new SetupLayout(
             frame, Shift(prompt, offset), Shift(caption, offset), Shift(statusIcon, offset), Shift(statusText, offset), Shift(statusSub, offset),
