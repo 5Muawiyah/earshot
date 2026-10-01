@@ -213,55 +213,6 @@ public sealed class WidgetCardTests
         });
     }
 
-    // No part has a percent: the grid gives way to the one primary button. It is drawn in the accent colour,
-    // the card is shorter without the grid, and no column is drawn.
-    [TestMethod]
-    public void TheSetupButtonReplacesTheGridWhenNoPartHasAPercent()
-    {
-        Phase5.CardSta.Run(() =>
-        {
-            using var with = new WidgetCard(new CapturingLog());
-            with.SetTheme(Color.Black, highContrast: false);
-            with.Render(Model(Snapshot(), showSetupButton: true), 96);
-            using Bitmap bitmapWith = Render(with);
-
-            using var without = new WidgetCard(new CapturingLog());
-            without.SetTheme(Color.Black, highContrast: false);
-            without.Render(Model(Snapshot(), showSetupButton: false), 96);
-            using Bitmap bitmapWithout = Render(without);
-
-            WidgetCardLayout.Layout layout = with.CurrentMainLayout;
-            Assert.IsTrue(layout.ShowSetupButton);
-            Assert.IsFalse(layout.ShowColumns, "No grid.");
-            Point inside = new(layout.SetupButton.X + 6, layout.SetupButton.Y + (layout.SetupButton.Height / 2));
-            Assert.AreEqual(WidgetCard.AccentLight, bitmapWith.GetPixel(inside.X, inside.Y), "The button is the accent fill.");
-            Assert.IsGreaterThan(bitmapWith.Height, bitmapWithout.Height, "The card is taller with the grid than with the button.");
-        });
-    }
-
-    [TestMethod]
-    public void TheButtonReadsTryAgainAfterAShortFormOnlyRecord()
-    {
-        Phase5.CardSta.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-
-            card.Render(Model(Snapshot(), showSetupButton: true), 96);
-            Rectangle plain = card.CurrentMainLayout.SetupButton;
-            Assert.AreEqual(Rectangle.Empty, card.CurrentMainLayout.SetupCaption, "No caption before a set-up has failed to read.");
-
-            card.Render(Model(Snapshot() with { SetupCouldNotRead = true }, showSetupButton: true), 96);
-            WidgetCardLayout.Layout layout = card.CurrentMainLayout;
-            using Bitmap bitmap = Render(card);
-
-            Assert.AreNotEqual(Rectangle.Empty, layout.SetupCaption, "The caption line sits above the button.");
-            Assert.IsTrue(HasInk(bitmap, layout.SetupCaption, bitmap.GetPixel(0, 0)), "The caption is drawn.");
-            Assert.AreNotEqual(plain.Width, layout.SetupButton.Width, "The button is measured for its own text: Try again is not as wide as Set up battery.");
-            Assert.IsTrue(layout.SetupButton.Top > plain.Top, "The caption pushes the button down.");
-        });
-    }
-
     // The bars are filled with the accent colour the card is given, not a fixed blue.
     [TestMethod]
     public void TheBatteryBarUsesTheAccentColourTheCardIsGiven()
@@ -271,7 +222,7 @@ public sealed class WidgetCardTests
             var accent = Color.FromArgb(0xC2, 0x39, 0xB3);
             using var card = new WidgetCard(new CapturingLog()) { AccentSource = new FixedAccent(accent) };
             card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(left: new PartReading(100, false, false))), 96);
+            card.Render(Model(Snapshot(left: new PartReading(100, false, false) { ReadAt = DateTimeOffset.UtcNow })), 96);
             using Bitmap bitmap = Render(card);
 
             Rectangle bar = card.CurrentMainLayout.Left.Bar;
@@ -423,157 +374,6 @@ public sealed class WidgetCardTests
             Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget, "The gear is last in the order.");
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
-        });
-    }
-
-    // The rows draw in the order Button, Switch, SetupButton in the focus order, and Tab must follow it: a
-    // reader tabbing through must never get stuck on a row that is not shown.
-    [TestMethod]
-    public void TabCyclesThroughTheButtonTheSwitchAndTheSetupButtonAndWrapsBack()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(autoPauseAvailable: true), showSwitch: true, autoPauseOn: false, showSetupButton: true), 96);
-            card.Location = new Point(50, 50);
-            card.Show();
-            card.Activate();
-            Application.DoEvents();
-
-            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "The button has the focus first.");
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.Switch, card.FocusTarget);
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.SetupButton, card.FocusTarget);
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget, "The gear is last in the order.");
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
-        });
-    }
-
-    // With no switch row at all, Tab must still reach the set-up button directly from the button.
-    [TestMethod]
-    public void TabReachesTheSetupButtonDirectlyFromTheButtonWhenTheSwitchIsNotShown()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(), showSwitch: false, showSetupButton: true), 96);
-            card.Location = new Point(50, 50);
-            card.Show();
-            card.Activate();
-            Application.DoEvents();
-
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.SetupButton, card.FocusTarget);
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget, "The gear is last in the order.");
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
-        });
-    }
-
-    [TestMethod]
-    public void EnterOnTheFocusedSetupButtonRaisesSetupRequestedAndKeepsTheCardOpen()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(), showSetupButton: true), 96);
-            card.Location = new Point(50, 50);
-            card.Show();
-            card.Activate();
-            Application.DoEvents();
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.SetupButton, card.FocusTarget);
-
-            int requests = 0;
-            card.SetupRequested += (_, _) => requests++;
-            SendKey(card.Handle, Keys.Enter);
-
-            Assert.AreEqual(1, requests);
-            Assert.IsTrue(card.Visible, "The set-up runs on this card: it stays open.");
-        });
-    }
-
-    [TestMethod]
-    public void AGenuineClickOnTheSetupButtonRaisesSetupRequested()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(), showSetupButton: true), 96);
-            card.Location = new Point(50, 50);
-            card.Show();
-            card.Activate();
-            Application.DoEvents();
-
-            int requests = 0;
-            card.SetupRequested += (_, _) => requests++;
-
-            Rectangle rect = card.CurrentMainLayout.SetupButton;
-            Point centre = new(rect.X + (rect.Width / 2), rect.Y + (rect.Height / 2));
-            nint lParam = MakeLParam(centre.X, centre.Y);
-            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONDOWN, 0, lParam);
-            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, lParam);
-
-            Assert.AreEqual(1, requests);
-            Assert.AreEqual(WidgetCardFocus.SetupButton, card.FocusTarget, "A click on the set-up button also moves focus to it.");
-        });
-    }
-
-    // Mirrors ALeftUpWithNoMatchingLeftDownNeverActivatesTheButton: a left up over the set-up button with no
-    // preceding left down on it must not activate it either.
-    [TestMethod]
-    public void ALeftUpWithNoMatchingLeftDownNeverActivatesTheSetupButton()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(), showSetupButton: true), 96);
-            card.Location = new Point(50, 50);
-            card.Show();
-            card.Activate();
-            Application.DoEvents();
-
-            int requests = 0;
-            card.SetupRequested += (_, _) => requests++;
-
-            Rectangle rect = card.CurrentMainLayout.SetupButton;
-            Point centre = new(rect.X + (rect.Width / 2), rect.Y + (rect.Height / 2));
-            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, MakeLParam(centre.X, centre.Y));
-
-            Assert.AreEqual(0, requests, "A left up with no matching left down must never activate the set-up button.");
-        });
-    }
-
-    // Render's own defensive reset (mirroring the switch's): a reading arriving between two renders removes
-    // this button, so focus already on it must move back to the Connect button.
-    [TestMethod]
-    public void FocusMovesBackToTheButtonWhenTheSetupButtonDisappearsUnderIt()
-    {
-        Phase5.CardDesktop.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot(), showSetupButton: true), 96);
-            card.Location = new Point(50, 50);
-            card.Show();
-            card.Activate();
-            Application.DoEvents();
-            SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.SetupButton, card.FocusTarget);
-
-            card.Render(Model(Snapshot(left: new PartReading(70, false, false)), showSetupButton: false), 96);
-
-            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget,
-                "A reading arriving must not leave focus pointed at a button that no longer draws.");
         });
     }
 
@@ -802,70 +602,54 @@ public sealed class WidgetCardTests
         });
     }
 
-    // ---- The set-up pages
+    // ---- The sub-pages (the update page is the one that draws through the sub-page frame)
 
-    private static WidgetCardModel SetupModel(WidgetCardView view, SetupViewModel page) =>
-        Model(Snapshot(), showSetupButton: true, view: view, setup: page);
+    private static SetupViewModel Page(SetupIcon icon, string status, string? sub = null, params SetupButton[] buttons) =>
+        new("Updates", null, null, null, icon, status, sub, buttons, 0);
 
-    private static readonly (WidgetCardView View, SetupViewModel Page, string Name)[] SetupPages =
-    [
-        (WidgetCardView.SetupListening, SetupViewModel.Listening(), "listening"),
-        (WidgetCardView.SetupPick, SetupViewModel.Pick(new BatterySetupPicks(80, 60, 90, true, true, false)), "pick"),
-        (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp), "done-battery"),
-        (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUp), "done-case"),
-        (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUpBudsSame), "done-buds-same"),
-        (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.SavedNeedsAnother), "done-saved-needs-another"),
-        (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.NotSaved), "done-not-saved"),
-        (WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead), "done-could-not-read"),
-        (WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.NotFound), "failed-not-found"),
-        (WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.Ambiguous), "failed-ambiguous"),
-        (WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.WatcherNotStarted), "failed-bluetooth-off"),
-    ];
+    private static WidgetCardModel PageModel(SetupViewModel page) =>
+        Model(Snapshot(), view: WidgetCardView.Update, setup: page);
 
-    // Every set-up page is drawn through the card's own paint routine into an off-screen bitmap, at 100% in
-    // light and in dark: never a Form shown, never DrawToBitmap. Each has ink in its header, its footer buttons
-    // and (for the pick page) every picker; the dark and light renders differ.
+    private static readonly SetupButton Primary = new("Update", true, SetupAction.Update);
+
+    private static readonly SetupButton Secondary = new("Cancel", false, SetupAction.Cancel);
+
+    // Every sub-page is drawn through the card's own paint routine into an off-screen bitmap, at 100% in light and
+    // in dark: never a Form shown, never DrawToBitmap. Each has ink in its header and its footer buttons, and the
+    // dark and light renders differ.
     [TestMethod]
-    public void EachSetupViewDrawsToABitmap()
+    public void EachSubPageDrawsToABitmap()
     {
         Phase5.CardSta.Run(() =>
         {
-            foreach ((WidgetCardView view, SetupViewModel page, string name) in SetupPages)
+            SetupViewModel[] pages =
+            [
+                Page(SetupIcon.Spinner, "Checking", null, Secondary),
+                Page(SetupIcon.Check, "Up to date", "Version 1.2.1", Primary),
+                Page(SetupIcon.Caution, "Could not check", "Try again later.", Secondary, Primary),
+            ];
+            foreach (SetupViewModel page in pages)
             {
                 Bitmap? light = null;
                 foreach ((Color ink, string theme) in new[] { (Color.Black, "light"), (Color.White, "dark") })
                 {
                     using var card = new WidgetCard(new CapturingLog());
                     card.SetTheme(ink, highContrast: false);
-                    card.Render(SetupModel(view, page), 96);
+                    card.Render(PageModel(page), 96);
                     Bitmap bitmap = Render(card);
 
                     WidgetCardLayout.SetupLayout layout = card.CurrentSetupLayout!;
-                    Assert.AreEqual(360, bitmap.Width, name + " " + theme + ": 360 wide at 100%.");
-                    Assert.AreEqual(layout.Frame.Height, bitmap.Height, name + " " + theme);
+                    Assert.AreEqual(360, bitmap.Width, page.Status + " " + theme + ": 360 wide at 100%.");
+                    Assert.AreEqual(layout.Frame.Height, bitmap.Height, page.Status + " " + theme);
                     Color background = bitmap.GetPixel(0, 0);
-                    Assert.IsTrue(HasInk(bitmap, layout.Frame.Back, background), name + " " + theme + ": the back arrow.");
-                    Assert.IsTrue(HasInk(bitmap, layout.Frame.Title, background), name + " " + theme + ": the title.");
-                    Assert.IsTrue(HasInk(bitmap, layout.Frame.Step, background), name + " " + theme + ": the step counter.");
+                    Assert.IsTrue(HasInk(bitmap, layout.Frame.Back, background), page.Status + " " + theme + ": the back arrow.");
+                    Assert.IsTrue(HasInk(bitmap, layout.Frame.Title, background), page.Status + " " + theme + ": the title.");
                     foreach (Rectangle button in layout.Frame.Buttons)
                     {
-                        Assert.IsTrue(HasInk(bitmap, button, layout.Frame.Footer.IsEmpty ? background : bitmap.GetPixel(2, layout.Frame.Footer.Top + 4)), name + " " + theme + ": a footer button.");
+                        Assert.IsTrue(HasInk(bitmap, button, bitmap.GetPixel(2, layout.Frame.Footer.Top + 4)), page.Status + " " + theme + ": a footer button.");
                     }
 
-                    if (view == WidgetCardView.SetupPick)
-                    {
-                        foreach (WidgetCardLayout.PickerLayout picker in layout.Pickers)
-                        {
-                            Color box = bitmap.GetPixel(picker.Box.X + 4, picker.Box.Y + 4);
-                            Assert.IsTrue(HasInk(bitmap, picker.Value, box), name + " " + theme + ": a picker value.");
-                            Assert.IsTrue(HasInk(bitmap, picker.Up, box) && HasInk(bitmap, picker.Down, box), name + " " + theme + ": both chevrons.");
-                            Assert.IsTrue(HasInk(bitmap, picker.Toggle, box), name + " " + theme + ": the Charging toggle.");
-                        }
-                    }
-                    else
-                    {
-                        Assert.IsTrue(HasInk(bitmap, layout.StatusText, background), name + " " + theme + ": the status line.");
-                    }
+                    Assert.IsTrue(HasInk(bitmap, layout.StatusText, background), page.Status + " " + theme + ": the status line.");
 
                     if (light is null)
                     {
@@ -873,130 +657,12 @@ public sealed class WidgetCardTests
                     }
                     else
                     {
-                        Assert.AreNotEqual(light.GetPixel(0, 0), bitmap.GetPixel(0, 0), name + ": dark and light differ.");
+                        Assert.AreNotEqual(light.GetPixel(0, 0), bitmap.GetPixel(0, 0), page.Status + ": dark and light differ.");
                         light.Dispose();
                         bitmap.Dispose();
                     }
                 }
             }
-        });
-    }
-
-    // "Battery set up" is never drawn for a set-up that read nothing: the last page says so plainly.
-    [TestMethod]
-    public void ANothingProvedOutcomeShowsThePlainWordingNotBatterySetUp()
-    {
-        SetupViewModel nothing = SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead);
-        Assert.AreEqual(WidgetCopy.SetupCouldNotRead, nothing.Status);
-        Assert.AreEqual(SetupIcon.Caution, nothing.Icon, "A caution, not a tick.");
-        Assert.AreNotEqual(WidgetCopy.SetupBatterySetUp, nothing.Status);
-        Assert.AreEqual(WidgetCopy.SetupCapturesKept, nothing.StatusSub);
-        foreach (BatterySetupResultStatus status in Enum.GetValues<BatterySetupResultStatus>().Where(s => s != BatterySetupResultStatus.BatterySetUp))
-        {
-            Assert.AreNotEqual(WidgetCopy.SetupBatterySetUp, SetupViewModel.Done(status).Status, status + " must not claim the battery is set up.");
-        }
-
-        Assert.AreEqual(WidgetCopy.SetupBatterySetUp, SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp).Status, "Only a proved bud order says it.");
-        Assert.AreEqual(SetupIcon.Check, SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp).Icon);
-    }
-
-    [TestMethod]
-    public void PickersStepByTenAndClampToZeroAndOneHundred()
-    {
-        Phase5.CardSta.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(SetupModel(WidgetCardView.SetupPick, SetupViewModel.Pick(new BatterySetupPicks(50, 100, 0, false, false, false))), 96);
-            var seen = new List<BatterySetupPicks>();
-            card.SetupPicksChanged += (_, picks) => seen.Add(picks);
-
-            card.HandleSetupKey(Keys.Tab);     // Save -> Back
-            card.HandleSetupKey(Keys.Tab);     // Back -> left up
-            card.HandleSetupKey(Keys.Space);
-            Assert.AreEqual(60, card.Model.Setup!.Picks!.Left, "Up is one step of ten.");
-            card.HandleSetupKey(Keys.Tab);     // left down
-            card.HandleSetupKey(Keys.Space);
-            card.HandleSetupKey(Keys.Space);
-            Assert.AreEqual(40, card.Model.Setup.Picks!.Left, "Down is one step of ten.");
-
-            card.HandleSetupKey(Keys.Tab);     // left charging
-            card.HandleSetupKey(Keys.Tab);     // right up
-            card.HandleSetupKey(Keys.Space);
-            Assert.AreEqual(100, card.Model.Setup.Picks!.Right, "Clamped to 100: no change and no event.");
-            int changesAtTheTop = seen.Count;
-            card.HandleSetupKey(Keys.Space);
-            Assert.AreEqual(changesAtTheTop, seen.Count, "A step that changes nothing raises nothing.");
-
-            card.HandleSetupKey(Keys.Tab);     // right down
-            card.HandleSetupKey(Keys.Tab);     // right charging
-            card.HandleSetupKey(Keys.Tab);     // case up
-            card.HandleSetupKey(Keys.Tab);     // case down
-            card.HandleSetupKey(Keys.Space);
-            Assert.AreEqual(0, card.Model.Setup.Picks!.Case, "Clamped to 0.");
-
-            // The arrow keys step the picker the focus is in.
-            card.HandleSetupKey(Keys.Up);
-            Assert.AreEqual(10, card.Model.Setup.Picks!.Case);
-            card.HandleSetupKey(Keys.Down);
-            card.HandleSetupKey(Keys.Down);
-            Assert.AreEqual(0, card.Model.Setup.Picks!.Case);
-            Assert.AreEqual(seen[^1], card.Model.Setup.Picks, "The last event carries the card's own picks.");
-        });
-    }
-
-    [TestMethod]
-    public void ChargingTogglesFlip()
-    {
-        Phase5.CardSta.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(SetupModel(WidgetCardView.SetupPick, SetupViewModel.Pick(BatterySetupPicks.Default)), 96);
-
-            card.HandleSetupKey(Keys.Tab);     // Save -> Back
-            card.HandleSetupKey(Keys.Tab);     // left up
-            card.HandleSetupKey(Keys.Tab);     // left down
-            card.HandleSetupKey(Keys.Tab);     // left charging
-            card.HandleSetupKey(Keys.Space);
-            Assert.IsTrue(card.Model.Setup!.Picks!.LeftCharging);
-            card.HandleSetupKey(Keys.Space);
-            Assert.IsFalse(card.Model.Setup.Picks!.LeftCharging, "Space flips it back.");
-
-            card.HandleSetupKey(Keys.Tab);     // right up
-            card.HandleSetupKey(Keys.Tab);     // right down
-            card.HandleSetupKey(Keys.Tab);     // right charging
-            card.HandleSetupKey(Keys.Space);
-            card.HandleSetupKey(Keys.Tab);     // case up
-            card.HandleSetupKey(Keys.Tab);     // case down
-            card.HandleSetupKey(Keys.Tab);     // case charging
-            card.HandleSetupKey(Keys.Space);
-            BatterySetupPicks picks = card.Model.Setup.Picks!;
-            Assert.IsFalse(picks.LeftCharging);
-            Assert.IsTrue(picks.RightCharging);
-            Assert.IsTrue(picks.CaseCharging);
-        });
-    }
-
-    [TestMethod]
-    public void EscapeIsBackAndEnterIsSaveInPick()
-    {
-        Phase5.CardSta.Run(() =>
-        {
-            using var card = new WidgetCard(new CapturingLog());
-            card.SetTheme(Color.Black, highContrast: false);
-            card.Render(SetupModel(WidgetCardView.SetupPick, SetupViewModel.Pick(BatterySetupPicks.Default)), 96);
-            var actions = new List<SetupAction>();
-            card.SetupActionRequested += (_, action) => actions.Add(action);
-
-            card.HandleSetupKey(Keys.Escape);
-            card.HandleSetupKey(Keys.Enter);
-            card.HandleSetupKey(Keys.Tab);
-            card.HandleSetupKey(Keys.Tab);  // on a picker chevron now
-            card.HandleSetupKey(Keys.Enter);
-
-            CollectionAssert.AreEqual(new[] { SetupAction.Back, SetupAction.Save, SetupAction.Save }, actions,
-                "Escape is Back; Enter is Save, wherever the focus is.");
         });
     }
 
@@ -1007,37 +673,55 @@ public sealed class WidgetCardTests
         {
             using var card = new WidgetCard(new CapturingLog());
             card.SetTheme(Color.Black, highContrast: false);
-            card.Render(SetupModel(WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.NotFound)), 96);
+            card.Render(PageModel(Page(SetupIcon.Caution, "Could not check", null, Secondary, Primary)), 96);
             var actions = new List<SetupAction>();
             card.SetupActionRequested += (_, action) => actions.Add(action);
 
-            card.HandleSetupKey(Keys.Tab);     // Try again -> Back
+            card.HandleSetupKey(Keys.Tab);     // the primary button -> Back
             card.HandleSetupKey(Keys.Space);
             card.HandleSetupKey(Keys.Tab);     // Back -> Cancel
             card.HandleSetupKey(Keys.Space);
-            card.HandleSetupKey(Keys.Tab);     // Cancel -> Try again
+            card.HandleSetupKey(Keys.Tab);     // Cancel -> Update
             card.HandleSetupKey(Keys.Space);
 
-            CollectionAssert.AreEqual(new[] { SetupAction.Back, SetupAction.Cancel, SetupAction.TryAgain }, actions);
+            CollectionAssert.AreEqual(new[] { SetupAction.Back, SetupAction.Cancel, SetupAction.Update }, actions);
         });
     }
 
-    // A set-up page keeps the card open when it loses the focus; the ordinary card closes. Real activation, on
-    // a private desktop, like the other activation checks.
+    [TestMethod]
+    public void EnterIsThePrimaryButtonAndEscapeIsBack()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            card.Render(PageModel(Page(SetupIcon.Caution, "Could not check", null, Secondary, Primary)), 96);
+            var actions = new List<SetupAction>();
+            card.SetupActionRequested += (_, action) => actions.Add(action);
+
+            card.HandleSetupKey(Keys.Enter);
+            card.HandleSetupKey(Keys.Escape);
+
+            CollectionAssert.AreEqual(new[] { SetupAction.Update, SetupAction.Back }, actions);
+        });
+    }
+
     // The calling thread's active window, which follows activation on a private desktop too (the foreground
     // window belongs to the desktop taking input, so it cannot be used here).
     [DllImport("user32.dll")]
     private static extern nint GetActiveWindow();
 
+    // A sub-page that is downloading keeps the card open when it loses the focus; the ordinary card closes. Real
+    // activation, on a private desktop, like the other activation checks.
     [TestMethod]
-    public void ASetupViewDoesNotCloseOnDeactivate()
+    public void TheUpdatePageDoesNotCloseOnDeactivate()
     {
         Phase5.CardDesktop.Run(() =>
         {
             using var other = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(0, 0), ClientSize = new Size(50, 50), ShowInTaskbar = false };
             using var card = new WidgetCard(new CapturingLog());
             card.SetTheme(Color.Black, highContrast: false);
-            card.Render(SetupModel(WidgetCardView.SetupListening, SetupViewModel.Listening()), 96);
+            card.Render(PageModel(Page(SetupIcon.Spinner, "Downloading", null, Secondary)), 96);
             var reasons = new List<WidgetCardCloseReason>();
             card.CloseRequested += (_, reason) => reasons.Add(reason);
             card.Location = new Point(200, 50);
@@ -1054,10 +738,10 @@ public sealed class WidgetCardTests
             if (GetActiveWindow() != other.Handle)
                 Assert.Inconclusive("This desktop did not activate the other window, so the card never lost the focus.");
 
-            Assert.IsEmpty(reasons, "A set-up page never asks to close because it lost the focus.");
+            Assert.IsEmpty(reasons, "The update page never asks to close because it lost the focus.");
             Assert.IsTrue(card.Visible);
 
-            card.Render(Model(Snapshot(), showSetupButton: true), 96);
+            card.Render(Model(Snapshot()), 96);
             card.Activate();
             Application.DoEvents();
             bool cardWasActive = GetActiveWindow() == card.Handle;
@@ -1080,18 +764,17 @@ public sealed class WidgetCardTests
         {
             using var card = new WidgetCard(new CapturingLog(), notice: true);
             card.SetTheme(Color.Black, highContrast: false);
-            card.Render(SetupModel(WidgetCardView.SetupPick, SetupViewModel.Pick(BatterySetupPicks.Default)), 96);
+            card.Render(PageModel(Page(SetupIcon.Spinner, "Checking", null, Secondary)), 96);
             using Bitmap bitmap = Render(card);
 
             Assert.AreEqual(WidgetCardView.Main, card.EffectiveView, "A notice ignores the view.");
             Assert.IsNull(card.CurrentSetupLayout);
-            Assert.AreEqual(WidgetCardLayout.WidthAt96, bitmap.Width, "The main card's width, not the set-up page's.");
-            Assert.IsFalse(card.CurrentMainLayout.ShowSetupButton, "And never a set-up button.");
+            Assert.AreEqual(WidgetCardLayout.WidthAt96, bitmap.Width, "The main card's width, not a sub-page's.");
         });
     }
 
-    // The set-up page's parts land where the layout says: the spinner arc is drawn while listening, the check
-    // while done, the caution when nothing was read.
+    // The sub-page's parts land where the layout says: the spinner arc is drawn while checking, the check when
+    // done, the caution when something went wrong.
     [TestMethod]
     public void TheStatusIconIsTheSpinnerTheCheckOrTheCaution()
     {
@@ -1100,14 +783,14 @@ public sealed class WidgetCardTests
             var seen = new List<Bitmap>();
             foreach (SetupViewModel page in new[]
             {
-                SetupViewModel.Listening(),
-                SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp),
-                SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead),
+                Page(SetupIcon.Spinner, "Checking"),
+                Page(SetupIcon.Check, "Up to date"),
+                Page(SetupIcon.Caution, "Could not check"),
             })
             {
                 using var card = new WidgetCard(new CapturingLog());
                 card.SetTheme(Color.Black, highContrast: false);
-                card.Render(SetupModel(page.Icon == SetupIcon.Spinner ? WidgetCardView.SetupListening : WidgetCardView.SetupDone, page), 96);
+                card.Render(PageModel(page), 96);
                 Bitmap bitmap = Render(card);
                 Rectangle icon = card.CurrentSetupLayout!.StatusIcon;
                 Assert.IsTrue(HasInk(bitmap, icon, bitmap.GetPixel(0, 0)), page.Icon + " draws something in the icon slot.");
@@ -1131,7 +814,7 @@ public sealed class WidgetCardTests
         {
             using var card = new WidgetCard(new CapturingLog());
             card.SetTheme(Color.Black, highContrast: false);
-            card.Render(SetupModel(WidgetCardView.SetupListening, SetupViewModel.Listening(spinnerFrame: 0)), 96);
+            card.Render(PageModel(Page(SetupIcon.Spinner, "Checking")), 96);
             using Bitmap first = Render(card);
             card.SetSpinnerFrame(5);
             using Bitmap second = Render(card);
@@ -1159,6 +842,73 @@ public sealed class WidgetCardTests
 
             Assert.IsTrue(iconChanged, "The arc moved.");
             Assert.IsFalse(restChanged, "Nothing but the icon changed.");
+        });
+    }
+
+    // ---- What the card says about the battery: fresh values are drawn as current, older ones greyed
+
+    private static PartReading Read(int percent, TimeSpan age) => new(percent, false, null) { ReadAt = DateTimeOffset.UtcNow - age };
+
+    private static Color BarFill(WidgetCard card, Bitmap bitmap)
+    {
+        Rectangle bar = card.CurrentMainLayout.Left.Bar;
+        return bitmap.GetPixel(bar.X + 2, bar.Y + (bar.Height / 2));
+    }
+
+    [TestMethod]
+    public void AValueThatIsNotFreshIsDrawnGreyedAndAFreshOneIsNot()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            var accent = Color.FromArgb(0xC2, 0x39, 0xB3);
+            using var fresh = new WidgetCard(new CapturingLog()) { AccentSource = new FixedAccent(accent) };
+            fresh.SetTheme(Color.Black, highContrast: false);
+            fresh.Render(Model(Snapshot(left: Read(100, TimeSpan.FromSeconds(2)))), 96);
+            using Bitmap freshBitmap = Render(fresh);
+
+            using var old = new WidgetCard(new CapturingLog()) { AccentSource = new FixedAccent(accent) };
+            old.SetTheme(Color.Black, highContrast: false);
+            old.Render(Model(Snapshot(left: Read(100, TimeSpan.FromMinutes(4)))), 96);
+            using Bitmap oldBitmap = Render(old);
+
+            Assert.AreEqual(accent, BarFill(fresh, freshBitmap), "A fresh value is drawn in the accent.");
+            Assert.AreNotEqual(accent, BarFill(old, oldBitmap), "A value read four minutes ago is not drawn as current.");
+            Assert.IsTrue(HasInk(oldBitmap, old.CurrentMainLayout.Left.Percent, oldBitmap.GetPixel(0, 0)), "It is still shown, with its figure.");
+        });
+    }
+
+    [TestMethod]
+    public void TheReadLineGivesTheAgeOfTheOldestValue()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            DateTimeOffset readAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(4);
+            card.Render(Model(Snapshot(left: Read(70, TimeSpan.FromMinutes(4)), readAt: readAt)), 96);
+
+            Assert.AreEqual("Battery read 4 min ago", card.ReadLineText);
+        });
+    }
+
+    [TestMethod]
+    public void TheReadLineSaysWhatWindowsReadsWhenThatIsWhatIsShown()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using var card = new WidgetCard(new CapturingLog());
+            card.SetTheme(Color.Black, highContrast: false);
+            WidgetSnapshot snapshot = Snapshot(left: Read(70, TimeSpan.FromMinutes(4))) with
+            {
+                Headset = new PartReading(55, null, null) { ReadAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(10) },
+            };
+            card.Render(Model(snapshot), 96);
+
+            Assert.AreEqual("Windows reads 55%", card.ReadLineText);
+
+            card.Render(Model(snapshot with { Left = Read(70, TimeSpan.FromSeconds(3)), BatteryReadAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(3) }), 96);
+
+            Assert.IsTrue(card.ReadLineText.StartsWith("Battery read", StringComparison.Ordinal), "A fresh bud value is shown, so Windows' figure is not.");
         });
     }
 
@@ -1219,7 +969,6 @@ public sealed class WidgetCardTests
             WidgetWatcherState.Started,
             WatcherErrorCode: null,
             WatcherErrorName: null,
-            ClaimExists: true,
             AutoPauseAvailable: autoPauseAvailable,
             WidgetCounters.Empty);
 
@@ -1230,8 +979,7 @@ public sealed class WidgetCardTests
         bool connectIntent = true,
         bool buttonEnabled = true,
         string otherDeviceLabel = "",
-        bool showSetupButton = false,
         WidgetCardView view = WidgetCardView.Main,
         SetupViewModel? setup = null) =>
-        new(snapshot, autoPauseOn, showSwitch, connectIntent, buttonEnabled, otherDeviceLabel, DateTimeOffset.UtcNow, showSetupButton, view, setup);
+        new(snapshot, autoPauseOn, showSwitch, connectIntent, buttonEnabled, otherDeviceLabel, DateTimeOffset.UtcNow, view, setup);
 }

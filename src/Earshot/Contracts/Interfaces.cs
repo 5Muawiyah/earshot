@@ -77,8 +77,10 @@ public interface IAudioProtectionController
     Task<bool?> GetPendingProtectAsync(CancellationToken ct = default) => Task.FromResult<bool?>(null);
 }
 
-// The battery check found no battery source on this hardware (README, Battery). Kept so a future AACP/WinRT source
-// can be added without touching the UI contract. HasSource is false in v1; the UI omits the element.
+// A battery figure for the paired AirPods, kept behind one contract so the UI never depends on where it came from.
+// The shipping provider reads Windows' own Hands-Free battery property; the null provider has no source, and a test
+// uses it when it needs none. The figure from the AirPods' own broadcast does not come through here: the widget
+// reads that from the advertisements.
 public interface IBatteryProvider
 {
     bool HasSource { get; }

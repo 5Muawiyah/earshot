@@ -28,7 +28,7 @@ public sealed class CompositionRootLowBatteryAlertTests
         var registry = new ServiceRegistry(log, settings, action => action(), safeMode: true);
         WidgetStatusService status = CompositionRoot.BuildWidget(registry, () => null, TimeProvider.System)!;
 
-        using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status);
+        using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status, TimeProvider.System);
 
         Assert.IsInstanceOfType<CardNotifier>(service.NotifierForTest, "Safe mode must never construct a real ToastNotifier.");
         status.Dispose();
@@ -45,7 +45,7 @@ public sealed class CompositionRootLowBatteryAlertTests
         var registry = new ServiceRegistry(log, settings, action => action(), safeMode: false);
         WidgetStatusService status = CompositionRoot.BuildWidget(registry, () => null, TimeProvider.System)!;
 
-        using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status);
+        using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status, TimeProvider.System);
 
         Assert.IsInstanceOfType<CardNotifier>(service.NotifierForTest, "A redirected data root must never construct a real ToastNotifier.");
         status.Dispose();
@@ -62,7 +62,7 @@ public sealed class CompositionRootLowBatteryAlertTests
         var registry = new ServiceRegistry(log, settings, action => action(), safeMode: false);
         WidgetStatusService status = CompositionRoot.BuildWidget(registry, () => null, TimeProvider.System)!;
 
-        using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status);
+        using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status, TimeProvider.System);
 
         Assert.IsInstanceOfType<ToastNotifier>(service.NotifierForTest, "Off safe mode and off a redirected data root, the real toast route must be used.");
         status.Dispose();

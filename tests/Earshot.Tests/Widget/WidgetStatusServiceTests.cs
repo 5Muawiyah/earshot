@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Interop;
 using Earshot.Tests.Phase3;
 using Earshot.Tests.Streaming;
 using Earshot.Widget;
@@ -19,11 +20,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
     private FakeDeviceMonitor _deviceMonitor = null!;
     private TestTimeProvider _clock = null!;
     private FakeAdvertisementSource _source = null!;
+    private FakePairedModelSource _paired = null!;
     private int _posts;
     private List<EventArgs> _changedEvents = null!;
     private List<CaseOpenedEventArgs> _caseOpenedEvents = null!;
-    private List<OwnedReadingEventArgs> _ownedReadingEvents = null!;
-    private ClaimStore? _claimStore;
+    private List<ReadingAppliedEventArgs> _readingEvents = null!;
 
     [TestInitialize]
     public void Setup()
@@ -34,62 +35,29 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _clock = new TestTimeProvider();
         _deviceMonitor = new FakeDeviceMonitor(_clock);
         _source = new FakeAdvertisementSource();
+        _paired = new FakePairedModelSource();
         _posts = 0;
         _changedEvents = new List<EventArgs>();
         _caseOpenedEvents = new List<CaseOpenedEventArgs>();
-        _ownedReadingEvents = new List<OwnedReadingEventArgs>();
+        _readingEvents = new List<ReadingAppliedEventArgs>();
     }
 
-    // Save now queues its disk write on a background thread. Wait for anything still pending before the
-    // temp folder is torn down, or its own claim.json.tmp can still be open when Directory.Delete runs.
-    public void Dispose()
-    {
-        _claimStore?.IdleAsync().GetAwaiter().GetResult();
-        _temp.Dispose();
-    }
+    public void Dispose() => _temp.Dispose();
 
-    private ClaimStore NewClaimStore()
-    {
-        _claimStore = new ClaimStore(_temp.File("claim.json"), _log);
-        return _claimStore;
-    }
-
-    // A proof store over the test's own folder, built from whatever records a test has already written there.
-    private DecodeProofStore NewProof(params BatterySetupRecord[] existing)
-    {
-        var records = new BatterySetupStore(_temp.File("setup"), _log);
-        foreach (BatterySetupRecord record in existing)
-        {
-            Assert.IsNotNull(records.Save(record), "A fixture record must be writable.");
-        }
-
-        return new DecodeProofStore(_temp.File("setup"), _temp.File("proof.json"), _log, _clock);
-    }
-
-    // A table whose only proved part is the case nibble, so a reading has a figure to show without a bud order. The
-    // tests that are about what an unproved table shows say so with ProximityDecodeTable.Unproved itself.
-    private static readonly ProximityDecodeTable CaseProved = ProximityDecodeTable.Unproved with { CaseNibbleProved = true };
-
-    // table is what the decoder reads unless a proof store is given, in which case the store's own table is
-    // what it reads, exactly as production does.
-    private WidgetStatusService NewService(
-        ClaimStore store, ProximityDecodeTable? table = null, DecodeProofStore? proof = null, bool? broadcasts = null)
+    // The documented table, or one with extra bits a test wants to exercise (in-ear, the lid).
+    private WidgetStatusService NewService(ProximityDecodeTable? table = null)
     {
         var service = new WidgetStatusService(
-            () => _source, store, _settings, _deviceMonitor, () => null, _log,
-            action => { Interlocked.Increment(ref _posts); action(); }, _clock,
-            () => proof?.Table ?? table ?? CaseProved, () => proof?.BroadcastsWhilePlayingFromThisPc ?? broadcasts, proof);
+            () => _source, _settings, _deviceMonitor, () => null, _log,
+            action => { Interlocked.Increment(ref _posts); action(); }, _clock, _paired, table ?? ProximityDecodeTable.Documented);
         service.Changed += (sender, e) => { lock (_changedEvents) { _changedEvents.Add(e); } };
         service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
-        service.OwnedReadingApplied += (sender, e) => { lock (_ownedReadingEvents) { _ownedReadingEvents.Add(e); } };
+        service.ReadingApplied += (sender, e) => { lock (_readingEvents) { _readingEvents.Add(e); } };
         return service;
     }
 
-    // nibblesAreNamedOrder must match whatever table a test then passes to NewService: a claim made (or
-    // stood in for here) while the bud order is proved needs it true, or OwnershipRule now correctly refuses
-    // to compare its stored nibbles at all.
-    private static WidgetClaim SampleClaim(OwnedBattery? last = null, bool nibblesAreNamedOrder = false) =>
-        SetupRecordFixtures.Claim(last, nibblesAreNamedOrder);
+    private static ProximityDecodeTable WithInEarBits() =>
+        ProximityDecodeTable.Documented with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
 
     private DeviceSnapshot ThisPcSnapshot(bool active)
     {
@@ -104,30 +72,380 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
     private void PinContainer() => _settings.Update(s => s.PinnedContainerId = Container);
 
-    private AdvertisementSample Owned(byte batteryA = 0x00, byte batteryB = 0x00, byte status = 0x00, byte lid = 0x00, sbyte rssi = -60) =>
-        new(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(status: status, batteryA: batteryA, batteryB: batteryB, lid: lid), rssi, _clock.GetUtcNow(), SenderTag: 1);
+    // A message of the invented set at the current time, from one sender. batteryA and batteryB default to the
+    // documented "unknown" so a test that does not care about a part never sets it.
+    private AdvertisementSample Owned(
+        byte batteryA = 0xFF, byte batteryB = 0x0F, byte status = 0x00, byte lid = 0x00, sbyte rssi = -60, uint tag = 1,
+        byte colour = WidgetFixtures.Colour, byte modelLow = WidgetFixtures.ModelLow) =>
+        new(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(modelLow: modelLow, status: status, batteryA: batteryA, batteryB: batteryB, lid: lid, colour: colour), rssi, _clock.GetUtcNow(), tag);
 
-    // The production constructor reads the proof store's table, not a constant, so nothing composing this
-    // service can wire up anything but what the owner's own set-ups proved. With no records that is the
-    // unproved table: nothing is decoded, the case nibble included. (ProximityDecodeTable.Current is gone from the
-    // build, which is the compile-time half of this proof.)
-    [TestMethod]
-    public void TheTableComesFromTheProofStoreNotAConstant()
+    // The first choice waits for the paired model to have been heard for two seconds and the set to have three
+    // messages, so a test that needs the set chosen sends three messages that carry no values and lets the time
+    // pass between them. What the test then raises is what the chosen set says.
+    private void Prime(byte lid = 0x00, uint tag = 1)
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        DecodeProofStore proof = NewProof();
-        var service = new WidgetStatusService(
-            () => _source, store, _settings, _deviceMonitor, () => null, _log, action => action(), _clock, proof);
+        for (int i = 0; i < 3; i++)
+        {
+            _source.Raise(Owned(lid: lid, tag: tag));
+            _clock.Advance(TimeSpan.FromMilliseconds(1100));
+        }
+    }
+
+    private AdvertisementSample From(uint tag, ProximityMessage m, sbyte rssi = -60) =>
+        new(
+            ProximityParser.AppleCompanyId,
+            WidgetFixtures.Proximity(m.ModelHigh, m.ModelLow, m.Status, m.BatteryA, m.BatteryB, m.Lid, m.Colour, m.Reserved),
+            rssi, _clock.GetUtcNow(), tag);
+
+    private void Raise(uint tag, ProximityMessage m, sbyte rssi = -60) => _source.Raise(From(tag, m, rssi));
+
+    private void Tick(double seconds) => _clock.Advance(TimeSpan.FromSeconds(seconds));
+
+    // Sends the same message from one sender every half second for the given time, both ends included.
+    private void Send(uint tag, ProximityMessage m, sbyte rssi, double seconds)
+    {
+        int steps = (int)Math.Round(seconds / 0.5);
+        for (int i = 0; i <= steps; i++)
+        {
+            Raise(tag, m, rssi);
+            if (i < steps)
+            {
+                Tick(0.5);
+            }
+        }
+    }
+
+    // ---- Selection: the paired model, the chosen set, and what only that set may show
+
+    [TestMethod]
+    public void StartReadsThePairedModelForThePinnedDevice()
+    {
+        _settings.Update(s =>
+        {
+            s.PinnedContainerId = Container;
+            s.PinnedAddress = Phase4.RecordedNodes.AirPodsAddress;
+        });
+        using WidgetStatusService service = NewService();
+
         service.Start();
 
-        _source.Raise(Owned(batteryA: 0x37, batteryB: 0x05)); // bud nibbles known were the order proved
-
-        Assert.IsNull(service.Current.Left.Percent, "With nothing proved, bud nibbles must not decode.");
-        Assert.IsNull(service.Current.Right.Percent);
-        Assert.IsNull(service.Current.Case.Percent, "With nothing proved the case nibble is not decoded either.");
-        service.Dispose();
+        Assert.AreEqual(1, _paired.Reads);
+        Assert.AreEqual(Container, _paired.LastContainer);
+        Assert.AreEqual(Phase4.RecordedNodes.AirPodsAddress, _paired.LastAddress);
     }
+
+    [TestMethod]
+    public void ASettingsChangeThatLeavesThePinnedDeviceAloneReadsNothingAgainButAnotherDeviceDoes()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Assert.AreEqual(1, _paired.Reads);
+
+        _settings.Update(s => s.Widget = s.Widget with { LowBatteryThresholdPercent = 30 });
+        Assert.AreEqual(1, _paired.Reads, "Nothing about the pinned device changed.");
+
+        _settings.Update(s => s.PinnedContainerId = Container);
+        Assert.AreEqual(2, _paired.Reads, "A different pinned device is a different pair of AirPods.");
+    }
+
+    [TestMethod]
+    public void ADifferentModelAfterAPinnedChangeStartsOverAndDropsTheValues()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A));
+        Assert.AreEqual(100, service.Current.Case.Percent);
+
+        _paired.Model = 0x1234;
+        _settings.Update(s => s.PinnedContainerId = Container);
+
+        Assert.IsNull(service.Current.Case.Percent, "The values belonged to the other pair.");
+        Assert.AreEqual(BroadcastSelectionState.Listening, service.Current.Selection);
+    }
+
+    [TestMethod]
+    public void WithNoPairedModelNothingIsShownTheMessagesAreCountedAndTheReasonIsLogged()
+    {
+        _paired.Model = null;
+        _paired.Steps = [StepOutcomes.FromConfigRet("cm-list", CfgMgr32.CR_FAILURE, "The device list could not be read.")];
+        using WidgetStatusService service = NewService();
+
+        service.Start();
+        Prime();
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A));
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(BroadcastSelectionState.NoPairedModel, snapshot.Selection);
+        Assert.IsNull(snapshot.Case.Percent);
+        Assert.IsNull(snapshot.Left.Percent);
+        Assert.AreEqual(4, snapshot.Counters.NoPairedModel);
+        Assert.AreEqual(0, snapshot.Counters.Chosen);
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "CR_FAILURE"), "The raw code of the failed read is logged.");
+        Assert.IsTrue(_log.Has(LogLevel.Warn, "no paired AirPods model"));
+    }
+
+    [TestMethod]
+    public void OnlyTheChosenSetsValuesAreShownAndTheOtherSetIsCounted()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        ProximityMessage near = BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4);
+        ProximityMessage far = BroadcastFixtures.Bud(first: true, caseNibble: 0x2, pairHigh: 0x3, pairLow: 0x1);
+
+        for (int i = 0; i < 10; i++)
+        {
+            Raise(1, near, -50);
+            Raise(2, far, -70);
+            Tick(0.5);
+        }
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(BroadcastSelectionState.Chosen, snapshot.Selection);
+        Assert.AreEqual(90, snapshot.Case.Percent);
+        Assert.AreEqual(40, snapshot.Left.Percent);
+        Assert.AreEqual(70, snapshot.Right.Percent);
+        Assert.IsGreaterThan(0, snapshot.Counters.OtherSet);
+        Assert.AreEqual(2, snapshot.Counters.Sets);
+    }
+
+    [TestMethod]
+    public void AnotherModelAndAnotherColourAreCountedAndNeverShown()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+
+        Raise(9, BroadcastFixtures.Bud(first: true, modelLow: WidgetFixtures.StrangerModelLow, pairHigh: 0x1, pairLow: 0x2, caseNibble: 0x3), -30);
+        Raise(8, BroadcastFixtures.Bud(first: true, colour: WidgetFixtures.StrangerColour, pairHigh: 0x1, pairLow: 0x2, caseNibble: 0x3), -30);
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(1, snapshot.Counters.ModelMismatch);
+        Assert.AreEqual(1, snapshot.Counters.ColourMismatch);
+        Assert.IsNull(snapshot.Case.Percent);
+        Assert.IsNull(snapshot.Left.Percent);
+    }
+
+    [TestMethod]
+    public void TheSeventeenByteFormIsNeverDecodedWhateverItsBytes()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+
+        for (int i = 0; i < 20; i++)
+        {
+            _source.Raise(new AdvertisementSample(
+                ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), -20, _clock.GetUtcNow(), 77));
+            Tick(0.5);
+        }
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(20, snapshot.Counters.UnknownForm);
+        Assert.IsNull(snapshot.Case.Percent);
+        Assert.IsNull(snapshot.Left.Percent);
+        Assert.IsNull(snapshot.Right.Percent);
+        Assert.IsTrue(snapshot.Counters.UnknownForms.Any(s => s.Prefix == 0x06 && s.Length == 17 && s.Count == 20));
+    }
+
+    // Each bud sends on its own address and carries the pair swapped, with bit 5 of the status differing: one set,
+    // one left and right, and the card never alternates.
+    [TestMethod]
+    public void OneSetFromTwoAddressesShowsOnePairAndNeverFlickers()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        var pairs = new List<(int? Left, int? Right)>();
+        service.ReadingApplied += (s, e) => pairs.Add((e.Reading.Left.Percent, e.Reading.Right.Percent));
+
+        for (int i = 0; i < 20; i++)
+        {
+            Raise(1, new ProximityMessage(WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, 0x00, 0x56, 0x3A, 0, WidgetFixtures.Colour, 0), -58);
+            Tick(0.3);
+            Raise(2, new ProximityMessage(WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, 0x20, 0x65, 0x3A, 0, WidgetFixtures.Colour, 0), -56);
+            Tick(0.4);
+        }
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(60, snapshot.Left.Percent);
+        Assert.AreEqual(50, snapshot.Right.Percent);
+        Assert.AreEqual(100, snapshot.Case.Percent);
+        Assert.AreEqual(true, snapshot.Left.Charging);
+        Assert.AreEqual(true, snapshot.Right.Charging);
+        Assert.AreEqual(false, snapshot.Case.Charging);
+        Assert.AreEqual(1, snapshot.Counters.Sets);
+        Assert.AreEqual(0, snapshot.Counters.BudOrderDisagree);
+        Assert.IsGreaterThan(10, pairs.Count);
+        Assert.IsTrue(pairs.All(p => p == (60, 50)), "Every reading of the set decodes to the same left and right.");
+    }
+
+    [TestMethod]
+    public void TwoSendersOfTheChosenSetThatDisagreeOnWhichBudIsWhichAreCountedAndLoggedOnce()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+
+        for (int i = 0; i < 20; i++)
+        {
+            // The same flip bit with the pair swapped: the rule reads them as left 50, right 60 and left 60, right 50.
+            Raise(1, new ProximityMessage(WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, 0x00, 0x56, 0x0A, 0, WidgetFixtures.Colour, 0), -58);
+            Tick(0.3);
+            Raise(2, new ProximityMessage(WidgetFixtures.ModelHigh, WidgetFixtures.ModelLow, 0x00, 0x65, 0x0A, 0, WidgetFixtures.Colour, 0), -56);
+            Tick(0.4);
+        }
+
+        Assert.IsGreaterThan(0, service.Current.Counters.BudOrderDisagree);
+        Assert.AreEqual(1, _log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("read different left and right levels", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void ASwitchToANearerSetDropsTheOldSetsValuesAndIsCounted()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        ProximityMessage a = BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4);
+        ProximityMessage b = BroadcastFixtures.Bud(first: true, caseNibble: 0x2, pairHigh: 0x3, pairLow: 0x1);
+        Send(1, a, -60, 3);
+        Assert.AreEqual(90, service.Current.Case.Percent);
+
+        for (int i = 0; i <= 70; i++)
+        {
+            Raise(1, a, -60);
+            Raise(2, b, -51);
+            Tick(0.5);
+        }
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(1, snapshot.Counters.Switches);
+        Assert.AreEqual(20, snapshot.Case.Percent);
+        Assert.AreEqual(10, snapshot.Left.Percent);
+        Assert.AreEqual(30, snapshot.Right.Percent);
+    }
+
+    [TestMethod]
+    public void AnAddressRotationKeepsTheValuesAndTheNewAddressIsChosen()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        ProximityMessage a = BroadcastFixtures.Bud(first: true, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4);
+        Send(1, a, -60, 3);
+        int appliedBefore = _readingEvents.Count;
+        Tick(3.0);
+
+        Raise(5, a, -60);
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(90, snapshot.Case.Percent, "The same pair under a new address keeps its values.");
+        Assert.AreEqual(appliedBefore + 1, _readingEvents.Count);
+        Assert.AreEqual(0, snapshot.Counters.Switches);
+    }
+
+    [TestMethod]
+    public void TheChosenSetIsReleasedAfterAnHourWithNoMessageFromIt()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+
+        _clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1));
+
+        Assert.AreEqual(BroadcastSelectionState.Listening, service.Current.Selection);
+    }
+
+    [TestMethod]
+    public void ReadingAppliedIsRaisedForTheChosenSetsMessagesOnly()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        int afterPrime = _readingEvents.Count;
+
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A));
+        Assert.AreEqual(afterPrime + 1, _readingEvents.Count);
+        Assert.AreEqual(100, _readingEvents[^1].Reading.Case.Percent);
+
+        Raise(9, BroadcastFixtures.Bud(first: true, modelLow: WidgetFixtures.StrangerModelLow), -30);
+        Raise(8, BroadcastFixtures.Bud(first: true, colour: WidgetFixtures.StrangerColour), -30);
+
+        Assert.AreEqual(afterPrime + 1, _readingEvents.Count, "A message of another model or colour raises nothing.");
+    }
+
+    [TestMethod]
+    public void TheCountersLineKeepsTheFieldsTheLiveTestReadsInTheirOrder()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A));
+
+        _clock.Advance(WidgetTiming.CountersLogInterval);
+
+        LogEntry line = _log.Entries.Last(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal));
+        string[] keys = ["allSections=", "apple=", "other=", "items=", "ok=", "truncated=", "unknownForm=", "modelMismatch=", "colourMismatch=", "otherSet=", "chosen=", "noPairedModel=", "budOrderDisagree=", "switches=", "sets=", "unknownFormShapes="];
+        int at = -1;
+        foreach (string key in keys)
+        {
+            int next = line.Message.IndexOf(key, StringComparison.Ordinal);
+            Assert.IsGreaterThan(at, next, key + " must come after the field before it in: " + line.Message);
+            at = next;
+        }
+
+        Assert.Contains(" allSections=4 ", line.Message);
+        Assert.Contains(" ok=4 ", line.Message);
+        Assert.Contains(" chosen=2 ", line.Message);
+    }
+
+    [TestMethod]
+    public void AutoPauseIsAvailableOnlyWhenTheTableHasInEarBits()
+    {
+        using WidgetStatusService documented = NewService();
+        documented.Start();
+        Assert.IsFalse(documented.Current.AutoPauseAvailable, "The documented table sets no in-ear bit.");
+
+        var other = new FakeAdvertisementSource();
+        using var withBits = new WidgetStatusService(
+            () => other, _settings, _deviceMonitor, () => null, _log, action => action(), _clock, _paired, WithInEarBits());
+        withBits.Start();
+        Assert.IsTrue(withBits.Current.AutoPauseAvailable);
+    }
+
+    [TestMethod]
+    public void WhereIsUnknownOffThisPcWhileTheInEarBitsAreNotSet()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+
+        Prime();
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A));
+
+        Assert.AreEqual(AirPodsWhere.Unknown, service.Current.Where);
+    }
+
+    [TestMethod]
+    public void BeforeAnyReadingEverythingIsUnknown()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+
+        WidgetSnapshot snapshot = service.Current;
+
+        Assert.AreEqual(AirPodsWhere.Unknown, snapshot.Where);
+        Assert.IsNull(snapshot.Left.Percent);
+        Assert.IsNull(snapshot.Right.Percent);
+        Assert.IsNull(snapshot.Case.Percent);
+        Assert.IsNull(snapshot.Headset.Percent);
+        Assert.IsNull(snapshot.BatteryReadAt);
+        Assert.IsNull(snapshot.EarReadAt);
+        Assert.IsNull(snapshot.LidOpen);
+        Assert.AreEqual(WidgetWatcherState.Started, snapshot.Watcher);
+        Assert.AreEqual(BroadcastSelectionState.Listening, snapshot.Selection);
+        Assert.IsFalse(snapshot.AutoPauseAvailable);
+        Assert.AreEqual(0, snapshot.Counters.AllSections);
+    }
+
+    // ---- The lifecycle, the logs and the rest, as they were before the battery came from the broadcast
+
 
     // Close, and turning the setting off, both call RunStopOutsideLock with disposeSource true: the source
     // is meant to actually be released, not just forgotten. Every test elsewhere in this file that ends with
@@ -138,8 +456,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void CloseActuallyDisposesTheSourceNotJustTheServicesOwnReferenceToIt()
     {
-        var store = NewClaimStore();
-        WidgetStatusService service = NewService(store);
+        WidgetStatusService service = NewService();
         service.Start();
         Assert.AreEqual(0, _source.DisposeCalls, "Sanity: nothing has disposed the source yet.");
 
@@ -149,33 +466,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     [TestMethod]
-    public void BeforeAnyReadingEverythingIsUnknown()
-    {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
-        service.Start();
-
-        WidgetSnapshot snapshot = service.Current;
-
-        Assert.AreEqual(AirPodsWhere.Unknown, snapshot.Where);
-        Assert.IsNull(snapshot.Left.Percent);
-        Assert.IsNull(snapshot.Right.Percent);
-        Assert.IsNull(snapshot.Case.Percent);
-        Assert.IsNull(snapshot.BatteryReadAt);
-        Assert.IsNull(snapshot.EarReadAt);
-        Assert.IsNull(snapshot.LidOpen);
-        Assert.AreEqual(WidgetWatcherState.Started, snapshot.Watcher);
-        Assert.IsFalse(snapshot.ClaimExists);
-        Assert.IsFalse(snapshot.AutoPauseAvailable);
-        Assert.AreEqual(0, snapshot.Counters.AllSections);
-    }
-
-    [TestMethod]
     public void ThisPcComesFromCoreAudioAlone()
     {
         PinContainer();
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
 
         _deviceMonitor.Raise(ThisPcSnapshot(active: true));
@@ -190,11 +484,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AnOwnedFreshReadingWithABudInEarWhileNotOnThisPcIsElsewhere()
     {
-        var table = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store, table);
+        ProximityDecodeTable table = WithInEarBits();
+        using WidgetStatusService service = NewService(table);
         service.Start();
+        Prime();
 
         _source.Raise(Owned(status: 0b0000_0001)); // left in ear
 
@@ -204,11 +497,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AnOwnedFreshReadingWithNoBudInEarIsNotInUse()
     {
-        var table = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store, table);
+        ProximityDecodeTable table = WithInEarBits();
+        using WidgetStatusService service = NewService(table);
         service.Start();
+        Prime();
 
         _source.Raise(Owned(status: 0b0000_0000)); // neither bud in ear
 
@@ -216,26 +508,12 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     [TestMethod]
-    public void WithTheInEarBitsUnprovedWhereIsUnknownOffThisPc()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store); // Unproved table: no in-ear bits
-
-        service.Start();
-        _source.Raise(Owned());
-
-        Assert.AreEqual(AirPodsWhere.Unknown, service.Current.Where);
-    }
-
-    [TestMethod]
     public void AStaleReadingLeavesWhereUnknownAndEarStateNull()
     {
-        var table = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store, table);
+        ProximityDecodeTable table = WithInEarBits();
+        using WidgetStatusService service = NewService(table);
         service.Start();
+        Prime();
 
         _source.Raise(Owned(status: 0b0000_0001));
         Assert.AreEqual(AirPodsWhere.Elsewhere, service.Current.Where);
@@ -252,17 +530,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AStaleReadingClearsPerBudInEarButKeepsTheBatteryPercent()
     {
-        var table = ProximityDecodeTable.Unproved with
-        {
-            HighNibbleIsRight = true,
-            LeftInEarBit = 0,
-            RightInEarBit = 1,
-            InEarWhenSet = true,
-        };
-        var store = NewClaimStore();
-        store.Save(SampleClaim(nibblesAreNamedOrder: true));
-        using WidgetStatusService service = NewService(store, table);
+        ProximityDecodeTable table = WithInEarBits();
+        using WidgetStatusService service = NewService(table);
         service.Start();
+        Prime();
 
         // High nibble (right) 3 -> 30%, low nibble (left) 5 -> 50%; both bits set: both buds in ear.
         _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35));
@@ -285,10 +556,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AnOutOfRangeNibbleLogsThatTheFormDrifted()
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
+        Prime();
 
         _source.Raise(Owned(batteryA: 0x0B)); // low nibble 0xB (11): out of range, not the documented 0xF
 
@@ -298,10 +568,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void BatteryKeepsItsReadTimeAndNeverExpires()
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
+        Prime();
 
         DateTimeOffset at = _clock.GetUtcNow();
         _source.Raise(Owned(batteryB: 0x05));
@@ -317,11 +586,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void BatteryReadAtIsTheOldestKnownPart()
     {
-        var table = CaseProved with { HighNibbleIsRight = true };
-        var store = NewClaimStore();
-        store.Save(SampleClaim(nibblesAreNamedOrder: true));
-        using WidgetStatusService service = NewService(store, table);
+        using WidgetStatusService service = NewService();
         service.Start();
+        Prime();
 
         DateTimeOffset first = _clock.GetUtcNow();
         _source.Raise(Owned(batteryA: 0x00, batteryB: 0x05)); // case known now, buds known now too (nibble 0)
@@ -338,10 +605,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AnUnknownPercentLeavesThePartAsItWas()
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
+        Prime();
 
         _source.Raise(Owned(batteryB: 0x05));
         Assert.AreEqual(50, service.Current.Case.Percent);
@@ -356,10 +622,9 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void CounterChangesAloneDoNotRaiseChanged()
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
+        Prime();
 
         _source.Raise(Owned(batteryB: 0x05));
         int changedAfterFirst = _changedEvents.Count;
@@ -370,422 +635,13 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(changedAfterFirst, _changedEvents.Count, "A counter-only change must not raise Changed again.");
     }
 
-    // M7, reviewer probe P4: forgetting a claim must not leave the old battery or ear state around to be
-    // shown, or compared for consistency, against whatever the owner claims next.
-    [TestMethod]
-    public void ForgetClaimClearsEveryReadingAndEarState()
-    {
-        var table = CaseProved with { HighNibbleIsRight = true, LeftInEarBit = 0, RightInEarBit = 1, InEarWhenSet = true };
-        var store = NewClaimStore();
-        store.Save(SampleClaim(nibblesAreNamedOrder: true));
-        using WidgetStatusService service = NewService(store, table);
-        service.Start();
-        _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05)); // both buds in ear, battery known
-        Assert.AreEqual(50, service.Current.Case.Percent);
-        Assert.IsNotNull(service.Current.Left.InEar);
-
-        service.ForgetClaim();
-
-        WidgetSnapshot snapshot = service.Current;
-        Assert.IsNull(snapshot.Left.Percent, "ForgetClaim must not keep the old battery.");
-        Assert.IsNull(snapshot.Right.Percent);
-        Assert.IsNull(snapshot.Case.Percent);
-        Assert.IsNull(snapshot.Left.InEar, "ForgetClaim must not keep the old ear state.");
-        Assert.IsNull(snapshot.Right.InEar);
-        Assert.IsNull(snapshot.EarReadAt);
-        Assert.IsNull(snapshot.BatteryReadAt);
-    }
-
-    // A redone set-up is a different set of AirPods as far as the widget knows: it must not keep the previous
-    // claim's battery or ear state, and shows the new first reading instead.
-    [TestMethod]
-    public async Task ARedoneSetupReplacesTheOldBatteryAndEarState()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        // Two earlier records prove the case and, with both buds reading the same, nothing about the buds.
-        DecodeProofStore proof = NewProof(
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(5, 5), SetupRecordFixtures.Picks(50, 50), minutes: 5),
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(5, 5), SetupRecordFixtures.Picks(50, 50), minutes: 6));
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        _source.Raise(Owned(status: 0b0000_0011, batteryA: 0x35, batteryB: 0x05));
-        Assert.AreEqual(50, service.Current.Case.Percent);
-
-        BatterySetupListen listen = await ListenAsync(service, sender: 999, batteryB: 0x02);
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(50, 50, 20));
-
-        WidgetSnapshot snapshot = service.Current;
-        Assert.AreEqual(20, snapshot.Case.Percent, "The redone set-up's own first reading replaces the old battery.");
-        Assert.IsNull(snapshot.Left.Percent);
-        Assert.IsNull(snapshot.Right.Percent);
-        Assert.IsNull(snapshot.Left.InEar, "A redone set-up must not keep the old ear state.");
-        Assert.IsNull(snapshot.Right.InEar);
-        Assert.IsNull(snapshot.EarReadAt);
-    }
-
-    // The record cannot be written (here, a file stands where its folder should be): the proof and the claim are not
-    // touched, the card is told plainly, and nothing is reported as set up.
-    [TestMethod]
-    public async Task ASetupWhoseRecordCannotBeSavedChangesNeitherTheProofNorTheClaimAndSaysSo()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
-        File.WriteAllText(_temp.File("setup"), "a file where the folder should be");
-
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80, box: 50));
-
-        Assert.AreEqual(BatterySetupResultStatus.NotSaved, result.Status);
-        Assert.IsEmpty(proof.Records, "A record that was not written is not counted.");
-        Assert.IsNull(store.Current, "No claim names a record that is not there.");
-        Assert.IsFalse(service.Current.ClaimExists);
-        Assert.IsTrue(_log.Has(LogLevel.Warn, "could not be saved, so the proof and the claim were left as they were"));
-        Assert.IsFalse(_log.Has(LogLevel.Info, "Battery set-up saved:"), "It must not log a save that did not happen.");
-    }
-
-    // The claim store keeps only the newer of two claims, so a set-up must never lose to the claim before it, even
-    // when the clock reads earlier than that claim's date or the same: the new claim's date is one second past the old.
-    [TestMethod]
-    public async Task ARepeatSetupWithTheClockAtOrBeforeTheOldClaimsDateStillReplacesIt()
-    {
-        var store = NewClaimStore();
-        DateTimeOffset oldDate = _clock.GetUtcNow().AddHours(1);
-        store.Save(SampleClaim() with { ClaimedAtUtc = oldDate, SetupRecord = "setup-older.json" });
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen listen = await ListenAsync(service, batteryB: 0x05);
-
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(50, 50, 50));
-
-        Assert.AreEqual(result.RecordFileName, store.Current!.SetupRecord, "The new claim replaced the older one.");
-        Assert.AreEqual(oldDate.AddSeconds(1), store.Current.ClaimedAtUtc, "Its date is one second past the older claim's.");
-    }
-
-    // Runs one real listening window over the test's fake source: enough messages from one sender, the newest a
-    // documented-form message with the given battery bytes.
-    private async Task<BatterySetupListen> ListenAsync(
-        WidgetStatusService service, uint sender = 1, byte batteryA = 0x00, byte batteryB = 0x05, sbyte rssi = -60)
-    {
-        Task<BatterySetupListen> task = service.ListenForSetupAsync(CancellationToken.None);
-        for (int i = 0; i < 4; i++)
-        {
-            _source.Raise(new AdvertisementSample(
-                ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryA: batteryA, batteryB: batteryB), rssi, _clock.GetUtcNow(), sender));
-        }
-
-        _clock.Advance(WidgetTiming.SetupListenWindow);
-        return await task;
-    }
-
-    // The set-up trigger's own gate: true only while the watcher runs, so the UI's idea of whether a set-up can
-    // be listened for follows what actually happens when it is tried.
-        [TestMethod]
-    public void SetupAvailableFollowsTheWatcherState()
-    {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
-        Assert.IsFalse(service.SetupAvailable, "Before Start the watcher is not running.");
-
-        service.Start();
-        Assert.IsTrue(service.SetupAvailable);
-
-        service.Suspend();
-        Assert.IsFalse(service.SetupAvailable, "A stopped watcher cannot be listened through.");
-
-        service.Resume();
-        Assert.IsTrue(service.SetupAvailable);
-
-        service.Close();
-        Assert.IsFalse(service.SetupAvailable);
-    }
-
-    [TestMethod]
-    public void AStrangerChangesNothingButTheCount()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
-        service.Start();
-
-        var stranger = new AdvertisementSample(
-            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(colour: WidgetFixtures.StrangerColour, batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 2);
-        _source.Raise(stranger);
-
-        WidgetSnapshot snapshot = service.Current;
-        Assert.IsNull(snapshot.Case.Percent);
-        Assert.AreEqual(AirPodsWhere.Unknown, snapshot.Where);
-        Assert.AreEqual(1, snapshot.Counters.ModelOrColourMismatch);
-        Assert.AreEqual(0, snapshot.Counters.Owned);
-    }
-
-    // Owner decision, 2026-09-27 ("same checks always"): a live connection to this PC used to waive battery
-    // consistency for one candidate. It confirms nothing now; the owner's own reading is accepted only
-    // because it is consistent with the claim, exactly as it would be off this PC.
-    [TestMethod]
-    public void TheOwnersOwnConsistentReadingWhileConnectedIsStillAccepted()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
-        using WidgetStatusService service = NewService(store);
-        PinContainer();
-        service.Start();
-        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
-
-        var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x03), -60, _clock.GetUtcNow(), SenderTag: 1);
-        _source.Raise(reading);
-
-        Assert.AreEqual(30, service.Current.Case.Percent);
-        Assert.AreEqual(1, service.Current.Counters.Owned);
-        Assert.AreEqual(3, store.Current!.Last.Case);
-    }
-
-    // Security reviewer's first ordering: a lone stranger (same model and colour as the claim, but a
-    // battery jump the claim's last reading does not allow) arrives while this PC is connected. Nothing is
-    // shown and claim.json is untouched, exactly as it would be with no connection at all.
-    [TestMethod]
-    public void ALoneStrangerWhileConnectedShowsNothingAndLeavesTheClaimUnchanged()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
-        using WidgetStatusService service = NewService(store);
-        PinContainer();
-        service.Start();
-        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
-
-        var stranger = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 7);
-        _source.Raise(stranger);
-
-        Assert.IsNull(service.Current.Case.Percent, "Nothing is shown for a same-model sender whose battery does not match the claim.");
-        Assert.AreEqual(1, service.Current.Counters.BatteryInconsistent);
-        Assert.AreEqual(0, service.Current.Counters.Owned);
-        Assert.AreEqual(2, store.Current!.Last.Case, "claim.json must be unchanged.");
-    }
-
-    // Security reviewer's second ordering: the same stranger arrives first, then the owner's own consistent
-    // reading follows straight after. The stranger changes nothing; the owner is still accepted.
-    [TestMethod]
-    public void AStrangerArrivingBeforeTheOwnerIsRejectedThenTheOwnerIsAccepted()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
-        using WidgetStatusService service = NewService(store);
-        PinContainer();
-        service.Start();
-        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
-
-        var stranger = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 7);
-        _source.Raise(stranger);
-        Assert.AreEqual(1, service.Current.Counters.BatteryInconsistent);
-
-        var owner = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x03), -60, _clock.GetUtcNow(), SenderTag: 1);
-        _source.Raise(owner);
-
-        Assert.AreEqual(30, service.Current.Case.Percent, "The owner's own reading is accepted straight after a rejected stranger.");
-        Assert.AreEqual(1, service.Current.Counters.Owned);
-        Assert.AreEqual(3, store.Current!.Last.Case);
-    }
-
-    // Security reviewer's third ordering: the owner's reading is accepted first, then, long after any window
-    // the old live-candidate concept ever had, a stranger arrives. There is no window left to matter: the
-    // stranger is rejected on the ordinary consistency check alone and the claim keeps the owner's value.
-    [TestMethod]
-    public void AStrangerArrivingAfterTheOwnersWindowLapsesIsStillRejected()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
-        using WidgetStatusService service = NewService(store);
-        PinContainer();
-        service.Start();
-        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
-
-        var owner = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x03), -60, _clock.GetUtcNow(), SenderTag: 1);
-        _source.Raise(owner);
-        Assert.AreEqual(1, service.Current.Counters.Owned);
-
-        _clock.Advance(TimeSpan.FromMinutes(5));
-
-        var stranger = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 7);
-        _source.Raise(stranger);
-
-        Assert.AreEqual(1, service.Current.Counters.BatteryInconsistent);
-        Assert.AreEqual(3, store.Current!.Last.Case, "The stranger, however much time has passed, never overwrites the owner's claim.");
-    }
-
-    // Every owned advertisement carries a new read time, so "save only when Last changes" (a record with an
-    // AtUtc field) never holds: comparing the whole Last record would write on every single advert. Only the
-    // battery values (the nibbles) actually decide whether the disk needs touching; the read time can move
-    // in memory for free.
-    [TestMethod]
-    public async Task TwentyIdenticalAdvertsWriteTheClaimToDiskOnce()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
-        await store.IdleAsync();
-        int baseline = store.DiskWriteCount;
-        using WidgetStatusService service = NewService(store);
-        service.Start();
-
-        for (int i = 0; i < 20; i++)
-        {
-            _clock.Advance(TimeSpan.FromSeconds(1));
-            var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x03), -60, _clock.GetUtcNow(), SenderTag: 1);
-            _source.Raise(reading);
-        }
-
-        await store.IdleAsync();
-
-        Assert.AreEqual(30, service.Current.Case.Percent);
-        Assert.AreEqual(1, store.DiskWriteCount - baseline, "20 adverts carrying the same battery value must write to disk once, not twenty times.");
-    }
-
-    // The two buds of one set are two senders leading with their own bud, so their bud nibbles arrive swapped, message
-    // after message. Before the order is proved the pair is compared unordered, so the swap is no change and the file
-    // is not rewritten for it.
-    [TestMethod]
-    public async Task TwoBudsAlternatingWriteTheClaimToDiskOnce()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(4, 7, 3, _clock.GetUtcNow())));
-        await store.IdleAsync();
-        int baseline = store.DiskWriteCount;
-        using WidgetStatusService service = NewService(store);
-        service.Start();
-
-        for (int i = 0; i < 20; i++)
-        {
-            _clock.Advance(TimeSpan.FromSeconds(1));
-            byte batteryA = i % 2 == 0 ? (byte)0x74 : (byte)0x47;
-            uint sender = i % 2 == 0 ? 1u : 2u;
-            _source.Raise(new AdvertisementSample(
-                ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(status: (byte)(i % 2 == 0 ? 0x40 : 0x60), batteryA: batteryA, batteryB: 0x03), -60, _clock.GetUtcNow(), sender));
-        }
-
-        await store.IdleAsync();
-
-        Assert.AreEqual(20, service.Current.Counters.Owned, "Both buds' senders are owned.");
-        Assert.AreEqual(0, store.DiskWriteCount - baseline, "The swap of the two bud nibbles is not a change of battery.");
-    }
-
-    // Same 20 identical adverts, but the file cannot be written at all: one save is attempted (and logged),
-    // not twenty, because the service never even asks the store to save the 19 that changed nothing.
-    [TestMethod]
-    public async Task WithAReadOnlyClaimFileTwentyIdenticalAdvertsLogOneWarnNotTwenty()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
-        await store.IdleAsync();
-        string path = _temp.File("claim.json");
-        File.SetAttributes(path, FileAttributes.ReadOnly);
-        using WidgetStatusService service = NewService(store);
-
-        try
-        {
-            service.Start();
-
-            for (int i = 0; i < 20; i++)
-            {
-                _clock.Advance(TimeSpan.FromSeconds(1));
-                var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x03), -60, _clock.GetUtcNow(), SenderTag: 1);
-                _source.Raise(reading);
-            }
-
-            await store.IdleAsync();
-
-            Assert.AreEqual(1, _log.Entries.Count(e => e.Level == Earshot.Contracts.LogLevel.Warn && e.Message.Contains("claim", StringComparison.OrdinalIgnoreCase)),
-                "One failed-save warning, not twenty.");
-        }
-        finally
-        {
-            File.SetAttributes(path, FileAttributes.Normal);
-        }
-    }
-
-    // The seam LowBatteryAlertService feeds from: raised for an Owned verdict, carrying the exact decoded
-    // reading ApplyDecodedReadingLocked was given.
-    [TestMethod]
-    public void OwnedReadingAppliedIsRaisedForAnOwnedAdvertisement()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
-
-        service.Start();
-        _source.Raise(Owned(batteryB: 0x05)); // case nibble 5 -> 50%, needs no proved table
-
-        Assert.AreEqual(1, _ownedReadingEvents.Count);
-        Assert.AreEqual(50, _ownedReadingEvents[0].Reading.Case.Percent);
-    }
-
-    // The owner's rule: a live connection to this PC confirms nothing. A battery jump the consistency check
-    // refuses is refused while connected too, so the alert and auto-pause never see it.
-    [TestMethod]
-    public void OwnedReadingAppliedIsNotRaisedForAnInconsistentJumpEvenWhileConnected()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim(new OwnedBattery(2, 2, 2, _clock.GetUtcNow())));
-        using WidgetStatusService service = NewService(store);
-        PinContainer();
-        service.Start();
-        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
-
-        var reading = new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 1);
-        _source.Raise(reading);
-
-        Assert.AreEqual(1, service.Current.Counters.BatteryInconsistent, "Sanity: this reading must be refused as inconsistent.");
-        Assert.AreEqual(0, _ownedReadingEvents.Count, "A live connection must not let an inconsistent reading through.");
-    }
-
-    // NoClaim, ModelOrColourMismatch, SignalBelowThreshold, BatteryUnreadable and BatteryInconsistent all
-    // return before ApplyDecodedReadingLocked runs: none of them may raise this.
-    [TestMethod]
-    public void OwnedReadingAppliedIsNeverRaisedForANonOwnedVerdict()
-    {
-        var store = NewClaimStore(); // never Save()d: every advertisement reads NoClaim
-        using WidgetStatusService service = NewService(store);
-        service.Start();
-
-        _source.Raise(Owned(batteryB: 0x05));
-
-        Assert.AreEqual(0, _ownedReadingEvents.Count, "NoClaim must not raise OwnedReadingApplied.");
-
-        store.Save(SampleClaim());
-        var stranger = new AdvertisementSample(
-            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(colour: WidgetFixtures.StrangerColour, batteryB: 0x09), -60, _clock.GetUtcNow(), SenderTag: 2);
-        _source.Raise(stranger);
-
-        Assert.AreEqual(0, _ownedReadingEvents.Count, "ModelOrColourMismatch must not raise OwnedReadingApplied.");
-    }
-
-    [TestMethod]
-    public void CaseOpenedIsRaisedOnlyForAnOwnedAdvertisement()
-    {
-        var table = CaseProved with { LidOpenBit = 0 };
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store, table);
-        service.Start();
-
-        var stranger = new AdvertisementSample(
-            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(colour: WidgetFixtures.StrangerColour, lid: 0x01), -60, _clock.GetUtcNow(), SenderTag: 2);
-        _source.Raise(stranger);
-        Assert.AreEqual(0, _caseOpenedEvents.Count);
-
-        _source.Raise(Owned(lid: 0x01)); // lid bit rising edge, owned sender
-        Assert.AreEqual(1, _caseOpenedEvents.Count);
-    }
-
     [TestMethod]
     public void CaseOpenedIsRaisedOncePerEdgeOrCounterChange()
     {
-        var table = CaseProved with { LidOpenBit = 0 };
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store, table);
+        ProximityDecodeTable table = ProximityDecodeTable.Documented with { LidOpenBit = 0 };
+        using WidgetStatusService service = NewService(table);
         service.Start();
+        Prime();
 
         _source.Raise(Owned(lid: 0x01));
         _source.Raise(Owned(lid: 0x01)); // still open: not a new edge
@@ -801,13 +657,12 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void CaseOpenedIsNotRaisedByTheFirstReadingWithTheLidCounterBaseline()
     {
-        var table = CaseProved with { LidCounterMask = 0xFF };
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store, table);
+        ProximityDecodeTable table = ProximityDecodeTable.Documented with { LidCounterMask = 0xFF };
+        using WidgetStatusService service = NewService(table);
         service.Start();
+        Prime(lid: 0x03); // the chosen set's first reading carries the baseline
 
-        _source.Raise(Owned(lid: 0x03)); // the very first owned reading: establishes the baseline only
+        _source.Raise(Owned(lid: 0x03)); // the same counter again: nothing changed
 
         Assert.AreEqual(0, _caseOpenedEvents.Count, "The first reading must only establish the lid counter baseline.");
 
@@ -827,25 +682,24 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ChangedAndCaseOpenedAreRaisedThroughUiPost()
     {
-        var table = CaseProved with { LidOpenBit = 0 };
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
+        ProximityDecodeTable table = ProximityDecodeTable.Documented with { LidOpenBit = 0 };
         var queue = new Queue<Action>();
         int itemsCompleted = 0;
         var changedCompletedCountAtFire = new List<int>();
         var caseOpenedCompletedCountAtFire = new List<int>();
 
         var service = new WidgetStatusService(
-            () => _source, store, _settings, _deviceMonitor, () => null, _log,
+            () => _source, _settings, _deviceMonitor, () => null, _log,
             action =>
             {
                 Interlocked.Increment(ref _posts);
                 queue.Enqueue(action);
             },
-            _clock, () => table);
+            _clock, _paired, table);
         service.Changed += (sender, e) => changedCompletedCountAtFire.Add(itemsCompleted);
         service.CaseOpened += (sender, e) => caseOpenedCompletedCountAtFire.Add(itemsCompleted);
         service.Start();
+        Prime();
         int postsBefore = _posts;
 
         _source.Raise(Owned(lid: 0x01));
@@ -873,8 +727,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void SuspendLogsAFailingStopStepAtWarn()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         _source.StopResult = () => StepOutcomes.FromHResult("fake-stop", 5, detail: "ACCESS_DENIED", ok: false);
 
@@ -887,8 +740,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ClosingWithAFailingStopStepLogsItAtWarn()
     {
-        var store = NewClaimStore();
-        var service = NewService(store);
+        var service = NewService();
         service.Start();
         _source.StopResult = () => StepOutcomes.FromHResult("fake-stop", 5, detail: "ACCESS_DENIED", ok: false);
 
@@ -901,8 +753,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AFailingStartStepIsLoggedAtWarn()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         _source.StartResult = () => StepOutcomes.FromHResult("fake-start", 5, detail: "ACCESS_DENIED", ok: false);
 
         service.Start();
@@ -913,8 +764,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void TheStoppedEventIsLoggedWithItsErrorAndShownInTheSnapshot()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
 
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
@@ -929,8 +779,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void SuspendStopsTheSourceAndResumeStartsIt()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
 
@@ -949,8 +798,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ALateStoppedFromASupersededGenerationIsIgnored()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         service.Suspend();
         service.Resume();
@@ -973,8 +821,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ACurrentGenerationStoppedIsStillShownAndRetried()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
 
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)); // the convenience overload: current generation
@@ -992,8 +839,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AFailingInitialStartKeepsTheErrorNameAndSchedulesARetry()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         _source.StartResult = () => StepOutcomes.FromHResult("fake-start", 5, detail: "ACCESS_DENIED", ok: false);
 
         service.Start();
@@ -1015,8 +861,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AStartThatFailsBecauseBluetoothIsOffShowsAsRadioNotAvailableAndKeepsRetrying()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
 
         service.Start();
@@ -1025,12 +870,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(WidgetWatcherState.Stopped, snapshot.Watcher);
         Assert.AreEqual(1, snapshot.WatcherErrorCode, "The same code a Stopped(RadioNotAvailable) carries.");
         Assert.AreEqual("RadioNotAvailable", snapshot.WatcherErrorName);
-        Assert.IsFalse(service.SetupAvailable, "The set-up needs the watcher, so it must say Bluetooth is off.");
         Assert.IsTrue(_log.Has(LogLevel.Warn, "0x800710DF"), "The raw code must be in the log.");
 
         // The same state as the event path, field for field.
         _source = new FakeAdvertisementSource();
-        using WidgetStatusService other = NewService(store);
+        using WidgetStatusService other = NewService();
         other.Start();
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         Assert.AreEqual(other.Current.WatcherErrorCode, snapshot.WatcherErrorCode);
@@ -1041,8 +885,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ABluetoothOffStartIsRetriedOnTheDoublingScheduleAndRecoversWhenBluetoothComesOn()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         _source.StartResult = () => AdvertisementSourceCodes.RadioOff("fake-start");
         service.Start();
         int starts = _source.StartCalls;
@@ -1064,15 +907,13 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
         Assert.IsNull(service.Current.WatcherErrorCode, "A successful start clears the radio-off error.");
-        Assert.IsTrue(service.SetupAvailable);
     }
 
     // Any other failing code is still shown as itself, not as Bluetooth being off.
     [TestMethod]
     public void AStartThatFailsForAnotherReasonIsNotShownAsBluetoothOff()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         _source.StartResult = () => StepOutcomes.FromHResult("fake-start", unchecked((int)0x800710DE), detail: "COMException", ok: false);
 
         service.Start();
@@ -1089,8 +930,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ARetryAlreadyInFlightWhenSuspendRunsDoesNotStartTheWatcher()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)); // schedules a retry
 
@@ -1114,8 +954,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ARetryRacingSuspendWhileStartIsInFlightStopsTheSourceOnceItReturns()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
 
@@ -1143,8 +982,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ARetryRacingCloseWhileStartIsInFlightStopsTheSourceOnceItReturns()
     {
-        var store = NewClaimStore();
-        var service = NewService(store);
+        var service = NewService();
         service.Start();
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
 
@@ -1170,8 +1008,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void SuspendCallsStopOutsideTheServiceLockSoAConcurrentLockedCallDoesNotDeadlock()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         Assert.AreEqual(WidgetWatcherState.Started, service.Current.Watcher);
 
@@ -1196,9 +1033,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void StartIsIdempotent()
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
 
         service.Start();
         service.Start();
@@ -1210,79 +1045,6 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, service.Current.Counters.AllSections, "A second Start must not double-subscribe Received.");
     }
 
-    // Close is final: a set-up already under way when Close runs must not be applied to the service, or
-    // raise Changed, once it completes afterwards.
-    [TestMethod]
-    public async Task ASetupCompletingAfterCloseDoesNotApplyOrRaiseChanged()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        var service = NewService(store, proof: proof);
-        service.Start();
-
-        BatterySetupListen listen = await ListenAsync(service, batteryB: 0x05);   // the owner's case was heard
-
-        service.Close(); // closes while the owner is still choosing what the iPhone shows
-        int changedBeforeCompletion = _changedEvents.Count;
-
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(50, 50, 50));
-
-        Assert.IsFalse(service.Current.ClaimExists, "A set-up completing after Close must not be applied to the closed service.");
-        Assert.IsNull(store.Current, "Nothing after Close writes a claim.");
-        Assert.AreEqual(changedBeforeCompletion, _changedEvents.Count, "Nothing after Close raises Changed.");
-    }
-
-    // A claim made while the bud order was unproved (wire order) read against a table that has since had
-    // the order proved must fail closed, and once, not once per advert.
-    [TestMethod]
-    public void ANibbleOrderMismatchShowsNothingAndLogsOnce()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim()); // NibblesAreNamedOrder defaults to false: wire order
-        var table = CaseProved with { HighNibbleIsRight = true };
-        using WidgetStatusService service = NewService(store, table: table);
-        service.Start();
-
-        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
-        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
-
-        WidgetSnapshot snapshot = service.Current;
-        Assert.IsNull(snapshot.Left.Percent, "Nothing is shown while the claim's nibble order no longer matches the table's.");
-        Assert.IsNull(snapshot.Right.Percent);
-        Assert.AreEqual(
-            1,
-            _log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("nibble order", StringComparison.OrdinalIgnoreCase)),
-            "A nibble order mismatch must be logged once, not once per advert.");
-    }
-
-    // A set-up completed while the order is proved records that order in its claim, so a reading that was
-    // blocked by the mismatch is shown again afterwards: the claim's order follows the table the run-time rule
-    // will use, because the proof is updated before the claim is written.
-    [TestMethod]
-    public async Task TheClaimsNibbleOrderFollowsTheTableAtCompletion()
-    {
-        var store = NewClaimStore();
-        store.Save(SampleClaim()); // wire order
-        DecodeProofStore proof = NewProof(SetupRecordFixtures.TwoRecordsProvingHighIsRight().ToArray());
-        Assert.IsTrue(proof.Table.HighNibbleIsRight is true, "Sanity: two agreeing records prove the order.");
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
-        Assert.IsNull(service.Current.Left.Percent, "Sanity: the mismatch must still block the reading before the set-up.");
-
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x68, batteryB: 0x00);
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(left: 80, right: 60, box: 0));
-
-        Assert.AreEqual(BatterySetupResultStatus.BatterySetUp, result.Status);
-        Assert.IsTrue(store.Current!.NibblesAreNamedOrder, "A claim made while the order is proved must record named order.");
-        Assert.AreEqual(60, service.Current.Right.Percent, "The high nibble is the right bud once the order is proved.");
-        Assert.AreEqual(80, service.Current.Left.Percent);
-
-        _source.Raise(Owned(batteryA: 0x68, batteryB: 0x00));
-
-        Assert.IsNotNull(service.Current.Left.Percent, "After the set-up, a matching reading must be shown again.");
-    }
-
     [TestMethod]
     public void AStoppedSourceIsStartedAgainAfterTheRetryDelayDoubling()
     {
@@ -1290,8 +1052,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         // unconditionally), so it proved only that one retry happens at 30 s and never exercised the
         // doubling or the cap at all. The fake here keeps failing every attempt, so every step of
         // 30, 60, 120, 240, 480, then the 15-minute cap repeating, is actually driven and checked.
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
 
         _source.StartResult = () => StepOutcomes.FromHResult("fake-start", 1, ok: false);
@@ -1323,8 +1084,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ARetryTimerCallbackThatThrowsIsCaughtAndLoggedNotLeftToEscape()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
@@ -1342,8 +1102,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AThrowingRetryIsArmedAgainOnTheDoublingScheduleAndRecoversOnceItWorks()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1)); // arms the first retry
         int starts = _source.StartCalls;
@@ -1373,8 +1132,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void AThrowingRetryDoesNotArmAgainWhileSuspended()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         _source.StateOverride = () => throw new IOException("radio gone", unchecked((int)0x80070005));
@@ -1393,8 +1151,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void RefreshTriesOnceAtOnce()
     {
-        var store = NewClaimStore();
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         service.Start();
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
         int startsAfterStop = _source.StartCalls;
@@ -1465,18 +1222,17 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ForbiddenByteRunLeavesOrdinaryWordsAlone()
     {
-        Assert.IsFalse(ForbiddenByteRun.IsMatch("Widget counters: watcher=Started signalBelowThreshold=0 batteryInconsistent=0 modelOrColourMismatch=0"));
+        Assert.IsFalse(ForbiddenByteRun.IsMatch("Widget counters: watcher=Started modelMismatch=0 colourMismatch=0 budOrderDisagree=0 noPairedModel=0"));
         Assert.IsFalse(ForbiddenByteRun.IsMatch("Widget watcher start: watcher-start ERROR_DEVICE_NOT_AVAILABLE (Bluetooth is off)."));
     }
 
     [TestMethod]
     public void LogLinesCarryCountsAndNeverBytes()
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         int baseline = _log.Entries.Count; // excludes Setup's own JsonSettingsStore bootstrap logging
         service.Start();
+        Prime();
 
         _source.Raise(Owned(batteryB: 0x05));
         _source.RaiseStopped(1, "RadioNotAvailable", StepOutcomes.FromWin32("fake-stop", 1));
@@ -1491,7 +1247,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         // Once a minute while anything changed, the counters line itself, counts only.
         Assert.IsTrue(
-            widgetEntries.Any(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal) && e.Message.Contains("ok=1", StringComparison.Ordinal)),
+            widgetEntries.Any(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal) && e.Message.Contains("ok=4", StringComparison.Ordinal)),
             "The once-a-minute counters line was not logged.");
     }
 
@@ -1504,11 +1260,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void LogLinesNeverCarryBytesOnTheUnknownFormPath()
     {
-        var store = NewClaimStore();
-        store.Save(SampleClaim());
-        using WidgetStatusService service = NewService(store);
+        using WidgetStatusService service = NewService();
         int baseline = _log.Entries.Count;
         service.Start();
+        Prime();
 
         byte[] payload = WidgetFixtures.UnknownSeventeenByteForm();
         _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, payload, Rssi: -60, _clock.GetUtcNow(), SenderTag: 1));
@@ -1532,11 +1287,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public void WithTheSettingOffNoSourceIsConstructed()
     {
         _settings.Update(s => s.Widget = s.Widget with { Enabled = false });
-        var store = NewClaimStore();
         int factoryCalls = 0;
         var service = new WidgetStatusService(
-            () => { factoryCalls++; return _source; }, store, _settings, _deviceMonitor, () => null, _log,
-            action => action(), _clock, () => ProximityDecodeTable.Unproved);
+            () => { factoryCalls++; return _source; }, _settings, _deviceMonitor, () => null, _log,
+            action => action(), _clock, _paired);
 
         service.Start();
 
@@ -1549,11 +1303,10 @@ public sealed class WidgetStatusServiceTests : IDisposable
     public void TurningTheSettingOnStartsOne()
     {
         _settings.Update(s => s.Widget = s.Widget with { Enabled = false });
-        var store = NewClaimStore();
         int factoryCalls = 0;
         var service = new WidgetStatusService(
-            () => { factoryCalls++; return _source; }, store, _settings, _deviceMonitor, () => null, _log,
-            action => action(), _clock, () => ProximityDecodeTable.Unproved);
+            () => { factoryCalls++; return _source; }, _settings, _deviceMonitor, () => null, _log,
+            action => action(), _clock, _paired);
         service.Start();
         Assert.AreEqual(WidgetWatcherState.Off, service.Current.Watcher);
 
@@ -1572,12 +1325,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ASettingsOffThenOnGenuineStoppedFromTheFreshSourceIsNotDroppedAsStale()
     {
-        var store = NewClaimStore();
         var sources = new List<FakeAdvertisementSource>();
         using var service = new WidgetStatusService(
             () => { var built = new FakeAdvertisementSource(); sources.Add(built); return built; },
-            store, _settings, _deviceMonitor, () => null, _log,
-            action => { Interlocked.Increment(ref _posts); action(); }, _clock, () => ProximityDecodeTable.Unproved);
+            _settings, _deviceMonitor, () => null, _log,
+            action => { Interlocked.Increment(ref _posts); action(); }, _clock, _paired);
 
         service.Start();
         Assert.AreEqual(1, sources.Count);
@@ -1598,422 +1350,4 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     // ---- Battery set-up: completion, what is proved, and what is never shown
-
-    [TestMethod]
-    public async Task CompleteSetupWritesTheRecordThenTheClaimUnderTheNewTable()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(left: 40, right: 80, box: 50));
-
-        string[] files = Directory.GetFiles(_temp.File("setup"), "setup-*.json");
-        Assert.HasCount(1, files, "One record is written.");
-        Assert.AreEqual(Path.GetFileName(files[0]), result.RecordFileName);
-        Assert.IsNotNull(store.Current, "A claim is written.");
-        Assert.AreEqual(result.RecordFileName, store.Current!.SetupRecord, "The claim names the record it was made from.");
-        Assert.AreEqual((sbyte)-70, store.Current.SignalThresholdDbm, "Ten decibels under the weakest message (-60).");
-        Assert.AreEqual((sbyte)-60, store.Current.SignalMinDbm);
-        Assert.AreEqual(4, store.Current.SignalSamples);
-        Assert.AreEqual(BatterySetupResultStatus.SavedNeedsAnother, result.Status, "One record proves neither the order nor the case, so nothing is called set up.");
-        Assert.IsNull(service.Current.Case.Percent, "And nothing is shown yet.");
-        Assert.HasCount(1, proof.Records);
-        Assert.IsTrue(service.Current.ClaimExists);
-        Assert.IsTrue(_log.Has(LogLevel.Info, "Battery set-up saved: " + result.RecordFileName));
-        Assert.IsTrue(_log.Has(LogLevel.Info, "AirPods claimed from set-up " + result.RecordFileName + ": threshold -70 dBm."));
-    }
-
-    [TestMethod]
-    public async Task CompleteSetupAppliesTheFirstReadingAndRaisesOwnedReadingApplied()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4, caseNibble: 7), SetupRecordFixtures.Picks(40, 80, box: 70), minutes: 5));
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x07);
-        _ownedReadingEvents.Clear();
-
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80, 70));
-
-        Assert.AreEqual(70, service.Current.Case.Percent, "The second agreeing record proves the case, which reads at once, without waiting for a further message.");
-        Assert.HasCount(1, _ownedReadingEvents, "The first reading is an owned reading like any other.");
-        Assert.AreEqual(70, _ownedReadingEvents[0].Reading.Case.Percent);
-        Assert.IsNotNull(service.Current.BatteryReadAt);
-    }
-
-    // The claim's nibble order is the one the table has after this very record: written after the proof, never before.
-    [TestMethod]
-    public async Task CompleteSetupRecordsTheOrderTheRecordJustProved()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4), SetupRecordFixtures.Picks(40, 80), minutes: 5));
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        Assert.IsNull(proof.Table.HighNibbleIsRight, "Sanity: one earlier record proves nothing.");
-
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x86, batteryB: 0x05);
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(left: 60, right: 80));
-
-        Assert.AreEqual(BatterySetupResultStatus.BatterySetUp, result.Status, "The second agreeing record proves the order.");
-        Assert.IsTrue(store.Current!.NibblesAreNamedOrder, "The claim was written under the table the run-time rule will use.");
-        Assert.AreEqual(80, service.Current.Right.Percent, "The very first reading after the proving set-up is shown, not a NibbleOrderMismatch.");
-        Assert.AreEqual(60, service.Current.Left.Percent);
-        Assert.AreEqual(0, service.Current.Counters.NibbleOrderMismatch);
-    }
-
-    [TestMethod]
-    public async Task ASetupWhoseBudsReadTheSameSaysToRepeatItWhenTheyDiffer()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(SetupRecordFixtures.Record(SetupRecordFixtures.Message(6, 6), SetupRecordFixtures.Picks(60, 60), minutes: 5));
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x66, batteryB: 0x05);
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(60, 60));
-
-        Assert.AreEqual(BatterySetupResultStatus.CaseSetUpBudsSame, result.Status);
-        Assert.IsNotNull(store.Current, "The case is still set up.");
-    }
-
-    // A listen whose candidate sent only forms the parser does not read (what an earlier build could return): the
-    // record and its captures are kept, nothing is claimed, and an existing claim is left alone.
-    [TestMethod]
-    public void ShortFormOnlyWritesARecordAndNoClaim()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-
-        BatterySetupListen listen = ShortFormListen();
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80));
-
-        Assert.AreEqual(BatterySetupResultStatus.CouldNotRead, result.Status);
-        Assert.HasCount(1, Directory.GetFiles(_temp.File("setup"), "setup-*.json"), "The record is written.");
-        Assert.IsNull(store.Current, "No claim.");
-        Assert.IsFalse(service.Current.ClaimExists);
-        Assert.IsTrue(service.Current.SetupCouldNotRead, "The card is told to say so.");
-        Assert.AreEqual(BatterySetupListenStatus.ShortFormOnly, proof.Newest!.ListenStatus);
-        Assert.IsNull(proof.Newest.Candidate!.LastOkMessage);
-        Assert.HasCount(4, proof.Newest.Candidate.Captures);
-
-        // The same again with a claim already there: the claim is left alone.
-        store.Save(SampleClaim(new OwnedBattery(1, 2, 3, _clock.GetUtcNow())));
-        WidgetClaim before = store.Current!;
-        _clock.Advance(WidgetTiming.SetupListenWindow);
-        service.CompleteSetup(ShortFormListen(), SetupRecordFixtures.Picks(40, 80));
-
-        Assert.AreEqual(before, store.Current, "A set-up that read nothing does not touch an existing claim.");
-    }
-
-    private BatterySetupListen ShortFormListen()
-    {
-        DateTimeOffset end = _clock.GetUtcNow();
-        BatterySetupCapture capture = new(end, -55, 0x06, 17, Convert.ToHexString(WidgetFixtures.UnknownSeventeenByteForm()[2..]));
-        var candidate = new BatterySetupCandidate(
-            Messages: 4, OkFormMessages: 0, OtherFormMessages: 4, RssiMin: -55, RssiMedian: -55, RssiMax: -55, ThresholdDbm: -65,
-            Captures: [capture, capture, capture, capture], LastOkMessage: null);
-        return new BatterySetupListen(BatterySetupListenStatus.ShortFormOnly, string.Empty, candidate, [], end.AddSeconds(-20), end, 4, 4);
-    }
-
-    // The short form is never the candidate: with nothing else heard, the window found no AirPods and nothing is written.
-    [TestMethod]
-    public async Task OnlyShortFormSendersAreNotFoundAtTheService()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-
-        Task<BatterySetupListen> listening = service.ListenForSetupAsync(CancellationToken.None);
-        for (int i = 0; i < 4; i++)
-        {
-            _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), -55, _clock.GetUtcNow(), SenderTag: 5));
-        }
-
-        _clock.Advance(WidgetTiming.SetupListenWindow);
-        BatterySetupListen listen = await listening;
-
-        Assert.AreEqual(BatterySetupListenStatus.NotFound, listen.Status);
-        Assert.AreEqual(WidgetCopy.SetupNotFound, listen.Message);
-        Assert.IsNull(store.Current);
-    }
-
-    // Set-up ends with the case unreadable and the buds unproved: nothing at all can be shown, and the last step
-    // says so rather than "Battery set up".
-    [TestMethod]
-    public async Task ASetupThatLeavesNothingToShowSaysItReadNothing()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x0F);   // the case nibble unreadable
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80));
-
-        Assert.AreEqual(BatterySetupResultStatus.CouldNotRead, result.Status, "Nothing is shown, so nothing is called set up.");
-        Assert.IsNotNull(store.Current, "The claim itself is still made.");
-        Assert.IsNull(service.Current.Case.Percent);
-        Assert.IsNull(service.Current.Left.Percent);
-        Assert.IsTrue(service.Current.SetupCouldNotRead);
-    }
-
-    // A reading that could be read but is not proved yet is saved and asks for one more, so the owner is not told
-    // it read nothing when the fault is only that one record cannot prove anything.
-    [TestMethod]
-    public async Task ASetupWhoseReadingIsNotProvedYetSaysItIsSavedAndNeedsAnother()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen first = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
-
-        BatterySetupResult one = service.CompleteSetup(first, SetupRecordFixtures.Picks(40, 80, box: 50));
-
-        Assert.AreEqual(BatterySetupResultStatus.SavedNeedsAnother, one.Status);
-        Assert.IsNull(service.Current.Case.Percent, "One agreeing record does not prove the case, so the card shows nothing.");
-        Assert.IsTrue(service.Current.SetupCouldNotRead, "The card still offers set-up, since nothing can be shown yet.");
-
-        BatterySetupListen second = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
-        BatterySetupResult two = service.CompleteSetup(second, SetupRecordFixtures.Picks(40, 80, box: 50));
-
-        Assert.AreNotEqual(BatterySetupResultStatus.SavedNeedsAnother, two.Status);
-        Assert.AreEqual(50, service.Current.Case.Percent, "The second agreeing record proves the case, and it is shown.");
-    }
-
-    // The owner's own pick contradicts what the case nibble reads: the case is not shown, and the set-up says it
-    // could not read the battery rather than that it needs another.
-    [TestMethod]
-    public async Task ASetupWhoseCasePickContradictsTheReadingShowsNoCaseAndSaysItCouldNotRead()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4), SetupRecordFixtures.Picks(40, 80), minutes: 5),
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(6, 9), SetupRecordFixtures.Picks(90, 60), minutes: 6));
-        Assert.IsTrue(proof.Table.CaseNibbleProved, "Sanity: two agreeing records prove the case.");
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x84, batteryB: 0x05);
-
-        BatterySetupResult result = service.CompleteSetup(listen, SetupRecordFixtures.Picks(40, 80, box: 90));
-
-        Assert.IsFalse(proof.Table.CaseNibbleProved, "A record that disagrees takes the proof away.");
-        Assert.IsNull(service.Current.Case.Percent);
-        Assert.AreEqual(BatterySetupResultStatus.BatterySetUp, result.Status, "The buds are proved and shown, so the battery is set up.");
-    }
-
-    // Picks are evidence only: whatever the owner picked, what the card shows is what the advertisement says.
-    [TestMethod]
-    public async Task PickerValuesNeverReachTheSnapshot()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4), SetupRecordFixtures.Picks(40, 80), minutes: 5),
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(6, 9), SetupRecordFixtures.Picks(90, 60), minutes: 6));
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x63, batteryB: 0x04);
-        _ownedReadingEvents.Clear();
-
-        // The owner picks values that are nothing like what the AirPods advertise.
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(left: 100, right: 100, box: 100, leftCharging: true, rightCharging: true, caseCharging: true));
-
-        WidgetSnapshot snapshot = service.Current;
-        Assert.AreEqual(30, snapshot.Left.Percent, "The nibbles are 6 and 3: the low one is the left bud, whatever was picked.");
-        Assert.AreEqual(60, snapshot.Right.Percent);
-        Assert.IsNull(snapshot.Case.Percent, "The picked 100 contradicts the case nibble, which takes the case's proof away; the pick itself is never shown.");
-        Assert.IsNull(snapshot.Left.Charging, "A charging toggle is evidence too: nothing is shown as charging until a bit is proved.");
-        Assert.IsNull(snapshot.Right.Charging);
-        Assert.IsNull(snapshot.Case.Charging);
-        Assert.IsTrue(_ownedReadingEvents.All(e => e.Reading.Left.Percent != 100 && e.Reading.Right.Percent != 100 && e.Reading.Case.Percent != 100),
-            "No event carries a picked value.");
-    }
-
-    [TestMethod]
-    public async Task AnUnprovedBudNeverReachesTheLowBatteryAlert()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        var notifier = new FakeNotifier();
-        _settings.Update(s => s.Widget = s.Widget with { LowBatteryAlert = true, LowBatteryThresholdPercent = 20 });
-        using var alert = new Earshot.Widget.Alert.LowBatteryAlertService(service, _settings, notifier);
-
-        // Both buds read 10% and the case 90%: with the order unproved the buds are not decoded, so nothing
-        // low can be alerted about.
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x11, batteryB: 0x09);
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(10, 10, 90));
-        _source.Raise(Owned(batteryA: 0x11, batteryB: 0x09));
-
-        Assert.IsEmpty(notifier.Calls, "An unproved bud reaches no alert.");
-    }
-
-    [TestMethod]
-    public async Task AProvedBudReachesTheLowBatteryAlert()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4), SetupRecordFixtures.Picks(40, 80), minutes: 5),
-            SetupRecordFixtures.Record(SetupRecordFixtures.Message(6, 9), SetupRecordFixtures.Picks(90, 60), minutes: 6));
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        var notifier = new FakeNotifier();
-        _settings.Update(s => s.Widget = s.Widget with { LowBatteryAlert = true, LowBatteryThresholdPercent = 20 });
-        using var alert = new Earshot.Widget.Alert.LowBatteryAlertService(service, _settings, notifier);
-
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x21, batteryB: 0x09);   // right 20%, left 10%... high nibble is the right bud
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(10, 20, 90));
-
-        CollectionAssert.Contains(notifier.Calls, ("Earshot", "Right AirPod at 20%"));
-        CollectionAssert.Contains(notifier.Calls, ("Earshot", "Left AirPod at 10%"));
-        Assert.HasCount(2, notifier.Calls, "The case at 90% is not low.");
-    }
-
-    // Set-up cannot prove an in-ear bit or the lid, so neither is ever acted on: the AirPods are never placed
-    // elsewhere or out of use, and no case-open event fires, whatever the status and lid bytes do.
-    [TestMethod]
-    public async Task EarDetectionAndTheLidStayOffWhileTheirBitsAreUnproved()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(SetupRecordFixtures.TwoRecordsProvingHighIsRight().ToArray());
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x86, batteryB: 0x05);
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(60, 80));
-
-        for (int i = 0; i < 6; i++)
-        {
-            _source.Raise(Owned(status: (byte)(i * 51), batteryA: 0x86, batteryB: 0x05, lid: (byte)i));
-        }
-
-        WidgetSnapshot snapshot = service.Current;
-        Assert.AreEqual(AirPodsWhere.Unknown, snapshot.Where, "Never Elsewhere or NotInUse from the advertisement.");
-        Assert.IsNull(snapshot.Left.InEar);
-        Assert.IsNull(snapshot.Right.InEar);
-        Assert.IsNull(snapshot.EarReadAt);
-        Assert.IsNull(snapshot.LidOpen);
-        Assert.IsEmpty(_caseOpenedEvents, "CaseOpened never fires: the lid is not provable by set-up.");
-        Assert.IsTrue(_ownedReadingEvents.All(e => e.Reading.LidOpen is null && e.Reading.LidCounter is null && e.Reading.Left.InEar is null));
-    }
-
-    // Auto-pause needs the broadcast observed while playing AND a proved in-ear bit; the second cannot come from a set-up.
-    [TestMethod]
-    public void AutoPauseAvailableReadsTheInjectedObservationAndTheInEarBits()
-    {
-        var store = NewClaimStore();
-        var withInEar = CaseProved with { LeftInEarBit = 0, RightInEarBit = 1 };
-
-        using WidgetStatusService observed = NewService(store, withInEar, broadcasts: true);
-        using WidgetStatusService notObserved = NewService(store, withInEar, broadcasts: null);
-        using WidgetStatusService noBits = NewService(store, ProximityDecodeTable.Unproved, broadcasts: true);
-
-        Assert.IsTrue(observed.Current.AutoPauseAvailable, "Observed, and the bits are proved.");
-        Assert.IsFalse(notObserved.Current.AutoPauseAvailable, "Not observed: off.");
-        Assert.IsFalse(noBits.Current.AutoPauseAvailable, "Observed but no in-ear bit proved: off, as it stays after any set-up.");
-        Assert.AreEqual(true, observed.BroadcastObserved(), "The service passes the observation on to auto-pause.");
-        Assert.IsNull(notObserved.BroadcastObserved());
-    }
-
-    [TestMethod]
-    public async Task AnOwnedMessageWhileThisPcRendersIsNotedOnce()
-    {
-        PinContainer();
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-        BatterySetupListen listen = await ListenAsync(service, batteryA: 0x86, batteryB: 0x05);
-        service.CompleteSetup(listen, SetupRecordFixtures.Picks(60, 80));
-        int noted = proof.OwnedMessagesCounted;
-
-        _source.Raise(Owned(batteryA: 0x86, batteryB: 0x05));
-        Assert.AreEqual(noted, proof.OwnedMessagesCounted, "This PC is not rendering to the AirPods: nothing is noted.");
-
-        _deviceMonitor.Raise(ThisPcSnapshot(active: true));
-        _source.Raise(Owned(batteryA: 0x86, batteryB: 0x05));
-        Assert.AreEqual(noted + 1, proof.OwnedMessagesCounted, "Rendering to the AirPods: exactly one note per owned message.");
-
-        _source.Raise(new AdvertisementSample(
-            ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(colour: WidgetFixtures.StrangerColour, batteryA: 0x86), -60, _clock.GetUtcNow(), SenderTag: 2));
-        Assert.AreEqual(noted + 1, proof.OwnedMessagesCounted, "A stranger's message is never noted.");
-    }
-
-    [TestMethod]
-    public void TheBroadcastObservationReachesTheServiceThroughTheProofStore()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        for (int i = 0; i <= 21; i++)
-        {
-            proof.NoteOwnedWhileThisPcRenders(SetupRecordFixtures.Start.AddSeconds(i * 3));
-        }
-
-        using var service = new WidgetStatusService(
-            () => _source, store, _settings, _deviceMonitor, () => null, _log, action => action(), _clock, proof);
-
-        Assert.AreEqual(true, service.BroadcastObserved(), "The production constructor reads the store's observation.");
-        Assert.IsFalse(service.Current.AutoPauseAvailable, "Still off: no in-ear bit is proved, and none can be by a set-up.");
-    }
-
-    // Every line the set-up logs carries numbers, statuses and a file name: no byte, no model or colour byte, no tag.
-    [TestMethod]
-    public async Task EverySetupLogLineHasNoHexRunLongerThanTwoBytes()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof(SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4), SetupRecordFixtures.Picks(40, 80), minutes: 5));
-        using WidgetStatusService service = NewService(store, proof: proof);
-        service.Start();
-
-        Task<BatterySetupListen> listening = service.ListenForSetupAsync(CancellationToken.None);
-        for (int i = 0; i < 5; i++)
-        {
-            _source.Raise(new AdvertisementSample(
-                ProximityParser.AppleCompanyId, WidgetFixtures.Proximity(batteryA: 0x86, batteryB: 0x05), -58, _clock.GetUtcNow(), SenderTag: 4242424242));
-        }
-
-        _source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, WidgetFixtures.UnknownSeventeenByteForm(), -95, _clock.GetUtcNow(), SenderTag: 77));
-        _clock.Advance(WidgetTiming.SetupListenWindow);
-        service.CompleteSetup(await listening, SetupRecordFixtures.Picks(60, 80));
-
-        Assert.IsTrue(_log.Entries.Count(e => e.Message.StartsWith("Battery set-up", StringComparison.Ordinal)) >= 2, "Sanity: the set-up did log.");
-        // Only the set-up's own lines: the settings store's lines name a temp folder, whose random name is not ours.
-        foreach (LogEntry entry in _log.Entries.Where(e => e.Message.Contains("set-up", StringComparison.Ordinal) ||
-            e.Message.StartsWith("Decode proof", StringComparison.Ordinal) || e.Message.StartsWith("AirPods claimed", StringComparison.Ordinal)))
-        {
-            Assert.IsFalse(ForbiddenByteRun.IsMatch(entry.Message), "A byte-like run in: " + entry.Message);
-            Assert.DoesNotContain("EEEE", entry.Message);
-            Assert.DoesNotContain("4242424242", entry.Message);
-        }
-    }
-
-    [TestMethod]
-    public void CompletingASetupThatWasNotFoundIsRefused()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        var notFound = new BatterySetupListen(BatterySetupListenStatus.NotFound, "x", null, [], SetupRecordFixtures.Start, SetupRecordFixtures.Start, 0, 0);
-
-        Assert.ThrowsExactly<ArgumentException>(() => service.CompleteSetup(notFound, SetupRecordFixtures.Picks(50, 50)));
-        Assert.AreEqual(0, Directory.Exists(_temp.File("setup")) ? Directory.GetFiles(_temp.File("setup")).Length : 0, "Nothing is written for a listen that found nothing.");
-    }
-
-    [TestMethod]
-    public void PicksThatAreNotTensAreRefused()
-    {
-        var store = NewClaimStore();
-        DecodeProofStore proof = NewProof();
-        using WidgetStatusService service = NewService(store, proof: proof);
-        BatterySetupRecord record = SetupRecordFixtures.Record(SetupRecordFixtures.Message(8, 4), SetupRecordFixtures.Picks(40, 80));
-        var listen = new BatterySetupListen(BatterySetupListenStatus.Found, "", record.Candidate, [], SetupRecordFixtures.Start, SetupRecordFixtures.Start.AddSeconds(20), 0, 0);
-
-        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => service.CompleteSetup(listen, SetupRecordFixtures.Picks(45, 80)));
-    }
 }

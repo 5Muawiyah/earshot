@@ -462,7 +462,6 @@ internal sealed partial class TrayContext : ApplicationContext
         _menu.CaseOpenCardClicked += (_, _) => OnCaseOpenCardClicked();
         _menu.LowBatteryAlertClicked += (_, _) => OnLowBatteryAlertClicked();
         _menu.LowBatteryThresholdItemClicked += OnLowBatteryThresholdItemClicked;
-        _menu.SetUpBatteryClicked += (_, _) => OnSetUpBatteryClicked();
         // The click point is read now, before the menu closes and the form opens, exactly as ChooseDeviceClicked below.
         _menu.NameOtherDeviceClicked += (_, _) =>
         {
@@ -1960,7 +1959,7 @@ internal sealed partial class TrayContext : ApplicationContext
     private MenuState CurrentMenuState() =>
         MenuModel.Build(
             _snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy,
-            _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu, _widgetStatus?.SetupAvailable ?? false,
+            _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu,
             updateInProgress: _updates?.IsBusy ?? false, elevatedRun: _elevatedRun);
 
     private void UpdatePresentation(bool forceIcon)
@@ -2289,19 +2288,6 @@ internal sealed partial class TrayContext : ApplicationContext
         CardPlace place = ClickPlace();
         int percent = e.Item.Percent;
         TryUpdateSettings("low battery threshold", s => s.Widget = s.Widget with { LowBatteryThresholdPercent = percent }, place);
-    }
-
-    // The set-up trigger: opens the widget card at its first page, above the gauge when it is shown, else near
-    // the cursor. Not a device action, so it does not go through Launch: the listen only reads advertisements
-    // and the pages show their own results.
-    private void OnSetUpBatteryClicked()
-    {
-        if (_closing)
-        {
-            return;
-        }
-
-        RequestSetupFromWidget();
     }
 
     // Opens the picker-style modal for the owner's own device label. No device list to load here, unlike

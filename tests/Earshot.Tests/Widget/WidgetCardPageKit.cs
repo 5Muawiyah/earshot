@@ -38,10 +38,10 @@ internal sealed class FakeCardHost : IWidgetCardHost
 
     // The design's defaults, with invented version and chord texts.
     public static CardSettingsValues Defaults() => new(
-        GaugePosition.RightEnd, "iPhone", PauseWhenBudComesOut: true, PauseWhenAirPodsLeave: true, CaseOpenCard: true, LowBatteryPercent: 20,
+        GaugePosition.RightEnd, "iPhone", PauseWhenBudComesOut: true, PauseWhenAirPodsLeave: true, LowBatteryPercent: 20,
         LeftClickConnects: false, HandBack: true, ConnectChord: "Ctrl+Alt+Shift+A", DisconnectChord: "Ctrl+Alt+Shift+D",
         ConnectFailure: null, DisconnectFailure: null, InstalledVersion: "1.1.0", CheckAutomatically: false,
-        InEarProofMissing: false, LidProofMissing: false);
+        InEarProofMissing: false);
 
     public CardSettingsValues ReadSettings() => Values;
 
@@ -73,12 +73,6 @@ internal sealed class FakeCardHost : IWidgetCardHost
     {
         Calls.Add("pauseLeave:" + on);
         Values = Values with { PauseWhenAirPodsLeave = on };
-    }
-
-    public void SetCaseOpenCard(bool on, CardPlace place)
-    {
-        Calls.Add("caseCard:" + on);
-        Values = Values with { CaseOpenCard = on };
     }
 
     public void SetLowBatteryPercent(int percent, CardPlace place)
@@ -206,8 +200,6 @@ internal static class CardKit
         OtherDeviceLabel: () => "iPhone",
         RequestToggle: _ => { },
         SetAutoPause: (_, _) => { },
-        ListenForSetup: _ => new TaskCompletionSource<BatterySetupListen>().Task,
-        CompleteSetup: (_, _) => throw new NotSupportedException("No set-up runs in these tests."),
         GaugePosition: position is { } p ? () => p : null);
 
     public static WidgetSnapshot Snapshot(PartReading? left = null, PartReading? right = null, DateTimeOffset? readAt = null) =>
@@ -222,18 +214,17 @@ internal static class CardKit
             WidgetWatcherState.Started,
             WatcherErrorCode: null,
             WatcherErrorName: null,
-            ClaimExists: true,
             AutoPauseAvailable: false,
             WidgetCounters.Empty);
 
-    public static WidgetCardModel MainModel(WidgetSnapshot? snapshot = null, string? updateVersion = null, bool showSetupButton = false) =>
-        new(snapshot ?? Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, showSetupButton, UpdateVersion: updateVersion);
+    public static WidgetCardModel MainModel(WidgetSnapshot? snapshot = null, string? updateVersion = null) =>
+        new(snapshot ?? Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, UpdateVersion: updateVersion);
 
     public static WidgetCardModel SettingsModel(CardSettingsValues values) =>
-        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, false, WidgetCardView.Settings, Settings: values);
+        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, WidgetCardView.Settings, Settings: values);
 
     public static WidgetCardModel UpdateModel(UpdateViewModel view) =>
-        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, false, WidgetCardView.Update, WidgetCardUpdatePage.From(view));
+        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, WidgetCardView.Update, WidgetCardUpdatePage.From(view));
 
     // A card painted into an off-screen bitmap through its own paint routine: never shown, never given a handle.
     public static Bitmap Render(WidgetCard card)

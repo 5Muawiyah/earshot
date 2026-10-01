@@ -11,7 +11,7 @@ internal enum BroadcastClass
     OtherSet,        // the paired model and colour, from a set that is not the chosen one
 }
 
-internal enum BroadcastSelectionState { NoPairedModel, Listening, Chosen }
+public enum BroadcastSelectionState { NoPairedModel, Listening, Chosen }
 
 // What one message did to the selection.
 //   NewChoice: the chosen set is not the set it was (a first choice, a switch, or a choice after a release), so

@@ -26,7 +26,7 @@ public sealed class CompositionRootAutoPauseTests
         var registry = new ServiceRegistry(log, settings, action => action(), safeMode: true);
         WidgetStatusService status = CompositionRoot.BuildWidget(registry, () => null, TimeProvider.System)!;
 
-        using AutoPauseService service = CompositionRoot.BuildAutoPauseService(registry, status, () => null, TimeProvider.System, () => null);
+        using AutoPauseService service = CompositionRoot.BuildAutoPauseService(registry, status, () => null, TimeProvider.System);
 
         Assert.IsNotNull(service);
         status.Dispose();
@@ -43,7 +43,7 @@ public sealed class CompositionRootAutoPauseTests
         // BuildWidget never ran (the widget stayed disabled, say), so registry.MediaSessions is still null:
         // a genuine upstream bug this must surface loudly, not silently no-op past.
         Assert.ThrowsExactly<ArgumentNullException>(() =>
-            CompositionRoot.BuildAutoPauseService(registry, new NullWidgetStatusForTest(), () => null, TimeProvider.System, () => null));
+            CompositionRoot.BuildAutoPauseService(registry, new NullWidgetStatusForTest(), () => null, TimeProvider.System));
     }
 
     // A minimal IWidgetStatus so ThrowsWhenMediaSessionsWasNeverSet can reach BuildAutoPauseService's own
@@ -51,21 +51,17 @@ public sealed class CompositionRootAutoPauseTests
     // ran).
     private sealed class NullWidgetStatusForTest : IWidgetStatus
     {
-        public WidgetSnapshot Current => WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
+        public WidgetSnapshot Current => WidgetSnapshot.Empty(WidgetWatcherState.NotStarted);
 
-        public bool SetupAvailable => false;
 
         public event EventHandler? Changed;
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
-        public event EventHandler<OwnedReadingEventArgs>? OwnedReadingApplied;
+        public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
-        public Task<BatterySetupListen> ListenForSetupAsync(CancellationToken ct) => throw new NotSupportedException();
 
-        public BatterySetupResult CompleteSetup(BatterySetupListen listen, BatterySetupPicks picks) => throw new NotSupportedException();
 
-        public void ForgetClaim() => throw new NotSupportedException();
 
         public Task RefreshAsync() => Task.CompletedTask;
 
@@ -74,7 +70,7 @@ public sealed class CompositionRootAutoPauseTests
         {
             Changed?.Invoke(this, EventArgs.Empty);
             CaseOpened?.Invoke(this, new CaseOpenedEventArgs(DateTimeOffset.UtcNow));
-            OwnedReadingApplied?.Invoke(this, new OwnedReadingEventArgs(DecodedReading0, DateTimeOffset.UtcNow));
+            ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(DecodedReading0, DateTimeOffset.UtcNow));
         }
 
         private static readonly DecodedReading DecodedReading0 = new(PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, null, null);

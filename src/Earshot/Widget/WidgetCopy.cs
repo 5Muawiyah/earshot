@@ -45,14 +45,12 @@ internal static class WidgetCopy
     public const string SettingsOtherDevice = "Other device";
     public const string SettingsPauseBud = AutoPauseSwitch;
     public const string SettingsPauseLeave = "Pause when AirPods leave this PC";
-    public const string SettingsCaseCard = "Case-open card";
     public const string SettingsLowBattery = "Low battery alert";
     public const string SettingsLeftClick = "Left click connects";
     public const string SettingsHandBack = Earshot.Tray.MenuModel.HandBackOnShutdownAndSleep;
     public const string SettingsShortcuts = "Shortcuts";
     public const string SettingsUpdates = "Updates";
     public const string SettingsWaitsOnInEar = "Earshot cannot yet tell when a bud is in your ear.";
-    public const string SettingsWaitsOnLid = "Earshot cannot yet tell when the case lid is open.";
     public const string ShortcutNotSet = "Not set";
     public const string ShortcutPressKeys = "Press keys";
     public const string ShortcutClear = "Clear";
@@ -154,7 +152,6 @@ internal static class WidgetCopy
     public const string GaugeCharging = "Charging";
     public const string GaugeLowBattery = "Low battery";
     public const string GaugeNotOnThisPc = "Not on this PC";
-    public const string GaugeBatteryNotSetUp = "Battery not set up";
     public const string GaugeNoRecentReading = "No recent reading";
 
     // "L 70%   R 60%": the buds that have a proved reading, left first, three spaces apart. A bud with none is
@@ -183,4 +180,11 @@ internal static class WidgetCopy
         percent is { } value ? value.ToString(CultureInfo.InvariantCulture) + "%" : NoReading;
 
     private static string Round(double value) => Math.Max(0, Math.Round(value)).ToString(CultureInfo.InvariantCulture);
+
+    // Windows' own figure for the AirPods as a headset: one number, not a bud's or the case's.
+    public static string WindowsReads(int percent) =>
+        "Windows reads " + percent.ToString(CultureInfo.InvariantCulture) + "%";
+
+    // The low battery alert's line for that same figure.
+    public static string LowBatteryHeadsetText(int percent) => LowBatteryText("AirPods", percent);
 }

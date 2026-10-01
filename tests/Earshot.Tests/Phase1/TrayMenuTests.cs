@@ -19,8 +19,8 @@ public sealed class TrayMenuTests
         "Connect", "-",
         "Block at boot", "Hand back on shut down, sleep and Exit", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
         "Speak status", "-",
-        "Show on the taskbar", "Left click connects straight away", "Card when the case opens", "Low battery alert", "Threshold",
-        "Set up battery (Bluetooth is off)", "Name your other device...", "-",
+        "Show on the taskbar", "Left click connects straight away", "Low battery alert", "Threshold",
+        "Name your other device...", "-",
         "Choose device...", "Set up Earshot...", "-",
         "Check for updates", "Check automatically", "-",
         "Exit",
@@ -28,7 +28,7 @@ public sealed class TrayMenuTests
 
     private static readonly string[] CommandOrder = ["toggle", "block", "handback", "protect", "startup", "device", "setup", "exit"];
 
-    private static readonly string[] WidgetCommandOrder = ["taskbar", "leftclick", "caseopen", "lowbattery", "setup", "othername"];
+    private static readonly string[] WidgetCommandOrder = ["taskbar", "leftclick", "lowbattery", "othername"];
 
     // The Play from a phone submenu as StreamingCoordinator builds it with one device in use.
     private static readonly StreamingMenuModel PlayingFromAPhone = new(
@@ -50,9 +50,8 @@ public sealed class TrayMenuTests
         EarshotSettings? settings = null,
         AudioProtectionSnapshot? protection = null,
         bool safeMode = false,
-        bool voiceKnownMissing = false,
-        bool setupAvailable = false) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, StartupState.Off, safeMode, voiceKnownMissing, setupAvailable: setupAvailable);
+        bool voiceKnownMissing = false) =>
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, StartupState.Off, safeMode, voiceKnownMissing);
 
     private static string[] AvailableTexts(TrayMenu menu) =>
         menu.Items.Where(i => i.Available).Select(i => i is ToolStripSeparator ? "-" : i.Text ?? "").ToArray();
@@ -192,20 +191,16 @@ public sealed class TrayMenuTests
         StaThread.Run(() =>
         {
             EarshotSettings settings = Settings(s => s.Widget = s.Widget with { LowBatteryAlert = true });
-            using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp), settings: settings, setupAvailable: true));
+            using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp), settings: settings));
             var raised = new List<string>();
             menu.ShowOnTaskbarClicked += (_, _) => raised.Add("taskbar");
             menu.LeftClickConnectsClicked += (_, _) => raised.Add("leftclick");
-            menu.CaseOpenCardClicked += (_, _) => raised.Add("caseopen");
             menu.LowBatteryAlertClicked += (_, _) => raised.Add("lowbattery");
-            menu.SetUpBatteryClicked += (_, _) => raised.Add("setup");
             menu.NameOtherDeviceClicked += (_, _) => raised.Add("othername");
 
             menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Show on the taskbar").PerformClick();
             menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Left click connects straight away").PerformClick();
-            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Card when the case opens").PerformClick();
             menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Low battery alert").PerformClick();
-            menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Set up battery").PerformClick();
             menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Name your other device...").PerformClick();
 
             CollectionAssert.AreEqual(WidgetCommandOrder, raised);

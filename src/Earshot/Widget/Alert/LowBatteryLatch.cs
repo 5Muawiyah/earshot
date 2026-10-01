@@ -2,7 +2,7 @@ namespace Earshot.Widget.Alert;
 
 public enum LatchState { Armed, Fired }
 
-// One latch per part (left, right, case), pure. Armed and a known percent at or below the threshold fires
+// One latch per part (left, right, case, and Windows' own figure for the headset), pure. Armed and a known percent at or below the threshold fires
 // once; Fired and a known percent at least one 10% step above the threshold re-arms; an unknown percent
 // changes nothing. A threshold change arms every latch, so the next reading at or below the new threshold
 // fires once and a value already above it re-arms by the ordinary rule. Only owned readings feed this: the
@@ -14,6 +14,7 @@ internal sealed class LowBatteryLatch
     private LatchState _left = LatchState.Armed;
     private LatchState _right = LatchState.Armed;
     private LatchState _case = LatchState.Armed;
+    private LatchState _headset = LatchState.Armed;
 
     public LowBatteryLatch(int thresholdPercent = DefaultThresholdPercent)
     {
@@ -28,12 +29,16 @@ internal sealed class LowBatteryLatch
 
     public LatchState Case => _case;
 
+    public LatchState Headset => _headset;
+
     // Returns true exactly when this call fired the latch (Armed to Fired): the moment to show an alert.
     public bool ApplyLeft(int? percent) => Apply(ref _left, percent);
 
     public bool ApplyRight(int? percent) => Apply(ref _right, percent);
 
     public bool ApplyCase(int? percent) => Apply(ref _case, percent);
+
+    public bool ApplyHeadset(int? percent) => Apply(ref _headset, percent);
 
     public void SetThreshold(int thresholdPercent)
     {
@@ -46,6 +51,7 @@ internal sealed class LowBatteryLatch
         _left = LatchState.Armed;
         _right = LatchState.Armed;
         _case = LatchState.Armed;
+        _headset = LatchState.Armed;
     }
 
     private bool Apply(ref LatchState state, int? percent)

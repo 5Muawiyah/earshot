@@ -21,9 +21,8 @@ public sealed class MenuModelTests
         EarshotSettings? settings = null,
         bool busy = false,
         StartupState startup = StartupState.Off,
-        bool safeMode = false,
-        bool setupAvailable = false) =>
-        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup, safeMode, setupAvailable: setupAvailable);
+        bool safeMode = false) =>
+        MenuModel.Build(snapshot ?? NoDevice(), block, protection, settings ?? Settings(), busy, startup, safeMode);
 
     [TestMethod]
     public void TheCopyIsExactlyAsDesigned()
@@ -132,7 +131,7 @@ public sealed class MenuModelTests
 
         foreach (MenuItemState item in new[]
                  {
-                     state.ShowOnTaskbar, state.LeftClickConnectsItem, state.CaseOpenCardItem,
+                     state.ShowOnTaskbar, state.LeftClickConnectsItem,
                      state.LowBatteryAlert, state.NameOtherDeviceItem,
                  })
         {
@@ -459,34 +458,18 @@ public sealed class MenuModelTests
         Assert.IsFalse(MenuModel.ProtectionDisagrees(false, null));
     }
 
-    // The set-up trigger is always in the menu, so a repeat set-up is reachable once there is a reading. It
-    // is disabled while the watcher is not running, and its own text says why rather than leaving a plain grey
-    // row with no explanation.
+    // Battery needs no set-up, so the menu has no such item.
     [TestMethod]
-    public void SetUpBatteryIsDisabledWithItsReasonWhileTheWatcherIsNotRunning()
+    public void TheMenuHasNoSetUpBatteryItem()
     {
-        MenuItemState disabled = Build(setupAvailable: false).SetUpBatteryItem;
-
-        Assert.IsFalse(disabled.Enabled);
-        Assert.IsTrue(disabled.Visible);
-        Assert.AreEqual("Set up battery (Bluetooth is off)", disabled.Text);
+        Assert.IsNull(typeof(MenuState).GetProperty("SetUpBatteryItem"));
+        Assert.IsNull(typeof(MenuModel).GetField("SetUpBattery"));
     }
 
+    // The lid is not read, so the case-open card never shows and a switch for it would do nothing.
     [TestMethod]
-    public void SetUpBatteryIsEnabledWhileTheWatcherRuns()
+    public void TheCaseOpenCardItemIsHidden()
     {
-        MenuItemState enabled = Build(setupAvailable: true).SetUpBatteryItem;
-
-        Assert.IsTrue(enabled.Enabled);
-        Assert.AreEqual("Set up battery", enabled.Text);
-    }
-
-    // Busy still gates it the same as every other action here, once it would otherwise be available.
-    [TestMethod]
-    public void SetUpBatteryIsDisabledWhileBusyEvenWithTheWatcherRunning()
-    {
-        MenuItemState item = Build(setupAvailable: true, busy: true).SetUpBatteryItem;
-
-        Assert.IsFalse(item.Enabled);
+        Assert.IsFalse(Build().CaseOpenCardItem.Visible);
     }
 }

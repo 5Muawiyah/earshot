@@ -50,8 +50,7 @@ public sealed class WidgetCardHostTests
             Assert.AreEqual("Ctrl+Alt+Shift+A", values.ConnectChord);
             Assert.AreEqual("Ctrl+Alt+Shift+D", values.DisconnectChord);
             Assert.AreEqual(Earshot.Update.ReleaseVersion.Running(typeof(Earshot.Update.ReleaseVersion).Assembly)!.Value.ToString(), values.InstalledVersion);
-            Assert.IsTrue(values.InEarProofMissing, "No in-ear field has been proved.");
-            Assert.IsTrue(values.LidProofMissing, "No lid field has been proved.");
+            Assert.IsTrue(values.InEarProofMissing, "The in-ear signal is not known.");
         });
     }
 
@@ -100,9 +99,9 @@ public sealed class WidgetCardHostTests
         });
     }
 
-    // The two rows that switch a consumer of the watcher keep the watcher's own flag true to what still needs it.
+    // The row that switches a consumer of the watcher keeps the watcher's own flag true to what still needs it.
     [TestMethod]
-    public void TheCaseOpenCardAndPauseRowsKeepTheWatcherFlagInStepWithWhatNeedsIt()
+    public void ThePauseRowKeepsTheWatcherFlagInStepWithWhatNeedsIt()
     {
         using var temp = new TempFolder();
         using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.Path);
@@ -112,13 +111,8 @@ public sealed class WidgetCardHostTests
             IWidgetCardHost host = tray.Context.WidgetCardHostForTest;
             Assert.IsFalse(tray.Settings.Current.Widget.Enabled, "The harness starts with every consumer off.");
 
-            host.SetCaseOpenCard(true, Place);
-            Assert.IsTrue(tray.Settings.Current.Widget.CaseOpenCard);
-            Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "A consumer on wakes the watcher.");
-
             host.SetPauseWhenBudComesOut(true, Place);
-            host.SetCaseOpenCard(false, Place);
-            Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "The other consumer still needs it.");
+            Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "A consumer on wakes the watcher.");
 
             host.SetPauseWhenBudComesOut(false, Place);
             Assert.IsFalse(tray.Settings.Current.Widget.Enabled, "No consumer left: it can rest.");

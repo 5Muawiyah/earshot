@@ -15,7 +15,7 @@ public sealed class WidgetCardSettingsTests
 
     private static readonly SettingsRowId[] RowOrder =
     [
-        SettingsRowId.GaugePosition, SettingsRowId.GaugeDisplay, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave, SettingsRowId.CaseCard,
+        SettingsRowId.GaugePosition, SettingsRowId.GaugeDisplay, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave,
         SettingsRowId.LowBattery, SettingsRowId.LeftClick, SettingsRowId.HandBack, SettingsRowId.Connect, SettingsRowId.Disconnect,
         SettingsRowId.CheckForUpdates, SettingsRowId.CheckAutomatically,
     ];
@@ -36,14 +36,14 @@ public sealed class WidgetCardSettingsTests
 
             string[] expectedShape =
             [
-                "GaugePosition", "GaugeDisplay", "OtherDevice", "PauseBud", "PauseLeave", "CaseCard", "LowBattery", "LeftClick", "HandBack",
+                "GaugePosition", "GaugeDisplay", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "LeftClick", "HandBack",
                 "Divider", "Head:Shortcuts", "Connect", "Disconnect", "Divider", "Head:Updates", "CheckForUpdates", "CheckAutomatically",
             ];
             CollectionAssert.AreEqual(expectedShape, shape);
             string[] labels = card.CurrentSettingsLayout.Items.Where(i => i.Kind == SettingsItemKind.Row).Select(i => i.Label).ToArray();
             string[] expectedLabels =
             [
-                "Gauge position", "Gauge display", "Other device", "Pause when a bud comes out", "Pause when AirPods leave this PC", "Case-open card",
+                "Gauge position", "Gauge display", "Other device", "Pause when a bud comes out", "Pause when AirPods leave this PC",
                 "Low battery alert", "Left click connects", "Hand back on shut down, sleep and Exit", "Connect", "Disconnect",
                 "Check for updates", "Check automatically",
             ];
@@ -84,7 +84,7 @@ public sealed class WidgetCardSettingsTests
             foreach (int dpi in CardKit.Scales)
             {
                 using WidgetCard card = CardKit.NewCard(dark: false);
-                CardSettingsValues values = FakeCardHost.Defaults() with { ConnectFailure = "That shortcut is used by another program.", InEarProofMissing = true, LidProofMissing = true };
+                CardSettingsValues values = FakeCardHost.Defaults() with { ConnectFailure = "That shortcut is used by another program.", InEarProofMissing = true };
                 card.Render(CardKit.SettingsModel(values), dpi);
                 SettingsLayout layout = card.CurrentSettingsLayout!;
 
@@ -229,35 +229,38 @@ public sealed class WidgetCardSettingsTests
         });
     }
 
-    // ---- The rows whose feature waits on a proved field
+    // ---- The row whose feature waits on the in-ear signal
 
     [TestMethod]
-    public void ARowWhoseFeatureWaitsOnAProvedFieldSaysSoInOneLineAndKeepsItsToggle()
+    public void ARowWhoseFeatureWaitsOnTheInEarSignalSaysSoInOneLineAndKeepsItsToggle()
     {
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
-            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InEarProofMissing = true, LidProofMissing = true }), 96);
+            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InEarProofMissing = true }), 96);
             using Bitmap bitmap = CardKit.Render(card);
 
-            foreach ((SettingsRowId id, string caption) in new[]
-            {
-                (SettingsRowId.PauseBud, WidgetCopy.SettingsWaitsOnInEar),
-                (SettingsRowId.CaseCard, WidgetCopy.SettingsWaitsOnLid),
-            })
-            {
-                SettingsItem row = CardKit.Row(card, id);
-                Assert.AreEqual(caption, row.Sub);
-                Assert.AreEqual(44, row.Bounds.Height, id + ": the caption is one line, so the row is a two-line row.");
-                Assert.IsTrue(CardKit.HasInk(bitmap, row.SubRect, bitmap.GetPixel(0, 0)), id + ": the caption is drawn.");
-                Assert.IsFalse(row.A.IsEmpty, id + ": the toggle stays.");
-                StringAssert.Contains(caption, "cannot yet tell");
-                Assert.IsFalse(caption.Contains("set-up", StringComparison.OrdinalIgnoreCase), id + ": set-up cannot prove this field, so the caption must not promise it.");
-            }
+            SettingsItem row = CardKit.Row(card, SettingsRowId.PauseBud);
+            Assert.AreEqual(WidgetCopy.SettingsWaitsOnInEar, row.Sub);
+            Assert.AreEqual(44, row.Bounds.Height, "The caption is one line, so the row is a two-line row.");
+            Assert.IsTrue(CardKit.HasInk(bitmap, row.SubRect, bitmap.GetPixel(0, 0)), "The caption is drawn.");
+            Assert.IsFalse(row.A.IsEmpty, "The toggle stays.");
+            StringAssert.Contains(WidgetCopy.SettingsWaitsOnInEar, "cannot yet tell");
 
             card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
-            Assert.IsNull(CardKit.Row(card, SettingsRowId.PauseBud).Sub, "Proved: no caption.");
-            Assert.IsNull(CardKit.Row(card, SettingsRowId.CaseCard).Sub, "Proved: no caption.");
+            Assert.IsNull(CardKit.Row(card, SettingsRowId.PauseBud).Sub, "Known: no caption.");
+        });
+    }
+
+    [TestMethod]
+    public void ThereIsNoCaseOpenCardRow()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using WidgetCard card = CardKit.NewCard(dark: false);
+            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+
+            Assert.IsFalse(card.CurrentSettingsLayout!.Items.Any(i => i.Label.Contains("Case-open card", StringComparison.OrdinalIgnoreCase)));
         });
     }
 
@@ -268,11 +271,10 @@ public sealed class WidgetCardSettingsTests
             page =>
             {
                 CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.PauseBud, SettingsPart.Toggle));
-                CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.CaseCard, SettingsPart.Toggle));
 
-                CardKit.AssertCalls(page.Host, "pauseBud:False", "caseCard:False");
+                CardKit.AssertCalls(page.Host, "pauseBud:False");
             },
-            host => host.Values = host.Values with { InEarProofMissing = true, LidProofMissing = true });
+            host => host.Values = host.Values with { InEarProofMissing = true });
     }
 
     // ---- Opening and leaving the page
@@ -365,7 +367,6 @@ public sealed class WidgetCardSettingsTests
     [TestMethod]
     [DataRow("PauseBud", "pauseBud:False")]
     [DataRow("PauseLeave", "pauseLeave:False")]
-    [DataRow("CaseCard", "caseCard:False")]
     [DataRow("LeftClick", "leftClick:True")]
     [DataRow("HandBack", "handBack:False")]
     [DataRow("CheckAutomatically", "checkAuto:True")]

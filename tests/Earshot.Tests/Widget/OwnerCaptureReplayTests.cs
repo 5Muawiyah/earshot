@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Earshot.Infra;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -322,6 +323,86 @@ public sealed class OwnerCaptureReplayTests
                 .OrderByDescending(g => g.Count())
                 .First().Key;
             Assert.AreEqual((true, true, false), (modal.Item1, modal.Item2, modal.Item3), name);
+        }
+    }
+
+    // A clock the replay sets from the messages' own times, so the service's idea of "now" is the capture's.
+    private sealed class ReplayClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    // Through the real service, with a fake watcher source and a fake paired model, keeping each message's own tag,
+    // signal and time.
+    private static WidgetSnapshot ThroughTheService(IReadOnlyList<ReplayMessage> messages, out DateTimeOffset now)
+    {
+        using var temp = new TempFolder();
+        var log = new CapturingLog();
+        var settings = new JsonSettingsStore(temp.File("settings.json"), log);
+        var source = new FakeAdvertisementSource();
+        var clock = new ReplayClock { Now = messages[0].At };
+        using var service = new WidgetStatusService(
+            () => source, settings, new Phase3.FakeDeviceMonitor(clock), () => null, log, action => action(), clock,
+            new FakePairedModelSource(OwnersModel));
+        service.Start();
+        foreach (ReplayMessage message in messages)
+        {
+            clock.Now = message.At;
+            source.Raise(new AdvertisementSample(ProximityParser.AppleCompanyId, message.Section, message.Rssi, message.At, message.Tag));
+        }
+
+        clock.Now = messages[^1].At + TimeSpan.FromSeconds(1);
+        now = clock.Now;
+        return service.Current;
+    }
+
+    [TestMethod]
+    public void ThroughTheServiceTheCaptureShowsTheBudsTheCaseAndTheLowerBudOnTheGauge()
+    {
+        IReadOnlyList<ReplayMessage> messages = Baseline();
+
+        WidgetSnapshot snapshot = ThroughTheService(messages, out DateTimeOffset now);
+
+        int?[] buds = [snapshot.Left.Percent, snapshot.Right.Percent];
+        CollectionAssert.AreEquivalent(new int?[] { 50, 60 }, buds);
+        Assert.AreEqual(100, snapshot.Case.Percent);
+        Assert.AreEqual(false, snapshot.Case.Charging);
+        Assert.AreEqual(true, snapshot.Left.Charging);
+        Assert.AreEqual(true, snapshot.Right.Charging);
+        Assert.AreEqual(BroadcastSelectionState.Chosen, snapshot.Selection);
+        Assert.AreEqual(1, snapshot.Counters.Sets, "One set from the two senders.");
+        Assert.AreEqual(0, snapshot.Counters.BudOrderDisagree);
+        Assert.AreEqual(0, snapshot.Counters.ModelMismatch);
+        Assert.IsGreaterThan(0, snapshot.Counters.UnknownForm, "The short form is counted by shape and never decoded.");
+        Assert.IsGreaterThan(0, snapshot.Counters.Chosen);
+        Assert.IsLessThanOrEqualTo(
+            snapshot.Counters.OkForm,
+            snapshot.Counters.Chosen + snapshot.Counters.OtherSet + snapshot.Counters.NoPairedModel + snapshot.Counters.ModelMismatch + snapshot.Counters.ColourMismatch,
+            "Every documented-form message lands in at most one of the classes.");
+        Assert.AreEqual(50, BatteryFreshness.Shown(snapshot, now).Gauge?.Percent);
+    }
+
+    [TestMethod]
+    public void ThroughTheServiceTheSetupRecordsShowFullBudsAndAHalfFullCase()
+    {
+        IReadOnlyList<string> files = OwnerCaptureReplay.SetupRecordFiles();
+        if (files.Count == 0)
+        {
+            Assert.Inconclusive("No saved set-up record is on this machine.");
+        }
+
+        foreach (string file in files)
+        {
+            IReadOnlyList<ReplayMessage> messages = OwnerCaptureReplay.LoadSetupRecord(file)!;
+            WidgetSnapshot snapshot = ThroughTheService(messages, out _);
+            string name = Path.GetFileName(file);
+
+            Assert.AreEqual(100, snapshot.Left.Percent, name);
+            Assert.AreEqual(100, snapshot.Right.Percent, name);
+            Assert.AreEqual(50, snapshot.Case.Percent, name);
+            Assert.AreEqual(0, snapshot.Counters.BudOrderDisagree, name);
         }
     }
 

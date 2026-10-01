@@ -48,8 +48,9 @@ public sealed class EarshotSettings
     public Earshot.Streaming.StreamingSettings Streaming { get; set; } = Earshot.Streaming.StreamingSettings.Default;
 
     // v1.1: the AirPods widget's data side. Defaults on (Earshot.Widget.WidgetSettings.Default), so an
-    // older settings file with no Widget member reads as the widget's own defaults; every feature that
-    // depends on the advertisement still fails closed on its own until the owner's battery set-ups have proved what it needs.
+    // older settings file with no Widget member reads as the widget's own defaults. A member the widget no longer
+    // reads (the case-open card setting) is still kept and written back, so an older file loads and a newer one
+    // is read by an older build.
     public Earshot.Widget.WidgetSettings Widget { get; set; } = Earshot.Widget.WidgetSettings.Default;
 }
 

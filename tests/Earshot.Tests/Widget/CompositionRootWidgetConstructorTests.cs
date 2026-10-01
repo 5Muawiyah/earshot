@@ -33,11 +33,11 @@ public sealed class CompositionRootWidgetConstructorTests
             "BuildWidget must call WidgetStatusService's public constructor, not the internal, test-only " +
             "overload that takes the decode table directly.");
         ParameterInfo[] parameters = calls[0].GetParameters();
-        Assert.HasCount(9, parameters,
-            "The public constructor takes exactly 9 parameters, the last the proof store; a call with more is " +
-            "the internal overload.");
-        Assert.AreEqual(typeof(DecodeProofStore), parameters[^1].ParameterType,
-            "The table and the broadcast observation must come from the proof store.");
+        Assert.HasCount(8, parameters,
+            "The public constructor takes exactly 8 parameters, the last the paired model source; a call with more " +
+            "is the internal overload.");
+        Assert.AreEqual(typeof(IPairedModelSource), parameters[^1].ParameterType,
+            "The candidates come from the paired AirPods' model.");
     }
 
     // Mirrors WidgetAtRestTests' own IL walker (a full operand-size table is needed to skip variable-length

@@ -24,11 +24,8 @@ namespace Earshot;
 // too, the same FileLog(Paths.Current.LogFolder) every other probe target already uses.
 //
 // Every fixture rendered here is synthetic: the battery percentages, the read time and the where-state are
-// all made up for layout purposes, not read from a device. In particular, the left and right bud
-// percentages (70% and 60%) are values production only produces once two of the owner's own set-ups have
-// proved the bud nibble order (DecodeProof), so until then a real snapshot's Left.Percent and Right.Percent
-// are null (WidgetCopy.Percent(null), "No reading") and only the case nibble decodes. These captures preview
-// the finished layout, not a claim about what the widget shows on the owner's own hardware.
+// all made up for layout purposes, not read from a device. These captures preview the layout, including a part
+// whose value is old and so drawn greyed, not a claim about what the widget shows on the owner's own hardware.
 //
 // The card's window handle, if RenderContent's caller ever created one at all, is never shown, so
 // the transient backdrop the card asks DWM for (DwmExtendFrameIntoClientArea with a transient window
@@ -90,27 +87,25 @@ internal static partial class Program
         ctx.ExitCode = files.Any(f => f.Bytes == 0) ? ExitCodes.IoError : ExitCodes.Ok;
     }
 
-    // The two fixed synthetic snapshots the design asks for: on this PC with the left bud charging and
-    // the right bud in the ear, read two minutes ago; and elsewhere.
+    // The fixed synthetic snapshots the design asks for: on this PC with the left bud charging and the right bud
+    // in the ear, read five seconds ago (every value fresh); the same read four minutes ago (every value greyed);
+    // and elsewhere.
     internal static IReadOnlyList<(string Name, WidgetSnapshot Snapshot)> ProbeWidgetSnapshots(DateTimeOffset now) =>
     [
-        ("this-pc", WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
-        {
-            Where = AirPodsWhere.ThisPc,
-            Left = new PartReading(70, true, null) { ReadAt = now - TimeSpan.FromMinutes(2) },
-            Right = new PartReading(60, false, true) { ReadAt = now - TimeSpan.FromMinutes(2) },
-            Case = new PartReading(90, false, null) { ReadAt = now - TimeSpan.FromMinutes(2) },
-            BatteryReadAt = now - TimeSpan.FromMinutes(2),
-        }),
-        ("elsewhere", WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
-        {
-            Where = AirPodsWhere.Elsewhere,
-            Left = new PartReading(70, true, null) { ReadAt = now - TimeSpan.FromMinutes(2) },
-            Right = new PartReading(60, false, true) { ReadAt = now - TimeSpan.FromMinutes(2) },
-            Case = new PartReading(90, false, null) { ReadAt = now - TimeSpan.FromMinutes(2) },
-            BatteryReadAt = now - TimeSpan.FromMinutes(2),
-        }),
+        ("this-pc", ProbeBatterySnapshot(AirPodsWhere.ThisPc, now - TimeSpan.FromSeconds(5))),
+        ("elsewhere", ProbeBatterySnapshot(AirPodsWhere.Elsewhere, now - TimeSpan.FromSeconds(5))),
+        ("greyed", ProbeBatterySnapshot(AirPodsWhere.ThisPc, now - TimeSpan.FromMinutes(4))),
     ];
+
+    private static WidgetSnapshot ProbeBatterySnapshot(AirPodsWhere where, DateTimeOffset readAt) =>
+        WidgetSnapshot.Empty(WidgetWatcherState.Started) with
+        {
+            Where = where,
+            Left = new PartReading(70, true, null) { ReadAt = readAt },
+            Right = new PartReading(60, false, true) { ReadAt = readAt },
+            Case = new PartReading(90, false, null) { ReadAt = readAt },
+            BatteryReadAt = readAt,
+        };
 
     internal static IReadOnlyList<ProbeWidgetFile> RenderProbeWidgets(string folder)
     {
@@ -184,47 +179,32 @@ internal static partial class Program
         }
     }
 
-    // The card variants the widget card probe renders, from the same two fixed synthetic snapshots the
-    // gauge already uses. "this-pc" and "elsewhere" are the card as it renders with a reading (AutoPauseAvailable
-    // false in both, so the switch row never appears). "auto-pause-preview" is a preview only: production never
-    // sets AutoPauseAvailable true until the in-ear bits are proved, which a set-up cannot do. "set-up-button"
-    // is the card with no reading at all, and "set-up-button-cannot-read" the same after a set-up that could
-    // not read the AirPods. The "setup-" variants are every page of the battery set-up, with fixed picks.
+    // The card variants the widget card probe renders, from the same fixed synthetic snapshots the gauge already
+    // uses. "this-pc" and "elsewhere" are the card as it renders with fresh values (AutoPauseAvailable false in both,
+    // so the switch row never appears); "greyed" is the same values read four minutes ago, drawn greyed with their
+    // age; "no-reading" is a card with no value for any part. "auto-pause-preview" is a preview only: production
+    // never sets AutoPauseAvailable true until the in-ear signal is known.
     internal static IReadOnlyList<(string Variant, WidgetCardModel Model)> ProbeWidgetCardVariants(DateTimeOffset now)
     {
         IReadOnlyList<(string Name, WidgetSnapshot Snapshot)> snapshots = ProbeWidgetSnapshots(now);
         WidgetSnapshot thisPc = snapshots[0].Snapshot;
         WidgetSnapshot elsewhere = snapshots[1].Snapshot;
-        WidgetSnapshot unclaimed = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: false);
-        WidgetSnapshot cannotRead = unclaimed with { SetupCouldNotRead = true };
-        var picks = new BatterySetupPicks(80, 60, 90, LeftCharging: true, RightCharging: true, CaseCharging: false);
-
-        WidgetCardModel SetupPage(WidgetCardView view, SetupViewModel page) => new(
-            unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true, ButtonEnabled: true,
-            OtherDeviceLabel: "", Now: now, ShowSetupButton: true, View: view, Setup: page);
+        WidgetSnapshot greyed = snapshots[2].Snapshot;
+        WidgetSnapshot none = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
 
         return
         [
             ("this-pc", new WidgetCardModel(thisPc, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
-                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowSetupButton: false)),
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
             ("elsewhere", new WidgetCardModel(elsewhere, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
-                ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now, ShowSetupButton: false)),
+                ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now)),
+            ("greyed", new WidgetCardModel(greyed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
+            ("no-reading", new WidgetCardModel(none, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now)),
             ("auto-pause-preview", new WidgetCardModel(thisPc with { AutoPauseAvailable = true },
                 AutoPauseOn: false, ShowSwitch: true, ConnectIntent: false, ButtonEnabled: true,
-                OtherDeviceLabel: "", Now: now, ShowSetupButton: false)),
-            ("set-up-button", new WidgetCardModel(unclaimed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
-                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowSetupButton: true)),
-            ("set-up-button-cannot-read", new WidgetCardModel(cannotRead, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true,
-                ButtonEnabled: true, OtherDeviceLabel: "", Now: now, ShowSetupButton: true)),
-            ("setup-listening", SetupPage(WidgetCardView.SetupListening, SetupViewModel.Listening(spinnerFrame: 3))),
-            ("setup-pick", SetupPage(WidgetCardView.SetupPick, SetupViewModel.Pick(picks))),
-            ("setup-done-battery-set-up", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.BatterySetUp))),
-            ("setup-done-case-set-up", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUp))),
-            ("setup-done-buds-same", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CaseSetUpBudsSame))),
-            ("setup-done-could-not-read", SetupPage(WidgetCardView.SetupDone, SetupViewModel.Done(BatterySetupResultStatus.CouldNotRead))),
-            ("setup-failed-not-found", SetupPage(WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.NotFound))),
-            ("setup-failed-ambiguous", SetupPage(WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.Ambiguous))),
-            ("setup-failed-bluetooth-off", SetupPage(WidgetCardView.SetupFailed, SetupViewModel.Failed(BatterySetupListenStatus.WatcherNotStarted))),
+                OtherDeviceLabel: "", Now: now)),
         ];
     }
 

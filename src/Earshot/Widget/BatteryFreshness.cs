@@ -59,6 +59,12 @@ internal static class BatteryFreshness
         return age <= window;
     }
 
+    public static ShownBattery Shown(WidgetSnapshot snapshot, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return Shown(snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset, snapshot.Where == AirPodsWhere.ThisPc, now);
+    }
+
     public static ShownBattery Shown(
         PartReading left, PartReading right, PartReading caseReading, PartReading headset, bool onThisPc, DateTimeOffset now)
     {
