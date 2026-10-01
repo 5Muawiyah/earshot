@@ -10,6 +10,7 @@ namespace Earshot;
 
 // probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>]
 // probe icon --out <folder> [--json]
+// probe setup-values [--out <path>]
 //
 // Read-only diagnostics that reuse the production selection code. Each target is one elidable
 // partial implemented in its feature's folder (Audio\ProbeAudio.cs and so on); a missing target
@@ -20,7 +21,7 @@ namespace Earshot;
 internal static partial class Program
 {
     internal const string ProbeUsage =
-        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json] | probe service [--json] [--out <path>]";
+        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json] | probe service [--json] [--out <path>] | probe setup-values [--out <path>]";
 
     internal const string ProbeIconTarget = "icon";
 
@@ -105,7 +106,7 @@ internal static partial class Program
 
                 outPath = args[++i];
             }
-            else if (a == "all" || a == ProbeIconTarget || a == ProbeWidgetTarget || a == ProbeServiceTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
+            else if (a == "all" || a == ProbeIconTarget || a == ProbeWidgetTarget || a == ProbeServiceTarget || a == ProbeSetupValuesTarget || ProbeTargets.Contains(a, StringComparer.Ordinal))
             {
                 if (target is not null)
                 {
@@ -135,7 +136,9 @@ internal static partial class Program
         }
 
         IReadOnlyList<string> targets = target is null or "all" ? ProbeTargets : [target];
-        request = new ProbeRequest(targets, json, outPath);
+
+        // setup-values is read by a script, so its report is always the JSON, with no heading above it.
+        request = new ProbeRequest(targets, json || target == ProbeSetupValuesTarget, outPath);
         error = null;
         return true;
     }
@@ -224,6 +227,7 @@ internal static partial class Program
             case ProbeIconTarget: ProbeIcon(ctx, outPath); break;
             case ProbeWidgetTarget: ProbeWidget(ctx, outPath); break;
             case ProbeServiceTarget: ProbeService(ctx); break;
+            case ProbeSetupValuesTarget: ProbeSetupValues(ctx); break;
             default:         break;
         }
     }
@@ -235,6 +239,7 @@ internal static partial class Program
     static partial void ProbeTask(ProbeContext ctx);
     static partial void ProbeBattery(ProbeContext ctx);
     static partial void ProbeService(ProbeContext ctx);
+    static partial void ProbeSetupValues(ProbeContext ctx);
 
     // folder: where the images go (probe icon's --out).
     static partial void ProbeIcon(ProbeContext ctx, string? folder);

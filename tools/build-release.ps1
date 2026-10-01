@@ -17,7 +17,11 @@
       6. writes the zip's SHA-256 beside it as Earshot-<version>-win-x64.zip.sha256, in the
          sha256sum form (hex, two spaces, file name), UTF-8 without a byte order mark,
          which is what the in-app update reads from the release;
-      7. prints the zip size and its SHA-256.
+      7. copies installer\earshot.ps1 to artifacts\earshot.ps1, byte for byte, after checking it is
+         plain ASCII (Windows PowerShell 5.1 does not decode an octet-stream download as UTF-8, so any
+         other byte would be mangled before it ran), and records its SHA-256, in lower-case hex, as
+         script_sha256 beside zip_sha256, so the release notes can carry both;
+      8. prints the zip size and its SHA-256.
 
     Full output goes to the log folder. The summary is JSON on stdout. Any failure
     exits non-zero and nothing is left in artifacts.
@@ -42,6 +46,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $result = [ordered]@{
     root = $Root; version = ''; published_files = 0
     publish_dir = ''; zip = ''; zip_bytes = 0; zip_sha256 = ''; checksum_file = ''
+    script = ''; script_sha256 = ''
     log = (Join-Path $LogDir 'publish.log'); problems = @()
 }
 
@@ -72,6 +77,16 @@ $zipPath = Join-Path $artifactsDir ("Earshot-$version-win-x64.zip")
 $result.zip = $zipPath
 $checksumPath = $zipPath + '.sha256'
 $result.checksum_file = $checksumPath
+$scriptSource = Join-Path $Root 'installer\earshot.ps1'
+$scriptPath = Join-Path $artifactsDir 'earshot.ps1'
+$result.script = $scriptPath
+
+# The install script is attached to the release as it is in the repository. It is checked first, so a script that
+# would be mangled in transit stops the release before any time is spent publishing.
+if (-not (Test-Path $scriptSource -PathType Leaf)) { Stop-Release "The install script was not found: $scriptSource" }
+$scriptBytes = [System.IO.File]::ReadAllBytes($scriptSource)
+$nonAscii = @($scriptBytes | Where-Object { $_ -ge 0x80 }).Count
+if ($nonAscii -gt 0) { Stop-Release "installer\earshot.ps1 holds $nonAscii byte(s) that are not plain ASCII, so a download of it would be mangled before it ran." }
 
 # A leftover file from an earlier publish stops the manifest being written, and an old zip must never
 # be mistaken for this run's.
@@ -81,6 +96,7 @@ try {
     New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
     if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
     if (Test-Path $checksumPath) { Remove-Item -Force $checksumPath }
+    if (Test-Path $scriptPath) { Remove-Item -Force $scriptPath }
 }
 catch { Stop-Release ("Could not clear the publish and artifacts folders: " + $_.Exception.Message) }
 
@@ -176,6 +192,16 @@ try {
 catch {
     Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
     Stop-Release ("The checksum file could not be written: " + $_.Exception.Message)
+}
+
+# The install script, byte for byte, with its own SHA-256 for the release notes.
+try {
+    [System.IO.File]::WriteAllBytes($scriptPath, $scriptBytes)
+    $result.script_sha256 = (Get-FileHash -Algorithm SHA256 -Path $scriptPath).Hash.ToLowerInvariant()
+}
+catch {
+    Remove-Item -Force $zipPath, $checksumPath, $scriptPath -ErrorAction SilentlyContinue
+    Stop-Release ("The install script could not be copied: " + $_.Exception.Message)
 }
 $result.ok = $true
 $result | ConvertTo-Json -Depth 4

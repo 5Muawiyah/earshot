@@ -15,7 +15,7 @@ and the evidence behind each run.
 | 3 | Keep the AirPods on A2DP, so a browser tab or a game cannot drop them to call quality | The read-only walk from the audio endpoints to both the A2DP and Hands-Free filters shows both filters answer, so the connect path is reachable | Test 06, pending |
 | 4 | Show no battery figure that was not read off the device | Three independent read-only checks, each run against a positive control so a broken query could not be mistaken for a missing value | Done, see [What it does not do](#what-it-does-not-do). The same check with the AirPods disconnected is Test 11, pending |
 | 5 | Ask for one administrator prompt at setup and one per update, and none in everyday use | The elevated worker's argument-validation unit tests confirm it refuses anything it does not expect | Test 15, Uninstall reversal, which exercises the live setup and its reversal, pending |
-| 6 | Hand the AirPods back at shut down, sleep and Exit, once Hand back is ticked (it is off by default): release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting; `tests/Earshot.Tests/Integration/Coordinator/ExitHandBackTests.cs` proves the same order for Exit | No live run yet. Tests 17, 18 and 20, pending; see [verification.md](verification.md) |
+| 6 | Hand the AirPods back at shut down, sleep and Exit, once Hand back is ticked (it is on for a new install and never changed for an existing one; a settings file with no member for it reads as off): release them, then block their device nodes again, before this computer can grab them back | `tests/Earshot.Tests/Integration/Coordinator/HandBackTests.cs` proves the disconnect-then-block order, the two caps, and each reason a block is withheld, against fakes and a moved clock; `tests/Earshot.Tests/Phase1/TrayHandBackTests.cs` proves the reply is actually held open on the real window procedure for `WM_ENDSESSION` and `WM_POWERBROADCAST`, that a connect click is still refused once the hold returns because the session is still ending, and that the menu item toggles the setting; `tests/Earshot.Tests/Integration/Coordinator/ExitHandBackTests.cs` proves the same order for Exit | No live run yet. Tests 17, 18 and 20, pending; see [verification.md](verification.md) |
 
 ## Widget and later requirements
 
@@ -32,6 +32,8 @@ Every test below runs against a stand-in. None of these has had a live run.
 | 13 | Pause when the AirPods leave this PC: only when this PC was playing to them, before Earshot's own disconnects, never resumes, none when two sessions play | `PauseOnLeaveTests.cs` and `WindowsMediaSessionsTests.cs` | Test 21, pending |
 | 14 | Updates: nothing downloads before Update, the zip is checked against the published `.sha256`, the installed copy checks it again and installs after one administrator prompt, Update is offered only by an installed copy | `tests/Earshot.Tests/Update` | None yet. Nothing has updated a real install |
 | 15 | Switch timing: one `Switch to-pc:` or `Switch to-phone:` log line per switch | `tests/Earshot.Tests/App/SwitchTimelineTextTests.cs` | Test 16, pending |
+| 16 | The install script: one line installs, updates, repairs or uninstalls; the zip's SHA-256 is checked before anything is unzipped and any mismatch ends the run with one plain line; one administrator prompt, handed to Earshot's own verbs, which check the zip again in an administrators-only folder; no menu when no one can answer; Uninstall keeps the settings unless asked. The checksum catches a damaged download, not a compromised release, because the script and the zip come from the same release | `tests/Earshot.Tests/Installer` runs `installer\earshot.ps1` in Windows PowerShell 5.1 and PowerShell 7 against a local release feed and a stub install root; `tests/Earshot.Tests/Update/InstallZipTests.cs`, `tests/Earshot.Tests/App/ProbeSetupValuesTests.cs` and `tests/Earshot.Tests/App/TrayExitCommandTests.cs` cover the verbs it uses. The PowerShell 7 rows run on the hosted build | None yet. Nothing has installed, updated or repaired a real PC with it, and the real administrator prompt has not been shown by any test |
+| 17 | New installs: Hand back on shut down, sleep and Exit on, and Open on startup on; an existing settings file keeps its saved values | `tests/Earshot.Tests/Infra/JsonSettingsStoreTests.cs` (no file and no backup gives both on; a file, a backup, a file without the member and a reset file do not) | None yet |
 
 ## What it does not do
 
@@ -60,7 +62,7 @@ Every test below runs against a stand-in. None of these has had a live run.
   blocks again the next time it sees them enabled and unused, but a boot in
   between can let Windows page them.
 - **Guarantee the shutdown-while-connected case.** With Hand back on shut
-  down, sleep and Exit on (it is off by default), Earshot releases the
+  down, sleep and Exit on (it is on for a new install), Earshot releases the
   AirPods and blocks the nodes again inside its own cap of 4 seconds at a shut
   down, restart or sign-out, and 1.5 seconds at sleep. Exit uses the 4 second
   cap too. It cannot do any of that when Windows gives it no notice at all: a
@@ -90,8 +92,10 @@ Every test below runs against a stand-in. None of these has had a live run.
 - **Rule out a stranger's AirPods completely.** A same-model stranger with a
   lower battery reading than yours can pass the ownership rule. The owner
   accepted that risk.
-- **Protect an update against a compromised release or account.** The
-  checksum comes from the same release and the app is not signed.
+- **Protect an update or an install against a compromised release or account.**
+  The checksum comes from the same release as the zip, and, for the install
+  script, as the script itself, so it catches a damaged download and not a
+  compromised release. The app is not signed.
 - **Claim anything about Administrator protection**, the newer Windows
   elevation model. It is off by default on this machine and has not been
   tested with. Setup follows Microsoft's guidance for a highest-privilege

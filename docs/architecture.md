@@ -49,11 +49,16 @@ Disconnect only asks the AirPods to disconnect.
 With **Hand back on shut down, sleep and Exit** on, Earshot releases the
 AirPods and blocks their device nodes again before the session actually ends,
 the machine actually sleeps, or Exit closes the tray, so this PC does not take
-them back the moment it restarts or wakes. The setting is off by default: the
-tray's `HandBackOnShutdownAndSleep` and the service's `HandBackAtShutdown` both
-read as off when absent. Until it is ticked, Exit while the AirPods are in use
-closes Earshot without blocking them, and the service does nothing at shut
-down. The setting is in the tray menu and on the widget card's settings page.
+them back the moment it restarts or wakes. The setting is on for a new
+install: a PC with no `settings.json` and no `settings.json.bak` gets it on
+(and Open on startup on) the first time Earshot starts, and the tray then
+copies the choice to the service's `HandBackAtShutdown`. It is never turned on
+for an existing install. A settings file that already exists keeps whatever it
+holds, and one written before the setting existed has no member for it, which
+reads as off, as does a file that was unusable and reset to defaults. While it
+is off, Exit while the AirPods are in use closes Earshot without blocking
+them, and the service does nothing at shut down. The setting is in the tray
+menu and on the widget card's settings page.
 
 **Where it runs.** Entirely inside the tray. For shut down, restart and
 sign-out and for sleep it runs on the real Windows messages the tray's hidden
@@ -793,6 +798,92 @@ Test 15, which exercises setup and this reversal live, has not yet run; the
 elevated launch site it covers has never been exercised. See
 [verification.md](verification.md).
 
+### The install script
+
+`installer\earshot.ps1` installs, updates, repairs and uninstalls Earshot from
+a GitHub release, and is attached to every release as `earshot.ps1`. A person
+runs `irm https://github.com/5Muawiyah/earshot/releases/latest/download/earshot.ps1 | iex`
+in a normal PowerShell window and picks from a small menu. A tool passes the
+action instead, `& ([scriptblock]::Create((irm <the same address>))) -Action
+Install` (or `Update`, `Repair`, `Uninstall`), and when there is no one to
+answer and no action the script prints its usage line and stops, before it
+makes any request. It runs in Windows PowerShell 5.1 and in PowerShell 7, and
+ends with one line: `Earshot: done.` or `Earshot: stopped.` and the reason. It
+never uses `exit`, which would close the person's window when run through
+`iex`.
+
+**What it does, in order.** It refuses an administrator shell, because the
+tray must never run elevated. It reads the latest release once, with
+PowerShell's own default headers. It downloads that release's zip and its
+`.sha256` into a new folder under `%TEMP%` with a progress bar (plain percent
+lines when output is redirected), and checks the zip's SHA-256 before anything
+is unzipped; any mismatch ends the run with one plain line. It then runs the
+unpacked copy's read-only `Earshot.exe probe setup-values --out <file>`, which
+reports the signed-in user's SID, the AirPods' address and container, and what
+is installed, so the script never asks for them. It closes a running tray
+through the tray's own Exit (`Earshot.exe --exit`), so AirPods in use are let
+go and blocked first, and never stops the process. Then it shows the one
+administrator prompt. `-DryRun` does everything up to that prompt and prints
+the command it would have run. Afterwards it starts Earshot unelevated.
+
+**Which verb gets the prompt.**
+
+| Action | Installed copy | What is elevated |
+|---|---|---|
+| Install | none, or unusable | the verified copy's `install-zip <zip> <sha256> <userSid> <address> <containerGuid>`, which copies the zip into a folder only SYSTEM and Administrators can use, hashes the copy against the value on its command line, checks every file against the release's file list, and runs that release's `install` from there; it refuses with exit code 26 when a usable install is already there |
+| Update | usable and older | the installed `Earshot.exe update ...`, the same verb the tray's Update uses, so it works against an install made before the script existed; the script waits for the outcome record in `%ProgramData%\Earshot\update-outcome.json` |
+| Repair | usable | the installed `update` verb with the zip of the installed version's own release, so a repair never changes the version |
+| Uninstall | usable | the installed `Earshot.exe uninstall`; with the program gone, the latest release's verified copy runs `uninstall` instead |
+
+Install over a current install, and Update when nothing is newer, say so and
+change nothing. Uninstall keeps `%APPDATA%\Earshot` and
+`%LOCALAPPDATA%\Earshot` unless `-RemoveSettings` is given (the menu asks);
+it removes the Open on startup entry only when it names Earshot's own program.
+The pairing is never touched.
+
+**No AirPods paired, or several.** The installed program cannot be set up
+without a device to set up for, so the script installs nothing elevated. It
+copies the verified release to `%LOCALAPPDATA%\Programs\Earshot` for the
+signed-in user, starts it, and says to pair the AirPods (or to choose one in
+the menu) and run the line again. That second run takes the normal route and
+removes the per-user copy once the install has finished.
+
+**New installs.** A PC with no settings file gets Hand back on shut down,
+sleep and Exit on, and Open on startup on. The script's last step starts the
+tray, whose first start writes both and copies the Hand back choice to the
+service, so the AirPods are handed back from the first shut down. A settings
+file that exists is never changed by an install, an update or a repair.
+
+**What the checksum does and does not prove.** The script, the zip and the
+checksum come from the same release. The checksum therefore catches a damaged
+or cut-short download; it does not catch a compromised release, because
+whoever could change the zip could change the checksum and the script with it.
+What the elevated verbs add is narrower and real: what lands in Program Files
+is exactly the zip whose hash was fixed on the command line when the prompt
+was shown, copied first into a folder no ordinary program can write to.
+Nothing stops an older release's zip, with its own matching hash, being
+offered, as with the app's own updater. On a first install the program that
+does the checking, the verified copy's `Earshot.exe`, is in a folder the
+person can write to, as it already is when setup is run from an unzipped
+release.
+
+**What it never does.** It does not change or persist an execution policy,
+turn off or weaken Defender, SmartScreen or UAC, add or remove a download's
+Zone.Identifier mark, send a header of its own, fetch or run any other
+script, run or unzip anything before its SHA-256 matched, ask for more than one
+administrator prompt, start Earshot elevated, or stop a process. The file is
+plain ASCII, because Windows PowerShell 5.1 does not decode a download served
+as `application/octet-stream` as UTF-8.
+
+The elevated verbs still refuse to run while `EARSHOT_SAFE_MODE` or
+`EARSHOT_DATA_ROOT` is set, and so does the script's own prompt, which is why
+no test can reach a real install. `tests\Earshot.Tests\Installer` runs the
+script in both shells against a local release feed and a stub install root,
+with only the prompt, the check of this PC, the running tray and the tray start
+replaced. The hosted build is the one that runs the PowerShell 7 half. The real
+`Start-Process -Verb RunAs` has not been run by any test; the first real
+execution is an update on the owner's PC.
+
 ## Command line
 
 One program, `Earshot.exe`, chosen by its first argument.
@@ -804,6 +895,9 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
 | `Earshot.exe probe widget --out <folder>` | Writes the taskbar gauge, the card and the case-open card to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. See [The AirPods widget](#the-airpods-widget). |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
+| `Earshot.exe install-zip <zip> <sha256> <userSid> <address> <containerGuid>` | The elevated half of a first install by the install script, run from the verified download's own copy, never by hand. It refuses (exit code 26) when a usable install is already there. See [The install script](#the-install-script). |
+| `Earshot.exe probe setup-values [--out <path>]` | Read-only. Writes JSON with the signed-in user's SID, the AirPods' address and container, whether one device could be chosen, and the state and version of the installed copy. The install script reads it. |
+| `Earshot.exe --exit` | Asks the running tray to exit through its menu's own Exit, so AirPods in use are handed back first, and ends. Exit code 0 when the tray was asked, 75 when none is running. |
 | `Earshot.exe update <zip> <sha256> <pid> <userSid> <address> <containerGuid>` | The elevated half of Update. Started by the installed Earshot after the one administrator prompt, not by hand. See [Updates](#updates). |
 | `Earshot.exe repair <userSid> <address> <containerGuid>` | The elevated half of Repair. Started by the tray after the one administrator prompt, from the installed copy only, not by hand. See [Repair](#repair). |
 | `Earshot.exe service` | The hand-back service's run mode. Started by Windows from the service's registration, not by hand. |

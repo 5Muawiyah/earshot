@@ -12,6 +12,11 @@ jobs:
     permissions:
       contents: read      # the gate only reads the checkout
     timeout-minutes: 40   # a wedged build fails here rather than at the platform ceiling; the suite took 19 min on 2026-09-29
+    env:
+      # The install script runs in Windows PowerShell 5.1 and in PowerShell 7. A PC without pwsh skips the PowerShell 7
+      # rows of its tests; this image has pwsh, and with this set a skipped row fails instead, so a hosted pass always
+      # means both halves ran.
+      EARSHOT_REQUIRE_PWSH: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -28,6 +33,19 @@ jobs:
       # is the case that once inherited a module path it could not use. Running the gate
       # under pwsh keeps that case executed on every push.
       - run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools\check.ps1 -LogDir "${{ runner.temp }}\earshot-check"
+      # The install script's own tests, once more on their own and by name, so the hosted run shows the PowerShell 7 half of
+      # installer\earshot.ps1 running here, on an image that has pwsh, instead of leaving it counted among the gate's
+      # passes. It uses the gate's own build. The gate's safe mode and temporary data root are set again, because those
+      # tests refuse to go near a real install without them; EARSHOT_REQUIRE_PWSH (above) turns a skipped row into a failure.
+      - name: Install script under PowerShell 7 and Windows PowerShell 5.1
+        if: always()
+        shell: pwsh
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          $env:EARSHOT_SAFE_MODE = '1'
+          $env:EARSHOT_DATA_ROOT = Join-Path $env:RUNNER_TEMP 'earshot-installer-data'
+          dotnet test tests\Earshot.Tests -c Debug --no-build -nologo -v:minimal --filter "FullyQualifiedName~InstallerScriptTests"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # The summary keeps forty lines of a failure. The full build and test logs name every
       # skipped test and hold everything a failing one printed, so they are kept whether the
       # gate passed or not. They do not give a skip's reason: the gate runs at minimal
