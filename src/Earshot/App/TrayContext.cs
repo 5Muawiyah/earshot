@@ -101,6 +101,10 @@ internal sealed record TrayStartOptions(
     // The foreground window as the full-screen rule needs it, given the displays. The real read by default.
     public Func<IReadOnlyList<DisplayInfo>, ForegroundWindowReading?> ForegroundWindowProbe { get; init; } = SystemDisplaySource.ForegroundWindow;
 
+    // The secondary taskbar windows, for the gauges on other displays (Gauge display: All displays). The real enumeration by
+    // default; a test gives the windows a display would have, since a private desktop has none.
+    public Func<SecondaryTaskbarReading> SecondaryTaskbars { get; init; } = SystemDisplaySource.SecondaryTaskbars;
+
     // The names in the install folder, asked only when Earshot.exe was not found, to tell a program that is gone from one
     // that could not be seen. A failure to list is an IOException or an UnauthorizedAccessException, which is kept.
     public Func<string, IEnumerable<string>> ListFolder { get; init; } = static folder => Directory.EnumerateFileSystemEntries(folder);
@@ -399,6 +403,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _gaugeSurfaceFactory = options.GaugeSurfaceFactory;
         _displaySource = options.DisplaySource;
         _foregroundWindowProbe = options.ForegroundWindowProbe;
+        _secondaryTaskbarSource = options.SecondaryTaskbars;
         _exitWaitLimit = options.ExitWaitLimit;
         _coordinatorExitWaitLimit = options.CoordinatorExitWaitLimit;
         _exitNoticeTime = options.ExitNoticeTime;
@@ -426,11 +431,11 @@ internal sealed partial class TrayContext : ApplicationContext
         // against the old one is stale and is reset before the poke, and AppBarRegistration's own
         // registration is redone (OnTaskbarCreatedForAppBar, a no-op the same way while nothing is wired
         // yet); WM_SETTINGCHANGE and WM_DISPLAYCHANGE ask only for an immediate re-measure.
-        _window.TaskbarCreated += (_, _) => { _taskbarWatcher?.ResetBackoff(); _taskbarWatcher?.Poke(); };
+        _window.TaskbarCreated += (_, _) => { _taskbarWatcher?.ResetBackoff(); _taskbarWatcher?.Poke(); PokeSecondaryGauges(resetBackoff: true); };
         _window.TaskbarCreated += (_, _) => OnTaskbarCreatedForAppBar();
         _window.TaskbarCreated += (_, _) => OnTaskbarCreatedForShellWindowHook();
-        _window.SettingChanged += (_, _) => _taskbarWatcher?.Poke();
-        _window.DisplayChanged += (_, _) => _taskbarWatcher?.Poke();
+        _window.SettingChanged += (_, _) => { _taskbarWatcher?.Poke(); PokeSecondaryGauges(resetBackoff: false); };
+        _window.DisplayChanged += (_, _) => { _taskbarWatcher?.Poke(); PokeSecondaryGauges(resetBackoff: false); ReconcileSecondaryGauges(); };
 
         // The settings page lists the connected displays as they were when it was drawn, so a display that comes or goes
         // while the card is open redraws the page (and a choice made from the old list is refused, SetGaugeDisplay).

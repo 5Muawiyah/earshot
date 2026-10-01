@@ -403,9 +403,18 @@ free space on the taskbar, or Earshot cannot read the taskbar at all, the
 gauge steps aside and the ordinary tray icon takes over, without asking.
 
 **Which display.** With more than one display, **Gauge display** on the settings
-page chooses whose taskbar holds the gauge: **Main display** (the default) or
-one of the connected displays, named plainly, for example `Display 2 (1920 x 1080)`.
-Click the button to step through the list. On another display's taskbar the
+page chooses whose taskbar holds the gauge: **Main display** (the default),
+**All displays**, or one of the connected displays, named plainly, for example
+`Display 2 (1920 x 1080)`. Click the button to step through the list. **All
+displays** puts a gauge on the taskbar of every display that has one, at once, all
+with the same content, order and tooltip; each is placed, scaled, raised and
+hidden for full-screen applications by the rules of its own display, so a
+full-screen game on Display 2 hides only Display 2's gauge. A click on a gauge
+opens the card above that gauge, on its display, and the hover tooltip and the
+right-click menu work on each. A display or a taskbar that is plugged in or
+turned on gets a gauge, and one that goes loses it, within about a second; with
+no other taskbar it is the same as **Main display**. While any gauge is on a
+taskbar the tray icon stays out of the way. On another display's taskbar the
 gauge keeps the same two positions: at the right end, 8 pixels left of the
 clock (or of the taskbar's end when that taskbar shows no clock), or 4 pixels
 after the last app button, and it never overlaps anything. Each display's own
@@ -489,7 +498,7 @@ The gear on the card opens it. Rows, top to bottom:
 | Row | Default | Notes |
 |---|---|---|
 | Gauge position | Right end | Right end, or next to apps |
-| Gauge display | Main display | Main display, or one of the connected displays; a line under the row says when the chosen one is not connected or shows no taskbar |
+| Gauge display | Main display | Main display, All displays (offered with more than one display), or one of the connected displays; a line under the row says when the chosen one is not connected or shows no taskbar |
 | Other device | `iPhone` | The label used in "On your <name>", up to 40 characters |
 | Gauge order | Ring, number, bolt | Six pictures of the gauge; pick one |
 | Pause when a bud comes out | On | Built but inactive. Says "Earshot cannot yet tell when a bud is in your ear." and nothing acts, because no documented source gives an in-ear value |
