@@ -90,6 +90,14 @@ internal sealed class ConnectCard : Form, ICardSurface
     private bool _shown;
     private string? _lastFrameProblem;
 
+    // What the last Prepare laid out, and whether it differs from the one before: a card that is on screen is drawn again only
+    // for a change, and moved or resized only when its place or size is not what it already is.
+    private PreparedKey? _prepared;
+    private bool _contentChanged = true;
+    private CardPalette? _borderFor;
+
+    private sealed record PreparedKey(CardContent Content, CardPalette Palette, Size Size, int Dpi);
+
     public ConnectCard(ILog log)
     {
         ArgumentNullException.ThrowIfNull(log);
@@ -155,32 +163,62 @@ internal sealed class ConnectCard : Form, ICardSurface
         _titleBounds = new Rectangle(padX, padY, textWidth, titleHeight);
         _statusBounds = new Rectangle(padX, padY + titleHeight + gap, textWidth, statusHeight);
         Size size = new(width, _statusBounds.Bottom + padY);
+        var key = new PreparedKey(content, palette, size, effectiveDpi);
+        _contentChanged = _contentChanged || _prepared != key;
+        _prepared = key;
         if (!_shown)
         {
             // A card on screen takes its new size and position together in ShowAt.
             ClientSize = size;
         }
 
-        Invalidate();
+        if (!_shown || _contentChanged)
+        {
+            Invalidate();
+        }
+
         return size;
     }
 
+    // Shows the card at bounds. A card that is already on screen is not shown again: a new status in the same place and size is
+    // drawn where it is, with no call to the window manager at all; a different place or size is one placement, with no show and
+    // no hide. Showing and placing it again for every status is what made a card seem to flash when two statuses followed
+    // each other.
     public StepOutcome ShowAt(Rectangle bounds)
     {
         // Reading Handle creates the window, hidden, the first time.
         nint handle = Handle;
+        const string Step = "set-window-pos:show-card";
+        bool onScreen = _shown;
+        if (onScreen && Bounds == bounds)
+        {
+            if (_contentChanged)
+            {
+                ApplyBorderColour(handle);
+                BackColor = _palette.Background;
+                Invalidate();
+                Update();
+                _contentChanged = false;
+            }
+
+            return StepOutcomes.FromWin32(Step, 0, Describe(bounds));
+        }
+
         ApplyBorderColour(handle);
         BackColor = _palette.Background;
         Invalidate();
 
-        const string Step = "set-window-pos:show-card";
-        if (!NativeMethods.SetWindowPos(handle, NativeMethods.HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height,
-                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW))
+        // On screen already: placed, not shown again, and what the move uncovers is repainted rather than copied.
+        uint flags = onScreen
+            ? NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOCOPYBITS
+            : NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW;
+        if (!NativeMethods.SetWindowPos(handle, NativeMethods.HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height, flags))
         {
             return StepOutcomes.FromWin32(Step, unchecked((uint)Marshal.GetLastPInvokeError()), Describe(bounds));
         }
 
         _shown = true;
+        _contentChanged = false;
 
         // Paint now, so the first frame on screen is the card rather than an empty window.
         Update();
@@ -233,6 +271,7 @@ internal sealed class ConnectCard : Form, ICardSurface
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        _borderFor = null;
         ApplyCorners(Handle);
     }
 
@@ -339,10 +378,12 @@ internal sealed class ConnectCard : Form, ICardSurface
 
     private void ApplyBorderColour(nint handle)
     {
-        if (!_dwmFrame || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        if (!_dwmFrame || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000) || _palette == _borderFor)
         {
             return;
         }
+
+        _borderFor = _palette;
 
         // A COLORREF is 0x00BBGGRR. High contrast keeps the system border.
         int colour = _palette.HighContrast

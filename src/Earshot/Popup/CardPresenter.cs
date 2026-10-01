@@ -17,6 +17,12 @@ namespace Earshot.Popup;
 // dismiss timer. The card goes away after DismissAfter, when it is clicked, or on Hide. ShowAsync does the
 // same and reports whether the card went on screen, for a one-time notice that is remembered only once seen.
 //
+// A card that is not on screen is held for SettleDelay before it first appears, and what is held is replaced by every
+// newer Show in that time, so a status that is followed at once by the next ("Connecting", then "Allowing" 43 ms later
+// in the owner's log) is never drawn: the owner sees the second, once. The hold is measured from the first Show and a
+// later one does not extend it, so a stream of statuses cannot keep the card off screen. A card that is on screen takes
+// its new status at once, in place (ConnectCard). ShowAsync is never held: its caller asks whether the card was seen.
+//
 // Where a card after a click goes. The notification area guidance asks for a popup raised by a click to
 // sit near the click, but a result card often comes long after the click (a connect waits for the
 // device), when the cursor may be anywhere. So a NearCursor card is anchored at the first of:
@@ -51,6 +57,11 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     // that comes later still goes to the cursor on the taskbar or the corner near the notification area.
     public static readonly TimeSpan ClickAnchorLifetime = TimeSpan.FromSeconds(60);
 
+    // How long a card that is not on screen is held before it first appears. A UI timing choice: under the 100 ms to 200 ms
+    // within which a response to a click still feels instant, and long enough to take in the second of two statuses that
+    // follow each other (43 ms apart in the owner's log).
+    public static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(150);
+
     private readonly ILog _log;
     private readonly Action<Action> _uiPost;
     private readonly ICardEnvironment _environment;
@@ -62,13 +73,24 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     private Point? _clickAnchor;
     private long _clickAnchorShownAt;
     private bool _disposed;
+    private readonly TimeSpan _settle;
+    private bool _onScreen;
+    private PendingCard? _pending;
+    private ITimer? _settleTimer;
+
+    // A card held before it first appears: what it is to show, and where, until the hold ends.
+    private sealed record PendingCard(CardContent Content, CardAnchor Anchor, Point? ClickPoint);
 
     public CardPresenter(ILog log, Action<Action> uiPost)
-        : this(log, uiPost, new SystemCardEnvironment(log), () => new ConnectCard(log), static () => new FormsCardTimer(), TimeProvider.System)
+        : this(log, uiPost, new SystemCardEnvironment(log), () => new ConnectCard(log), static () => new FormsCardTimer(), TimeProvider.System, SettleDelay)
     {
     }
 
-    internal CardPresenter(ILog log, Action<Action> uiPost, ICardEnvironment environment, Func<ICardSurface> createCard, Func<ICardTimer> createTimer, TimeProvider time)
+    // settle: how long a card that is not on screen is held before it appears; none when null, which is what a test of the rest
+    // of the presenter wants, so it sees every Show at once.
+    internal CardPresenter(
+        ILog log, Action<Action> uiPost, ICardEnvironment environment, Func<ICardSurface> createCard, Func<ICardTimer> createTimer, TimeProvider time,
+        TimeSpan? settle = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(uiPost);
@@ -82,12 +104,16 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         _createCard = createCard;
         _createTimer = createTimer;
         _time = time;
+        _settle = settle ?? TimeSpan.Zero;
     }
+
+    // How long a card that is not on screen is held before it appears, for tests.
+    internal TimeSpan Settle => _settle;
 
     public void Show(CardContent content, CardAnchor anchor)
     {
         ArgumentNullException.ThrowIfNull(content);
-        _uiPost(() => ShowOnUiThread(content, anchor, clickPoint: null));
+        _uiPost(() => ShowOrHold(content, anchor, clickPoint: null));
     }
 
     // Show for a card that follows a click at clickPoint: the cursor position in physical pixels, read
@@ -96,7 +122,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     public void Show(CardContent content, CardAnchor anchor, Point clickPoint)
     {
         ArgumentNullException.ThrowIfNull(content);
-        _uiPost(() => ShowOnUiThread(content, anchor, clickPoint));
+        _uiPost(() => ShowOrHold(content, anchor, clickPoint));
     }
 
     // Show that completes, on the UI thread, with whether the card was put on screen: false when it was held back
@@ -105,7 +131,12 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     {
         ArgumentNullException.ThrowIfNull(content);
         var shown = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _uiPost(() => shown.TrySetResult(ShowOnUiThread(content, anchor, clickPoint)));
+        _uiPost(() =>
+        {
+            // Newer than anything held, and asked about: it goes up now and takes the place of what was waiting.
+            CancelHold();
+            shown.TrySetResult(ShowOnUiThread(content, anchor, clickPoint));
+        });
         return shown.Task;
     }
 
@@ -119,6 +150,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         }
 
         _disposed = true;
+        CancelHold();
         if (_timer is not null)
         {
             _timer.Elapsed -= OnTimerElapsed;
@@ -149,6 +181,47 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         Shell.QUNS_APP => "QUNS_APP",
         _ => "QUNS " + state.ToString(CultureInfo.InvariantCulture),
     };
+
+    // A card that is on screen, or any card when there is no hold, goes up at once. Otherwise it is held, replacing what was
+    // held, and the hold ends SettleDelay after the first card of it.
+    private void ShowOrHold(CardContent content, CardAnchor anchor, Point? clickPoint)
+    {
+        if (_disposed || _settle <= TimeSpan.Zero || _onScreen)
+        {
+            CancelHold();
+            ShowOnUiThread(content, anchor, clickPoint);
+            return;
+        }
+
+        if (_pending is { } replaced)
+        {
+            _log.Write(LogLevel.Debug, "Not shown, a newer card came within " + Milliseconds(_settle) + " ms: " + Describe(replaced.Anchor, replaced.Content) + ".");
+        }
+
+        _pending = new PendingCard(content, anchor, clickPoint);
+        _settleTimer ??= _time.CreateTimer(_ => _uiPost(OnHoldEnded), null, _settle, Timeout.InfiniteTimeSpan);
+    }
+
+    private void OnHoldEnded()
+    {
+        PendingCard? pending = _pending;
+        CancelHold();
+        if (pending is not null)
+        {
+            ShowOnUiThread(pending.Content, pending.Anchor, pending.ClickPoint);
+        }
+    }
+
+    private void CancelHold()
+    {
+        _pending = null;
+        _settleTimer?.Dispose();
+        _settleTimer = null;
+    }
+
+    private static string Describe(CardAnchor anchor, CardContent content) => anchor + " card \"" + content.Title + ": " + content.Status + "\"";
+
+    private static string Milliseconds(TimeSpan span) => ((int)span.TotalMilliseconds).ToString(CultureInfo.InvariantCulture);
 
     // True when the card was put on screen.
     private bool ShowOnUiThread(CardContent content, CardAnchor anchor, Point? clickPoint)
@@ -196,6 +269,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
             if (!shown.Ok)
             {
                 timer.Stop();
+                _onScreen = false;
                 _log.Error("Not shown: " + what + ". " + TrayReport.DescribeStep(shown));
                 ReportHide(card.HideCard());
                 return false;
@@ -207,6 +281,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
                 _clickAnchorShownAt = _time.GetTimestamp();
             }
 
+            _onScreen = true;
             timer.Restart(DismissAfter);
             _log.Write(LogLevel.Debug, string.Create(CultureInfo.InvariantCulture,
                 $"Shown at {bounds.X},{bounds.Y} {bounds.Width}x{bounds.Height}, {dpi} DPI, taskbar {target.Edge}, {where}: {what}."));
@@ -273,6 +348,8 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
 
     private void HideOnUiThread()
     {
+        CancelHold();
+        _onScreen = false;
         _timer?.Stop();
         if (_card is { IsDisposed: false } card)
         {
