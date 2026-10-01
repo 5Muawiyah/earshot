@@ -50,8 +50,8 @@ internal readonly record struct SelectionObservation(
 //     opens its case at least SwitchMarginDb nearer than the linked set's median takes the link, which is how the owner
 //     corrects a link made to somebody else's pair.
 //   - Addresses rotate: when every anchor has been silent for longer than the window, a set whose fields continue the
-//     linked set's last (BroadcastSenderSets.SameFields: model, colour, case level and the two bud levels as an unordered
-//     pair), heard for ContinueAfter with MinMessages in the window and within ContinueWithin of the linked set's last
+//     linked set's last (BroadcastSenderSets.Continues: model, colour and the two bud levels as an unordered pair, and the
+//     case level unless either message gives none), heard for ContinueAfter with MinMessages in the window and within ContinueWithin of the linked set's last
 //     message, is followed under its new addresses. A set with other fields is never followed, however near. A case open
 //     during the loss links as it does with no link at all.
 //   - After LostLimit with no message from an anchor the link and the colour are dropped, and nothing is linked until the
@@ -217,7 +217,7 @@ internal sealed class BroadcastSelector
     private SelectionObservation? TryLink(
         List<BroadcastSet> sets, uint tag, ProximityMessage message, DateTimeOffset at, BroadcastSet? exclude, double? overMedian)
     {
-        if (!CaseKnown(message))
+        if (!BroadcastSenderSets.CaseKnown(message))
         {
             return null;
         }
@@ -260,7 +260,7 @@ internal sealed class BroadcastSelector
         DateTimeOffset last = DateTimeOffset.MinValue;
         foreach (SenderMessage m in set.Messages)
         {
-            if (at - m.At > BroadcastRules.LinkWindow || !CaseKnown(m.Message))
+            if (at - m.At > BroadcastRules.LinkWindow || !BroadcastSenderSets.CaseKnown(m.Message))
             {
                 continue;
             }
@@ -279,8 +279,6 @@ internal sealed class BroadcastSelector
         return median >= BroadcastRules.LinkThresholdDbm ? median : null;
     }
 
-    // A message whose case nibble is a level. 0xF, and 11 to 14, are not.
-    private static bool CaseKnown(ProximityMessage message) => BatteryNibble.ToPercent(message.BatteryB & 0x0F) is not null;
 
     private static double Median(List<double> values)
     {
@@ -303,7 +301,7 @@ internal sealed class BroadcastSelector
         {
             if (set.Messages.Count < BroadcastRules.MinMessages ||
                 set.Newest.At - set.Messages[0].At < BroadcastRules.ContinueAfter ||
-                !set.Messages.Any(m => BroadcastSenderSets.SameFields(m.Message, fields)))
+                !set.Messages.Any(m => BroadcastSenderSets.Continues(fields, m.Message)))
             {
                 continue;
             }

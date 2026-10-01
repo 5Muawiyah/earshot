@@ -305,8 +305,8 @@ times over three seconds, and one of its messages counts as the linked set's onl
 when it matches an anchor's message within two seconds, so a stranger that
 matched once never has its different messages shown. The addresses rotate. When
 every anchor has been silent for longer than the ten second window, a set whose
-fields continue the linked set's last (the same model, colour, case level and two
-bud levels), heard for two seconds with three messages and within 30 seconds of
+fields continue the linked set's last (the same model, colour and two bud levels, and
+the same case level unless either message gives none, since a pair sends it only with a bud in the case), heard for two seconds with three messages and within 30 seconds of
 the old address's last message, is followed under its new addresses, and the values
 already shown stay. A set with other fields is never followed, however near and
 however long it is heard. A case opened during the loss links as it would with no

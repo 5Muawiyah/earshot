@@ -217,6 +217,19 @@ internal static class BroadcastSenderSets
         (x.BatteryB & 0x0F) == (y.BatteryB & 0x0F) &&
         SameBudPair(x.BatteryA, y.BatteryA);
 
+    // Whether a message continues what a linked set last said: the same model and colour and the same two bud levels as
+    // an unordered pair, and the same case level unless either message gives none. A pair's case level is sent only while
+    // a bud is in the case with the lid open, so the same set legitimately goes from a level to none (the buds were taken
+    // out) or back, whatever address it sends from; the bud levels and the colour are what stay.
+    internal static bool Continues(ProximityMessage last, ProximityMessage next) =>
+        last.Model == next.Model &&
+        last.Colour == next.Colour &&
+        SameBudPair(last.BatteryA, next.BatteryA) &&
+        ((last.BatteryB & 0x0F) == (next.BatteryB & 0x0F) || !CaseKnown(last) || !CaseKnown(next));
+
+    // A message whose case nibble is a level. 0xF, and 11 to 14, are not.
+    internal static bool CaseKnown(ProximityMessage message) => BatteryNibble.ToPercent(message.BatteryB & 0x0F) is not null;
+
     private static bool SameBudPair(byte first, byte second)
     {
         int firstHigh = (first >> 4) & 0x0F;

@@ -351,6 +351,55 @@ public sealed class BroadcastSelectorTests
         Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now), "It is lost, but not yet dropped.");
     }
 
+    // A pair sends its case level only with a bud in the case and the lid open. The same set goes from a level to none (the
+    // buds were taken out) or back, so an address change across that is still the same set when the bud levels and the
+    // colour are what they were.
+    [TestMethod]
+    public void AnAddressChangeThatCrossesTheCaseLevelGoingOrComingIsFollowedWhenTheBudLevelsAreTheSame()
+    {
+        // The last thing the pair said was the case open (a level), and the new address says none.
+        SelectorDriver toNone = Linked();
+        toNone.Tick(12);
+        bool followedToNone = false;
+        for (int i = 0; i < 10; i++)
+        {
+            followedToNone |= toNone.Send(SetANewAddress, InUse(true, pairHigh: 0x7, pairLow: 0x4), -55).Followed;
+            toNone.Tick(0.5);
+        }
+
+        Assert.IsTrue(followedToNone, "The last message said a case level; the new address says none: the same set.");
+
+        // The last thing it said was in use (no level), and the new address says one.
+        SelectorDriver toLevel = Linked();
+        InUseRun(toLevel, 4);
+        toLevel.Tick(12);
+        bool followedToLevel = false;
+        for (int i = 0; i < 10; i++)
+        {
+            followedToLevel |= toLevel.Send(SetANewAddress, Bud(first: true, caseNibble: 0x6, pairHigh: 0x7, pairLow: 0x4), -55).Followed;
+            toLevel.Tick(0.5);
+        }
+
+        Assert.IsTrue(followedToLevel, "The last message said no case level; the new address says one: the same set.");
+    }
+    [TestMethod]
+    public void AnAddressChangeWithOtherBudLevelsIsNeverFollowedWhateverItSaysOfTheCase()
+    {
+        SelectorDriver d = Linked();
+        InUseRun(d, 4);
+        d.Tick(12);
+
+        bool followed = false;
+        for (int i = 0; i < 20; i++)
+        {
+            followed |= d.Send(SetANewAddress, InUse(true, pairHigh: 0x9, pairLow: 0xA), -40).Followed;
+            followed |= d.Send(SetANewOtherBud, Bud(first: false, caseNibble: 0x6, pairHigh: 0x9, pairLow: 0xA), -40).Followed;
+            d.Tick(0.5);
+        }
+
+        Assert.IsFalse(followed, "One bud 10% off is another pair.");
+    }
+
     [TestMethod]
     public void AnAddressChangeThatIsFollowedWithinTheThirtySecondsIsFollowedEvenWhenItIsHeardLate()
     {
