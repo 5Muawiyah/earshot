@@ -57,6 +57,14 @@ public sealed class WidgetStatusServiceRealWatcherBindingTests
                 return;
             }
 
+            // A machine with no Bluetooth adapter at all (a hosted build runner is one) cannot run a watcher: Windows stops
+            // it at once with a success code. That says nothing about the late stop this test is about, so it is said, not
+            // failed. On a machine with an adapter, a stop other than RadioNotAvailable still fails.
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063) && await Windows.Devices.Bluetooth.BluetoothAdapter.GetDefaultAsync().AsTask() is null)
+            {
+                Assert.Inconclusive("This machine has no Bluetooth adapter, so no watcher can run here (it stopped with " + snapshot.WatcherErrorName + ").");
+            }
+
             if (snapshot.Watcher == WidgetWatcherState.Stopped && snapshot.WatcherErrorName != "RadioNotAvailable")
             {
                 Assert.Fail("The watcher failed to start with an error other than RadioNotAvailable: " + snapshot.WatcherErrorName + ".");
