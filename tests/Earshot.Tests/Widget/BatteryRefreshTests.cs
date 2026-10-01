@@ -73,6 +73,7 @@ public sealed class BatteryRefreshTests : IDisposable
 
         Assert.IsTrue(refresh.IsCompleted);
         Assert.AreEqual(BatteryRefreshOutcome.Heard, refresh.Result);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "Widget: battery refresh ended: Heard."), "The end is on the log, which the live test reads.");
     }
 
     // A message that was sent before the restart, but reaches the service after it (the UI queue), is not the

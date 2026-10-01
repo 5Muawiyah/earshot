@@ -793,6 +793,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         timer?.Dispose();
+        _log.Info("Widget: battery refresh ended: " + outcome + ".");
         state.Completion.TrySetResult(outcome);
     }
 

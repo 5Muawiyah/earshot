@@ -698,12 +698,12 @@
     # notification-shortcut-exists is 'fail' in every case: the sandbox redirects APPDATA under
     # itself, and nothing here writes Earshot.lnk into it, so the real Test-Path this criterion
     # runs is honestly answering "not found" on a machine where that is correct, exactly as it
-    # would on a real machine Earshot has never started on. battery-setup-reachable, battery-setup-flow
-    # and battery-setup-honest-result are always 'pass': the fake owner answers 'yes' to every set-up
-    # question (the item is there and available, the card went through its three steps, and showed a
-    # figure only for what the set-up proved). low-battery-alert-fires stays 'inconclusive' in every
-    # case: the alert can never be fed a proved reading by this test, whatever the case. explorer-restart-reattach and
-    # positive-control-counters need at least one matching log line to pass; case-open-no-auto-
+    # would on a real machine Earshot has never started on. refresh-battery-reachable, battery-matches-iphone,
+    # battery-greys-when-old, refresh-says-nothing-heard and refresh-reads-again are always 'pass': the fake owner
+    # answers 'yes' to each question. low-battery-alert-fires stays 'inconclusive' in every case: this test sets
+    # no threshold, whatever the case. explorer-restart-reattach, positive-control-counters, airpods-picked-out
+    # and refresh-logged need at least one matching log line to pass (airpods-picked-out is 'inconclusive' and
+    # refresh-logged 'fail' without one, because the fake owner says the refresh happened); case-open-no-auto-
     # connect needs zero, so it is the one criterion that flips the other way as the case grows.
     # atRest: render never reads Active at the close (the last owner action before it is the
     # case-open step, which touches neither "connect" nor "left-click"), so the closing step never
@@ -713,16 +713,16 @@
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
                 'gauge-follows-autohide' = 'pass'; 'gauge-hidden-fullscreen' = 'pass'; 'explorer-restart-reattach' = 'fail'
                 'gauge-card-dpi' = 'pass'; 'gauge-card-theme' = 'pass'; 'gauge-click-behaviour' = 'pass'
-                'positive-control-counters' = 'inconclusive'; 'battery-setup-reachable' = 'pass'
-                'battery-honestly-not-shown' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
+                'positive-control-counters' = 'inconclusive'; 'refresh-battery-reachable' = 'pass'
+                'airpods-picked-out' = 'inconclusive'; 'battery-matches-iphone' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'pass'; 'bluetooth-off-then-on' = 'inconclusive'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
-                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass'
+                'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
                 'gauge-stays-on-top' = 'inconclusive' }
             FindingsInclude = @{
-                'claimFileExistsAtStart' = 'no'; 'batterySetupInMenu' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
+                'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 0; 'refreshEndedLines' = 0
                 'widgetAllSectionsSeen' = $null; 'widgetAppleSectionsSeen' = $null; 'widgetProximityItemsSeen' = $null
                 'caseOpenToggleLinesSeen' = 0; 'widgetWatcherStoppedLine' = $null; 'leftAtRest' = 'yes'
                 'gaugeRaisedLines' = 0; 'gaugeLeftUnderLines' = 0; 'gaugeRingShown' = 'yes' }
@@ -731,16 +731,16 @@
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
                 'gauge-follows-autohide' = 'pass'; 'gauge-hidden-fullscreen' = 'pass'; 'explorer-restart-reattach' = 'pass'
                 'gauge-card-dpi' = 'pass'; 'gauge-card-theme' = 'pass'; 'gauge-click-behaviour' = 'pass'
-                'positive-control-counters' = 'pass'; 'battery-setup-reachable' = 'pass'
-                'battery-honestly-not-shown' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
+                'positive-control-counters' = 'pass'; 'refresh-battery-reachable' = 'pass'
+                'airpods-picked-out' = 'pass'; 'battery-matches-iphone' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
-                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass'
+                'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'pass'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
                 'gauge-stays-on-top' = 'pass' }
             FindingsInclude = @{
-                'claimFileExistsAtStart' = 'no'; 'batterySetupInMenu' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
+                'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 1; 'refreshEndedLines' = 1
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
                 'caseOpenToggleLinesSeen' = 1; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes'
                 'gaugeRaisedLines' = 1; 'gaugeLeftUnderLines' = 1; 'gaugeRingShown' = 'yes' }
@@ -749,16 +749,16 @@
                 'gauge-placement' = 'pass'; 'gauge-follows-buttons' = 'pass'; 'gauge-follows-alignment' = 'pass'
                 'gauge-follows-autohide' = 'pass'; 'gauge-hidden-fullscreen' = 'pass'; 'explorer-restart-reattach' = 'pass'
                 'gauge-card-dpi' = 'pass'; 'gauge-card-theme' = 'pass'; 'gauge-click-behaviour' = 'pass'
-                'positive-control-counters' = 'pass'; 'battery-setup-reachable' = 'pass'
-                'battery-honestly-not-shown' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
+                'positive-control-counters' = 'pass'; 'refresh-battery-reachable' = 'pass'
+                'airpods-picked-out' = 'pass'; 'battery-matches-iphone' = 'pass'; 'where-this-pc' = 'pass'; 'auto-pause-inert' = 'pass'
                 'where-not-connected-honest' = 'pass'; 'case-open-card-honestly-not-shown' = 'pass'
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
-                'battery-setup-flow' = 'pass'; 'battery-setup-honest-result' = 'pass'
+                'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'pass'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
                 'gauge-stays-on-top' = 'pass' }
             FindingsInclude = @{
-                'claimFileExistsAtStart' = 'no'; 'batterySetupInMenu' = 'yes'; 'claimFileExistsAfterCheck' = 'no'
+                'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 2; 'refreshEndedLines' = 2
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
                 'caseOpenToggleLinesSeen' = 2; 'widgetWatcherStoppedLine' = 'any'; 'leftAtRest' = 'yes'
                 'gaugeRaisedLines' = 2; 'gaugeLeftUnderLines' = 2; 'gaugeRingShown' = 'yes' }
