@@ -216,11 +216,13 @@ internal static class CardKit
         SetAutoPause: (_, _) => { },
         GaugePosition: position is { } p ? () => p : null);
 
+    // A part handed in without a read time is stamped with readAt: BatteryFreshness shows only parts that carry a time, so
+    // a figure with none would never be drawn and a test about drawing it would pass on an empty card.
     public static WidgetSnapshot Snapshot(PartReading? left = null, PartReading? right = null, DateTimeOffset? readAt = null) =>
         new(
             AirPodsWhere.ThisPc,
-            left ?? (readAt is { } at ? new PartReading(60, false, null) { ReadAt = at } : PartReading.Unknown),
-            right ?? PartReading.Unknown,
+            Stamped(left, readAt) ?? (readAt is { } at ? new PartReading(60, false, null) { ReadAt = at } : PartReading.Unknown),
+            Stamped(right, readAt) ?? PartReading.Unknown,
             PartReading.Unknown,
             BatteryReadAt: readAt,
             EarReadAt: null,
@@ -233,6 +235,9 @@ internal static class CardKit
         {
             Selection = BroadcastSelectionState.Linked,
         };
+
+    private static PartReading? Stamped(PartReading? part, DateTimeOffset? readAt) =>
+        part is { } reading && reading.ReadAt is null && readAt is { } at ? reading with { ReadAt = at } : part;
 
     public static WidgetCardModel MainModel(WidgetSnapshot? snapshot = null, string? updateVersion = null) =>
         new(snapshot ?? Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, UpdateVersion: updateVersion);

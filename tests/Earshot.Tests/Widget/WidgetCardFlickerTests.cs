@@ -75,6 +75,8 @@ public sealed class WidgetCardFlickerTests
             Application.DoEvents();
             Time.Advance(TimeSpan.FromMilliseconds(400));
             Application.DoEvents();
+            ShownBattery shown = Card!.Model.ShownParts;
+            Assert.IsTrue(shown.Left.Fresh && shown.Right.Fresh, "Sanity: both figures are drawn, so a repaint test is about a card that has figures on it.");
         }
 
         public void Dispose() => Presenter.Dispose();
