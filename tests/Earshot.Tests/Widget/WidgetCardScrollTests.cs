@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 using Earshot.Popup;
+using Earshot.Update;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -28,6 +29,10 @@ public sealed class WidgetCardScrollTests
 
     // Little enough that the page is more than a page and a bit long.
     private static readonly Rectangle TinyWorkArea = new(0, 0, 1280, 400);
+
+    // The work area of a 1024 by 768 screen with a taskbar, the smallest the tests run on (a hosted runner's). A test that gives a
+    // card more room than this is only as good as the screen it runs on.
+    private static readonly Rectangle RunnerWorkArea = new(0, 0, 1024, 728);
 
     // ---- The cap and the bottom edge
 
@@ -94,9 +99,11 @@ public sealed class WidgetCardScrollTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            // A 1080p screen at 150%: the settings page is about 1290 px tall, the work area 1020.
-            var workArea = new Rectangle(0, 0, 1920, 1020);
-            using ScrollPage page = ScrollPage.Open(workArea, dpi: 144);
+            // At 150% the settings page is about 1140 px tall, more than any work area a screen of 1024 by 768 has. The work area is
+            // one a real window can have on any screen the tests run on: a card taller than the screen is cut to it by Windows,
+            // whatever work area the presenter is told, and the test would then measure the screen and not the cap.
+            using ScrollPage page = ScrollPage.Open(RunnerWorkArea, dpi: 144);
+            Rectangle workArea = RunnerWorkArea;
             int bottom = page.Card.Bounds.Bottom;
 
             page.OpenSettings();
@@ -105,6 +112,42 @@ public sealed class WidgetCardScrollTests
             Assert.AreEqual(bottom, page.Card.Bounds.Bottom);
             Assert.AreEqual(workArea.Height - (2 * gap), page.Card.Height);
             Assert.IsGreaterThan(page.Card.Height, page.Card.CurrentSettingsLayout!.Frame.Height, "This is a page that does not fit, or the test proves nothing.");
+        });
+    }
+
+    // ---- A small screen
+
+    // The card on the work area of the smallest screen the tests run on, at every scale: it stays inside that work area, and every row
+    // of the page can be scrolled to and pressed. A page that only worked with room for every row would pass on a large screen
+    // and fail here.
+    [TestMethod]
+    public void OnASmallScreenAtEveryScaleTheCardStaysInsideTheWorkAreaAndEveryRowCanBeReached()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            foreach (int dpi in CardKit.Scales)
+            {
+                using ScrollPage page = ScrollPage.Open(RunnerWorkArea, dpi);
+                page.Host.View = CardKit.Update(UpdateStage.Available);
+                string at = " at " + dpi.ToString(System.Globalization.CultureInfo.InvariantCulture) + " dpi";
+                Assert.IsTrue(RunnerWorkArea.Contains(page.Card.Bounds), "The main card is inside the work area" + at);
+
+                page.OpenSettings();
+
+                Assert.IsTrue(RunnerWorkArea.Contains(page.Card.Bounds), "The settings page is inside the work area" + at);
+                int bodyTop = page.Card.CurrentSettingsLayout!.Frame.Body.Y;
+                foreach (SettingsItem item in page.Card.CurrentSettingsLayout.Items.Where(i => i.Kind == SettingsItemKind.Row))
+                {
+                    page.Card.ScrollSettingsToForTest(item.Bounds.Top - bodyTop);
+                    int offset = page.Card.SettingsScrollOffset;
+                    Assert.IsGreaterThanOrEqualTo(bodyTop, item.Bounds.Top - offset, "The row " + item.Row + " starts in view" + at);
+                    Assert.IsLessThanOrEqualTo(page.Card.ClientSize.Height, item.Bounds.Bottom - offset, "The row " + item.Row + " ends in view" + at);
+                }
+
+                CardKit.ClickPart(page.Card, SettingsRowId.CheckForUpdates, SettingsPart.Button);
+
+                Assert.AreEqual(WidgetCardView.Update, page.Presenter.ViewForTest, "The last row can be pressed" + at);
+            }
         });
     }
 

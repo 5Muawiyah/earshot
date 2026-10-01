@@ -301,6 +301,18 @@ internal static class CardKit
         return part is SettingsPart.SegmentSecond or SettingsPart.Plus or SettingsPart.Clear ? item.B : item.A;
     }
 
+    // Presses a part of a row the way a person would on a card that is shorter than the page: the rows are scrolled until the
+    // row is at the top of the body, and the press lands where the part is drawn then. A card that is tall enough does not scroll,
+    // so this is the same press as Click on the part's own rectangle. Pressing a part by its place on the page alone works only
+    // on a screen with room for every row, which a small screen does not have.
+    public static void ClickPart(WidgetCard card, SettingsRowId row, SettingsPart part)
+    {
+        SettingsItem item = Row(card, row);
+        Rectangle place = Part(card, row, part);
+        card.ScrollSettingsToForTest(item.Bounds.Top - card.CurrentSettingsLayout!.Frame.Body.Y);
+        Click(card, new Rectangle(place.X, place.Y - card.SettingsScrollOffset, place.Width, place.Height));
+    }
+
     public static UpdateViewModel Update(UpdateStage stage, int? percent = null, string? reason = null, string? notice = null) =>
         UpdateViewModel.For(stage, new ReleaseVersion(1, 1, 0), new ReleaseVersion(1, 2, 0), percent, reason, notice);
 

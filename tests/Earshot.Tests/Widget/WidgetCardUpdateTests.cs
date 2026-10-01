@@ -378,8 +378,8 @@ public sealed class WidgetCardUpdateTests
             Application.DoEvents();
 
             CardKit.Click(card!, card!.CurrentMainLayout.Gear);
-            CardKit.Click(card, CardKit.Part(card, SettingsRowId.CheckAutomatically, SettingsPart.Toggle));
-            CardKit.Click(card, CardKit.Part(card, SettingsRowId.CheckForUpdates, SettingsPart.Button));
+            CardKit.ClickPart(card, SettingsRowId.CheckAutomatically, SettingsPart.Toggle);
+            CardKit.ClickPart(card, SettingsRowId.CheckForUpdates, SettingsPart.Button);
             host.RaiseUpdateChanged();
             CardKit.Click(card, card.CurrentSetupLayout!.Frame.Back);
             CardKit.Click(card, card.CurrentSettingsLayout!.Frame.Back);
