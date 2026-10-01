@@ -5,8 +5,10 @@ namespace Earshot.Widget.EarPause;
 
 // Wires IWidgetStatus.ReadingApplied into AutoPause.ApplyAsync: every reading of the chosen set is fed the two
 // in-ear bits, when the reading was taken and the render facts AutoPause needs (Where, the default render
-// endpoint's container, the container this build watches). See AutoPause's own header for what it decides
-// with that feed; this class only wires it, it decides nothing about pausing itself.
+// endpoint's container, the container this build watches). It also tells AutoPause when the AirPods stop being this
+// PC's output, so a pause it remembers is forgotten. See AutoPause's own header for what it decides with that feed;
+// this class only wires it, it decides nothing about pausing or resuming itself. It owns the AutoPause it is given
+// and disposes it with itself.
 internal sealed class AutoPauseService : IDisposable
 {
     private readonly IWidgetStatus _status;
@@ -45,6 +47,26 @@ internal sealed class AutoPauseService : IDisposable
         _log = log;
 
         _status.ReadingApplied += OnReadingApplied;
+        _deviceMonitor.SnapshotChanged += OnSnapshotChanged;
+    }
+
+    // Raised on the UI sync context. A remembered pause is only resumable while the AirPods are still this PC's output:
+    // the watched container's render endpoint is active and the default render endpoint belongs to it. It is read from
+    // the snapshot itself, not from the widget's Where, which may not have caught up with this change yet.
+    private void OnSnapshotChanged(object? sender, DeviceSnapshotEventArgs e)
+    {
+        try
+        {
+            Guid watched = CoordinatorRules.WatchedContainer(_blockStatus(), _settings.Current, e.Snapshot);
+            bool renders = watched != Guid.Empty
+                && CoordinatorRules.RenderOf(e.Snapshot, watched) == RenderState.Active
+                && e.Snapshot.DefaultRenderContainerId == watched;
+            _autoPause.NoteOutput(renders);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Auto-pause: reading the output change threw.", ex);
+        }
     }
 
     // Runs on the UI thread (ReadingApplied is documented as raised there). Kicks off the async work
@@ -103,6 +125,8 @@ internal sealed class AutoPauseService : IDisposable
 
         _disposed = true;
         _status.ReadingApplied -= OnReadingApplied;
+        _deviceMonitor.SnapshotChanged -= OnSnapshotChanged;
+        _autoPause.Dispose();
         _lifetime.Cancel();
         _lifetime.Dispose();
     }

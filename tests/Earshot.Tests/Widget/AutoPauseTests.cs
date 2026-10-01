@@ -5,8 +5,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// Stage 1 only (a bud leaving the ear pauses the one session playing to the AirPods). Stage 2 (resuming
-// what was paused) is not built yet, and leaving it out does not touch stage 1's own behaviour.
+// A bud leaving the ear pauses the one session playing to the AirPods, and the bud going back resumes that session
+// under AutoResume's conditions (AutoResumeTests has each condition; EarSequenceTests runs whole message sequences).
 [TestClass]
 public sealed class AutoPauseTests
 {
@@ -166,5 +166,120 @@ public sealed class AutoPauseTests
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count, "Safe mode never reaches the inner sessions.");
         Assert.IsTrue(log.Has(LogLevel.Warn, "Safe mode"));
+    }
+
+    [TestMethod]
+    public async Task DoesNotPauseAgainstAPreviousValueOlderThanTheFreshWindow()
+    {
+        var sessions = OnePlayingSession();
+        var autoPause = NewAutoPause(sessions);
+        DateTimeOffset later = At + WidgetTiming.EarFreshWindow + TimeSpan.FromSeconds(1);
+
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, later, later, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.IsFalse(paused, "An 11 second old 'in' must not pair with a new 'out'.");
+        Assert.AreEqual(0, sessions.PauseCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task RemembersThePauseAndResumesThatSessionWhenTheBudIsBack()
+    {
+        var sessions = OnePlayingSession();
+        var autoPause = NewAutoPause(sessions);
+        DateTimeOffset back = At + TimeSpan.FromSeconds(10);
+
+        await autoPause.ApplyAsync(true, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(false, true, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        Assert.IsTrue(autoPause.HasRememberedPause);
+        sessions.Sessions[0] = sessions.Sessions[0] with { PlaybackStatus = MediaPlaybackState.Paused };
+
+        await autoPause.ApplyAsync(true, true, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        string[] played = { "app.exe" };
+        CollectionAssert.AreEqual(played, sessions.PlayCalls);
+        Assert.IsFalse(autoPause.HasRememberedPause);
+    }
+
+    [TestMethod]
+    public async Task ARefusedPauseRemembersNothingSoNothingIsResumed()
+    {
+        var sessions = OnePlayingSession();
+        sessions.PauseResult = false;
+        var autoPause = NewAutoPause(sessions);
+        DateTimeOffset back = At + TimeSpan.FromSeconds(10);
+
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.IsFalse(autoPause.HasRememberedPause);
+        Assert.AreEqual(0, sessions.PlayCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task AFalseFromTryPlayIsLoggedAndNotRetried()
+    {
+        var sessions = OnePlayingSession();
+        sessions.PlayResult = false;
+        var log = new CapturingLog();
+        var autoPause = NewAutoPause(sessions, log: log);
+        DateTimeOffset back = At + TimeSpan.FromSeconds(10);
+
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        sessions.Sessions[0] = sessions.Sessions[0] with { PlaybackStatus = MediaPlaybackState.Paused };
+        await autoPause.ApplyAsync(true, null, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.AreEqual(1, sessions.PlayCalls.Count);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "could not resume"));
+    }
+
+    [TestMethod]
+    public async Task ASessionThatNoLongerReadsPausedIsNotPlayed()
+    {
+        var sessions = OnePlayingSession();
+        var log = new CapturingLog();
+        var autoPause = NewAutoPause(sessions, log: log);
+        DateTimeOffset back = At + TimeSpan.FromSeconds(10);
+
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        // The fake does not change the session's state when it is paused: it still reads Playing, as if the person
+        // had pressed play again.
+        await autoPause.ApplyAsync(true, null, back, back, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.AreEqual(0, sessions.PlayCalls.Count);
+        Assert.IsTrue(log.Has(LogLevel.Info, "no longer reads paused"));
+    }
+
+    [TestMethod]
+    public async Task AReadingWithNoInEarValueNeverResumes()
+    {
+        var sessions = OnePlayingSession();
+        var autoPause = NewAutoPause(sessions);
+
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        sessions.Sessions[0] = sessions.Sessions[0] with { PlaybackStatus = MediaPlaybackState.Paused };
+        DateTimeOffset later = At + TimeSpan.FromSeconds(5);
+        await autoPause.ApplyAsync(null, null, later, later, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        Assert.AreEqual(0, sessions.PlayCalls.Count, "The bud's own value is still out, and null does not say it came back.");
+    }
+
+    [TestMethod]
+    public async Task DisposeStopsListeningToTheSessions()
+    {
+        var sessions = OnePlayingSession();
+        var autoPause = NewAutoPause(sessions);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+
+        autoPause.Dispose();
+        sessions.RaisePlaybackInfoChanged("another.exe");
+
+        Assert.IsTrue(autoPause.HasRememberedPause, "A disposed AutoPause no longer hears the sessions.");
     }
 }

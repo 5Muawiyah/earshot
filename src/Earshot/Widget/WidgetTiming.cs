@@ -4,7 +4,10 @@ namespace Earshot.Widget;
 // measurement.
 public static class WidgetTiming
 {
-    // How fresh a reading of the chosen set has to be for the ear state (Elsewhere/NotInUse) to be shown at all.
+    // How fresh a reading of the chosen set has to be for the ear state (Elsewhere/NotInUse) to be shown at all, and
+    // for ear detection to act on it: a bud's in-ear value is used only if it was read no more than this long ago, and
+    // an in-to-out change is taken only against a previous value that is itself this fresh. At about one message every
+    // 1.7 seconds this spans about six messages, so an old "in" can never pair with a new "out".
     public static readonly TimeSpan EarFreshWindow = TimeSpan.FromSeconds(10);
 
     // How long a battery refresh listens after restarting the watcher before it gives up: twice the longest gap seen
@@ -21,8 +24,16 @@ public static class WidgetTiming
 
     public static readonly TimeSpan WatcherRetryLimit = TimeSpan.FromMinutes(15);
 
-    // How long a bud has to return to the ear for auto-pause's second stage to resume what it paused.
+    // How long a bud has to return to the ear for ear detection to resume what it paused. Long enough to take a bud out
+    // for a short word, short enough that sound does not start by surprise minutes later. Measured from the pause; a
+    // bud back at exactly this age still resumes, one a moment later does not, and neither ever resumes at a later
+    // reading.
     public static readonly TimeSpan ResumeWindow = TimeSpan.FromSeconds(60);
+
+    // How long after Earshot pauses a session Windows' own report of that pause may still arrive. A change reported
+    // for the paused session inside this time is the pause itself; a later one is something the person did, and it
+    // cancels the resume.
+    public static readonly TimeSpan OwnPauseEchoWindow = TimeSpan.FromSeconds(2);
 
     // How often the counters line (counts, unknown-form shapes and the watcher state, never a byte) is
     // logged while anything has changed since the last one.

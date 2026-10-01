@@ -124,6 +124,11 @@ public sealed class AutoPauseServiceTests : IDisposable
         return snapshot with { DefaultRenderContainerId = Phase1.Phase1Fixtures.AirPodsContainer };
     }
 
+    // RendersToAirPods above is the fixture AutoPause's own checks read; the output-change check reads the render endpoint
+    // itself, so it needs one that is active.
+    private static DeviceSnapshot RendersToAirPodsOnAnActiveEndpoint() =>
+        Phase1.Phase1Fixtures.TargetRenderActive() with { DefaultRenderContainerId = Phase1.Phase1Fixtures.AirPodsContainer };
+
     private AutoPauseService NewService(AutoPause autoPause) =>
         new(_status, _deviceMonitor, () => null, _settings, autoPause, TimeProvider.System, _log);
 
@@ -221,5 +226,54 @@ public sealed class AutoPauseServiceTests : IDisposable
         _status.Raise(Reading(left: false, right: null), At);
 
         Assert.AreEqual(0, sessions.PauseCalls.Count, "A disposed service must not react to a reading raised after Dispose.");
+    }
+
+    [TestMethod]
+    public void TheAirPodsLeavingThisPcAfterAPauseForgetsIt()
+    {
+        var sessions = new FakeMediaSessions
+        {
+            Sessions = { new MediaSessionView("app.exe", MediaPlaybackState.Playing, true, true, "app.exe") },
+        };
+        var autoPause = new AutoPause(sessions, () => true, _log);
+        using AutoPauseService service = NewService(autoPause);
+        _deviceMonitor.Current = RendersToAirPods();
+        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
+        _status.Raise(Reading(left: true, right: null), At);
+        _status.Raise(Reading(left: false, right: null), At);
+        Assert.IsTrue(autoPause.HasRememberedPause);
+
+        // The output is unchanged (the render endpoint is active and is the default): nothing is forgotten.
+        _deviceMonitor.RaiseSnapshotChanged(new DeviceSnapshotEventArgs(RendersToAirPodsOnAnActiveEndpoint()));
+        Assert.IsTrue(autoPause.HasRememberedPause);
+
+        // The default output moved off the AirPods.
+        _deviceMonitor.RaiseSnapshotChanged(
+            new DeviceSnapshotEventArgs(RendersToAirPodsOnAnActiveEndpoint() with { DefaultRenderContainerId = Guid.NewGuid() }));
+
+        Assert.IsFalse(autoPause.HasRememberedPause);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "Auto-resume cancelled"));
+    }
+
+    [TestMethod]
+    public void DisposeStopsListeningToTheDeviceMonitorAndTheSessions()
+    {
+        var sessions = new FakeMediaSessions
+        {
+            Sessions = { new MediaSessionView("app.exe", MediaPlaybackState.Playing, true, true, "app.exe") },
+        };
+        var autoPause = new AutoPause(sessions, () => true, _log);
+        var service = NewService(autoPause);
+        _deviceMonitor.Current = RendersToAirPods();
+        _status.Current = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc };
+        _status.Raise(Reading(left: true, right: null), At);
+        _status.Raise(Reading(left: false, right: null), At);
+
+        service.Dispose();
+        _deviceMonitor.RaiseSnapshotChanged(
+            new DeviceSnapshotEventArgs(RendersToAirPodsOnAnActiveEndpoint() with { DefaultRenderContainerId = Guid.NewGuid() }));
+        sessions.RaisePlaybackInfoChanged("another.exe");
+
+        Assert.IsTrue(autoPause.HasRememberedPause, "A disposed service hears neither the monitor nor the sessions.");
     }
 }
