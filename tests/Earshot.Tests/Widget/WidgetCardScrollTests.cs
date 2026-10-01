@@ -178,6 +178,68 @@ public sealed class WidgetCardScrollTests
         });
     }
 
+    // A control that is cut by the bottom edge of the body is pressed where it can be seen, and the page then shows it whole.
+    [TestMethod]
+    public void AClickOnAControlCutByTheBottomOfThePageScrollsItWhollyIntoViewAndStillPressesIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            Wheel(page.Card, -120 * 100);
+            Rectangle toggle = page.Card.CurrentControls()[^1].Bounds;
+            for (int i = 0; i < 400 && !(toggle.Top < page.Viewport.Bottom && toggle.Bottom > page.Viewport.Bottom); i++)
+            {
+                Wheel(page.Card, 40);
+                toggle = page.Card.CurrentControls()[^1].Bounds;
+            }
+
+            Assert.IsTrue(toggle.Top < page.Viewport.Bottom && toggle.Bottom > page.Viewport.Bottom, "Sanity: the toggle is cut by the bottom of the page: " + toggle + " in " + page.Viewport);
+            int offset = page.Card.SettingsScrollOffset;
+
+            CardKit.Click(page.Card, Rectangle.Intersect(toggle, page.Viewport));
+
+            CardKit.AssertCalls(page.Host, "checkAuto:True");
+            Assert.IsGreaterThan(offset, page.Card.SettingsScrollOffset, "The page scrolled down to bring it in.");
+            Rectangle after = page.Card.CurrentControls()[^1].Bounds;
+            Assert.IsTrue(after.Top >= page.Viewport.Top && after.Bottom <= page.Viewport.Bottom, "The toggle is wholly in view: " + after + " in " + page.Viewport);
+        });
+    }
+
+    // The same at the top edge, where the header ends: the part of a control under the header is not there to be pressed, the part
+    // below it is.
+    [TestMethod]
+    public void AClickOnAControlCutByTheTopOfThePageScrollsItWhollyIntoViewAndStillPressesIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            Rectangle OnScreen()
+            {
+                Rectangle onPage = CardKit.Part(page.Card, SettingsRowId.GaugePosition, SettingsPart.SegmentFirst);
+                return new Rectangle(onPage.X, onPage.Y - page.Card.SettingsScrollOffset, onPage.Width, onPage.Height);
+            }
+
+            Rectangle toggle = OnScreen();
+            for (int i = 0; i < 400 && !(toggle.Top < page.Viewport.Top && toggle.Bottom > page.Viewport.Top); i++)
+            {
+                Wheel(page.Card, -40);
+                toggle = OnScreen();
+            }
+
+            Assert.IsTrue(toggle.Top < page.Viewport.Top && toggle.Bottom > page.Viewport.Top, "Sanity: the toggle is cut by the top of the page: " + toggle + " in " + page.Viewport);
+            int offset = page.Card.SettingsScrollOffset;
+
+            CardKit.Click(page.Card, Rectangle.Intersect(toggle, page.Viewport));
+
+            CardKit.AssertCalls(page.Host, "gauge:RightEnd");
+            Assert.IsLessThan(offset, page.Card.SettingsScrollOffset, "The page scrolled up to bring it in.");
+            Rectangle after = OnScreen();
+            Assert.IsTrue(after.Top >= page.Viewport.Top && after.Bottom <= page.Viewport.Bottom, "The toggle is wholly in view: " + after + " in " + page.Viewport);
+        });
+    }
+
     [TestMethod]
     public void ARowScrolledUnderTheHeaderIsNotClickedThroughIt()
     {

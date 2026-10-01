@@ -331,7 +331,9 @@ internal sealed partial class WidgetCard
         _leftButtonDownOnSettingsTarget = null;
         if (e.Button == MouseButtons.Left && down is { } pressed && HitSettingsTarget(e.Location) == pressed)
         {
+            // A control that was only partly in view comes wholly into view, as it does when the keyboard moves to it.
             _settingsFocus = pressed;
+            ScrollFocusIntoView();
             ActivateSettingsTarget(pressed);
         }
     }
