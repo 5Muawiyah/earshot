@@ -51,7 +51,7 @@ public sealed class ProbeWidgetTests
         Assert.IsTrue(BatteryFreshness.IsRecent(snapshots[2].Snapshot.Left, now), "...and still recent, so the gauge draws them.");
     }
 
-    private static readonly string[] AllCardVariants = ["this-pc", "elsewhere", "greyed", "no-reading", "auto-pause-preview"];
+    private static readonly string[] AllCardVariants = ["this-pc", "elsewhere", "greyed", "no-reading", "auto-pause-preview", "refresh-reading", "refresh-nothing-heard"];
 
     // The files of one variant only, matched up to the DPI that always follows the name.
     private static string[] VariantFiles(string folder, string variant) =>
@@ -75,6 +75,10 @@ public sealed class ProbeWidgetTests
         Assert.IsNull(variants[3].Model.Snapshot.Left.Percent, "The empty card has no value for any part.");
         Assert.IsTrue(variants[4].Model.ShowSwitch, "The preview variant exists to show the switch row.");
         Assert.IsTrue(variants[4].Model.Snapshot.AutoPauseAvailable);
+        Assert.IsTrue(variants[5].Model.Refresh!.Reading, "The refresh-reading variant shows the icon mid-turn.");
+        Assert.AreEqual("Reading the battery", variants[5].Model.Refresh!.ReadLine);
+        Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, variants[6].Model.Refresh!.Outcome);
+        Assert.AreEqual("Nothing heard. Open the case", variants[6].Model.Refresh!.ReadLine);
     }
 
     [TestMethod]

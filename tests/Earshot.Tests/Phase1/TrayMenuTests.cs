@@ -16,7 +16,7 @@ public sealed class TrayMenuTests
     // caller has to say a voice is known missing, not the other way round.
     private static readonly string[] DesignedOrder =
     [
-        "Connect", "-",
+        "Connect", "Refresh battery", "-",
         "Block at boot", "Hand back on shut down, sleep and Exit", "Protect audio quality", "Turns off the AirPods microphone", "Open on startup",
         "Speak status", "-",
         "Show on the taskbar", "Left click connects straight away", "Low battery alert", "Threshold",
@@ -29,6 +29,13 @@ public sealed class TrayMenuTests
     private static readonly string[] CommandOrder = ["toggle", "block", "handback", "protect", "startup", "device", "setup", "exit"];
 
     private static readonly string[] WidgetCommandOrder = ["taskbar", "leftclick", "lowbattery", "othername"];
+
+    private static EarshotSettings WithTheGaugeOff()
+    {
+        EarshotSettings settings = Settings();
+        settings.Widget = settings.Widget with { ShowOnTaskbar = false };
+        return settings;
+    }
 
     // The Play from a phone submenu as StreamingCoordinator builds it with one device in use.
     private static readonly StreamingMenuModel PlayingFromAPhone = new(
@@ -204,6 +211,30 @@ public sealed class TrayMenuTests
             menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Name your other device...").PerformClick();
 
             CollectionAssert.AreEqual(WidgetCommandOrder, raised);
+        });
+    }
+
+    // Refresh battery reads the battery again on the card, so it is in the menu while the gauge is on and raises its own
+    // command; with the gauge off there is no card to show it on and the item is not there.
+    [TestMethod]
+    public void RefreshBatteryRaisesItsOwnCommandAndGoesWithTheGauge()
+    {
+        StaThread.Run(() =>
+        {
+            EarshotSettings settings = Settings();
+            using var menu = new TrayMenu(() => State(block: Block(BlockState.NotSetUp), settings: settings));
+            int raised = 0;
+            menu.RefreshBatteryClicked += (_, _) => raised++;
+
+            ToolStripMenuItem item = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Refresh battery");
+            Assert.IsTrue(item.Available);
+            Assert.IsTrue(item.Enabled);
+            item.PerformClick();
+            Assert.AreEqual(1, raised);
+
+            settings = WithTheGaugeOff();
+            menu.Refresh();
+            CollectionAssert.DoesNotContain(AvailableTexts(menu), "Refresh battery");
         });
     }
 

@@ -452,6 +452,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _menu = new TrayMenu(CurrentMenuState);
         _menu.ToggleClicked += (_, _) => StartToggle(trigger: SwitchTrigger.Menu);
         _menu.PlayFromPhoneItemClicked += OnPlayFromPhoneItemClicked;
+        _menu.RefreshBatteryClicked += (_, _) => OnRefreshBatteryClicked();
         _menu.BlockAtBootClicked += (_, _) => Start("block at boot", place => BlockAtBootAsync(place));
         _menu.HandBackClicked += (_, _) => OnHandBackClicked();
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();

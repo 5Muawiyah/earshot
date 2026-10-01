@@ -139,7 +139,8 @@ internal sealed partial class TrayContext
                 RequestToggle: StartToggleFromWidget,
                 SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
                     "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place),
-                GaugePosition: () => _registry.Settings.Current.Widget.GaugePosition);
+                GaugePosition: () => _registry.Settings.Current.Widget.GaugePosition,
+                RefreshBattery: RefreshBatteryForCard);
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,

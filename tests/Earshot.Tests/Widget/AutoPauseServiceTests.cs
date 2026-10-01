@@ -31,7 +31,11 @@ public sealed class AutoPauseServiceTests : IDisposable
 
 
 
+        public bool BatteryRefreshAvailable => false;
+
         public Task RefreshAsync() => Task.CompletedTask;
+
+        public Task<BatteryRefreshOutcome> RefreshBatteryAsync(CancellationToken ct) => Task.FromResult(BatteryRefreshOutcome.NotListening);
 
         public void Raise(DecodedReading reading, DateTimeOffset at) =>
             ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(reading, at));

@@ -4,8 +4,8 @@ namespace Earshot.Widget;
 
 // Pure row layout for the widget card. No window, no drawing.
 //
-// Main view: width 360 at 96 DPI like every other page, padding 16: a title row (the title, and the gear that
-// opens the settings when the view has one), three columns (Left, Right, Case), the where line, the read line,
+// Main view: width 360 at 96 DPI like every other page, padding 16: a title row (the title, the battery refresh icon
+// and the gear that opens the settings, when the view has them), three columns (Left, Right, Case), the where line, the read line,
 // the update line when a check found a newer version, then the Connect/Disconnect button and, only when the
 // snapshot says auto-pause is available, the switch row beneath it. A part with no value says so in its own
 // column.
@@ -81,13 +81,15 @@ internal static class WidgetCardLayout
         bool ShowUpdateLine = false,
         Rectangle UpdateLine = default,
         Rectangle UpdateCaption = default,
-        Rectangle UpdateButton = default);
+        Rectangle UpdateButton = default,
+        Rectangle Refresh = default);
 
-    // showGear: the view has a settings button (the case-open notice does not). showUpdateLine: a check found a
+    // showGear: the view has a settings button (the case-open notice does not). showRefresh: the view has the battery
+    // refresh icon, a button the size of the gear's, left of it (never without the gear). showUpdateLine: a check found a
     // newer version; updateButtonWidth is the "Update" button's own width (its text and padding), or 0 for the
     // least width the design gives it.
     public static Layout Compute(
-        int dpi, bool showSwitch, bool showGear = true, bool showUpdateLine = false, int updateButtonWidth = 0)
+        int dpi, bool showSwitch, bool showGear = true, bool showUpdateLine = false, int updateButtonWidth = 0, bool showRefresh = true)
     {
         int width = WidthFor(dpi);
         int pad = CardPlacement.Scale(PaddingAt96, dpi);
@@ -113,7 +115,10 @@ internal static class WidgetCardLayout
         Rectangle gear = showGear
             ? new Rectangle(width - pad + gearOverhang - gearSize, titleTop + ((titleRowHeight - gearSize) / 2), gearSize, gearSize)
             : Rectangle.Empty;
-        int titleRight = showGear ? gear.X : width - pad;
+        Rectangle refresh = showGear && showRefresh
+            ? new Rectangle(gear.X - gearSize, gear.Y, gearSize, gearSize)
+            : Rectangle.Empty;
+        int titleRight = !refresh.IsEmpty ? refresh.X : showGear ? gear.X : width - pad;
         var title = new Rectangle(pad, titleTop, Math.Max(1, titleRight - pad), titleRowHeight);
 
         int y = title.Bottom + CardPlacement.Scale(TitleGapAt96, dpi);
@@ -158,7 +163,7 @@ internal static class WidgetCardLayout
         return new Layout(
             width, bottom, ShowColumns: true, left, right, box, whereLine, readLine, button,
             showSwitch, switchRect,
-            title, gear, showUpdateLine, updateLine, updateCaption, updateButton);
+            title, gear, showUpdateLine, updateLine, updateCaption, updateButton, refresh);
     }
 
     private static ColumnLayout Column(int x, int y, int colWidth, int labelHeight, int gapToLabel, int glyphSize, int barWidth, int barHeight, int gapToBar, int lineHeight)

@@ -63,7 +63,11 @@ public sealed class CompositionRootAutoPauseTests
 
 
 
+        public bool BatteryRefreshAvailable => false;
+
         public Task RefreshAsync() => Task.CompletedTask;
+
+        public Task<BatteryRefreshOutcome> RefreshBatteryAsync(CancellationToken ct) => Task.FromResult(BatteryRefreshOutcome.NotListening);
 
         // Kept only so the field-like events above count as used.
         internal void RaiseUnused()

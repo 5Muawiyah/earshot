@@ -29,6 +29,7 @@ internal sealed record MenuState(
     MenuItemState Toggle,
     MenuItemState PlayFromPhone,
     IReadOnlyList<StreamingMenuItem> PlayFromPhoneItems,
+    MenuItemState RefreshBattery,
     MenuItemState BlockAtBoot,
     MenuItemState HandBack,
     MenuItemState ProtectAudio,
@@ -122,6 +123,8 @@ internal static class MenuModel
             Toggle: new MenuItemState(WithShortcut(connected ? Disconnect : Connect, settings.Hotkeys, HotkeyAction.ToggleConnection), Checked: false, Enabled: !busy && !changing, Visible: true),
             PlayFromPhone: new MenuItemState(streaming?.ParentText ?? PlayFromPhone, Checked: false, Enabled: streaming is { ParentEnabled: true }, Visible: streaming is not null),
             PlayFromPhoneItems: streaming?.Items ?? [],
+            // Reads the battery again on the card, so it is there while the gauge is: a refresh touches no device.
+            RefreshBattery: new MenuItemState(WidgetCopy.RefreshBattery, Checked: false, Enabled: true, Visible: settings.Widget.ShowOnTaskbar),
             BlockAtBoot: new MenuItemState(WithShortcut(BlockAtBoot, settings.Hotkeys, HotkeyAction.ToggleBlockAtBoot), Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
             HandBack: new MenuItemState(HandBackOnShutdownAndSleep, Checked: settings.HandBackOnShutdownAndSleep, Enabled: !busy, Visible: true),
             ProtectAudio: new MenuItemState(

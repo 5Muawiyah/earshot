@@ -23,6 +23,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _safeMode = new();
     private readonly ToolStripMenuItem _toggle = new();
     private readonly ToolStripMenuItem _playFromPhone = new();
+    private readonly ToolStripMenuItem _refreshBattery = new();
     private readonly ToolStripMenuItem _blockAtBoot = new();
     private readonly ToolStripMenuItem _handBack = new();
     private readonly ToolStripMenuItem _protectAudio = new();
@@ -53,6 +54,7 @@ internal sealed class TrayMenu : IDisposable
             _safeMode,
             _toggle,
             _playFromPhone,
+            _refreshBattery,
             new ToolStripSeparator(),
             _blockAtBoot,
             _handBack,
@@ -79,6 +81,7 @@ internal sealed class TrayMenu : IDisposable
         ]);
 
         _toggle.Click += (_, _) => ToggleClicked?.Invoke(this, EventArgs.Empty);
+        _refreshBattery.Click += (_, _) => RefreshBatteryClicked?.Invoke(this, EventArgs.Empty);
         _blockAtBoot.Click += (_, _) => BlockAtBootClicked?.Invoke(this, EventArgs.Empty);
         _handBack.Click += (_, _) => HandBackClicked?.Invoke(this, EventArgs.Empty);
         _protectAudio.Click += (_, _) => ProtectAudioClicked?.Invoke(this, EventArgs.Empty);
@@ -104,6 +107,8 @@ internal sealed class TrayMenu : IDisposable
 
     // One item of the Play from a phone submenu was clicked: a device, Stop, or Refresh the list.
     public event EventHandler<StreamingMenuItemEventArgs>? PlayFromPhoneItemClicked;
+
+    public event EventHandler? RefreshBatteryClicked;
 
     public event EventHandler? BlockAtBootClicked;
 
@@ -158,6 +163,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_toggle, state.Toggle);
         Set(_playFromPhone, state.PlayFromPhone);
         SetPlayFromPhoneItems(state.PlayFromPhoneItems);
+        Set(_refreshBattery, state.RefreshBattery);
         Set(_blockAtBoot, state.BlockAtBoot);
         Set(_handBack, state.HandBack);
         Set(_protectAudio, state.ProtectAudio);

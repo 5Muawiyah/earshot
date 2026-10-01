@@ -9,7 +9,7 @@ namespace Earshot.Widget;
 
 // Which of the card's focusable items has the keyboard focus. There are no child controls, so focus is
 // tracked here and painted as the system focus rectangle.
-internal enum WidgetCardFocus { Button, Switch, Gear, UpdateButton }
+internal enum WidgetCardFocus { Button, Switch, Gear, UpdateButton, Refresh }
 
 // Which control of a sub-page has the keyboard focus: the back button, or a footer button (Index is the button).
 internal enum SetupTargetKind { Back, Button }
@@ -48,6 +48,10 @@ internal sealed record WidgetCardModel(
     // What each battery part shows and whether it is fresh, worked out by the presenter from the snapshot and the
     // time so the card only picks a colour from it. A model built without it gets the same answer worked out here.
     public ShownBattery? Parts { get; init; }
+
+    // Where a battery refresh stands, or null when none has been asked for: the icon turns while it reads, and a
+    // refresh that heard nothing says so in the read line.
+    public BatteryRefreshView? Refresh { get; init; }
 
     public ShownBattery ShownParts => Parts ?? BatteryFreshness.Shown(Snapshot, Now);
 }
@@ -104,6 +108,7 @@ internal sealed partial class WidgetCard : Form
     private bool _leftButtonDownOnSwitch;
     private bool _leftButtonDownOnGear;
     private bool _leftButtonDownOnUpdate;
+    private bool _leftButtonDownOnRefresh;
     private SetupTarget? _leftButtonDownOnSetupTarget;
 
     public WidgetCard(ILog log, bool notice = false)
@@ -144,6 +149,9 @@ internal sealed partial class WidgetCard : Form
 
     // The user activated the gear in the title row (Enter, Space or a mouse click on it).
     public event EventHandler? SettingsRequested;
+
+    // The user activated the battery refresh icon beside the gear (Enter, Space or a mouse click on it).
+    public event EventHandler? RefreshRequested;
 
     // The user activated the "Update" button on the update line (Enter, Space or a mouse click on it).
     public event EventHandler? UpdateRequested;
@@ -340,6 +348,11 @@ internal sealed partial class WidgetCard : Form
             _focus = WidgetCardFocus.Button;
         }
 
+        if (_focus == WidgetCardFocus.Refresh && _mainLayout.Refresh.IsEmpty)
+        {
+            _focus = WidgetCardFocus.Button;
+        }
+
         ClientSize = new Size(layout.Width, layout.Height);
         Invalidate();
     }
@@ -358,7 +371,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         return WidgetCardLayout.Compute(
-            _dpi, model.ShowSwitch, showGear: !_notice, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth);
+            _dpi, model.ShowSwitch, showGear: !_notice, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, showRefresh: !_notice);
     }
 
     private WidgetCardLayout.SetupLayout ComputeSetupLayout(Graphics measure, SetupViewModel setup)
@@ -425,6 +438,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnSwitch = false;
         _leftButtonDownOnGear = false;
         _leftButtonDownOnUpdate = false;
+        _leftButtonDownOnRefresh = false;
         _leftButtonDownOnSetupTarget = null;
         _leftButtonDownOnSettingsTarget = null;
     }
@@ -534,6 +548,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnSwitch = e.Button == MouseButtons.Left && layout.ShowSwitch && layout.Switch.Contains(e.Location);
         _leftButtonDownOnGear = e.Button == MouseButtons.Left && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
         _leftButtonDownOnUpdate = e.Button == MouseButtons.Left && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
+        _leftButtonDownOnRefresh = e.Button == MouseButtons.Left && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -568,11 +583,17 @@ internal sealed partial class WidgetCard : Form
         bool activatesSwitch = e.Button == MouseButtons.Left && _leftButtonDownOnSwitch && layout.ShowSwitch && layout.Switch.Contains(e.Location);
         bool activatesGear = e.Button == MouseButtons.Left && _leftButtonDownOnGear && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
         bool activatesUpdate = e.Button == MouseButtons.Left && _leftButtonDownOnUpdate && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
+        bool activatesRefresh = e.Button == MouseButtons.Left && _leftButtonDownOnRefresh && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
         ClearPressedFlags();
 
         if (activatesGear)
         {
             _focus = WidgetCardFocus.Gear;
+            ActivateFocused();
+        }
+        else if (activatesRefresh)
+        {
+            _focus = WidgetCardFocus.Refresh;
             ActivateFocused();
         }
         else if (activatesUpdate)
@@ -680,6 +701,7 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
+        DrawRefreshIcon(g, layout);
         CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
         if (_focus == WidgetCardFocus.Gear && ContainsFocus)
         {
@@ -699,7 +721,7 @@ internal sealed partial class WidgetCard : Form
         CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _fontFamily, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && ContainsFocus);
     }
 
-    // Cycles Button, Switch (when shown), UpdateButton (when shown), Gear (when the view has one), back to
+    // Cycles Button, Switch (when shown), UpdateButton (when shown), Gear and Refresh (when the view has them), back to
     // Button.
     private void MoveFocus()
     {
@@ -717,6 +739,11 @@ internal sealed partial class WidgetCard : Form
         if (!_mainLayout.Gear.IsEmpty)
         {
             order.Add(WidgetCardFocus.Gear);
+        }
+
+        if (!_mainLayout.Refresh.IsEmpty)
+        {
+            order.Add(WidgetCardFocus.Refresh);
         }
 
         int at = order.IndexOf(_focus);
@@ -741,6 +768,13 @@ internal sealed partial class WidgetCard : Form
             if (!_mainLayout.Gear.IsEmpty)
             {
                 SettingsRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else if (_focus == WidgetCardFocus.Refresh)
+        {
+            if (!_mainLayout.Refresh.IsEmpty)
+            {
+                RefreshRequested?.Invoke(this, EventArgs.Empty);
             }
         }
         else if (_focus == WidgetCardFocus.UpdateButton)

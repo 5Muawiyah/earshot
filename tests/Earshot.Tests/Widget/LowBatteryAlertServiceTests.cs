@@ -22,7 +22,11 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
 
         public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
+        public bool BatteryRefreshAvailable => false;
+
         public Task RefreshAsync() => Task.CompletedTask;
+
+        public Task<BatteryRefreshOutcome> RefreshBatteryAsync(CancellationToken ct) => Task.FromResult(BatteryRefreshOutcome.NotListening);
 
         public void Raise(WidgetSnapshot snapshot)
         {

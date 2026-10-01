@@ -371,7 +371,9 @@ public sealed class WidgetCardTests
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Switch, card.FocusTarget);
             SendKey(card.Handle, Keys.Tab);
-            Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget, "The gear is last in the order.");
+            Assert.AreEqual(WidgetCardFocus.Gear, card.FocusTarget);
+            SendKey(card.Handle, Keys.Tab);
+            Assert.AreEqual(WidgetCardFocus.Refresh, card.FocusTarget, "The refresh icon is last in the order, after the gear.");
             SendKey(card.Handle, Keys.Tab);
             Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget, "Tab cycles back to the button.");
         });

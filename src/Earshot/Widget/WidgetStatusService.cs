@@ -106,6 +106,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private bool _headsetBusy;
     private string? _lastHeadsetNote;
 
+    // The refresh in progress, if any; a second request joins it. Read and written only under _gate.
+    private RefreshState? _refresh;
+
     public WidgetStatusService(
         Func<IAdvertisementSource> sourceFactory,
         ISettingsStore settings,
@@ -269,6 +272,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             RunStopOutsideLock(sourceToStop, disposeSource: false);
         }
 
+        CompleteAnyRefresh(BatteryRefreshOutcome.NotListening);
         PublishAndNotify();
     }
 
@@ -326,6 +330,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             RunStopOutsideLock(sourceToStop, disposeSource: true);
         }
+
+        CompleteAnyRefresh(BatteryRefreshOutcome.NotListening);
     }
 
     public void Dispose() => Close();
@@ -605,6 +611,205 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _thisPcActive = CoordinatorRules.RenderOf(snapshot, watched) == RenderState.Active;
     }
 
+    // ---- Battery refresh
+
+    // What a refresh in progress is waiting for. WindowsFigure is set when a read of Windows' own figure found one
+    // while it waited.
+    private sealed class RefreshState(DateTimeOffset startedAt)
+    {
+        public DateTimeOffset StartedAt { get; } = startedAt;
+
+        public TaskCompletionSource<BatteryRefreshOutcome> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ITimer? Timer { get; set; }
+
+        public bool WindowsFigure { get; set; }
+    }
+
+    // True while the watcher runs.
+    public bool BatteryRefreshAvailable
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_closed && !_suspended && _watcherState == WidgetWatcherState.Started;
+            }
+        }
+    }
+
+    // Restarts the passive listen through the same outside-the-lock stop and start every other restart uses (a new
+    // generation, so the old run's own Stopped never reads as the current one), starts a read of Windows' own figure,
+    // and waits for a message of the chosen set sent after the restart, or for WidgetTiming.RefreshWindow to pass.
+    // A passive watcher sends no scan request and connects to nothing, so restarting it pages nothing, and the figure
+    // read is a property read: the AirPods stay unpaged at rest. No value is cleared. A second request while one runs
+    // joins it; cancelling ends only the caller's own wait.
+    public Task<BatteryRefreshOutcome> RefreshBatteryAsync(CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+        {
+            return Task.FromCanceled<BatteryRefreshOutcome>(ct);
+        }
+
+        RefreshState state;
+        lock (_gate)
+        {
+            if (_refresh is { } running)
+            {
+                return running.Completion.Task.WaitAsync(ct);
+            }
+
+            if (_closed || _source is null || _suspended)
+            {
+                return Task.FromResult(BatteryRefreshOutcome.NotListening);
+            }
+
+            state = new RefreshState(_timeProvider.GetUtcNow());
+            _refresh = state;
+        }
+
+        StartRefresh(state);
+        return state.Completion.Task.WaitAsync(ct);
+    }
+
+    private void StartRefresh(RefreshState state)
+    {
+        bool running;
+        lock (_gate)
+        {
+            running = _watcherState == WidgetWatcherState.Started;
+        }
+
+        if (running)
+        {
+            RestartWatcherForRefresh();
+        }
+        else
+        {
+            // Stopped (Bluetooth was off, or a start failed): one immediate attempt, the way RefreshAsync makes one.
+            RetryStartNow();
+        }
+
+        BatteryRefreshOutcome? failed;
+        lock (_gate)
+        {
+            failed = _watcherState == WidgetWatcherState.Started
+                ? null
+                : _watcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode ? BatteryRefreshOutcome.BluetoothOff : BatteryRefreshOutcome.NotListening;
+        }
+
+        if (failed is { } outcome)
+        {
+            CompleteRefresh(state, outcome);
+            return;
+        }
+
+        ITimer timer = _timeProvider.CreateTimer(
+            static box => ((RefreshTimerBox)box!).Service.OnRefreshWindowElapsed(((RefreshTimerBox)box).State), new RefreshTimerBox(this, state),
+            WidgetTiming.RefreshWindow, Timeout.InfiniteTimeSpan);
+        bool done;
+        lock (_gate)
+        {
+            done = state.Completion.Task.IsCompleted;
+            if (!done)
+            {
+                state.Timer = timer;
+            }
+        }
+
+        if (done)
+        {
+            timer.Dispose();
+            return;
+        }
+
+        RequestHeadsetRead();
+    }
+
+    private sealed record RefreshTimerBox(WidgetStatusService Service, RefreshState State);
+
+    private void OnRefreshWindowElapsed(RefreshState state)
+    {
+        bool windows;
+        lock (_gate)
+        {
+            windows = state.WindowsFigure;
+        }
+
+        CompleteRefresh(state, windows ? BatteryRefreshOutcome.WindowsFigure : BatteryRefreshOutcome.NothingHeard);
+    }
+
+    // The stop and start of Suspend and Resume without the suspended flag between them, so nothing else is held off.
+    private void RestartWatcherForRefresh()
+    {
+        IAdvertisementSource? stop;
+        lock (_gate)
+        {
+            if (_source is null || _closed || _suspended)
+            {
+                return;
+            }
+
+            stop = BeginStopLocked();
+        }
+
+        if (stop is not null)
+        {
+            RunStopOutsideLock(stop, disposeSource: false);
+        }
+
+        IAdvertisementSource? start;
+        int generation;
+        lock (_gate)
+        {
+            if (_closed || _suspended || !ReferenceEquals(_source, stop))
+            {
+                return;
+            }
+
+            _stopRequested = false;
+            _generation++;
+            generation = _generation;
+            start = _source;
+        }
+
+        RunStartOutsideLock(start, generation);
+    }
+
+    // Ends the refresh in progress with this outcome, once. The completion runs its continuations off this thread.
+    private void CompleteRefresh(RefreshState state, BatteryRefreshOutcome outcome)
+    {
+        ITimer? timer;
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_refresh, state))
+            {
+                return;
+            }
+
+            _refresh = null;
+            timer = state.Timer;
+            state.Timer = null;
+        }
+
+        timer?.Dispose();
+        state.Completion.TrySetResult(outcome);
+    }
+
+    private void CompleteAnyRefresh(BatteryRefreshOutcome outcome)
+    {
+        RefreshState? state;
+        lock (_gate)
+        {
+            state = _refresh;
+        }
+
+        if (state is not null)
+        {
+            CompleteRefresh(state, outcome);
+        }
+    }
+
     // ---- Windows' Hands-Free figure
 
     private void OnHeadsetPollDue()
@@ -672,6 +877,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             if (read.Percent is int percent)
             {
                 _headset = new PartReading(percent, null, null) { ReadAt = at };
+                if (_refresh is { } waiting)
+                {
+                    waiting.WindowsFigure = true;
+                }
             }
         }
 
@@ -836,6 +1045,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool caseOpenedEdge = false;
         DateTimeOffset caseOpenedAt = at;
         DecodedReading? applied = null;
+        RefreshState? heard = null;
 
         lock (_gate)
         {
@@ -908,6 +1118,17 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             CheckBudOrderLocked(reading, tag, at);
             caseOpenedEdge = ApplyDecodedReadingLocked(reading, _table, at);
             applied = reading;
+
+            // A message of the chosen set sent after the refresh restarted the listen is the answer it waits for.
+            if (_refresh is { } waiting && at >= waiting.StartedAt)
+            {
+                heard = waiting;
+            }
+        }
+
+        if (heard is not null)
+        {
+            CompleteRefresh(heard, BatteryRefreshOutcome.Heard);
         }
 
         if (caseOpenedEdge)
@@ -1051,6 +1272,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         if (!ownStop)
         {
             ScheduleRetry();
+            CompleteAnyRefresh(stopped.ErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode
+                ? BatteryRefreshOutcome.BluetoothOff
+                : BatteryRefreshOutcome.NotListening);
         }
 
         PublishAndNotify();

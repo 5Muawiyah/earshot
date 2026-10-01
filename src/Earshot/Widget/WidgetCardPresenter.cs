@@ -23,7 +23,8 @@ internal sealed record WidgetCardPresenterCallbacks(
     Func<string> OtherDeviceLabel,
     Action<CardPlace> RequestToggle,
     Action<bool, CardPlace> SetAutoPause,
-    Func<GaugePosition>? GaugePosition = null)   // where the gauge sits, so the card follows it; the right end when null
+    Func<GaugePosition>? GaugePosition = null,   // where the gauge sits, so the card follows it; the right end when null
+    Func<CancellationToken, Task<BatteryRefreshOutcome>>? RefreshBattery = null)   // reads the battery again; no refresh icon works when null
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }
@@ -48,7 +49,7 @@ internal sealed record WidgetCardPresenterCallbacks(
 //
 // UI thread only from the outside; every public method posts through uiPost so a caller on any thread is
 // safe, matching CardPresenter's own contract.
-internal sealed class WidgetCardPresenter : IDisposable
+internal sealed partial class WidgetCardPresenter : IDisposable
 {
     // Short enough that a part greys within 5 s of crossing BatteryFreshness.FreshWindow.
     public static readonly TimeSpan ReadLineRefreshInterval = TimeSpan.FromSeconds(5);
@@ -154,6 +155,7 @@ internal sealed class WidgetCardPresenter : IDisposable
 
         StopRefreshTimer();
         StopSpinnerTimer();
+        EndBatteryRefresh();
         if (_card is not null)
         {
             Unsubscribe(_card);
@@ -242,6 +244,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         card.Show();
         card.Activate();
         StartRefreshTimer();
+        SyncRefreshSpinner();
     }
 
     private Rectangle PlaceAbove(WidgetCard card, Rectangle anchor)
@@ -256,6 +259,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         _view = WidgetCardView.Main;
         _shortcutNote = null;
         StopSpinnerTimer();
+        ForgetRefreshOutcome();
         if (_card is { IsDisposed: false, Visible: true } card)
         {
             card.Hide();
@@ -278,6 +282,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         {
             UpdateVersion = _host?.AvailableUpdateVersion(),
             Settings = _view == WidgetCardView.Settings ? ReadSettings() : null,
+            Refresh = RefreshViewForModel(),
         };
     }
 
@@ -341,6 +346,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         _card.AutoPauseChanged += OnAutoPauseChanged;
         _card.SetupActionRequested += OnSetupAction;
         _card.SettingsRequested += OnSettingsRequested;
+        _card.RefreshRequested += OnRefreshRequested;
         _card.UpdateRequested += OnUpdateRequested;
         _card.SettingChanged += OnSettingChanged;
         _card.CloseRequested += OnCardClosed;
@@ -353,6 +359,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         card.AutoPauseChanged -= OnAutoPauseChanged;
         card.SetupActionRequested -= OnSetupAction;
         card.SettingsRequested -= OnSettingsRequested;
+        card.RefreshRequested -= OnRefreshRequested;
         card.UpdateRequested -= OnUpdateRequested;
         card.SettingChanged -= OnSettingChanged;
         card.CloseRequested -= OnCardClosed;

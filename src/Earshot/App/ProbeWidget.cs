@@ -182,7 +182,7 @@ internal static partial class Program
     // The card variants the widget card probe renders, from the same fixed synthetic snapshots the gauge already
     // uses. "this-pc" and "elsewhere" are the card as it renders with fresh values (AutoPauseAvailable false in both,
     // so the switch row never appears); "greyed" is the same values read four minutes ago, drawn greyed with their
-    // age; "no-reading" is a card with no value for any part. "auto-pause-preview" is a preview only: production
+    // age; "no-reading" is a card with no value for any part; "refresh-reading" and "refresh-nothing-heard" are a battery refresh in progress and one that heard nothing. "auto-pause-preview" is a preview only: production
     // never sets AutoPauseAvailable true until the in-ear signal is known.
     internal static IReadOnlyList<(string Variant, WidgetCardModel Model)> ProbeWidgetCardVariants(DateTimeOffset now)
     {
@@ -205,6 +205,17 @@ internal static partial class Program
             ("auto-pause-preview", new WidgetCardModel(thisPc with { AutoPauseAvailable = true },
                 AutoPauseOn: false, ShowSwitch: true, ConnectIntent: false, ButtonEnabled: true,
                 OtherDeviceLabel: "", Now: now)),
+            // A refresh in progress, its icon a third of a turn on, and one that ended with nothing heard.
+            ("refresh-reading", new WidgetCardModel(greyed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now)
+            {
+                Refresh = new BatteryRefreshView(Reading: true, SpinFrame: 3),
+            }),
+            ("refresh-nothing-heard", new WidgetCardModel(greyed, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
+                ButtonEnabled: true, OtherDeviceLabel: "", Now: now)
+            {
+                Refresh = new BatteryRefreshView(Reading: false, Outcome: BatteryRefreshOutcome.NothingHeard),
+            }),
         ];
     }
 
