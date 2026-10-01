@@ -153,7 +153,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         StrangerWornNearby(seconds: 300);
 
         WidgetSnapshot snapshot = service.Current;
-        Assert.AreNotEqual(BroadcastSelectionState.Chosen, snapshot.Selection, "Nothing is linked.");
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, snapshot.Selection, "Nothing is linked.");
         AssertNothingShown(Shown(service), "A worn pair nearby is not the owner's");
         Assert.AreEqual(GaugeMode.MarkOnly, Gauge(service).Mode, "Connected with no figure: the mark alone.");
         Assert.IsNull(Gauge(service).Percent);
@@ -191,7 +191,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
 
         OpenTheCase(seconds: 3);
 
-        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
         ShownBattery shown = Shown(service);
         Assert.AreEqual(100, shown.Left.Percent);
         Assert.AreEqual(100, shown.Right.Percent);
@@ -249,7 +249,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         Tick(12); // the old addresses go quiet
         WearThem(8, left: OwnerLeftBudNewAddress, right: OwnerRightBudNewAddress);
 
-        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
         ShownBattery shown = Shown(service);
         Assert.AreEqual(100, shown.Left.Percent);
         Assert.AreEqual(100, shown.Right.Percent);
@@ -303,7 +303,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         Assert.IsFalse(Shown(service).Left.Fresh);
 
         Tick(15);
-        Assert.AreNotEqual(BroadcastSelectionState.Chosen, service.Current.Selection, "Over two minutes: the link is dropped.");
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection, "Over two minutes: the link is dropped.");
         AssertNothingShown(Shown(service), "The link was dropped");
         Assert.IsNull(service.Current.Left.Percent, "What the set said is not kept either.");
 
@@ -327,7 +327,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         OpenTheCase(3); // linked, but the AirPods are not on this PC
         WearThem(3);
 
-        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection, "The link is made whether or not they are connected.");
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection, "The link is made whether or not they are connected.");
         AssertNothingShown(Shown(service), "Not connected");
         Assert.AreEqual(GaugeMode.NotOnThisPc, Gauge(service).Mode);
 
@@ -403,7 +403,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         Connect();
         WearThem(5);
 
-        Assert.AreNotEqual(BroadcastSelectionState.Chosen, second.Current.Selection, "A restart forgets the link: the next case open makes one.");
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, second.Current.Selection, "A restart forgets the link: the next case open makes one.");
         AssertNothingShown(Shown(second), "A new run, no case opened");
     }
 

@@ -103,7 +103,7 @@ internal static partial class Program
         WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = where,
-            Selection = BroadcastSelectionState.Chosen,
+            Selection = BroadcastSelectionState.Linked,
             Left = new PartReading(70, true, null) { ReadAt = readAt },
             Right = new PartReading(60, false, true) { ReadAt = readAt },
             Case = new PartReading(90, false, null) { ReadAt = readAt },

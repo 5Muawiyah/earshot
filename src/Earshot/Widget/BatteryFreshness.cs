@@ -88,7 +88,7 @@ internal static class BatteryFreshness
         ArgumentNullException.ThrowIfNull(snapshot);
         return Shown(
             snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset,
-            onThisPc: snapshot.Where == AirPodsWhere.ThisPc, linked: snapshot.Selection == BroadcastSelectionState.Chosen, now);
+            onThisPc: snapshot.Where == AirPodsWhere.ThisPc, linked: snapshot.Selection == BroadcastSelectionState.Linked, now);
     }
 
     // onThisPc: the owner's AirPods are connected to this PC; nothing at all is shown otherwise. linked: the broadcast's

@@ -206,7 +206,7 @@ public sealed class BatteryFreshnessTests
             Selection = state,
         };
 
-        Assert.AreEqual(60, BatteryFreshness.Shown(Snap(BroadcastSelectionState.Chosen), Now).Right.Percent);
+        Assert.AreEqual(60, BatteryFreshness.Shown(Snap(BroadcastSelectionState.Linked), Now).Right.Percent);
         Assert.IsFalse(BatteryFreshness.Shown(Snap(BroadcastSelectionState.Listening), Now).Right.HasValue, "Heard, never linked.");
         Assert.IsFalse(BatteryFreshness.Shown(Snap(BroadcastSelectionState.NoPairedModel), Now).Right.HasValue);
     }

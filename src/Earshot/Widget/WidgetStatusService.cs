@@ -8,9 +8,12 @@ namespace Earshot.Widget;
 // decoder, the snapshot and the events run after a post through uiPost, so every state change the UI can see
 // happens on one thread. Counters are Interlocked so they can always be read without that post.
 //
-// Which AirPods are the owner's is decided with no step from the owner: the paired AirPods' model (read once at
-// start and again when the pinned device changes) picks the candidates, and BroadcastSelector picks the set.
-// Only the chosen set's messages ever reach the values the card, the gauge and the alert show. Windows' own
+// Which AirPods are the owner's is decided with no step from the owner beyond opening the case next to the PC: the
+// paired AirPods' model (read once at start and again when the pinned device changes) picks the candidates, and
+// BroadcastSelector links the set whose case is opened near the PC, follows it across address changes and drops the
+// link when the set has been lost for too long. The link is in memory only: nothing about it is written, so a restart
+// has none. Only the linked set's messages ever reach the values, and BatteryFreshness shows them (on the card, the
+// gauge, the tooltip and the low battery alert) only while the AirPods are connected to this PC. Windows' own
 // Hands-Free battery figure, when it has one, is read beside them (every minute while the AirPods are on this PC, at
 // each connect, and when asked) and held apart: it fills in only when no bud has a fresh broadcast value.
 //
@@ -172,7 +175,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // neither, so nothing raises it today.
     public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
-    // Raised for every reading of the chosen set: the seam auto-pause is fed from.
+    // Raised for every reading of the linked set, and of no other: the seam auto-pause is fed from. Auto-pause itself acts
+    // only while the AirPods are this PC's output.
     public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
     public WidgetSnapshot Current
@@ -1147,7 +1151,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                     _log.Info("Widget: linked to the AirPods whose case was opened (" + seen.SetsInRange + " in range).");
                 }
             }
-            else if (seen.Reacquired)
+            else if (seen.Followed)
             {
                 // The values on show stay, greyed as they age, until this set's own messages replace them. The in-ear
                 // state does not: whoever pairs readings by set is told the set changed addresses.
@@ -1167,7 +1171,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 case BroadcastClass.ColourMismatch:
                     Interlocked.Increment(ref _colourMismatch);
                     return;
-                case BroadcastClass.Choosing:
+                case BroadcastClass.NotLinked:
                     return;
                 case BroadcastClass.OtherSet:
                     Interlocked.Increment(ref _otherSet);

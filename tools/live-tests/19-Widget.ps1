@@ -232,19 +232,19 @@ try
 
         Write-Section -Run $run -Title 'Half C: the battery, from the broadcast'
         $batteryStartUtc = (Get-Date).ToUniversalTime()
-        Wait-Owner -Run $run -Text 'Take your AirPods out of the case, or open the case lid next to this computer, then left-click the Earshot icon or the gauge to open the card.'
-        # A set that is picked out stays picked out for an hour, so one chosen earlier in this sitting (or just before it)
-        # is not picked out again and logs no new line here. Either a picked-out line anywhere since the sitting began, or
-        # the counters' chosen figure rising since the first counters line of the sitting, shows the widget has a set and
-        # is hearing it.
+        Wait-Owner -Run $run -Text 'Connect the AirPods to this PC (left-click the Earshot icon or the gauge, then Connect). Then put both AirPods in the case, open the lid next to this computer and leave it open, and open the card again.'
+        # A set that is linked stays linked while it is heard (and for two minutes after), so one linked earlier in this
+        # sitting (or just before it) is not linked again and logs no new line here. Either a linked line anywhere since
+        # the sitting began, or the counters' chosen figure rising since the first counters line of the sitting, shows the
+        # widget has a linked set and is hearing it.
         $firstChosen = $(if (@($counterLines).Count -gt 0) { Get-CounterFigure -Line (@($counterLines)[0]) -Name 'chosen' } else { $null })
         $lastChosen = $null
         $chosenRose = $false
         $pickedLines = @()
         for ($step = 0; $step -lt 7 -and @($pickedLines).Count -eq 0 -and -not $chosenRose; $step++)
         {
-            Wait-Seconds -Run $run -Seconds 10 -Reason 'waiting for the widget to pick out your AirPods'
-            $pickedLines = Get-EarshotLogLines -Run $run -Pattern 'Widget: picked out a set of AirPods to show' -SinceUtc $testStartUtc
+            Wait-Seconds -Run $run -Seconds 10 -Reason 'waiting for the widget to link your AirPods'
+            $pickedLines = Get-EarshotLogLines -Run $run -Pattern 'Widget: linked to the AirPods whose case was opened' -SinceUtc $testStartUtc
             $sittingCounterLines = Get-EarshotLogLines -Run $run -Pattern 'Widget counters:' -SinceUtc $testStartUtc
             if (@($sittingCounterLines).Count -gt 0)
             {
@@ -254,11 +254,11 @@ try
             }
         }
 
-        Add-Finding -Run $run -Name 'airPodsPickedOutLines' -Value @($pickedLines).Count -Detail 'Log lines saying the widget picked out a set of AirPods to show, since the sitting began'
+        Add-Finding -Run $run -Name 'airPodsPickedOutLines' -Value @($pickedLines).Count -Detail 'Log lines saying the widget linked the AirPods whose case was opened, since the sitting began'
         Add-Finding -Run $run -Name 'chosenCounterRose' -Value $(if ($chosenRose) { 'yes' } else { 'no' }) -Detail 'Whether the counters'' chosen figure was higher in the newest counters line of the sitting than in its first'
-        Add-Criterion -Run $run -Id 'airpods-picked-out' -Criterion 'With the AirPods out of the case or the case open, the widget has a set of AirPods to show from what it hears: it picked one out during the sitting, or its chosen counter is rising.' `
+        Add-Criterion -Run $run -Id 'airpods-picked-out' -Criterion 'With the case open next to this PC, the widget links the AirPods from what it hears: it linked them during the sitting, or its chosen counter is rising.' `
             -Outcome $(if (@($pickedLines).Count -gt 0 -or $chosenRose) { 'pass' } else { 'inconclusive' }) `
-            -Detail $(if (@($pickedLines).Count -gt 0 -or $chosenRose) { [string]@($pickedLines).Count + ' picked-out line(s) since the sitting began; the chosen counter ' + $(if ($chosenRose) { 'rose from ' + $firstChosen + ' to ' + $lastChosen + '.' } else { 'did not rise.' }) } else { 'Nothing was picked out since the sitting began and the chosen counter did not rise in about a minute: the AirPods were not broadcasting, or the watcher is not running. A set picked out before this sitting keeps being shown without a new line, so its counter is the thing to look at.' })
+            -Detail $(if (@($pickedLines).Count -gt 0 -or $chosenRose) { [string]@($pickedLines).Count + ' linked line(s) since the sitting began; the chosen counter ' + $(if ($chosenRose) { 'rose from ' + $firstChosen + ' to ' + $lastChosen + '.' } else { 'did not rise.' }) } else { 'Nothing was linked since the sitting began and the chosen counter did not rise in about a minute: the case was not open with a bud in it near this PC, or the watcher is not running. A set linked before this sitting keeps being shown without a new line, so its counter is the thing to look at.' })
         $batteryAnswer = Read-Answer -Run $run -Question 'Compare the card with what your iPhone shows. Does every battery figure the card shows agree with the iPhone (give or take one step of 10), with nothing shown for a part the card has no figure for?'
         Add-Criterion -Run $run -Id 'battery-matches-iphone' -Criterion 'Every battery figure the card shows agrees with the iPhone, and nothing is shown for a part with no figure.' `
             -Outcome $(if ($batteryAnswer -eq 'yes') { 'pass' } elseif ($batteryAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
@@ -266,14 +266,14 @@ try
 
         Write-Section -Run $run -Title 'The battery when it is old'
         Wait-Owner -Run $run -Text 'Close the case lid with the AirPods inside, and leave the card open for a minute.'
-        $greyAnswer = Read-Answer -Run $run -Question 'A minute later, are the battery figures greyed, and does the line under the "where" line say how long ago the battery was read?'
+        $greyAnswer = Read-Answer -Run $run -Question 'A minute later, are the battery figures greyed, and does the line under the "where" line say how long ago the battery was read? (After two minutes with the case shut the figures go and the line asks you to open the case; that is the link being dropped, not a fault.)'
         Add-Criterion -Run $run -Id 'battery-greys-when-old' -Criterion 'A battery figure older than 30 seconds is greyed, and the card says how long ago it was read, rather than showing it as current.' `
             -Outcome $(if ($greyAnswer -eq 'yes') { 'pass' } elseif ($greyAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $greyAnswer + '. A "no" would mean an old figure was shown as current, which is a real defect.')
 
         Write-Section -Run $run -Title 'Refresh'
         Wait-Owner -Run $run -Text 'With the AirPods still shut in the case, click the circular arrow beside the gear on the card, and wait about twelve seconds.'
-        $nothingHeardAnswer = Read-Answer -Run $run -Question 'After about twelve seconds, does the card say "Nothing heard. Open the case", with the figures still greyed?'
+        $nothingHeardAnswer = Read-Answer -Run $run -Question 'After about twelve seconds, does the card say "Nothing heard. Open the case", with the figures still greyed (or gone, if the case has been shut for more than two minutes)?'
         Add-Criterion -Run $run -Id 'refresh-says-nothing-heard' -Criterion 'A refresh with the AirPods shut in the case says nothing was heard and leaves the old figures greyed.' `
             -Outcome $(if ($nothingHeardAnswer -eq 'yes') { 'pass' } elseif ($nothingHeardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $nothingHeardAnswer + '.')

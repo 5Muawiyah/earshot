@@ -113,7 +113,7 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'Widget watcher start:'; Text = 'Widget watcher start: start Started.' }
     [ordered]@{ Pattern = 'Widget watcher stopped:'; Text = 'Widget watcher stopped: RadioNotAvailable (1).' }
     [ordered]@{ Pattern = 'Widget counters:'; Text = 'Widget counters: watcher=Started allSections=4 apple=4 other=0 items=4 ok=4 truncated=0 unknownForm=0 modelMismatch=0 colourMismatch=0 otherSet=0 chosen=4 noPairedModel=0 budOrderDisagree=0 switches=0 sets=1 unknownFormShapes=[]' }
-    [ordered]@{ Pattern = 'Widget: picked out a set of AirPods to show'; Text = 'Widget: picked out a set of AirPods to show (1 in range).' }
+    [ordered]@{ Pattern = 'Widget: linked to the AirPods whose case was opened'; Text = 'Widget: linked to the AirPods whose case was opened (1 in range).' }
     [ordered]@{ Pattern = 'Widget: battery refresh ended:'; Text = 'Widget: battery refresh ended: Heard.' }
     [ordered]@{ Pattern = 'Gauge raised:'; Text = 'Gauge raised: Shell_TrayWnd (Explorer) was over it after a foreground change to Windows.UI.Core.CoreWindow.' }
     [ordered]@{ Pattern = 'Gauge left under'; Text = 'Gauge left under Windows.UI.Core.CoreWindow after a foreground change: not the taskbar.' }
@@ -513,9 +513,9 @@ function New-FakeSandbox
         $lines = $lines + @([string]$p1 + ' INFO  Pause on leave: the AirPods left this PC (change seen at ' + $p1 + '). Not paused: this PC was not playing to them (last reading: silent).')
     }
 
-    # test 19, chosen-rising: the widget picked its set out before this sitting (a choice lasts an hour), so no
-    # "picked out" line is logged in it, and what shows the choice is the counters line: its chosen figure is higher in
-    # the newest line than in the first. A script that read only the picked-out line would call this nothing picked out.
+    # test 19, chosen-rising: the widget linked its set before this sitting (a link lasts while the set is heard), so no
+    # "linked" line is logged in it, and what shows the link is the counters line: its chosen figure is higher in
+    # the newest line than in the first. A script that read only the linked line would call this nothing linked.
     if ($Case -eq 'chosen-rising')
     {
         $index = $index + 1; $c1 = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)

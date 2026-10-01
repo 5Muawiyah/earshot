@@ -6,17 +6,17 @@ internal enum BroadcastClass
     NoPairedModel,   // no paired AirPods model is known, so nothing can be linked
     ModelMismatch,   // another model than the paired AirPods'
     ColourMismatch,  // the paired model, but not the colour of the set that is linked
-    Choosing,        // the paired model and colour, heard while no set is linked
+    NotLinked,       // the paired model and colour, heard while no set is linked
     Chosen,          // a message of the linked set: its values are the ones shown
     OtherSet,        // the paired model and colour, from a set that is not the linked one
 }
 
-public enum BroadcastSelectionState { NoPairedModel, Listening, Chosen }
+public enum BroadcastSelectionState { NoPairedModel, Listening, Linked }
 
 // What one message did to the selection.
 //   NewChoice: the linked set is not the set it was (a link made on a case open, a link moved to another pair that
 //   opened its case nearer), so whatever values were kept belonged to another pair and are to be dropped.
-//   Reacquired: every sender of the linked set had been silent for longer than the window (the addresses rotated), and
+//   Followed: every sender of the linked set had been silent for longer than the window (the addresses rotated), and
 //   a set whose fields continue the linked set's last was followed. It is the same set under other addresses, so the
 //   values on show stay.
 //   Switched: another set took the link from the linked one (it comes with NewChoice).
@@ -25,7 +25,7 @@ public enum BroadcastSelectionState { NoPairedModel, Listening, Chosen }
 internal readonly record struct SelectionObservation(
     BroadcastClass Class,
     bool NewChoice = false,
-    bool Reacquired = false,
+    bool Followed = false,
     bool Switched = false,
     int SetsInRange = 0,
     bool Dropped = false)
@@ -86,7 +86,7 @@ internal sealed class BroadcastSelector
 
     public int SetsInRange => _setsInRange;
 
-    public bool HasChosen => _anchors.Count > 0;
+    public bool IsLinked => _anchors.Count > 0;
 
     public BroadcastSelectionState StateAt(DateTimeOffset now)
     {
@@ -95,7 +95,7 @@ internal sealed class BroadcastSelector
             return BroadcastSelectionState.NoPairedModel;
         }
 
-        return HasChosen && !LostTooLong(now) ? BroadcastSelectionState.Chosen : BroadcastSelectionState.Listening;
+        return IsLinked && !LostTooLong(now) ? BroadcastSelectionState.Linked : BroadcastSelectionState.Listening;
     }
 
     private bool LostTooLong(DateTimeOffset now) => _chosenLastAt is { } last && now - last > BroadcastRules.LostLimit;
@@ -105,7 +105,7 @@ internal sealed class BroadcastSelector
     // with the clock's by whatever watches for silence, since silence brings no message to notice it with.
     public bool Expire(DateTimeOffset now)
     {
-        if (!HasChosen || !LostTooLong(now))
+        if (!IsLinked || !LostTooLong(now))
         {
             return false;
         }
@@ -191,10 +191,10 @@ internal sealed class BroadcastSelector
         List<BroadcastSet> sets = BroadcastSenderSets.Compute(_senders.Select(s => (s.Key, s.Value)).ToList());
         _setsInRange = sets.Count;
 
-        if (!HasChosen)
+        if (!IsLinked)
         {
             return TryLink(sets, tag, message, at, exclude: null, overMedian: null)
-                ?? new SelectionObservation(BroadcastClass.Choosing, SetsInRange: _setsInRange);
+                ?? new SelectionObservation(BroadcastClass.NotLinked, SetsInRange: _setsInRange);
         }
 
         BroadcastSet? chosen = ChosenSetOf(sets);
@@ -323,7 +323,7 @@ internal sealed class BroadcastSelector
         _chosenMedian = best.MedianRssi;
         return new SelectionObservation(
             _anchors.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
-            Reacquired: true, SetsInRange: _setsInRange);
+            Followed: true, SetsInRange: _setsInRange);
     }
 
     private SelectionObservation Follow(List<BroadcastSet> sets, BroadcastSet chosen, SenderMessage message, DateTimeOffset at)

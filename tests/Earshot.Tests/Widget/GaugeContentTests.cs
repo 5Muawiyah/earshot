@@ -19,7 +19,7 @@ public sealed class GaugeContentTests
         WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = where,
-            Selection = BroadcastSelectionState.Chosen,
+            Selection = BroadcastSelectionState.Linked,
             Left = left ?? PartReading.Unknown,
             Right = right ?? PartReading.Unknown,
             Headset = headset ?? PartReading.Unknown,

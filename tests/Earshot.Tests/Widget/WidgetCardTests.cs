@@ -938,7 +938,7 @@ public sealed class WidgetCardTests
             }
 
             Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.Unknown) with { Selection = BroadcastSelectionState.Listening }), "Not connected: nothing to ask for.");
-            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.Chosen }), "Linked, nothing read yet.");
+            Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.Linked }), "Linked, nothing read yet.");
             Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.ThisPc) with { Selection = BroadcastSelectionState.NoPairedModel }), "No paired model: opening the case would not help.");
             Assert.AreEqual(
                 "Windows reads 70%",
@@ -1127,7 +1127,7 @@ public sealed class WidgetCardTests
             WidgetCounters.Empty)
         {
             // A card that shows figures is one for a linked pair: opening the case near the PC is what links one.
-            Selection = BroadcastSelectionState.Chosen,
+            Selection = BroadcastSelectionState.Linked,
         };
 
     private static WidgetCardModel Model(

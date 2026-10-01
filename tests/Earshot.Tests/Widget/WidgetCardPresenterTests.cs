@@ -329,7 +329,7 @@ public sealed class WidgetCardPresenterTests
             AutoPauseAvailable: autoPauseAvailable,
             WidgetCounters.Empty)
         {
-            Selection = BroadcastSelectionState.Chosen,
+            Selection = BroadcastSelectionState.Linked,
         };
 
     // Records every call the presenter makes into "TrayContext"; nothing here touches a real coordinator,

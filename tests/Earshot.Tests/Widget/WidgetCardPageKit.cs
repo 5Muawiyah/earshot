@@ -231,7 +231,7 @@ internal static class CardKit
             AutoPauseAvailable: false,
             WidgetCounters.Empty)
         {
-            Selection = BroadcastSelectionState.Chosen,
+            Selection = BroadcastSelectionState.Linked,
         };
 
     public static WidgetCardModel MainModel(WidgetSnapshot? snapshot = null, string? updateVersion = null) =>

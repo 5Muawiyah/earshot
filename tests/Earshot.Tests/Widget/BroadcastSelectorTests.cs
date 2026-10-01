@@ -53,7 +53,7 @@ public sealed class BroadcastSelectorTests
     {
         var d = new SelectorDriver();
         Burst(d, rssi, 3, colour: colour);
-        Assert.IsTrue(d.Selector.HasChosen, "Sanity: the burst linked the pair.");
+        Assert.IsTrue(d.Selector.IsLinked, "Sanity: the burst linked the pair.");
         d.Tick(0.25);
         return d;
     }
@@ -85,7 +85,7 @@ public sealed class BroadcastSelectorTests
         SelectionObservation seen = Burst(d, -50, 5);
 
         Assert.AreEqual(BroadcastClass.NoPairedModel, seen.Class);
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
         Assert.AreEqual(BroadcastSelectionState.NoPairedModel, d.Selector.StateAt(d.Now));
     }
 
@@ -101,7 +101,7 @@ public sealed class BroadcastSelectorTests
         }
 
         Assert.AreEqual(BroadcastClass.ModelMismatch, seen.Class);
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
         Assert.AreEqual(BroadcastSelectionState.Listening, d.Selector.StateAt(d.Now));
     }
 
@@ -121,8 +121,8 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.5);
         }
 
-        Assert.AreEqual(BroadcastClass.Choosing, seen.Class, "Heard, and never the owner's.");
-        Assert.IsFalse(d.Selector.HasChosen, "Five minutes of a worn pair nearby: nothing is linked.");
+        Assert.AreEqual(BroadcastClass.NotLinked, seen.Class, "Heard, and never the owner's.");
+        Assert.IsFalse(d.Selector.IsLinked, "Five minutes of a worn pair nearby: nothing is linked.");
         Assert.AreEqual(BroadcastSelectionState.Listening, d.Selector.StateAt(d.Now));
 
         // Even a stronger signal does not make it the owner's.
@@ -132,7 +132,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.25);
         }
 
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
     }
 
     [TestMethod]
@@ -141,15 +141,15 @@ public sealed class BroadcastSelectorTests
         var d = new SelectorDriver();
 
         SelectionObservation early = Burst(d, -55, 1.75, colour: 0x11);
-        Assert.AreEqual(BroadcastClass.Choosing, early.Class, "Eight messages in a second and three quarters: not yet sustained.");
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.AreEqual(BroadcastClass.NotLinked, early.Class, "Eight messages in a second and three quarters: not yet sustained.");
+        Assert.IsFalse(d.Selector.IsLinked);
 
         d.Tick(0.25);
         SelectionObservation linked = d.Send(SetA, Bud(first: true, colour: 0x11), -55);
 
         Assert.IsTrue(linked.NewChoice, "A link was made: whatever was held before belonged to another pair.");
-        Assert.IsTrue(d.Selector.HasChosen);
-        Assert.AreEqual(BroadcastSelectionState.Chosen, d.Selector.StateAt(d.Now));
+        Assert.IsTrue(d.Selector.IsLinked);
+        Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now));
         Assert.AreEqual((byte)0x11, d.Selector.HeldColour);
         Assert.AreEqual(BroadcastClass.Chosen, linked.Class);
         Assert.AreEqual(BroadcastClass.Chosen, d.Send(SetAOtherBud, Bud(first: false, colour: 0x11), -55).Class, "Both buds are the linked set.");
@@ -160,11 +160,11 @@ public sealed class BroadcastSelectorTests
     {
         var far = new SelectorDriver();
         Burst(far, -71, 20);
-        Assert.IsFalse(far.Selector.HasChosen, "-71 dBm is not next to the PC.");
+        Assert.IsFalse(far.Selector.IsLinked, "-71 dBm is not next to the PC.");
 
         var near = new SelectorDriver();
         Burst(near, -70, 3);
-        Assert.IsTrue(near.Selector.HasChosen, "-70 dBm is.");
+        Assert.IsTrue(near.Selector.IsLinked, "-70 dBm is.");
     }
 
     [TestMethod]
@@ -179,7 +179,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.25);
         }
 
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
     }
 
     [TestMethod]
@@ -192,7 +192,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(1.3); // four in five seconds
         }
 
-        Assert.IsFalse(d.Selector.HasChosen, "A case-known message every second and a third is not a burst.");
+        Assert.IsFalse(d.Selector.IsLinked, "A case-known message every second and a third is not a burst.");
     }
 
     [TestMethod]
@@ -206,7 +206,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.25);
         }
 
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
     }
 
     [TestMethod]
@@ -271,7 +271,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.5);
             SelectionObservation b = d.Send(SetANewOtherBud, InUse(false), -55);
             d.Tick(0.5);
-            followed |= a.Reacquired || b.Reacquired;
+            followed |= a.Followed || b.Followed;
             newChoice |= a.NewChoice || b.NewChoice;
             last = b.Class;
         }
@@ -279,8 +279,8 @@ public sealed class BroadcastSelectorTests
         Assert.IsTrue(followed, "Fields that continue the linked set's last: it is the same set under new addresses.");
         Assert.IsFalse(newChoice, "A continuation is not another pair: the values stay.");
         Assert.AreEqual(BroadcastClass.Chosen, last);
-        Assert.IsTrue(d.Selector.HasChosen);
-        Assert.AreEqual(BroadcastSelectionState.Chosen, d.Selector.StateAt(d.Now));
+        Assert.IsTrue(d.Selector.IsLinked);
+        Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now));
     }
 
     [TestMethod]
@@ -295,7 +295,7 @@ public sealed class BroadcastSelectorTests
         for (int i = 0; i < 40; i++)
         {
             SelectionObservation seen = d.Send(Stranger, InUse(true, pairHigh: 0x6, pairLow: 0x6), -35);
-            adopted |= seen.Class == BroadcastClass.Chosen || seen.NewChoice || seen.Reacquired || seen.Switched;
+            adopted |= seen.Class == BroadcastClass.Chosen || seen.NewChoice || seen.Followed || seen.Switched;
             d.Tick(0.5);
         }
 
@@ -305,7 +305,7 @@ public sealed class BroadcastSelectorTests
         bool followed = false;
         for (int i = 0; i < 12; i++)
         {
-            followed |= d.Send(SetANewAddress, InUse(true), -55).Reacquired;
+            followed |= d.Send(SetANewAddress, InUse(true), -55).Followed;
             d.Send(Stranger, InUse(true, pairHigh: 0x6, pairLow: 0x6), -35);
             d.Tick(0.5);
         }
@@ -343,12 +343,12 @@ public sealed class BroadcastSelectorTests
         bool followed = false;
         for (int i = 0; i < 20; i++)
         {
-            followed |= d.Send(SetANewAddress, InUse(true), -55).Reacquired;
+            followed |= d.Send(SetANewAddress, InUse(true), -55).Followed;
             d.Tick(0.5);
         }
 
         Assert.IsFalse(followed, "Thirty seconds is the time in which the old address's last value is still current.");
-        Assert.AreEqual(BroadcastSelectionState.Chosen, d.Selector.StateAt(d.Now), "It is lost, but not yet dropped.");
+        Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now), "It is lost, but not yet dropped.");
     }
 
     [TestMethod]
@@ -362,7 +362,7 @@ public sealed class BroadcastSelectorTests
 
         Assert.AreEqual(BroadcastClass.OtherSet, seen.Class);
         Assert.IsFalse(seen.NewChoice);
-        Assert.IsFalse(seen.Reacquired);
+        Assert.IsFalse(seen.Followed);
         Assert.AreEqual(BroadcastClass.Chosen, d.Send(SetA, InUse(true), -55).Class, "The linked set still sends and is still the linked set.");
     }
 
@@ -377,7 +377,7 @@ public sealed class BroadcastSelectorTests
 
         SelectionObservation last = Burst(d, -55, 3, SetANewAddress, SetANewOtherBud, pairHigh: 0x9, pairLow: 0x9);
 
-        Assert.IsTrue(d.Selector.HasChosen);
+        Assert.IsTrue(d.Selector.IsLinked);
         Assert.AreEqual(BroadcastClass.Chosen, last.Class);
         Assert.IsTrue(d.Send(SetANewAddress, Bud(first: true, pairHigh: 0x9, pairLow: 0x9), -55).Class == BroadcastClass.Chosen);
     }
@@ -391,15 +391,15 @@ public sealed class BroadcastSelectorTests
         InUseRun(d, 4, colour: 0x11);
 
         d.Tick(119);
-        Assert.AreEqual(BroadcastSelectionState.Chosen, d.Selector.StateAt(d.Now), "A minute and fifty nine seconds is within the limit.");
+        Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now), "A minute and fifty nine seconds is within the limit.");
         Assert.IsFalse(d.Selector.Expire(d.Now));
-        Assert.IsTrue(d.Selector.HasChosen);
+        Assert.IsTrue(d.Selector.IsLinked);
 
         d.Tick(2);
         Assert.AreEqual(BroadcastSelectionState.Listening, d.Selector.StateAt(d.Now), "Two minutes and a second: nothing is linked.");
         Assert.IsTrue(d.Selector.Expire(d.Now), "The drop is reported once, so what was kept can be cleared.");
         Assert.IsFalse(d.Selector.Expire(d.Now));
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
         Assert.IsNull(d.Selector.HeldColour, "The colour goes with the link.");
     }
 
@@ -413,8 +413,8 @@ public sealed class BroadcastSelectorTests
         SelectionObservation seen = d.Send(SetA, InUse(true), -55);
 
         Assert.IsTrue(seen.Dropped);
-        Assert.AreEqual(BroadcastClass.Choosing, seen.Class, "The same address is not linked again by being heard.");
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.AreEqual(BroadcastClass.NotLinked, seen.Class, "The same address is not linked again by being heard.");
+        Assert.IsFalse(d.Selector.IsLinked);
     }
 
     [TestMethod]
@@ -432,10 +432,10 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.5);
         }
 
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
 
         Burst(d, -55, 3);
-        Assert.IsTrue(d.Selector.HasChosen, "The next case open links again.");
+        Assert.IsTrue(d.Selector.IsLinked, "The next case open links again.");
     }
 
     [TestMethod]
@@ -446,7 +446,7 @@ public sealed class BroadcastSelectorTests
         {
             InUseRun(d, 2);
             d.Tick(90); // a minute and a half of silence between each word, always under the limit
-            Assert.AreEqual(BroadcastSelectionState.Chosen, d.Selector.StateAt(d.Now), "Round " + round);
+            Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now), "Round " + round);
         }
 
         Assert.AreEqual(BroadcastClass.Chosen, d.Send(SetA, InUse(true), -55).Class);
@@ -458,10 +458,10 @@ public sealed class BroadcastSelectorTests
         SelectorDriver d = Linked();
 
         Assert.IsFalse(d.Selector.SetPairedModel(BroadcastFixtures.PairedModel), "The same model changes nothing.");
-        Assert.IsTrue(d.Selector.HasChosen);
+        Assert.IsTrue(d.Selector.IsLinked);
         Assert.IsTrue(d.Selector.SetPairedModel(0x1234));
 
-        Assert.IsFalse(d.Selector.HasChosen);
+        Assert.IsFalse(d.Selector.IsLinked);
         Assert.IsNull(d.Selector.HeldColour);
     }
 
@@ -537,7 +537,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.5);
             SelectionObservation seen = d.Send(Stranger, InUse(true, pairHigh: 0x6, pairLow: 0x6), -85);
             chosen += seen.Class == BroadcastClass.Chosen ? 1 : 0;
-            changed |= seen.NewChoice || seen.Switched || seen.Reacquired;
+            changed |= seen.NewChoice || seen.Switched || seen.Followed;
         }
 
         Assert.AreEqual(0, chosen, "Eight and a half seconds with the owner quiet: the stranger's own messages are not the linked set's.");
@@ -546,7 +546,7 @@ public sealed class BroadcastSelectorTests
         d.Tick(0.5);
         SelectionObservation owner = d.Send(SetA, InUse(true), -55);
         Assert.AreEqual(BroadcastClass.Chosen, owner.Class, "The owner is back and is still the linked set.");
-        Assert.IsFalse(owner.NewChoice || owner.Switched || owner.Reacquired);
+        Assert.IsFalse(owner.NewChoice || owner.Switched || owner.Followed);
     }
 
     [TestMethod]
@@ -594,7 +594,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.25);
         }
 
-        Assert.IsTrue(d.Selector.HasChosen);
+        Assert.IsTrue(d.Selector.IsLinked);
         for (int i = 0; i <= 7; i++)
         {
             d.Send(SetA, InUse(true), -58);
@@ -608,7 +608,7 @@ public sealed class BroadcastSelectorTests
         for (int i = 0; i < 40; i++)
         {
             SelectionObservation seen = d.Send(SetAOtherBud, InUse(false), -56);
-            followed |= seen.Reacquired || seen.NewChoice;
+            followed |= seen.Followed || seen.NewChoice;
             last = seen.Class;
             d.Tick(0.5);
         }
@@ -639,7 +639,7 @@ public sealed class BroadcastSelectorTests
         bool followed = false;
         for (int i = 0; i < 40; i++)
         {
-            followed |= d.Send(SetAOtherBud, InUse(false), -56).Reacquired;
+            followed |= d.Send(SetAOtherBud, InUse(false), -56).Followed;
             d.Tick(0.5);
         }
 
@@ -662,7 +662,7 @@ public sealed class BroadcastSelectorTests
             d.Tick(0.5);
             elapsed += 0.5;
             seen = d.Send(Stranger, InUse(true), -85);
-            if (seen.Class == BroadcastClass.Chosen && seen.Reacquired && firstFollowedAt < 0)
+            if (seen.Class == BroadcastClass.Chosen && seen.Followed && firstFollowedAt < 0)
             {
                 firstFollowedAt = elapsed;
             }

@@ -64,7 +64,7 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
     // older it is greyed and feeds nothing.
     private WidgetSnapshot Snapshot(
         int? left = null, int? right = null, int? box = null, double ageSeconds = 1, int? headset = null, double headsetAgeSeconds = 1,
-        AirPodsWhere where = AirPodsWhere.ThisPc, BroadcastSelectionState selection = BroadcastSelectionState.Chosen)
+        AirPodsWhere where = AirPodsWhere.ThisPc, BroadcastSelectionState selection = BroadcastSelectionState.Linked)
     {
         DateTimeOffset readAt = _clock.GetUtcNow() - TimeSpan.FromSeconds(ageSeconds);
         PartReading Part(int? percent) => percent is null ? PartReading.Unknown : new PartReading(percent, null, null) { ReadAt = readAt };
@@ -230,7 +230,7 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         Assert.AreEqual(1, _notifier.Calls.Count, "Windows' figure needs no link.");
         Assert.AreEqual(("Earshot", "AirPods at 15%"), _notifier.Calls[0]);
 
-        _status.Raise(Snapshot(left: 10, selection: BroadcastSelectionState.Chosen));
+        _status.Raise(Snapshot(left: 10, selection: BroadcastSelectionState.Linked));
         Assert.AreEqual(2, _notifier.Calls.Count, "Linked, the same value is shown and alerts.");
     }
 

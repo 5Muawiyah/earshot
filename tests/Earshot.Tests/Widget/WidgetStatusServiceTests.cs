@@ -204,7 +204,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         }
 
         WidgetSnapshot snapshot = service.Current;
-        Assert.AreEqual(BroadcastSelectionState.Chosen, snapshot.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, snapshot.Selection);
         Assert.AreEqual(90, snapshot.Case.Percent);
         Assert.AreEqual(40, snapshot.Left.Percent);
         Assert.AreEqual(70, snapshot.Right.Percent);
@@ -375,7 +375,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Send(5, inUse, -60, 1.0);
 
         WidgetSnapshot snapshot = service.Current;
-        Assert.AreEqual(BroadcastSelectionState.Chosen, snapshot.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, snapshot.Selection);
         Assert.AreEqual(1, snapshot.Counters.Followed);
         Assert.AreEqual(40, snapshot.Left.Percent);
         Assert.AreEqual(70, snapshot.Right.Percent);
@@ -403,7 +403,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         Send(5, inUse, -60, 2.5);
 
-        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
         Assert.IsTrue(_log.Has(LogLevel.Info, "the linked set changed address and was followed"));
         Assert.IsGreaterThan(before, _readingEvents[^1].SelectionGeneration, "A set followed may be another pair: its readings do not pair with the earlier ones.");
     }
@@ -501,7 +501,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         using WidgetStatusService service = NewService();
         service.Start();
         Prime();
-        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
 
         _clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1));
 
@@ -922,7 +922,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         Assert.AreEqual(50, service.Current.Case.Percent, "Lost for under two minutes: still linked, so still kept.");
         Assert.AreEqual(at, service.Current.Case.ReadAt);
-        Assert.AreEqual(BroadcastSelectionState.Chosen, service.Current.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
 
         _clock.Advance(TimeSpan.FromSeconds(30));
 

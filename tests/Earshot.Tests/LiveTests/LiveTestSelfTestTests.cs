@@ -58,7 +58,7 @@ public sealed class LiveTestSelfTestTests
     // 17-HandBackOnShutdown's declined-start, handback-cut-short and handback-not-reached, each
     // run on both of that row's halves (6); 18-HandBackOnSleep's no-sleep-event,
     // handback-cut-short and repaged-at-wake, on that row's one half (3). 19-Widget's chosen-rising,
-    // a set picked out before the sitting and shown by its counter alone (1), on that row's one half.
+    // a set linked before the sitting and shown by its counter alone (1), on that row's one half.
     // 20-HandBackOnExit's exit-cut-short
     // (1) and 21-PauseOnLeave's pause-declined (1), each on that row's one half; 16-FastSwitch's
     // switch-timed-out, switch-not-at-rest, switch-rejected and switch-unparsable (4), on that row's

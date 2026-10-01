@@ -385,7 +385,7 @@ public sealed class OwnerCaptureReplayTests
         Assert.AreEqual(false, snapshot.Case.Charging);
         Assert.AreEqual(true, snapshot.Left.Charging);
         Assert.AreEqual(true, snapshot.Right.Charging);
-        Assert.AreEqual(BroadcastSelectionState.Chosen, snapshot.Selection);
+        Assert.AreEqual(BroadcastSelectionState.Linked, snapshot.Selection);
         Assert.AreEqual(1, snapshot.Counters.Sets, "One set from the two senders.");
         Assert.AreEqual(0, snapshot.Counters.BudOrderDisagree);
         Assert.AreEqual(0, snapshot.Counters.ModelMismatch);
