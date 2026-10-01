@@ -16,12 +16,14 @@ public enum BroadcastSelectionState { NoPairedModel, Listening, Chosen }
 // What one message did to the selection.
 //   NewChoice: the chosen set is not the set it was (a first choice, a switch, or a choice after a release), so
 //   whatever values were kept belonged to another pair and are to be dropped.
-//   Continued: the chosen set came back under new addresses (they rotate), so its values stand.
+//   Reacquired: every chosen sender had been silent for longer than the window (the case was closed, or the
+//   addresses rotated), and a set was chosen again by the first-choice rule. The values on show are kept, greyed
+//   as they age, until that set's own messages replace them; nothing is carried over as current.
 //   Switched: another set took over from the chosen one.
 internal readonly record struct SelectionObservation(
     BroadcastClass Class,
     bool NewChoice = false,
-    bool Continued = false,
+    bool Reacquired = false,
     bool Switched = false,
     int SetsInRange = 0)
 {
@@ -34,17 +36,24 @@ internal readonly record struct SelectionObservation(
 //   - One set can broadcast from two addresses, one per bud: BroadcastSenderSets merges them.
 //   - The first choice is the set with the highest median signal over the window, once the model has been heard
 //     for FirstChoiceAfter and the set has MinMessages in the window. Its colour is learned and held.
-//   - The chosen set stays chosen. Another takes over only when its median is SwitchMarginDb above the chosen
-//     set's for SwitchHold without a break; while the chosen set is silent its last median is held.
-//   - Addresses rotate: a new set within one window of the chosen set's last message, with the same case level
-//     and bud pair, is the chosen set under new addresses and is adopted at once.
+//   - The chosen set stays chosen, and at each message its tags are exactly the tags of the one set that holds the
+//     longest-standing chosen sender. A sender that merged into the set for a moment (equal fields heard together)
+//     and then differs is its own set again, and a set of its own is held to the next rule.
+//   - Another set takes over only when its median is SwitchMarginDb above the chosen set's for SwitchHold without a
+//     break; while the chosen set is silent its last median is held. Nothing else makes a different set the chosen
+//     one while any chosen sender has sent inside the window, however equal its fields.
+//   - Addresses rotate, and the case closes: when every chosen sender has been silent for longer than the window the
+//     selection is acquired again by the first-choice rule among the sets of the paired model and the held colour.
 //   - After ReleaseAfter with no message from the chosen set it and the colour are dropped.
 // Pure and single threaded: time comes from the messages' own timestamps, nothing here reads a clock, and
 // nothing is written to disk.
 internal sealed class BroadcastSelector
 {
     private readonly Dictionary<uint, List<SenderMessage>> _senders = new();
-    private readonly HashSet<uint> _chosenTags = new();
+
+    // The chosen tags, each with the order it became a chosen tag in: the lowest order among the tags that sent
+    // inside the window anchors which set is the chosen one when a sender that had merged splits off again.
+    private readonly Dictionary<uint, long> _chosenOrder = new();
     private readonly Dictionary<uint, DateTimeOffset> _challengerSince = new();
 
     private ushort? _model;
@@ -52,10 +61,11 @@ internal sealed class BroadcastSelector
     private DateTimeOffset? _firstHeardAt;
     private DateTimeOffset _latest = DateTimeOffset.MinValue;
     private DateTimeOffset? _chosenLastAt;
-    private ProximityMessage? _chosenLastMessage;
     private double? _chosenMedian;
     private long _sequence;
+    private long _order;
     private int _setsInRange;
+    private bool _reacquiring;
 
     public ushort? PairedModel => _model;
 
@@ -64,7 +74,7 @@ internal sealed class BroadcastSelector
 
     public int SetsInRange => _setsInRange;
 
-    public bool HasChosen => _chosenTags.Count > 0;
+    public bool HasChosen => _chosenOrder.Count > 0;
 
     public BroadcastSelectionState StateAt(DateTimeOffset now)
     {
@@ -94,14 +104,14 @@ internal sealed class BroadcastSelector
     private void Reset()
     {
         _senders.Clear();
-        _chosenTags.Clear();
+        _chosenOrder.Clear();
         _challengerSince.Clear();
         _colour = null;
         _firstHeardAt = null;
         _chosenLastAt = null;
-        _chosenLastMessage = null;
         _chosenMedian = null;
         _setsInRange = 0;
+        _reacquiring = false;
     }
 
     public SelectionObservation Observe(ProximityMessage message, uint tag, sbyte rssi, DateTimeOffset at)
@@ -128,6 +138,9 @@ internal sealed class BroadcastSelector
             return new SelectionObservation(BroadcastClass.ColourMismatch);
         }
 
+        // Senders that went quiet leave the window first, so a model heard once and then not for a long while is
+        // not "heard for two seconds" when it comes back.
+        Prune();
         _firstHeardAt ??= at;
         if (!_senders.TryGetValue(tag, out List<SenderMessage>? own))
         {
@@ -150,16 +163,22 @@ internal sealed class BroadcastSelector
         List<BroadcastSet> sets = BroadcastSenderSets.Compute(_senders.Select(s => (s.Key, s.Value)).ToList());
         _setsInRange = sets.Count;
 
-        BroadcastSet? ownSet = sets.FirstOrDefault(s => s.Tags.Contains(tag));
-        if (!HasChosen)
+        BroadcastSet? chosen = null;
+        if (HasChosen)
         {
-            return Choose(sets, tag, at);
+            chosen = ChosenSetOf(sets);
+            if (chosen is null)
+            {
+                // Every chosen sender has been silent for longer than the window: the case was closed, or the
+                // addresses rotated. The values on show stay (they grey as they age); what is chosen is chosen again.
+                BeginReacquire(at);
+            }
         }
 
-        return Continue(sets, ownSet, tag, at);
+        return chosen is null ? Choose(sets, tag, at) : Follow(sets, chosen, tag, at);
     }
 
-    // A first choice, or a choice after a release.
+    // A first choice, a choice after a release, or a choice again after every chosen sender fell silent.
     private SelectionObservation Choose(List<BroadcastSet> sets, uint tag, DateTimeOffset at)
     {
         if (_firstHeardAt is not { } first || at - first < BroadcastRules.FirstChoiceAfter)
@@ -186,72 +205,76 @@ internal sealed class BroadcastSelector
             return new SelectionObservation(BroadcastClass.Choosing, SetsInRange: _setsInRange);
         }
 
-        AdoptSet(best);
+        bool again = _reacquiring;
+        _reacquiring = false;
+        AdoptSet(best, replace: true);
         _colour ??= best.Newest.Message.Colour;
         _chosenMedian = best.MedianRssi;
         _challengerSince.Clear();
-        bool mine = _chosenTags.Contains(tag);
         return new SelectionObservation(
-            mine ? BroadcastClass.Chosen : BroadcastClass.OtherSet, NewChoice: true, SetsInRange: _setsInRange);
+            _chosenOrder.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
+            NewChoice: !again, Reacquired: again, SetsInRange: _setsInRange);
     }
 
-    private SelectionObservation Continue(List<BroadcastSet> sets, BroadcastSet? own, uint tag, DateTimeOffset at)
+    private SelectionObservation Follow(List<BroadcastSet> sets, BroadcastSet chosen, uint tag, DateTimeOffset at)
     {
-        BroadcastSet? chosen = sets.FirstOrDefault(s => s.Tags.Any(_chosenTags.Contains));
-        if (chosen is not null)
+        // The chosen tags are the tags of the chosen set and no others: a second sender of the set (the other bud)
+        // joins here, and one that merged for a moment and then differs is dropped.
+        AdoptSet(chosen);
+        if (chosen.MedianRssi is double median)
         {
-            // A second sender of the set (the other bud) joins the chosen tags here.
-            AdoptSet(chosen);
-            if (chosen.MedianRssi is double median)
-            {
-                _chosenMedian = median;
-            }
+            _chosenMedian = median;
         }
 
-        // The chosen set came back under new addresses: a set of senders none of which was chosen, within one
-        // window of the chosen set's last message, saying exactly what that message said.
-        bool continued = false;
-        if (!_chosenTags.Contains(tag) && own is not null && !own.Tags.Any(_chosenTags.Contains) &&
-            _chosenLastMessage is ProximityMessage last && _chosenLastAt is DateTimeOffset lastAt &&
-            at - lastAt <= BroadcastRules.Window &&
-            BroadcastSenderSets.SameFields(own.Newest.Message, last))
-        {
-            AdoptSet(own);
-            chosen = own;
-            if (own.MedianRssi is double median)
-            {
-                _chosenMedian = median;
-            }
-
-            _challengerSince.Clear();
-            continued = true;
-        }
-
-        BroadcastSet? winner = null;
-        bool switched = !continued && EvaluateChallengers(sets, chosen, at, out winner);
-        if (switched && winner is not null)
+        if (EvaluateChallengers(sets, chosen, at, out BroadcastSet? winner) && winner is not null)
         {
             // The values the old set gave were another pair's. The colour is held across the switch.
             AdoptSet(winner, replace: true);
             _chosenMedian = winner.MedianRssi;
             _challengerSince.Clear();
             return new SelectionObservation(
-                _chosenTags.Contains(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
+                _chosenOrder.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
                 NewChoice: true, Switched: true, SetsInRange: _setsInRange);
         }
 
-        if (_chosenTags.Contains(tag))
+        return new SelectionObservation(
+            _chosenOrder.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet, SetsInRange: _setsInRange);
+    }
+
+    // The set that holds the longest-standing chosen tag among the senders that sent inside the window, or null when
+    // none of them did.
+    private BroadcastSet? ChosenSetOf(List<BroadcastSet> sets)
+    {
+        BroadcastSet? found = null;
+        long foundOrder = long.MaxValue;
+        foreach (BroadcastSet set in sets)
         {
-            return new SelectionObservation(BroadcastClass.Chosen, Continued: continued, SetsInRange: _setsInRange);
+            foreach (uint t in set.Tags)
+            {
+                if (_chosenOrder.TryGetValue(t, out long order) && order < foundOrder)
+                {
+                    found = set;
+                    foundOrder = order;
+                }
+            }
         }
 
-        return new SelectionObservation(BroadcastClass.OtherSet, SetsInRange: _setsInRange);
+        return found;
+    }
+
+    private void BeginReacquire(DateTimeOffset at)
+    {
+        _chosenOrder.Clear();
+        _challengerSince.Clear();
+        _chosenMedian = null;
+        _firstHeardAt = at;
+        _reacquiring = true;
     }
 
     // Updates the challengers' timers from this evaluation and returns the one that has been past the margin for
     // the whole hold, if any. A timer resets on any evaluation where its set has too few messages for a median
     // or is below the margin. The chosen set's own median is the held one while it is silent.
-    private bool EvaluateChallengers(List<BroadcastSet> sets, BroadcastSet? chosen, DateTimeOffset at, out BroadcastSet? winner)
+    private bool EvaluateChallengers(List<BroadcastSet> sets, BroadcastSet chosen, DateTimeOffset at, out BroadcastSet? winner)
     {
         winner = null;
         if (_chosenMedian is not double chosenMedian)
@@ -263,7 +286,9 @@ internal sealed class BroadcastSelector
         var keep = new HashSet<uint>();
         foreach (BroadcastSet set in sets)
         {
-            if (ReferenceEquals(set, chosen) || set.Tags.Any(_chosenTags.Contains) || set.Newest.Message.Colour != _colour)
+            // Messages of another colour are not admitted once the colour is held, so one that is still in the window
+            // from before leaves it within a window, long before a hold can end: no colour test is needed here.
+            if (ReferenceEquals(set, chosen))
             {
                 continue;
             }
@@ -306,39 +331,48 @@ internal sealed class BroadcastSelector
         return false;
     }
 
-    // Makes set the chosen one: its tags join (or, on replace, become) the chosen tags, and its newest message and
-    // time are the chosen set's last.
+    // Makes set the chosen one: its tags are the chosen tags (a tag already chosen keeps its order, a new one takes
+    // the next, one that is not in the set is dropped), and the time of its newest message is the chosen set's last.
     private void AdoptSet(BroadcastSet set, bool replace = false)
     {
         if (replace)
         {
-            _chosenTags.Clear();
+            _chosenOrder.Clear();
+        }
+        else
+        {
+            foreach (uint t in _chosenOrder.Keys.Where(k => !set.Tags.Contains(k)).ToList())
+            {
+                _chosenOrder.Remove(t);
+            }
         }
 
         foreach (uint t in set.Tags)
         {
-            _chosenTags.Add(t);
+            if (!_chosenOrder.ContainsKey(t))
+            {
+                _chosenOrder[t] = ++_order;
+            }
         }
 
-        SenderMessage newest = set.Newest;
-        if (_chosenLastAt is null || newest.At >= _chosenLastAt || replace)
+        DateTimeOffset newest = set.Newest.At;
+        if (_chosenLastAt is null || newest >= _chosenLastAt || replace)
         {
-            _chosenLastAt = newest.At;
-            _chosenLastMessage = newest.Message;
+            _chosenLastAt = newest;
         }
     }
 
     private void ReleaseIfStale()
     {
-        if (HasChosen && _chosenLastAt is DateTimeOffset last && _latest - last > BroadcastRules.ReleaseAfter)
+        if (_chosenLastAt is DateTimeOffset last && _latest - last > BroadcastRules.ReleaseAfter)
         {
-            _chosenTags.Clear();
+            _chosenOrder.Clear();
             _challengerSince.Clear();
             _chosenLastAt = null;
-            _chosenLastMessage = null;
             _chosenMedian = null;
             _colour = null;
             _firstHeardAt = null;
+            _reacquiring = false;
             _senders.Clear();
         }
     }
@@ -355,6 +389,11 @@ internal sealed class BroadcastSelector
                 _senders.Remove(tag);
             }
         }
+
+        if (_senders.Count == 0)
+        {
+            _firstHeardAt = null;
+        }
     }
 
     // The newest message each other sender of the chosen set sent within the given time of at, for the caller's
@@ -362,7 +401,7 @@ internal sealed class BroadcastSelector
     public IReadOnlyList<SenderMessage> OtherChosenSenders(uint tag, DateTimeOffset at, TimeSpan within)
     {
         var result = new List<SenderMessage>();
-        foreach (uint other in _chosenTags)
+        foreach (uint other in _chosenOrder.Keys)
         {
             if (other == tag || !_senders.TryGetValue(other, out List<SenderMessage>? list) || list.Count == 0)
             {
