@@ -44,7 +44,7 @@ public sealed class WidgetCardHostTests
             Assert.AreEqual("Pixel", values.OtherDeviceLabel);
             Assert.AreEqual(40, values.LowBatteryPercent);
             Assert.IsTrue(values.PauseWhenAirPodsLeave, "Saved as on by default.");
-            Assert.IsFalse(values.HandBack, "Saved as off by default.");
+            Assert.IsTrue(values.HandBack, "On for a new install, which a harness with no settings file is.");
             Assert.IsFalse(values.LeftClickConnects);
             Assert.IsFalse(values.CheckAutomatically, "No automatic checks by default.");
             Assert.AreEqual("Ctrl+Alt+Shift+A", values.ConnectChord);
@@ -78,7 +78,7 @@ public sealed class WidgetCardHostTests
             Assert.IsTrue(saved.Widget.LeftClickConnects);
             Assert.IsFalse(saved.PauseWhenAirPodsLeave);
             Assert.IsTrue(saved.CheckForUpdatesAutomatically);
-            Assert.IsFalse(saved.HandBackOnShutdownAndSleep, "Nothing else changed.");
+            Assert.IsTrue(saved.HandBackOnShutdownAndSleep, "Nothing else changed: still the new-install default.");
             Assert.AreEqual(GaugePosition.NextToApps, host.ReadSettings().GaugePosition, "And the page reads it back.");
         });
     }

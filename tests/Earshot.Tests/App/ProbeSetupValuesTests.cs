@@ -19,7 +19,7 @@ namespace Earshot.Tests.App;
 public sealed class ProbeSetupValuesTests
 {
     private static readonly Guid PodsContainer = new("5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13");
-    private static readonly Guid OtherContainer = new("a1b2c3d4-0000-4000-8000-000000000001");
+    private static readonly Guid OtherContainer = new("aaaaaaaa-bbbb-4ccc-8ddd-000000000001");
 
     private static readonly string[] SetupValuesTarget = ["setup-values"];
     private static readonly string[] NotReadyReasons = ["not-paired", "several", "unreadable"];
