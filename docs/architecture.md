@@ -891,8 +891,9 @@ administrator prompt. `-DryRun` does everything up to that prompt and prints
 the command it would have run, and changes nothing the install would change:
 not the settings, not the Open on startup entry, not a per-user copy. The one
 thing it writes is Earshot's own log, because the unpacked copy's read-only
-`probe setup-values` writes a line there as every probe does. Afterwards it
-starts Earshot unelevated.
+`probe setup-values` writes a line there as every probe does. After an install,
+update or repair it starts Earshot unelevated; after an uninstall it starts
+nothing.
 
 **When a run stops.** A run that stopped after it closed the tray starts that
 tray again, so Earshot is not left closed until the next sign-in (the closed
