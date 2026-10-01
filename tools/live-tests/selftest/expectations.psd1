@@ -720,7 +720,7 @@
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
-                'gauge-stays-on-top' = 'inconclusive' }
+                'gauge-stays-on-top' = 'inconclusive'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 0; 'refreshEndedLines' = 0
                 'widgetAllSectionsSeen' = $null; 'widgetAppleSectionsSeen' = $null; 'widgetProximityItemsSeen' = $null
@@ -738,7 +738,7 @@
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
-                'gauge-stays-on-top' = 'pass' }
+                'gauge-stays-on-top' = 'pass'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 1; 'refreshEndedLines' = 1
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
@@ -756,7 +756,7 @@
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'pass'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
-                'gauge-stays-on-top' = 'pass' }
+                'gauge-stays-on-top' = 'pass'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 2; 'refreshEndedLines' = 2
                 'widgetAllSectionsSeen' = 4; 'widgetAppleSectionsSeen' = 4; 'widgetProximityItemsSeen' = 4
@@ -774,7 +774,7 @@
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
                 'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'
-                'gauge-stays-on-top' = 'inconclusive' }
+                'gauge-stays-on-top' = 'inconclusive'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 0; 'chosenCounterRose' = 'yes'; 'refreshEndedLines' = 0
                 'widgetAllSectionsSeen' = 90; 'widgetAppleSectionsSeen' = 90; 'widgetProximityItemsSeen' = 90

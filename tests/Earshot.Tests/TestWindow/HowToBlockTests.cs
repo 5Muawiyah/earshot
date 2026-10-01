@@ -107,7 +107,7 @@ public sealed class HowToBlockTests
         // find-the-icon block, so ten with none, and test 18's first-sleep question one more: 244.
         // Test 19's battery set-up steps go (two instructions with no block) and its grey and refresh steps come
         // (three with none), so one more: 245.
-        const int expectedMissingCount = 245;
+        const int expectedMissingCount = 246;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +

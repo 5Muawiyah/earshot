@@ -6,7 +6,8 @@
     Earshot shows the battery of the AirPods it is paired with from what those AirPods broadcast, with no
     set-up step: the two buds, and the case when its lid is open or the buds are out of it. A figure is current
     for 30 seconds and is then greyed with the time it was read, and a bud's figure leaves the gauge after an
-    hour. The card has a refresh icon beside the gear and the tray menu has "Refresh battery": each restarts the
+    hour. Nothing is shown unless the AirPods are connected to this PC, so a step that shuts the AirPods in the
+    case expects the figures to be greyed (still connected) or gone (disconnected), never current. The card has a refresh icon beside the gear and the tray menu has "Refresh battery": each restarts the
     listening and waits up to twelve seconds for the chosen AirPods to be heard again, or says nothing was heard.
     The broadcast cannot say whether a bud is in the ear or whether the case lid is open, so auto-pause and the
     case-open card stay off. This test checks all of that, and that any figure shown agrees with the iPhone.
@@ -76,7 +77,7 @@ try
         'The AirPods are paired with this PC and available to connect.'
     ) -PhysicalActions @(
         'This is a long sitting. It watches the taskbar, restarts Explorer once, changes display scaling and light/dark mode and back, opens your AirPods case near the PC, and turns Bluetooth off and on. Nothing here is destructive, and every step says what it does before it asks.',
-        'The battery figures on the card come from what your AirPods broadcast, which they only do while they are out of the case or the case lid is open. Some steps below ask you to shut them in the case: that is on purpose, to see the figures grey and the refresh say nothing was heard.'
+        'The battery figures on the card come from what your AirPods broadcast, which they only do while they are out of the case or the case lid is open, and the card shows a figure only while the AirPods are connected to this PC. Some steps below ask you to shut them in the case: that is on purpose, to see the figures grey or go, and the refresh say nothing was heard.'
     )
 
     if ($ready)
@@ -141,16 +142,27 @@ try
         $onTopAnswer = Read-Answer -Run $run -Question 'Through all of that, did the gauge stay visible and on top of the taskbar, or come straight back, with no time where it was gone and stayed gone?'
         $raisedLines = Get-EarshotLogLines -Run $run -Pattern 'Gauge raised:' -SinceUtc $onTopStartUtc
         $leftUnderLines = Get-EarshotLogLines -Run $run -Pattern 'Gauge left under' -SinceUtc $onTopStartUtc
+        # The gauge is the taskbar's owned window, so the system keeps it above the bar and there may be nothing to raise: the
+        # line saying it was owned is what shows that was how it stayed on top.
+        $ownedLines = Get-EarshotLogLines -Run $run -Pattern 'Gauge owned by the taskbar' -SinceUtc $testStartUtc
         Write-Line -Run $run -Text ('  ' + @($raisedLines).Count + ' "Gauge raised" line(s), ' + @($leftUnderLines).Count + ' "Gauge left under" line(s) in the app log during that step.')
         Add-Finding -Run $run -Name 'gaugeRaisedLines' -Value @($raisedLines).Count -Detail 'Log lines saying the gauge was put back on top while Start, a flyout and taskbar clicks came and went'
         Add-Finding -Run $run -Name 'gaugeLeftUnderLines' -Value @($leftUnderLines).Count -Detail 'Log lines saying another window was over the gauge and it was left there'
         Add-Criterion -Run $run -Id 'gauge-stays-on-top' -Criterion 'The gauge stays visible and on top when Start, a flyout or a taskbar click comes and goes, and the app log shows what covered it and when it was raised.' `
-            -Outcome $(if ($onTopAnswer -eq 'no') { 'fail' } elseif ($onTopAnswer -eq 'unsure') { 'inconclusive' } elseif (@($raisedLines).Count -gt 0 -or @($leftUnderLines).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
+            -Outcome $(if ($onTopAnswer -eq 'no') { 'fail' } elseif ($onTopAnswer -eq 'unsure') { 'inconclusive' } elseif (@($raisedLines).Count -gt 0 -or @($leftUnderLines).Count -gt 0 -or @($ownedLines).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
             -Detail $(
                 if ($onTopAnswer -eq 'no') { 'You answered no: the gauge was gone and stayed gone, which is the fault this check exists to catch.' }
                 elseif ($onTopAnswer -eq 'unsure') { 'You answered unsure.' }
                 elseif (@($raisedLines).Count -gt 0 -or @($leftUnderLines).Count -gt 0) { 'You answered yes; the log shows ' + @($raisedLines).Count + ' raise(s) and ' + @($leftUnderLines).Count + ' cover(s) left alone.' }
-                else { 'You answered yes, but the log shows nothing covered the gauge during the step, so the put-back was not exercised. Try again and open Start with the gauge in view.' })
+                elseif (@($ownedLines).Count -gt 0) { 'You answered yes; nothing needed raising, and the log says the gauge is the taskbar''s owned window, which is how the system kept it on top.' }
+                else { 'You answered yes, but the log shows neither a raise nor the gauge being owned by the taskbar, so how it stayed on top is not shown. Try again and open Start with the gauge in view.' })
+
+        Write-Section -Run $run -Title 'The shell stays responsive'
+        Wait-Owner -Run $run -Text 'Open the Start menu again, type a few letters into its search box, then press Escape. Do this twice, then click the clock and close its flyout.'
+        $responsiveAnswer = Read-Answer -Run $run -Question 'Did Start, what you typed in it and the flyout from the clock answer at once each time, with no pause and no letter going missing?'
+        Add-Criterion -Run $run -Id 'shell-stays-responsive' -Criterion 'With the gauge owned by the taskbar, Start, typing into it and the clock''s flyout answer as quickly as without the gauge: no pause and no lost typing.' `
+            -Outcome $(if ($responsiveAnswer -eq 'yes') { 'pass' } elseif ($responsiveAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $responsiveAnswer + '. A "no" would mean the gauge is still tied to the shell''s input, which it must not be.')
 
         Write-Section -Run $run -Title 'The gauge follows auto-hide'
         Wait-Owner -Run $run -Text 'In the same Taskbar settings, turn on "Automatically hide the taskbar", then move the mouse away from the bottom of the screen so it slides away, then move it back down.'
@@ -232,7 +244,7 @@ try
 
         Write-Section -Run $run -Title 'Half C: the battery, from the broadcast'
         $batteryStartUtc = (Get-Date).ToUniversalTime()
-        Wait-Owner -Run $run -Text 'Connect the AirPods to this PC (left-click the Earshot icon or the gauge, then Connect). Then put both AirPods in the case, open the lid next to this computer and leave it open, and open the card again.'
+        Wait-Owner -Run $run -Text 'Connect the AirPods to this PC (left-click the Earshot icon or the gauge, then Connect). Then put both AirPods in the case, open the lid next to this computer and leave it open, and open the card again. If the card no longer says "On this PC", connect them again with the lid still open.'
         # A set that is linked stays linked while it is heard (and for two minutes after), so one linked earlier in this
         # sitting (or just before it) is not linked again and logs no new line here. Either a linked line anywhere since
         # the sitting began, or the counters' chosen figure rising since the first counters line of the sitting, shows the
@@ -259,25 +271,25 @@ try
         Add-Criterion -Run $run -Id 'airpods-picked-out' -Criterion 'With the case open next to this PC, the widget links the AirPods from what it hears: it linked them during the sitting, or its chosen counter is rising.' `
             -Outcome $(if (@($pickedLines).Count -gt 0 -or $chosenRose) { 'pass' } else { 'inconclusive' }) `
             -Detail $(if (@($pickedLines).Count -gt 0 -or $chosenRose) { [string]@($pickedLines).Count + ' linked line(s) since the sitting began; the chosen counter ' + $(if ($chosenRose) { 'rose from ' + $firstChosen + ' to ' + $lastChosen + '.' } else { 'did not rise.' }) } else { 'Nothing was linked since the sitting began and the chosen counter did not rise in about a minute: the case was not open with a bud in it near this PC, or the watcher is not running. A set linked before this sitting keeps being shown without a new line, so its counter is the thing to look at.' })
-        $batteryAnswer = Read-Answer -Run $run -Question 'Compare the card with what your iPhone shows. Does every battery figure the card shows agree with the iPhone (give or take one step of 10), with nothing shown for a part the card has no figure for?'
+        $batteryAnswer = Read-Answer -Run $run -Question 'Compare the card with what your iPhone shows. Does every battery figure the card shows agree with the iPhone (give or take one step of 10), with nothing shown for a part the card has no figure for? If the card shows no battery figure at all, answer "not sure".'
         Add-Criterion -Run $run -Id 'battery-matches-iphone' -Criterion 'Every battery figure the card shows agrees with the iPhone, and nothing is shown for a part with no figure.' `
             -Outcome $(if ($batteryAnswer -eq 'yes') { 'pass' } elseif ($batteryAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $batteryAnswer + '. A "no" would mean a figure was shown that disagrees with the iPhone, or one for a part that was not heard, which is a real defect.')
+            -Detail ('You answered ' + $batteryAnswer + '. A "no" would mean a figure was shown that disagrees with the iPhone, or one for a part that was not heard, which is a real defect. "Not sure" is the answer when the card showed no figure at all (the AirPods were not connected to this PC, or no pair was linked), and it leaves this inconclusive: nothing was compared.')
 
         Write-Section -Run $run -Title 'The battery when it is old'
         Wait-Owner -Run $run -Text 'Close the case lid with the AirPods inside, and leave the card open for a minute.'
-        $greyAnswer = Read-Answer -Run $run -Question 'A minute later, are the battery figures greyed, and does the line under the "where" line say how long ago the battery was read? (After two minutes with the case shut the figures go and the line asks you to open the case; that is the link being dropped, not a fault.)'
-        Add-Criterion -Run $run -Id 'battery-greys-when-old' -Criterion 'A battery figure older than 30 seconds is greyed, and the card says how long ago it was read, rather than showing it as current.' `
+        $greyAnswer = Read-Answer -Run $run -Question 'A minute later, is every battery figure either greyed, with the line under the "where" line saying how long ago the battery was read (the AirPods are still connected to this PC), or gone (closing the lid disconnected them, and the card says they are not on this PC)? None may look current.'
+        Add-Criterion -Run $run -Id 'battery-greys-when-old' -Criterion 'A battery figure older than 30 seconds is greyed and the card says how long ago it was read, or it is not shown at all once the AirPods are not connected to this PC; it is never shown as current.' `
             -Outcome $(if ($greyAnswer -eq 'yes') { 'pass' } elseif ($greyAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $greyAnswer + '. A "no" would mean an old figure was shown as current, which is a real defect.')
 
         Write-Section -Run $run -Title 'Refresh'
         Wait-Owner -Run $run -Text 'With the AirPods still shut in the case, click the circular arrow beside the gear on the card, and wait about twelve seconds.'
-        $nothingHeardAnswer = Read-Answer -Run $run -Question 'After about twelve seconds, does the card say "Nothing heard. Open the case", with the figures still greyed (or gone, if the case has been shut for more than two minutes)?'
-        Add-Criterion -Run $run -Id 'refresh-says-nothing-heard' -Criterion 'A refresh with the AirPods shut in the case says nothing was heard and leaves the old figures greyed.' `
+        $nothingHeardAnswer = Read-Answer -Run $run -Question 'After about twelve seconds, does the card say "Nothing heard. Open the case", with any figures greyed (the AirPods are still connected to this PC) or gone (they are not)?'
+        Add-Criterion -Run $run -Id 'refresh-says-nothing-heard' -Criterion 'A refresh with the AirPods shut in the case says nothing was heard and leaves any old figures greyed or gone, never current.' `
             -Outcome $(if ($nothingHeardAnswer -eq 'yes') { 'pass' } elseif ($nothingHeardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $nothingHeardAnswer + '.')
-        Wait-Owner -Run $run -Text 'Open the case lid next to this computer, then click the circular arrow beside the gear again and wait a few seconds.'
+        Wait-Owner -Run $run -Text 'Open the case lid next to this computer and connect the AirPods to this PC (left-click the Earshot icon or the gauge, then Connect). Then click the circular arrow beside the gear and wait a few seconds.'
         $refreshedAnswer = Read-Answer -Run $run -Question 'Did the arrow turn while the card said "Reading the battery", and did the figures come back no longer greyed?'
         Add-Criterion -Run $run -Id 'refresh-reads-again' -Criterion 'A refresh with the case open turns the icon while it reads, then shows fresh figures.' `
             -Outcome $(if ($refreshedAnswer -eq 'yes') { 'pass' } elseif ($refreshedAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
@@ -370,8 +382,8 @@ try
 
         Write-Section -Run $run -Title 'A reading older than an hour'
         Wait-Owner -Run $run -Text 'Put the AirPods in the case and close it, or take them away from this computer, and leave them for over an hour. Then hover over the gauge. If you cannot wait, answer "not sure" below.'
-        $staleAnswer = Read-Answer -Run $run -Question 'More than an hour after the AirPods were last heard, does the gauge show only the earbud mark, with no ring and no number, and does hovering say "No recent reading"?'
-        Add-Criterion -Run $run -Id 'gauge-reading-older-than-an-hour' -Criterion 'A battery reading older than one hour counts as no recent reading: the gauge shows only the earbud mark and says so.' `
+        $staleAnswer = Read-Answer -Run $run -Question 'More than an hour after the AirPods were last heard, does the gauge show only the earbud mark, with no ring and no number, and does hovering say "Not on this PC" (they disconnected) or "No recent reading" (they stayed connected)?'
+        Add-Criterion -Run $run -Id 'gauge-reading-older-than-an-hour' -Criterion 'A battery reading older than one hour counts as no recent reading: the gauge shows only the earbud mark and says so, or says the AirPods are not on this PC.' `
             -Outcome $(if ($staleAnswer -eq 'yes') { 'pass' } elseif ($staleAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $staleAnswer + '. "Not sure" is the honest answer when you did not wait the hour.')
 
