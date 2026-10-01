@@ -1,27 +1,15 @@
 using System.Text.RegularExpressions;
+using Earshot.Widget;
 
 namespace Earshot.Contracts;
-
-// Where the AirPods' Hands-Free microphone stands in Windows, as the "microphone off" mode's row says it.
-internal enum MicrophoneRowState
-{
-    // No Hands-Free microphone exists yet: Windows adds it at the next connect, once protection is off.
-    ConnectFirst,
-
-    // The microphone is there and Windows has not been told to refuse it: the person can open sound settings.
-    OpenSettings,
-
-    // Windows lists the microphone as disabled: nothing is left to do.
-    OffInWindows,
-}
 
 // SettingsUri is the page the button opens: the AirPods' microphone when its id is known and well formed, otherwise
 // the list of sound devices.
 internal sealed record MicrophoneRow(MicrophoneRowState State, string SettingsUri);
 
 // The Hands-Free "microphone off" mode, as pure rules with no device, window or clock. It lives with the other pure
-// settings and node rules in Contracts because the settings page reads the row's state, and the widget never reaches the
-// device path.
+// settings and node rules in Contracts. The row's state (MicrophoneRowState) is the widget's own type, because the widget
+// may reach only its own types and never the device path.
 //
 // What the mode is: Protect audio quality turned off, so the Hands-Free link and Windows' own battery reading stay up,
 // and the person switching the AirPods' Hands-Free microphone off in Windows' sound settings, so an app that opens a

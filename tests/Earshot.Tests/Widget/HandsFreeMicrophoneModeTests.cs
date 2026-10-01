@@ -22,12 +22,25 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class HandsFreeMicrophoneModeTests
 {
-    private const string InventedCaptureId = "{0.0.1.00000000}.{aaaaaaaa-0000-1111-2222-bbbbbbbbbbbb}";
-    private static readonly Guid Container = new("5C3A9E21-4B7D-5F18-9A6C-2D8E0B4F7A13");
+    // Ids are built, never written out: nothing in this folder may look like a real device's id.
+    private static readonly string InventedCaptureId = CaptureId(Invented(1));
+    private static readonly Guid Container = Invented(9);
     private static readonly Earshot.App.CardPlace Place = Earshot.App.CardPlace.NearTray;
     private static readonly bool[] OffOnly = [false];
     private static readonly bool[] OnOnly = [true];
     private static readonly bool[] OffThenOn = [false, true];
+
+    private static Guid Invented(int n)
+    {
+        var bytes = new byte[16];
+        bytes[0] = (byte)n;
+        bytes[15] = 0x7F;
+        return new Guid(bytes);
+    }
+
+    private static string CaptureId(Guid endpoint) => "{0.0.1.00000000}.{" + endpoint.ToString("D") + "}";
+
+    private static string RenderId(Guid endpoint) => "{0.0.0.00000000}.{" + endpoint.ToString("D") + "}";
 
     private static DeviceSnapshot Snapshot(SnapshotReadStatus read, params AudioEndpoint[] endpoints)
     {
@@ -35,11 +48,11 @@ public sealed class HandsFreeMicrophoneModeTests
         return new DeviceSnapshot(model, [model], DateTimeOffset.UnixEpoch) { Sequence = 1, ReadStatus = read, Resolution = TargetResolution.Pinned };
     }
 
-    private static AudioEndpoint Capture(EndpointState state, string id = InventedCaptureId) =>
-        new(id, EndpointFlow.Capture, state, "Headset", Container);
+    private static AudioEndpoint Capture(EndpointState state, string? id = null) =>
+        new(id ?? InventedCaptureId, EndpointFlow.Capture, state, "Headset", Container);
 
     private static AudioEndpoint Render(EndpointState state) =>
-        new("{0.0.0.00000000}.{cccccccc-0000-1111-2222-dddddddddddd}", EndpointFlow.Render, state, "Headphones", Container);
+        new(RenderId(Invented(2)), EndpointFlow.Render, state, "Headphones", Container);
 
     // ---- The setting
 
@@ -148,10 +161,10 @@ public sealed class HandsFreeMicrophoneModeTests
     [TestMethod]
     public void TheCaptureEndpointIsTheOneToOpenAndAnActiveOneBeatsAnUnpluggedOneBeatsADisabledOne()
     {
-        AudioEndpoint active = Capture(EndpointState.Active, "{0.0.1.00000000}.{11111111-0000-1111-2222-bbbbbbbbbbbb}");
-        AudioEndpoint unplugged = Capture(EndpointState.Unplugged, "{0.0.1.00000000}.{22222222-0000-1111-2222-bbbbbbbbbbbb}");
-        AudioEndpoint disabled = Capture(EndpointState.Disabled, "{0.0.1.00000000}.{33333333-0000-1111-2222-bbbbbbbbbbbb}");
-        AudioEndpoint notPresent = Capture(EndpointState.NotPresent, "{0.0.1.00000000}.{44444444-0000-1111-2222-bbbbbbbbbbbb}");
+        AudioEndpoint active = Capture(EndpointState.Active, CaptureId(Invented(11)));
+        AudioEndpoint unplugged = Capture(EndpointState.Unplugged, CaptureId(Invented(12)));
+        AudioEndpoint disabled = Capture(EndpointState.Disabled, CaptureId(Invented(13)));
+        AudioEndpoint notPresent = Capture(EndpointState.NotPresent, CaptureId(Invented(14)));
 
         Assert.AreSame(active, HandsFreeMicrophoneMode.CaptureEndpoint(Snapshot(SnapshotReadStatus.Ok, disabled, unplugged, active, Render(EndpointState.Active))));
         Assert.AreSame(unplugged, HandsFreeMicrophoneMode.CaptureEndpoint(Snapshot(SnapshotReadStatus.Ok, disabled, unplugged)));
@@ -184,15 +197,21 @@ public sealed class HandsFreeMicrophoneModeTests
         Assert.AreEqual(HandsFreeMicrophoneMode.SoundDevicesUri, row.SettingsUri);
     }
 
+    public static IEnumerable<object?[]> IdsNotInTheForm()
+    {
+        Guid g = Invented(1);
+        yield return [null];
+        yield return [""];
+        yield return [RenderId(g)];
+        yield return ["{0.0.1.00000000}.capture"];
+        yield return [CaptureId(g) + "&other=1"];
+        yield return [CaptureId(g) + " "];
+        yield return ["ms-settings:privacy-microphone"];
+        yield return ["\\\\?\\SWD#MMDEVAPI#" + CaptureId(g) + "#{" + Invented(3).ToString("D") + "}"];
+    }
+
     [TestMethod]
-    [DataRow(null)]
-    [DataRow("")]
-    [DataRow("{0.0.0.00000000}.{aaaaaaaa-0000-1111-2222-bbbbbbbbbbbb}")]
-    [DataRow("{0.0.1.00000000}.capture")]
-    [DataRow("{0.0.1.00000000}.{aaaaaaaa-0000-1111-2222-bbbbbbbbbbbb}&other=1")]
-    [DataRow("{0.0.1.00000000}.{aaaaaaaa-0000-1111-2222-bbbbbbbbbbbb} ")]
-    [DataRow("ms-settings:privacy-microphone")]
-    [DataRow("\\\\?\\SWD#MMDEVAPI#{0.0.1.00000000}.{aaaaaaaa-0000-1111-2222-bbbbbbbbbbbb}#{cccccccc-2222-3333-4444-dddddddddddd}")]
+    [DynamicData(nameof(IdsNotInTheForm))]
     public void AnIdNotInTheFormSettingsTakesOpensTheListOfSoundDevices(string? id)
     {
         Assert.IsFalse(HandsFreeMicrophoneMode.IsCaptureEndpointId(id));
@@ -206,7 +225,7 @@ public sealed class HandsFreeMicrophoneModeTests
     public void AWellFormedCaptureIdIsAcceptedInEitherCase()
     {
         Assert.IsTrue(HandsFreeMicrophoneMode.IsCaptureEndpointId(InventedCaptureId));
-        Assert.IsTrue(HandsFreeMicrophoneMode.IsCaptureEndpointId("{0.0.1.0000ABCD}.{AAAAAAAA-0000-1111-2222-BBBBBBBBBBBB}"));
+        Assert.IsTrue(HandsFreeMicrophoneMode.IsCaptureEndpointId("{0.0.1.0000ABCD}.{" + Invented(1).ToString("D").ToUpperInvariant() + "}"));
     }
 
     // ---- At rest
@@ -216,8 +235,9 @@ public sealed class HandsFreeMicrophoneModeTests
     [TestMethod]
     public void TheHandsFreeServiceNodeIsStillADisableTargetAndItsAudioChildIsNot()
     {
-        const string address = "0A1B2C3D4E8C";
-        const string handsFreeService = @"BTHENUM\{0000111E-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&0A1B2C3D4E8C_C00000000";
+        string address = string.Concat(Enumerable.Repeat("1A", 6));
+        string handsFreeService = @"BTHENUM\" + Earshot.Interop.BluetoothApis.HandsfreeServiceClass.ToString("B").ToUpperInvariant()
+            + @"_VID&0001004C_PID&2027\b&1a2b3c4d&0&" + address + "_C00000000";
         const string handsFreeAudioChild = @"BTHHFENUM\BTHHFPAUDIO\c&2b3c4d5e&1&97";
 
         Assert.IsTrue(NodeMatch.IsDisableTarget(handsFreeService, Container, Container, address));

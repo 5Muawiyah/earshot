@@ -1,5 +1,4 @@
 using Earshot.App;
-using Earshot.Contracts;
 using Earshot.Popup;
 
 namespace Earshot.Widget;
@@ -52,6 +51,19 @@ internal sealed record CardSettingsValues(
     public const int LowBatteryMin = 10;
     public const int LowBatteryMax = 90;
     public const int LowBatteryStep = 10;
+}
+
+// Where the AirPods' Hands-Free microphone stands in Windows, as the "microphone off" mode's row says it.
+internal enum MicrophoneRowState
+{
+    // No Hands-Free microphone exists yet: Windows adds it at the next connect, once protection is off.
+    ConnectFirst,
+
+    // The microphone is there and Windows has not been told to refuse it: the person can open sound settings.
+    OpenSettings,
+
+    // Windows lists the microphone as disabled: nothing is left to do.
+    OffInWindows,
 }
 
 // What the settings page and the update page need from the tray, so the card and its presenter reach the real
