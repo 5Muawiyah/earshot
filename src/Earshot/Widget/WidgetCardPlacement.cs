@@ -42,6 +42,16 @@ internal static class WidgetCardPlacement
         return displays[index].WorkArea;
     }
 
+    // The tallest the card can be and still sit above anchor with the gap under it and the gap under the top of workArea
+    // above it: the space above the taskbar (the work area's bottom, or the anchor's top when that is higher), less the
+    // margins. A page taller than this is capped to it and scrolls. At least 1.
+    public static int MaxHeight(Rectangle anchor, Rectangle workArea, int dpi)
+    {
+        int gap = CardPlacement.Scale(GapAt96, dpi);
+        int bottom = Math.Min(anchor.Top, workArea.Bottom) - gap;
+        return Math.Max(1, bottom - (workArea.Top + gap));
+    }
+
     // The card's rectangle. anchor may be a zero-size rectangle at a point (the fallback when the gauge is
     // hidden): the card is then centred on that point with its bottom edge the gap above it, clamped inside
     // workArea without resizing.

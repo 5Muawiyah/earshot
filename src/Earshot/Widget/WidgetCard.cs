@@ -444,6 +444,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnRefresh = false;
         _leftButtonDownOnSetupTarget = null;
         _leftButtonDownOnSettingsTarget = null;
+        EndScrollDrag();
     }
 
     protected override void OnDeactivate(EventArgs e)

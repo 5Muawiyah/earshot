@@ -37,6 +37,39 @@ internal sealed partial class WidgetCard
 
     private bool OnSettingsPage => !_notice && _model.View == WidgetCardView.Settings && _settingsLayout is not null && _model.Settings is not null;
 
+    // The tallest the card may be, or 0 for no limit: the space above the taskbar, which the presenter works out from the
+    // work area of the gauge's display. A settings page taller than this is as tall as this and scrolls under its header.
+    // Set before Render; the other views never reach it.
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal int MaxHeight { get; set; }
+
+    // How far the rows have scrolled up past the top of the body, in pixels. Rectangles of the layout are the page's own, in
+    // positions that never scroll; what is drawn, hit and told to a screen reader is those moved up by this.
+    private int _settingsScroll;
+    private bool _scrollHot;
+    private bool _scrollDragging;
+    private int _scrollDragGrab;
+
+    // The body of the page where the rows show, in client pixels: under the header, to the bottom of the card.
+    internal Rectangle SettingsViewport => _settingsLayout is { } layout
+        ? new Rectangle(0, layout.Frame.Body.Y, layout.Frame.Width, Math.Max(0, ClientSize.Height - layout.Frame.Body.Y))
+        : Rectangle.Empty;
+
+    // How far the rows have scrolled, for tests.
+    internal int SettingsScrollOffset => _settingsScroll;
+
+    // True when the page is taller than the card and scrolls.
+    internal bool SettingsScrolls => _settingsLayout is { } layout && CardScroll.MaxOffset(layout.Frame.Body.Height, SettingsViewport.Height) > 0;
+
+    // The indicator's bar as it is drawn now, and a way to put the rows at an offset, for tests.
+    internal Rectangle ScrollIndicatorBounds => ScrollIndicator();
+
+    internal void ScrollSettingsToForTest(int offset) => ScrollSettingsTo(offset);
+
+    // The page's own rectangle as it is drawn now.
+    private Rectangle Scrolled(Rectangle content) =>
+        content.IsEmpty ? content : new Rectangle(content.X, content.Y - _settingsScroll, content.Width, content.Height);
+
     private void RenderSettings(CardSettingsValues values)
     {
         if (_shownView != WidgetCardView.Settings)
@@ -44,6 +77,9 @@ internal sealed partial class WidgetCard
             _settingsFocus = new SettingsTarget(SettingsRowId.None, SettingsPart.Back);
             _editingText = false;
             _capturing = null;
+            _settingsScroll = 0;
+            _scrollHot = false;
+            _scrollDragging = false;
         }
 
         _shownView = WidgetCardView.Settings;
@@ -59,8 +95,154 @@ internal sealed partial class WidgetCard
             _settingsFocus = new SettingsTarget(SettingsRowId.None, SettingsPart.Back);
         }
 
-        ClientSize = new Size(layout.Frame.Width, layout.Frame.Height);
+        // A page taller than the card may be is capped to that height, however little is left of it: the header and a row or two
+        // at least. What is cut off is reached by scrolling.
+        int height = layout.Frame.Height;
+        if (MaxHeight > 0 && height > MaxHeight)
+        {
+            height = Math.Min(height, Math.Max(MaxHeight, layout.Frame.Body.Y + CardPlacement.Scale(MinViewportAt96, _dpi)));
+        }
+
+        ClientSize = new Size(layout.Frame.Width, height);
+        _settingsScroll = CardScroll.Clamp(_settingsScroll, layout.Frame.Body.Height, SettingsViewport.Height);
         Invalidate();
+    }
+
+    private const int MinViewportAt96 = 72;
+
+    // ---- Scrolling
+
+    private void ScrollSettingsTo(int offset)
+    {
+        if (_settingsLayout is not { } layout)
+        {
+            return;
+        }
+
+        int next = CardScroll.Clamp(offset, layout.Frame.Body.Height, SettingsViewport.Height);
+        if (next == _settingsScroll)
+        {
+            return;
+        }
+
+        _settingsScroll = next;
+        HideTip();
+        Invalidate();
+    }
+
+    // The wheel: each notch moves the rows by the lines Windows is set to scroll.
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        if (!_notice && !_exiting && OnSettingsPage && !_scrollDragging && SettingsScrolls)
+        {
+            ScrollSettingsTo(_settingsScroll + CardScroll.WheelPixels(e.Delta, SystemInformation.MouseWheelScrollLines, _dpi, SettingsViewport.Height));
+            if (e is HandledMouseEventArgs handled)
+            {
+                handled.Handled = true;
+            }
+
+            return;
+        }
+
+        base.OnMouseWheel(e);
+    }
+
+    // Brings the control that has the keyboard focus wholly into view. A row is shown whole (its label and its note with
+    // its control) when the viewport has room for that, so moving to the first row shows the top of the page. The back
+    // button is in the header, which does not scroll.
+    private void ScrollFocusIntoView()
+    {
+        if (_settingsLayout is not { } layout || _settingsFocus.Part == SettingsPart.Back || !SettingsScrolls)
+        {
+            return;
+        }
+
+        SettingsItem? row = layout.Items.FirstOrDefault(i => i.Kind == SettingsItemKind.Row && i.Row == _settingsFocus.Row);
+        if (row is null)
+        {
+            return;
+        }
+
+        Rectangle control = _settingsFocus.Part == SettingsPart.Tile && _settingsFocus.Index < row.Tiles.Count
+            ? row.Tiles[_settingsFocus.Index]
+            : PartRectangle(row, _settingsFocus.Part);
+        Rectangle target = control;
+        if (control.IsEmpty)
+        {
+            target = row.Bounds;
+        }
+        else if (row.Bounds.Height <= SettingsViewport.Height)
+        {
+            target = Rectangle.Union(row.Bounds, control);
+        }
+
+        ScrollSettingsTo(CardScroll.EnsureVisible(
+            _settingsScroll, target, layout.Frame.Body.Y, SettingsViewport.Height, layout.Frame.Body.Height, CardPlacement.Scale(CardScroll.FocusMarginAt96, _dpi)));
+    }
+
+    // The indicator along the right edge as it is drawn: empty when the page does not scroll.
+    private Rectangle ScrollIndicator() =>
+        _settingsLayout is { } layout && SettingsScrolls
+            ? CardScroll.Thumb(SettingsViewport, layout.Frame.Body.Height, _settingsScroll, _dpi, _scrollHot || _scrollDragging)
+            : Rectangle.Empty;
+
+    // A press on the strip at the right edge: on the bar, it is picked up to be dragged; beside it, the rows move a page that
+    // way. True when the press was the indicator's.
+    private bool ScrollIndicatorMouseDown(MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left || !SettingsScrolls || _settingsLayout is not { } layout
+            || !CardScroll.Zone(SettingsViewport, _dpi).Contains(e.Location))
+        {
+            return false;
+        }
+
+        Rectangle bar = ScrollIndicator();
+        if (e.Y >= bar.Top && e.Y < bar.Bottom)
+        {
+            _scrollDragging = true;
+            _scrollDragGrab = e.Y - bar.Y;
+            Invalidate();
+        }
+        else
+        {
+            int page = CardScroll.PagePixels(SettingsViewport.Height, _dpi);
+            ScrollSettingsTo(_settingsScroll + (e.Y < bar.Y ? -page : page));
+        }
+
+        return true;
+    }
+
+    // The pointer moved: a bar being dragged follows it, and the bar widens while the pointer is near it. True while dragging.
+    private bool ScrollIndicatorMouseMove(MouseEventArgs e)
+    {
+        if (_scrollDragging && _settingsLayout is { } layout)
+        {
+            Rectangle bar = ScrollIndicator();
+            ScrollSettingsTo(CardScroll.OffsetForThumbTop(SettingsViewport, layout.Frame.Body.Height, e.Y - _scrollDragGrab, bar.Height, _dpi));
+            return true;
+        }
+
+        SetScrollHot(OnSettingsPage && SettingsScrolls && CardScroll.Zone(SettingsViewport, _dpi).Contains(e.Location));
+        return false;
+    }
+
+    private void SetScrollHot(bool hot)
+    {
+        if (_scrollHot != hot)
+        {
+            _scrollHot = hot;
+            Invalidate();
+        }
+    }
+
+    private void EndScrollDrag()
+    {
+        if (_scrollDragging)
+        {
+            _scrollDragging = false;
+            Invalidate();
+        }
     }
 
     // ---- Mouse
@@ -77,6 +259,13 @@ internal sealed partial class WidgetCard
             return new SettingsTarget(SettingsRowId.None, SettingsPart.Back);
         }
 
+        // Nothing in the header but the back button, and a row that has scrolled up under it is not to be pressed through it.
+        if (point.Y < layout.Frame.Body.Y)
+        {
+            return null;
+        }
+
+        point = new Point(point.X, point.Y + _settingsScroll);
         foreach (SettingsItem item in layout.Items)
         {
             if (item.Kind != SettingsItemKind.Row)
@@ -113,6 +302,12 @@ internal sealed partial class WidgetCard
 
     private void SettingsMouseDown(MouseEventArgs e)
     {
+        if (ScrollIndicatorMouseDown(e))
+        {
+            _leftButtonDownOnSettingsTarget = null;
+            return;
+        }
+
         SettingsTarget? hit = e.Button == MouseButtons.Left ? HitSettingsTarget(e.Location) : null;
         _leftButtonDownOnSettingsTarget = hit;
 
@@ -131,6 +326,7 @@ internal sealed partial class WidgetCard
 
     private void SettingsMouseUp(MouseEventArgs e)
     {
+        EndScrollDrag();
         SettingsTarget? down = _leftButtonDownOnSettingsTarget;
         _leftButtonDownOnSettingsTarget = null;
         if (e.Button == MouseButtons.Left && down is { } pressed && HitSettingsTarget(e.Location) == pressed)
@@ -235,7 +431,8 @@ internal sealed partial class WidgetCard
 
     // The keys of the settings page. Internal so a test can send one without a window handle. A shortcut waiting
     // for keys takes every key; a text box being edited takes the editing keys; otherwise Tab and Shift+Tab move
-    // the focus, Enter and Space use what has it, Up and Down step the low battery value, and Escape goes back.
+    // the focus, Enter and Space use what has it, Up and Down step the low battery value, Page Up, Page Down, Home and End
+    // scroll a page that is taller than the card, and Escape goes back.
     internal void HandleSettingsKey(Keys keyData)
     {
         NoteKeyForFocusCue(keyData);
@@ -268,6 +465,18 @@ internal sealed partial class WidgetCard
             case Keys.Space:
                 ActivateSettingsTarget(_settingsFocus);
                 break;
+            case Keys.PageDown:
+                ScrollSettingsTo(_settingsScroll + CardScroll.PagePixels(SettingsViewport.Height, _dpi));
+                break;
+            case Keys.PageUp:
+                ScrollSettingsTo(_settingsScroll - CardScroll.PagePixels(SettingsViewport.Height, _dpi));
+                break;
+            case Keys.Home:
+                ScrollSettingsTo(0);
+                break;
+            case Keys.End:
+                ScrollSettingsTo(int.MaxValue);
+                break;
             case Keys.Left when _settingsFocus.Part == SettingsPart.Tile:
                 MoveTile(-1);
                 break;
@@ -297,6 +506,7 @@ internal sealed partial class WidgetCard
         if (next is >= 0 and <= 5)
         {
             _settingsFocus = _settingsFocus with { Index = next };
+            ScrollFocusIntoView();
             Invalidate();
             NoteFocusMoved();
         }
@@ -320,6 +530,7 @@ internal sealed partial class WidgetCard
         }
 
         _settingsFocus = targets[(at + (backwards ? targets.Count - 1 : 1)) % targets.Count];
+        ScrollFocusIntoView();
         Invalidate();
         NoteFocusMoved();
     }
@@ -491,6 +702,8 @@ internal sealed partial class WidgetCard
         {
             HideTip();
             EndEdits(commit: true);
+            EndScrollDrag();
+            _scrollHot = false;
         }
     }
 
@@ -501,10 +714,39 @@ internal sealed partial class WidgetCard
         CardColours colours = Colours;
         bool focusVisible = FocusShown;
         SettingsTarget focus = _settingsFocus;
-        int fourteen = CardPlacement.Scale(14, _dpi);
-        int twelve = CardPlacement.Scale(12, _dpi);
 
         SubPageFrame.DrawHeader(g, layout.Frame, WidgetCopy.SettingsTitle, null, colours, _type, _dpi, backFocused: focusVisible && focus.Part == SettingsPart.Back);
+
+        // The rows draw in their own positions, moved up by the scroll and cut at the body's top and bottom, so nothing of
+        // them shows under the header. A page that fits is drawn as it is.
+        bool scrolls = SettingsScrolls;
+        GraphicsState state = g.Save();
+        if (scrolls)
+        {
+            g.SetClip(SettingsViewport);
+            g.TranslateTransform(0, -_settingsScroll);
+        }
+
+        DrawSettingsRows(g, values, layout, colours, focusVisible, focus);
+        g.Restore(state);
+
+        if (scrolls)
+        {
+            if (_settingsScroll > 0)
+            {
+                // One whole pixel row under the header, so nothing of it spills into the header.
+                using var line = new SolidBrush(colours.Divider);
+                g.FillRectangle(line, 0, SettingsViewport.Top, layout.Frame.Width, 1);
+            }
+
+            CardScroll.DrawIndicator(g, ScrollIndicator(), colours.TextSecondary, _scrollHot || _scrollDragging);
+        }
+    }
+
+    private void DrawSettingsRows(Graphics g, CardSettingsValues values, SettingsLayout layout, CardColours colours, bool focusVisible, SettingsTarget focus)
+    {
+        int fourteen = CardPlacement.Scale(14, _dpi);
+        int twelve = CardPlacement.Scale(12, _dpi);
 
         bool Focused(SettingsRowId row, SettingsPart part) => focusVisible && focus == new SettingsTarget(row, part);
 

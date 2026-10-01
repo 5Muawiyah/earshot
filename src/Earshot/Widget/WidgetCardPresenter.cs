@@ -259,6 +259,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
         WidgetCard card = EnsureCard();
         card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
+        card.MaxHeight = WidgetCardPlacement.MaxHeight(anchor, _workAreaFor(anchor), _callbacks.Dpi());
         card.Render(BuildModel(), _callbacks.Dpi());
         Rectangle rest = PlaceAbove(card, anchor);
         card.ResetFocusCue(openedByKeyboard);
@@ -603,7 +604,8 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     // Draws the card again from the current model. A page's height changes with what it holds (the step, a
     // caption, a row's note), so the card keeps its bottom edge where it was and grows upward from the gauge
-    // instead of into the taskbar.
+    // instead of into the taskbar. It grows no higher than the top of the work area less the margin: a page taller than
+    // that is capped there and scrolls.
     private void RenderKeepingBottom()
     {
         // A card that is fading out keeps the page it was closed on: closing switched the presenter's page, and drawing that
@@ -614,12 +616,13 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         }
 
         Rectangle before = card.RestBounds;
+        Rectangle workArea = _workAreaFor(before);
+        card.MaxHeight = Math.Max(1, before.Bottom - (workArea.Top + CardPlacement.Scale(WidgetCardPlacement.GapAt96, _callbacks.Dpi())));
         card.Render(BuildModel(), _callbacks.Dpi());
 
         Size size = card.ClientSize;
         if (size != before.Size)
         {
-            Rectangle workArea = _workAreaFor(before);
             var resized = new Rectangle(before.X, before.Bottom - size.Height, size.Width, size.Height);
             card.PlaceAtRest(CardPlacement.Clamp(resized, workArea));
         }

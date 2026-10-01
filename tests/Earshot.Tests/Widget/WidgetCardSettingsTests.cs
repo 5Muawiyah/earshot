@@ -311,12 +311,24 @@ public sealed class WidgetCardSettingsTests
         });
     }
 
+    // The work area is given, not read from the screen the tests run on: the page is taller than a small screen has room for.
     [TestMethod]
     public void TheCardKeepsItsBottomEdgeWhenThePageIsTallerThanTheMainView()
     {
+        AssertTheCardKeepsItsBottomEdge(new Rectangle(0, 0, 1920, 1040));
+    }
+
+    [TestMethod]
+    public void TheCardKeepsItsBottomEdgeWhenThePageIsTallerThanTheMainViewOnASmallWorkArea()
+    {
+        AssertTheCardKeepsItsBottomEdge(new Rectangle(0, 0, 1280, 600));
+    }
+
+    private static void AssertTheCardKeepsItsBottomEdge(Rectangle workArea)
+    {
         Phase5.CardDesktop.Run(() =>
         {
-            using Page page = Page.Open(new FakeCardHost());
+            using Page page = Page.Open(new FakeCardHost(), workArea: workArea);
             int bottom = page.Card.Bounds.Bottom;
 
             CardKit.Click(page.Card, page.Card.CurrentMainLayout.Gear);
@@ -765,13 +777,20 @@ public sealed class WidgetCardSettingsTests
 
         public required WidgetCard Card { get; init; }
 
-        public static Page Open(FakeCardHost host, GaugePosition? position = null)
+        // The work area the card is placed in: never the screen the tests run on, so no page is taller than the room it has
+        // unless a test says so. A work area given also puts the gauge just under it.
+        private static readonly Rectangle DefaultWorkArea = new(0, 0, 1920, 1040);
+
+        public static Page Open(FakeCardHost host, GaugePosition? position = null, Rectangle? workArea = null)
         {
             var log = new CapturingLog();
             WidgetCard? card = null;
+            Rectangle area = workArea ?? DefaultWorkArea;
+            Rectangle gauge = workArea is null ? CardKit.Gauge : new Rectangle(area.Right - 200, area.Bottom, CardKit.Gauge.Width, CardKit.Gauge.Height);
             var presenter = new WidgetCardPresenter(
-                () => card = new WidgetCard(log), CardKit.Callbacks(position), CardKit.Inline, new Streaming.TestTimeProvider(), log, host);
-            presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
+                () => card = new WidgetCard(log), CardKit.Callbacks(position), CardKit.Inline, new Streaming.TestTimeProvider(), log, host,
+                workAreaFor: _ => area);
+            presenter.RequestShow(gauge, gauge.Location);
             Application.DoEvents();
             return new Page { Host = host, Presenter = presenter, Card = card! };
         }

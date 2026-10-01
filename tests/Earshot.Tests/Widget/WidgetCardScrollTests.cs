@@ -1,0 +1,557 @@
+using System.Drawing;
+using System.Windows.Forms;
+using Earshot.Popup;
+using Earshot.Widget;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace Earshot.Tests.Widget;
+
+// A page of the card that is taller than the space above the taskbar: the card is capped to that space and keeps its
+// bottom edge, and the rows scroll under a header that stays. Every test opens a real card on a private desktop over a
+// fixed work area, so the answer does not depend on the screen the tests run on.
+[TestClass]
+public sealed class WidgetCardScrollTests
+{
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_MOUSEMOVE = 0x0200;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_LBUTTONUP = 0x0202;
+    private const int WM_MOUSEWHEEL = 0x020A;
+    private const int MK_LBUTTON = 0x0001;
+
+    private const int Gap = 12;
+
+    // A screen with room for the whole settings page at 100%, and one that has none: 1280 by 600 less nothing, as a small
+    // laptop screen or a hosted runner's.
+    private static readonly Rectangle LargeWorkArea = new(0, 0, 1920, 1040);
+    private static readonly Rectangle SmallWorkArea = new(0, 0, 1280, 600);
+
+    // Little enough that the page is more than a page and a bit long.
+    private static readonly Rectangle TinyWorkArea = new(0, 0, 1280, 400);
+
+    // ---- The cap and the bottom edge
+
+    [TestMethod]
+    public void ASettingsPageTallerThanTheSpaceAboveTheTaskbarIsCappedToItAndKeepsItsBottomEdge()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            int bottom = page.Card.Bounds.Bottom;
+
+            page.OpenSettings();
+
+            Assert.AreEqual(WidgetCardView.Settings, page.Card.EffectiveView);
+            Assert.AreEqual(bottom, page.Card.Bounds.Bottom, "It grows upward from the gauge, not down into the taskbar.");
+            Assert.AreEqual(SmallWorkArea.Height - (2 * Gap), page.Card.Height, "The space above the taskbar, less the margin above and below.");
+            Assert.IsGreaterThanOrEqualTo(SmallWorkArea.Top + Gap, page.Card.Bounds.Top, "A margin at the top of the work area.");
+            Assert.IsLessThan(page.Card.CurrentSettingsLayout!.Frame.Height, page.Card.Height, "The page is taller than the card.");
+        });
+    }
+
+    [TestMethod]
+    public void ASettingsPageThatFitsKeepsItsFullHeightAndItsBottomEdge()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(LargeWorkArea);
+            int bottom = page.Card.Bounds.Bottom;
+            page.OpenSettings(capped: false);
+            int[] before = page.Card.CurrentControls().Select(c => c.Bounds.Y).ToArray();
+
+            Wheel(page.Card, -120 * 10);
+
+            Assert.AreEqual(bottom, page.Card.Bounds.Bottom, "It grows upward from the gauge, not down into the taskbar.");
+            Assert.AreEqual(page.Card.CurrentSettingsLayout!.Frame.Height, page.Card.Height, "Nothing is cut when the page has room.");
+            CollectionAssert.AreEqual(before, page.Card.CurrentControls().Select(c => c.Bounds.Y).ToArray(), "Nothing scrolls when everything is in view.");
+        });
+    }
+
+    [TestMethod]
+    public void AnOverTallPageIsCappedAtLargerScalesToo()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            // A 1080p screen at 150%: the settings page is about 1290 px tall, the work area 1020.
+            var workArea = new Rectangle(0, 0, 1920, 1020);
+            using ScrollPage page = ScrollPage.Open(workArea, dpi: 144);
+            int bottom = page.Card.Bounds.Bottom;
+
+            page.OpenSettings();
+
+            int gap = 18;
+            Assert.AreEqual(bottom, page.Card.Bounds.Bottom);
+            Assert.AreEqual(workArea.Height - (2 * gap), page.Card.Height);
+            Assert.IsGreaterThan(page.Card.Height, page.Card.CurrentSettingsLayout!.Frame.Height, "This is a page that does not fit, or the test proves nothing.");
+        });
+    }
+
+    // ---- The wheel
+
+    [TestMethod]
+    public void TheWheelScrollsTheRowsByTheSameAmountAndLeavesTheHeaderWhereItIs()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            Rectangle[] before = page.Card.CurrentControls().Select(c => c.Bounds).ToArray();
+
+            Wheel(page.Card, -120);
+
+            Rectangle[] after = page.Card.CurrentControls().Select(c => c.Bounds).ToArray();
+            Assert.AreEqual(before[0], after[0], "The back button is in the header, which does not scroll.");
+            int moved = before[1].Y - after[1].Y;
+            Assert.IsGreaterThan(0, moved, "One notch down moves the rows up.");
+            Assert.IsLessThan(page.Viewport.Height, moved, "A notch is less than a page.");
+            for (int i = 1; i < before.Length; i++)
+            {
+                Assert.AreEqual(moved, before[i].Y - after[i].Y, "Every row moves by the same amount: " + i);
+                Assert.AreEqual(before[i].Size, after[i].Size);
+            }
+
+            Wheel(page.Card, 120 * 20);
+            CollectionAssert.AreEqual(before, page.Card.CurrentControls().Select(c => c.Bounds).ToArray(), "Wheeling back up stops at the top.");
+        });
+    }
+
+    [TestMethod]
+    public void TheWheelStopsWhenTheLastRowIsInViewAndNotBefore()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+
+            Wheel(page.Card, -120 * 100);
+
+            CardControl last = page.Card.CurrentControls()[^1];
+            Assert.IsLessThanOrEqualTo(page.Card.ClientSize.Height, last.Bounds.Bottom, "The last row is wholly in view.");
+            Assert.IsLessThan(CardPlacement.Scale(40, 96), page.Card.ClientSize.Height - last.Bounds.Bottom, "Nothing more than the page's own bottom padding is left under it.");
+            Rectangle[] atEnd = page.Card.CurrentControls().Select(c => c.Bounds).ToArray();
+
+            Wheel(page.Card, -120);
+
+            CollectionAssert.AreEqual(atEnd, page.Card.CurrentControls().Select(c => c.Bounds).ToArray(), "Nothing scrolls past the end.");
+        });
+    }
+
+    // ---- Mouse and header
+
+    [TestMethod]
+    public void ARowScrolledIntoViewIsClickedWhereItIsDrawnAndTheOffsetSurvivesTheChange()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            Wheel(page.Card, -120 * 100);
+            CardControl toggle = page.Card.CurrentControls()[^1];
+            Assert.IsGreaterThanOrEqualTo(page.Viewport.Top, toggle.Bounds.Top, "The last toggle is in view.");
+
+            CardKit.Click(page.Card, toggle.Bounds);
+
+            CardKit.AssertCalls(page.Host, "checkAuto:True");
+            Assert.AreEqual(toggle.Bounds, page.Card.CurrentControls()[^1].Bounds, "Choosing a setting draws the page again where it was, not from the top.");
+        });
+    }
+
+    [TestMethod]
+    public void ARowScrolledUnderTheHeaderIsNotClickedThroughIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            Wheel(page.Card, -120 * 3);
+
+            // The first rows are now drawn above the body, in the header's own band; nothing there is theirs.
+            foreach (CardControl control in page.Card.CurrentControls().Skip(1).Where(c => c.Bounds.Bottom <= page.Viewport.Top))
+            {
+                CardKit.Click(page.Card, control.Bounds);
+            }
+
+            Assert.IsEmpty(page.Host.Calls, "A control that has scrolled out of view cannot be pressed where the header is.");
+            Assert.AreEqual(WidgetCardView.Settings, page.Presenter.ViewForTest);
+        });
+    }
+
+    [TestMethod]
+    public void TheBackButtonStaysAndWorksWhileTheRowsAreScrolled()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            Rectangle back = page.Card.CurrentSettingsLayout!.Frame.Back;
+            Wheel(page.Card, -120 * 100);
+            Assert.AreEqual(back, page.Card.CurrentControls()[0].Bounds);
+
+            CardKit.Click(page.Card, back);
+
+            Assert.AreEqual(WidgetCardView.Main, page.Presenter.ViewForTest, "Back goes back from anywhere on the page.");
+        });
+    }
+
+    [TestMethod]
+    public void TheNextTimeThePageOpensItStartsAtTheTop()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            int top = page.Card.CurrentControls()[1].Bounds.Y;
+            Wheel(page.Card, -120 * 100);
+            Assert.AreNotEqual(top, page.Card.CurrentControls()[1].Bounds.Y);
+
+            CardKit.Click(page.Card, page.Card.CurrentSettingsLayout!.Frame.Back);
+            page.OpenSettings();
+
+            Assert.AreEqual(top, page.Card.CurrentControls()[1].Bounds.Y);
+        });
+    }
+
+    // ---- The keyboard
+
+    [TestMethod]
+    public void TabScrollsEachFocusedControlWhollyIntoViewAllTheWayRoundAndBack()
+    {
+        AssertTabKeepsTheFocusedControlInView(SmallWorkArea, 96);
+    }
+
+    [TestMethod]
+    public void TabScrollsEachFocusedControlWhollyIntoViewAtOneAndAHalfTimesTheSize()
+    {
+        AssertTabKeepsTheFocusedControlInView(new Rectangle(0, 0, 1920, 1020), 144);
+    }
+
+    private static void AssertTabKeepsTheFocusedControlInView(Rectangle workArea, int dpi)
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(workArea, dpi);
+            page.OpenSettings();
+            page.Card.Activate();
+            Application.DoEvents();
+            int stops = page.Card.CurrentSettingsLayout!.Targets.Count;
+
+            for (int step = 1; step <= stops + 1; step++)
+            {
+                Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
+                SettingsTarget focus = page.Card.SettingsFocusTarget;
+                CardControl control = page.Card.CurrentControls().First(c => c.Name == SettingsRows.NameOf(focus.Row, focus.Part, focus.Index));
+
+                if (focus.Part == SettingsPart.Back)
+                {
+                    Assert.AreEqual(page.Card.CurrentSettingsLayout!.Frame.Back, control.Bounds, "Step " + step + ": the back button does not move.");
+                    continue;
+                }
+
+                Assert.AreEqual(control.Bounds, Rectangle.Intersect(control.Bounds, page.Viewport), "Step " + step + ": " + control.Name + " is wholly in view, at " + control.Bounds + " in " + page.Viewport + ".");
+            }
+        });
+    }
+
+    [TestMethod]
+    public void ShiftTabFromTheBackButtonGoesToTheLastRowAndScrollsItIntoView()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            page.Card.Activate();
+            Application.DoEvents();
+            Assert.AreEqual(new SettingsTarget(SettingsRowId.None, SettingsPart.Back), page.Card.SettingsFocusTarget);
+
+            page.Card.HandleSettingsKey(Keys.Tab | Keys.Shift);
+
+            SettingsTarget focus = page.Card.SettingsFocusTarget;
+            Assert.AreEqual(page.Card.CurrentSettingsLayout!.Targets[^1], focus);
+            CardControl control = page.Card.CurrentControls().First(c => c.Name == SettingsRows.NameOf(focus.Row, focus.Part, focus.Index));
+            Assert.AreEqual(control.Bounds, Rectangle.Intersect(control.Bounds, page.Viewport), "The last row is in view.");
+        });
+    }
+
+    // ---- What a screen reader sees
+
+    [TestMethod]
+    public void ARowOutOfViewIsOffscreenToAScreenReaderUntilTheFocusScrollsItIn()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            page.Card.Activate();
+            Application.DoEvents();
+            AccessibleObject card = page.Card.AccessibilityObject;
+            int last = card.GetChildCount() - 1;
+
+            Assert.IsFalse(card.GetChild(1)!.State.HasFlag(AccessibleStates.Offscreen), "The first row is in view.");
+            Assert.IsTrue(card.GetChild(last)!.State.HasFlag(AccessibleStates.Offscreen), "The last row is below the card.");
+
+            Wheel(page.Card, -120 * 100);
+
+            AccessibleObject lastRow = card.GetChild(last)!;
+            Assert.IsFalse(lastRow.State.HasFlag(AccessibleStates.Offscreen), "The last row has scrolled into view.");
+            Assert.IsTrue(card.GetChild(1)!.State.HasFlag(AccessibleStates.Offscreen), "The first row has scrolled out of view.");
+            Rectangle screen = page.Card.RectangleToScreen(page.Viewport);
+            Assert.AreEqual(lastRow.Bounds, Rectangle.Intersect(lastRow.Bounds, screen), "Its bounds are where it is drawn now.");
+            Assert.AreEqual(page.Card.RectangleToScreen(page.Card.CurrentControls()[last].Bounds), lastRow.Bounds);
+        });
+    }
+
+    [TestMethod]
+    public void PageUpPageDownHomeAndEndScrollAPageAtATime()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(TinyWorkArea);
+            page.OpenSettings();
+            page.Card.Activate();
+            Application.DoEvents();
+            int viewport = page.Viewport.Height;
+            int max = CardScroll.MaxOffset(page.Card.CurrentSettingsLayout!.Frame.Body.Height, viewport);
+            int pageStep = CardScroll.PagePixels(viewport, 96);
+            Assert.IsGreaterThan(pageStep, max, "The page is more than a page and a bit long, or the keys prove little.");
+
+            Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.PageDown, 0);
+            Assert.AreEqual(pageStep, page.Card.SettingsScrollOffset);
+            Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.PageDown, 0);
+            Assert.AreEqual(Math.Min(2 * pageStep, max), page.Card.SettingsScrollOffset);
+            Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.End, 0);
+            Assert.AreEqual(max, page.Card.SettingsScrollOffset);
+            Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.PageUp, 0);
+            Assert.AreEqual(max - pageStep, page.Card.SettingsScrollOffset);
+            Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.Home, 0);
+            Assert.AreEqual(0, page.Card.SettingsScrollOffset);
+            Assert.IsEmpty(page.Host.Calls, "Scrolling keys change nothing.");
+        });
+    }
+
+    // ---- The indicator
+
+    [TestMethod]
+    public void TheWheelMovesTheRowsByWhatWindowsIsSetToScroll()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            int lines = SystemInformation.MouseWheelScrollLines;
+            if (lines == 0)
+            {
+                Assert.Inconclusive("Windows is set not to scroll with the wheel.");
+            }
+
+            int max = CardScroll.MaxOffset(page.Card.CurrentSettingsLayout!.Frame.Body.Height, page.Viewport.Height);
+            int expected = Math.Min(max, CardScroll.WheelPixels(-120, lines, 96, page.Viewport.Height));
+
+            Wheel(page.Card, -120);
+
+            Assert.AreEqual(expected, page.Card.SettingsScrollOffset);
+        });
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void TheIndicatorIsPaintedOnlyWhereThePageScrollsAndTheHeaderIsNeverPaintedOver(bool dark)
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using WidgetCard fits = CardKit.NewCard(dark);
+            fits.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            using Bitmap fitting = CardKit.Render(fits);
+            Assert.IsFalse(fits.SettingsScrolls);
+            Assert.AreEqual(Rectangle.Empty, fits.ScrollIndicatorBounds);
+            var strip = new Rectangle(fits.ClientSize.Width - 8, fits.SettingsViewport.Top, 8, fits.SettingsViewport.Height);
+            Assert.IsFalse(CardKit.HasInk(fitting, strip, fitting.GetPixel(0, 0)), "Nothing is drawn along the right edge of a page that fits.");
+
+            using WidgetCard card = CardKit.NewCard(dark);
+            card.MaxHeight = 500;
+            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            Assert.AreEqual(500, card.ClientSize.Height);
+            Assert.IsTrue(card.SettingsScrolls);
+            using Bitmap top = CardKit.Render(card);
+            Rectangle barAtTop = card.ScrollIndicatorBounds;
+            Assert.IsTrue(CardKit.HasInk(top, barAtTop, top.GetPixel(0, 0)), "The indicator is drawn where the page scrolls.");
+
+            card.HandleSettingsKey(Keys.End);
+            using Bitmap end = CardKit.Render(card);
+            Assert.IsGreaterThan(barAtTop.Top, card.ScrollIndicatorBounds.Top, "It moves down with the rows.");
+            Assert.IsTrue(CardKit.HasInk(end, card.ScrollIndicatorBounds, end.GetPixel(0, 0)));
+
+            // The header is the same scrolled or not: nothing of a row shows under it.
+            Rectangle header = card.CurrentSettingsLayout!.Frame.Header;
+            for (int y = header.Top; y < header.Bottom; y++)
+            {
+                for (int x = header.Left; x < header.Right; x++)
+                {
+                    Assert.AreEqual(top.GetPixel(x, y), end.GetPixel(x, y), "Header pixel " + x + "," + y);
+                }
+            }
+
+            // And the last toggle is drawn where the scroll put it.
+            Rectangle toggle = card.CurrentControls()[^1].Bounds;
+            Assert.IsTrue(CardKit.HasInk(end, toggle, end.GetPixel(0, 0)), "The last toggle is painted at " + toggle + ".");
+        });
+    }
+
+    [TestMethod]
+    public void TheBarCanBeDraggedAndAPressBesideItMovesAPage()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            WidgetCard card = page.Card;
+            Rectangle bar = card.ScrollIndicatorBounds;
+            Assert.IsFalse(bar.IsEmpty);
+            int max = CardScroll.MaxOffset(card.CurrentSettingsLayout!.Frame.Body.Height, page.Viewport.Height);
+            var grab = new Point(bar.X + (bar.Width / 2), bar.Y + (bar.Height / 2));
+
+            Mouse(card, WM_LBUTTONDOWN, 0, grab);
+            Mouse(card, WM_MOUSEMOVE, MK_LBUTTON, new Point(grab.X, grab.Y + 60));
+            Assert.IsGreaterThan(0, card.SettingsScrollOffset, "Dragging the bar down moves the rows up.");
+            Assert.IsGreaterThan(bar.Top, card.ScrollIndicatorBounds.Top, "The bar followed the pointer.");
+
+            Mouse(card, WM_MOUSEMOVE, MK_LBUTTON, new Point(grab.X, grab.Y + 5000));
+            Assert.AreEqual(max, card.SettingsScrollOffset, "Dragged far past the end, it stops at the end.");
+            Mouse(card, WM_LBUTTONUP, 0, new Point(grab.X, grab.Y + 5000));
+
+            Mouse(card, WM_MOUSEMOVE, 0, new Point(grab.X, grab.Y - 100));
+            Assert.AreEqual(max, card.SettingsScrollOffset, "Once let go the bar does not follow the pointer.");
+
+            // A press on the strip above the bar moves up a page; below it, down a page.
+            int pageStep = CardScroll.PagePixels(page.Viewport.Height, 96);
+            Rectangle atEnd = card.ScrollIndicatorBounds;
+            Mouse(card, WM_LBUTTONDOWN, 0, new Point(atEnd.X + 1, atEnd.Y - 10));
+            Mouse(card, WM_LBUTTONUP, 0, new Point(atEnd.X + 1, atEnd.Y - 10));
+            Assert.AreEqual(Math.Max(0, max - pageStep), card.SettingsScrollOffset);
+            Rectangle now = card.ScrollIndicatorBounds;
+            Mouse(card, WM_LBUTTONDOWN, 0, new Point(now.X + 1, now.Bottom + 10));
+            Mouse(card, WM_LBUTTONUP, 0, new Point(now.X + 1, now.Bottom + 10));
+            Assert.AreEqual(max, card.SettingsScrollOffset);
+            Assert.IsEmpty(page.Host.Calls, "Nothing on the page was pressed through the strip.");
+        });
+    }
+
+    [TestMethod]
+    public void TheBarIsWiderWhileThePointerIsNearItAndThinAgainWhenItIsAway()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            WidgetCard card = page.Card;
+            int thin = card.ScrollIndicatorBounds.Width;
+
+            Mouse(card, WM_MOUSEMOVE, 0, new Point(card.ClientSize.Width - 5, page.Viewport.Top + 50));
+            Assert.AreEqual(CardPlacement.Scale(CardScroll.IndicatorHotWidthAt96, 96), card.ScrollIndicatorBounds.Width);
+
+            Mouse(card, WM_MOUSEMOVE, 0, new Point(100, page.Viewport.Top + 50));
+            Assert.AreEqual(thin, card.ScrollIndicatorBounds.Width);
+        });
+    }
+
+    // ---- Tooltips
+
+    [TestMethod]
+    public void ATooltipBelongsToWhereTheControlIsDrawnAndNotToTheHeaderItHasScrolledUnder()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using WidgetCard card = CardKit.NewCard(dark: false);
+            card.MaxHeight = 500;
+            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            int bodyTop = card.SettingsViewport.Top;
+            CardControl[] withTips = card.CurrentControls().Skip(1).Where(c => c.Tip is { Length: > 0 }).ToArray();
+            int tried = 0;
+
+            foreach (CardControl control in withTips)
+            {
+                card.ScrollSettingsToForTest(0);
+                CardControl atTop = card.CurrentControls().First(c => c.Name == control.Name);
+                card.ScrollSettingsToForTest(atTop.Bounds.Top - bodyTop + 4);
+                CardControl moved = card.CurrentControls().First(c => c.Name == control.Name);
+                if (moved.Bounds.Top >= bodyTop)
+                {
+                    continue;
+                }
+
+                tried++;
+                int x = moved.Bounds.X + (moved.Bounds.Width / 2);
+                Assert.IsNull(card.TooltipAt(new Point(x, bodyTop - 2)), control.Name + ": the header is not the control's, though the control's top is up there.");
+                Assert.AreEqual(control.Tip, card.TooltipAt(new Point(x, bodyTop + 2))?.Text, control.Name + ": the part in view is.");
+            }
+
+            Assert.IsGreaterThan(3, tried, "Enough controls were scrolled under the header for this to prove something.");
+        });
+    }
+
+    // ---- Helpers
+
+    private static void Mouse(WidgetCard card, int message, nint wParam, Point client)
+    {
+        nint lParam = (nint)(((client.Y & 0xFFFF) << 16) | (client.X & 0xFFFF));
+        Phase5.TestWindows.Send(card.Handle, message, wParam, lParam);
+    }
+
+    private static void Wheel(WidgetCard card, int delta)
+    {
+        Point screen = card.PointToScreen(new Point(card.ClientSize.Width / 2, card.ClientSize.Height / 2));
+        nint lParam = (nint)(((screen.Y & 0xFFFF) << 16) | (screen.X & 0xFFFF));
+        nint wParam = (nint)((uint)(ushort)(short)delta << 16);
+        Phase5.TestWindows.Send(card.Handle, WM_MOUSEWHEEL, wParam, lParam);
+        Application.DoEvents();
+    }
+
+    // A real card over the real presenter, a fake host, and a work area that is given. The gauge sits on the taskbar just
+    // under the work area, at the right-hand end, as it does on a bottom taskbar.
+    private sealed class ScrollPage : IDisposable
+    {
+        public required FakeCardHost Host { get; init; }
+
+        public required WidgetCardPresenter Presenter { get; init; }
+
+        public required WidgetCard Card { get; init; }
+
+        // The scrolling body of the page: the card under its header, in client pixels.
+        public Rectangle Viewport
+        {
+            get
+            {
+                int top = Card.CurrentSettingsLayout!.Frame.Body.Y;
+                return new Rectangle(0, top, Card.ClientSize.Width, Card.ClientSize.Height - top);
+            }
+        }
+
+        public static ScrollPage Open(Rectangle workArea, int dpi = 96)
+        {
+            var host = new FakeCardHost();
+            var log = new CapturingLog();
+            WidgetCard? card = null;
+            Rectangle gauge = new(workArea.Right - CardPlacement.Scale(200, dpi), workArea.Bottom, CardPlacement.Scale(74, dpi), CardPlacement.Scale(40, dpi));
+            WidgetCardPresenterCallbacks callbacks = CardKit.Callbacks() with { Dpi = () => dpi };
+            var presenter = new WidgetCardPresenter(
+                () => card = new WidgetCard(log), callbacks, CardKit.Inline, new Streaming.TestTimeProvider(), log, host, workAreaFor: _ => workArea);
+            presenter.RequestShow(gauge, gauge.Location);
+            Application.DoEvents();
+            return new ScrollPage { Host = host, Presenter = presenter, Card = card! };
+        }
+
+        // Opens the page with the gear. A test on a work area the page does not fit says so, and the card must then be shorter
+        // than the page: what it does next is only worth proving on a card that is capped.
+        public void OpenSettings(bool capped = true)
+        {
+            CardKit.Click(Card, Card.CurrentMainLayout.Gear);
+            Assert.AreEqual(WidgetCardView.Settings, Presenter.ViewForTest, "The gear opened the settings page.");
+            if (capped)
+            {
+                Assert.IsLessThan(Card.CurrentSettingsLayout!.Frame.Height, Card.Height, "The page is taller than the card.");
+            }
+        }
+
+        public void Dispose() => Presenter.Dispose();
+    }
+}

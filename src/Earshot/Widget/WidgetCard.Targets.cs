@@ -8,11 +8,13 @@ namespace Earshot.Widget;
 // rather than found.
 internal enum CardControlRole { PushButton, CheckButton, RadioButton, Text }
 
-// One control: what it is called, what it is, where it is (client pixels), the tooltip that explains it when its icon
-// or picture does not, whether it is only an icon or a picture, whether it is on, whether it has the focus, and what
-// pressing it does.
+// One control: what it is called, what it is, where it is (client pixels, where it is drawn now, scrolled or not), the
+// tooltip that explains it when its icon or picture does not, whether it is only an icon or a picture, whether it is on,
+// whether it has the focus, and what pressing it does. Offscreen: a page that scrolls has moved it wholly out of the part
+// of the card that shows it.
 internal sealed record CardControl(
-    string Name, CardControlRole Role, Rectangle Bounds, string? Tip, bool IconOnly, bool Checked, bool Focused, bool Enabled, Action Activate);
+    string Name, CardControlRole Role, Rectangle Bounds, string? Tip, bool IconOnly, bool Checked, bool Focused, bool Enabled, Action Activate,
+    bool Offscreen = false);
 
 internal sealed partial class WidgetCard
 {
@@ -113,12 +115,17 @@ internal sealed partial class WidgetCard
         bool focus = ContainsFocus;
         var list = new List<CardControl>();
 
+        // Bounds come in the page's own positions; the back button is in the header and stays, every other control is where the
+        // scroll has put it. One that is wholly outside the body is off screen.
+        Rectangle viewport = SettingsViewport;
         void Add(SettingsTarget stop, Rectangle bounds, CardControlRole role, bool isChecked, bool focused)
         {
             bool iconOnly = stop.Part is SettingsPart.Back or SettingsPart.Clear or SettingsPart.Tile;
+            Rectangle drawn = stop.Part == SettingsPart.Back ? bounds : Scrolled(bounds);
+            bool offscreen = stop.Part != SettingsPart.Back && !drawn.IntersectsWith(viewport);
             list.Add(new CardControl(
-                SettingsRows.NameOf(stop.Row, stop.Part, stop.Index), role, bounds, SettingsRows.TipOf(stop.Row, stop.Part, stop.Index), iconOnly, isChecked,
-                focus && focused, true, () => ActivateSettingsTarget(stop)));
+                SettingsRows.NameOf(stop.Row, stop.Part, stop.Index), role, drawn, SettingsRows.TipOf(stop.Row, stop.Part, stop.Index), iconOnly, isChecked,
+                focus && focused, true, () => ActivateSettingsTarget(stop), offscreen));
         }
 
         foreach (SettingsTarget stop in layout.Targets)
@@ -169,20 +176,21 @@ internal sealed partial class WidgetCard
     {
         foreach (CardControl target in CurrentControls())
         {
-            if (target.Tip is { Length: > 0 } tip && target.Bounds.Contains(point))
+            if (target.Tip is { Length: > 0 } tip && HitsControl(target, point))
             {
                 return (tip, target.Bounds);
             }
         }
 
-        if (OnSettingsPage && _settingsLayout is { } settings)
+        if (OnSettingsPage && _settingsLayout is { } settings && point.Y >= settings.Frame.Body.Y)
         {
-            // Over a row's icon or label: the row's own tooltip.
+            // Over a row's icon or label: the row's own tooltip. The point is on the page where the scroll has put the row.
+            var onPage = new Point(point.X, point.Y + _settingsScroll);
             foreach (SettingsItem item in settings.Items)
             {
-                if (item.Kind == SettingsItemKind.Row && item.Tip is { Length: > 0 } rowTip && item.Bounds.Contains(point))
+                if (item.Kind == SettingsItemKind.Row && item.Tip is { Length: > 0 } rowTip && item.Bounds.Contains(onPage))
                 {
-                    return (rowTip, item.LabelRect);
+                    return (rowTip, Scrolled(item.LabelRect));
                 }
             }
         }
@@ -203,6 +211,11 @@ internal sealed partial class WidgetCard
 
         return null;
     }
+
+    // Whether point is on a control as the card shows it: where the control is drawn, and not in the header over a row that
+    // has scrolled up under it.
+    private bool HitsControl(CardControl control, Point point) =>
+        control.Bounds.Contains(point) && !(OnSettingsPage && _settingsLayout is { } layout && point.Y < layout.Frame.Body.Y && control.Bounds.Bottom > layout.Frame.Body.Y);
 
     private readonly ToolTip _toolTip = new() { ShowAlways = true, UseAnimation = false, UseFading = false };
     private System.Windows.Forms.Timer? _tipTimer;
@@ -225,6 +238,13 @@ internal sealed partial class WidgetCard
         ArgumentNullException.ThrowIfNull(e);
         if (_notice)
         {
+            return;
+        }
+
+        // A bar being dragged is the pointer's business, and it widens while the pointer is near it.
+        if (ScrollIndicatorMouseMove(e))
+        {
+            HideTip();
             return;
         }
 
@@ -253,6 +273,10 @@ internal sealed partial class WidgetCard
     {
         base.OnMouseLeave(e);
         HideTip();
+        if (!_scrollDragging)
+        {
+            SetScrollHot(false);
+        }
     }
 
     private void OnTipTimer(object? sender, EventArgs e)
@@ -340,7 +364,7 @@ internal sealed partial class WidgetCard
             IReadOnlyList<CardControl> targets = card.CurrentControls();
             for (int i = 0; i < targets.Count; i++)
             {
-                if (targets[i].Bounds.Contains(point))
+                if (card.HitsControl(targets[i], point))
                 {
                     return GetChild(i);
                 }
@@ -418,6 +442,11 @@ internal sealed partial class WidgetCard
                 if (!target.Enabled)
                 {
                     state |= AccessibleStates.Unavailable;
+                }
+
+                if (target.Offscreen)
+                {
+                    state |= AccessibleStates.Offscreen;
                 }
 
                 return state;

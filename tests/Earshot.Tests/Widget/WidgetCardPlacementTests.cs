@@ -88,6 +88,35 @@ public sealed class WidgetCardPlacementTests
         Assert.AreEqual(700 - 12, card.Bottom);
     }
 
+    // The space a card can have: from 12 under the top of the work area to 12 above the taskbar.
+    [TestMethod]
+    public void TheMostACardCanBeIsTheWorkAreaLessTwelveAtTheTopAndTwelveAboveTheTaskbar()
+    {
+        Assert.AreEqual(1032 - 24, WidgetCardPlacement.MaxHeight(GaugeAt(1656), WorkArea, 96));
+        Assert.AreEqual(1020 - 36, WidgetCardPlacement.MaxHeight(new Rectangle(1500, 1020, 111, 60), new Rectangle(0, 0, 1920, 1020), 144), "The margins scale with the screen.");
+    }
+
+    [TestMethod]
+    public void TheMostACardCanBeIsWhatPlacementLeavesRoomForAboveTheGaugeOrThePoint()
+    {
+        // A work area below a top taskbar, and a gauge in the middle of it with the card above: the space is above the gauge.
+        var belowTopTaskbar = new Rectangle(0, 48, 1920, 1032);
+        Assert.AreEqual(600 - 12 - (48 + 12), WidgetCardPlacement.MaxHeight(new Rectangle(900, 600, 74, 40), belowTopTaskbar, 96));
+        Assert.AreEqual(700 - 12 - 12, WidgetCardPlacement.MaxHeight(new Rectangle(900, 700, 0, 0), WorkArea, 96), "A point is the same as a gauge's top.");
+        Assert.AreEqual(1, WidgetCardPlacement.MaxHeight(new Rectangle(900, 20, 74, 40), WorkArea, 96), "Never less than one.");
+    }
+
+    [TestMethod]
+    public void ACardAsTallAsTheMostItCanBeSitsInsideTheWorkAreaWithItsMarginsAndKeepsItsBottom()
+    {
+        int height = WidgetCardPlacement.MaxHeight(GaugeAt(1656), WorkArea, 96);
+
+        Rectangle card = WidgetCardPlacement.Above(GaugeAt(1656), new Size(360, height), WorkArea, 96, GaugePosition.RightEnd);
+
+        Assert.AreEqual(1032 - 12, card.Bottom, "The bottom edge is where a shorter card's is.");
+        Assert.AreEqual(12, card.Top, "Twelve under the top of the work area, so nothing moved to make it fit.");
+    }
+
     [TestMethod]
     public void AnAutoHiddenTaskbarLeavesTheGaugeTheOnlyEdgeToStandAbove()
     {
