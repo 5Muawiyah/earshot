@@ -13,8 +13,8 @@ public sealed class AutoPauseTests
     private static readonly Guid Container = Guid.NewGuid();
     private static readonly DateTimeOffset At = new(2026, 9, 27, 12, 0, 0, TimeSpan.Zero);
 
-    private static AutoPause NewAutoPause(FakeMediaSessions sessions, bool? gate = true, bool autoPauseEnabled = true, ILog? log = null) =>
-        new(sessions, () => gate, () => autoPauseEnabled, log ?? new CapturingLog());
+    private static AutoPause NewAutoPause(FakeMediaSessions sessions, bool autoPauseEnabled = true, ILog? log = null) =>
+        new(sessions, () => autoPauseEnabled, log ?? new CapturingLog());
 
     private static FakeMediaSessions OnePlayingSession() => new()
     {
@@ -22,26 +22,13 @@ public sealed class AutoPauseTests
     };
 
     [TestMethod]
-    public async Task HeldOffWhileTheGateIsNull()
-    {
-        var sessions = OnePlayingSession();
-        var autoPause = NewAutoPause(sessions, gate: null);
-
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-
-        Assert.IsFalse(paused);
-        Assert.AreEqual(0, sessions.PauseCalls.Count);
-    }
-
-    [TestMethod]
     public async Task HeldOffWhenTheSettingIsOff()
     {
         var sessions = OnePlayingSession();
         var autoPause = NewAutoPause(sessions, autoPauseEnabled: false);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count);
@@ -53,8 +40,8 @@ public sealed class AutoPauseTests
         var sessions = OnePlayingSession();
         var autoPause = NewAutoPause(sessions);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsTrue(paused);
         string[] expected = { "app.exe" };
@@ -68,8 +55,8 @@ public sealed class AutoPauseTests
         var autoPause = NewAutoPause(sessions);
         Guid otherRenderContainer = Guid.NewGuid();
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, otherRenderContainer, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, otherRenderContainer, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, otherRenderContainer, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, otherRenderContainer, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count);
@@ -81,8 +68,8 @@ public sealed class AutoPauseTests
         var sessions = OnePlayingSession();
         var autoPause = NewAutoPause(sessions);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.Elsewhere, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.Elsewhere, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.Elsewhere, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.Elsewhere, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count);
@@ -94,8 +81,8 @@ public sealed class AutoPauseTests
         var sessions = new FakeMediaSessions();
         var autoPause = NewAutoPause(sessions);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
     }
@@ -113,22 +100,8 @@ public sealed class AutoPauseTests
         };
         var autoPause = NewAutoPause(sessions);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-
-        Assert.IsFalse(paused);
-        Assert.AreEqual(0, sessions.PauseCalls.Count);
-    }
-
-    [TestMethod]
-    public async Task DoesNotPauseOnAStrangerReading()
-    {
-        var sessions = OnePlayingSession();
-        var autoPause = NewAutoPause(sessions);
-
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(
-            OwnershipVerdict.ModelOrColourMismatch, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count);
@@ -142,9 +115,9 @@ public sealed class AutoPauseTests
         DateTimeOffset readingAt = At;
         DateTimeOffset now = At + WidgetTiming.EarFreshWindow + TimeSpan.FromSeconds(1);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, readingAt, readingAt, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, readingAt, readingAt, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
         bool paused = await autoPause.ApplyAsync(
-            OwnershipVerdict.Owned, false, null, readingAt, now, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+            false, null, readingAt, now, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count);
@@ -156,8 +129,8 @@ public sealed class AutoPauseTests
         var sessions = OnePlayingSession();
         var autoPause = NewAutoPause(sessions);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, null, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, null, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(null, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(null, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count);
@@ -171,38 +144,12 @@ public sealed class AutoPauseTests
         var log = new CapturingLog();
         var autoPause = NewAutoPause(sessions, log: log);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(1, sessions.PauseCalls.Count, "Exactly one attempt: a false result is not retried for that edge.");
         Assert.IsTrue(log.Has(LogLevel.Warn, "could not pause"));
-    }
-
-    // The gate is read at the moment a bud leaves the ear, not at construction: an observation that arrives
-    // later (the broadcast proved while playing) lets the very next edge act, and the held-off line says why
-    // it waited.
-    [TestMethod]
-    public async Task TheGateReadsTheInjectedObservation()
-    {
-        var sessions = OnePlayingSession();
-        var log = new CapturingLog();
-        bool? observation = null;
-        var autoPause = new AutoPause(sessions, () => observation, () => true, log);
-
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool heldOff = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-
-        Assert.IsFalse(heldOff, "Nothing is paused until the broadcast has been observed while playing from this PC.");
-        Assert.AreEqual(0, sessions.PauseCalls.Count);
-        Assert.IsTrue(log.Has(LogLevel.Info, "waiting for the broadcast to be observed"));
-
-        observation = true;
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-
-        Assert.IsTrue(paused, "Once observed, the same gate lets the next edge through.");
-        Assert.AreEqual(1, sessions.PauseCalls.Count);
     }
 
     [TestMethod]
@@ -211,10 +158,10 @@ public sealed class AutoPauseTests
         var sessions = OnePlayingSession();
         var log = new CapturingLog();
         var safe = new SafeMediaSessions(sessions, log);
-        var autoPause = new AutoPause(safe, () => true, () => true, log);
+        var autoPause = new AutoPause(safe, () => true, log);
 
-        await autoPause.ApplyAsync(OwnershipVerdict.Owned, true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
-        bool paused = await autoPause.ApplyAsync(OwnershipVerdict.Owned, false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        await autoPause.ApplyAsync(true, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
+        bool paused = await autoPause.ApplyAsync(false, null, At, At, AirPodsWhere.ThisPc, Container, Container, CancellationToken.None);
 
         Assert.IsFalse(paused);
         Assert.AreEqual(0, sessions.PauseCalls.Count, "Safe mode never reaches the inner sessions.");

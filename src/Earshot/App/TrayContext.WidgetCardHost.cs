@@ -58,9 +58,8 @@ internal sealed partial class TrayContext
             WidgetSnapshot snapshot = _tray._widgetSnapshotCache;
             ReleaseVersion? running = ReleaseVersion.Running(typeof(TrayContext).Assembly);
 
-            // The two features below are switched by their own setting but only ever act once the field they read
-            // has been proved, so the page says which is still waiting. The in-ear field is proved when the
-            // snapshot says auto-pause is available; the lid field when a lid reading has been seen.
+            // Pausing when a bud comes out is switched by its own setting but only acts once the in-ear signal is
+            // known, so the page says it is still waiting while the snapshot says auto-pause is not available.
             DisplayReading displays = _tray._displaySource.Read();
             IReadOnlyList<DisplayOption> displayOptions = GaugeDisplayOptions.Build(displays.Displays);
             bool chosenConnected = string.IsNullOrEmpty(widget.GaugeDisplay) ||
@@ -73,7 +72,6 @@ internal sealed partial class TrayContext
                 widget.OtherDeviceLabel,
                 widget.AutoPause,
                 settings.PauseWhenAirPodsLeave,
-                widget.CaseOpenCard,
                 widget.LowBatteryThresholdPercent,
                 widget.LeftClickConnects,
                 settings.HandBackOnShutdownAndSleep,
@@ -84,7 +82,6 @@ internal sealed partial class TrayContext
                 running?.ToString(),
                 settings.CheckForUpdatesAutomatically,
                 InEarProofMissing: !snapshot.AutoPauseAvailable,
-                LidProofMissing: snapshot.LidOpen is null,
                 InstallExists: _tray.BlockStatus is { InstallExists: true })
             {
                 GaugeDisplayId = widget.GaugeDisplay,
@@ -127,9 +124,6 @@ internal sealed partial class TrayContext
 
         public void SetPauseWhenAirPodsLeave(bool on, CardPlace place) =>
             Write("pause when the AirPods leave this PC (card)", s => s.PauseWhenAirPodsLeave = on, place);
-
-        public void SetCaseOpenCard(bool on, CardPlace place) =>
-            Write("case-open card (card)", s => s.Widget = (s.Widget with { CaseOpenCard = on }).WithWatcherRecomputed(), place);
 
         public void SetLowBatteryPercent(int percent, CardPlace place) =>
             Write("low battery threshold (card)", s => s.Widget = s.Widget with { LowBatteryThresholdPercent = percent }, place);

@@ -1,8 +1,10 @@
 namespace Earshot.Widget;
 
-// One battery nibble to a percent, or "unknown, never shown as a number". Neither permitted source says
-// 0xF means unknown; that is the owner's own rule for this decode. No caller ever turns a null percent
-// into a number, a dash with a number, or an interpolation.
+// One battery nibble to a percent, or "unknown, never shown as a number". Levels 0 to 10 are tens of percent
+// (furiousMAC Continuity notes). That 0xF means unknown is neither source's statement but the local reading:
+// the one message in the saved set-up records from a bud just out of the case carried case nibble 0xF with no
+// charging bits, consistent with the paper's remark that the case level is only exposed with the lid open. No
+// caller ever turns a null percent into a number, a dash with a number, or an interpolation.
 public static class BatteryNibble
 {
     public static int? ToPercent(int nibble) => nibble is >= 0 and <= 10 ? nibble * 10 : null;

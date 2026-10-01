@@ -15,7 +15,6 @@ internal static class SettingsRows
         SettingsRowId.OtherDevice => new(FluentGlyphs.CellPhone, WidgetCopy.TipOtherDevice, WidgetCopy.NameOtherDeviceBox),
         SettingsRowId.PauseBud => new(FluentGlyphs.EarbudForThisPc(), WidgetCopy.TipPauseBud, WidgetCopy.NamePauseBud),
         SettingsRowId.PauseLeave => new(FluentGlyphs.Pause, WidgetCopy.TipPauseLeave, WidgetCopy.NamePauseLeave),
-        SettingsRowId.CaseCard => new(FluentGlyphs.Tiles, WidgetCopy.TipCaseCard, WidgetCopy.NameCaseCard),
         SettingsRowId.LowBattery => new(FluentGlyphs.Ringer, WidgetCopy.TipLowBattery, WidgetCopy.NameLowBattery),
         SettingsRowId.LeftClick => new(FluentGlyphs.Mouse, WidgetCopy.TipLeftClick, WidgetCopy.NameLeftClick),
         SettingsRowId.HandBack => new(FluentGlyphs.PowerButton, WidgetCopy.TipHandBack, WidgetCopy.NameHandBack),

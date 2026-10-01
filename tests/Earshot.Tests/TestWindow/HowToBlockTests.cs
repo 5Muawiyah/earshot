@@ -105,7 +105,9 @@ public sealed class HowToBlockTests
         // questions, three more with no how-to block: 233. Test 19's two gauge positions, the gauge staying on top,
         // the second set-up, the ring and its colour and the one-hour rule add thirteen rows, three of which carry the
         // find-the-icon block, so ten with none, and test 18's first-sleep question one more: 244.
-        const int expectedMissingCount = 244;
+        // Test 19's battery set-up steps go (two instructions with no block) and its grey and refresh steps come
+        // (three with none), so one more: 245.
+        const int expectedMissingCount = 245;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +

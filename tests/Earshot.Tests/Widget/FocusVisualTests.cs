@@ -166,7 +166,8 @@ public sealed class FocusVisualTests
                     bool dark = ink == Color.White;
                     Color background = dark ? Color.Black : Color.White;
                     using WidgetCard card = ShownCard(dpi, ink);
-                    // Button, then the gear, then the button again: a keyboard walk that ends on Connect.
+                    // Button, then the gear, then the battery refresh, then the button again: a keyboard walk that ends on Connect.
+                    Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
                     Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
                     Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
                     Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget);

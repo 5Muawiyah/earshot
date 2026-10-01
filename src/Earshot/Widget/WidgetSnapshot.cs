@@ -10,23 +10,25 @@ public sealed record WidgetSnapshot(
     PartReading Right,
     PartReading Case,
     DateTimeOffset? BatteryReadAt,      // the oldest ReadAt among the parts that have one
-    DateTimeOffset? EarReadAt,          // the last owned reading that carried a proved in-ear bit, while fresh
+    DateTimeOffset? EarReadAt,          // the last reading of the chosen set that carried an in-ear bit, while fresh
     bool? LidOpen,
     WidgetWatcherState Watcher,
     int? WatcherErrorCode, string? WatcherErrorName,
-    bool ClaimExists,
-    bool AutoPauseAvailable,            // the broadcast has been observed while playing and the in-ear bits are proved
+    bool AutoPauseAvailable,            // the decode table has in-ear bits: always false until they are known
     WidgetCounters Counters)
 {
-    // True when the newest set-up saw only forms the parser does not read: nothing can be shown for these
-    // AirPods yet, and the card says so beside its button. Not part of the positional shape, so a snapshot
-    // built without it reads false.
-    public bool SetupCouldNotRead { get; init; }
+    // Windows' own Hands-Free battery figure for the AirPods: the percent and when it was read, nothing else. It is
+    // one figure for the headset, never a bud's or the case's, and BatteryFreshness decides whether it is shown.
+    // Not part of the positional shape, so a snapshot built without it reads Unknown.
+    public PartReading Headset { get; init; } = PartReading.Unknown;
 
-    public static WidgetSnapshot Empty(WidgetWatcherState watcher, bool claimExists) => new(
+    // Whether the owner's AirPods have been picked out of the broadcast yet.
+    public BroadcastSelectionState Selection { get; init; } = BroadcastSelectionState.NoPairedModel;
+
+    public static WidgetSnapshot Empty(WidgetWatcherState watcher) => new(
         AirPodsWhere.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown,
         BatteryReadAt: null, EarReadAt: null, LidOpen: null, watcher, WatcherErrorCode: null, WatcherErrorName: null,
-        claimExists, AutoPauseAvailable: false, WidgetCounters.Empty);
+        AutoPauseAvailable: false, WidgetCounters.Empty);
 }
 
 public sealed class CaseOpenedEventArgs(DateTimeOffset at) : EventArgs
@@ -34,11 +36,8 @@ public sealed class CaseOpenedEventArgs(DateTimeOffset at) : EventArgs
     public DateTimeOffset At { get; } = at;
 }
 
-// Every owned reading, decoded, as WidgetStatusService applied it to its own state (the point right after
-// ApplyDecodedReadingLocked, which only an Owned verdict reaches). Deliberately carries no
-// OwnershipVerdict: reaching this event at all already means Owned, and keeping the verdict enum itself
-// out of this shape means it does not move when OwnershipVerdict's own members do.
-public sealed class OwnedReadingEventArgs(DecodedReading reading, DateTimeOffset at) : EventArgs
+// Every reading of the chosen set, decoded, as WidgetStatusService applied it to its own state.
+public sealed class ReadingAppliedEventArgs(DecodedReading reading, DateTimeOffset at) : EventArgs
 {
     public DecodedReading Reading { get; } = reading;
 

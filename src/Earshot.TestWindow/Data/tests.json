@@ -284,8 +284,8 @@
       "halves": 1,
       "name": "The AirPods widget",
       "title": "The AirPods widget: gauge, card and case-open card",
-      "proves": "The taskbar gauge and its cards work, and nothing on them shows a reading that has not actually been measured yet.",
-      "settles": "Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.",
+      "proves": "The taskbar gauge and its cards work, the battery they show agrees with the iPhone and greys when it is old, and refresh reads it again.",
+      "settles": "Whether the taskbar gauge and its cards work as built today, whether the battery they show agrees with the iPhone and greys when it is old, and whether refresh reads it again or says nothing was heard.",
       "powerCycleRequirement": "none",
       "maxSilenceSeconds": 900
     },

@@ -55,13 +55,6 @@ internal sealed partial class WidgetCard
                 focus && _focus == WidgetCardFocus.Switch, true, () => Press(WidgetCardFocus.Switch)));
         }
 
-        if (layout.ShowSetupButton)
-        {
-            list.Add(new CardControl(
-                SetupButtonLabel, CardControlRole.PushButton, layout.SetupButton, null, false, false,
-                focus && _focus == WidgetCardFocus.SetupButton, true, () => Press(WidgetCardFocus.SetupButton)));
-        }
-
         if (layout.ShowUpdateLine)
         {
             list.Add(new CardControl(
@@ -74,6 +67,13 @@ internal sealed partial class WidgetCard
             list.Add(new CardControl(
                 WidgetCopy.TipSettings, CardControlRole.PushButton, layout.Gear, WidgetCopy.TipSettings, true, false,
                 focus && _focus == WidgetCardFocus.Gear, true, () => Press(WidgetCardFocus.Gear)));
+        }
+
+        if (!layout.Refresh.IsEmpty)
+        {
+            list.Add(new CardControl(
+                WidgetCopy.RefreshBattery, CardControlRole.PushButton, layout.Refresh, WidgetCopy.RefreshBattery, true, false,
+                focus && _focus == WidgetCardFocus.Refresh, true, () => Press(WidgetCardFocus.Refresh)));
         }
 
         return list;
@@ -192,7 +192,7 @@ internal sealed partial class WidgetCard
             WidgetCardLayout.Layout layout = _mainLayout;
             if (layout.ShowColumns && layout.ReadLine.Contains(point))
             {
-                return (WidgetCopy.BatteryReadLine(_model.Snapshot.BatteryReadAt, _model.Now), layout.ReadLine);
+                return (ReadLineText, layout.ReadLine);
             }
 
             if (layout.ShowUpdateLine && layout.UpdateCaption.Contains(point))

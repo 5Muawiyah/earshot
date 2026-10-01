@@ -20,12 +20,11 @@ public sealed class WidgetCardTextScaleTests
     {
         yield return layout.Title;
         yield return layout.Gear;
+        yield return layout.Refresh;
         yield return layout.WhereLine;
         yield return layout.ReadLine;
         yield return layout.Button;
         yield return layout.Switch;
-        yield return layout.SetupButton;
-        yield return layout.SetupCaption;
         yield return layout.UpdateLine;
         yield return layout.UpdateCaption;
         yield return layout.UpdateButton;
@@ -45,20 +44,16 @@ public sealed class WidgetCardTextScaleTests
         {
             foreach (double scale in Scales)
             {
-                foreach (bool setup in new[] { false, true })
+                WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(
+                    dpi, showSwitch: true, showGear: true, showUpdateLine: true, updateButtonWidth: 0, showRefresh: true, textScale: scale);
+                string where = " (dpi " + dpi + ", text " + scale + ")";
+                Assert.AreEqual(CardPlacement.Scale(360, dpi), layout.Width, "The card stays 360 epx wide" + where);
+                var card = new Rectangle(0, 0, layout.Width, layout.Height);
+                foreach (Rectangle rect in MainRectangles(layout))
                 {
-                    WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(
-                        dpi, showSwitch: true, showSetupButton: setup, showSetupCaption: setup, setupButtonWidth: 0, showGear: true,
-                        showUpdateLine: true, updateButtonWidth: 0, textScale: scale);
-                    string where = " (dpi " + dpi + ", text " + scale + ", set-up button " + setup + ")";
-                    Assert.AreEqual(CardPlacement.Scale(360, dpi), layout.Width, "The card stays 360 epx wide" + where);
-                    var card = new Rectangle(0, 0, layout.Width, layout.Height);
-                    foreach (Rectangle rect in MainRectangles(layout))
+                    if (!rect.IsEmpty)
                     {
-                        if (!rect.IsEmpty)
-                        {
-                            Assert.IsTrue(card.Contains(rect), "A row sits inside the card: " + rect + " in " + card + where);
-                        }
+                        Assert.IsTrue(card.Contains(rect), "A row sits inside the card: " + rect + " in " + card + where);
                     }
                 }
             }

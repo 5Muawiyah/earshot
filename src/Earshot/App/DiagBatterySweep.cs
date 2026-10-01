@@ -161,6 +161,10 @@ internal static class BatterySweep
 
     private static readonly Guid BatteryKeySetId = new(BatteryKeySet);
 
+    // The one property of that set Windows fills with the Hands-Free battery figure while the profile is up: id 2.
+    // HandsFreeBatteryProvider reads it; the sweep records the whole set as it always did.
+    internal static readonly DEVPROPKEY HandsFreeBatteryKey = new(BatteryKeySetId, 2);
+
     // propkey.h: System.Devices.BatteryLife (10), BatteryPlusCharging (22), BatteryPlusChargingText (23), and
     // System.Devices.Notifications.LowBattery.
     private static readonly Guid DevicesSetId = new("49CD1F76-5626-4B17-A4E8-18B4AA1A2213");
@@ -168,7 +172,7 @@ internal static class BatterySweep
     private static readonly DEVPROPKEY LowBattery = new(new Guid("C4C07F2B-8524-4E66-AE3A-A6235F103BEB"), 2);
 
     // System.Devices.Aep.ContainerId (propkey.h).
-    private static readonly DEVPROPKEY AepContainerId = new(new Guid("E7C3FB29-CAA7-4F47-8C8B-BE59B330D4C5"), 2);
+    internal static readonly DEVPROPKEY AepContainerId = new(new Guid("E7C3FB29-CAA7-4F47-8C8B-BE59B330D4C5"), 2);
 
     private const int MaxValueBytes = 256;
 

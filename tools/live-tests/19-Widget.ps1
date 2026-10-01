@@ -3,21 +3,15 @@
     The AirPods widget: the taskbar gauge, its card, and the case-open card.
 
 .DESCRIPTION
-    Earshot shows a battery figure only for a part that battery set-up has confirmed: two set-ups in
-    which what the AirPods broadcast agreed with what the iPhone showed. Until then every reading that
-    depends on that (battery, charging, the low battery alert) must honestly show nothing rather than a
-    guessed figure. Set-up cannot confirm whether a bud is in the ear or whether the case lid is open,
-    so auto-pause and the case-open card stay off. This test checks all of that, and that once a
-    set-up has been done any figure shown agrees with the iPhone.
+    Earshot shows the battery of the AirPods it is paired with from what those AirPods broadcast, with no
+    set-up step: the two buds, and the case when its lid is open or the buds are out of it. A figure is current
+    for 30 seconds and is then greyed with the time it was read, and a bud's figure leaves the gauge after an
+    hour. The card has a refresh icon beside the gear and the tray menu has "Refresh battery": each restarts the
+    listening and waits up to twelve seconds for the chosen AirPods to be heard again, or says nothing was heard.
+    The broadcast cannot say whether a bud is in the ear or whether the case lid is open, so auto-pause and the
+    case-open card stay off. This test checks all of that, and that any figure shown agrees with the iPhone.
 
-    Battery set-up is how those readings get proved. "Set up battery" is on the card and in the tray
-    menu. It has three steps: open your AirPods case next to this PC, say what your iPhone shows with
-    three pickers, and a result, or "Couldn't find your AirPods" when nothing was heard. The picker
-    values are evidence, never a displayed reading. Half B checks the item is there and available
-    while Bluetooth is on. The last half runs the set-up once and asks what the card said, after
-    every check that needs the card to show nothing has already been answered.
-
-    Everything that does not depend on a confirmed battery reading is exercised for real: the
+    Everything that does not depend on the battery is exercised for real: the
     gauge's two positions (at the right end, 8 pixels left of the notification area, by default; next
     to the apps, 4 pixels after the last button), its following the taskbar, its staying visible and on
     top when Start, a flyout or a taskbar click comes and goes, its fallback under a full screen
@@ -26,9 +20,8 @@
     the advertisement), the watcher's own start and stop, the notification shortcut, and that nothing
     here ever connects the AirPods by itself.
 
-    It settles whether the gauge and its cards work as built today, whether every reading that is not
-    yet confirmed honestly says so rather than showing a figure nobody measured, and whether a figure
-    that is shown agrees with the iPhone.
+    It settles whether the gauge and its cards work as built today, whether the battery shown agrees with the
+    iPhone and greys when it is old, and whether refresh reads it again or says nothing was heard.
 
 .PARAMETER ExePath
     Earshot.exe: the installed copy or an unzipped release.
@@ -53,18 +46,8 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'LiveTest.psm1') -Force
 
 $run = New-LiveTestRun -TestId '19-widget' -Title 'The AirPods widget: gauge, card and case-open card' `
-    -Settles 'Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.' `
+    -Settles 'Whether the taskbar gauge and its cards work as built today, whether the battery they show agrees with the iPhone and greys when it is old, and whether refresh reads it again or says nothing was heard.' `
     -ExePath $ExePath -RunRoot $RunRoot
-
-# The path Earshot.Infra.Paths.WidgetClaimFile computes: %LOCALAPPDATA%\Earshot\widget\claim.json,
-# or under EARSHOT_DATA_ROOT when redirected. Read-only: this test never writes it.
-function Get-WidgetClaimPath
-{
-    param([Parameter(Mandatory = $true)]$Run)
-
-    $paths = Get-EarshotDataPaths
-    return Join-Parts @($paths.LocalFolder, 'widget', 'claim.json')
-}
 
 # The Start menu shortcut NotificationRegistration writes so a toast can name Earshot:
 # %APPDATA%\Microsoft\Windows\Start Menu\Programs\Earshot.lnk.
@@ -93,13 +76,12 @@ try
         'The AirPods are paired with this PC and available to connect.'
     ) -PhysicalActions @(
         'This is a long sitting. It watches the taskbar, restarts Explorer once, changes display scaling and light/dark mode and back, opens your AirPods case near the PC, and turns Bluetooth off and on. Nothing here is destructive, and every step says what it does before it asks.',
-        'Several checks below expect the card to say "No reading", "Not seen yet" or show nothing at all. That is the correct, honest answer until battery set-up has confirmed a reading: it is not a bug, and a check on this only fails if the card shows a figure nobody measured.'
+        'The battery figures on the card come from what your AirPods broadcast, which they only do while they are out of the case or the case lid is open. Some steps below ask you to shut them in the case: that is on purpose, to see the figures grey and the refresh say nothing was heard.'
     )
 
     if ($ready)
     {
         $paths = Get-EarshotDataPaths
-        $claimPath = Get-WidgetClaimPath -Run $run
         $testStartUtc = (Get-Date).ToUniversalTime()
 
         Write-Section -Run $run -Title 'Starting facts'
@@ -114,9 +96,6 @@ try
         Add-Finding -Run $run -Name 'caseOpenCardSetting' -Value $caseOpenCardSetting -Detail 'Widget.CaseOpenCard read from settings.json'
         Add-Finding -Run $run -Name 'autoPauseSetting' -Value $autoPauseSetting -Detail 'Widget.AutoPause read from settings.json'
         Add-Finding -Run $run -Name 'lowBatteryAlertSetting' -Value $lowBatteryAlertSetting -Detail 'Widget.LowBatteryAlert read from settings.json'
-
-        $claimBefore = Read-EarshotJsonFile -Run $run -Path $claimPath
-        Add-Finding -Run $run -Name 'claimFileExistsAtStart' -Value $(if ($null -eq $claimBefore) { 'no' } else { 'yes' }) -Detail $claimPath
 
         # =============================================================== the gauge and its cards
 
@@ -220,7 +199,7 @@ try
             -Outcome $(if ($clickAnswer -eq 'yes') { 'pass' } elseif ($clickAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $clickAnswer + '.')
 
-        # ============================================================ the advertisement, claim and alert
+        # ============================================================ the advertisement, the battery and the alert
 
         Write-Section -Run $run -Title 'Half A: the positive control'
         Write-Line -Run $run -Text 'The watcher listens passively for every nearby Apple advertisement, not only the owner''s own AirPods, so this counts up on its own with nobody handling a device.'
@@ -243,32 +222,61 @@ try
             -Outcome $(if ($null -eq $newestCounterLine) { 'inconclusive' } elseif ($appleSections -gt 0 -and $proximityItems -gt 0) { 'pass' } else { 'fail' }) `
             -Detail $(if ($null -eq $newestCounterLine) { 'No "Widget counters:" line was logged in the wait; either nothing Apple was nearby or the watcher is not running.' } else { 'allSections=' + $allSections + ' apple=' + $appleSections + ' items=' + $proximityItems + '.' })
 
-        Write-Section -Run $run -Title 'Half B: battery set-up is reachable'
-        $setupInMenuAnswer = Read-Answer -Run $run -Question 'Right-click the Earshot tray icon: is there a "Set up battery" item in the menu?'
-        $setupAvailableAnswer = if ($setupInMenuAnswer -eq 'yes') { Read-Answer -Run $run -Question 'With Bluetooth on, is that item available to click, not greyed out and with no reason in brackets after its name?' } else { 'unsure' }
-        $claimNow = Read-EarshotJsonFile -Run $run -Path $claimPath
-        Add-Finding -Run $run -Name 'batterySetupInMenu' -Value $(if ($setupInMenuAnswer -eq 'yes') { 'yes' } else { 'no' }) `
-            -Detail 'The tray menu holds "Set up battery". It reads "Set up battery (Bluetooth is off)" and is greyed out while the watcher is not running, and is available otherwise.'
-        Add-Finding -Run $run -Name 'claimFileExistsAfterCheck' -Value $(if ($null -eq $claimNow) { 'no' } else { 'yes' }) -Detail $claimPath
-        Add-Criterion -Run $run -Id 'battery-setup-reachable' -Criterion 'Battery set-up is in the running application, and is available while Bluetooth is on.' `
-            -Outcome $(if ($setupInMenuAnswer -ne 'yes') { 'fail' } elseif ($setupAvailableAnswer -eq 'yes') { 'pass' } elseif ($setupAvailableAnswer -eq 'no') { 'fail' } else { 'inconclusive' }) `
-            -Detail $(
-                if ($setupInMenuAnswer -ne 'yes') { 'You answered ' + $setupInMenuAnswer + ': "Set up battery" should always be in the tray menu. A missing item is a real defect.' }
-                elseif ($setupAvailableAnswer -eq 'yes') { 'Found and available: battery set-up can be started.' }
-                elseif ($setupAvailableAnswer -eq 'no') { 'The item is greyed out although Bluetooth is on: it should be available. This is a real defect, not an inconclusive result.' }
-                else { 'You answered ' + $setupAvailableAnswer + ' on whether it is available.' })
+        Write-Section -Run $run -Title 'Half B: refresh is reachable'
+        $refreshInMenuAnswer = Read-Answer -Run $run -Question 'Right-click the Earshot tray icon: is there a "Refresh battery" item in the menu?'
+        Add-Finding -Run $run -Name 'refreshBatteryInMenu' -Value $(if ($refreshInMenuAnswer -eq 'yes') { 'yes' } else { 'no' }) `
+            -Detail 'The tray menu holds "Refresh battery" while "Show on the taskbar" is on.'
+        Add-Criterion -Run $run -Id 'refresh-battery-reachable' -Criterion 'Refresh battery is in the tray menu while the gauge is on.' `
+            -Outcome $(if ($refreshInMenuAnswer -eq 'yes') { 'pass' } elseif ($refreshInMenuAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $refreshInMenuAnswer + '. A missing item while the gauge is on is a real defect.')
 
-        Write-Section -Run $run -Title 'Half C: battery, honestly'
-        Wait-Owner -Run $run -Text 'Left-click the Earshot icon or the gauge to open the card.'
-        $batteryAnswer = Read-Answer -Run $run -Question 'Does the card say "No reading" for the battery, never a percentage, and show nothing at all for charging or in-ear state?'
-        Add-Criterion -Run $run -Id 'battery-honestly-not-shown' -Criterion 'Before a battery reading is confirmed, the card never shows a battery figure, charging state or in-ear state it has not actually read.' `
+        Write-Section -Run $run -Title 'Half C: the battery, from the broadcast'
+        $batteryStartUtc = (Get-Date).ToUniversalTime()
+        Wait-Owner -Run $run -Text 'Take your AirPods out of the case, or open the case lid next to this computer, then left-click the Earshot icon or the gauge to open the card.'
+        $pickedLines = @()
+        for ($step = 0; $step -lt 3 -and @($pickedLines).Count -eq 0; $step++)
+        {
+            Wait-Seconds -Run $run -Seconds 10 -Reason 'waiting for the widget to pick out your AirPods'
+            $pickedLines = Get-EarshotLogLines -Run $run -Pattern 'Widget: picked out a set of AirPods to show' -SinceUtc $batteryStartUtc
+        }
+
+        Add-Finding -Run $run -Name 'airPodsPickedOutLines' -Value @($pickedLines).Count -Detail 'Log lines saying the widget picked out a set of AirPods to show, in the wait above'
+        Add-Criterion -Run $run -Id 'airpods-picked-out' -Criterion 'With the AirPods out of the case or the case open, the widget picks out a set of AirPods to show from what it hears.' `
+            -Outcome $(if (@($pickedLines).Count -gt 0) { 'pass' } else { 'inconclusive' }) `
+            -Detail $(if (@($pickedLines).Count -gt 0) { [string]@($pickedLines).Count + ' line(s) logged.' } else { 'Nothing was picked out in half a minute: either the AirPods were not broadcasting or the watcher is not running.' })
+        $batteryAnswer = Read-Answer -Run $run -Question 'Compare the card with what your iPhone shows. Does every battery figure the card shows agree with the iPhone (give or take one step of 10), with nothing shown for a part the card has no figure for?'
+        Add-Criterion -Run $run -Id 'battery-matches-iphone' -Criterion 'Every battery figure the card shows agrees with the iPhone, and nothing is shown for a part with no figure.' `
             -Outcome $(if ($batteryAnswer -eq 'yes') { 'pass' } elseif ($batteryAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $batteryAnswer + '. A "yes" here is the correct, honest state before battery set-up has proved anything; a "no" (a figure was shown) would mean something invented a reading, which is a real defect.')
+            -Detail ('You answered ' + $batteryAnswer + '. A "no" would mean a figure was shown that disagrees with the iPhone, or one for a part that was not heard, which is a real defect.')
+
+        Write-Section -Run $run -Title 'The battery when it is old'
+        Wait-Owner -Run $run -Text 'Close the case lid with the AirPods inside, and leave the card open for a minute.'
+        $greyAnswer = Read-Answer -Run $run -Question 'A minute later, are the battery figures greyed, and does the line under the "where" line say how long ago the battery was read?'
+        Add-Criterion -Run $run -Id 'battery-greys-when-old' -Criterion 'A battery figure older than 30 seconds is greyed, and the card says how long ago it was read, rather than showing it as current.' `
+            -Outcome $(if ($greyAnswer -eq 'yes') { 'pass' } elseif ($greyAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $greyAnswer + '. A "no" would mean an old figure was shown as current, which is a real defect.')
+
+        Write-Section -Run $run -Title 'Refresh'
+        Wait-Owner -Run $run -Text 'With the AirPods still shut in the case, click the circular arrow beside the gear on the card, and wait about twelve seconds.'
+        $nothingHeardAnswer = Read-Answer -Run $run -Question 'After about twelve seconds, does the card say "Nothing heard. Open the case", with the figures still greyed?'
+        Add-Criterion -Run $run -Id 'refresh-says-nothing-heard' -Criterion 'A refresh with the AirPods shut in the case says nothing was heard and leaves the old figures greyed.' `
+            -Outcome $(if ($nothingHeardAnswer -eq 'yes') { 'pass' } elseif ($nothingHeardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $nothingHeardAnswer + '.')
+        Wait-Owner -Run $run -Text 'Open the case lid next to this computer, then click the circular arrow beside the gear again and wait a few seconds.'
+        $refreshedAnswer = Read-Answer -Run $run -Question 'Did the arrow turn while the card said "Reading the battery", and did the figures come back no longer greyed?'
+        Add-Criterion -Run $run -Id 'refresh-reads-again' -Criterion 'A refresh with the case open turns the icon while it reads, then shows fresh figures.' `
+            -Outcome $(if ($refreshedAnswer -eq 'yes') { 'pass' } elseif ($refreshedAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $refreshedAnswer + '.')
+        $endedLines = Get-EarshotLogLines -Run $run -Pattern 'Widget: battery refresh ended:' -SinceUtc $batteryStartUtc
+        Add-Finding -Run $run -Name 'refreshEndedLines' -Value @($endedLines).Count -Detail 'Log lines saying a battery refresh ended, since the battery steps began'
+        Add-Criterion -Run $run -Id 'refresh-logged' -Criterion 'Each refresh the card started is on the log with how it ended.' `
+            -Outcome $(if (@($endedLines).Count -gt 0) { 'pass' } elseif ($refreshedAnswer -eq 'yes' -or $nothingHeardAnswer -eq 'yes') { 'fail' } else { 'inconclusive' }) `
+            -Detail ([string]@($endedLines).Count + ' "battery refresh ended" line(s) logged; there should be one for each click.')
 
         Write-Section -Run $run -Title 'Half E: where, connected'
         Wait-Owner -Run $run -Text 'Connect the AirPods to this PC: left-click the Earshot icon or the gauge, then click Connect on the card.'
         $whereThisPcAnswer = Read-Answer -Run $run -Question 'With the AirPods connected to this PC, does the "where" line on the card say "On this PC"?'
-        Add-Criterion -Run $run -Id 'where-this-pc' -Criterion 'The card reads "on this PC" from Core Audio alone, which needs no set-up.' `
+        Add-Criterion -Run $run -Id 'where-this-pc' -Criterion 'The card reads "on this PC" from Core Audio alone.' `
             -Outcome $(if ($whereThisPcAnswer -eq 'yes') { 'pass' } elseif ($whereThisPcAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $whereThisPcAnswer + '.')
 
@@ -283,7 +291,7 @@ try
         Write-Section -Run $run -Title 'Half E: where, not connected'
         Wait-Owner -Run $run -Text 'Disconnect the AirPods from this PC again: left-click the Earshot icon or the gauge, then click Disconnect on the card.'
         $whereNotConnectedAnswer = Read-Answer -Run $run -Question 'With the AirPods not connected to this PC, does the card say "Not seen yet" rather than guessing whether they are on your phone or in the case?'
-        Add-Criterion -Run $run -Id 'where-not-connected-honest' -Criterion 'Before battery set-up, the card never guesses "on your phone" or "in the case": it says "Not seen yet".' `
+        Add-Criterion -Run $run -Id 'where-not-connected-honest' -Criterion 'When the AirPods are not connected to this PC and nothing recent is known, the card never guesses "on your phone" or "in the case": it says "Not seen yet".' `
             -Outcome $(if ($whereNotConnectedAnswer -eq 'yes') { 'pass' } elseif ($whereNotConnectedAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $whereNotConnectedAnswer + '.')
 
@@ -322,25 +330,12 @@ try
         Add-Criterion -Run $run -Id 'notification-shortcut-exists' -Criterion 'The Start menu shortcut a toast needs to name Earshot has been written.' `
             -Outcome $(if ($shortcutExists) { 'pass' } else { 'fail' }) `
             -Detail $(if ($shortcutExists) { 'Found at ' + $shortcutPath + '.' } else { 'Not found at ' + $shortcutPath + '.' })
-        Add-Criterion -Run $run -Id 'low-battery-alert-fires' -Criterion 'The alert fires once a part with a proved reading first reads at or below the threshold, and does not repeat.' `
+        Add-Criterion -Run $run -Id 'low-battery-alert-fires' -Criterion 'The alert fires once a part whose figure is shown first reads at or below the threshold, and does not repeat.' `
             -Outcome 'inconclusive' `
-            -Detail 'The latch is only ever fed a reading Earshot has confirmed is the owner''s own AirPods and has proved, and this test does not prove one, so this cannot be exercised for real yet.'
-
-        Write-Section -Run $run -Title 'Half I: battery set-up, run twice'
-        Wait-Owner -Run $run -Text 'Click the Earshot icon to open the card, then click Set up battery. When the card asks you to open your AirPods case, open it next to this computer.'
-        Wait-Owner -Run $run -Text 'The card now asks what your iPhone shows. Pick the nearest 10 for each part (if it ends in 5, pick the lower), then click Save.'
-        Wait-Owner -Run $run -Text 'Set up battery a second time in the same way, with the case open next to this computer and the picks matching what your iPhone shows now. One set-up is never enough to show a figure.'
-        $setupStepsAnswer = Read-Answer -Run $run -Question 'Did the card go through the three steps: open the case, pick what your iPhone shows, then a result? Answer no if it stopped early and said it could not find your AirPods.'
-        Add-Criterion -Run $run -Id 'battery-setup-flow' -Criterion 'Battery set-up goes through its three steps and ends on a result.' `
-            -Outcome $(if ($setupStepsAnswer -eq 'yes') { 'pass' } else { 'inconclusive' }) `
-            -Detail ('You answered ' + $setupStepsAnswer + '. A "no" is not a defect on its own: the set-up says it could not find your AirPods when it heard none, which depends on the case being open next to this computer.')
-        $setupHonestAnswer = Read-Answer -Run $run -Question 'Compare the card with what your iPhone shows now. Does every battery figure the card shows agree with the iPhone (give or take one step of 10), with nothing shown for a part Earshot could not read?'
-        Add-Criterion -Run $run -Id 'battery-setup-honest-result' -Criterion 'After battery set-up, every battery figure the card shows agrees with the iPhone, and nothing is shown for a part that could not be read.' `
-            -Outcome $(if ($setupHonestAnswer -eq 'yes') { 'pass' } elseif ($setupHonestAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $setupHonestAnswer + '. A "no" would mean a figure was shown that disagrees with the iPhone, or one for a part that was not confirmed, which is a real defect.')
+            -Detail 'The alert acts on the figure the card shows, and this test does not set a threshold above your AirPods'' battery, so it does not exercise it.'
 
         Write-Section -Run $run -Title 'The ring and its colour'
-        $ringAnswer = Read-Answer -Run $run -Question 'Is there a ring round the earbud mark on the gauge? (It appears only once both buds have been confirmed, so no ring is a fine answer before that.)'
+        $ringAnswer = Read-Answer -Run $run -Question 'Is there a ring round the earbud mark on the gauge? (It appears only while a bud has a reading from the last hour, so no ring is a fine answer when the AirPods have been quiet.)'
         $accentAnswer = 'unsure'
         if ($ringAnswer -eq 'yes')
         {
@@ -348,11 +343,11 @@ try
             $accentAnswer = Read-Answer -Run $run -Question 'Was the ring filled in your Windows accent colour, and did it change to the new one when you changed it?'
         }
 
-        Add-Finding -Run $run -Name 'gaugeRingShown' -Value $ringAnswer -Detail 'Whether the gauge showed a ring after the two set-ups'
+        Add-Finding -Run $run -Name 'gaugeRingShown' -Value $ringAnswer -Detail 'Whether the gauge showed a ring'
         Add-Criterion -Run $run -Id 'gauge-ring-accent' -Criterion 'The gauge ring is filled in the Windows accent colour and follows it when it changes.' `
             -Outcome $(if ($ringAnswer -ne 'yes') { 'inconclusive' } elseif ($accentAnswer -eq 'yes') { 'pass' } elseif ($accentAnswer -eq 'no') { 'fail' } else { 'inconclusive' }) `
             -Detail $(
-                if ($ringAnswer -ne 'yes') { 'There was no ring (you answered ' + $ringAnswer + '), so nothing here could be looked at. Both buds need confirming first, which takes two set-ups at different bud levels.' }
+                if ($ringAnswer -ne 'yes') { 'There was no ring (you answered ' + $ringAnswer + '), so nothing here could be looked at. A bud needs a reading from the broadcast first, which needs the AirPods out of the case or the case open.' }
                 else { 'You answered ' + $accentAnswer + ' about the accent colour.' })
 
         Write-Section -Run $run -Title 'A reading older than an hour'

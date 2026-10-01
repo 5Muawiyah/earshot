@@ -14,15 +14,14 @@ public sealed class WidgetCardAccessibilityTests
     private const int WM_MOUSEMOVE = 0x0200;
     private const int WM_MOUSELEAVE = 0x02A3;
 
-    private static readonly string[] PlainNames = ["Connect", "Settings"];
-    private static readonly string[] FullNames = ["Connect", "Pause when a bud comes out", "Update", "Settings"];
-    private static readonly string[] SetupNames = ["Connect", "Set up battery", "Settings"];
+    private static readonly string[] PlainNames = ["Connect", "Settings", "Refresh battery"];
+    private static readonly string[] FullNames = ["Connect", "Pause when a bud comes out", "Update", "Settings", "Refresh battery"];
     private static readonly bool[] OnOff = [false, true];
 
     private static readonly string[] SettingsNames =
     [
         "Right end", "Next to apps", "Gauge display", "Other device name", "Pause when a bud comes out", "Pause when AirPods leave this PC",
-        "Case-open card", "Lower the low battery level", "Raise the low battery level", "Left click connects", "Hand back on shut down, sleep and Exit",
+        "Lower the low battery level", "Raise the low battery level", "Left click connects", "Hand back on shut down, sleep and Exit",
         "Connect shortcut", "Disconnect shortcut", "Clear connect shortcut", "Clear disconnect shortcut", "Check for updates", "Repair Earshot",
         "Check for updates automatically",
     ];
@@ -61,12 +60,10 @@ public sealed class WidgetCardAccessibilityTests
         {
             WidgetCardModel plain = CardKit.MainModel();
             WidgetCardModel full = CardKit.MainModel(CardKit.Snapshot() with { AutoPauseAvailable = true }, updateVersion: "1.3.0") with { ShowSwitch = true, AutoPauseOn = true };
-            WidgetCardModel setup = CardKit.MainModel(showSetupButton: true);
             foreach ((WidgetCardModel model, string[] names) in new (WidgetCardModel, string[])[]
             {
                 (plain, PlainNames),
                 (full, FullNames),
-                (setup, SetupNames),
             })
             {
                 using WidgetCard card = ShownMain(model);
@@ -131,6 +128,13 @@ public sealed class WidgetCardAccessibilityTests
             Assert.IsFalse(children[0].State.HasFlag(AccessibleStates.Focused));
             Assert.IsTrue(children[1].State.HasFlag(AccessibleStates.Focused), "Then the settings button.");
             Assert.AreEqual("Settings", card.AccessibilityObject.GetFocused()!.Name);
+
+            Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
+
+            children = Children(card);
+            Assert.IsTrue(children[2].State.HasFlag(AccessibleStates.Focused), "Then the battery refresh.");
+            Assert.AreEqual("Refresh battery", card.AccessibilityObject.GetFocused()!.Name);
+            Assert.AreEqual(WidgetCardFocus.Refresh, card.FocusTarget);
         });
     }
 
@@ -216,10 +220,28 @@ public sealed class WidgetCardAccessibilityTests
             WidgetCardLayout.Layout layout = card.CurrentMainLayout;
 
             Assert.AreEqual("Settings", card.TooltipAt(Centre(layout.Gear))!.Value.Text, "The gear is an icon and says what it is.");
+            Assert.AreEqual("Refresh battery", card.TooltipAt(Centre(layout.Refresh))!.Value.Text, "The refresh icon says what it does.");
             Assert.AreEqual("Battery read 2 min ago", card.TooltipAt(Centre(layout.ReadLine))!.Value.Text, "The read line is short; its tooltip is the whole sentence.");
             Assert.AreEqual("Version 1.3.0 is available", card.TooltipAt(Centre(layout.UpdateCaption))!.Value.Text);
             Assert.IsNull(card.TooltipAt(Centre(layout.Button)), "The Connect button says it all.");
             Assert.IsNull(card.TooltipAt(new Point(1, 1)), "Nothing under empty space.");
+        });
+    }
+
+    [TestMethod]
+    public void TheReadLineTooltipFollowsARefreshUnderWayAndShortAgeIsDrawnBesideTheClock()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            using WidgetCard card = CardKit.NewCard(dark: false);
+            card.Render(CardKit.MainModel(CardKit.Snapshot(readAt: now - TimeSpan.FromMinutes(2))) with { Now = now }, 96);
+            Assert.AreEqual("2 min ago", card.ReadLineShort, "Beside the clock icon only the age is drawn.");
+            Assert.AreEqual("Battery read 2 min ago", card.ReadLineText);
+
+            card.Render(CardKit.MainModel(CardKit.Snapshot(readAt: now - TimeSpan.FromMinutes(2))) with { Now = now, Refresh = BatteryRefreshView.Started }, 96);
+            Assert.AreEqual(WidgetCopy.ReadingBattery, card.TooltipAt(Centre(card.CurrentMainLayout.ReadLine))!.Value.Text, "The tooltip is the line the refresh set, not the old age.");
+            Assert.AreEqual(WidgetCopy.ReadingBattery, card.ReadLineShort);
         });
     }
 
@@ -263,6 +285,11 @@ public sealed class WidgetCardAccessibilityTests
             Assert.AreEqual("Settings", card.TooltipShownForTest, "The gear is an icon, so it says what it is when the keyboard arrives.");
 
             Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
+            Assert.AreEqual(WidgetCardFocus.Refresh, card.FocusTarget);
+            Assert.AreEqual("Refresh battery", card.TooltipShownForTest, "The refresh icon is an icon too, so it says what it does.");
+
+            Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
+            Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget);
             Assert.IsNull(card.TooltipShownForTest, "Connect has words, so there is nothing to show; the old one goes.");
         });
     }

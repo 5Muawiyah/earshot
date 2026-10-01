@@ -238,7 +238,7 @@ recorded that way rather than guessed at.
 | 16 | How long a handover takes each way on the real AirPods, which path each switch to this PC took, whether the phone takes the AirPods back by itself, whether this PC is at rest after every switch to the phone, whether protection survives switching, and the first real press of a registered shortcut. |
 | 17 | Whether Earshot hands the AirPods back inside the time Windows gives it at shut down, and whether the next boot leaves them alone. |
 | 18 | Whether Earshot hands the AirPods back inside the two seconds Windows gives it at sleep, whether the block completes before sleep or after wake, and whether this computer takes the AirPods back when it wakes. |
-| 19 | Whether the taskbar gauge and its cards work as built today, whether every reading battery set-up has not proved honestly shows nothing rather than a guessed figure, and whether a figure that is shown agrees with the iPhone. |
+| 19 | Whether the taskbar gauge and its cards work as built today, whether the battery they show agrees with the iPhone and greys when it is old, and whether refresh reads it again or says nothing was heard. |
 | 20 | Whether choosing Exit while the AirPods are connected lets them go and blocks them, inside its cap, and leaves the nodes blocked. |
 | 21 | Whether Earshot pauses this PC when the AirPods leave it while it plays to them, before its own disconnect and as soon as it sees the phone take them, pauses nothing when this PC was not playing, and never resumes anything. |
 | 22 | Whether the always-on service blocks the AirPods at shut down when the Earshot tray icon is gone, and whether the next boot leaves them alone. |

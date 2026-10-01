@@ -27,7 +27,7 @@ public sealed class GaugeWindowRenderTests
     private static readonly DateTimeOffset Now = new(2026, 9, 29, 12, 0, 0, TimeSpan.Zero);
 
     private static WidgetSnapshot Reading() =>
-        WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
+        WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = AirPodsWhere.ThisPc,
             Left = new PartReading(70, false, null) { ReadAt = Now - TimeSpan.FromMinutes(2) },

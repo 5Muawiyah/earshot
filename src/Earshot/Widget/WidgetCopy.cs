@@ -45,14 +45,12 @@ internal static class WidgetCopy
     public const string SettingsOtherDevice = "Other device";
     public const string SettingsPauseBud = AutoPauseSwitch;
     public const string SettingsPauseLeave = "Pause on leave";
-    public const string SettingsCaseCard = "Case card";
     public const string SettingsLowBattery = "Low battery";
     public const string SettingsLeftClick = "Click connects";
     public const string SettingsHandBack = "Hand back";
     public const string SettingsShortcuts = "Shortcuts";
     public const string SettingsUpdates = "Updates";
     public const string SettingsWaitsOnInEar = "Earshot cannot yet tell when a bud is in your ear.";
-    public const string SettingsWaitsOnLid = "Earshot cannot yet tell when the case lid is open.";
     public const string ShortcutNotSet = "Not set";
     public const string ShortcutPressKeys = "Press keys";
     public const string ShortcutClear = "Clear";
@@ -77,7 +75,6 @@ internal static class WidgetCopy
     public const string TipOtherDevice = "The name shown when your AirPods are on another device";
     public const string TipPauseBud = "Pause when a bud comes out, and play again when it goes back";
     public const string TipPauseLeave = "Pause this PC when the AirPods move to another device. It never plays again by itself.";
-    public const string TipCaseCard = "Show a card when the case opens";
     public const string TipLowBattery = "Alert me at this level";
     public const string TipLeftClick = "A left click on the gauge connects or disconnects";
     public const string TipHandBack = "Let go of the AirPods at shut down, sleep and Exit";
@@ -93,7 +90,6 @@ internal static class WidgetCopy
     public const string NameOtherDeviceBox = "Other device name";
     public const string NamePauseBud = "Pause when a bud comes out";
     public const string NamePauseLeave = "Pause when AirPods leave this PC";
-    public const string NameCaseCard = "Case-open card";
     public const string NameLowBattery = "Low battery alert";
     public const string NameLowerLowBattery = "Lower the low battery level";
     public const string NameRaiseLowBattery = "Raise the low battery level";
@@ -106,38 +102,6 @@ internal static class WidgetCopy
     public const string NameCheckForUpdates = CheckForUpdates;
     public const string NameRepair = RepairEarshot;
     public const string NameAutoCheck = "Check for updates automatically";
-
-    // Battery set-up: the card's button, the menu item, the three steps and their outcomes. Plain, short,
-    // never a figure the set-up did not prove.
-    public const string SetUpBattery = "Set up battery";
-    public const string SetUpBatteryBluetoothOff = "Set up battery (Bluetooth is off)";
-    public const string TryAgain = "Try again";
-    public const string Cancel = "Cancel";
-    public const string Save = "Save";
-    public const string Done = "Done";
-    public const string Back = "Back";
-    public const string Charging = "Charging";
-    public const string SetupOpenCase = "Open your AirPods case next to this PC";
-    public const string SetupWaiting = "Waiting";
-    public const string SetupWhatDoesYourIphoneShow = "What does your iPhone show?";
-    public const string SetupPickCaption = "Pick the nearest 10. If it ends in 5, pick the lower.";
-    public const string SetupBatterySetUp = "Battery set up";
-    public const string SetupCaseSetUp = "Case battery set up";
-    public const string SetupRepeatForBuds = "To set up the buds, try again when they show different levels.";
-    public const string SetupBudsReadTheSame = "Both buds read the same. Try again when they differ.";
-    public const string SetupSaved = "Set-up saved";
-    public const string SetupNotSaved = "Couldn't save the set-up";
-    public const string SetupNotSavedSub = "Nothing was changed. Try again.";
-    public const string SetupNeedsAnother = "Set up once more to confirm it. The battery shows once it is confirmed.";
-    public const string SetupCouldNotRead = "Couldn't read your AirPods' battery";
-    public const string SetupCapturesKept = "What was seen is kept on this PC.";
-    public const string SetupCannotReadYet = "Your AirPods' battery could not be read yet.";
-    public const string SetupNotFound = "Couldn't find your AirPods";
-    public const string SetupNotFoundHint = "Open the case next to the PC. If that does not work, take a bud out and try again.";
-    public const string SetupAmbiguous = "More than one set of AirPods is near";
-    public const string SetupAmbiguousHint = "Move away from other AirPods and try again.";
-    public const string SetupBluetoothOff = "Bluetooth is off";
-    public const string SetupBluetoothOffHint = "Turn Bluetooth on, then try again.";
 
     private const string LeftAirPodLabel = "Left AirPod";
     private const string RightAirPodLabel = "Right AirPod";
@@ -205,7 +169,6 @@ internal static class WidgetCopy
     public const string GaugeCharging = "Charging";
     public const string GaugeLowBattery = "Low battery";
     public const string GaugeNotOnThisPc = "Not on this PC";
-    public const string GaugeBatteryNotSetUp = "Battery not set up";
     public const string GaugeNoRecentReading = "No recent reading";
 
     // "L 70%   R 60%": the buds that have a proved reading, left first, three spaces apart. A bud with none is
@@ -234,4 +197,19 @@ internal static class WidgetCopy
         percent is { } value ? value.ToString(CultureInfo.InvariantCulture) + "%" : NoReading;
 
     private static string Round(double value) => Math.Max(0, Math.Round(value)).ToString(CultureInfo.InvariantCulture);
+
+    // Windows' own figure for the AirPods as a headset: one number, not a bud's or the case's.
+    public static string WindowsReads(int percent) =>
+        "Windows reads " + percent.ToString(CultureInfo.InvariantCulture) + "%";
+
+    // The low battery alert's line for that same figure.
+    public static string LowBatteryHeadsetText(int percent) => LowBatteryText("AirPods", percent);
+
+    // Refresh: the menu item (and the name of the card's icon), and what a refresh that heard nothing says.
+    public const string RefreshBattery = "Refresh battery";
+    public const string OpenTheCase = "Open the case";
+    public const string BluetoothIsOff = "Bluetooth is off";
+    public const string NotListening = "Not listening";
+    public const string ReadingBattery = "Reading the battery";
+    public static readonly string NothingHeardOpenTheCase = "Nothing heard. " + OpenTheCase;
 }

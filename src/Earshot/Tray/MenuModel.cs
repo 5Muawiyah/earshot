@@ -29,6 +29,7 @@ internal sealed record MenuState(
     MenuItemState Toggle,
     MenuItemState PlayFromPhone,
     IReadOnlyList<StreamingMenuItem> PlayFromPhoneItems,
+    MenuItemState RefreshBattery,
     MenuItemState BlockAtBoot,
     MenuItemState HandBack,
     MenuItemState ProtectAudio,
@@ -41,7 +42,6 @@ internal sealed record MenuState(
     MenuItemState LowBatteryAlert,
     MenuItemState LowBatteryThreshold,
     IReadOnlyList<LowBatteryThresholdMenuItem> LowBatteryThresholdItems,
-    MenuItemState SetUpBatteryItem,
     MenuItemState NameOtherDeviceItem,
     MenuItemState ChooseDevice,
     MenuItemState SetUp,
@@ -101,7 +101,6 @@ internal static class MenuModel
         bool safeMode = false,
         bool voiceKnownMissing = false,
         StreamingMenuModel? streaming = null,
-        bool setupAvailable = false,
         bool updateInProgress = false,
         string? elevatedRun = null)
     {
@@ -124,6 +123,8 @@ internal static class MenuModel
             Toggle: new MenuItemState(WithShortcut(connected ? Disconnect : Connect, settings.Hotkeys, HotkeyAction.ToggleConnection), Checked: false, Enabled: !busy && !changing, Visible: true),
             PlayFromPhone: new MenuItemState(streaming?.ParentText ?? PlayFromPhone, Checked: false, Enabled: streaming is { ParentEnabled: true }, Visible: streaming is not null),
             PlayFromPhoneItems: streaming?.Items ?? [],
+            // Reads the battery again on the card, so it is there while the gauge is: a refresh touches no device.
+            RefreshBattery: new MenuItemState(WidgetCopy.RefreshBattery, Checked: false, Enabled: true, Visible: settings.Widget.ShowOnTaskbar),
             BlockAtBoot: new MenuItemState(WithShortcut(BlockAtBoot, settings.Hotkeys, HotkeyAction.ToggleBlockAtBoot), Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
             HandBack: new MenuItemState(HandBackOnShutdownAndSleep, Checked: settings.HandBackOnShutdownAndSleep, Enabled: !busy, Visible: true),
             ProtectAudio: new MenuItemState(
@@ -141,24 +142,17 @@ internal static class MenuModel
                 Visible: true),
             ShowOnTaskbar: new MenuItemState(WidgetCopy.ShowOnTaskbar, Checked: settings.Widget.ShowOnTaskbar, Enabled: !busy, Visible: true),
             LeftClickConnectsItem: new MenuItemState(WidgetCopy.LeftClickConnects, Checked: settings.Widget.LeftClickConnects, Enabled: !busy, Visible: true),
-            CaseOpenCardItem: new MenuItemState(WidgetCopy.CardWhenCaseOpens, Checked: settings.Widget.CaseOpenCard, Enabled: !busy, Visible: true),
+            // The lid is not read, so the case-open card never shows and a switch for it would do nothing: hidden.
+            CaseOpenCardItem: new MenuItemState(WidgetCopy.CardWhenCaseOpens, Checked: settings.Widget.CaseOpenCard, Enabled: !busy, Visible: false),
             LowBatteryAlert: new MenuItemState(WidgetCopy.LowBatteryAlert, Checked: settings.Widget.LowBatteryAlert, Enabled: !busy, Visible: true),
             // A plain submenu opener, never checkable itself: the alert's own on/off state lives on
             // LowBatteryAlert above, not here, so one menu row is never both a toggle and a dropdown parent.
             LowBatteryThreshold: new MenuItemState(WidgetCopy.LowBatteryThreshold, Checked: false, Enabled: !busy && settings.Widget.LowBatteryAlert, Visible: true),
             LowBatteryThresholdItems: LowBatteryThresholdItems(settings.Widget, busy),
-            // Always there, so a repeat set-up is reachable once there is a reading. Disabled, with the plain
-            // reason in its own text, while the watcher is not running (Bluetooth off): a set-up listens through
-            // it. busy still gates it the same as every other action here.
-            SetUpBatteryItem: new MenuItemState(
-                setupAvailable ? WidgetCopy.SetUpBattery : WidgetCopy.SetUpBatteryBluetoothOff,
-                Checked: false,
-                Enabled: setupAvailable && !busy,
-                Visible: true),
             NameOtherDeviceItem: new MenuItemState(WidgetCopy.NameOtherDevice, Checked: false, Enabled: !busy, Visible: true),
             ChooseDevice: new MenuItemState(ChooseDevice, Checked: false, Enabled: true, Visible: true),
             // While a setup, repair or update is running, a second one would work on the same folder, tasks and service, so
-            // these are disabled and say why in their own text, as Set up battery does when Bluetooth is off.
+            // these are disabled and say why in their own text.
             SetUp: new MenuItemState(WithReason(SetUpEarshot, elevatedRun), Checked: false, Enabled: !busy && elevatedRun is null, Visible: TrayStatus.OffersSetUp(block)),
             Repair: new MenuItemState(WithReason(RepairEarshot, elevatedRun), Checked: false, Enabled: !busy && elevatedRun is null, Visible: TrayStatus.OffersRepair(block)),
             // A check reads GitHub and touches no device, so a connect in flight does not stop it; only another

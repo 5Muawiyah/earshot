@@ -66,8 +66,9 @@ internal sealed class Paths
 
     public string InstalledExe => Path.Combine(InstallFolder, "Earshot.exe");
 
-    // The widget's device-derived claim, kept apart from settings.json because it is not a preference and
-    // is never roamed. %LOCALAPPDATA%\Earshot\widget\claim.json, or under EARSHOT_DATA_ROOT when redirected.
+    // The widget's folder, %LOCALAPPDATA%\Earshot\widget, or under EARSHOT_DATA_ROOT when redirected. What an older
+    // build kept there (a claim, a proof and set-up records) is no longer read or written by anything; Repair and an
+    // update leave it where it is, which WidgetClaimFile lets their tests check.
     public string WidgetFolder => Path.Combine(LocalFolder, "widget");
 
     public string WidgetClaimFile => Path.Combine(WidgetFolder, "claim.json");

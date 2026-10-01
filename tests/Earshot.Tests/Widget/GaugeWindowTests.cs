@@ -139,7 +139,7 @@ public sealed class GaugeWindowTests
             Assert.AreEqual(activeBefore, activeAfter, "A NOACTIVATE show must not change the thread's active window.");
             Assert.AreNotEqual(gauge.Handle, activeAfter, "The gauge must never become the active window.");
 
-            WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
+            WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
             {
                 Where = AirPodsWhere.ThisPc,
                 Left = new PartReading(70, false, null),

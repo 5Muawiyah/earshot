@@ -74,7 +74,7 @@ public sealed class GaugeOrderSettingTests : IDisposable
             GaugeOrder order = GaugeOrder.RingNumberBolt;
             var bounds = new Rectangle(50, 50, 74, 40);
             DateTimeOffset now = new(2026, 9, 29, 12, 0, 0, TimeSpan.Zero);
-            WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started, claimExists: true) with
+            WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
             {
                 Where = AirPodsWhere.ThisPc,
                 Left = new PartReading(70, false, null) { ReadAt = now },

@@ -11,8 +11,7 @@ namespace Earshot.Widget;
 // exact path the tray icon's own click and the menu already use: RequestToggle is
 // TrayContext.StartToggleFromWidget (Launch -> ToggleAsync -> BlockCoordinator, the same as the tray
 // icon's left click), SetAutoPause is TryUpdateSettingsFromWidget (the same TryUpdateSettings the menu
-// items use). The battery set-up is not a device action: ListenForSetup and CompleteSetup are the widget
-// status service's own, and only listen to advertisements and write the owner's own records.
+// items use).
 internal sealed record WidgetCardPresenterCallbacks(
     Func<WidgetSnapshot> CurrentSnapshot,
     Func<bool> AutoPauseOn,
@@ -24,9 +23,8 @@ internal sealed record WidgetCardPresenterCallbacks(
     Func<string> OtherDeviceLabel,
     Action<CardPlace> RequestToggle,
     Action<bool, CardPlace> SetAutoPause,
-    Func<CancellationToken, Task<BatterySetupListen>> ListenForSetup,
-    Func<BatterySetupListen, BatterySetupPicks, BatterySetupResult> CompleteSetup,
-    Func<GaugePosition>? GaugePosition = null)   // where the gauge sits, so the card follows it; the right end when null
+    Func<GaugePosition>? GaugePosition = null,   // where the gauge sits, so the card follows it; the right end when null
+    Func<CancellationToken, Task<BatteryRefreshOutcome>>? RefreshBattery = null)   // reads the battery again; no refresh icon works when null
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }
@@ -46,16 +44,15 @@ internal sealed record WidgetCardPresenterCallbacks(
 // and the update page follows the update flow's own state. The update line's button is the one place a download
 // is started from.
 //
-// It also drives the battery set-up on the card: listening (the service's listen, with a spinner that turns
-// on a 100 ms timer only while listening), the pickers, the result. A set-up page stays open when the card
-// loses focus and a second gauge click does not close it; Escape, Cancel, Back and Done do, and each cancels a
-// listen that is still running.
+// Every battery part is handed to the card with whether it is fresh (BatteryFreshness): the card draws a part
+// that is not fresh greyed, and says its age.
 //
 // UI thread only from the outside; every public method posts through uiPost so a caller on any thread is
 // safe, matching CardPresenter's own contract.
-internal sealed class WidgetCardPresenter : IDisposable
+internal sealed partial class WidgetCardPresenter : IDisposable
 {
-    public static readonly TimeSpan ReadLineRefreshInterval = TimeSpan.FromSeconds(30);
+    // Short enough that a part greys within 5 s of crossing BatteryFreshness.FreshWindow.
+    public static readonly TimeSpan ReadLineRefreshInterval = TimeSpan.FromSeconds(5);
 
     public static readonly TimeSpan SpinnerInterval = TimeSpan.FromMilliseconds(100);
 
@@ -74,12 +71,7 @@ internal sealed class WidgetCardPresenter : IDisposable
     private long? _closedByDeactivateAtTimestamp;
     private bool _disposed;
 
-    // The set-up in progress. _view is Main whenever there is none.
     private WidgetCardView _view = WidgetCardView.Main;
-    private SetupViewModel? _setup;
-    private CancellationTokenSource? _listenCts;
-    private BatterySetupListen? _listen;
-    private BatterySetupPicks _picks = BatterySetupPicks.Default;
     private int _spinnerFrame;
 
     // Where Back on the update page goes: the settings page when it was opened from there, else the main view.
@@ -133,8 +125,6 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     internal bool SpinnerRunningForTest => _spinnerTimer is not null;
 
-    internal bool ListenTokenCancelledForTest => _listenCts?.IsCancellationRequested ?? false;
-
     // Shows the card above gaugeBounds, or above a zero-size rectangle at fallbackPoint when the gauge is
     // hidden and the click came from the tray icon fallback instead: a simpler fallback than the gauge
     // case, since the tray icon has no free taskbar rectangle of its own to anchor above, unlike the full
@@ -146,11 +136,6 @@ internal sealed class WidgetCardPresenter : IDisposable
     // a click opens the card with none.
     public void RequestShow(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false) =>
         _uiPost(() => RequestShowOnUiThread(gaugeBounds, fallbackPoint, openedByKeyboard));
-
-    // Opens the card at the first set-up page (or switches an open card to it) and starts listening. From the
-    // tray menu's "Set up battery", placed the same way a gauge click places the card.
-    public void RequestSetup(Rectangle? gaugeBounds, Point fallbackPoint) =>
-        _uiPost(() => RequestSetupOnUiThread(gaugeBounds, fallbackPoint));
 
     // Opens the card at the update page (or switches an open card to it), placed the same way a gauge click places the
     // card. From the tray menu's "Check for updates" once a newer version is found, so the Update button is there.
@@ -184,7 +169,8 @@ internal sealed class WidgetCardPresenter : IDisposable
         }
 
         StopRefreshTimer();
-        CancelSetup();
+        StopSpinnerTimer();
+        EndBatteryRefresh();
         if (_card is not null)
         {
             Unsubscribe(_card);
@@ -211,8 +197,8 @@ internal sealed class WidgetCardPresenter : IDisposable
 
             if (_view != WidgetCardView.Main)
             {
-                // A set-up or update page is open: a second gauge click does not close it, so a stray click on
-                // the way to the owner's case does not lose the step.
+                // The update page is open: a second gauge click does not close it, so a stray click does not lose
+                // a download that is running.
                 return;
             }
 
@@ -239,25 +225,6 @@ internal sealed class WidgetCardPresenter : IDisposable
         ShowAt(gaugeBounds, fallbackPoint, openedByKeyboard);
     }
 
-    private void RequestSetupOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint)
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        if (_card is { IsDisposed: false, Visible: true })
-        {
-            StartListening();
-            return;
-        }
-
-        _view = WidgetCardView.SetupListening;
-        _setup = SetupViewModel.Listening();
-        ShowAt(gaugeBounds, fallbackPoint);
-        StartListening();
-    }
-
     private void RequestUpdatePageOnUiThread(Rectangle? gaugeBounds, Point fallbackPoint)
     {
         if (_disposed || _host is null)
@@ -265,8 +232,6 @@ internal sealed class WidgetCardPresenter : IDisposable
             return;
         }
 
-        // A set-up listening on the card gives way to the update page.
-        CancelSetup();
         _updateFrom = WidgetCardView.Main;
         _view = WidgetCardView.Update;
         _spinnerFrame = 0;
@@ -295,6 +260,7 @@ internal sealed class WidgetCardPresenter : IDisposable
         card.PresentAnimated(rest, CardMotion.TravelFor(gaugeBounds ?? Rectangle.Empty, SystemDisplaySource.WorkAreaFor(anchor), _callbacks.Dpi()));
         card.Activate();
         StartRefreshTimer();
+        SyncRefreshSpinner();
     }
 
     private Rectangle PlaceAbove(WidgetCard card, Rectangle anchor)
@@ -306,7 +272,10 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     private void HideOnUiThread()
     {
-        CancelSetup();
+        _view = WidgetCardView.Main;
+        _shortcutNote = null;
+        StopSpinnerTimer();
+        ForgetRefreshOutcome();
         if (_card is { IsDisposed: false, Visible: true } card)
         {
             card.HideAnimated();
@@ -340,12 +309,13 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     private WidgetCardModel BuildModel()
     {
-        SetupViewModel? setup = _view == WidgetCardView.Update ? UpdatePage() : _setup;
+        SetupViewModel? setup = _view == WidgetCardView.Update ? UpdatePage() : null;
         WidgetCardModel model = BuildModel(_callbacks, _time, _view, setup);
         return model with
         {
             UpdateVersion = _host?.AvailableUpdateVersion(),
             Settings = _view == WidgetCardView.Settings ? ReadSettings() : null,
+            Refresh = RefreshViewForModel(),
         };
     }
 
@@ -385,9 +355,11 @@ internal sealed class WidgetCardPresenter : IDisposable
             ButtonEnabled: !busy && intent is not null,
             OtherDeviceLabel: callbacks.OtherDeviceLabel(),
             Now: time.GetUtcNow(),
-            ShowSetupButton: snapshot.Left.Percent is null && snapshot.Right.Percent is null && snapshot.Case.Percent is null,
             View: view,
-            Setup: setup);
+            Setup: setup)
+        {
+            Parts = BatteryFreshness.Shown(snapshot, time.GetUtcNow()),
+        };
     }
 
     private WidgetCard EnsureCard()
@@ -410,10 +382,9 @@ internal sealed class WidgetCardPresenter : IDisposable
 
         _card.ToggleRequested += OnToggleRequested;
         _card.AutoPauseChanged += OnAutoPauseChanged;
-        _card.SetupRequested += OnSetupRequested;
         _card.SetupActionRequested += OnSetupAction;
-        _card.SetupPicksChanged += OnSetupPicksChanged;
         _card.SettingsRequested += OnSettingsRequested;
+        _card.RefreshRequested += OnRefreshRequested;
         _card.UpdateRequested += OnUpdateRequested;
         _card.SettingChanged += OnSettingChanged;
         _card.CloseRequested += OnCardClosed;
@@ -424,10 +395,9 @@ internal sealed class WidgetCardPresenter : IDisposable
     {
         card.ToggleRequested -= OnToggleRequested;
         card.AutoPauseChanged -= OnAutoPauseChanged;
-        card.SetupRequested -= OnSetupRequested;
         card.SetupActionRequested -= OnSetupAction;
-        card.SetupPicksChanged -= OnSetupPicksChanged;
         card.SettingsRequested -= OnSettingsRequested;
+        card.RefreshRequested -= OnRefreshRequested;
         card.UpdateRequested -= OnUpdateRequested;
         card.SettingChanged -= OnSettingChanged;
         card.CloseRequested -= OnCardClosed;
@@ -436,11 +406,6 @@ internal sealed class WidgetCardPresenter : IDisposable
     private void OnToggleRequested(object? sender, EventArgs e) => _callbacks.RequestToggle(_place);
 
     private void OnAutoPauseChanged(object? sender, bool on) => _callbacks.SetAutoPause(on, _place);
-
-    // The main view's "Set up battery" button: the same card turns into the first set-up page.
-    private void OnSetupRequested(object? sender, EventArgs e) => StartListening();
-
-    private void OnSetupPicksChanged(object? sender, BatterySetupPicks picks) => _picks = picks;
 
     // ---- The settings page and the update page
 
@@ -541,9 +506,6 @@ internal sealed class WidgetCardPresenter : IDisposable
             case SettingsRowId.PauseLeave:
                 _host!.SetPauseWhenAirPodsLeave(toggle.On, place);
                 break;
-            case SettingsRowId.CaseCard:
-                _host!.SetCaseOpenCard(toggle.On, place);
-                break;
             case SettingsRowId.LeftClick:
                 _host!.SetLeftClickConnects(toggle.On, place);
                 break;
@@ -609,22 +571,6 @@ internal sealed class WidgetCardPresenter : IDisposable
         if (_view is WidgetCardView.Settings or WidgetCardView.Update)
         {
             OnSubPageAction(action);
-            return;
-        }
-
-        switch (action)
-        {
-            case SetupAction.Cancel:
-            case SetupAction.Back:
-            case SetupAction.Done:
-                CloseSetup();
-                break;
-            case SetupAction.TryAgain:
-                StartListening();
-                break;
-            case SetupAction.Save:
-                SaveSetup();
-                break;
         }
     }
 
@@ -643,121 +589,6 @@ internal sealed class WidgetCardPresenter : IDisposable
 
         StopRefreshTimer();
     }
-
-    // ---- The set-up
-
-    private void StartListening()
-    {
-        CancelListenOnly();
-        _view = WidgetCardView.SetupListening;
-        _spinnerFrame = 0;
-        _setup = SetupViewModel.Listening();
-        _listen = null;
-        var cts = new CancellationTokenSource();
-        _listenCts = cts;
-        StartSpinnerTimer();
-        RenderSetup();
-
-        // The listen runs off the UI thread; its result comes back through uiPost. A result for a listen that
-        // has since been cancelled or replaced is dropped.
-        _ = ListenAsync(cts);
-    }
-
-    private async Task ListenAsync(CancellationTokenSource cts)
-    {
-        BatterySetupListen result;
-        try
-        {
-            result = await _callbacks.ListenForSetup(cts.Token);
-        }
-        catch (Exception ex)
-        {
-            // Raised by nothing the flow does on purpose; kept visible rather than lost on an unobserved task.
-            _log.Error("Widget card: the battery set-up listen failed unexpectedly.", ex);
-            DateTimeOffset now = _time.GetUtcNow();
-            result = new BatterySetupListen(
-                BatterySetupListenStatus.WatcherNotStarted, WidgetCopy.SetupBluetoothOff, Candidate: null, [], now, now, 0, 0);
-        }
-
-        _uiPost(() => OnListenCompleted(cts, result));
-    }
-
-    private void OnListenCompleted(CancellationTokenSource cts, BatterySetupListen result)
-    {
-        if (_disposed || !ReferenceEquals(cts, _listenCts) || cts.IsCancellationRequested || _view != WidgetCardView.SetupListening)
-        {
-            return;
-        }
-
-        StopSpinnerTimer();
-        switch (result.Status)
-        {
-            case BatterySetupListenStatus.Found:
-            case BatterySetupListenStatus.ShortFormOnly:
-                _listen = result;
-                _picks = BatterySetupPicks.Default;
-                _view = WidgetCardView.SetupPick;
-                _setup = SetupViewModel.Pick(_picks);
-                RenderSetup();
-                break;
-            case BatterySetupListenStatus.Cancelled:
-                CloseSetup();
-                break;
-            default:
-                _view = WidgetCardView.SetupFailed;
-                _setup = SetupViewModel.Failed(result.Status);
-                RenderSetup();
-                break;
-        }
-    }
-
-    private void SaveSetup()
-    {
-        if (_listen is not { } listen || _view != WidgetCardView.SetupPick)
-        {
-            return;
-        }
-
-        BatterySetupResult result = _callbacks.CompleteSetup(listen, _picks);
-        _view = WidgetCardView.SetupDone;
-        _setup = SetupViewModel.Done(result.Status);
-        RenderSetup();
-    }
-
-    // Back, Cancel, Done and Escape: the set-up is over. A listen still running is cancelled and nothing is
-    // written; the card closes, and the main view shows whatever the snapshot holds when it is next opened.
-    private void CloseSetup()
-    {
-        CancelSetup();
-        if (_card is { IsDisposed: false, Visible: true } card)
-        {
-            card.HideAnimated();
-        }
-
-        StopRefreshTimer();
-    }
-
-    private void CancelSetup()
-    {
-        CancelListenOnly();
-        _view = WidgetCardView.Main;
-        _setup = null;
-        _listen = null;
-        _shortcutNote = null;
-    }
-
-    private void CancelListenOnly()
-    {
-        StopSpinnerTimer();
-        if (_listenCts is { } cts)
-        {
-            _listenCts = null;
-            cts.Cancel();
-            cts.Dispose();
-        }
-    }
-
-    private void RenderSetup() => RenderKeepingBottom();
 
     // Draws the card again from the current model. A page's height changes with what it holds (the step, a
     // caption, a row's note), so the card keeps its bottom edge where it was and grows upward from the gauge
@@ -785,20 +616,12 @@ internal sealed class WidgetCardPresenter : IDisposable
 
     private void AdvanceSpinner()
     {
-        if (_view == WidgetCardView.Update)
-        {
-            _spinnerFrame = (_spinnerFrame + 1) % SetupViewModel.SpinnerFrames;
-            _card?.SetSpinnerFrame(_spinnerFrame);
-            return;
-        }
-
-        if (_view != WidgetCardView.SetupListening || _setup is null)
+        if (_view != WidgetCardView.Update)
         {
             return;
         }
 
         _spinnerFrame = (_spinnerFrame + 1) % SetupViewModel.SpinnerFrames;
-        _setup = _setup with { SpinnerFrame = _spinnerFrame };
         _card?.SetSpinnerFrame(_spinnerFrame);
     }
 

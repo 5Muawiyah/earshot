@@ -201,7 +201,6 @@ internal sealed partial class WidgetCard
     {
         SettingsRowId.PauseBud => values.PauseWhenBudComesOut,
         SettingsRowId.PauseLeave => values.PauseWhenAirPodsLeave,
-        SettingsRowId.CaseCard => values.CaseOpenCard,
         SettingsRowId.LeftClick => values.LeftClickConnects,
         SettingsRowId.HandBack => values.HandBack,
         SettingsRowId.CheckAutomatically => values.CheckAutomatically,

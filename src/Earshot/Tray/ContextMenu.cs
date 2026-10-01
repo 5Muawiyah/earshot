@@ -23,6 +23,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _safeMode = new();
     private readonly ToolStripMenuItem _toggle = new();
     private readonly ToolStripMenuItem _playFromPhone = new();
+    private readonly ToolStripMenuItem _refreshBattery = new();
     private readonly ToolStripMenuItem _blockAtBoot = new();
     private readonly ToolStripMenuItem _handBack = new();
     private readonly ToolStripMenuItem _protectAudio = new();
@@ -34,7 +35,6 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _caseOpenCard = new();
     private readonly ToolStripMenuItem _lowBatteryAlert = new();
     private readonly ToolStripMenuItem _lowBatteryThreshold = new();
-    private readonly ToolStripMenuItem _setUpBattery = new();
     private readonly ToolStripMenuItem _nameOtherDevice = new();
     private readonly ToolStripMenuItem _chooseDevice = new();
     private readonly ToolStripMenuItem _setUp = new();
@@ -54,6 +54,7 @@ internal sealed class TrayMenu : IDisposable
             _safeMode,
             _toggle,
             _playFromPhone,
+            _refreshBattery,
             new ToolStripSeparator(),
             _blockAtBoot,
             _handBack,
@@ -67,7 +68,6 @@ internal sealed class TrayMenu : IDisposable
             _caseOpenCard,
             _lowBatteryAlert,
             _lowBatteryThreshold,
-            _setUpBattery,
             _nameOtherDevice,
             new ToolStripSeparator(),
             _chooseDevice,
@@ -81,6 +81,7 @@ internal sealed class TrayMenu : IDisposable
         ]);
 
         _toggle.Click += (_, _) => ToggleClicked?.Invoke(this, EventArgs.Empty);
+        _refreshBattery.Click += (_, _) => RefreshBatteryClicked?.Invoke(this, EventArgs.Empty);
         _blockAtBoot.Click += (_, _) => BlockAtBootClicked?.Invoke(this, EventArgs.Empty);
         _handBack.Click += (_, _) => HandBackClicked?.Invoke(this, EventArgs.Empty);
         _protectAudio.Click += (_, _) => ProtectAudioClicked?.Invoke(this, EventArgs.Empty);
@@ -90,7 +91,6 @@ internal sealed class TrayMenu : IDisposable
         _leftClickConnects.Click += (_, _) => LeftClickConnectsClicked?.Invoke(this, EventArgs.Empty);
         _caseOpenCard.Click += (_, _) => CaseOpenCardClicked?.Invoke(this, EventArgs.Empty);
         _lowBatteryAlert.Click += (_, _) => LowBatteryAlertClicked?.Invoke(this, EventArgs.Empty);
-        _setUpBattery.Click += (_, _) => SetUpBatteryClicked?.Invoke(this, EventArgs.Empty);
         _nameOtherDevice.Click += (_, _) => NameOtherDeviceClicked?.Invoke(this, EventArgs.Empty);
         _chooseDevice.Click += (_, _) => ChooseDeviceClicked?.Invoke(this, EventArgs.Empty);
         _setUp.Click += (_, _) => SetUpClicked?.Invoke(this, EventArgs.Empty);
@@ -107,6 +107,8 @@ internal sealed class TrayMenu : IDisposable
 
     // One item of the Play from a phone submenu was clicked: a device, Stop, or Refresh the list.
     public event EventHandler<StreamingMenuItemEventArgs>? PlayFromPhoneItemClicked;
+
+    public event EventHandler? RefreshBatteryClicked;
 
     public event EventHandler? BlockAtBootClicked;
 
@@ -128,8 +130,6 @@ internal sealed class TrayMenu : IDisposable
 
     // One entry of the low battery threshold submenu was clicked.
     public event EventHandler<LowBatteryThresholdMenuItemEventArgs>? LowBatteryThresholdItemClicked;
-
-    public event EventHandler? SetUpBatteryClicked;
 
     public event EventHandler? NameOtherDeviceClicked;
 
@@ -163,6 +163,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_toggle, state.Toggle);
         Set(_playFromPhone, state.PlayFromPhone);
         SetPlayFromPhoneItems(state.PlayFromPhoneItems);
+        Set(_refreshBattery, state.RefreshBattery);
         Set(_blockAtBoot, state.BlockAtBoot);
         Set(_handBack, state.HandBack);
         Set(_protectAudio, state.ProtectAudio);
@@ -175,7 +176,6 @@ internal sealed class TrayMenu : IDisposable
         Set(_lowBatteryAlert, state.LowBatteryAlert);
         Set(_lowBatteryThreshold, state.LowBatteryThreshold);
         SetLowBatteryThresholdItems(state.LowBatteryThresholdItems);
-        Set(_setUpBattery, state.SetUpBatteryItem);
         Set(_nameOtherDevice, state.NameOtherDeviceItem);
         Set(_chooseDevice, state.ChooseDevice);
         Set(_setUp, state.SetUp);

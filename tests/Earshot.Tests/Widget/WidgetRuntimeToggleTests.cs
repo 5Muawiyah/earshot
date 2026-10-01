@@ -90,7 +90,7 @@ public sealed class WidgetRuntimeToggleTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true }).WithWatcherRecomputed());
+                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, Enabled = true });
             tray.PumpUntilIdle();
             Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "Sanity: the case-open card must be wired first.");
             Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Case-open card"), "Sanity: nothing has raised CaseOpened yet.");
@@ -117,7 +117,7 @@ public sealed class WidgetRuntimeToggleTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = true, CaseOpenCard = true, LeftClickConnects = false }).WithWatcherRecomputed(),
+                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = true, CaseOpenCard = true, LeftClickConnects = false, Enabled = true },
                 cardEnvironmentFactory: () => new Phase5.FakeCardEnvironment());
             tray.PumpUntilIdle();
 
@@ -147,7 +147,7 @@ public sealed class WidgetRuntimeToggleTests
         {
             var connect = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, LeftClickConnects = true }).WithWatcherRecomputed(),
+                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, LeftClickConnects = true, Enabled = true },
                 cardEnvironmentFactory: () => new Phase5.FakeCardEnvironment());
             tray.Connection.OnConnect = _ => connect.Task;
             tray.PumpUntilIdle();
@@ -184,10 +184,10 @@ public sealed class WidgetRuntimeToggleTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true }).WithWatcherRecomputed());
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, LowBatteryAlert = true }).WithWatcherRecomputed());
             tray.PumpUntilIdle();
 
-            Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "Sanity: CaseOpenCard alone must still want the watcher.");
+            Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "Sanity: the low battery alert alone must still want the watcher.");
             Assert.IsTrue(tray.Context.WidgetDataPipelineWiredForTest, "The data pipeline must be wired for the case-open card to have anything to show.");
             Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "The case-open card itself must be wired even with the gauge off.");
             Assert.AreEqual(0, tray.TaskbarReaderFactoryCalls, "The gauge itself must stay off: nothing here asked for it.");

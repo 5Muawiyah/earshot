@@ -22,7 +22,7 @@ public sealed class GaugeOrderRenderTests
         return GaugeRenderer.Render(content, palette, GaugeLayout.For(dpi, order), hover: false, FontFamily);
     }
 
-    private static GaugeContent Full() => new(GaugeMode.Reading, 100, Low: false, Charging: true, "", false);
+    private static GaugeContent Full() => new(GaugeMode.Reading, 100, Low: false, Charging: true, "");
 
     private static bool Painted(Color pixel) => pixel.A >= 24;
 
@@ -60,9 +60,9 @@ public sealed class GaugeOrderRenderTests
                 foreach (GaugeContent content in new[]
                 {
                     Full(),
-                    new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, "", false),
-                    new GaugeContent(GaugeMode.MarkOnly, null, false, false, "", false),
-                    new GaugeContent(GaugeMode.NotOnThisPc, null, false, false, "", false),
+                    new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, ""),
+                    new GaugeContent(GaugeMode.MarkOnly, null, false, false, ""),
+                    new GaugeContent(GaugeMode.NotOnThisPc, null, false, false, ""),
                 })
                 {
                     using Bitmap bitmap = Draw(content, dpi, order);
@@ -145,7 +145,7 @@ public sealed class GaugeOrderRenderTests
             foreach (GaugeOrder order in Enum.GetValues<GaugeOrder>())
             {
                 GaugeLayout layout = GaugeLayout.For(dpi, order);
-                using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, "", false), dpi, order);
+                using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, ""), dpi, order);
                 (int First, int Last)? phone = Columns(bitmap, layout.NumberSlot);
                 Assert.IsNotNull(phone, "The phone is drawn in the number slot (" + order + ", dpi " + dpi + ")");
                 Rectangle slot = layout.NumberSlot;

@@ -36,7 +36,7 @@ internal sealed partial class TrayContext
     private CaseOpenCardPresenter? _caseOpenCardPresenter;
     private WidgetCardPresenterCallbacks? _widgetCardCallbacks;
     private int _widgetLayoutDpi = CardPlacement96;
-    private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted, claimExists: false);
+    private WidgetSnapshot _widgetSnapshotCache = WidgetSnapshot.Empty(WidgetWatcherState.NotStarted);
 
     // TrayStartOptions.AdvertisementSourceFactory/TaskbarReaderFactory: the real ones by default, a fake in
     // tests (TrayHarness), so a widget-enabled test never starts a real Bluetooth watcher or polls the real
@@ -118,8 +118,8 @@ internal sealed partial class TrayContext
             _widgetStatus.CaseOpened += OnCaseOpened;
             _widgetSnapshotCache = _widgetStatus.Current;
             _widgetStatus.Start();
-            _lowBatteryAlertService = CompositionRoot.BuildLowBatteryAlertService(_registry, _widgetStatus);
-            _autoPauseService = CompositionRoot.BuildAutoPauseService(_registry, _widgetStatus, () => _coordinator.BlockStatus, _time, _widgetStatus.BroadcastObserved);
+            _lowBatteryAlertService = CompositionRoot.BuildLowBatteryAlertService(_registry, _widgetStatus, _time);
+            _autoPauseService = CompositionRoot.BuildAutoPauseService(_registry, _widgetStatus, () => _coordinator.BlockStatus, _time);
         }
 
         if (_widgetTheme is null)
@@ -141,9 +141,8 @@ internal sealed partial class TrayContext
                 RequestToggle: StartToggleFromWidget,
                 SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
                     "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place),
-                ListenForSetup: ListenForSetupFromCard,
-                CompleteSetup: CompleteSetupFromCard,
-                GaugePosition: () => _registry.Settings.Current.Widget.GaugePosition);
+                GaugePosition: () => _registry.Settings.Current.Widget.GaugePosition,
+                RefreshBattery: RefreshBatteryForCard);
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
@@ -426,8 +425,8 @@ internal sealed partial class TrayContext
         return card;
     }
 
-    // The gauge-anchored card's presenter, built once. The gauge's own pipeline builds it, and so does the
-    // tray menu's "Set up battery" when the gauge is off, since the set-up pages are drawn on that card.
+    // The gauge-anchored card's presenter, built once. The gauge's own pipeline builds it, and so does an update
+    // page request when the gauge is off, since that page is drawn on this card.
     private WidgetCardPresenter EnsureWidgetCardPresenter()
     {
         if (_widgetCardPresenter is null)
@@ -437,27 +436,6 @@ internal sealed partial class TrayContext
         }
 
         return _widgetCardPresenter;
-    }
-
-    // The tray menu's "Set up battery": the widget card opens at its first page, above the gauge when it is
-    // shown, else near the cursor. Not a device action: it listens to advertisements and shows its own pages.
-    internal void RequestSetupFromWidget()
-    {
-        if (_widgetStatus is null || _widgetCardCallbacks is null)
-        {
-            return;
-        }
-
-        _caseOpenCardPresenter?.Hide();
-        WidgetCardPresenter presenter = EnsureWidgetCardPresenter();
-        if (GaugeBoundsIfShown() is { } bounds)
-        {
-            presenter.RequestSetup(bounds, bounds.Location);
-        }
-        else
-        {
-            presenter.RequestSetup(gaugeBounds: null, _cursorPosition());
-        }
     }
 
     // The update page on the widget card, above the gauge when it is shown, else near the cursor, for a check that found a
@@ -483,21 +461,6 @@ internal sealed partial class TrayContext
 
         return true;
     }
-
-    private Task<BatterySetupListen> ListenForSetupFromCard(CancellationToken ct)
-    {
-        if (_widgetStatus is { } status)
-        {
-            return status.ListenForSetupAsync(ct);
-        }
-
-        DateTimeOffset now = _time.GetUtcNow();
-        return Task.FromResult(new BatterySetupListen(
-            BatterySetupListenStatus.WatcherNotStarted, WidgetCopy.SetupBluetoothOff, Candidate: null, [], now, now, 0, 0));
-    }
-
-    private BatterySetupResult CompleteSetupFromCard(BatterySetupListen listen, BatterySetupPicks picks) =>
-        (_widgetStatus ?? throw new InvalidOperationException("The widget is not running, so a set-up cannot be completed.")).CompleteSetup(listen, picks);
 
     private GaugeControllerSettings ReadGaugeControllerSettings()
     {

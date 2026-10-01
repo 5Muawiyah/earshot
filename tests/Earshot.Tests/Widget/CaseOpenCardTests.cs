@@ -309,14 +309,13 @@ public sealed class CaseOpenCardTests
         });
     }
 
-    // The case-open notice never shows a set-up page or a set-up button, whatever the snapshot holds: it is
-    // always the main view, and a click on the spot where the button would be is not a set-up request.
+    // The case-open notice is always the main view, whatever the snapshot holds.
     [TestMethod]
-    public void TheNoticeCardNeverShowsASetupButtonOrPage()
+    public void TheNoticeCardIsAlwaysTheMainView()
     {
         Phase5.CardDesktop.Run(() =>
         {
-            var callbacks = new FakeCallbacks { Snapshot = Snapshot(claimExists: false) };
+            var callbacks = new FakeCallbacks { Snapshot = Snapshot() };
             var gate = Gate();
             var environment = new Earshot.Tests.Phase5.FakeCardEnvironment();
             var log = new CapturingLog();
@@ -332,7 +331,6 @@ public sealed class CaseOpenCardTests
             Assert.IsTrue(presenter.IsShown);
             Assert.AreEqual(WidgetCardView.Main, card!.Model.View);
             Assert.AreEqual(WidgetCardView.Main, card.EffectiveView);
-            Assert.IsFalse(card.CurrentMainLayout.ShowSetupButton, "A notice never draws the set-up button.");
             Assert.IsTrue(card.CurrentMainLayout.ShowColumns, "The three columns stay, with No reading in place of a percent.");
         });
     }
@@ -472,7 +470,7 @@ public sealed class CaseOpenCardTests
     private static CaseOpenCardGate Gate(bool enabled = true, bool closing = false, bool handBack = false, bool sessionEnd = false, bool ownCardOpen = false) =>
         new(Enabled: () => enabled, Closing: () => closing, HandBackInProgress: () => handBack, SessionEndInProgress: () => sessionEnd, OwnCardOpen: () => ownCardOpen);
 
-    private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false, bool claimExists = true) =>
+    private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false) =>
         new(
             where,
             PartReading.Unknown,
@@ -484,7 +482,6 @@ public sealed class CaseOpenCardTests
             WidgetWatcherState.Started,
             WatcherErrorCode: null,
             WatcherErrorName: null,
-            ClaimExists: claimExists,
             AutoPauseAvailable: autoPauseAvailable,
             WidgetCounters.Empty);
 
@@ -513,8 +510,6 @@ public sealed class CaseOpenCardTests
 
         public List<(bool On, CardPlace Place)> AutoPauseCalls { get; } = new();
 
-        public Task<BatterySetupListen> NeverListens(CancellationToken ct) => throw new NotSupportedException("The notice never sets up.");
-
         public WidgetCardPresenterCallbacks Build() => new(
             CurrentSnapshot: () => Snapshot,
             AutoPauseOn: () => AutoPauseOnValue,
@@ -525,8 +520,6 @@ public sealed class CaseOpenCardTests
             HighContrast: () => HighContrast,
             OtherDeviceLabel: () => OtherDeviceLabel,
             RequestToggle: place => ToggleCalls.Add(place),
-            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)),
-            ListenForSetup: NeverListens,
-            CompleteSetup: (_, _) => throw new NotSupportedException("The notice never sets up."));
+            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)));
     }
 }
