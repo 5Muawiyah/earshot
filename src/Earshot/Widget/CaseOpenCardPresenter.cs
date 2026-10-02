@@ -85,6 +85,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     private readonly ICardEnvironment _environment;
     private readonly ICaseOpenCardScene _scene;
     private readonly Func<bool>? _animationsEnabled;
+    private readonly Func<WidgetCard, IFrameClock> _frameClockFor;
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _time;
     private readonly ILog _log;
@@ -109,7 +110,8 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         TimeProvider time,
         ILog log,
         ICaseOpenCardScene? scene = null,
-        Func<bool>? animationsEnabled = null)
+        Func<bool>? animationsEnabled = null,
+        Func<WidgetCard, IFrameClock>? frameClockFor = null)
     {
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(callbacks);
@@ -127,6 +129,9 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         _log = log;
         _scene = scene ?? new SystemCaseOpenCardScene(new SystemDisplaySource(), static () => []);
         _animationsEnabled = animationsEnabled;
+
+        // Each card's frames come from the display it is on (VBlankFrameClock); a test hands in a fake clock.
+        _frameClockFor = frameClockFor ?? (card => new VBlankFrameClock(() => card.IsHandleCreated ? card.Handle : 0, uiPost, log));
     }
 
     // True while a card is on screen on any display. For tests and the gauge card's own gate; the UI thread only.
@@ -493,7 +498,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         int dpi = now is { Dpi: > 0 } d ? d.Dpi : _fallbackDpi.Current(_callbacks.Dpi);
         card.Render(WidgetCardPresenter.BuildModel(_callbacks, _time), dpi);
 
-        Size size = card.ClientSize;
+        Size size = card.LaidOutSize;
         if (size != before.Size)
         {
             Rectangle workArea = now?.WorkArea ?? SystemDisplaySource.WorkAreaFor(before);
@@ -538,7 +543,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         WidgetCard card = _createCard();
         if (_animationsEnabled is not null)
         {
-            card.AttachMotion(_time, _uiPost, _animationsEnabled);
+            card.AttachMotion(_frameClockFor(card), _animationsEnabled);
         }
 
         card.CloseRequested += OnCardClosed;

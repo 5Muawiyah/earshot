@@ -538,9 +538,18 @@ internal sealed partial class TrayContext
             return _gaugeSurface;
         }
 
-        var window = new GaugeWindow(_log, order: () => _registry.Settings.Current.Widget.GaugeOrder);
+        GaugeWindow window = CreateGaugeWindow();
         _gaugeWindow = window;
         _gaugeSurface = window;
+        return window;
+    }
+
+    // A real gauge window, with motion: its ring and hover fill move one frame per refresh of the display it is on, and not at
+    // all with Windows' animation effects off (read at each change).
+    private GaugeWindow CreateGaugeWindow()
+    {
+        var window = new GaugeWindow(_log, order: () => _registry.Settings.Current.Widget.GaugeOrder);
+        window.AttachMotion(new VBlankFrameClock(() => window.IsHandleCreated ? window.Handle : 0, _registry.UiPost, _log), new SystemAnimationSetting(_log).Enabled);
         return window;
     }
 

@@ -70,6 +70,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     private readonly ILog _log;
     private readonly IWidgetCardHost? _host;
     private readonly Func<bool>? _animationsEnabled;
+    private readonly Func<WidgetCard, IFrameClock> _frameClockFor;
     private readonly Func<Rectangle, Rectangle> _workAreaFor;
 
     private WidgetCard? _card;
@@ -90,7 +91,8 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     public WidgetCardPresenter(
         Func<WidgetCard> createCard, WidgetCardPresenterCallbacks callbacks, Action<Action> uiPost, TimeProvider time, ILog log,
-        IWidgetCardHost? host = null, Func<bool>? animationsEnabled = null, Func<Rectangle, Rectangle>? workAreaFor = null)
+        IWidgetCardHost? host = null, Func<bool>? animationsEnabled = null, Func<Rectangle, Rectangle>? workAreaFor = null,
+        Func<WidgetCard, IFrameClock>? frameClockFor = null)
     {
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(callbacks);
@@ -104,6 +106,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         _log = log;
         _host = host;
         _animationsEnabled = animationsEnabled;
+
+        // Each card's frames come from the display it is on (VBlankFrameClock); a test hands in a fake clock.
+        _frameClockFor = frameClockFor ?? (card => new VBlankFrameClock(() => card.IsHandleCreated ? card.Handle : 0, uiPost, log));
 
         // The work area of the display an anchor is on. The tray reads the real displays; a test hands in a fixed area so a
         // page's placement does not depend on the screen the tests happen to run on.
@@ -436,7 +441,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         _card = _createCard();
         if (_animationsEnabled is not null)
         {
-            _card.AttachMotion(_time, _uiPost, _animationsEnabled);
+            _card.AttachMotion(_frameClockFor(_card), _animationsEnabled);
         }
 
         _card.ToggleRequested += OnToggleRequested;
@@ -715,7 +720,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         card.MaxHeight = Math.Max(1, before.Bottom - (workArea.Top + CardPlacement.Scale(WidgetCardPlacement.GapAt96, CardDpi)));
         card.Render(BuildModel(), CardDpi);
 
-        Size size = card.ClientSize;
+        Size size = card.LaidOutSize;
         if (size != before.Size)
         {
             var resized = new Rectangle(before.X, before.Bottom - size.Height, size.Width, size.Height);

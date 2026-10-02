@@ -69,7 +69,7 @@ internal sealed partial class TrayContext
     private IGaugeSurface CreateSecondaryGaugeSurface() =>
         _gaugeSurfaceFactory is { } factory
             ? factory()
-            : new GaugeWindow(_log, order: () => _registry.Settings.Current.Widget.GaugeOrder);
+            : CreateGaugeWindow();
 
     // A left click on another display's gauge: the card opens above that gauge, on its display, at that display's scale.
     private void OpenWidgetCardFor(SecondaryGauge gauge)

@@ -300,6 +300,13 @@ internal sealed partial class WidgetCard : Form
     // window: the presenter reads WidgetCardLayout.Compute itself to place the card, then sets Bounds.
     public void Render(WidgetCardModel model, int dpi)
     {
+        WidgetCardView before = _shownView;
+        RenderView(model, dpi);
+        NotePageChange(before, _shownView);
+    }
+
+    private void RenderView(WidgetCardModel model, int dpi)
+    {
         ArgumentNullException.ThrowIfNull(model);
         _model = model;
         _dpi = dpi > 0 ? dpi : CardPlacement.BaseDpi;
@@ -333,7 +340,7 @@ internal sealed partial class WidgetCard : Form
             using var probe = new Bitmap(1, 1);
             using Graphics measure = Graphics.FromImage(probe);
             _setupLayout = ComputeSetupLayout(measure, setup);
-            SetClientSizeIfChanged(new Size(_setupLayout.Frame.Width, _setupLayout.Frame.Height));
+            SizeTo(new Size(_setupLayout.Frame.Width, _setupLayout.Frame.Height));
             RepaintIfChanged();
             return;
         }
@@ -374,7 +381,7 @@ internal sealed partial class WidgetCard : Form
             _focus = WidgetCardFocus.Button;
         }
 
-        SetClientSizeIfChanged(new Size(layout.Width, layout.Height));
+        SizeTo(new Size(layout.Width, layout.Height));
         RepaintIfChanged();
     }
 
@@ -593,6 +600,11 @@ internal sealed partial class WidgetCard : Form
 
         NoteMouseForFocusCue();
         HideTip();
+        if (e.Button == MouseButtons.Left)
+        {
+            TrackHot(e.Location, pressed: true);
+        }
+
         if (OnSettingsPage)
         {
             SettingsMouseDown(e);
@@ -624,6 +636,7 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
+        TrackHot(e.Location, pressed: false);
         if (OnSettingsPage)
         {
             SettingsMouseUp(e);
@@ -738,7 +751,13 @@ internal sealed partial class WidgetCard : Form
         // (transparency effects off, or high contrast, where it is the window colour).
         g.Clear(OverrideBackgroundForCaptureOnly ?? (PaintsOpaqueBackground ? Colours.Tokens.SolidSurface : Colours.Tokens.AcrylicTint));
         DrawSurfaceStroke(g);
+        RenderPageMoving(g, RenderPage);
+    }
 
+    // What is inside the surface: the page on show, with any hover fill under its icons.
+    private void RenderPage(Graphics g)
+    {
+        DrawFills(g);
         if (OnSettingsPage && _model.Settings is { } settingsValues && _settingsLayout is { } settingsLayout)
         {
             DrawSettings(g, settingsValues, settingsLayout);
@@ -1397,7 +1416,7 @@ internal sealed partial class WidgetCard : Form
         DrawIconLine(g, labelRect, FluentGlyphs.EarbudForThisPc(), WidgetCopy.AutoPauseSwitch);
 
         var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
-        CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi);
+        CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi, Knob(SettingsRowId.PauseBud, track, _model.AutoPauseOn));
 
         if (!_notice && _focus == WidgetCardFocus.Switch && FocusShown)
         {
@@ -1666,7 +1685,7 @@ internal sealed partial class WidgetCard : Form
             switch (row.Index)
             {
                 case 0:
-                    CardPaint.Toggle(g, row.Control, rows.AutoCheck, colours, _dpi);
+                    CardPaint.Toggle(g, row.Control, rows.AutoCheck, colours, _dpi, Knob(SettingsRowId.CheckAutomatically, row.Control, rows.AutoCheck));
                     if (focused)
                     {
                         CardPaint.Focus(g, row.Control, row.Control.Height / 2, colours, _dpi);

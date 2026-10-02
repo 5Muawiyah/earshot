@@ -293,7 +293,11 @@ internal static partial class CardPaint
 
     // The 40 by 20 toggle: an accent track with a knob at the right when on, an outline with a knob at the left
     // when off.
-    public static void Toggle(Graphics g, Rectangle bounds, bool on, CardColours colours, int dpi)
+    public static void Toggle(Graphics g, Rectangle bounds, bool on, CardColours colours, int dpi) => Toggle(g, bounds, on, colours, dpi, on ? 1 : 0);
+
+    // knob: where the knob is, 0 at rest off (x 3) to 1 at rest on (x 23), for a knob that slides (FluentMotion's toggle). The
+    // track and the knob's colour are the new value's from the first frame (design choice): only the knob moves.
+    public static void Toggle(Graphics g, Rectangle bounds, bool on, CardColours colours, int dpi, double knobAt)
     {
         float s = dpi / 96f;
         using GraphicsPath track = RoundedRectangle(new RectangleF(bounds.X + 0.5f, bounds.Y + 0.5f, bounds.Width - 1, bounds.Height - 1), bounds.Height / 2f);
@@ -309,7 +313,7 @@ internal static partial class CardPaint
         }
 
         float knob = 12 * s;
-        float knobX = bounds.X + ((on ? 23 : 3) * s);
+        float knobX = bounds.X + ((3 + (20 * (float)Math.Clamp(knobAt, 0, 1))) * s);
         float knobY = bounds.Y + ((bounds.Height - knob) / 2f);
         using var knobBrush = new SolidBrush(on ? colours.OnAccent : colours.TextSecondary);
         g.FillEllipse(knobBrush, knobX, knobY, knob, knob);

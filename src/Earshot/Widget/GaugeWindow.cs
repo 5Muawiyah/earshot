@@ -98,7 +98,35 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     private RenderRequest? _lastRequest;
     private GaugePushKey? _lastPush;
     private string? _lastTooltip;
-    private bool _hover;
+    private readonly GaugeMotion _motion = new();
+    private FrameDriver? _driver;
+    private IFrameClock? _clock;
+
+    // Gives the gauge motion: the ring moves to a new value and the hover fill fades, one frame per refresh of the display
+    // the gauge is on (clock; the gauge owns it from here). Without it every change lands at once.
+    internal void AttachMotion(IFrameClock clock, Func<bool> animationsEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(animationsEnabled);
+        DetachMotion();
+        _clock = clock;
+        _driver = new FrameDriver(clock, animationsEnabled);
+        _motion.Driver = _driver;
+        _motion.Changed += Repaint;
+    }
+
+    private void DetachMotion()
+    {
+        _motion.Changed -= Repaint;
+        _motion.Driver = null;
+        _driver?.Dispose();
+        _driver = null;
+        (_clock as IDisposable)?.Dispose();
+        _clock = null;
+    }
+
+    // Whether the gauge's frame driver is subscribed to its clock, for tests.
+    internal bool MotionSubscribed => _driver?.Subscribed ?? false;
 
     // Renders content and pushes it through UpdateLayeredWindow at bounds' location. The gauge draws its own
     // fixed size (GaugeLayout), which the placement also made the window's.
@@ -119,10 +147,12 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         GaugePalette palette = GaugePalette.Create(light, _accent.AccentFor(light), SystemInformation.HighContrast, r.Ink);
         GaugeContent content = GaugeContent.From(r.Snapshot, r.Now, r.Settings);
         GaugeLayout layout = GaugeLayout.For(r.Dpi, _order());
-        GaugePushKey key = GaugePushKey.Of(content, palette, layout, _hover, r.FontFamily, r.Bounds.Location);
+        _motion.Show(content, _shown);
+
+        GaugePushKey key = GaugePushKey.Of(content, palette, layout, _motion.Hover, r.FontFamily, r.Bounds.Location, _motion.Ring);
         if (key != _lastPush)
         {
-            using Bitmap bitmap = GaugeRenderer.Render(content, palette, layout, _hover, r.FontFamily);
+            using Bitmap bitmap = GaugeRenderer.Render(content, palette, layout, _motion.Hover, r.FontFamily, _motion.Ring);
             Push(bitmap, r.Bounds.Location);
             PushCount++;
             _lastPush = key;
@@ -135,6 +165,12 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
             AccessibleDescription = content.Tooltip.Replace("\r\n", ", ", StringComparison.Ordinal);
             if (IsHandleCreated)
             {
+                // The tooltip fades (the tooltip control's own fade) only with animation effects on.
+                if (_driver is { } driver && _tip.UseFading != driver.AnimationsEnabled)
+                {
+                    _tip.UseFading = _tip.UseAnimation = driver.AnimationsEnabled;
+                }
+
                 _tip.SetToolTip(this, content.Tooltip);
                 _lastTooltip = content.Tooltip;
             }
@@ -148,15 +184,19 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         if (_hover != hover)
         {
             _hover = hover;
+            _motion.SetHover(hover, _shown);
             Repaint();
         }
     }
+
+    private bool _hover;
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
             _accent.Changed -= OnAccentChanged;
+            DetachMotion();
             _tip.Dispose();
         }
 

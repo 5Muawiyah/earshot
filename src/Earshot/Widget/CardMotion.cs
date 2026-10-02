@@ -1,11 +1,21 @@
 namespace Earshot.Widget;
 
 // A cubic Bezier easing curve through (0,0) and (1,1) with the two control points given, as the Windows motion
-// page writes them: cubic-bezier(x1, y1, x2, y2). Progress(t) is the share of the way travelled after the share t
-// of the time. x(s) is monotonic for the curves used here, so it is inverted by bisection.
-// https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/motion
+// pages write them: cubic-bezier(x1, y1, x2, y2). Progress(t) is the share of the way travelled after the share t
+// of the time: the curve's parameter s is found where x(s) = t, and y(s) is the answer.
+//
+// x(s) is solved by Newton's method from s = t, which converges in a few steps where the curve has a slope, and by
+// bisection wherever Newton's step leaves [0, 1], meets a flat spot (x'(s) near 0, as cubic-bezier(0, 0, 0, 1) has at
+// s = 0) or has not converged. x(s) rises monotonically whenever x1 and x2 are within [0, 1], which every curve Earshot
+// uses has (the CSS rule for cubic-bezier, which the Windows pages write their curves in), so the root is unique. y is
+// not clamped: a curve with y1 or y2 outside [0, 1] overshoots, as it is meant to.
+// https://learn.microsoft.com/windows/apps/design/motion/timing-and-easing
+// https://learn.microsoft.com/windows/apps/design/signature-experiences/motion
 internal readonly record struct CubicBezier(double X1, double Y1, double X2, double Y2)
 {
+    // How close x(s) must come to t. The tests check Progress against closed forms to 1e-9.
+    private const double Tolerance = 1e-12;
+
     public double Progress(double t)
     {
         if (t <= 0)
@@ -18,13 +28,49 @@ internal readonly record struct CubicBezier(double X1, double Y1, double X2, dou
             return 1;
         }
 
+        return Axis(Y1, Y2, SolveX(t));
+    }
+
+    // The parameter s at which x(s) = t.
+    internal double SolveX(double t)
+    {
+        double s = t;
+        for (int i = 0; i < 8; i++)
+        {
+            double error = Axis(X1, X2, s) - t;
+            if (Math.Abs(error) < Tolerance)
+            {
+                return s;
+            }
+
+            double slope = Slope(X1, X2, s);
+            if (Math.Abs(slope) < 1e-6)
+            {
+                break;
+            }
+
+            double next = s - (error / slope);
+            if (next is < 0 or > 1)
+            {
+                break;
+            }
+
+            s = next;
+        }
+
         double low = 0;
         double high = 1;
-        double s = t;
-        for (int i = 0; i < 60; i++)
+        s = t;
+        for (int i = 0; i < 100; i++)
         {
             s = (low + high) / 2;
-            if (Axis(X1, X2, s) < t)
+            double x = Axis(X1, X2, s);
+            if (Math.Abs(x - t) < Tolerance)
+            {
+                return s;
+            }
+
+            if (x < t)
             {
                 low = s;
             }
@@ -34,14 +80,21 @@ internal readonly record struct CubicBezier(double X1, double Y1, double X2, dou
             }
         }
 
-        return Math.Clamp(Axis(Y1, Y2, s), 0, 1);
+        return s;
     }
 
     // The Bezier through 0, a, b and 1 at parameter s.
-    private static double Axis(double a, double b, double s)
+    internal static double Axis(double a, double b, double s)
     {
         double u = 1 - s;
         return (3 * u * u * s * a) + (3 * u * s * s * b) + (s * s * s);
+    }
+
+    // Its derivative in s.
+    private static double Slope(double a, double b, double s)
+    {
+        double u = 1 - s;
+        return (3 * u * u * a) + (6 * u * s * (b - a)) + (3 * s * s * (1 - b));
     }
 }
 
@@ -66,14 +119,14 @@ internal readonly record struct MotionFrame(int OffsetPx, byte Alpha, bool Done)
 // https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/motion
 internal static class CardMotion
 {
-    public static readonly CubicBezier Decelerate = new(0, 0, 0, 1);
+    public static readonly CubicBezier Decelerate = FluentMotion.Enter;
 
     // The exit's curve: cubic-bezier(1, 0, 1, 1).
-    public static readonly CubicBezier Accelerate = new(1, 0, 1, 1);
+    public static readonly CubicBezier Accelerate = FluentMotion.Exit;
 
-    public static readonly TimeSpan EnterDuration = TimeSpan.FromMilliseconds(250);
-    public static readonly TimeSpan EnterFade = TimeSpan.FromMilliseconds(83);
-    public static readonly TimeSpan ExitDuration = TimeSpan.FromMilliseconds(167);
+    public static readonly TimeSpan EnterDuration = FluentMotion.Slow;
+    public static readonly TimeSpan EnterFade = FluentMotion.Fast;
+    public static readonly TimeSpan ExitDuration = FluentMotion.Normal;
 
     // How far the card slides: 40 px at 100%, scaled with the display.
     public const int TravelAt96 = 40;

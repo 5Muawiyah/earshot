@@ -315,8 +315,11 @@ internal sealed partial class WidgetCard
         if (ScrollIndicatorMouseMove(e))
         {
             HideTip();
+            TrackHot(null, pressed: false);
             return;
         }
+
+        TrackHot(e.Location, pressed: _hotPressed && (MouseButtons & MouseButtons.Left) != 0);
 
         (string Text, Rectangle Anchor)? tip = TooltipAt(e.Location);
         if (tip == _tipPending || (tip is null && _tipPending is null))
@@ -343,6 +346,7 @@ internal sealed partial class WidgetCard
     {
         base.OnMouseLeave(e);
         HideTip();
+        TrackHot(null, pressed: false);
         if (!_scrollDragging)
         {
             SetScrollHot(false);
@@ -361,6 +365,15 @@ internal sealed partial class WidgetCard
     private void ShowTip(string text, Rectangle anchor)
     {
         TooltipShownForTest = text;
+
+        // The tooltip fades in and out (the tooltip control's own fade) only with animation effects on.
+        bool fade = _driver?.AnimationsEnabled ?? false;
+        if (_toolTip.UseFading != fade || _toolTip.UseAnimation != fade)
+        {
+            _toolTip.UseFading = fade;
+            _toolTip.UseAnimation = fade;
+        }
+
         _toolTip.Show(text, this, new Point(anchor.X, anchor.Bottom + CardPlacement.Scale(4, _dpi)), 8000);
     }
 

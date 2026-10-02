@@ -14,6 +14,8 @@ namespace Earshot.Widget;
 internal sealed partial class WidgetCard
 {
     private CardAnimator? _animator;
+    private FrameDriver? _driver;
+    private IFrameClock? _clock;
     private bool _layered;
     private bool _motionBroken;
     private bool _exiting;
@@ -28,6 +30,10 @@ internal sealed partial class WidgetCard
 
     internal Func<nint, byte, bool> SetWindowAlpha = static (handle, alpha) =>
         NativeMethods.SetLayeredWindowAttributes(handle, 0, alpha, NativeMethods.LWA_ALPHA);
+
+    // The third: the window put at a position and size at once, for a height that moves point to point.
+    internal Func<nint, Rectangle, bool> PlaceWindow = static (handle, r) =>
+        NativeMethods.SetWindowPos(handle, 0, r.X, r.Y, r.Width, r.Height, NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
 
     // The recording seam: every placement, DWM attribute call, alpha or motion window call, client size change and invalidation
     // (with its rectangle) is reported here, so a test can prove that a card whose figures did not change makes none of them, and
@@ -51,17 +57,31 @@ internal sealed partial class WidgetCard
         return ok;
     }
 
-    // Gives the card motion. Called before the card has a window handle: the layered style is chosen when the
-    // handle is created.
-    internal void AttachMotion(TimeProvider time, Action<Action> uiPost, Func<bool> animationsEnabled)
+    private bool CallPlace(nint handle, Rectangle bounds)
     {
-        ArgumentNullException.ThrowIfNull(time);
-        ArgumentNullException.ThrowIfNull(uiPost);
-        ArgumentNullException.ThrowIfNull(animationsEnabled);
-        _animator?.Dispose();
-        _layered = CardMotion.UseAlphaFade;
-        _animator = new CardAnimator(time, new WindowMotion(this), animationsEnabled, uiPost);
+        bool ok = PlaceWindow(handle, bounds);
+        Record(CardWindowCallKind.Move, bounds, ok ? "move and size" : "move and size failed");
+        return ok;
     }
+
+    // Gives the card motion, paced by clock (one frame per refresh of the card's display; the card owns it from here and
+    // disposes it with itself). Called before the card has a window handle: the layered style is chosen when the handle is
+    // created. Everything that moves on the card runs on the one driver: the entrance and exit, a height, a page, a toggle's
+    // knob, a hover fill.
+    internal void AttachMotion(IFrameClock clock, Func<bool> animationsEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(animationsEnabled);
+        StopMotion();
+        _layered = CardMotion.UseAlphaFade;
+        _clock = clock;
+        _driver = new FrameDriver(clock, animationsEnabled);
+        _driver.AfterFrame += OnMotionFrame;
+        _animator = new CardAnimator(_driver, new WindowMotion(this));
+    }
+
+    // The frame driver, for tests: whether it is subscribed to its clock.
+    internal bool MotionSubscribed => _driver?.Subscribed ?? false;
 
     // True when the style bit for the fade is wanted at handle creation.
     private bool WantsLayeredStyle => _animator is not null && _layered;
@@ -72,15 +92,26 @@ internal sealed partial class WidgetCard
     // Whether the card was given motion, for tests.
     internal bool HasMotion => _animator is not null;
 
-    // Whether a motion is running, for tests.
-    internal bool IsMoving => _animator?.Running ?? false;
+    // Whether the window is moving: sliding in or out, or changing height.
+    internal bool IsMoving => (_animator?.Running ?? false) || Resizing;
 
     // Where the card rests: its bounds, except while it is sliding, when the window is somewhere along the way.
     internal Rectangle RestBounds => IsMoving ? _rest : Bounds;
 
     // Puts the card at rest at bounds, even while it is sliding.
+    // A card on screen and still whose size changes moves to it point to point instead (MoveBoundsTo).
     internal void PlaceAtRest(Rectangle bounds)
     {
+        if (Resizing && bounds == _rest)
+        {
+            return;
+        }
+
+        if (MoveBoundsTo(bounds))
+        {
+            return;
+        }
+
         _rest = bounds;
         Record(CardWindowCallKind.Place, bounds, Bounds == bounds ? "place at rest, same bounds" : "place at rest");
         Bounds = bounds;
@@ -91,6 +122,7 @@ internal sealed partial class WidgetCard
     // The window starts invisible and out at the far end of the travel, so there is no frame at rest before the slide.
     internal void PresentAnimated(Rectangle rest, int travel)
     {
+        StopResizing();
         _rest = rest;
         _travel = travel;
         _exiting = false;
@@ -126,6 +158,13 @@ internal sealed partial class WidgetCard
         if (_exiting)
         {
             return;
+        }
+
+        // A height on its way leaves from where it has got to.
+        if (Resizing)
+        {
+            _rest = Bounds;
+            StopResizing();
         }
 
         // A press that began before the exit is over with it, and nothing pressed from here on is answered (OnKeyDown,
@@ -187,6 +226,15 @@ internal sealed partial class WidgetCard
     {
         _animator?.Dispose();
         _animator = null;
+        if (_driver is not null)
+        {
+            _driver.AfterFrame -= OnMotionFrame;
+            _driver.Dispose();
+            _driver = null;
+        }
+
+        (_clock as IDisposable)?.Dispose();
+        _clock = null;
         _exiting = false;
     }
 

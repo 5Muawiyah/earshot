@@ -29,15 +29,32 @@ public sealed class WidgetCardMotionTests
         return alpha;
     }
 
+    // The presenter's own timers run on Time; the card's frames come from a fake 60 Hz display, Clock. Advance moves both.
+    private sealed class MotionTime
+    {
+        public TestTimeProvider Time { get; } = new();
+
+        public FakeVBlankClock Clock { get; } = new(60);
+
+        public int LiveTimers => Time.LiveTimers;
+
+        public void Advance(TimeSpan by)
+        {
+            Time.Advance(by);
+            Clock.RunUntil(Clock.Now + by);
+        }
+    }
+
     private static TimeSpan Ms(double milliseconds) => TimeSpan.FromTicks((long)Math.Round(milliseconds * TimeSpan.TicksPerMillisecond));
 
-    private static (WidgetCardPresenter Presenter, WidgetCard Card, TestTimeProvider Time) Open(bool animations)
+    private static (WidgetCardPresenter Presenter, WidgetCard Card, MotionTime Time) Open(bool animations)
     {
         var log = new CapturingLog();
-        var time = new TestTimeProvider();
+        var time = new MotionTime();
         WidgetCard? card = null;
         var presenter = new WidgetCardPresenter(
-            () => card = new WidgetCard(log), CardKit.Callbacks(), CardKit.Inline, time, log, host: null, animationsEnabled: () => animations);
+            () => card = new WidgetCard(log), CardKit.Callbacks(), CardKit.Inline, time.Time, log, host: null, animationsEnabled: () => animations,
+            frameClockFor: _ => time.Clock);
         presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
         Application.DoEvents();
         return (presenter, card!, time);
@@ -48,7 +65,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time) = Open(animations: true);
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time) = Open(animations: true);
             using (presenter)
             {
                 Assert.IsTrue((Phase5.TestWindows.ExtendedStyle(card.Handle) & WsExLayered) != 0, "The layered style is what the fade needs.");
@@ -59,9 +76,10 @@ public sealed class WidgetCardMotionTests
                 Assert.AreEqual(rest.X, card.Bounds.X);
                 Assert.AreEqual(0, AlphaOf(card), "And invisible.");
 
-                time.Advance(Ms(16));
-                MotionFrame expected = CardMotion.FrameAt(CardMotion.EnterFromBelow(travel), Ms(16));
-                Assert.AreEqual(rest.Y + expected.OffsetPx, card.Bounds.Y, "The window is where the curve puts it at 16 ms.");
+                // The display's first blank, 1/60 s after the open.
+                time.Advance(time.Clock.TimeOfBlank(1));
+                MotionFrame expected = CardMotion.FrameAt(CardMotion.EnterFromBelow(travel), time.Clock.TimeOfBlank(1));
+                Assert.AreEqual(rest.Y + expected.OffsetPx, card.Bounds.Y, "The window is where the curve puts it at the first blank.");
                 Assert.AreEqual(expected.Alpha, AlphaOf(card));
 
                 time.Advance(Ms(300));
@@ -77,7 +95,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time) = Open(animations: true);
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time) = Open(animations: true);
             using (presenter)
             {
                 time.Advance(Ms(300));
@@ -108,7 +126,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time) = Open(animations: true);
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time) = Open(animations: true);
             using (presenter)
             {
                 time.Advance(Ms(300));
@@ -134,7 +152,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time) = Open(animations: false);
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time) = Open(animations: false);
             using (presenter)
             {
                 Assert.IsTrue(presenter.IsShown);
@@ -142,6 +160,7 @@ public sealed class WidgetCardMotionTests
                 Assert.AreEqual(card.RestBounds, card.Bounds, "Shown at rest in one step.");
                 Assert.AreEqual(255, AlphaOf(card), "Opaque in one step.");
                 Assert.AreEqual(1, time.LiveTimers, "Only the read line's own timer: the animator makes none.");
+                Assert.AreEqual(0, time.Clock.SubscribeCalls, "And asks for no frame.");
 
                 presenter.Hide();
                 Application.DoEvents();
@@ -153,11 +172,11 @@ public sealed class WidgetCardMotionTests
 
     // ----- a window call of the motion fails -----
 
-    private static (WidgetCardPresenter Presenter, WidgetCard Card, TestTimeProvider Time, CapturingLog Log, int[] Toggles) OpenWith(
+    private static (WidgetCardPresenter Presenter, WidgetCard Card, MotionTime Time, CapturingLog Log, int[] Toggles) OpenWith(
         Action<WidgetCard> arrange, FakeCardHost? host = null, bool show = true)
     {
         var log = new CapturingLog();
-        var time = new TestTimeProvider();
+        var time = new MotionTime();
         var toggles = new int[1];
         WidgetCardPresenterCallbacks callbacks = CardKit.Callbacks() with { RequestToggle = _ => toggles[0]++, CurrentIntent = () => new ToggleIntent(true, Guid.NewGuid(), "AirPods Pro 3") };
         WidgetCard? card = null;
@@ -167,7 +186,7 @@ public sealed class WidgetCardMotionTests
                 card = new WidgetCard(log);
                 arrange(card);
                 return card;
-            }, callbacks, CardKit.Inline, time, log, host: host, animationsEnabled: () => true);
+            }, callbacks, CardKit.Inline, time.Time, log, host: host, animationsEnabled: () => true, frameClockFor: _ => time.Clock);
         if (show)
         {
             presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
@@ -199,7 +218,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time, CapturingLog log, _) = OpenWith(c => c.MoveWindow = MoveFailingOnce(c));
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time, CapturingLog log, _) = OpenWith(c => c.MoveWindow = MoveFailingOnce(c));
             using (presenter)
             {
                 Assert.IsTrue(card.Visible, "The card is on screen.");
@@ -228,7 +247,7 @@ public sealed class WidgetCardMotionTests
         {
             Func<nint, int, int, bool>? real = null;
             bool failNext = false;
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time, _, _) = OpenWith(c =>
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time, _, _) = OpenWith(c =>
             {
                 real = c.MoveWindow;
                 c.MoveWindow = (handle, x, y) =>
@@ -269,7 +288,7 @@ public sealed class WidgetCardMotionTests
         {
             Func<nint, int, int, bool>? real = null;
             int restY = int.MinValue;
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time, CapturingLog log, _) = OpenWith(c =>
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time, CapturingLog log, _) = OpenWith(c =>
             {
                 real = c.MoveWindow;
                 c.MoveWindow = (handle, x, y) =>
@@ -304,7 +323,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time, CapturingLog log, _) = OpenWith(c =>
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time, CapturingLog log, _) = OpenWith(c =>
             {
                 Func<nint, byte, bool> real = c.SetWindowAlpha;
                 c.SetWindowAlpha = (handle, alpha) =>
@@ -348,7 +367,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time, _, int[] toggles) = OpenWith(_ => { });
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time, _, int[] toggles) = OpenWith(_ => { });
             using (presenter)
             {
                 time.Advance(Ms(300));
@@ -375,7 +394,7 @@ public sealed class WidgetCardMotionTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time, _, int[] toggles) = OpenWith(_ => { });
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time, _, int[] toggles) = OpenWith(_ => { });
             using (presenter)
             {
                 time.Advance(Ms(300));
@@ -396,7 +415,7 @@ public sealed class WidgetCardMotionTests
         Phase5.CardDesktop.Run(() =>
         {
             var host = new FakeCardHost();
-            (WidgetCardPresenter presenter, WidgetCard card, TestTimeProvider time, _, _) = OpenWith(_ => { }, host);
+            (WidgetCardPresenter presenter, WidgetCard card, MotionTime time, _, _) = OpenWith(_ => { }, host);
             using (presenter)
             {
                 time.Advance(Ms(300));

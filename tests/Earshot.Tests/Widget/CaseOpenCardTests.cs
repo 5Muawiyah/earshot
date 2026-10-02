@@ -412,13 +412,14 @@ public sealed class CaseOpenCardTests
             var callbacks = new FakeCallbacks();
             var log = new CapturingLog();
             var time = new Streaming.TestTimeProvider();
+            var clock = new FakeVBlankClock(60);
             WidgetCard? card = null;
             using var presenter = new CaseOpenCardPresenter(
                 () => card = new WidgetCard(log, notice: true), callbacks.Build(), Gate(), new Earshot.Tests.Phase5.FakeCardEnvironment(), Inline, time, log,
-                new FakeScene(), animationsEnabled: () => true);
+                new FakeScene(), animationsEnabled: () => true, frameClockFor: _ => clock);
             presenter.RequestShow(gaugeBounds: null);
             Application.DoEvents();
-            time.Advance(TimeSpan.FromMilliseconds(300));
+            clock.RunUntil(clock.Now + TimeSpan.FromMilliseconds(300));
             presenter.Hide();
             Application.DoEvents();
             Assert.IsTrue(card!.IsExiting);

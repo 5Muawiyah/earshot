@@ -60,7 +60,7 @@ internal sealed partial class WidgetCard
 
     // The body of the page where the rows show, in client pixels: under the header, to the bottom of the card.
     internal Rectangle SettingsViewport => _settingsLayout is { } layout
-        ? new Rectangle(0, layout.Frame.Body.Y, layout.Frame.Width, Math.Max(0, ClientSize.Height - layout.Frame.Body.Y))
+        ? new Rectangle(0, layout.Frame.Body.Y, layout.Frame.Width, Math.Max(0, LaidOutSize.Height - layout.Frame.Body.Y))
         : Rectangle.Empty;
 
     // How far the rows have scrolled, for tests.
@@ -121,7 +121,7 @@ internal sealed partial class WidgetCard
             height = Math.Min(height, Math.Max(MaxHeight, layout.Frame.Body.Y + CardPlacement.Scale(MinViewportAt96, _dpi)));
         }
 
-        SetClientSizeIfChanged(new Size(layout.Frame.Width, height));
+        SizeTo(new Size(layout.Frame.Width, height));
         _settingsScroll = CardScroll.Clamp(_settingsScroll, layout.Frame.Body.Height, SettingsViewport.Height);
         RepaintIfChanged();
     }
@@ -145,6 +145,7 @@ internal sealed partial class WidgetCard
 
         _settingsScroll = next;
         HideTip();
+        ForgetFills();
         Invalidate();
     }
 
@@ -393,20 +394,27 @@ internal sealed partial class WidgetCard
                 break;
             case SettingsPart.Expand:
                 // Only the page changes: the row's choices show or go, and the focus stays on the chevron.
+                bool opening;
                 switch (target.Row)
                 {
                     case SettingsRowId.More:
-                        _moreExpanded = !_moreExpanded;
+                        opening = _moreExpanded = !_moreExpanded;
                         break;
                     case SettingsRowId.GaugeOrder:
-                        _orderExpanded = !_orderExpanded;
+                        opening = _orderExpanded = !_orderExpanded;
                         break;
                     default:
-                        _caseCardExpanded = !_caseCardExpanded;
+                        opening = _caseCardExpanded = !_caseCardExpanded;
                         break;
                 }
 
+                SettingsLayout? before = _settingsLayout;
                 RenderSettings(values);
+                if (before is not null && _settingsLayout is { } after)
+                {
+                    NoteExpander(target.Row, opening, before, after);
+                }
+
                 Invalidate();
                 break;
             case SettingsPart.Check when target.Index >= 0 && target.Index < values.CaseOpenCardDisplayOptions.Count:
@@ -783,7 +791,7 @@ internal sealed partial class WidgetCard
             g.TranslateTransform(0, -_settingsScroll);
         }
 
-        DrawSettingsRows(g, values, layout, colours, focusVisible, focus);
+        DrawSettingsRowsMoving(g, values, layout, colours, focusVisible, focus);
         g.Restore(state);
 
         if (scrolls)
@@ -900,7 +908,7 @@ internal sealed partial class WidgetCard
 
                     break;
                 case SettingsRowId.CaseCard:
-                    CardPaint.Toggle(g, item.A, values.CaseOpenCardOn, colours, _dpi);
+                    CardPaint.Toggle(g, item.A, values.CaseOpenCardOn, colours, _dpi, Knob(item.Row, item.A, values.CaseOpenCardOn));
                     if (Focused(item.Row, SettingsPart.Toggle))
                     {
                         CardPaint.Focus(g, item.A, item.A.Height / 2, colours, _dpi);
@@ -929,7 +937,7 @@ internal sealed partial class WidgetCard
                         focusVisible && focus == new SettingsTarget(item.Row, SettingsPart.Check, item.Index));
                     break;
                 default:
-                    CardPaint.Toggle(g, item.A, ToggleValue(values, item.Row), colours, _dpi);
+                    CardPaint.Toggle(g, item.A, ToggleValue(values, item.Row), colours, _dpi, Knob(item.Row, item.A, ToggleValue(values, item.Row)));
                     if (Focused(item.Row, SettingsPart.Toggle))
                     {
                         CardPaint.Focus(g, item.A, item.A.Height / 2, colours, _dpi);

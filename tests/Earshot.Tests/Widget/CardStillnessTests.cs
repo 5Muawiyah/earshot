@@ -53,7 +53,8 @@ public sealed class CardStillnessTests
     {
         private int _hostDpi = 96;
 
-        public Rig()
+        // motion: the card is given motion on a fake 300 Hz display, as the tray gives it on the owner's.
+        public Rig(bool motion = false)
         {
             Snapshot = Message(0, left: 70, right: 70);
             WidgetCardPresenterCallbacks callbacks = CardKit.Callbacks() with { CurrentSnapshot = () => Snapshot, Dpi = () => _hostDpi };
@@ -65,8 +66,11 @@ public sealed class CardStillnessTests
                     Card.CallRecorder = Calls.Add;
                     return Card;
                 },
-                callbacks, CardKit.Inline, Time, Log, host: null, animationsEnabled: null, workAreaFor: _ => WorkArea);
+                callbacks, CardKit.Inline, Time, Log, host: null, animationsEnabled: motion ? () => true : null, workAreaFor: _ => WorkArea,
+                frameClockFor: _ => Clock);
         }
+
+        public FakeVBlankClock Clock { get; } = new(300);
 
         public CapturingLog Log { get; } = new();
 
@@ -100,6 +104,7 @@ public sealed class CardStillnessTests
         {
             Presenter.RequestShow(GaugeRect, GaugeRect.Location);
             Application.DoEvents();
+            Clock.RunUntilIdle();
             Time.Advance(TimeSpan.FromMilliseconds(400));
             Application.DoEvents();
             ShownBattery shown = Card!.Model.ShownParts;
@@ -175,6 +180,40 @@ public sealed class CardStillnessTests
             Assert.AreEqual(darkSets, card.DarkModeApplications, "The dark mode attribute was not set again.");
             Assert.AreEqual(backdropSets, card.BackdropApplications, "Nor the backdrop.");
             Assert.IsTrue(rig.Presenter.IsShown);
+        });
+    }
+
+    // The same minute on a card with motion, on a fake display: once the entrance is over the card lets its frame source go, so
+    // the minute brings no frame, no window call and no paint; the motion's own machinery is as still as the card.
+    [TestMethod]
+    public void ACardWithMotionLetsItsFrameSourceGoAtRestAndMakesNoWindowCall()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new Rig(motion: true);
+            rig.Open();
+            WidgetCard card = rig.Card!;
+            Assert.IsTrue(card.HasMotion);
+            Assert.AreEqual(0, rig.Clock.Subscriptions, "At rest after the entrance: nothing subscribed.");
+            int subscribes = rig.Clock.SubscribeCalls;
+            using var counter = new WindowMessageCounter(card.Handle);
+            int index = 0;
+            double since = 0;
+
+            for (int second = 0; second < 60; second++)
+            {
+                RunSeconds(rig, 1, ref index, ref since);
+                for (int blank = 0; blank < 300; blank++)
+                {
+                    Assert.IsFalse(rig.Clock.Blank(), "No frame reaches anyone at rest.");
+                }
+            }
+
+            Assert.AreEqual(subscribes, rig.Clock.SubscribeCalls, "Nothing asked for frames.");
+            Assert.IsFalse(card.MotionSubscribed);
+            Assert.IsEmpty(rig.Calls, "The card made window calls though nothing it draws changed: " + string.Join("; ", rig.Calls.Take(8)));
+            Assert.AreEqual(0, counter.Count(WindowMessageCounter.WmWindowPosChanging));
+            Assert.AreEqual(0, counter.Count(WindowMessageCounter.WmPaint), "Not painted.");
         });
     }
 

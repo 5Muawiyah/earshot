@@ -12,43 +12,33 @@ internal interface ICardWindowMotion
     bool Apply(Rectangle rest, int offsetPx, byte alpha);
 }
 
-// Drives a CardMotionPlan with a timer on the given clock: a tick about every frame asks the plan for the frame at
-// the elapsed time and applies it, and stops when the motion is over. An entrance during an exit, and the other
-// way round, starts from where the card is. With animation effects off there is no timer and no movement: the card
-// is shown at rest, or hidden, in one step.
+// Drives a CardMotionPlan on a frame driver: each frame of the display asks the plan for the frame at the time of that
+// refresh and applies it, and the animator stops asking for frames when the motion is over. An entrance during an exit, and
+// the other way round, starts from where the card is. With animation effects off nothing runs and nothing moves: the card is
+// shown at rest, or hidden, in one step, and no frame is asked for.
 //
-// Not thread safe: the timer's tick is handed to uiPost, and everything else is called on the UI thread.
+// UI thread only (the driver's frames arrive there).
 internal sealed class CardAnimator : IDisposable
 {
-    public static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(16);
-
-    private readonly TimeProvider _time;
+    private readonly FrameDriver _driver;
     private readonly ICardWindowMotion _sink;
-    private readonly Func<bool> _animationsEnabled;
-    private readonly Action<Action> _uiPost;
-    private ITimer? _timer;
     private CardMotionPlan? _plan;
     private Rectangle _rest;
     private Action? _hidden;
-    private long _startedAt;
-    private MotionFrame _last = new(0, 0, Done: true);
-    private int _generation;
+    private TimeSpan _startedAt;
+    private MotionFrame _last = new(0, 255, Done: true);
     private bool _disposed;
 
-    public CardAnimator(TimeProvider time, ICardWindowMotion sink, Func<bool> animationsEnabled, Action<Action> uiPost)
+    public CardAnimator(FrameDriver driver, ICardWindowMotion sink)
     {
-        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(driver);
         ArgumentNullException.ThrowIfNull(sink);
-        ArgumentNullException.ThrowIfNull(animationsEnabled);
-        ArgumentNullException.ThrowIfNull(uiPost);
-        _time = time;
+        _driver = driver;
         _sink = sink;
-        _animationsEnabled = animationsEnabled;
-        _uiPost = uiPost;
     }
 
     // True while a motion is running.
-    public bool Running => _timer is not null;
+    public bool Running => _driver.IsRunning(this);
 
     // The last frame applied, for tests.
     internal MotionFrame LastFrame => _last;
@@ -63,7 +53,7 @@ internal sealed class CardAnimator : IDisposable
 
         _rest = rest;
         _hidden = null;
-        if (!_animationsEnabled())
+        if (!_driver.AnimationsEnabled)
         {
             Stop();
             Apply(CardMotion.FrameAt(CardMotion.EnterFromBelow(travel), TimeSpan.Zero, reducedMotion: true));
@@ -87,7 +77,7 @@ internal sealed class CardAnimator : IDisposable
         }
 
         _rest = rest;
-        if (!_animationsEnabled())
+        if (!_driver.AnimationsEnabled)
         {
             Stop();
             _hidden = null;
@@ -133,40 +123,41 @@ internal sealed class CardAnimator : IDisposable
     {
         Stop();
         _plan = plan;
-        _startedAt = _time.GetTimestamp();
-        int generation = ++_generation;
+        _startedAt = _driver.Now;
         if (!Apply(CardMotion.FrameAt(plan, TimeSpan.Zero)))
         {
             GiveUp();
             return;
         }
 
-        _timer = _time.CreateTimer(_ => _uiPost(() => Tick(generation)), null, FrameInterval, FrameInterval);
+        _driver.Run(this, Frame);
     }
 
-    private void Tick(int generation)
+    // One refresh of the display: the plan's frame at the refresh's time. False when the motion is over.
+    private bool Frame(TimeSpan at)
     {
-        if (_disposed || generation != _generation || _plan is not { } plan)
+        if (_disposed || _plan is not { } plan)
         {
-            return;
+            return false;
         }
 
-        MotionFrame frame = CardMotion.FrameAt(plan, _time.GetElapsedTime(_startedAt));
+        MotionFrame frame = CardMotion.FrameAt(plan, at - _startedAt);
         if (!Apply(frame))
         {
             GiveUp();
-            return;
+            return false;
         }
 
         if (!frame.Done)
         {
-            return;
+            return true;
         }
 
         Stop();
         Action? hidden = _hidden;
         _hidden = null;
         hidden?.Invoke();
+        return false;
     }
 
     private bool Apply(MotionFrame frame)
@@ -176,7 +167,7 @@ internal sealed class CardAnimator : IDisposable
     }
 
     // A frame could not be applied. The window has been left at rest and opaque, so the motion simply ends: no further
-    // timer tick, and the card is hidden when an exit was under way, as it would have been at its end.
+    // frame, and the card is hidden when an exit was under way, as it would have been at its end.
     private void GiveUp()
     {
         Stop();
@@ -185,11 +176,7 @@ internal sealed class CardAnimator : IDisposable
         hidden?.Invoke();
     }
 
-    private void Stop()
-    {
-        _timer?.Dispose();
-        _timer = null;
-    }
+    private void Stop() => _driver.Stop(this);
 }
 
 // Where "animation effects" is read from: SystemParametersInfo with SPI_GETCLIENTAREAANIMATION, asked at each show

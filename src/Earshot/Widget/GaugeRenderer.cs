@@ -60,7 +60,13 @@ internal static class GaugeRenderer
 
     // The gauge bitmap, layout.Width x layout.Height, Format32bppPArgb so it can go straight to
     // UpdateLayeredWindow. The caller disposes it.
-    public static Bitmap Render(GaugeContent content, GaugePalette palette, GaugeLayout layout, bool hover, string fontFamily)
+    public static Bitmap Render(GaugeContent content, GaugePalette palette, GaugeLayout layout, bool hover, string fontFamily) =>
+        Render(content, palette, layout, hover ? 1 : 0, fontFamily, ring: null);
+
+    // The same, part way through a motion: hover is the hover fill's strength (0 none, 1 full), and ring, when given, is where
+    // the ring's arc is drawn to (a percentage, which may be fractional while it moves point to point to a new value). The
+    // number is always the content's own: it changes at once.
+    public static Bitmap Render(GaugeContent content, GaugePalette palette, GaugeLayout layout, double hover, string fontFamily, double? ring)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(fontFamily);
@@ -72,6 +78,7 @@ internal static class GaugeRenderer
         g.Clear(Color.Transparent);
 
         FillBackground(g, palette, layout, hover);
+        double sweep = ring ?? content.Percent ?? 0;
 
         // A last reading or an estimate is drawn in tertiary ink throughout; the earbud pair stays at full ink on this PC,
         // since the AirPods themselves are here.
@@ -80,7 +87,7 @@ internal static class GaugeRenderer
         {
             case GaugeMode.Reading:
                 DrawEarbudPair(g, layout, palette.Ink);
-                DrawRing(g, layout, palette, content);
+                DrawRing(g, layout, palette, content, sweep);
                 DrawNumber(g, layout, content, palette, fontFamily);
                 if (content.Charging)
                 {
@@ -91,7 +98,7 @@ internal static class GaugeRenderer
 
             case GaugeMode.CaseAway:
                 DrawCaseMark(g, CaseMarkRect(layout), ink);
-                DrawRing(g, layout, palette, content);
+                DrawRing(g, layout, palette, content, sweep);
                 DrawNumber(g, layout, content, palette, fontFamily);
                 if (content.Charging)
                 {
@@ -166,10 +173,12 @@ internal static class GaugeRenderer
     // gauge. Layered-window hit testing follows the painted pixels, so nothing outside this rounded rectangle
     // ever answers a click.
     // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows
-    private static void FillBackground(Graphics g, GaugePalette palette, GaugeLayout layout, bool hover)
+    // A fill part way between the two (fading in or out over FluentMotion's hover time) is the two colours mixed, and never
+    // falls under the idle fill's alpha of 1.
+    private static void FillBackground(Graphics g, GaugePalette palette, GaugeLayout layout, double hover)
     {
         using GraphicsPath path = RoundedRectangle(new RectangleF(0, 0, layout.Width, layout.Height), layout.CornerRadius);
-        using var brush = new SolidBrush(hover ? palette.HoverFill : palette.IdleFill);
+        using var brush = new SolidBrush(Mix(palette.IdleFill, palette.HoverFill, hover));
         g.FillPath(brush, path);
     }
 
@@ -203,13 +212,29 @@ internal static class GaugeRenderer
         g.DrawEllipse(track, new RectangleF(c.X - r, c.Y - r, r * 2, r * 2));
     }
 
-    private static void DrawRing(Graphics g, GaugeLayout layout, GaugePalette palette, GaugeContent content)
+    internal static Color Mix(Color from, Color to, double share)
+    {
+        double p = Math.Clamp(share, 0, 1);
+        if (p <= 0)
+        {
+            return from;
+        }
+
+        if (p >= 1)
+        {
+            return to;
+        }
+
+        static int Channel(int a, int b, double p) => (int)Math.Round(a + ((b - a) * p), MidpointRounding.AwayFromZero);
+        return Color.FromArgb(Channel(from.A, to.A, p), Channel(from.R, to.R, p), Channel(from.G, to.G, p), Channel(from.B, to.B, p));
+    }
+
+    private static void DrawRing(Graphics g, GaugeLayout layout, GaugePalette palette, GaugeContent content, double percent)
     {
         DrawRingTrack(g, layout, palette);
         PointF c = RingCentre(layout);
         float r = layout.RingRadius;
         var square = new RectangleF(c.X - r, c.Y - r, r * 2, r * 2);
-        int percent = content.Percent ?? 0;
         if (percent <= 0)
         {
             return;
@@ -227,7 +252,7 @@ internal static class GaugeRenderer
         }
         else
         {
-            g.DrawArc(fill, square, -90f, 360f * percent / 100f);
+            g.DrawArc(fill, square, -90f, (float)(360 * percent / 100));
         }
     }
 
