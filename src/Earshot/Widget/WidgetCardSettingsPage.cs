@@ -835,8 +835,11 @@ internal sealed partial class WidgetCard
 
             if (item.DividerAbove)
             {
+                // The card draws with PixelOffsetMode.Half, so a whole coordinate is the edge between two pixel rows: a 1 px pen on it
+                // would put half its strength on each. Half a pixel down puts the whole stroke on the row the item starts at.
                 using var line = new Pen(colours.RowStroke, 1f);
-                g.DrawLine(line, item.Bounds.Left + 1, item.Bounds.Top, item.Bounds.Right - 2, item.Bounds.Top);
+                float strokeY = item.Bounds.Top + 0.5f;
+                g.DrawLine(line, item.Bounds.Left + 1, strokeY, item.Bounds.Right - 2, strokeY);
             }
 
             if (item.Glyph != '\0')
