@@ -207,7 +207,7 @@ public sealed class SettingsAndUpdatesDesignPixelTests
             {
                 Rectangle row = card.CurrentSetupLayout!.Progress;
                 DesignPixels.AssertSameColour(c.Accent, progress.GetPixel(row.X + 4, row.Y + (row.Height / 2)), "Downloading: the fill is the accent from the left");
-                Assert.AreNotEqual(c.Accent, progress.GetPixel(row.Right - 60, row.Y + (row.Height / 2)), "and is not full at 60%");
+                DesignPixels.AssertNotSameColour(c.Accent, progress.GetPixel(row.Right - 60, row.Y + (row.Height / 2)), "and is not full at 60%");
             }
         });
     }

@@ -116,7 +116,7 @@ public sealed class CardDesignPixelTests
             }
 
             Assert.AreEqual("4 min", WidgetCopy.StaleAgeAmount(TimeSpan.FromMinutes(4)), "The age is the table's example.");
-            Assert.AreNotEqual(c.Accent, bitmap.GetPixel(layout.Left.Bar.X + 1, layout.Left.Bar.Y), "A stale bar is not the accent");
+            DesignPixels.AssertNotSameColour(c.Accent, bitmap.GetPixel(layout.Left.Bar.X + 1, layout.Left.Bar.Y), "A stale bar is not the accent");
         });
     }
 

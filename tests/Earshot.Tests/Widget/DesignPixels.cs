@@ -67,6 +67,11 @@ internal static class DesignPixels
     public static void AssertSameColour(Color expected, Color actual, string? message = null) =>
         Assert.AreEqual(expected.ToArgb(), actual.ToArgb(), (message ?? "The colour") + ": expected " + expected + " (" + expected.ToArgb().ToString("X8") + "), drawn " + actual);
 
+    // The colours differ by value: Color's own inequality also compares how it was made, so a system colour never "equals" a pixel and
+    // a check that a pixel is not the accent would pass whatever the pixel was.
+    public static void AssertNotSameColour(Color unexpected, Color actual, string? message = null) =>
+        Assert.AreNotEqual(unexpected.ToArgb(), actual.ToArgb(), (message ?? "The colour") + ": not " + unexpected + " (" + unexpected.ToArgb().ToString("X8") + "), drawn " + actual);
+
     public static int Distance(Color a, Color b) => Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Max(Math.Abs(a.B - b.B), Math.Abs(a.A - b.A))));
 
     // The pixel of a rectangle that differs most from the background: the ink of text at its fullest.
