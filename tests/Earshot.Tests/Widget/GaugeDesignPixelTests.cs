@@ -197,8 +197,9 @@ public sealed class GaugeDesignPixelTests
         using Bitmap plain = Draw(new GaugeContent(GaugeMode.Reading, 62, false, false, "") { Tertiary = true }, DesignTheme.Light, 96);
         using Bitmap estimate = Draw(new GaugeContent(GaugeMode.Reading, 62, false, false, "") { Tertiary = true, Estimated = true }, DesignTheme.Light, 96);
 
-        (int First, int Last) a = DesignPixels.InkColumns(plain, layout.NumberSlot, plain.GetPixel(0, 0))!.Value;
-        (int First, int Last) b = DesignPixels.InkColumns(estimate, layout.NumberSlot, estimate.GetPixel(0, 0))!.Value;
+        // The background is the idle fill (alpha 1), read inside the window: the corner pixel is outside the rounded rectangle and clear.
+        (int First, int Last) a = DesignPixels.InkColumns(plain, layout.NumberSlot, plain.GetPixel(layout.Width / 2, 2))!.Value;
+        (int First, int Last) b = DesignPixels.InkColumns(estimate, layout.NumberSlot, estimate.GetPixel(layout.Width / 2, 2))!.Value;
         Assert.IsGreaterThan(a.Last - a.First, b.Last - b.First, "≈ adds a mark.");
     }
 
@@ -225,19 +226,31 @@ public sealed class GaugeDesignPixelTests
         AssertNoInk(live, layout.ChargingSlot, "No bolt when it is not charging");
     }
 
-    // The case mark replaces the earbud pair: the pair's head, where the case mark is not, is empty.
+    // The case mark replaces the earbud pair. The case mark (the middle 14 units of the 24 unit grid) covers all but a sliver of where
+    // the pair is, so the pair's absence shows in the case's own seam: the thin unpainted line a little below the lid. The pair's left
+    // head runs from grid y 6 to 11 and x 6.5 to 11.5, across the seam (grid y 9.76 to 10.88); at x 8 only that head could fill it.
     [TestMethod]
     public void TheCaseMarkTakesThePlaceOfThePair()
     {
         GaugeLayout layout = GaugeLayout.For(144);
         using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.CaseAway, 80, false, false, "") { CaseMark = true, Tertiary = true }, DesignTheme.Light, 144);
         Assert.IsGreaterThan(0, (int)CaseMarkPixel(bitmap, layout).A);
-        RectangleF[] shapes = layout.EarbudShapes().Shapes;
-        // The pair's left stem is 2 grid units wide at x 9.5 to 11.5: where the case's seam and body are, both are painted or both not;
-        // a head at (6.5, 6) is above the case's lid, which starts lower.
-        PointF headCentre = new(shapes[0].X + (shapes[0].Width / 2), shapes[0].Y + (shapes[0].Height / 2));
-        Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)bitmap.GetPixel((int)headCentre.X, (int)headCentre.Y).A, "The pair is not drawn with the case mark.");
+
+        float k = layout.Mark.Width / (float)GaugeLayout.MarkGrid;
+        int seamX = (int)(layout.Mark.X + (8f * k));
+        int seamY = (int)(layout.Mark.Y + (10.32f * k));
+        Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)bitmap.GetPixel(seamX, seamY).A, "The pair is not drawn with the case mark: the seam is clear where the pair's head would fill it.");
+
+        // And the same point is filled when the pair is drawn instead.
+        using Bitmap pair = Draw(new GaugeContent(GaugeMode.Reading, 80, false, false, ""), DesignTheme.Light, 144);
+        Assert.IsGreaterThan(GaugePalette.IdleAlpha + 1, (int)pair.GetPixel(seamX, seamY).A, "Sanity: the pair's head is there.");
     }
+
+    // GDI+ anti-aliases an edge a little past the geometry it is given: probed on this machine (Windows 11, GDI+ with
+    // SmoothingMode.AntiAlias and PixelOffsetMode.HighQuality), the ring's outer edge, which sits exactly on its box's edge, writes alpha
+    // 0x14 to 0x1D (8 to 11%) into the one pixel column beyond the box, and nothing into the second. So the first pixel column next to
+    // a slot is its anti-alias fringe, and the empty gap and padding are checked from the second.
+    private const int AntiAliasFringe = 1;
 
     // All six orders at the three scales: the ring's track, the value and the bolt are each where the layout puts them, and the gaps
     // between them are empty.
@@ -261,13 +274,14 @@ public sealed class GaugeDesignPixelTests
         Rectangle Slot(GaugePiece piece) => piece switch { GaugePiece.Ring => layout.RingBox, GaugePiece.Number => layout.NumberSlot, _ => layout.ChargingSlot };
         foreach ((GaugePiece left, GaugePiece right) in new[] { (first, second), (second, third) })
         {
-            int gapLeft = Slot(left).Right;
-            int gapRight = Slot(right).Left;
+            int gapLeft = Slot(left).Right + AntiAliasFringe;
+            int gapRight = Slot(right).Left - AntiAliasFringe;
             AssertNoInk(bitmap, new Rectangle(gapLeft, 0, Math.Max(0, gapRight - gapLeft), layout.Height), "The gap between " + left + " and " + right + where);
         }
 
-        AssertNoInk(bitmap, new Rectangle(0, 0, Slot(first).Left, layout.Height), "The left padding" + where);
-        AssertNoInk(bitmap, new Rectangle(Slot(third).Right, 0, layout.Width - Slot(third).Right, layout.Height), "The right padding" + where);
+        AssertNoInk(bitmap, new Rectangle(0, 0, Math.Max(0, Slot(first).Left - AntiAliasFringe), layout.Height), "The left padding" + where);
+        int rightPadStart = Slot(third).Right + AntiAliasFringe;
+        AssertNoInk(bitmap, new Rectangle(rightPadStart, 0, Math.Max(0, layout.Width - rightPadStart), layout.Height), "The right padding" + where);
     }
 
     // The earbud pair's four shapes are filled in ink at their grid places.
