@@ -210,14 +210,15 @@ public sealed class WidgetCardScrollTests
         {
             using ScrollPage page = ScrollPage.Open(SmallWorkArea);
             page.OpenSettings();
+            page.OpenMore();
             Wheel(page.Card, -120 * 100);
-            CardControl toggle = page.Card.CurrentControls()[^1];
-            Assert.IsGreaterThanOrEqualTo(page.Viewport.Top, toggle.Bounds.Top, "The last toggle is in view.");
+            CardControl toggle = page.LeftClickToggle();
+            Assert.IsGreaterThanOrEqualTo(page.Viewport.Top, toggle.Bounds.Top, "The toggle is in view.");
 
             CardKit.Click(page.Card, toggle.Bounds);
 
-            CardKit.AssertCalls(page.Host, "checkAuto:True");
-            Assert.AreEqual(toggle.Bounds, page.Card.CurrentControls()[^1].Bounds, "Choosing a setting draws the page again where it was, not from the top.");
+            CardKit.AssertCalls(page.Host, "leftClick:True");
+            Assert.AreEqual(toggle.Bounds, page.LeftClickToggle().Bounds, "Choosing a setting draws the page again where it was, not from the top.");
         });
     }
 
@@ -229,12 +230,13 @@ public sealed class WidgetCardScrollTests
         {
             using ScrollPage page = ScrollPage.Open(SmallWorkArea);
             page.OpenSettings();
+            page.OpenMore();
             Wheel(page.Card, -120 * 100);
-            Rectangle toggle = page.Card.CurrentControls()[^1].Bounds;
+            Rectangle toggle = page.LeftClickToggle().Bounds;
             for (int i = 0; i < 400 && !(toggle.Top < page.Viewport.Bottom && toggle.Bottom > page.Viewport.Bottom); i++)
             {
                 Wheel(page.Card, 40);
-                toggle = page.Card.CurrentControls()[^1].Bounds;
+                toggle = page.LeftClickToggle().Bounds;
             }
 
             Assert.IsTrue(toggle.Top < page.Viewport.Bottom && toggle.Bottom > page.Viewport.Bottom, "Sanity: the toggle is cut by the bottom of the page: " + toggle + " in " + page.Viewport);
@@ -242,15 +244,16 @@ public sealed class WidgetCardScrollTests
 
             CardKit.Click(page.Card, Rectangle.Intersect(toggle, page.Viewport));
 
-            CardKit.AssertCalls(page.Host, "checkAuto:True");
+            CardKit.AssertCalls(page.Host, "leftClick:True");
             Assert.IsGreaterThan(offset, page.Card.SettingsScrollOffset, "The page scrolled down to bring it in.");
-            Rectangle after = page.Card.CurrentControls()[^1].Bounds;
+            Rectangle after = page.LeftClickToggle().Bounds;
             Assert.IsTrue(after.Top >= page.Viewport.Top && after.Bottom <= page.Viewport.Bottom, "The toggle is wholly in view: " + after + " in " + page.Viewport);
         });
     }
 
     // The same at the top edge, where the header ends: the part of a control under the header is not there to be pressed, the part
-    // below it is.
+    // below it is. The control is the gauge order's header, which is near the top of the page (the rows below the middle of a page
+    // that is a little taller than the card cannot be scrolled up under the header, there being no more page to scroll by).
     [TestMethod]
     public void AClickOnAControlCutByTheTopOfThePageScrollsItWhollyIntoViewAndStillPressesIt()
     {
@@ -260,7 +263,7 @@ public sealed class WidgetCardScrollTests
             page.OpenSettings();
             Rectangle OnScreen()
             {
-                Rectangle onPage = CardKit.Part(page.Card, SettingsRowId.GaugePosition, SettingsPart.Choice);
+                Rectangle onPage = CardKit.Part(page.Card, SettingsRowId.GaugeOrder, SettingsPart.Expand);
                 return new Rectangle(onPage.X, onPage.Y - page.Card.SettingsScrollOffset, onPage.Width, onPage.Height);
             }
 
@@ -271,15 +274,16 @@ public sealed class WidgetCardScrollTests
                 toggle = OnScreen();
             }
 
-            Assert.IsTrue(toggle.Top < page.Viewport.Top && toggle.Bottom > page.Viewport.Top, "Sanity: the toggle is cut by the top of the page: " + toggle + " in " + page.Viewport);
+            Assert.IsTrue(toggle.Top < page.Viewport.Top && toggle.Bottom > page.Viewport.Top, "Sanity: the header is cut by the top of the page: " + toggle + " in " + page.Viewport);
             int offset = page.Card.SettingsScrollOffset;
 
             CardKit.Click(page.Card, Rectangle.Intersect(toggle, page.Viewport));
 
-            CardKit.AssertCalls(page.Host, "gauge:RightEnd");
+            CardKit.AssertCalls(page.Host);
+            Assert.IsTrue(page.Card.CurrentSettingsLayout!.Items.Any(i => i.Row == SettingsRowId.GaugeOrder && i.Tiles.Count == 6), "The press opened the order's pictures.");
             Assert.IsLessThan(offset, page.Card.SettingsScrollOffset, "The page scrolled up to bring it in.");
             Rectangle after = OnScreen();
-            Assert.IsTrue(after.Top >= page.Viewport.Top && after.Bottom <= page.Viewport.Bottom, "The toggle is wholly in view: " + after + " in " + page.Viewport);
+            Assert.IsTrue(after.Top >= page.Viewport.Top && after.Bottom <= page.Viewport.Bottom, "The header is wholly in view: " + after + " in " + page.Viewport);
         });
     }
 
@@ -682,6 +686,16 @@ public sealed class WidgetCardScrollTests
                 Assert.IsLessThan(Card.CurrentSettingsLayout!.Frame.Height, Card.Height, "The page is taller than the card.");
             }
         }
+
+        // Opens More the way a person does: a press on its row, which scrolls to it first on a card shorter than the page.
+        public void OpenMore()
+        {
+            CardKit.ClickPart(Card, SettingsRowId.More, SettingsPart.Expand);
+            Assert.IsTrue(Card.CurrentSettingsLayout!.Items.Any(i => i.Row == SettingsRowId.LeftClick), "The press opened More.");
+        }
+
+        // The toggle of the last row of More that has one, which the bottom of the page ends near.
+        public CardControl LeftClickToggle() => Card.CurrentControls().Single(c => c.Name == "Left click connects");
 
         public void Dispose() => Presenter.Dispose();
     }
