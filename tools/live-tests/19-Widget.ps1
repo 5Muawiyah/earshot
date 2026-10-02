@@ -77,7 +77,7 @@ try
         'The AirPods are paired with this PC and available to connect.'
     ) -PhysicalActions @(
         'This is a long sitting. It watches the taskbar, restarts Explorer once, changes display scaling and light/dark mode and back, opens your AirPods case near the PC, and turns Bluetooth off and on. Nothing here is destructive, and every step says what it does before it asks.',
-        'The battery figures on the card come from what your AirPods broadcast, which they only do while they are out of the case or the case lid is open, and the card keeps the last figure it heard, greyed, wherever the AirPods are. Some steps below ask you to shut them in the case: that is on purpose, to see the figures grey, and the refresh say nothing was heard.'
+        'The battery figures on the card come from what your AirPods broadcast, which, in the records saved so far, they do only while they are out of the case or the case lid is open, and the card keeps the last figure it heard, greyed, wherever the AirPods are. Some steps below ask you to shut them in the case: that is on purpose, to see the figures grey, and the refresh say nothing was heard.'
     )
 
     if ($ready)
@@ -391,7 +391,7 @@ try
                 else { 'You answered ' + $accentAnswer + ' about the accent colour.' })
 
         Write-Section -Run $run -Title 'An estimate while away'
-        Wait-Owner -Run $run -Text 'Make sure the AirPods are not on this PC. Put them in the case, plug the case in so it charges, shut the lid and take it out of range of this computer, for example into another room. Leave it charging for at least thirty minutes, then look at the gauge and the card.'
+        Wait-Owner -Run $run -Text 'Make sure the AirPods are not on this PC. Put them in the case, plug the case in so it charges, open the lid next to this computer for about ten seconds so Earshot hears it charging, then shut the lid and take it out of range of this computer, for example into another room. Leave it charging for at least thirty minutes, then look at the gauge and the card.'
         $estimateAnswer = Read-Answer -Run $run -Question 'Does the gauge show the case mark with a grey ring and number, and does the card show the case figure with the "about" sign (two wavy lines) before it and how long ago the reading was? If no figure has that sign, answer "not sure": Earshot estimates only once it has learned a charge rate from your own AirPods.'
         Add-Criterion -Run $run -Id 'estimate-marked-with-age' -Criterion 'Away from this PC, a part that was charging is shown as an estimate: the "about" sign (two wavy lines) before the figure, grey, and the age of the reading it grew from; the gauge shows the case mark.' `
             -Outcome $(if ($estimateAnswer -eq 'yes') { 'pass' } elseif ($estimateAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
