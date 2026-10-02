@@ -639,7 +639,9 @@ internal static class SettingsPageLayout
                 int across = surfaceWidth - (2 * pad) - (2 * tileGap);
                 int tileWidth = across / 3;
                 int spare = across - (3 * tileWidth);
-                int tileHeight = Math.Max(CardPlacement.Scale(OrderTileHeightAt96, dpi), gaugeSize.Height + (2 * CardPlacement.Scale(6, dpi)));
+                // The design's 52 at 100%, scaled like every other figure. (The gauge is 40 high in it, so 6 above and below; at 125% the gauge's
+                // 50 in a tile of 65 leaves 7 and 8, which is the rounding of a half pixel and not a reason to grow the tile.)
+                int tileHeight = CardPlacement.Scale(OrderTileHeightAt96, dpi);
                 int gridTop = y + pad;
                 var tiles = new List<Rectangle>(6);
                 for (int i = 0; i < 6; i++)
