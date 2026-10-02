@@ -244,7 +244,9 @@ public sealed class WidgetCardSettingsTests
             Color behind = bitmap.GetPixel(2, card.CurrentSettingsLayout!.Frame.Body.Y + 20);
             foreach (Rectangle surface in card.CurrentSettingsLayout.Surfaces)
             {
-                Color inside = bitmap.GetPixel(surface.X + 6, surface.Y + (surface.Height / 2));
+                // The middle of the surface's first row: the middle of a surface of several rows can be a row's divider.
+                SettingsItem first = card.CurrentSettingsLayout.Items.First(i => surface.Contains(i.Bounds));
+                Color inside = bitmap.GetPixel(surface.X + 6, first.Bounds.Y + (first.Bounds.Height / 2));
                 AssertNear(Over(tokens.SettingsRowFill, behind), inside, 2, "The fill of " + surface);
                 Color edge = bitmap.GetPixel(surface.X + 40, surface.Y);
                 AssertNear(Over(tokens.SettingsRowStroke, Over(tokens.SettingsRowFill, behind)), edge, 3, "The stroke along the top of " + surface);
@@ -446,12 +448,14 @@ public sealed class WidgetCardSettingsTests
             var row = Enum.Parse<SettingsRowId>(rowName);
             CardSettingsValues before = page.Host.Values;
 
-            CardKit.Click(page.Card, CardKit.Part(page.Card, row, SettingsPart.Toggle));
+            // Pressed the way a person does on a card shorter than the page: the row is scrolled to first, and the press lands where the
+            // switch is then. A press at the switch's place on the page alone lands on the next row once the page has scrolled.
+            CardKit.ClickPart(page.Card, row, SettingsPart.Toggle);
 
             CollectionAssert.AreEqual(new[] { expected }, page.Host.Calls);
             Assert.AreNotEqual(before, page.Host.Values);
 
-            CardKit.Click(page.Card, CardKit.Part(page.Card, row, SettingsPart.Toggle));
+            CardKit.ClickPart(page.Card, row, SettingsPart.Toggle);
             Assert.AreEqual(before, page.Host.Values, "A second click puts it back.");
         });
     }
@@ -495,19 +499,19 @@ public sealed class WidgetCardSettingsTests
     {
         RunSettings(page =>
         {
-            CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.LowBattery, SettingsPart.Plus));
+            CardKit.ClickPart(page.Card, SettingsRowId.LowBattery, SettingsPart.Plus);
             Assert.AreEqual(30, page.Host.Values.LowBatteryPercent);
-            CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.LowBattery, SettingsPart.Minus));
-            CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.LowBattery, SettingsPart.Minus));
+            CardKit.ClickPart(page.Card, SettingsRowId.LowBattery, SettingsPart.Minus);
+            CardKit.ClickPart(page.Card, SettingsRowId.LowBattery, SettingsPart.Minus);
             Assert.AreEqual(10, page.Host.Values.LowBatteryPercent);
 
             page.Host.Calls.Clear();
-            CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.LowBattery, SettingsPart.Minus));
+            CardKit.ClickPart(page.Card, SettingsRowId.LowBattery, SettingsPart.Minus);
             Assert.IsEmpty(page.Host.Calls, "Nothing below 10.");
 
             page.Host.Values = page.Host.Values with { LowBatteryPercent = 90 };
             page.Presenter.Refresh();
-            CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.LowBattery, SettingsPart.Plus));
+            CardKit.ClickPart(page.Card, SettingsRowId.LowBattery, SettingsPart.Plus);
             Assert.IsEmpty(page.Host.Calls, "Nothing above 90.");
         });
     }
