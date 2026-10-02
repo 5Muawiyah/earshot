@@ -124,9 +124,12 @@ public sealed class VBlankFrameClockTests
             Interlocked.Increment(ref _posted);
         }
 
+        // One turn of the UI thread: what was posted before it began, and no more. Actions posted while it runs (the unpaced clock
+        // thread posts its next frame the moment a frame is delivered) wait for the next turn, as a real message loop's would.
         public void Run()
         {
-            while (_queue.TryDequeue(out Action? action))
+            int waiting = _queue.Count;
+            for (int i = 0; i < waiting && _queue.TryDequeue(out Action? action); i++)
             {
                 action();
             }
@@ -219,6 +222,34 @@ public sealed class VBlankFrameClockTests
         Assert.HasCount(1, _frames);
         Assert.IsTrue(_frames[0] > now + TimeSpan.FromMinutes(59), "An unpaced frame ends every motion in one step.");
         Assert.IsTrue(_log.Has(LogLevel.Warn, "0x887A0002"), "The raw HRESULT is in the log.");
+    }
+
+    // The race that made the test above flaky, forced: delivering a frame lets the unpaced clock thread post its next one at once, so a
+    // UI thread that kept draining the queue would deliver that one too and a single run would deliver several. One run delivers what
+    // was posted before it began, and the next frame waits for the next run.
+    [TestMethod]
+    public void OneRunOfTheUiThreadDeliversOnlyTheFramesPostedBeforeIt()
+    {
+        _outputs.Available.Clear();
+        using VBlankFrameClock clock = NewClock();
+        using IDisposable sub = clock.Subscribe(at =>
+        {
+            _frames.Add(at);
+
+            // Held inside the first delivery until the clock thread has posted the next frame, which is the interleaving.
+            if (_frames.Count == 1)
+            {
+                WaitUntil(() => _ui.Posted == 2);
+            }
+        });
+
+        WaitUntil(() => _ui.Posted == 1);
+        _ui.Run();
+
+        Assert.HasCount(1, _frames, "One run, one frame, though the next was posted while it ran.");
+        Assert.AreEqual(2, _ui.Posted, "The next frame is posted and waits.");
+        _ui.Run();
+        Assert.HasCount(2, _frames, "And the next run delivers it.");
     }
 
     [TestMethod]
