@@ -114,6 +114,13 @@ public sealed class WidgetCardTextScaleTests
                         }
 
                         Assert.IsTrue(page.Contains(control), item.Row + " control inside the page: " + control + where);
+                        // A row that opens (the gauge order's header) takes a press anywhere on it: that part is the row itself, not a control
+                        // beside the label.
+                        if (control == item.Bounds)
+                        {
+                            continue;
+                        }
+
                         Assert.IsFalse(control.IntersectsWith(item.LabelRect), item.Row + " control clear of its label" + where);
                         if (!item.SubRect.IsEmpty)
                         {
@@ -134,9 +141,9 @@ public sealed class WidgetCardTextScaleTests
         using var probe = new Bitmap(1, 1);
         using Graphics graphics = Graphics.FromImage(probe);
         var measure = new GraphicsTextMeasure(graphics, new CardType(96, 2.25));
-        SettingsLayout layout = SettingsPageLayout.Compute(FakeCardHost.Defaults(), 96, measure, 2.25);
+        SettingsLayout layout = SettingsPageLayout.Compute(FakeCardHost.Defaults() with { MoreExpanded = true }, 96, measure, 2.25);
         SettingsItem position = layout.Items.Single(i => i.Row == SettingsRowId.GaugePosition);
-        Assert.IsGreaterThanOrEqualTo(position.LabelRect.Bottom, position.A.Top, "The two choices sit under the label at 225% text.");
+        Assert.IsGreaterThanOrEqualTo(position.LabelRect.Bottom, position.A.Top, "The choice sits under the label at 225% text.");
         Assert.IsTrue(position.B.Right <= layout.Frame.Width);
     }
 
@@ -218,7 +225,12 @@ public sealed class WidgetCardTextScaleTests
                 }
                 else if (card.HasTranslucentBackdrop)
                 {
-                    Assert.AreEqual(0, alpha, "Cleared to alpha 0 for the system backdrop when DWM gave it one.");
+                    // The design (round 3, Acrylic): with a system backdrop the card paints the tint over it, and the backdrop shows through
+                    // by the tint's own alpha, so the pixel is the tint's, not clear. (White ink tells the card the theme is dark.)
+                    // GDI+ stores 210 for the 209 (82%) the dark tint asks for, so the allowance is the one level its conversion adds.
+                    int tint = DesignTokens.For(dark: true, highContrast: false).AcrylicTint.A;
+                    Assert.IsLessThanOrEqualTo(1, Math.Abs(tint - alpha), "The tint of the theme over the system backdrop when DWM gave it one: " + tint + ", drawn " + alpha + ".");
+                    Assert.IsGreaterThan(0, alpha, "Not cleared.");
                 }
             }
         });
