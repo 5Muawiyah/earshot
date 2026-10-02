@@ -81,7 +81,10 @@ public sealed class WidgetCardUpdateTests
             notice.Render(CardKit.MainModel(updateVersion: "1.2.0"), 96);
 
             Assert.IsFalse(notice.CurrentMainLayout.ShowUpdateLine);
-            Assert.IsTrue(notice.CurrentMainLayout.Gear.IsEmpty, "And no gear.");
+            // Not the gear: the owner's decision of 2 October 2026 gives the case-open card a close button, which takes the gear's place
+            // (settings are not reached from this card). It has no update line.
+            Assert.IsFalse(notice.CurrentMainLayout.Gear.IsEmpty, "The close button takes the gear's place.");
+            Assert.AreEqual(WidgetCopy.CaseOpen, notice.StatusRow.Text);
         });
     }
 

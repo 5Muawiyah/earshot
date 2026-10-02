@@ -54,7 +54,17 @@ public sealed class WidgetCardFlickerTests
             Host = host;
             var callbacks = CardKit.Callbacks() with { CurrentSnapshot = () => Snapshot };
             Presenter = new WidgetCardPresenter(
-                () => Card = new WidgetCard(Log), callbacks, CardKit.Inline, Time, Log, host, animations ? () => true : null);
+                () => Card = new WidgetCard(Log), callbacks, CardKit.Inline, Time, Log, host, animations ? () => true : null,
+                frameClockFor: _ => Clock);
+        }
+
+        // The card's frames come from the display, not from the time provider: a fake 60 Hz display, which Advance moves with the time.
+        public FakeVBlankClock Clock { get; } = new(60);
+
+        public void Advance(TimeSpan by)
+        {
+            Time.Advance(by);
+            Clock.RunUntil(Clock.Now + by);
         }
 
         public CapturingLog Log { get; } = new();
@@ -73,7 +83,7 @@ public sealed class WidgetCardFlickerTests
         {
             Presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
             Application.DoEvents();
-            Time.Advance(TimeSpan.FromMilliseconds(400));
+            Advance(TimeSpan.FromMilliseconds(400));
             Application.DoEvents();
             ShownBattery shown = Card!.Model.ShownParts;
             Assert.IsTrue(shown.Left.Fresh && shown.Right.Fresh, "Sanity: both figures are drawn, so a repaint test is about a card that has figures on it.");
@@ -149,7 +159,7 @@ public sealed class WidgetCardFlickerTests
             using var rig = new Rig(host, animations: true);
             rig.Presenter.RequestUpdatePage(CardKit.Gauge, CardKit.Gauge.Location);
             Application.DoEvents();
-            rig.Time.Advance(TimeSpan.FromMilliseconds(400));
+            rig.Advance(TimeSpan.FromMilliseconds(400));
             Application.DoEvents();
             WidgetCard card = rig.Card!;
             Assert.AreEqual(WidgetCardView.Update, rig.Presenter.ViewForTest);
@@ -216,7 +226,7 @@ public sealed class WidgetCardFlickerTests
                 alphas++;
                 return alpha(h, a);
             };
-            rig.Time.Advance(TimeSpan.FromMilliseconds(400));
+            rig.Advance(TimeSpan.FromMilliseconds(400));
             Application.DoEvents();
             int entranceMoves = moves;
             int entranceAlphas = alphas;
@@ -226,7 +236,7 @@ public sealed class WidgetCardFlickerTests
             {
                 rig.Snapshot = Snapshot(60 + (i % 7), 70, readAt: rig.Time.GetUtcNow());
                 rig.Presenter.Refresh();
-                rig.Time.Advance(TimeSpan.FromMilliseconds(500));
+                rig.Advance(TimeSpan.FromMilliseconds(500));
                 Application.DoEvents();
             }
 
@@ -253,10 +263,10 @@ public sealed class WidgetCardFlickerTests
             for (int i = 0; i < 3; i++)
             {
                 rig.Presenter.Hide();
-                rig.Time.Advance(TimeSpan.FromMilliseconds(400));
+                rig.Advance(TimeSpan.FromMilliseconds(400));
                 Application.DoEvents();
                 rig.Presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
-                rig.Time.Advance(TimeSpan.FromMilliseconds(400));
+                rig.Advance(TimeSpan.FromMilliseconds(400));
                 Application.DoEvents();
                 rig.Presenter.ReapplyLook();
             }
@@ -298,7 +308,7 @@ public sealed class WidgetCardFlickerTests
             rig.Presenter.Hide();
             for (int i = 0; i < 30; i++)
             {
-                rig.Time.Advance(TimeSpan.FromMilliseconds(16));
+                rig.Advance(TimeSpan.FromMilliseconds(16));
                 Application.DoEvents();
             }
 
