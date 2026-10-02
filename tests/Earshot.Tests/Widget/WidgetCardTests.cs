@@ -54,39 +54,46 @@ public sealed class WidgetCardTests
         });
     }
 
-    // The head (an ellipse) and the stem (a rounded rectangle) overlap where the stem meets the head:
-    // FillMode.Alternate (the GraphicsPath default) XORs that overlap into a hole instead of filling it
-    // solid, which FillMode.Winding fixes.
-    // The in-ear mark is part of what is shown of a bud, so it follows the same rule as the figure: nothing for AirPods that are not
-    // connected to this PC, whatever the raw snapshot still says of the bud. (No documented bit says a bud is in the ear, so
-    // nothing decodes one today; this holds the card to the rule for the day something does.)
+    // The in-ear mark says where a bud is now, so it is drawn only from a live reading (heard within the fresh window) while the AirPods
+    // are on this PC. A last reading or an estimate, which are shown at any age, and any reading of AirPods that are away, draw none,
+    // whatever the raw snapshot says of the bud. (No documented bit says a bud is in the ear, so nothing decodes one today; this holds
+    // the card to the rule for the day something does.)
     [TestMethod]
-    public void TheInEarMarkIsDrawnOnlyForABudWhoseReadingIsShown()
+    public void TheInEarMarkIsDrawnOnlyFromALiveReadingWhileTheAirPodsAreOnThisPc()
     {
         Phase5.CardSta.Run(() =>
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
 
-            Bitmap Draw(AirPodsWhere where, bool? inEar)
+            Bitmap Draw(AirPodsWhere where, bool? inEar, TimeSpan age)
             {
                 using var card = new WidgetCard(new CapturingLog());
                 card.SetTheme(Color.Black, highContrast: false);
-                WidgetSnapshot snapshot = Snapshot(where, left: new PartReading(80, false, inEar) { ReadAt = now }, readAt: now);
+                DateTimeOffset readAt = now - age;
+                WidgetSnapshot snapshot = Snapshot(where, left: new PartReading(80, false, inEar) { ReadAt = readAt }, readAt: readAt);
                 card.Render(Model(snapshot), 96);
                 return Render(card);
             }
 
-            using Bitmap awayWithMark = Draw(AirPodsWhere.NotInUse, true);
-            using Bitmap awayWithout = Draw(AirPodsWhere.NotInUse, null);
-            using Bitmap hereWithMark = Draw(AirPodsWhere.ThisPc, true);
-            using Bitmap hereWithout = Draw(AirPodsWhere.ThisPc, null);
+            TimeSpan live = TimeSpan.FromSeconds(2);
+            TimeSpan stale = TimeSpan.FromMinutes(4);
+            using Bitmap awayWithMark = Draw(AirPodsWhere.NotInUse, true, live);
+            using Bitmap awayWithout = Draw(AirPodsWhere.NotInUse, null, live);
+            using Bitmap hereWithMark = Draw(AirPodsWhere.ThisPc, true, live);
+            using Bitmap hereWithout = Draw(AirPodsWhere.ThisPc, null, live);
+            using Bitmap staleWithMark = Draw(AirPodsWhere.ThisPc, true, stale);
+            using Bitmap staleWithout = Draw(AirPodsWhere.ThisPc, null, stale);
 
-            Assert.IsTrue(SamePixels(awayWithMark, awayWithout, layout.Left.Glyph), "Not connected: no mark is drawn for the bud.");
-            Assert.IsFalse(SamePixels(hereWithMark, hereWithout, layout.Left.Glyph), "Connected with the reading shown: the mark is drawn.");
+            Assert.IsTrue(SamePixels(awayWithMark, awayWithout, layout.Left.Glyph), "Not on this PC: no mark is drawn for the bud, though its reading is shown.");
+            Assert.IsFalse(SamePixels(hereWithMark, hereWithout, layout.Left.Glyph), "On this PC with a live reading: the mark is drawn.");
+            Assert.IsTrue(SamePixels(staleWithMark, staleWithout, layout.Left.Glyph), "On this PC, a stale reading with the bud in the ear draws no mark: it says nothing of the bud now.");
         });
     }
 
+    // The head (an ellipse) and the stem (a rounded rectangle) overlap where the stem meets the head:
+    // FillMode.Alternate (the GraphicsPath default) XORs that overlap into a hole instead of filling it
+    // solid, which FillMode.Winding fixes.
     [TestMethod]
     public void TheBudGlyphHasNoHoleWhereTheHeadAndStemMeet()
     {
