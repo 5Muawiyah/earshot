@@ -14,10 +14,23 @@ internal interface ILastReadingStore
     void Save(LastReadingBook book);
 }
 
+// Where the fully charged notice keeps which parts are spent (SpentMark). The same file and the same store object as the
+// readings, so one writer holds the file's rules: a change of marks rewrites the book last loaded or saved with the new
+// marks, and a book saved by the status service keeps the marks held here.
+internal interface ISpentStore
+{
+    // The marks that were saved: none for a missing, unreadable or newer file.
+    IReadOnlyList<SpentMark> LoadSpent();
+
+    // Replaces the marks and writes the file, under the store's rules (nothing over an unreadable or newer file).
+    void SaveSpent(IReadOnlyList<SpentMark> marks);
+}
+
 // The book as one small JSON file, last-reading.json in the widget folder (%LOCALAPPDATA%\Earshot\widget, or under
 // EARSHOT_DATA_ROOT when that redirects Earshot's folders; Paths.LastReadingFile). It holds each part's value, charging
 // flag, read time and model, and each learned rate's model, part, rate, time and span: no address, no name and nothing
-// else about any sender, which the shape of the file itself rules out.
+// else about any sender, which the shape of the file itself rules out. It also holds the parts whose fully charged notice is
+// spent (SpentMark, through ISpentStore): a part, and the read time and value of the reading it was spent on.
 //
 // Load: a missing file is the empty book, and a fresh start. A file that cannot be read (locked, no access) or parsed
 // (corrupt, cut short) is the empty book too, logged once, but it is not replaced by a save while it is in that state: it
@@ -32,7 +45,7 @@ internal interface ILastReadingStore
 //
 // Save writes last-reading.json.tmp, then moves it over the file (File.Move with overwrite replaces it in one step on one
 // volume, https://learn.microsoft.com/en-us/dotnet/api/system.io.file.move), so a cut-short save leaves the old file whole.
-internal sealed class LastReadingStore : ILastReadingStore
+internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
 {
     public const int SchemaVersion = 1;
 
@@ -51,6 +64,8 @@ internal sealed class LastReadingStore : ILastReadingStore
     private bool _unreadable;
     private bool _unreadableLogged;
     private long _lastSequence;
+    private LastReadingBook? _held;
+    private IReadOnlyList<SpentMark> _spent = [];
 
     public LastReadingStore(string path, ILog log)
     {
@@ -78,6 +93,17 @@ internal sealed class LastReadingStore : ILastReadingStore
     private LastReadingBook ReadLocked(bool quiet)
     {
         _unreadable = false;
+        LastReadingBook book = ReadFileLocked(quiet);
+        if (!_unreadable && !_newerSchema)
+        {
+            _held = book;
+        }
+
+        return book;
+    }
+
+    private LastReadingBook ReadFileLocked(bool quiet)
+    {
         byte[] bytes;
         try
         {
@@ -165,12 +191,101 @@ internal sealed class LastReadingStore : ILastReadingStore
             }
         }
 
+        var spent = new List<SpentMark>();
+        foreach (SpentData mark in data.Spent ?? [])
+        {
+            if (ToSpent(mark) is { } usable && !spent.Any(m => m.Component == usable.Component))
+            {
+                spent.Add(usable);
+            }
+        }
+
+        _spent = spent;
         return new LastReadingBook(ToReading(data.Left), ToReading(data.Right), ToReading(data.Case), rates) { Marks = marks };
+    }
+
+    public IReadOnlyList<SpentMark> LoadSpent()
+    {
+        lock (_gate)
+        {
+            if (_held is null)
+            {
+                ReadLocked(quiet: false);
+            }
+
+            return _spent;
+        }
+    }
+
+    public void SaveSpent(IReadOnlyList<SpentMark> marks)
+    {
+        ArgumentNullException.ThrowIfNull(marks);
+        lock (_gate)
+        {
+            if (_held is null && !_newerSchema && !_unreadable)
+            {
+                ReadLocked(quiet: false);
+            }
+
+            // Held in memory whatever the file allows, so this run goes on by it; written only when the file may be.
+            IReadOnlyList<SpentMark> kept = marks.ToList();
+            _spent = kept;
+            if (_held is { } book)
+            {
+                WriteLocked(book, kept);
+            }
+        }
     }
 
     public void Save(LastReadingBook book)
     {
         ArgumentNullException.ThrowIfNull(book);
+        lock (_gate)
+        {
+            WriteLocked(book, null);
+        }
+    }
+
+    // Writes the book under the store's rules. replaceSpent, when given, is the new set of spent marks, taken in after the
+    // look at an unreadable file (which reads the marks that file holds).
+    private void WriteLocked(LastReadingBook book, IReadOnlyList<SpentMark>? replaceSpent)
+    {
+        if (_newerSchema)
+        {
+            return;
+        }
+
+        if (book.Sequence != 0 && book.Sequence < _lastSequence)
+        {
+            return; // a newer book has been written since this one was taken
+        }
+
+        if (_unreadable)
+        {
+            // Look again: a lock is brief, and a file that is gone is a fresh start.
+            ReadLocked(quiet: true);
+            if (_newerSchema)
+            {
+                return;
+            }
+
+            if (_unreadable)
+            {
+                if (!_unreadableLogged)
+                {
+                    _unreadableLogged = true;
+                    _log.Warn("Widget: the last battery readings are not saved while the file cannot be read. They stay in memory for this run.");
+                }
+
+                return;
+            }
+        }
+
+        if (replaceSpent is not null)
+        {
+            _spent = replaceSpent;
+        }
+
         var data = new LastReadingFileData
         {
             SchemaVersion = SchemaVersion,
@@ -192,61 +307,34 @@ internal sealed class LastReadingStore : ILastReadingStore
                 ReadPercent = m.ReadPercent,
                 Percent = m.Percent,
             }).ToList(),
+            Spent = _spent.Select(m => new SpentData
+            {
+                Part = PartName(m.Component),
+                ReadAt = m.ReadAt,
+                ReadPercent = m.ReadPercent,
+            }).ToList(),
         };
 
-        lock (_gate)
+        try
         {
-            if (_newerSchema)
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            using (var stream = new FileStream(TempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                return;
+                JsonSerializer.Serialize(stream, data, LastReadingJsonContext.Default.LastReadingFileData);
+                stream.Flush(flushToDisk: true);
             }
 
-            if (book.Sequence != 0 && book.Sequence < _lastSequence)
-            {
-                return; // a newer book has been written since this one was taken
-            }
-
-            if (_unreadable)
-            {
-                // Look again: a lock is brief, and a file that is gone is a fresh start.
-                ReadLocked(quiet: true);
-                if (_newerSchema)
-                {
-                    return;
-                }
-
-                if (_unreadable)
-                {
-                    if (!_unreadableLogged)
-                    {
-                        _unreadableLogged = true;
-                        _log.Warn("Widget: the last battery readings are not saved while the file cannot be read. They stay in memory for this run.");
-                    }
-
-                    return;
-                }
-            }
-
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-                using (var stream = new FileStream(TempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-                {
-                    JsonSerializer.Serialize(stream, data, LastReadingJsonContext.Default.LastReadingFileData);
-                    stream.Flush(flushToDisk: true);
-                }
-
-                File.Move(TempPath, FilePath, overwrite: true);
-                _lastSequence = Math.Max(_lastSequence, book.Sequence);
-            }
-            catch (IOException ex)
-            {
-                _log.Warn("Widget: the last battery readings could not be saved (0x" + ex.HResult.ToString("X8") + "). They stay in memory for this run.", ex);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                _log.Warn("Widget: the last battery readings could not be saved (0x" + ex.HResult.ToString("X8") + "). They stay in memory for this run.", ex);
-            }
+            File.Move(TempPath, FilePath, overwrite: true);
+            _lastSequence = Math.Max(_lastSequence, book.Sequence);
+            _held = book;
+        }
+        catch (IOException ex)
+        {
+            _log.Warn("Widget: the last battery readings could not be saved (0x" + ex.HResult.ToString("X8") + "). They stay in memory for this run.", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn("Widget: the last battery readings could not be saved (0x" + ex.HResult.ToString("X8") + "). They stay in memory for this run.", ex);
         }
     }
 
@@ -261,6 +349,22 @@ internal sealed class LastReadingStore : ILastReadingStore
         ChargeComponent.Right => PartRight,
         _ => PartCase,
     };
+
+    // A spent mark is kept only for a known part and a reading's value from 0 to 100.
+    private static SpentMark? ToSpent(SpentData data)
+    {
+        ChargeComponent? component = data.Part switch
+        {
+            PartLeft => ChargeComponent.Left,
+            PartRight => ChargeComponent.Right,
+            PartCase => ChargeComponent.Case,
+            _ => null,
+        };
+
+        return component is ChargeComponent known && data.ReadPercent is >= 0 and <= 100
+            ? new SpentMark(known, data.ReadAt, data.ReadPercent)
+            : null;
+    }
 
     // A mark is kept only when it says an estimate rose above its reading, to at most 100.
     private static EstimateMark? ToMark(MarkData data)
@@ -320,6 +424,18 @@ internal sealed class LastReadingFileData
     public List<RateData>? Rates { get; set; }
 
     public List<MarkData>? Marks { get; set; }
+
+    public List<SpentData>? Spent { get; set; }
+}
+
+// A part whose fully charged notice is spent: which part, and the time and value of the reading it was spent on.
+internal sealed class SpentData
+{
+    public string Part { get; set; } = "";
+
+    public DateTimeOffset ReadAt { get; set; }
+
+    public int ReadPercent { get; set; }
 }
 
 // The highest estimate shown for a saved reading of a part: which part, the reading's time and value, and the estimate.

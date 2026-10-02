@@ -140,7 +140,7 @@ public sealed class SettingsMigrationTests : IDisposable
         Assert.IsTrue(loaded.Enabled, "Enabled reflects CaseOpenCardOn at load.");
     }
 
-    // With the card chosen off as well, nothing needs the watcher and Enabled stays false.
+    // With the card and the fully charged notice chosen off as well, nothing needs the watcher and Enabled stays false.
     [TestMethod]
     public void AFileWithEveryConsumerOffIncludingTheCaseOpenCardKeepsTheWatcherOff()
     {
@@ -152,6 +152,7 @@ public sealed class SettingsMigrationTests : IDisposable
         widget["AutoPause"] = false;
         widget["LowBatteryAlert"] = false;
         widget["CaseOpenCardOn"] = false;
+        widget["FullyChargedNotice"] = false;
         File.WriteAllText(SettingsPath, root.ToJsonString());
 
         Assert.IsFalse(new JsonSettingsStore(SettingsPath, _log).Current.Widget.Enabled);

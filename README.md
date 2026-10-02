@@ -167,8 +167,12 @@ What to know before you trust a number:
   pair is shown, greyed with its age, wherever the AirPods are and however old
   it is, until a newer one is heard. It is kept across a restart in
   `last-reading.json` in Earshot's local folder: the level, the charging flag, the
-  time and the model, no address and no name. Windows' own figure is shown only
-  while the AirPods are connected to this PC.
+  time and the model, no address and no name. It also notes which parts have had
+  their fully charged notice, so a restart does not repeat it. Windows' own figure
+  is shown only while the AirPods are connected to this PC.
+- **History.** The live readings of your linked pair are kept for seven days in
+  `battery-history.json` beside it: the part, the level, the charging flag and the
+  time. Nothing else, no address and no name.
 - **Age.** A value older than 30 seconds is greyed, with how long ago it was read.
 - **Estimates.** A part that was charging when last read is shown rising, as an
   estimate marked `≈` with the age of the reading it grew from, at a rate learned

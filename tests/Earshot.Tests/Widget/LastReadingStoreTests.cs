@@ -193,6 +193,68 @@ public sealed class LastReadingStoreTests : IDisposable
         Assert.AreEqual(33, NewStore().Load().Left?.Percent, "Readable now: a successful read lets the save through.");
     }
 
+    [TestMethod]
+    public void SpentPartsComeBackAndASavedBookKeepsThem()
+    {
+        LastReadingStore store = NewStore();
+        store.Save(SampleBook());
+        store.SaveSpent([new SpentMark(ChargeComponent.Case, ReadAt, 80), new SpentMark(ChargeComponent.Left, ReadAt, 100)]);
+
+        store.Save(SampleBook() with { Sequence = 1 });
+
+        LastReadingStore reopened = NewStore();
+        IReadOnlyList<SpentMark> spent = reopened.LoadSpent();
+        Assert.HasCount(2, spent);
+        Assert.AreEqual(new SpentMark(ChargeComponent.Case, ReadAt, 80), spent[0]);
+        Assert.AreEqual(70, reopened.Load().Left?.Percent, "The readings were not changed by the marks.");
+    }
+
+    [TestMethod]
+    public void SpentMarksOutOfRangeOrOfAnUnknownPartAreLeftOut()
+    {
+        WriteRaw("""
+            { "SchemaVersion": 1,
+              "Spent": [
+                { "Part": "case", "ReadAt": "2026-10-02T09:00:00+00:00", "ReadPercent": 80 },
+                { "Part": "case", "ReadAt": "2026-10-02T09:00:00+00:00", "ReadPercent": 60 },
+                { "Part": "left", "ReadAt": "2026-10-02T09:00:00+00:00", "ReadPercent": 101 },
+                { "Part": "boot", "ReadAt": "2026-10-02T09:00:00+00:00", "ReadPercent": 50 } ] }
+            """);
+
+        IReadOnlyList<SpentMark> spent = NewStore().LoadSpent();
+
+        Assert.HasCount(1, spent);
+        Assert.AreEqual(80, spent[0].ReadPercent);
+    }
+
+    [TestMethod]
+    public void SpentMarksAreNotWrittenOverAFileThatCannotBeRead()
+    {
+        NewStore().Save(SampleBook());
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        using (var hold = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            LastReadingStore store = NewStore();
+            Assert.IsEmpty(store.LoadSpent());
+            store.SaveSpent([new SpentMark(ChargeComponent.Case, ReadAt, 80)]);
+            Assert.HasCount(1, store.LoadSpent(), "The run goes on by what it holds.");
+        }
+
+        CollectionAssert.AreEqual(before, File.ReadAllBytes(FilePath));
+    }
+
+    [TestMethod]
+    public void SpentMarksAreNotWrittenOverAFileOfANewerSchema()
+    {
+        const string Newer = "{ \"SchemaVersion\": 2, \"Future\": 1 }";
+        WriteRaw(Newer);
+
+        NewStore().SaveSpent([new SpentMark(ChargeComponent.Case, ReadAt, 80)]);
+
+        Assert.AreEqual(Newer, File.ReadAllText(FilePath));
+    }
+
     // Two threads take books to write in order and may reach the file out of it: the older, arriving last, is dropped.
     [TestMethod]
     public void ABookTakenEarlierAndWrittenLaterDoesNotReplaceANewerOne()

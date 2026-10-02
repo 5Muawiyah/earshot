@@ -833,7 +833,7 @@ internal sealed partial class TrayContext
     }
 
     // A settings change may have turned the watcher, the gauge, or both on or off, or changed
-    // LeftClickConnects. Enabled (the OR of all four consumers, WidgetSettings.WithWatcherRecomputed) turning
+    // LeftClickConnects. Enabled (the OR of all five consumers, WidgetSettings.WithWatcherRecomputed) turning
     // on runs WireWidget, which is idempotent per field and rebuilds the data pipeline and the case-open card
     // whether or not the gauge itself is wanted; Enabled turning off leaves those objects in place exactly as
     // it always has (WidgetStatusService stops its own BLE source itself, reading the same setting).

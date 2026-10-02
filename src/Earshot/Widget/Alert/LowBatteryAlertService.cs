@@ -28,9 +28,14 @@ internal sealed class LowBatteryAlertService : IDisposable
     private readonly TimeProvider _time;
     private readonly LowBatteryLatch _latch;
     private readonly FullyChargedLatch _fullLatch = new();
+    private readonly ISpentStore? _spentStore;
+    private readonly SpentMark?[] _spentMarks = new SpentMark?[3];
+    private readonly bool[] _spentSeeded = new bool[3];
     private bool _disposed;
 
-    public LowBatteryAlertService(IWidgetStatus status, ISettingsStore settings, INotifier notifier, TimeProvider time)
+    // spentStore, when given, keeps which parts have had their fully charged notice across restarts (SpentMark): without it
+    // the latch is in memory only.
+    public LowBatteryAlertService(IWidgetStatus status, ISettingsStore settings, INotifier notifier, TimeProvider time, ISpentStore? spentStore = null)
     {
         ArgumentNullException.ThrowIfNull(status);
         ArgumentNullException.ThrowIfNull(settings);
@@ -42,6 +47,11 @@ internal sealed class LowBatteryAlertService : IDisposable
         _notifier = notifier;
         _time = time;
         _latch = new LowBatteryLatch(settings.Current.Widget.LowBatteryThresholdPercent);
+        _spentStore = spentStore;
+        foreach (SpentMark mark in spentStore?.LoadSpent() ?? [])
+        {
+            _spentMarks[(int)mark.Component] = mark;
+        }
 
         _status.Changed += OnStatusChanged;
         _settings.Changed += OnSettingsChanged;
@@ -74,9 +84,9 @@ internal sealed class LowBatteryAlertService : IDisposable
         // The fully charged notice reads the same shown values, wherever the pair is: a case charging on a desk, away from this
         // PC, is the use for an estimate reaching 100. Fed always, notified only while the setting is on.
         bool fullOn = _settings.Current.Widget.FullyChargedNotice;
-        NotifyFull(_fullLatch.Apply(ChargeComponent.Left, shown.Left), fullOn, WidgetCopy.FullyChargedLeftText);
-        NotifyFull(_fullLatch.Apply(ChargeComponent.Right, shown.Right), fullOn, WidgetCopy.FullyChargedRightText);
-        NotifyFull(_fullLatch.Apply(ChargeComponent.Case, shown.Case), fullOn, WidgetCopy.FullyChargedCaseText);
+        NotifyFull(ChargeComponent.Left, shown.Left, fullOn, WidgetCopy.FullyChargedLeftText);
+        NotifyFull(ChargeComponent.Right, shown.Right, fullOn, WidgetCopy.FullyChargedRightText);
+        NotifyFull(ChargeComponent.Case, shown.Case, fullOn, WidgetCopy.FullyChargedCaseText);
 
         // The card and the gauge show the owner's pair wherever it is; the alert stays for AirPods on this PC, as it was:
         // a live value of a pair that is not here is not one the person is listening on.
@@ -106,12 +116,46 @@ internal sealed class LowBatteryAlertService : IDisposable
         }
     }
 
-    private void NotifyFull(FullyChargedStep step, bool on, Func<bool, string> text)
+    // Feeds one part to the fully charged latch and keeps the spent marks beside it: a part saved as spent on the reading it is
+    // shown from is spent again at the first look (a restart is not a new charge), and a change of the latch is written.
+    private void NotifyFull(ChargeComponent component, ShownPart part, bool on, Func<bool, string> text)
     {
+        int index = (int)component;
+        SpentMark? key = part is { HasValue: true, ReadAt: DateTimeOffset readAt, Percent: int percent }
+            ? new SpentMark(component, readAt, part.ReadPercent ?? percent)
+            : null;
+
+        if (!_spentSeeded[index] && key is not null)
+        {
+            _spentSeeded[index] = true;
+            if (_spentMarks[index] == key)
+            {
+                _fullLatch.Spend(component);
+            }
+        }
+
+        bool wasSpent = _fullLatch.IsSpent(component);
+        FullyChargedStep step = _fullLatch.Apply(component, part);
+        bool isSpent = _fullLatch.IsSpent(component);
+        if (isSpent && !wasSpent && key is not null)
+        {
+            SetSpentMark(index, key);
+        }
+        else if (!isSpent && wasSpent)
+        {
+            SetSpentMark(index, null);
+        }
+
         if (step != FullyChargedStep.None && on)
         {
             Notify(text(step == FullyChargedStep.Estimated));
         }
+    }
+
+    private void SetSpentMark(int index, SpentMark? mark)
+    {
+        _spentMarks[index] = mark;
+        _spentStore?.SaveSpent(_spentMarks.OfType<SpentMark>().ToList());
     }
 
     // A greyed value is not what is shown as current, so it feeds nothing.

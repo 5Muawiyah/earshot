@@ -406,6 +406,19 @@ file is read at start. A saved reading is shown only when its model is the paire
 model, and is never live, since this run did not hear it. A dropped link or a
 restart therefore leaves the last readings on show.
 
+The same store object also keeps which parts have had their fully charged notice
+(`ISpentStore`, a `SpentMark` per part: the read time and value of the reading it was
+spent on), so the notice is one per charge across a restart. A mark counts only while
+the part is still shown from that reading, and a live reading below 100 re-arms the
+part. The same rules as the readings apply: nothing is written over a file that could
+not be read or is of a newer schema.
+
+Beside it, `battery-history.json` (`HistoryStore`, same folder and data root) keeps the
+live readings of the linked pair for the history page: per sample the part, the level,
+the charging flag and the time. Never a last reading, an estimate or Windows' figure,
+and the file's shape has no member for an address, a name or a model. One sample per
+part per minute at most, 7 days kept, and the same load and write rules as above.
+
 *The estimate.* A part charging at its last reading rises from it at its rate until
 100, then stops. Buds charge only in the case, so a bud that was not charging, and a
 case that was not itself charging, keep their value. A clock behind the read time

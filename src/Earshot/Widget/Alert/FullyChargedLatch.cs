@@ -21,6 +21,9 @@ internal sealed class FullyChargedLatch
     // Whether the part is spent, read only, for tests.
     public bool IsSpent(ChargeComponent component) => _spent[(int)component];
 
+    // Marks the part spent without a notice: what a restart does for a part saved as spent (SpentMark).
+    public void Spend(ChargeComponent component) => _spent[(int)component] = true;
+
     // Feeds the part as it is shown; returns whether this look is the moment to notify, and of what kind.
     public FullyChargedStep Apply(ChargeComponent component, ShownPart part)
     {

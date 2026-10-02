@@ -656,5 +656,9 @@ which broadcast to link. The link is held in memory and is not written to disk.
 The last reading of each bud and the case of your linked pair (the level, whether
 it was charging, when it was read and the model number) and the charge rates
 learned from them are kept in `last-reading.json` in Earshot's local folder; no
-address and no name. A device that is not linked is counted and nothing else
-about it is kept.
+address and no name. The same file notes which parts have had their fully charged
+notice, by the reading it was for, so a restart does not repeat it. Beside it,
+`battery-history.json` keeps the live readings of the linked pair for seven days
+(the part, the level, the charging flag and the time) for the history page; never
+a saved reading, an estimate or Windows' figure, and no address and no name. A
+device that is not linked is counted and nothing else about it is kept.

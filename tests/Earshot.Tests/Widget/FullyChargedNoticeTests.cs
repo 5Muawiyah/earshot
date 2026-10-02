@@ -52,6 +52,8 @@ public sealed class FullyChargedNoticeTests : IDisposable
 
     private LowBatteryAlertService NewService() => new(_status, _settings, _notifier, _clock);
 
+    private LowBatteryAlertService NewService(LastReadingStore store) => new(_status, _settings, _notifier, _clock, store);
+
     private static PartReading Heard(int? percent, DateTimeOffset at, bool charging = true) =>
         percent is null ? PartReading.Unknown : new PartReading(percent, charging, null) { ReadAt = at };
 
@@ -132,6 +134,48 @@ public sealed class FullyChargedNoticeTests : IDisposable
 
         Assert.AreEqual(1, _notifier.Calls.Count);
         Assert.AreEqual(("Earshot", "Case ≈100%, estimated"), _notifier.Calls[0]);
+    }
+
+    [TestMethod]
+    public void AnEstimatedHundredIsNotNotifiedAgainAfterARestart()
+    {
+        // The same reading, 80 percent charging, estimated to 100 before and after the restart: one charge, one notice.
+        var store = new LastReadingStore(_temp.File("last-reading.json"), _log);
+        using (LowBatteryAlertService first = NewService(store))
+        {
+            _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(41)));
+        }
+
+        Assert.AreEqual(1, _notifier.Calls.Count);
+
+        // Four minutes on, so the 45 minute old reading below is the same one as the 41 minute old reading above.
+        _clock.Advance(TimeSpan.FromMinutes(4));
+        var reopened = new LastReadingStore(_temp.File("last-reading.json"), _log);
+        using LowBatteryAlertService second = NewService(reopened);
+        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(45)));
+
+        Assert.AreEqual(1, _notifier.Calls.Count, "A restart does not make the same charge new.");
+    }
+
+    [TestMethod]
+    public void ALiveReadingBelowHundredAfterARestartArmsThePartAgain()
+    {
+        var store = new LastReadingStore(_temp.File("last-reading.json"), _log);
+        using (LowBatteryAlertService first = NewService(store))
+        {
+            _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(41)));
+        }
+
+        _clock.Advance(TimeSpan.FromMinutes(4));
+        using LowBatteryAlertService second = NewService(new LastReadingStore(_temp.File("last-reading.json"), _log));
+        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(45)));
+        _status.Raise(Live(box: 90));
+        _status.Raise(Live(box: 100));
+
+        Assert.AreEqual(2, _notifier.Calls.Count, "A part that came off 100 and charged to it again is a new charge.");
+
+        // The second charge is spent in turn, on its own reading.
+        Assert.HasCount(1,new LastReadingStore(_temp.File("last-reading.json"), _log).LoadSpent());
     }
 
     [TestMethod]

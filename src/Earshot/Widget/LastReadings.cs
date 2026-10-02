@@ -20,6 +20,12 @@ internal sealed record LearnedRate(ushort Model, ChargePart Part, double Percent
 // of no use.
 internal sealed record EstimateMark(ChargeComponent Component, DateTimeOffset ReadAt, int ReadPercent, int Percent);
 
+// A part whose fully charged notice is spent, keyed by the reading it was spent on: that reading's read time and value
+// (for an estimate, the saved reading it grew from; for a live 100, the 100). Kept beside the last readings so a restart
+// does not make the same charge new (FullyChargedLatch). It counts only while the part is still shown from that reading:
+// a newer reading is another one, and a live one below 100 re-arms the part as the latch's own rule says.
+internal sealed record SpentMark(ChargeComponent Component, DateTimeOffset ReadAt, int ReadPercent);
+
 // What is kept of the linked pair across restarts: the last fresh reading of each part and the learned rates. Immutable:
 // every change gives a new book, and a reading that changes nothing gives the same one back, so a reference compare
 // says whether anything changed. Pure: no clock and no file here (LastReadingStore reads and writes it).

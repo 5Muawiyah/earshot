@@ -38,6 +38,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // Where the owner's pair's last readings and learned rates are kept between runs, or null to keep them in memory only.
     private readonly ILastReadingStore? _lastReadingStore;
 
+    // The same store as the one for the fully charged notice's spent marks (SpentMark): one object holds the file, so the two
+    // never write over each other. Null when the readings are kept in memory only.
+    internal ISpentStore? SpentStore => _lastReadingStore as ISpentStore;
+
     // Where the live readings of the linked pair are kept for the history page, or null to keep none.
     private readonly IHistoryStore? _history;
 

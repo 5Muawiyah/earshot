@@ -80,7 +80,8 @@ internal static partial class CompositionRoot
             ? new CardNotifier(r.Cards)
             : new ToastNotifier(NotificationRegistration.AppUserModelId, new CardNotifier(r.Cards), r.Log);
 
-        return new LowBatteryAlertService(status, r.Settings, notifier, time);
+        // The fully charged notice's spent parts are kept in the status service's own store, beside the last readings.
+        return new LowBatteryAlertService(status, r.Settings, notifier, time, (status as WidgetStatusService)?.SpentStore);
     }
 
     // Auto-pause's live wiring: AutoPause itself (r.MediaSessions, wrapped in safe mode by the registry's
