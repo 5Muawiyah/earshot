@@ -38,6 +38,12 @@ stays pending until a run on the device has written the evidence for it.
 | Service hand-back with the tray not running (`tools\live-tests\22-ServiceHandBack.ps1`) | Pending: no live run yet |
 | The service finds nothing to do after the tray's hand-back (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
 | The AirPods widget: the taskbar gauge, its card, the broadcast battery with greying, and Refresh (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet |
+| The case-open card: open the case near the PC and the card appears on the gauge's display without taking focus; shut the case and it closes; its close button closes it (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet. The lid open counter and the eight second close have not been seen on a live case |
+| Estimates away from this PC: a charging case left away from the PC shows the case mark with the about sign and an age, the figure never falls, and live figures replace it on return (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet. No charge rate has been learned from a real pair |
+| The card shortcut, Ctrl+Alt+Shift+E, the fully charged notice, the low battery alert for the case, and the battery history page | Pending: no live run yet, and no live test script covers them |
+| Copy diagnostics pasted somewhere public with no address, id, name or user path left in it | Pending: no live run yet |
+| Motion on a real display, and a screen reader reading the gauge, the card and the case-open card | Pending: no live run yet. The pacing is tested against a fake display clock only |
+| Start, idle and first card open figures from the precompiled release | Pending: the figures printed so far are from a local build |
 | Microphone off mode: call quality with it on | Pending: the owner's own test. Unproved until then |
 | Updating a real install from a published release | Pending: no live run, and no live test script covers it |
 

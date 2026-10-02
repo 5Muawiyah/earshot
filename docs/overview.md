@@ -69,6 +69,7 @@ Top to bottom, with the exact wording. Separators sit between the groups.
 | `Repair Earshot...` | Offered whenever Earshot is installed, healthy, damaged, older or newer than the running copy. At most one administrator prompt. Disabled, with the reason in its text, while a setup, repair or update is running. See [Repair](#repair). |
 | `Check for updates` | Looks for a newer release. Downloads nothing. See [Updates](#updates). |
 | `Check automatically` | A tick, off by default. Contacts GitHub once a day when on. |
+| `Copy diagnostics` | Copies a short report to the clipboard for pasting into an issue: the versions, the end of the log and a log of moments the card was held up. Bluetooth addresses, ids, names and user folders are removed first. Nothing is sent anywhere. |
 | `Exit` | Closes Earshot. With Block at boot on and the AirPods not in use, it blocks the device nodes first. With Hand back ticked and the AirPods in use on this PC, it lets them go first, then blocks the device nodes. With Hand back off and the AirPods in use, it closes without blocking and says so: "Closed while in use, so the AirPods are not blocked." |
 
 A shortcut typed into the settings file for connect, audio protection or block
@@ -135,11 +136,12 @@ There is an opt-in alternative, off by default: [Microphone off mode](#microphon
 
 Shortcuts are on by default. Ctrl+Alt+Shift+A connects, which means it
 switches the AirPods to this PC. Ctrl+Alt+Shift+D disconnects, which means it
-switches them to the phone. On the settings page (the gear on the card) each
+switches them to the phone. Ctrl+Alt+Shift+E opens the card, or closes it when
+it is open; it never connects or disconnects anything. On the settings page (the gear on the card) each
 one can be changed, by pressing the new keys, or cleared.
 
-A shortcut runs the same thing the button does, and shows the same card with
-the result. If another program already holds a shortcut, Earshot says so on the
+A connect or disconnect shortcut runs the same thing the button does, and shows
+the same card with the result. If another program already holds a shortcut, Earshot says so on the
 card and under that shortcut's row on the settings page. If a second press
 arrives while an earlier one is still running, the last press wins: a press for
 the other direction replaces the one in flight, and a press for the same
@@ -237,7 +239,7 @@ its reason. No live run yet (test 21 is pending).
 
 ## Updates
 
-**Check for updates** in the menu and on the settings page looks at the latest
+**Check for updates** in the menu and on the Updates page looks at the latest
 release on GitHub and says whether it is newer. **Check automatically** does
 the same once a day after startup; it is off by default because a check
 contacts GitHub. A check downloads nothing. Nothing downloads until you press
@@ -305,7 +307,7 @@ from the Start menu.
 ### Repair
 
 **Repair Earshot...** is in the menu whenever Earshot is installed, and on the
-settings page in the Updates section. Earshot first reads every installed file
+Updates page. Earshot first reads every installed file
 and checks it against the list the release published, and checks that the
 install folder can be changed only by administrators. Then:
 
@@ -409,11 +411,11 @@ pictures of the gauge.
 
 **Where it sits.** On the taskbar, at the right end by default, 8 pixels left
 of the notification area, or next to the apps, 4 pixels after the last app
-button. Choose with **Gauge position** on the settings page. If there is no
+button. Choose with **Position**, under More on the settings page. If there is no
 free space on the taskbar, or Earshot cannot read the taskbar at all, the
 gauge steps aside and the ordinary tray icon takes over, without asking.
 
-**Which display.** With more than one display, **Gauge display** on the settings
+**Which display.** With more than one display, **Display** on the settings
 page chooses whose taskbar holds the gauge: **Main display** (the default),
 **All displays**, or one of the connected displays, named plainly, for example
 `Display 2 (1920 x 1080)`. Click the button to step through the list. **All
@@ -509,25 +511,29 @@ between two messages, not a measured guarantee.
 
 ### The settings page
 
-The gear on the card opens it. Rows, top to bottom:
+The gear on the card opens it. It follows the Windows 11 settings look, with the
+rows in groups. Top to bottom:
 
-| Row | Default | Notes |
+| Group and row | Default | Notes |
 |---|---|---|
-| Gauge position | Right end | Right end, or next to apps |
-| Gauge display | Main display | Main display, All displays (offered with more than one display), or one of the connected displays; a line under the row says when the chosen one is not connected or shows no taskbar |
-| Other device | `iPhone` | The label used in "On your <name>", up to 40 characters |
-| Gauge order | Ring, number, bolt | Six pictures of the gauge; pick one |
-| Pause when a bud comes out | On | Built but inactive. Says "Earshot cannot yet tell when a bud is in your ear." and nothing acts, because no documented source gives an in-ear value |
-| Pause when AirPods leave this PC | On | See [above](#pausing-when-the-airpods-leave-this-pc) |
-| Low battery alert | 20% | A stepper, 10% to 90% in steps of 10 |
-| Left click connects | Off | |
-| Hand back on shut down, sleep and Exit | On for a new install | A tick, as in the menu. See [above](#handing-the-airpods-back) |
-| Microphone off | Off | See [Microphone off mode](#microphone-off-mode). While on, a line under the row says what to do next, and a Sound settings row with an Open button appears |
+| Taskbar: Display | Main display | Main display, All displays (offered with more than one display), or one of the connected displays; a line under the row says when the chosen one is not connected or shows no taskbar |
+| Taskbar: Order | Ring, number, bolt | Shows the gauge as it is; open it to pick one of six pictures |
+| Behaviour: Case-open card | On | A switch. Its expander holds the close time (Until the case closes, 5, 10, 30 or 60 seconds) and the displays it shows on |
+| Behaviour: Hand back on shut down, sleep and Exit | On for a new install | A tick, as in the menu. See [above](#handing-the-airpods-back) |
+| Audio: Microphone off | Off | See [Microphone off mode](#microphone-off-mode). While on, a line under the row says what to do next, and a Sound settings row with an Open button appears |
 | Shortcuts: Connect | Ctrl+Alt+Shift+A | Press keys to change, Clear to remove; a chord another app holds is named under the row |
 | Shortcuts: Disconnect | Ctrl+Alt+Shift+D | The same |
-| Updates: Check for updates | | A Check button, and the version you have |
-| Updates: Repair Earshot | | A Repair button. Only there while Earshot is installed |
-| Updates: Check automatically | Off | Contacts GitHub when on |
+| Shortcuts: Card | Ctrl+Alt+Shift+E | The same. Opens or closes the card |
+| About: Updates | | Opens the Updates page: the version you have, Check for updates, Repair Earshot (only while Earshot is installed) and Check automatically (off for a new install; contacts GitHub when on) |
+| More: Position | Right end | Right end, or next to apps |
+| More: Other device | `iPhone` | The label used in "On your <name>", up to 40 characters |
+| More: Pause when a bud comes out | On | Built but inactive. Says "Earshot cannot yet tell when a bud is in your ear." and nothing acts, because no documented source gives an in-ear value |
+| More: Pause when AirPods leave this PC | On | See [above](#pausing-when-the-airpods-leave-this-pc) |
+| More: Low battery alert | 20% | A stepper, 10% to 90% in steps of 10 |
+| More: Fully charged notice | On | See below |
+| More: Left click connects | Off | |
+| More: Battery history | | Opens the history page |
+| More: Copy diagnostics | | A Copy button. Same as the menu item |
 
 The low battery alert's own on and off is a tick in the right-click menu.
 
@@ -545,10 +551,38 @@ works with the gauge hidden too: Earshot listens for the case (listen-only,
 nothing is sent) whenever it runs and the card is on.
 
 **The low battery alert.** A Windows notification, or the card if a
-notification cannot be shown, the moment a shown value first reads at or below
-a threshold, 20% by default. It only fires again once that part has read at
-least one 10% step back above the threshold, so a value sitting on the edge
-does not repeat itself.
+notification cannot be shown, the moment a live value first reads at or below
+a threshold, 20% by default. It covers the case as well as the buds. It only
+fires again once that part has read at least one 10% step back above the
+threshold, so a value sitting on the edge does not repeat itself. It acts on
+live readings only, never on a saved one or an estimate, and only while the
+AirPods are on this PC.
+
+**The fully charged notice.** On by default. One notice the first time a part
+reaches 100, wherever the AirPods are, whether it was heard or is an estimate (an
+estimate says so, with the age of the reading it grew from). It is one per charge per part, and a restart
+does not repeat it. A live reading below 100 makes the part ready for the next
+charge.
+
+**Battery history.** The history page, under More, draws the live readings of
+the left bud, the right bud and the case over 24 hours, with the three latest
+values beside it. The two arrows step back and forward by day over the 7 days
+kept. A stretch with nothing heard is shown as a gap and counted, never joined
+up. Only live readings are kept: never a saved reading, an estimate or Windows'
+figure, and no address and no name.
+
+**Screen readers.** The gauge, the three battery columns, the buttons, the
+settings rows, the case-open card and the history chart have names and values. A
+figure that is not live says what it is and how old, for example "Left about
+90%, estimated, read 2 h ago". The case-open card is read out once when it opens.
+
+**Motion and speed.** Pages, heights, expanders, toggles, hover fills, the gauge
+ring and the card's entrance move on Windows' own timings and curves, one frame
+for each refresh of the display the window is on. With Animation effects off in
+Windows nothing moves. The card is built before the first click, the taskbar is
+read when it changes with a slower safety poll behind it, and the release is
+precompiled. None of this has had a live run, and no release build has been
+timed.
 
 **Pausing when a bud comes out.** A row on the settings page, on by default.
 It is built but inactive. It is meant to pause what this PC is playing to the
@@ -594,6 +628,9 @@ address, so it does not depend on the mode.
   marked `≈` with the age of the reading it grew from: it rises at a rate learned
   from your own pair's charging (none until one is learned) and stops at 100. It
   never falls, and a newer reading replaces it.
+- **The case shows only after your case has been seen once.** Until Earshot has
+  heard your case, the gauge has no case figure to show away from the PC, and there
+  is no case estimate until it has seen the case charge once.
 - **Left and right rest partly on a published description of the broadcast
   and partly on one local capture, and are unproved.** No permitted source
   documents the bit that swaps the two buds. If it is read the wrong way round,

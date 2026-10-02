@@ -499,12 +499,14 @@ leave this PC never resumes.
 a topmost, layered overlay window, owned by the taskbar it sits on (an owned window is always above its
 owner in the z-order, so the system keeps the gauge above the bar wherever the shell raises the bar;
 https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#owned-windows), positioned over free taskbar space, which it finds by
-reading the taskbar's own button layout through UI Automation and polling it
-for changes; the window's alpha-zero pixels let a click reach the taskbar
+reading the taskbar's own button layout through UI Automation, when the shell
+says the taskbar moved or changed and on a 10 second safety poll (see Speed
+below); the window's alpha-zero pixels let a click reach the taskbar
 underneath rather than the gauge
 (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
-It draws the earbud mark with a ring in the Windows accent colour, filled to
-the lower bud's battery, and that number. The setting **Gauge order** puts the
+On this PC it draws the earbud mark with a ring in the Windows accent colour,
+filled to the lower bud's battery, and that number; away, the case mark and the
+case's value (see *The gauge* above). The setting **Gauge order** puts the
 ring, the number and the charging bolt in one of six orders.
 
 The setting **Gauge position** chooses between two placements. At the right
@@ -723,18 +725,43 @@ colour over the whole window instead of leaving it clear for the backdrop; Windo
 there itself, but painting it makes the result the same on every build.
 
 **Motion.** Taskbar flyouts slide up when they are invoked and down when they are dismissed
-(https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/motion). The card enters
-over 250 ms and leaves over 167 ms on the page's cubic-bezier(0, 0, 0, 1) curve, fading in over 83 ms
-and out over its 167 ms, and travels one taskbar thickness (read from where the gauge sits relative to
-the work area; 48 px at 100% when that is not known), away from the taskbar's edge. The curve is
-`3t^(2/3) - 2t`, which the tests use as an oracle. The motion is a pure function of the elapsed time,
-driven by a timer on the tray's clock and tested on a fake one. With Windows' Animation effects off
-(`SPI_GETCLIENTAREAANIMATION`, read at each show and hide) nothing moves and nothing fades. The fade is
-a constant window opacity (a layered window with `SetLayeredWindowAttributes`), and Microsoft does not
-say whether the system backdrop and the rounded corners survive that style, so there is one switch,
-`CardMotion.UseAlphaFade`, that turns the fade off and drops the layered style if they do not.
-The card lays out at its target size while the window height moves, so mid-resize the card is clipped by the
-window; that is a design choice, not a defect.
+(https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/motion). The numbers are in
+`FluentMotion`: 83, 167 and 250 ms; entering on cubic-bezier(0, 0, 0, 1), exiting on (1, 0, 1, 1) and a thing
+already on screen moving on (0.55, 0.55, 0, 1)
+(https://learn.microsoft.com/windows/apps/design/motion/timing-and-easing). The card enters over 250 ms and
+leaves over 167 ms, fading in over 83 ms and out over its 167 ms, and travels one taskbar thickness (read from
+where the gauge sits relative to the work area; 48 px at 100% when that is not known) away from the taskbar's
+edge. Pages, heights, expanders, toggles, hover and pressed fills and the gauge ring move on the same driver
+(`WidgetCard.Transitions.cs`). A new page slides 40 px (scaled) in from the right going deeper and from the
+left coming back, fading in over 83 ms; a height change, an expander and the ring take 250 ms point to point;
+a toggle's knob takes 167 ms; a hover fill takes 83 ms. Which duration and curve each of the last ones uses
+is a design choice, named in `FluentMotion`. Each motion is a pure function of the time of the frame it is
+drawn for and is tested against a fake clock. The enter curve is `3t^(2/3) - 2t`, which the tests use as an
+oracle. With Windows' Animation effects off (`SPI_GETCLIENTAREAANIMATION`, read at each show and hide)
+nothing moves and nothing fades. The fade is a constant window opacity (a layered window with
+`SetLayeredWindowAttributes`), and Microsoft does not say whether the system backdrop and the rounded
+corners survive that style, so there is one switch, `CardMotion.UseAlphaFade`, that turns the fade off and
+drops the layered style if they do not. The card lays out at its target size while the window height moves,
+so mid-resize the card is clipped by the window; that is a design choice, not a defect.
+
+**Motion pacing.** Frames come from `IFrameClock`. The real one, `VBlankFrameClock`, runs a background thread
+that calls `IDXGIOutput::WaitForVBlank` on the output of the display the window is on
+(https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgioutput-waitforvblank), asked again
+before every wait, so a window moved to another display follows that display's own rate, and posts one frame to
+the UI thread stamped with the time the wait returned. The rate is never read or assumed: the waits are the
+rate. `DwmFlush` waits for the next composition rather than for a given display's blank, and moving the drawing
+into DirectComposition was the larger change for no gain in pacing, so neither was used. The thread waits on an
+event at rest and is woken only while something is subscribed, and a frame is not posted while the last has not
+reached the UI thread. When no output can be waited on (DXGI refuses, or the window's monitor is on no output, as
+in some remote sessions) the raw HRESULT is logged once and frames are stamped an hour ahead, so every motion
+reaches its end in one frame, as with animation effects off: nothing is paced to a guessed rate. This has not
+been seen on a real display.
+
+**Stillness.** An open card is drawn only for a reason. The read time line does not tick: while a reading is
+fresh (30 seconds) the line is hidden but its place kept, and an older one says its age in minutes, never seconds.
+The card's display scale is fixed at the show (`CardDpiLatch`) and not rewritten by the host's poll, so a value
+that moves back and forth cannot resize or place it again. The accent colour event repaints only when the colour
+changed. The gauge is pushed to its window only when the content that is drawn changed (`GaugePushKey`).
 
 **Focus.** No control draws a dotted focus rectangle. Keyboard focus draws the Windows 11 focus visual:
 a gap of 1 px, a 1 px inner stroke and a 2 px outer stroke round the control, scaled with the display, in
@@ -777,22 +804,58 @@ made this way actually show and do not show.
 itself, with no child controls. Its rows are read from the real settings each
 time it is drawn, so a row shows what is saved and never what was last asked
 for. Every change goes through the same path the tray menu's own item uses.
-The rows are, in order: Position, Display (a button that steps through
-Main display and the connected displays), Order (six pictures of the gauge),
-Other device, Pause on removal, Pause on leave, Low battery (the
-threshold), Case-open card (a switch and a chevron that expands the row to its
-Close choice, a button that steps through Until the case closes, 5 s, 10 s,
-30 s and 60 s, and its Displays choice, a button that steps between Where the
-gauge is and All displays, with a box for each display when there is more than
-one), Click connects, Hand back, Microphone off (with a Sound settings
-button while it is on); then the shortcuts for Connect and
-Disconnect; then the installed version with Check, Repair when an install
-exists, and Auto check. Each is an icon and its words; what each row does is
-its tooltip. The Pause on removal row carries a caption saying Earshot cannot
-yet tell when a bud is in the ear, while there is no in-ear value to read. The
-card and the settings page follow the Windows 11 look: text size, accent
-colour, light and dark theme, reduced motion and keyboard focus, read at run
+The page follows the Windows 11 settings grouping, from one set of colour tokens and figures (`DesignTokens`).
+The rows are, in order: Taskbar (Display, a button that steps through Main display, All displays and the
+connected displays; Order, an expander showing the gauge as it is and, open, the six pictures), Behaviour
+(Case-open card, a switch and a chevron that expands the row to its Close choice, a button that steps through
+Until the case closes, 5 s, 10 s, 30 s and 60 s, and its Displays choice, a button that steps between Where the
+gauge is and All displays, with a box for each display when there is more than one; Hand back), Audio (Microphone
+off, with a Sound settings button while it is on), Shortcuts (Connect, Disconnect and Card), About (a row that
+opens the Updates page) and More, an expander holding the rarer rows: Position, Other device, Pause on removal,
+Pause on leave, Low battery (the threshold), Fully charged notice, Left click connects, Battery history (a row
+that opens the history page) and Copy diagnostics. The Updates page holds the installed version with Check,
+Repair when an install exists, and Check automatically (off for a new install). Each row is an icon and its
+words; what each row does is its tooltip. The Pause on removal row carries a caption saying Earshot cannot yet
+tell when a bud is in the ear, while there is no in-ear value to read. The card and the settings page follow the
+Windows 11 look: text size, accent colour, light and dark theme, reduced motion and keyboard focus, read at run
 time and re-read when Windows changes them.
+
+**The history page.** `HistoryStore` (see Where settings and data live) is read into a chart of the day chosen:
+24 hours of the left bud, the right bud and the case against percent, with a legend of the three latest values,
+and two step buttons that move a day back or forward over the 7 days kept. A stretch with no samples is drawn as
+a gap and counted ("Nothing heard in 2 stretches.") rather than joined up. The layout is `HistoryChartLayout`,
+a pure function of the samples, the day and the card's scale.
+
+**Speed.** Three things, none of which touches a device. The card is built before the first click
+(`CardPrewarm`): once the first taskbar layout has been applied, 3 seconds later (a design choice) the presenter
+makes the card, lays it out, draws one frame into an off-screen bitmap and creates its window handle, without
+showing, placing or activating it, so the first open takes the path a later one does. The taskbar is read when
+`ShellWindowChangeHook` raises `EVENT_OBJECT_LOCATIONCHANGE` for a taskbar window of Explorer's process (the
+main and the secondary taskbars), coalesced, with a 10 second safety poll (`TaskbarWatcher.SafetyPollIntervalMs`)
+in place of the 1 second poll while that event is installed; if it is not installed the 1 second poll stays.
+The linked set's silence check (`_linkTimer` in `WidgetStatusService`) is dormant while nothing is linked and is
+armed by the message that makes a link, so an Earshot with no AirPods in range wakes for nothing there. The
+release build is published with ReadyToRun (`tools\build-release.ps1`, `-p:PublishReadyToRun=true`, folder form,
+not single file), which precompiles the managed code beside the IL; the zip grew from about 57.6 MB to about
+68.4 MB in a local build. `StartupIdleAndCardMeasureTests` prints the start, idle and first card open figures;
+none has been measured on a release build.
+
+**Screen readers.** The gauge, the three battery columns, the buttons, the settings rows, the case-open card and
+the history chart carry a name and, where it changes, a value, built from the same snapshot, time and settings as
+what is drawn (`GaugeSpeech`, `SpokenText`), so a spoken value never says more than the screen does. A part that
+is not live says what it is and how old: "Left about 90%, estimated, read 2 h ago", "Right 80%, last read 2 h
+ago". The case-open card announces itself once per open (see above).
+
+**Copy diagnostics and the stall log.** **Copy diagnostics**, in the tray menu and under More, puts on the
+clipboard the app and Windows versions, the end of the log (200 lines at most) and the UI stall log
+(`DiagnosticsText`), passed through `DiagnosticsRedactor`, which replaces Bluetooth addresses, GUIDs and container
+ids, SIDs, device instance ids and interface paths, user profile paths and the paired device's friendly name,
+window titles and the signed-in user name with fixed tags (`<address>`, `<id>`, `<sid>`, `<device>`, `<path>`,
+`<name>`), and does it twice to the same effect. The stall log (`UiStallMonitor`) is a ring of 256 lines in
+memory: an action posted to the UI thread that waits or runs longer than two refresh intervals (a design choice:
+two missed frames is a hitch the eye can see; the interval comes from `DwmGetCompositionTimingInfo`, with 1000 ms
+/ 60 as a named fallback when that fails) is recorded with the action's method name, beside the card's own window
+calls, so a hitch can be read against what the card did around it. Nothing is sent anywhere.
 
 ### Shortcuts and switch timing
 
@@ -820,6 +883,13 @@ it did not reach ACTIVE, whether the nodes are blocked again. A disconnect
 line carries the release, whether the PC is at rest, and the block. A cancelled
 switch says so. Test 16 reads these lines; none has been measured on a live
 run yet.
+
+**The card shortcut.** Ctrl+Alt+Shift+E (`HotkeyAction.OpenCard`) opens the card, or closes it when it is open,
+by the same path a left click on the gauge takes (the card goes above the gauge, or where the tray icon click puts
+it when there is no gauge), so it never connects or disconnects whatever Left click connects says. It is opened from
+the keyboard, so the focus visual shows from the start. It is on with the other two, editable and clearable on the
+settings page; a settings file that has no member for it takes the default, one that has it keeps what the owner
+left, and a cleared one stays cleared. A chord another program holds is reported on its row.
 
 ### Pause when the AirPods leave this PC
 
@@ -1007,6 +1077,8 @@ check that fails is not retried until the next day.
 |---|---|
 | `%APPDATA%\Earshot\settings.json` | The owner's settings |
 | `%LOCALAPPDATA%\Earshot\logs` | The log |
+| `%LOCALAPPDATA%\Earshot\widget\last-reading.json` | The last reading of each part of the linked pair (level, charging flag, read time, model), the learned charge rates, the high-water marks of shown estimates and the fully charged notices spent. No address and no name. Written beside a `.tmp` and moved over; not written over when it could not be read |
+| `%LOCALAPPDATA%\Earshot\widget\battery-history.json` | The live readings of the linked pair, 7 days: part, level, charging flag, time. No address, name or model |
 | `%LOCALAPPDATA%\Earshot\livetest` | Live-test evidence |
 | `%ProgramData%\Earshot` | Machine files the elevated tasks and the service read: `device.json`, `config.json`, `protection.json`, `protection-intent.json` and the per-run status files |
 

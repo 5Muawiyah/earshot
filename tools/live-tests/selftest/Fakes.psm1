@@ -228,7 +228,7 @@ $script:Answers = [ordered]@{
     'right-click the gauge: does the same menu'                              = 'yes'
     'is there a "refresh battery" item in the menu'                        = 'yes'
     'compare the card with what your iphone shows'                           = 'yes'
-    'a minute later, is every battery figure either greyed'                       = 'yes'
+    'a minute later, is every battery figure greyed'                              = 'yes'
     'after about twelve seconds, does the card say "nothing heard'            = 'yes'
     'did the arrow turn while the card said'                                 = 'yes'
     'is there a ring round the earbud mark'                                  = 'yes'
@@ -237,7 +237,12 @@ $script:Answers = [ordered]@{
     'does the "where" line on the card say "on this pc"'                     = 'yes'
     'did the audio keep playing on this pc'                                  = 'yes'
     'with the airpods not connected to this pc, does the card say'           = 'yes'
-    'did any small card appear near the taskbar by itself'                   = 'no'
+    'did a small card with the left, right and case figures appear by itself' = 'yes'
+    'did the card close by itself after the lid was shut'                    = 'yes'
+    'did the card close when you clicked the cross'                          = 'yes'
+    'does the gauge show the case mark with a grey ring'                     = 'yes'
+    'compared with the last live reading'                                    = 'yes'
+    'did live figures replace the estimate'                                  = 'yes'
 
     # test 20: hand back on Exit.
     'did the sound go back to your phone or stop coming out'                 = 'yes'

@@ -47,7 +47,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'LiveTest.psm1') -Force
 
 $run = New-LiveTestRun -TestId '19-widget' -Title 'The AirPods widget: gauge, card and case-open card' `
-    -Settles 'Whether the taskbar gauge and its cards work as built today, whether the battery they show agrees with the iPhone and greys when it is old, and whether refresh reads it again or says nothing was heard.' `
+    -Settles 'Whether the taskbar gauge and its cards work as built today, whether the battery they show agrees with the iPhone, greys when it is old and is marked when it is an estimate, whether the case-open card shows when the case opens and closes with it, and whether refresh reads it again or says nothing was heard.' `
     -ExePath $ExePath -RunRoot $RunRoot
 
 # The Start menu shortcut NotificationRegistration writes so a toast can name Earshot:
@@ -77,7 +77,7 @@ try
         'The AirPods are paired with this PC and available to connect.'
     ) -PhysicalActions @(
         'This is a long sitting. It watches the taskbar, restarts Explorer once, changes display scaling and light/dark mode and back, opens your AirPods case near the PC, and turns Bluetooth off and on. Nothing here is destructive, and every step says what it does before it asks.',
-        'The battery figures on the card come from what your AirPods broadcast, which they only do while they are out of the case or the case lid is open, and the card shows a figure only while the AirPods are connected to this PC. Some steps below ask you to shut them in the case: that is on purpose, to see the figures grey or go, and the refresh say nothing was heard.'
+        'The battery figures on the card come from what your AirPods broadcast, which they only do while they are out of the case or the case lid is open, and the card keeps the last figure it heard, greyed, wherever the AirPods are. Some steps below ask you to shut them in the case: that is on purpose, to see the figures grey, and the refresh say nothing was heard.'
     )
 
     if ($ready)
@@ -103,7 +103,7 @@ try
         Write-Section -Run $run -Title 'Gauge placement'
         $gaugePositionAtStart = Get-FieldPath -Object $settings -Path @('Widget', 'GaugePosition')
         Add-Finding -Run $run -Name 'gaugePositionAtStart' -Value $gaugePositionAtStart -Detail 'Widget.GaugePosition read from settings.json'
-        Wait-Owner -Run $run -Text 'Left-click the Earshot icon or the gauge to open the card, click the gear, and check that "Gauge position" is set to "Right end". Then close the card.'
+        Wait-Owner -Run $run -Text 'Left-click the Earshot icon or the gauge to open the card, click the gear, open More, and check that "Gauge position" is set to "Right end". Then close the card.'
         Write-Line -Run $run -Text 'Look at the taskbar near the clock.'
         $placementAnswer = Read-Answer -Run $run -Question 'Is the gauge at the right end of the taskbar, just left of the notification area (the small arrow and icons beside the clock), with a small gap of about 8 pixels and no icon underneath it, and does clicking the free taskbar space beside it still do what it did before Earshot was installed?'
         Add-Criterion -Run $run -Id 'gauge-placement' -Criterion 'By default the gauge sits at the right end of the taskbar, 8 pixels left of the notification area, clear of every taskbar item, and does not intercept a click meant for the taskbar.' `
@@ -111,7 +111,7 @@ try
             -Detail ('You answered ' + $placementAnswer + '.')
 
         Write-Section -Run $run -Title 'Next to apps'
-        Wait-Owner -Run $run -Text 'Open the card, click the gear, set "Gauge position" to "Next to apps", then close the card.'
+        Wait-Owner -Run $run -Text 'Open the card, click the gear, open More, set "Gauge position" to "Next to apps", then close the card.'
         $nextToAppsAnswer = Read-Answer -Run $run -Question 'Is the gauge now just after the last taskbar button, with a small gap of about 4 pixels and no button underneath it?'
 
         Write-Section -Run $run -Title 'The gauge follows the taskbar buttons'
@@ -130,7 +130,7 @@ try
             -Outcome $(if ($alignLeftAnswer -eq 'yes' -and $alignCentreAnswer -eq 'yes') { 'pass' } elseif ($alignLeftAnswer -eq 'unsure' -or $alignCentreAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('Left: ' + $alignLeftAnswer + '. Centre: ' + $alignCentreAnswer + '.')
 
-        Wait-Owner -Run $run -Text 'Open the card, click the gear, set "Gauge position" back to "Right end", then close the card.'
+        Wait-Owner -Run $run -Text 'Open the card, click the gear, open More, set "Gauge position" back to "Right end", then close the card.'
         $rightEndAgainAnswer = Read-Answer -Run $run -Question 'Back at Right end, is the gauge at the right end of the taskbar again, just left of the notification area?'
         Add-Criterion -Run $run -Id 'gauge-next-to-apps' -Criterion 'The Gauge position setting moves the gauge next to the apps, 4 pixels after the last button, and back to the right end.' `
             -Outcome $(if ($nextToAppsAnswer -eq 'yes' -and $rightEndAgainAnswer -eq 'yes') { 'pass' } elseif ($nextToAppsAnswer -eq 'unsure' -or $rightEndAgainAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
@@ -327,13 +327,23 @@ try
 
         Write-Section -Run $run -Title 'Half D: the case-open card'
         $caseOpenUtc = (Get-Date).ToUniversalTime()
-        Wait-Owner -Run $run -Text 'Open your AirPods case next to this computer, without touching anything in Earshot.'
-        $caseCardAnswer = Read-Answer -Run $run -Question 'Did any small card appear near the taskbar by itself, without you clicking anything?'
+        Wait-Owner -Run $run -Text 'Open your AirPods case next to this computer, without touching anything in Earshot, and leave the lid open. Start typing in any other window first, so you can see whether the card takes the keyboard focus.'
+        $caseCardAnswer = Read-Answer -Run $run -Question 'Within about ten seconds, did a small card with the left, right and case figures appear by itself, on the display the gauge is on, while the window you were typing in kept the keyboard focus?'
         $toggleLines = Get-EarshotLogLines -Run $run -Pattern 'connect: ' -SinceUtc $caseOpenUtc
         Add-Finding -Run $run -Name 'caseOpenToggleLinesSeen' -Value @($toggleLines).Count
-        Add-Criterion -Run $run -Id 'case-open-card-honestly-not-shown' -Criterion 'While nothing can tell when the case lid is open, the case-open card correctly stays silent rather than showing an unproved reading.' `
-            -Outcome $(if ($caseCardAnswer -eq 'no') { 'pass' } elseif ($caseCardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
-            -Detail ('You answered ' + $caseCardAnswer + '. "No" is the correct, honest state: Earshot cannot yet tell when the case lid is open; "yes" would mean a card appeared for a set of AirPods this build cannot yet confirm are the owner''s.')
+        Add-Criterion -Run $run -Id 'case-open-card-appears' -Criterion 'Opening the case of the linked AirPods next to this PC shows the case-open card by itself on the display the gauge is on, without taking the keyboard focus.' `
+            -Outcome $(if ($caseCardAnswer -eq 'yes') { 'pass' } elseif ($caseCardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $caseCardAnswer + '. The card only follows a pair that has been linked, so if no card came, check the case had been opened next to this PC earlier in the sitting.')
+        Wait-Owner -Run $run -Text 'Close the case lid, and wait about fifteen seconds.'
+        $caseCloseAnswer = Read-Answer -Run $run -Question 'Did the card close by itself after the lid was shut?'
+        Add-Criterion -Run $run -Id 'case-open-card-closes-with-the-case' -Criterion 'With the default close choice, the case-open card closes when the case closes, about eight seconds after the case stops sending.' `
+            -Outcome $(if ($caseCloseAnswer -eq 'yes') { 'pass' } elseif ($caseCloseAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $caseCloseAnswer + '.')
+        Wait-Owner -Run $run -Text 'Open the case lid again so the card appears, then click the cross in its top corner.'
+        $caseCrossAnswer = Read-Answer -Run $run -Question 'Did the card close when you clicked the cross, and did the AirPods stay as they were (nothing connected or disconnected)?'
+        Add-Criterion -Run $run -Id 'case-open-card-close-button' -Criterion 'The case-open card''s close button closes it on every display.' `
+            -Outcome $(if ($caseCrossAnswer -eq 'yes') { 'pass' } elseif ($caseCrossAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $caseCrossAnswer + '.')
         Add-Criterion -Run $run -Id 'case-open-no-auto-connect' -Criterion 'Opening the case never connects the AirPods by itself, whether or not a card appeared.' `
             -Outcome $(if (@($toggleLines).Count -eq 0) { 'pass' } else { 'fail' }) `
             -Detail ([string]@($toggleLines).Count + ' connect or disconnect line(s) logged since the case was opened; there should be none.')
@@ -365,7 +375,7 @@ try
             -Detail 'The alert acts on the figure the card shows, and this test does not set a threshold above your AirPods'' battery, so it does not exercise it.'
 
         Write-Section -Run $run -Title 'The ring and its colour'
-        $ringAnswer = Read-Answer -Run $run -Question 'Is there a ring round the earbud mark on the gauge? (It appears only while a bud has a reading from the last hour, so no ring is a fine answer when the AirPods have been quiet.)'
+        $ringAnswer = Read-Answer -Run $run -Question 'Is there a ring round the earbud mark on the gauge? (It appears once a bud has a reading, of any age, so no ring is a fine answer when no bud has been heard yet.)'
         $accentAnswer = 'unsure'
         if ($ringAnswer -eq 'yes')
         {
@@ -379,6 +389,27 @@ try
             -Detail $(
                 if ($ringAnswer -ne 'yes') { 'There was no ring (you answered ' + $ringAnswer + '), so nothing here could be looked at. A bud needs a reading from the broadcast first, which needs the AirPods out of the case or the case open.' }
                 else { 'You answered ' + $accentAnswer + ' about the accent colour.' })
+
+        Write-Section -Run $run -Title 'An estimate while away'
+        Wait-Owner -Run $run -Text 'Make sure the AirPods are not on this PC. Put them in the case, plug the case in so it charges, shut the lid and take it out of range of this computer, for example into another room. Leave it charging for at least thirty minutes, then look at the gauge and the card.'
+        $estimateAnswer = Read-Answer -Run $run -Question 'Does the gauge show the case mark with a grey ring and number, and does the card show the case figure with the "about" sign (two wavy lines) before it and how long ago the reading was? If no figure has that sign, answer "not sure": Earshot estimates only once it has learned a charge rate from your own AirPods.'
+        Add-Criterion -Run $run -Id 'estimate-marked-with-age' -Criterion 'Away from this PC, a part that was charging is shown as an estimate: the "about" sign (two wavy lines) before the figure, grey, and the age of the reading it grew from; the gauge shows the case mark.' `
+            -Outcome $(if ($estimateAnswer -eq 'yes') { 'pass' } elseif ($estimateAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $estimateAnswer + '. A "no" would mean an estimate was shown without its marking, or the gauge did not follow the case, which is a real defect. "Not sure" is the answer when no rate had been learned yet.')
+        $fallAnswer = 'unsure'
+        if ($estimateAnswer -eq 'yes')
+        {
+            $fallAnswer = Read-Answer -Run $run -Question 'Compared with the last live reading you saw, is the estimated figure the same or higher, and has it never gone down at any look you took?'
+        }
+
+        Add-Criterion -Run $run -Id 'estimate-never-falls' -Criterion 'An estimate rises or holds and never falls below a figure already shown.' `
+            -Outcome $(if ($estimateAnswer -ne 'yes') { 'inconclusive' } elseif ($fallAnswer -eq 'yes') { 'pass' } elseif ($fallAnswer -eq 'no') { 'fail' } else { 'inconclusive' }) `
+            -Detail $(if ($estimateAnswer -ne 'yes') { 'There was no estimate to look at (you answered ' + $estimateAnswer + ').' } else { 'You answered ' + $fallAnswer + '. A "no" would mean an estimate fell, which is a real defect.' })
+        Wait-Owner -Run $run -Text 'Bring the case back next to this computer and open the lid, then wait a few seconds.'
+        $replaceAnswer = Read-Answer -Run $run -Question 'Did live figures replace the estimate, with no "about" sign and no grey, even where a figure is lower than the estimate was?'
+        Add-Criterion -Run $run -Id 'live-replaces-estimate' -Criterion 'A newer live reading replaces an estimate at once, even with a lower value.' `
+            -Outcome $(if ($replaceAnswer -eq 'yes') { 'pass' } elseif ($replaceAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
+            -Detail ('You answered ' + $replaceAnswer + '.')
 
         Write-Section -Run $run -Title 'A reading older than an hour'
         Wait-Owner -Run $run -Text 'Put the AirPods in the case and close it, or take them away from this computer, and leave them for over an hour. Then hover over the gauge. If you cannot wait, answer "not sure" below.'
