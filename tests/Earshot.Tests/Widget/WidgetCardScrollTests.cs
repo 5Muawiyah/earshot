@@ -287,6 +287,42 @@ public sealed class WidgetCardScrollTests
         });
     }
 
+    // The same with More open, which makes the page long enough that a row in the middle of it can be scrolled up under the header:
+    // Hand back's switch, cut by the top edge, is pressed where it can be seen and then shown whole.
+    [TestMethod]
+    public void AClickOnAControlCutByTheTopOfAPageWithMoreOpenScrollsItWhollyIntoViewAndStillPressesIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using ScrollPage page = ScrollPage.Open(SmallWorkArea);
+            page.OpenSettings();
+            page.OpenMore();
+            Rectangle OnScreen()
+            {
+                Rectangle onPage = CardKit.Part(page.Card, SettingsRowId.HandBack, SettingsPart.Toggle);
+                return new Rectangle(onPage.X, onPage.Y - page.Card.SettingsScrollOffset, onPage.Width, onPage.Height);
+            }
+
+            Rectangle toggle = OnScreen();
+            for (int i = 0; i < 400 && !(toggle.Top < page.Viewport.Top && toggle.Bottom > page.Viewport.Top); i++)
+            {
+                Wheel(page.Card, toggle.Top < page.Viewport.Top ? 40 : -40);
+                toggle = OnScreen();
+            }
+
+            Assert.IsTrue(toggle.Top < page.Viewport.Top && toggle.Bottom > page.Viewport.Top, "Sanity: the switch is cut by the top of the page: " + toggle + " in " + page.Viewport);
+            int offset = page.Card.SettingsScrollOffset;
+            page.Host.Calls.Clear();
+
+            CardKit.Click(page.Card, Rectangle.Intersect(toggle, page.Viewport));
+
+            CardKit.AssertCalls(page.Host, "handBack:False");
+            Assert.IsLessThan(offset, page.Card.SettingsScrollOffset, "The page scrolled up to bring it in.");
+            Rectangle after = OnScreen();
+            Assert.IsTrue(after.Top >= page.Viewport.Top && after.Bottom <= page.Viewport.Bottom, "The switch is wholly in view: " + after + " in " + page.Viewport);
+        });
+    }
+
     [TestMethod]
     public void ARowScrolledUnderTheHeaderIsNotClickedThroughIt()
     {
