@@ -8,14 +8,14 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class HistoryStoreTests : IDisposable
 {
-    private static readonly DateTimeOffset T0 = new(2026, 10, 2, 9, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Start = new(2026, 10, 2, 9, 0, 0, TimeSpan.Zero);
 
     private static readonly int[] KeptLevels = [80, 82];
     private static readonly string[] FileMembers = ["SchemaVersion", "Samples", "Part", "Percent", "Charging", "At"];
 
     private readonly TempFolder _temp = new();
     private readonly CapturingLog _log = new();
-    private readonly FixedClock _clock = new(T0);
+    private readonly FixedClock _clock = new(Start);
 
     public void Dispose() => _temp.Dispose();
 
@@ -47,15 +47,15 @@ public sealed class HistoryStoreTests : IDisposable
     {
         HistoryStore store = NewStore();
 
-        store.Record(Reading(left: 80, right: 75, box: 60, charging: true), T0);
+        store.Record(Reading(left: 80, right: 75, box: 60, charging: true), Start);
 
-        HistoryWindow window = store.Query(T0);
+        HistoryWindow window = store.Query(Start);
         Assert.HasCount(3, window.Samples);
-        CollectionAssert.Contains(window.Samples.ToList(), new HistorySample(ChargeComponent.Left, 80, true, T0));
-        CollectionAssert.Contains(window.Samples.ToList(), new HistorySample(ChargeComponent.Case, 60, true, T0));
+        CollectionAssert.Contains(window.Samples.ToList(), new HistorySample(ChargeComponent.Left, 80, true, Start));
+        CollectionAssert.Contains(window.Samples.ToList(), new HistorySample(ChargeComponent.Case, 60, true, Start));
 
         HistoryStore again = NewStore();
-        Assert.HasCount(3, again.Query(T0).Samples, "It comes back from the file.");
+        Assert.HasCount(3, again.Query(Start).Samples, "It comes back from the file.");
     }
 
     [TestMethod]
@@ -63,9 +63,9 @@ public sealed class HistoryStoreTests : IDisposable
     {
         HistoryStore store = NewStore();
 
-        store.Record(Reading(left: 80), T0);
+        store.Record(Reading(left: 80), Start);
 
-        Assert.HasCount(1, store.Query(T0).Samples);
+        Assert.HasCount(1, store.Query(Start).Samples);
     }
 
     [TestMethod]
@@ -73,22 +73,22 @@ public sealed class HistoryStoreTests : IDisposable
     {
         HistoryStore store = NewStore();
 
-        store.Record(Reading(left: 80), T0);
-        store.Record(Reading(left: 81), T0 + TimeSpan.FromSeconds(30));
-        store.Record(Reading(left: 81), T0 + TimeSpan.FromSeconds(59));
-        store.Record(Reading(left: 82), T0 + TimeSpan.FromSeconds(60));
-        store.Record(Reading(left: 70), T0 - TimeSpan.FromMinutes(5)); // a clock put back
+        store.Record(Reading(left: 80), Start);
+        store.Record(Reading(left: 81), Start + TimeSpan.FromSeconds(30));
+        store.Record(Reading(left: 81), Start + TimeSpan.FromSeconds(59));
+        store.Record(Reading(left: 82), Start + TimeSpan.FromSeconds(60));
+        store.Record(Reading(left: 70), Start - TimeSpan.FromMinutes(5)); // a clock put back
 
-        CollectionAssert.AreEqual(KeptLevels, store.Query(T0 + TimeSpan.FromMinutes(1)).Samples.Select(s => s.Percent).ToArray());
+        CollectionAssert.AreEqual(KeptLevels, store.Query(Start + TimeSpan.FromMinutes(1)).Samples.Select(s => s.Percent).ToArray());
     }
 
     [TestMethod]
     public void SamplesOlderThanSevenDaysArePrunedOnWrite()
     {
         HistoryStore store = NewStore();
-        store.Record(Reading(left: 50), T0);
+        store.Record(Reading(left: 50), Start);
 
-        DateTimeOffset later = T0 + TimeSpan.FromDays(7) + TimeSpan.FromMinutes(1);
+        DateTimeOffset later = Start + TimeSpan.FromDays(7) + TimeSpan.FromMinutes(1);
         _clock.Now = later;
         store.Record(Reading(left: 60), later);
 
@@ -103,43 +103,43 @@ public sealed class HistoryStoreTests : IDisposable
     public void SamplesOlderThanSevenDaysAreDroppedAtLoad()
     {
         HistoryStore store = NewStore();
-        store.Record(Reading(left: 50), T0);
-        store.Record(Reading(left: 55), T0 + TimeSpan.FromDays(6));
+        store.Record(Reading(left: 50), Start);
+        store.Record(Reading(left: 55), Start + TimeSpan.FromDays(6));
 
-        _clock.Now = T0 + TimeSpan.FromDays(7) + TimeSpan.FromHours(1);
+        _clock.Now = Start + TimeSpan.FromDays(7) + TimeSpan.FromHours(1);
         HistoryStore reread = NewStore();
         reread.Load();
 
         // Query over a window wide enough to show the old one if it were kept is not possible (24 h), so ask at its own time.
-        Assert.IsEmpty(reread.Query(T0 + TimeSpan.FromHours(1)).Samples, "The first sample is past 7 days at load.");
-        Assert.HasCount(1, reread.Query(T0 + TimeSpan.FromDays(6)).Samples);
+        Assert.IsEmpty(reread.Query(Start + TimeSpan.FromHours(1)).Samples, "The first sample is past 7 days at load.");
+        Assert.HasCount(1, reread.Query(Start + TimeSpan.FromDays(6)).Samples);
     }
 
     [TestMethod]
     public void TheDayWindowHoldsTheLast24HoursAndNamesTheGaps()
     {
         HistoryStore store = NewStore();
-        store.Record(Reading(left: 90), T0 - TimeSpan.FromHours(30)); // outside the window
-        store.Record(Reading(left: 80, box: 40), T0 - TimeSpan.FromHours(3));
-        store.Record(Reading(left: 78), T0 - TimeSpan.FromHours(3) + TimeSpan.FromMinutes(10)); // exactly 10 minutes: not a gap
-        store.Record(Reading(left: 70, box: 45), T0 - TimeSpan.FromHours(2)); // left: gap of 1 h 50 min; case: gap of 1 h
-        store.Record(Reading(left: 69), T0 - TimeSpan.FromHours(2) + TimeSpan.FromMinutes(1));
+        store.Record(Reading(left: 90), Start - TimeSpan.FromHours(30)); // outside the window
+        store.Record(Reading(left: 80, box: 40), Start - TimeSpan.FromHours(3));
+        store.Record(Reading(left: 78), Start - TimeSpan.FromHours(3) + TimeSpan.FromMinutes(10)); // exactly 10 minutes: not a gap
+        store.Record(Reading(left: 70, box: 45), Start - TimeSpan.FromHours(2)); // left: gap of 1 h 50 min; case: gap of 1 h
+        store.Record(Reading(left: 69), Start - TimeSpan.FromHours(2) + TimeSpan.FromMinutes(1));
 
-        HistoryWindow window = store.Query(T0);
+        HistoryWindow window = store.Query(Start);
 
-        Assert.AreEqual(T0 - TimeSpan.FromHours(24), window.Start);
-        Assert.AreEqual(T0, window.End);
+        Assert.AreEqual(Start - TimeSpan.FromHours(24), window.Start);
+        Assert.AreEqual(Start, window.End);
         Assert.HasCount(6, window.Samples);
         Assert.IsTrue(window.Samples.SequenceEqual(window.Samples.OrderBy(s => s.At)), "Oldest first.");
         Assert.HasCount(2, window.Gaps);
-        Assert.IsTrue(window.Gaps.Contains(new HistoryGap(ChargeComponent.Left, T0 - TimeSpan.FromHours(3) + TimeSpan.FromMinutes(10), T0 - TimeSpan.FromHours(2))));
-        Assert.IsTrue(window.Gaps.Contains(new HistoryGap(ChargeComponent.Case, T0 - TimeSpan.FromHours(3), T0 - TimeSpan.FromHours(2))));
+        Assert.IsTrue(window.Gaps.Contains(new HistoryGap(ChargeComponent.Left, Start - TimeSpan.FromHours(3) + TimeSpan.FromMinutes(10), Start - TimeSpan.FromHours(2))));
+        Assert.IsTrue(window.Gaps.Contains(new HistoryGap(ChargeComponent.Case, Start - TimeSpan.FromHours(3), Start - TimeSpan.FromHours(2))));
     }
 
     [TestMethod]
     public void TheFileHoldsNoAddressOrNameOnlyPartsLevelsFlagsAndTimes()
     {
-        NewStore().Record(Reading(left: 80, right: 75, box: 60, charging: true), T0);
+        NewStore().Record(Reading(left: 80, right: 75, box: 60, charging: true), Start);
 
         string text = File.ReadAllText(FilePath);
         using var doc = System.Text.Json.JsonDocument.Parse(text);
@@ -169,12 +169,12 @@ public sealed class HistoryStoreTests : IDisposable
         string before = File.ReadAllText(FilePath);
         HistoryStore store = NewStore();
 
-        store.Record(Reading(left: 80), T0);
-        store.Record(Reading(left: 79), T0 + TimeSpan.FromMinutes(2));
+        store.Record(Reading(left: 80), Start);
+        store.Record(Reading(left: 79), Start + TimeSpan.FromMinutes(2));
 
         Assert.AreEqual(before, File.ReadAllText(FilePath), "The unusable file is left as it is.");
         Assert.IsFalse(File.Exists(FilePath + ".tmp"));
-        Assert.HasCount(2, store.Query(T0 + TimeSpan.FromMinutes(2)).Samples, "Kept for this run.");
+        Assert.HasCount(2, store.Query(Start + TimeSpan.FromMinutes(2)).Samples, "Kept for this run.");
         Assert.IsNotEmpty(_log.Entries);
     }
 
@@ -183,12 +183,12 @@ public sealed class HistoryStoreTests : IDisposable
     {
         WriteRaw("not json");
         HistoryStore store = NewStore();
-        store.Record(Reading(left: 80), T0);
+        store.Record(Reading(left: 80), Start);
         File.Delete(FilePath);
 
-        store.Record(Reading(left: 79), T0 + TimeSpan.FromMinutes(2));
+        store.Record(Reading(left: 79), Start + TimeSpan.FromMinutes(2));
 
-        Assert.HasCount(2, NewStore().Query(T0 + TimeSpan.FromMinutes(2)).Samples);
+        Assert.HasCount(2, NewStore().Query(Start + TimeSpan.FromMinutes(2)).Samples);
     }
 
     [TestMethod]
@@ -198,7 +198,7 @@ public sealed class HistoryStoreTests : IDisposable
         WriteRaw(newer);
         HistoryStore store = NewStore();
 
-        store.Record(Reading(left: 80), T0);
+        store.Record(Reading(left: 80), Start);
 
         Assert.AreEqual(newer, File.ReadAllText(FilePath));
     }
