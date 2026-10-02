@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.Widget;
 
 // What the gauge shows and says, from a snapshot and a time. The first matching state wins, a bud with no value
-// is left out, and a value older than an hour is dropped bud by bud.
+// is left out, and a value that is not live is still shown, at any age, as a last reading in tertiary ink.
 [TestClass]
 public sealed class GaugeContentTests
 {
@@ -66,7 +66,8 @@ public sealed class GaugeContentTests
         Assert.AreEqual(60, c.Percent, "The lower bud.");
         Assert.IsFalse(c.Low);
         Assert.IsFalse(c.Charging);
-        Assert.AreEqual("AirPods\r\nL 70%   R 60%\r\nRead 2 min ago", c.Tooltip);
+        Assert.AreEqual("AirPods\r\nL 70%   R 60%\r\nLast read 2 min ago", c.Tooltip, "Two minutes old is not live: a last reading.");
+        Assert.IsTrue(c.Tertiary);
     }
 
     [TestMethod]
@@ -87,8 +88,11 @@ public sealed class GaugeContentTests
         GaugeContent old = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromHours(3)), Bud(60, age: TimeSpan.FromHours(3))), Now, Settings);
 
         Assert.AreEqual("No recent reading", none.Tooltip);
-        Assert.AreEqual("No recent reading", old.Tooltip);
-        Assert.AreEqual(GaugeMode.MarkOnly, old.Mode);
+
+        // Replaces "an old reading counts as none": it is the gauge's number, as a last reading.
+        Assert.AreEqual("AirPods\r\nL 70%   R 60%\r\nLast read 3 h ago", old.Tooltip);
+        Assert.AreEqual(GaugeMode.Reading, old.Mode);
+        Assert.IsTrue(old.Tertiary);
     }
 
     // Connected with no pair linked: the mark alone, and the tooltip says what makes a figure show. The same broadcast
@@ -124,42 +128,47 @@ public sealed class GaugeContentTests
         Assert.AreEqual(55, c.Percent);
     }
 
-    // The one rule for how old a reading may be: exactly an hour is still recent, a minute more is not.
+    // Replaces "exactly an hour is still recent, a minute more is not": there is no age at which a reading leaves the gauge.
     [TestMethod]
-    public void AReadingOfExactlyOneHourIsRecentAndOneMinuteOlderIsNot()
+    public void AReadingOfAnHourOrMoreIsStillOnTheGaugeAsALastReading()
     {
         GaugeContent atAnHour = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromHours(1)), Bud(60, age: TimeSpan.FromHours(1))), Now, Settings);
         GaugeContent past = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromMinutes(61)), Bud(60, age: TimeSpan.FromMinutes(61))), Now, Settings);
 
-        Assert.AreEqual(GaugeMode.Reading, atAnHour.Mode, "An hour old is still recent.");
-        Assert.AreEqual(GaugeMode.MarkOnly, past.Mode, "61 minutes old counts as no recent reading.");
+        Assert.AreEqual(GaugeMode.Reading, atAnHour.Mode);
+        Assert.AreEqual(GaugeMode.Reading, past.Mode, "61 minutes old is still shown.");
+        Assert.AreEqual(60, past.Percent);
+        Assert.IsTrue(past.Tertiary);
     }
 
     // ---- Freshness ----
 
+    // Replaces "a reading is still recent at one hour and gone after it": the tooltip says how old it is instead.
     [TestMethod]
-    public void AReadingIsStillRecentAtOneHourAndGoneAfterIt()
+    public void AnOldReadingSaysLastReadWithItsAge()
     {
         GaugeContent at59 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(60, age: TimeSpan.FromMinutes(59)), Bud(60, age: TimeSpan.FromMinutes(59))), Now, Settings);
         GaugeContent at60 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(60, age: TimeSpan.FromMinutes(60)), Bud(60, age: TimeSpan.FromMinutes(60))), Now, Settings);
         GaugeContent at61 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(60, age: TimeSpan.FromMinutes(61)), Bud(60, age: TimeSpan.FromMinutes(61))), Now, Settings);
 
         Assert.AreEqual(GaugeMode.Reading, at59.Mode);
-        Assert.AreEqual("AirPods\r\nL 60%   R 60%\r\nRead 59 min ago", at59.Tooltip);
-        Assert.AreEqual(GaugeMode.Reading, at60.Mode);
-        Assert.AreEqual(GaugeMode.MarkOnly, at61.Mode);
+        Assert.AreEqual("AirPods\r\nL 60%   R 60%\r\nLast read 59 min ago", at59.Tooltip);
+        Assert.AreEqual("AirPods\r\nL 60%   R 60%\r\nLast read 1 h ago", at60.Tooltip);
+        Assert.AreEqual(GaugeMode.Reading, at61.Mode);
+        Assert.AreEqual("AirPods\r\nL 60%   R 60%\r\nLast read 1 h ago", at61.Tooltip);
     }
 
-    // A value older than an hour is dropped bud by bud: the bud that is still recent is the number, and the bud
-    // that is not is left out of the tooltip as well.
+    // Replaces "a value older than an hour is dropped bud by bud": the old low bud is still the number, as a last
+    // reading, and the tooltip gives the age of the oldest bud shown.
     [TestMethod]
-    public void OneBudOlderThanAnHourIsDroppedAndTheOtherIsTheNumber()
+    public void AnOldLowBudIsStillTheNumberAsALastReading()
     {
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromMinutes(2)), Bud(30, age: TimeSpan.FromHours(2))), Now, Settings);
 
         Assert.AreEqual(GaugeMode.Reading, c.Mode);
-        Assert.AreEqual(70, c.Percent, "The old low bud no longer pulls the number down.");
-        Assert.AreEqual("AirPods\r\nL 70%\r\nRead 2 min ago", c.Tooltip);
+        Assert.AreEqual(30, c.Percent);
+        Assert.IsTrue(c.Tertiary);
+        Assert.AreEqual("AirPods\r\nL 70%   R 30%\r\nLast read 2 h ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -177,7 +186,7 @@ public sealed class GaugeContentTests
     {
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromSeconds(20)), Bud(60, age: TimeSpan.FromSeconds(200))), Now, Settings);
 
-        StringAssert.EndsWith(c.Tooltip, "Read 3 min ago");
+        StringAssert.EndsWith(c.Tooltip, "Last read 3 min ago");
         Assert.AreEqual("Read 1 min ago", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(119)));
     }
 
@@ -200,7 +209,7 @@ public sealed class GaugeContentTests
 
         Assert.AreEqual(GaugeMode.Reading, c.Mode);
         Assert.AreEqual(70, c.Percent);
-        Assert.AreEqual("AirPods\r\nL 70%\r\nRead 2 min ago", c.Tooltip);
+        Assert.AreEqual("AirPods\r\nL 70%\r\nLast read 2 min ago", c.Tooltip);
     }
 
     [TestMethod]

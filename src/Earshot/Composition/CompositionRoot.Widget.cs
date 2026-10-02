@@ -48,7 +48,8 @@ internal static partial class CompositionRoot
 
         // The paired AirPods' model is read from the pinned device's own nodes; it picks the candidates out of the
         // broadcast. Windows' own Hands-Free figure comes from the registry's battery provider when that is one that
-        // reads it. Nothing is read from disk, and nothing of what the widget chose is ever written.
+        // reads it. Nothing of the link is written; the owner's pair's last readings and learned charge rates are kept in
+        // the widget folder (Paths.LastReadingFile, under EARSHOT_DATA_ROOT when that is set), values and times only.
         var status = new WidgetStatusService(
             advertisementSourceFactory ?? (static () => new WinRtAdvertisementSource()),
             r.Settings,
@@ -58,7 +59,8 @@ internal static partial class CompositionRoot
             r.UiPost,
             time,
             pairedModel ?? new NodePairedModelSource(),
-            r.Battery as IHandsFreeBatterySource);
+            r.Battery as IHandsFreeBatterySource,
+            new LastReadingStore(Paths.Current.LastReadingFile, r.Log));
         r.WidgetStatus = status;
         return status;
     }

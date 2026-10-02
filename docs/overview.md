@@ -380,25 +380,27 @@ Alongside the tray icon, Earshot can show a small gauge on the taskbar, and
 from it a card with more detail. It works by listening to the AirPods' own
 Bluetooth broadcast, the same short signal a phone reads for its own battery
 widget. There is no set-up: you open the AirPods case next to the PC once and
-Earshot links to your pair. The figures show only while the AirPods are
-connected to this PC. That is also why it has firm limits; see
+Earshot links to your pair. The figures show wherever the AirPods are: live while
+they are being heard, then greyed with their age, kept across a restart until a
+newer reading comes. That is also why it has firm limits; see
 [below](#what-the-widget-cannot-know). The battery has not had a live run.
 
 **The gauge.** The earbud mark with a ring round it in your Windows accent
 colour. The ring fills to the lower bud's battery, that number sits beside it,
 and a bolt appears when a bud it is drawn from says it is charging. The ring
 changes colour when the battery is at or below the low battery threshold. The
-gauge has four looks, and its tooltip says why:
+gauge has five looks, and its tooltip says why:
 
 | When | What the gauge shows | Tooltip |
 |---|---|---|
-| On this PC with a bud read within the last hour | The ring, the number, and a bolt when it applies | Three lines: `AirPods` (or `Charging`, or `Low battery`), then the buds that have a reading such as `L 70%   R 60%`, then how long ago it was read |
-| On this PC, with no bud read within the last hour | The earbud mark alone | `No recent reading` |
-| Not on this PC | The earbud mark, faded | `Not on this PC` |
-| Not on this PC, and your AirPods are near and in use on another device | The earbud mark and a phone | `On your iPhone`, or the label you set |
+| On this PC with a bud reading of any age | The ring, the number, and a bolt when it applies; grey when the reading is not live | Three lines: `AirPods` (or `Charging`, or `Low battery`), then the buds that have a reading such as `L 70%   R 60%`, then `Read just now`, `Last read 2 h ago` or `Estimated, read 2 h ago` |
+| On this PC, with no bud reading | The earbud mark alone | `No recent reading` |
+| Not on this PC, with a case reading | A case mark, the ring and the case's number, all in grey, and a bolt if the case was charging | `Not on this PC`, then `Case 80%`, then `Last read` or `Estimated` with the age |
+| Not on this PC, with no case reading | The earbud mark, faded | `Not on this PC` |
+| Not on this PC, and your AirPods are near and in use on another device | The earbud mark and a phone | `On your iPhone`, or the label you set, then the case when there is a reading of it |
 
-A reading older than one hour counts as no recent reading, and the gauge
-drops it. A bud with no reading is left out of the tooltip, never shown as a
+A reading stays on the gauge, greyed, however old it is, until a newer one is
+heard. A bud with no reading is left out of the tooltip, never shown as a
 dash or a guess. When no bud has a current broadcast value, the AirPods are on
 this PC and Windows has a Hands-Free figure for them, the gauge shows that
 figure and the tooltip says `Windows reads 70%`. **Gauge order** on the
@@ -465,8 +467,9 @@ or disconnects immediately instead. It is off by default.
 columns, left bud, right bud and case, each with a bar, its number and a
 charging mark when it applies. The bars use your Windows accent colour, and
 switch to the caution colour at or below the low battery threshold. A value
-read within the last 30 seconds is drawn as current. An older one is greyed,
-and the read line says how long ago it was read. A column with no value says
+read within the last 30 seconds is drawn as current. An older one is greyed
+with its age beside it (`80% · 2 h`), and an estimate also has `≈` before it
+(`≈90% · 2 h`); hovering over it says `Last read` or `Estimated` and how long ago. A column with no value says
 "No reading". Below them: one line for where the AirPods are (`On this PC`,
 `On your iPhone` or the label you set, `Not in use`, or `Not seen yet`), one
 line for when the battery was last read (`Battery read 2 min ago`, or `Battery
@@ -577,10 +580,12 @@ address, so it does not depend on the mode.
   they are actually connected to.
 - **Battery is a snapshot, never live.** It is read in steps of 10% (0, 10,
   20 to 100) from the last broadcast Earshot heard. A value older than 30
-  seconds is greyed with its age, it is never interpolated, and the gauge
-  drops a reading older than an hour. It shows only while the AirPods are
-  connected to this PC, and only for the pair you linked by opening the case.
-  When they disconnect, nothing is shown, not even greyed.
+  seconds is greyed with its age, and is kept, across a restart too, until a
+  newer one is heard. It is only ever of the pair you linked by opening the
+  case. A part that was charging when last read may be shown as an estimate,
+  marked `≈` with the age of the reading it grew from: it rises at a rate learned
+  from your own pair's charging (none until one is learned) and stops at 100. It
+  never falls, and a newer reading replaces it.
 - **Left and right rest partly on a published description of the broadcast
   and partly on one local capture, and are unproved.** No permitted source
   documents the bit that swaps the two buds. If it is read the wrong way round,
@@ -608,8 +613,9 @@ is never linked, however near.
 After that Earshot follows your pair when its Bluetooth addresses change, which it
 does by the levels the pair last said: a set with other levels is never taken for
 yours. If it cannot hear your pair for two minutes it drops the link and shows
-nothing until you open the case again. The link is kept in memory only, so
-restarting Earshot, as an update does, needs the case opened once more.
+its last readings, greyed, until you open the case again. The link is kept in
+memory only, so restarting Earshot, as an update does, needs the case opened once
+more for live figures; the last readings are kept.
 
 With the AirPods connected and nothing linked, the card and the gauge's tooltip say
 "Open the case to show battery", and **Refresh** listens for the case to be opened.
@@ -636,6 +642,9 @@ full list and why, with sources.
 The widget only listens. It never connects to, or sends anything to, a
 Bluetooth device to get this data, and it does not need the AirPods connected
 to this PC to listen. It does read the paired AirPods' model from Windows to know
-which broadcast to link. What it hears is held in memory for the link and is not
-written to disk. A device that is not linked is counted and nothing else about it
-is kept.
+which broadcast to link. The link is held in memory and is not written to disk.
+The last reading of each bud and the case of your linked pair (the level, whether
+it was charging, when it was read and the model number) and the charge rates
+learned from them are kept in `last-reading.json` in Earshot's local folder; no
+address and no name. A device that is not linked is counted and nothing else
+about it is kept.

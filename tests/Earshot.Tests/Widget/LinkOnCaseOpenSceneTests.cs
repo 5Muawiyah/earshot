@@ -9,7 +9,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.Widget;
 
 // Whole scenes through the real status service with a fake watcher: the owner's AirPods are linked when the owner opens
-// the case next to the PC, are shown only while connected to this PC, and are never mistaken for a pair of the same
+// the case next to the PC, are shown wherever they are, and are never mistaken for a pair of the same
 // model worn nearby. The card, the gauge, the tooltip and the low battery alert all read BatteryFreshness.Shown, which
 // is what these scenes read.
 [TestClass]
@@ -189,7 +189,13 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         ShownBattery shown = Shown(service);
         Assert.IsFalse(shown.Left.Percent == 70 || shown.Right.Percent == 70, "Not once is the stranger's 70% shown.");
         Assert.IsTrue(_readings.All(r => r.Reading.Left.Percent != 70 && r.Reading.Right.Percent != 70), "Nor reached the ear logic.");
-        AssertNothingShown(shown, "The link was dropped when the owner's pair was lost for too long");
+
+        // The link was dropped when the owner's pair was lost for too long. Under the rule that replaced "nothing is
+        // shown", the owner's own last reading stays, never live, until a newer reading of the owner's pair.
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        Assert.AreEqual(100, shown.Left.Percent, "The owner's last reading.");
+        Assert.AreEqual(ReadingKind.Last, shown.Left.Kind);
+        Assert.AreEqual(ReadingKind.Last, shown.Case.Kind);
     }
 
     // ---- Linking on a case open
@@ -334,7 +340,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
     // ---- Dropping the link
 
     [TestMethod]
-    public void ALinkLostForMoreThanTwoMinutesShowsNothingAndWaitsForTheNextCaseOpen()
+    public void ALinkLostForMoreThanTwoMinutesLeavesTheLastReadingAndWaitsForTheNextCaseOpen()
     {
         using WidgetStatusService service = NewService();
         service.Start();
@@ -349,22 +355,32 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
 
         Tick(15);
         Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection, "Over two minutes: the link is dropped.");
-        AssertNothingShown(Shown(service), "The link was dropped");
-        Assert.IsNull(service.Current.Left.Percent, "What the set said is not kept either.");
+        Assert.IsNull(service.Current.Left.Percent, "What the set said in this link is not kept.");
 
-        // The owner's own pair in use, as it was, for ten minutes: without a case open nothing links.
+        // Under the rule that replaced "nothing is shown once the link is dropped": the last reading of the owner's pair
+        // stays, as a last reading, never live.
+        ShownBattery dropped = Shown(service);
+        Assert.AreEqual(100, dropped.Left.Percent);
+        Assert.AreEqual(ReadingKind.Last, dropped.Left.Kind);
+
+        // The owner's own pair in use, as it was, for ten minutes: without a case open nothing links, and nothing it says
+        // is taken as live.
         WearThem(600);
-        AssertNothingShown(Shown(service), "Heard again, but no case was opened");
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        Assert.AreEqual(ReadingKind.Last, Shown(service).Left.Kind, "Heard again, but no case was opened");
 
         OpenTheCase(3);
         Assert.AreEqual(100, Shown(service).Left.Percent, "The next case open links again.");
+        Assert.AreEqual(ReadingKind.Live, Shown(service).Left.Kind);
         Assert.AreEqual(90, Shown(service).Case.Percent);
     }
 
-    // ---- Connected only
+    // ---- Away from this PC
 
+    // Replaces "nothing is shown while not connected": the linked pair is shown wherever it is, and with the AirPods away
+    // the gauge shows the case's value in place of the buds'.
     [TestMethod]
-    public void NothingIsShownWhileNotConnectedEvenWhenLinkedAndItAppearsOnConnecting()
+    public void WhileNotConnectedTheLinkedPairIsShownAndTheGaugeShowsTheCase()
     {
         using WidgetStatusService service = NewService();
         service.Start();
@@ -373,8 +389,14 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         WearThem(3);
 
         Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection, "The link is made whether or not they are connected.");
-        AssertNothingShown(Shown(service), "Not connected");
-        Assert.AreEqual(GaugeMode.NotOnThisPc, Gauge(service).Mode);
+        Assert.AreEqual(100, Shown(service).Left.Percent, "Not connected: the linked pair's values still show.");
+        Assert.IsTrue(Shown(service).Left.Fresh);
+        Assert.IsNull(Shown(service).Gauge, "The gauge's bud figure is for AirPods on this PC.");
+        GaugeContent away = Gauge(service);
+        Assert.AreEqual(GaugeMode.CaseAway, away.Mode, "Away, the gauge shows the case.");
+        Assert.AreEqual(90, away.Percent);
+        Assert.IsTrue(away.CaseMark);
+        Assert.IsTrue(away.Tertiary);
 
         Connect();
         WearThem(2);
@@ -383,8 +405,8 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         Assert.AreEqual(GaugeMode.Reading, Gauge(service).Mode);
 
         Connect(active: false);
-        AssertNothingShown(Shown(service), "Disconnected again");
-        Assert.AreEqual(GaugeMode.NotOnThisPc, Gauge(service).Mode);
+        Assert.AreEqual(100, Shown(service).Left.Percent, "Disconnected again: still shown.");
+        Assert.AreEqual(GaugeMode.CaseAway, Gauge(service).Mode);
     }
 
     // ---- What is counted, what is logged and what is kept

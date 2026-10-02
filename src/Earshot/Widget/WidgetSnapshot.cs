@@ -26,6 +26,16 @@ public sealed record WidgetSnapshot(
     // been lost for too long). Listening: a paired model is known and nothing is linked.
     public BroadcastSelectionState Selection { get; init; } = BroadcastSelectionState.NoPairedModel;
 
+    // The owner's pair's last readings and learned charge rates, as saved across restarts (LastReadingStore), and the
+    // paired model they are shown for: BatteryFreshness shows a saved reading only when its model is this one.
+    internal LastReadingBook LastReadings { get; init; } = LastReadingBook.Empty;
+
+    public ushort? PairedModel { get; init; }
+
+    // The latest time the service has worked anything out at. An estimate is never worked out for an earlier time, so a
+    // clock that is put back holds it where it was rather than letting it fall.
+    public DateTimeOffset? EstimateClock { get; init; }
+
     public static WidgetSnapshot Empty(WidgetWatcherState watcher) => new(
         AirPodsWhere.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown,
         BatteryReadAt: null, EarReadAt: null, LidOpen: null, watcher, WatcherErrorCode: null, WatcherErrorName: null,

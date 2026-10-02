@@ -278,15 +278,15 @@ try
 
         Write-Section -Run $run -Title 'The battery when it is old'
         Wait-Owner -Run $run -Text 'Close the case lid with the AirPods inside, and leave the card open for a minute.'
-        $greyAnswer = Read-Answer -Run $run -Question 'A minute later, is every battery figure either greyed, with the line under the "where" line saying how long ago the battery was read (the AirPods are still connected to this PC), or gone (closing the lid disconnected them, and the card says they are not on this PC)? None may look current.'
-        Add-Criterion -Run $run -Id 'battery-greys-when-old' -Criterion 'A battery figure older than 30 seconds is greyed and the card says how long ago it was read, or it is not shown at all once the AirPods are not connected to this PC; it is never shown as current.' `
+        $greyAnswer = Read-Answer -Run $run -Question 'A minute later, is every battery figure greyed, with how long ago it was read beside it? The figures stay whether or not closing the lid disconnected the AirPods. None may look current.'
+        Add-Criterion -Run $run -Id 'battery-greys-when-old' -Criterion 'A battery figure older than 30 seconds is greyed and the card says how long ago it was read, whether or not the AirPods are connected to this PC; it is never shown as current.' `
             -Outcome $(if ($greyAnswer -eq 'yes') { 'pass' } elseif ($greyAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $greyAnswer + '. A "no" would mean an old figure was shown as current, which is a real defect.')
 
         Write-Section -Run $run -Title 'Refresh'
         Wait-Owner -Run $run -Text 'With the AirPods still shut in the case, click the circular arrow beside the gear on the card, and wait about twelve seconds.'
-        $nothingHeardAnswer = Read-Answer -Run $run -Question 'After about twelve seconds, does the card say "Nothing heard. Open the case", with any figures greyed (the AirPods are still connected to this PC) or gone (they are not)?'
-        Add-Criterion -Run $run -Id 'refresh-says-nothing-heard' -Criterion 'A refresh with the AirPods shut in the case says nothing was heard and leaves any old figures greyed or gone, never current.' `
+        $nothingHeardAnswer = Read-Answer -Run $run -Question 'After about twelve seconds, does the card say "Nothing heard. Open the case", with every figure still greyed and none looking current?'
+        Add-Criterion -Run $run -Id 'refresh-says-nothing-heard' -Criterion 'A refresh with the AirPods shut in the case says nothing was heard and leaves any old figures greyed, never current.' `
             -Outcome $(if ($nothingHeardAnswer -eq 'yes') { 'pass' } elseif ($nothingHeardAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $nothingHeardAnswer + '.')
         Wait-Owner -Run $run -Text 'Open the case lid next to this computer and connect the AirPods to this PC (left-click the Earshot icon or the gauge, then Connect). Then click the circular arrow beside the gear and wait a few seconds.'
@@ -382,8 +382,8 @@ try
 
         Write-Section -Run $run -Title 'A reading older than an hour'
         Wait-Owner -Run $run -Text 'Put the AirPods in the case and close it, or take them away from this computer, and leave them for over an hour. Then hover over the gauge. If you cannot wait, answer "not sure" below.'
-        $staleAnswer = Read-Answer -Run $run -Question 'More than an hour after the AirPods were last heard, does the gauge show only the earbud mark, with no ring and no number, and does hovering say "Not on this PC" (they disconnected) or "No recent reading" (they stayed connected)?'
-        Add-Criterion -Run $run -Id 'gauge-reading-older-than-an-hour' -Criterion 'A battery reading older than one hour counts as no recent reading: the gauge shows only the earbud mark and says so, or says the AirPods are not on this PC.' `
+        $staleAnswer = Read-Answer -Run $run -Question 'More than an hour after the AirPods were last heard, does the gauge still show the last figure in grey (the case mark and the case figure if they disconnected, the earbud mark and the lower bud if they stayed connected), and does hovering say "Last read" or "Estimated" with how long ago?'
+        Add-Criterion -Run $run -Id 'gauge-reading-older-than-an-hour' -Criterion 'A battery reading older than one hour stays on the gauge in grey, as a last reading or an estimate grown from it, and the tooltip says which and how old: the case figure with the case mark when the AirPods are not on this PC, the lower bud when they are.' `
             -Outcome $(if ($staleAnswer -eq 'yes') { 'pass' } elseif ($staleAnswer -eq 'unsure') { 'inconclusive' } else { 'fail' }) `
             -Detail ('You answered ' + $staleAnswer + '. "Not sure" is the honest answer when you did not wait the hour.')
 

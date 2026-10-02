@@ -4,8 +4,8 @@ using Earshot.Icons;
 
 namespace Earshot.Widget;
 
-// Draws the gauge bitmap: the earbud mark, a ring round it that fills to the lower bud's battery, that
-// number beside it, and a charging bolt in a slot that is always kept. Pure drawing, used by GaugeWindow, the
+// Draws the gauge bitmap: the earbud mark (or, with the AirPods away, the case mark), a ring round it that fills to the
+// lower bud's battery (or the case's), that number beside it, and a charging bolt in a slot that is always kept. Pure drawing, used by GaugeWindow, the
 // tests and the screenshot probe. Every coordinate comes from GaugeLayout.
 //
 // GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit): GDI text (TextRenderer) writes alpha
@@ -69,17 +69,28 @@ internal static class GaugeRenderer
 
         FillBackground(g, palette, layout, hover);
 
-        double markOpacity = content.Mode == GaugeMode.NotOnThisPc ? AwayOpacity : 1.0;
-        DrawMark(g, layout.Mark, palette.Ink, markOpacity);
+        // A last reading or an estimate is drawn in tertiary ink throughout; the earbud mark stays at full ink on this PC,
+        // since the AirPods themselves are here.
+        Color ink = content.Tertiary ? palette.Tertiary : palette.Ink;
+        if (content.CaseMark)
+        {
+            DrawCaseMark(g, layout.Mark, ink);
+        }
+        else
+        {
+            double markOpacity = content.Mode == GaugeMode.NotOnThisPc ? AwayOpacity : 1.0;
+            DrawMark(g, layout.Mark, palette.Ink, markOpacity);
+        }
 
         switch (content.Mode)
         {
             case GaugeMode.Reading:
+            case GaugeMode.CaseAway:
                 DrawRing(g, layout, palette, content);
                 DrawNumber(g, layout, content, palette, fontFamily);
                 if (content.Charging)
                 {
-                    DrawBolt(g, layout, palette.Ink);
+                    DrawBolt(g, layout, ink);
                 }
 
                 break;
@@ -108,7 +119,7 @@ internal static class GaugeRenderer
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
         // The phone mark fills the number's place on its own.
-        if (content.Mode is not (GaugeMode.Reading or GaugeMode.OnOtherDevice))
+        if (content.Mode is not (GaugeMode.Reading or GaugeMode.OnOtherDevice or GaugeMode.CaseAway))
         {
             float height = Math.Max(1f, layout.Dpi / 48f);
             var bar = new RectangleF(layout.NumberSlot.X, (layout.Height - height) / 2f, layout.NumberSlot.Width, height);
@@ -117,7 +128,7 @@ internal static class GaugeRenderer
             g.FillPath(brush, path);
         }
 
-        if (!(content.Mode == GaugeMode.Reading && content.Charging))
+        if (!(content.Mode is (GaugeMode.Reading or GaugeMode.CaseAway) && content.Charging))
         {
             using var pen = new Pen(placeholder, Math.Max(1f, layout.Dpi / 96f)) { LineJoin = LineJoin.Round };
             g.DrawPolygon(pen, BoltPoints(layout));
@@ -190,7 +201,8 @@ internal static class GaugeRenderer
             return;
         }
 
-        using var fill = new Pen(content.Low ? palette.Caution : palette.Accent, layout.RingStroke);
+        // Tertiary before caution: a value that is not live is never drawn as if it were a current warning.
+        using var fill = new Pen(content.Tertiary ? palette.Tertiary : content.Low ? palette.Caution : palette.Accent, layout.RingStroke);
         if (percent >= 100)
         {
             g.DrawEllipse(fill, square);
@@ -201,6 +213,8 @@ internal static class GaugeRenderer
         }
     }
 
+    // An estimate carries "≈" before its digits in a cell of its own. The slot fits three cells, so "≈100" is drawn at
+    // three quarters of the type size, which fits four.
     private static void DrawNumber(Graphics g, GaugeLayout layout, GaugeContent content, GaugePalette palette, string fontFamily)
     {
         if (content.Percent is not { } percent)
@@ -208,17 +222,79 @@ internal static class GaugeRenderer
             return;
         }
 
-        float cell = DigitCell(fontFamily, layout.TypePixels);
-        using var font = new Font(fontFamily, layout.TypePixels, FontStyle.Regular, GraphicsUnit.Pixel);
-        using var brush = new SolidBrush(content.Low ? palette.Caution : palette.Ink);
+        string text = (content.Estimated ? WidgetCopy.EstimateSign : "") + percent.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        int typePixels = text.Length > 3 ? Math.Max(1, layout.TypePixels * 3 / text.Length) : layout.TypePixels;
+        float cell = DigitCell(fontFamily, typePixels);
+        using var font = new Font(fontFamily, typePixels, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(content.Tertiary ? palette.Tertiary : content.Low ? palette.Caution : palette.Ink);
         using var format = new StringFormat(StringFormat.GenericTypographic) { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
-        string digits = percent.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        float x = layout.NumberAlignRight ? layout.NumberSlot.Right - (cell * digits.Length) : layout.NumberSlot.X;
-        foreach (char digit in digits)
+        float x = layout.NumberAlignRight ? layout.NumberSlot.Right - (cell * text.Length) : layout.NumberSlot.X;
+        foreach (char digit in text)
         {
             g.DrawString(digit.ToString(), font, brush, new RectangleF(x, layout.NumberSlot.Y, cell, layout.NumberSlot.Height), format);
             x += cell;
         }
+    }
+
+    // The case, our own shape, in place of the earbud mark and the size of it: a filled rounded box wider than it is tall,
+    // with a thin unpainted seam a little below the top for the lid. Drawn in the ink it is given, never the accent.
+    private static void DrawCaseMark(Graphics g, Rectangle mark, Color ink)
+    {
+        if (mark.Width < EarbudGlyph.MinSize)
+        {
+            return;
+        }
+
+        float w = mark.Width;
+        float h = mark.Height * 0.8f;
+        float top = mark.Y + ((mark.Height - h) / 2f);
+        float seam = Math.Max(1f, h * 0.1f);
+        float lidHeight = h * 0.3f;
+        var lid = new RectangleF(mark.X, top, w, lidHeight);
+        var box = new RectangleF(mark.X, top + lidHeight + seam, w, Math.Max(0f, h - lidHeight - seam));
+        float radius = h * 0.3f;
+        using var brush = new SolidBrush(ink);
+        using (GraphicsPath lidPath = TopRounded(lid, radius))
+        {
+            g.FillPath(brush, lidPath);
+        }
+
+        using GraphicsPath boxPath = BottomRounded(box, radius);
+        g.FillPath(brush, boxPath);
+    }
+
+    private static GraphicsPath TopRounded(RectangleF r, float radius)
+    {
+        float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height * 2));
+        var path = new GraphicsPath();
+        if (d <= 0)
+        {
+            path.AddRectangle(r);
+            return path;
+        }
+
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        path.AddLine(r.Right, r.Bottom, r.X, r.Bottom);
+        path.CloseFigure();
+        return path;
+    }
+
+    private static GraphicsPath BottomRounded(RectangleF r, float radius)
+    {
+        float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height * 2));
+        var path = new GraphicsPath();
+        if (d <= 0)
+        {
+            path.AddRectangle(r);
+            return path;
+        }
+
+        path.AddLine(r.X, r.Y, r.Right, r.Y);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     private static void DrawBolt(Graphics g, GaugeLayout layout, Color ink)

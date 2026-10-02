@@ -1049,8 +1049,9 @@ internal sealed partial class WidgetCard : Form
         DrawBatteryPart(g, column, shown);
     }
 
-    // The bar and the charging bolt are absent entirely when Percent is null: there is nothing to show a
-    // bar or a bolt for. The words "No reading" take the percent line's own place instead (the owner's own
+    // A live value is drawn in full ink and the accent; a last reading or an estimate in the stale style, its line saying
+    // its age, and an estimate with "≈" before it (WidgetCopy.PartLine). The bar and the charging bolt are absent entirely
+    // when Percent is null: there is nothing to show a bar or a bolt for. The words "No reading" take the percent line's own place instead (the owner's own
     // instruction): never a number, never a dash standing in for a reading that was never taken.
     private void DrawBatteryPart(Graphics g, WidgetCardLayout.ColumnLayout column, ShownPart shown)
     {
@@ -1082,7 +1083,7 @@ internal sealed partial class WidgetCard : Form
         using Font font = _type.Role(TypeRole.Number);
         using var textBrush = new SolidBrush(shown.Fresh ? _palette.Status : MutedInk(_palette.Status));
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
-        g.DrawString(WidgetCopy.Percent(percent), font, textBrush, new RectangleF(column.Percent.X, column.Percent.Y, column.Percent.Width, column.Percent.Height), format);
+        g.DrawString(WidgetCopy.PartLine(shown, _model.Now), font, textBrush, new RectangleF(column.Percent.X, column.Percent.Y, column.Percent.Width, column.Percent.Height), format);
     }
 
     // A small filled arc beside the bud, on the side away from the mirrored head so it never overlaps it.

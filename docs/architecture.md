@@ -316,8 +316,8 @@ takes the link, which is how the owner corrects a link made to somebody else's
 pair: open the case next to the PC.
 
 *Dropping.* When the linked set has not been heard under any address for two
-minutes, the link is dropped, what it said is cleared, and nothing is shown until
-the next case open. Two minutes covers an address change, which takes seconds, and
+minutes, the link is dropped, what this link said is cleared from memory, and only
+the saved last readings (below) are shown until the next case open. Two minutes covers an address change, which takes seconds, and
 a pair put back in the case for a moment. It does not cover a session. It is a
 margin, not a measurement: the saved records do not show when the addresses
 rotate. A clock check every ten seconds notices the silence, since silence brings
@@ -325,7 +325,8 @@ no message.
 
 *In memory only.* The link is held in memory and nothing about it is written, no
 address included, so a restart of Earshot (an update restarts it) has no link, and
-the next case open makes one. A message from a device that is not linked is counted
+the next case open makes one. What is written is the last reading of each part
+(below), never the link. A message from a device that is not linked is counted
 and nothing else about it is recorded. The log says that a link was made, followed
 or dropped, with counts only.
 
@@ -342,26 +343,54 @@ owner decision, not an oversight: the owner accepted that risk rather than ask f
 a set-up step to rule it out. There is no consistency check against another
 device.
 
-**Shown only while connected.** `BatteryFreshness.Shown` is the one definition of
-what the card, the gauge, its tooltip and the low battery alert show. It gives
-nothing unless the owner's AirPods are connected to this PC (the card's "On this
-PC" state), not as current and not greyed. A figure read while connected does not
-stay on screen after a disconnect, because the buds are then in the case, on
-another device or somebody else's, and a figure for them is not one the person can
-use. The values stay in memory while the link holds, so a quick reconnect shows
-them again, greyed with the time they were read until the set's own messages
-replace them. With the AirPods connected and no pair linked, the buds and the case
-show nothing, and the card and the gauge's tooltip say "Open the case to show
-battery". Windows' own figure, below, follows the same connected-only rule and
-needs no link.
-**What is read, and how old it may be.** From the linked set Earshot reads the
-left bud, the right bud and the case, each in steps of 10% (that is what the
-message carries), and the charging bits. Each part keeps its own read time. A
-value read within 30 seconds is current. An older value is drawn greyed with
-its age, never as current. A closed case sends nothing, so values grey about
-half a minute after the lid closes. The gauge is stricter about when it stops:
-its number is the lower of the buds read within the last hour, and with none
-that recent it shows the earbud mark alone (`BatteryFreshness`).
+**What is shown, and for how long.** `BatteryFreshness.Shown` is the one
+definition of what the card, the gauge and its tooltip show. The owner's pair is
+shown wherever it is. A part's value is one of three kinds:
+
+- *Live*: a reading of the linked set heard by this run within 30 seconds, drawn
+  as current. In use the set sends about 35 documented messages a minute; a closed
+  case sends nothing, so values stop being live about half a minute after the lid
+  closes.
+- *Last*: the last reading of the part, of any age, drawn in the stale style
+  (tertiary ink) with its age, until a newer reading is heard.
+- *Estimated*: a last reading of a part that was charging, grown at its rate
+  (`ChargeEstimator`), drawn like a last reading with "≈" before the value and the
+  age of the reading it grew from; the tooltip says "Estimated".
+
+From the linked set Earshot reads the left bud, the right bud and the case, each in
+steps of 10% (that is what the message carries), and the charging bits. Each fresh
+reading of the linked set, and of nothing else, goes into the last reading store
+(`LastReadingStore`, `last-reading.json` in the widget folder, under
+`EARSHOT_DATA_ROOT` when that is set): per part the value, the charging flag, the
+read time and the model, and nothing about the sender. A changed value, flag, model
+or rate is written at once and a read time alone at most once a minute, and the
+file is read at start. A saved reading is shown only when its model is the paired
+model, and is never live, since this run did not hear it. A dropped link or a
+restart therefore leaves the last readings on show.
+
+*The estimate.* A part charging at its last reading rises from it at its rate until
+100, then stops. Buds charge only in the case, so a bud that was not charging, and a
+case that was not itself charging, keep their value. A clock behind the read time
+gives no rise, and the service hands in the latest time it has worked anything out
+at, so a clock put back never makes an estimate fall. A newer live reading replaces
+the estimate. Rates are per model and part (`ChargeRates`): one rate for both buds of
+a model and one for the case, learned from the owner's own live readings by
+`ChargeRateLearner` (two steps up of one part, both while charging, the first seen
+within two minutes of the reading before it, the last below 100%, 15 minutes to
+3 hours apart; a new sample replaces the rate held) and kept beside the last readings.
+There is no case estimate until a charge of the case has been learned. The buds of
+one model have a seed from Apple's published fast-charge figure (one hour of eight
+hours of listening in five minutes, 150 points an hour), which is off until the
+owner has confirmed the wording (`ChargeRates.UseAppleBudSeed`).
+
+*The gauge.* On this PC its number is the lower bud, live or else last or estimated
+in tertiary ink, or Windows' own figure while that is current and no bud is live.
+Not on this PC, a case mark (our own shape, never in the accent colour) takes the
+earbud mark's place, and the ring and the number are the case's last or estimated
+value in tertiary ink, with the bolt if the case was charging; with no case value
+the gauge keeps the faded earbud mark. "On your iPhone" keeps its phone mark, with
+the case in its tooltip. The low battery alert still acts only on live values with
+the AirPods on this PC.
 
 **Left and right.** Which bud is the left and which the right rests partly on
 a published description of the message and partly on one local capture. No

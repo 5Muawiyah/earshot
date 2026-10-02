@@ -48,7 +48,7 @@ public sealed class ProbeWidgetTests
         Assert.AreEqual(Earshot.Widget.AirPodsWhere.ThisPc, snapshots[2].Snapshot.Where);
         Assert.IsTrue(BatteryFreshness.IsFresh(snapshots[0].Snapshot.Left, now), "this-pc shows fresh values.");
         Assert.IsFalse(BatteryFreshness.IsFresh(snapshots[2].Snapshot.Left, now), "greyed shows values that are not fresh.");
-        Assert.IsTrue(BatteryFreshness.IsRecent(snapshots[2].Snapshot.Left, now), "...and still recent, so the gauge draws them.");
+        Assert.AreEqual(ReadingKind.Last, BatteryFreshness.Shown(snapshots[2].Snapshot, now).Gauge?.Kind, "...and the gauge draws them as a last reading.");
     }
 
     private static readonly string[] AllCardVariants = ["this-pc", "elsewhere", "greyed", "no-reading", "open-the-case", "auto-pause-preview", "refresh-reading", "refresh-nothing-heard"];

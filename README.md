@@ -96,8 +96,8 @@ Startup on is not covered.
   at the AirPods' microphone when Earshot has a well-formed id for that capture
   endpoint, and the list of sound devices when it has not, with one line on what
   to press. Call quality with it on is unproved until I have tried it.
-- **Shows the battery** of the left bud, the right bud and the case while the
-  AirPods are connected to this PC. Earshot listens to the AirPods' own Bluetooth
+- **Shows the battery** of the left bud, the right bud and the case, live while
+  it hears them and greyed with its age after. Earshot listens to the AirPods' own Bluetooth
   broadcast, and you link your pair by opening the case next to the PC. See
   [Battery](#battery) for what that does and does not prove.
 - **Hands the AirPods back at shut down, sleep and Exit**, on for a new
@@ -133,7 +133,8 @@ Startup on is not covered.
 The AirPods broadcast their battery over Bluetooth Low Energy, and Earshot
 reads it with no set-up beyond opening the case. The card shows left, right and
 case together, and the taskbar gauge shows a ring round the earbud mark with the
-lower bud's number, while the AirPods are connected to this PC. There is a
+lower bud's number while the AirPods are connected to this PC, and the case's
+last number beside a case mark, in grey, while they are not. There is a
 **Refresh** control on the card and in the menu. It listens for up to 12 seconds
 and ends on values or on "Open the case".
 **Gauge order** on the settings page changes how the gauge lines up its ring,
@@ -149,9 +150,10 @@ What to know before you trust a number:
   that opens its case later but 8 dB stronger takes the link. A pair worn nearby is
   never linked. Earshot then follows your pair when its addresses change
   (only to a set that says the levels yours last said, within 30 seconds), and
-  drops the link after two minutes without hearing it, showing nothing until you
-  open the case again. The link is kept in memory only, so a restart, which an
-  update does, needs the case opened once more. With the AirPods connected and
+  drops the link after two minutes without hearing it, showing the last readings,
+  greyed, until you open the case again. The link is kept in memory only, so a
+  restart, which an update does, needs the case opened once more for live
+  figures. With the AirPods connected and
   nothing linked, the card says "Open the case to show battery".
 - **The risk that remains.** A pair of the same model that opens its case next to
   the PC more strongly than yours can be linked instead, and one whose levels
@@ -161,12 +163,17 @@ What to know before you trust a number:
   case at -70 dBm or stronger is linked at once, with no 8 dB margin to clear.
   I accept that risk, and you should know it is there. Opening your own case at
   least 8 dB stronger takes the link back.
-- **Only while connected.** Nothing is shown for AirPods that are not connected
-  to this PC: not as current and not greyed. Windows' own figure follows the same
-  rule.
-- **Age.** A value older than 30 seconds is greyed, with the time it was read.
-  The gauge drops a value after one hour, and a link lost for two minutes drops
-  everything it read.
+- **Last readings.** The last reading of each bud and the case of your linked
+  pair is shown, greyed with its age, wherever the AirPods are and however old
+  it is, until a newer one is heard. It is kept across a restart in
+  `last-reading.json` in Earshot's local folder: the level, the charging flag, the
+  time and the model, no address and no name. Windows' own figure is shown only
+  while the AirPods are connected to this PC.
+- **Age.** A value older than 30 seconds is greyed, with how long ago it was read.
+- **Estimates.** A part that was charging when last read is shown rising, as an
+  estimate marked `≈` with the age of the reading it grew from, at a rate learned
+  from your own pair's charging, and only once one has been learned. It stops at
+  100, never falls, and a newer reading replaces it.
 - **Left and right.** Which bud is left and which right rests partly on a
   published description of the broadcast and partly on one local capture. It is
   unproved.

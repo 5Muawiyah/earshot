@@ -4,11 +4,12 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.LiveTests;
 
-// The widget shows no battery figure, current or greyed, unless the AirPods are connected to this PC (BatteryFreshness). A live
-// test that shuts the AirPods in the case disconnects them, so a prompt that expects the figures to be "still greyed" there
-// contradicts what the build does, and an owner who answered "no" to it would have been reporting a fault that is not one. Held
-// here, by reading the prompts the way the owner reads them: each prompt about a figure that is old says that it may be gone, the
-// prompt that needs figures first connects the AirPods, and a comparison with the iPhone says what to answer when nothing is shown.
+// The widget shows the owner's pair's last battery figure wherever the AirPods are, greyed with its age once it is not live
+// (BatteryFreshness; this replaced "no figure unless connected to this PC" and "a reading older than an hour leaves the
+// gauge"). A live test that shuts the AirPods in the case disconnects them, so a prompt that told the owner the figures may be
+// gone there would now contradict what the build does. Held here, by reading the prompts the way the owner reads them: each
+// prompt about a figure that is old expects it greyed with its age and never gone, the prompt that needs figures first connects
+// the AirPods, and a comparison with the iPhone says what to answer when nothing is shown.
 [TestClass]
 public sealed class WidgetLiveTestConnectedOnlyTests
 {
@@ -23,23 +24,25 @@ public sealed class WidgetLiveTestConnectedOnlyTests
     }
 
     [TestMethod]
-    public void EveryPromptAboutAnOldFigureAllowsItToBeGoneBecauseTheAirPodsAreNotConnected()
+    public void EveryPromptAboutAnOldFigureExpectsItGreyedWithItsAgeAndNeverGone()
     {
         string script = Script();
 
         string greyed = Quoted(script, "A minute later");
-        StringAssert.Contains(greyed, "gone");
-        StringAssert.Contains(greyed, "not on this PC");
-        StringAssert.Contains(greyed, "still connected");
+        StringAssert.Contains(greyed, "greyed");
+        StringAssert.Contains(greyed, "how long ago");
+        StringAssert.Contains(greyed, "None may look current");
+        Assert.IsFalse(greyed.Contains("gone", StringComparison.Ordinal), "An old figure is no longer taken away when the AirPods disconnect.");
 
         string nothingHeard = Quoted(script, "After about twelve seconds");
-        StringAssert.Contains(nothingHeard, "gone");
-        StringAssert.Contains(nothingHeard, "still connected");
-        Assert.IsFalse(nothingHeard.Contains("more than two minutes", StringComparison.Ordinal), "The figures do not wait two minutes to go: they go when the AirPods are not connected.");
+        StringAssert.Contains(nothingHeard, "greyed");
+        Assert.IsFalse(nothingHeard.Contains("gone", StringComparison.Ordinal));
 
         string anHour = Quoted(script, "More than an hour after the AirPods were last heard");
-        StringAssert.Contains(anHour, "Not on this PC");
-        StringAssert.Contains(anHour, "No recent reading");
+        StringAssert.Contains(anHour, "case mark");
+        StringAssert.Contains(anHour, "Last read");
+        StringAssert.Contains(anHour, "Estimated");
+        Assert.IsFalse(anHour.Contains("No recent reading", StringComparison.Ordinal), "A reading older than an hour no longer leaves the gauge.");
     }
 
     [TestMethod]

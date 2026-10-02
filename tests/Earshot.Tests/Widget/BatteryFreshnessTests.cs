@@ -24,20 +24,25 @@ public sealed class BatteryFreshnessTests
         Assert.IsFalse(BatteryFreshness.IsFresh(PartReading.Unknown, Now), "No value is never fresh.");
     }
 
+    // Replaces "a value is recent for an hour and not after": a value that is not fresh is a last reading at any age.
     [TestMethod]
-    public void AValueIsRecentForAnHourAndNotAfter()
+    public void AValueThatIsNotFreshIsALastReadingAtAnyAge()
     {
-        Assert.IsTrue(BatteryFreshness.IsRecent(Part(70, TimeSpan.FromHours(1)), Now));
-        Assert.IsFalse(BatteryFreshness.IsRecent(Part(70, TimeSpan.FromHours(1) + Seconds(1)), Now));
+        foreach (TimeSpan age in new[] { Seconds(31), TimeSpan.FromHours(1), TimeSpan.FromHours(1) + Seconds(1), TimeSpan.FromDays(3) })
+        {
+            ShownBattery shown = BatteryFreshness.Shown(Part(70, age), PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, true, true, Now);
+            Assert.AreEqual(ReadingKind.Last, shown.Left.Kind, age.ToString());
+            Assert.AreEqual(70, shown.Left.Percent, age.ToString());
+        }
     }
 
     [TestMethod]
-    public void AValueWithNoReadTimeIsNeitherFreshNorRecent()
+    public void AValueWithNoReadTimeIsNotFreshAndIsNotShown()
     {
         var undated = new PartReading(70, null, null);
 
         Assert.IsFalse(BatteryFreshness.IsFresh(undated, Now));
-        Assert.IsFalse(BatteryFreshness.IsRecent(undated, Now));
+        Assert.IsFalse(BatteryFreshness.Shown(undated, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, true, true, Now).Left.HasValue);
     }
 
     [TestMethod]
@@ -53,22 +58,28 @@ public sealed class BatteryFreshnessTests
         Assert.IsFalse(shown.Case.Fresh);
     }
 
-    // The gauge number is the lower of the buds that have a value no older than an hour.
+    // Replaces "the gauge drops a bud per bud after an hour": the gauge number is the lower of the buds that have a value,
+    // at any age, and a bud that is not live makes it a last reading.
     [TestMethod]
-    public void TheGaugeDropsABudPerBudAfterAnHour()
+    public void TheGaugeKeepsAnOldBudAsALastReading()
     {
         PartReading headset = PartReading.Unknown;
 
         ShownBattery both = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(10)), Part(80, Seconds(1)), PartReading.Unknown, headset, true, true, Now);
         Assert.AreEqual(40, both.Gauge?.Percent);
+        Assert.AreEqual(ReadingKind.Last, both.Gauge?.Kind);
 
         ShownBattery oneStale = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(61)), Part(80, Seconds(1)), PartReading.Unknown, headset, true, true, Now);
-        Assert.AreEqual(80, oneStale.Gauge?.Percent, "The old low bud no longer pulls the number down.");
-        Assert.IsNull(oneStale.Gauge?.Left);
+        Assert.AreEqual(40, oneStale.Gauge?.Percent, "The old low bud still pulls the number down, as a last reading.");
+        Assert.AreEqual(ReadingKind.Last, oneStale.Gauge?.Kind);
+        Assert.AreEqual(40, oneStale.Gauge?.Left);
         Assert.AreEqual(80, oneStale.Gauge?.Right);
 
-        ShownBattery bothStale = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(61)), Part(80, TimeSpan.FromMinutes(120)), PartReading.Unknown, headset, true, true, Now);
-        Assert.IsNull(bothStale.Gauge, "No bud value, no number.");
+        ShownBattery bothLive = BatteryFreshness.Shown(Part(40, Seconds(2)), Part(80, Seconds(1)), PartReading.Unknown, headset, true, true, Now);
+        Assert.AreEqual(ReadingKind.Live, bothLive.Gauge?.Kind);
+
+        ShownBattery none = BatteryFreshness.Shown(PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, headset, true, true, Now);
+        Assert.IsNull(none.Gauge, "No bud value, no number.");
     }
 
     [TestMethod]
@@ -94,9 +105,13 @@ public sealed class BatteryFreshnessTests
             Part(40, Seconds(1), charging: true), Part(80, Seconds(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
         Assert.IsTrue(shown.Gauge?.Charging);
 
-        ShownBattery droppedBud = BatteryFreshness.Shown(
+        ShownBattery oldBud = BatteryFreshness.Shown(
             Part(40, TimeSpan.FromHours(2), charging: true), Part(80, Seconds(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
-        Assert.IsFalse(droppedBud.Gauge?.Charging, "A bud the gauge dropped does not make it charging.");
+        Assert.IsTrue(oldBud.Gauge?.Charging, "An old bud the gauge is drawn from was charging when read.");
+
+        ShownBattery neither = BatteryFreshness.Shown(
+            Part(40, TimeSpan.FromHours(2), charging: false), Part(80, Seconds(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
+        Assert.IsFalse(neither.Gauge?.Charging);
     }
 
     [TestMethod]
@@ -155,20 +170,23 @@ public sealed class BatteryFreshnessTests
         Assert.IsNull(shown.Gauge);
     }
 
-    // Nothing the broadcast or Windows read is a figure for AirPods that are not on this PC: not as current, not greyed.
+    // Replaces "no figure of any kind is shown for AirPods that are not on this PC": the owner's pair is shown wherever it
+    // is, live while fresh and as a last reading after. Windows' figure (the connected headset's) and the gauge's bud
+    // figure stay for AirPods on this PC.
     [TestMethod]
-    public void NoFigureOfAnyKindIsShownForAirPodsThatAreNotOnThisPc()
+    public void AwayFromThisPcTheLinkedPairIsShownLiveOrAsALastReading()
     {
         ShownBattery shown = BatteryFreshness.Shown(
             Part(70, Seconds(1)), Part(60, Seconds(1)), Part(90, Seconds(1)), Part(50, Seconds(1)), onThisPc: false, linked: true, Now);
         ShownBattery old = BatteryFreshness.Shown(
             Part(70, TimeSpan.FromMinutes(5)), Part(60, TimeSpan.FromMinutes(5)), Part(90, TimeSpan.FromMinutes(5)), PartReading.Unknown, onThisPc: false, linked: true, Now);
 
+        Assert.AreEqual(ReadingKind.Live, shown.Left.Kind);
+        Assert.AreEqual(90, shown.Case.Percent);
+        Assert.AreEqual(ReadingKind.Last, old.Left.Kind);
+        Assert.AreEqual(90, old.Case.Percent);
         foreach (ShownBattery each in new[] { shown, old })
         {
-            Assert.IsFalse(each.Left.HasValue, "No left figure.");
-            Assert.IsFalse(each.Right.HasValue, "No right figure.");
-            Assert.IsFalse(each.Case.HasValue, "No case figure.");
             Assert.IsNull(each.WindowsPercent);
             Assert.IsNull(each.Gauge);
         }

@@ -203,6 +203,19 @@ internal sealed partial class WidgetCard
                 return (ReadLineText, layout.ReadLine);
             }
 
+            // A column whose value is a last reading or an estimate says which, and how old the reading is.
+            if (layout.ShowColumns)
+            {
+                ShownBattery shown = _model.ShownParts;
+                foreach ((WidgetCardLayout.ColumnLayout column, ShownPart part) in new[] { (layout.Left, shown.Left), (layout.Right, shown.Right), (layout.Case, shown.Case) })
+                {
+                    if (column.Percent.Contains(point) && WidgetCopy.PartTip(part, _model.Now) is { } partTip)
+                    {
+                        return (partTip, column.Percent);
+                    }
+                }
+            }
+
             if (layout.ShowUpdateLine && layout.UpdateCaption.Contains(point))
             {
                 return (WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption);

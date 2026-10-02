@@ -160,21 +160,25 @@ internal static class WidgetCopy
 
     public const string NotReadYet = "Not read yet";
 
-    // "2 min ago": the amount in seconds, minutes or hours, rounded to the nearest whole, never negative.
-    private static string Age(DateTimeOffset at, DateTimeOffset now)
+    // "2 min ago": the amount in seconds, minutes, hours or days, rounded to the nearest whole, never negative.
+    private static string Age(DateTimeOffset at, DateTimeOffset now) => AgeAmount(now - at) + " ago";
+
+    // "40 s", "2 min", "3 h", "2 d": how long ago, without the "ago". Days from a day on, since a last reading may be kept
+    // for as long as nothing newer is heard.
+    public static string AgeAmount(TimeSpan age)
     {
-        TimeSpan age = now - at;
         if (age < TimeSpan.Zero)
         {
             age = TimeSpan.Zero;
         }
 
-        string amount = age.TotalHours >= 1
-            ? Round(age.TotalHours) + " h"
-            : age.TotalMinutes >= 1
-                ? Round(age.TotalMinutes) + " min"
-                : Round(Math.Max(0, age.TotalSeconds)) + " s";
-        return amount + " ago";
+        return age.TotalDays >= 1
+            ? Round(age.TotalDays) + " d"
+            : age.TotalHours >= 1
+                ? Round(age.TotalHours) + " h"
+                : age.TotalMinutes >= 1
+                    ? Round(age.TotalMinutes) + " min"
+                    : Round(Math.Max(0, age.TotalSeconds)) + " s";
     }
 
     // The gauge's tooltip. Three lines when there is a reading, one line otherwise.
@@ -184,14 +188,56 @@ internal static class WidgetCopy
     public const string GaugeNotOnThisPc = "Not on this PC";
     public const string GaugeNoRecentReading = "No recent reading";
 
-    // "L 70%   R 60%": the buds that have a reading, left first, three spaces apart. A bud with none is
-    // left out, never shown as a dash or a guess.
-    public static string GaugeBudsLine(int? left, int? right)
+    // "L 70%   R 60%": the buds that have a reading, left first, three spaces apart, an estimate with "≈" before it. A bud
+    // with none is left out, never shown as a dash or a guess.
+    public static string GaugeBudsLine(int? left, int? right, bool leftEstimated = false, bool rightEstimated = false)
     {
-        string l = left is { } lp ? LeftLabel + " " + lp.ToString(CultureInfo.InvariantCulture) + "%" : "";
-        string r = right is { } rp ? RightLabel + " " + rp.ToString(CultureInfo.InvariantCulture) + "%" : "";
+        string l = left is { } lp ? LeftLabel + " " + PercentText(lp, leftEstimated) : "";
+        string r = right is { } rp ? RightLabel + " " + PercentText(rp, rightEstimated) : "";
         return l.Length > 0 && r.Length > 0 ? l + "   " + r : l + r;
     }
+
+    // The sign an estimate carries before its value, wherever it is shown.
+    public const string EstimateSign = "≈";
+
+    // "80%", or "≈80%" for an estimate.
+    public static string PercentText(int percent, bool estimated) =>
+        (estimated ? EstimateSign : "") + percent.ToString(CultureInfo.InvariantCulture) + "%";
+
+    // "Case 80%" or "Case ≈90%", for the gauge's tooltip while the AirPods are away.
+    public static string GaugeCaseLine(int percent, bool estimated) => CaseLabel + " " + PercentText(percent, estimated);
+
+    // The tooltip's age line for what kind of value the number is: "Read just now" and the like for a live one, "Last
+    // read 2 h ago" for a last reading, "Estimated, read 2 h ago" for an estimate (the age of the reading it grew from).
+    public static string GaugeAgeLine(ReadingKind kind, TimeSpan age) => kind switch
+    {
+        ReadingKind.Live => GaugeReadLine(age),
+        ReadingKind.Estimated => EstimatedReadLine(age),
+        _ => LastReadLine(age),
+    };
+
+    public static string LastReadLine(TimeSpan age) => "Last read " + AgeAmount(age) + " ago";
+
+    public static string EstimatedReadLine(TimeSpan age) => "Estimated, read " + AgeAmount(age) + " ago";
+
+    // A card column's percent line: "80%" while live, "80% · 2 h" for a last reading and "≈90% · 2 h" for an estimate, the
+    // age being that of the reading shown or grown from. NoReading when the part has none.
+    public static string PartLine(ShownPart part, DateTimeOffset now)
+    {
+        if (part.Percent is not int percent)
+        {
+            return NoReading;
+        }
+
+        string value = PercentText(percent, part.Estimated);
+        return part.Fresh || part.ReadAt is not DateTimeOffset at ? value : value + " · " + AgeAmount(now - at);
+    }
+
+    // A card column's tooltip: what kind of value it is and how old, or null for a live value or none.
+    public static string? PartTip(ShownPart part, DateTimeOffset now) =>
+        !part.HasValue || part.Fresh || part.ReadAt is not DateTimeOffset at ? null
+        : part.Estimated ? EstimatedReadLine(now - at)
+        : LastReadLine(now - at);
 
     // "Read just now" only while the reading is current (within BatteryFreshness.FreshWindow, the age at which the card
     // greys it), then "Read 45 s ago" inside the minute and "Read 2 min ago" after it (whole seconds and minutes,

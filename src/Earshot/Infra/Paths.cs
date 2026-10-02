@@ -73,6 +73,10 @@ internal sealed class Paths
 
     public string WidgetClaimFile => Path.Combine(WidgetFolder, "claim.json");
 
+    // The last battery readings of the owner's pair and the learned charge rates (LastReadingStore): values, times and
+    // models only, no address or name.
+    public string LastReadingFile => Path.Combine(WidgetFolder, "last-reading.json");
+
     // The paths for this process, read from its environment each time.
     public static Paths Current => FromEnvironment(Environment.GetEnvironmentVariable);
 

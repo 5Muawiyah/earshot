@@ -12,8 +12,10 @@ namespace Earshot.Widget;
 // paired AirPods' model (read once at start and again when the pinned device changes) picks the candidates, and
 // BroadcastSelector links the set whose case is opened near the PC, follows it across address changes and drops the
 // link when the set has been lost for too long. The link is in memory only: nothing about it is written, so a restart
-// has none. Only the linked set's messages ever reach the values, and BatteryFreshness shows them (on the card, the
-// gauge, the tooltip and the low battery alert) only while the AirPods are connected to this PC. Windows' own
+// has none. Only the linked set's messages ever reach the values. Its last fresh reading of each part (value, charging
+// flag, read time and model, never an address or a name) and the charge rates learned from it are kept in the last
+// reading store, read at construction and written on change, and BatteryFreshness shows them (on the card, the gauge and
+// its tooltip) wherever the AirPods are, live while fresh and otherwise as a last reading or an estimate. Windows' own
 // Hands-Free battery figure, when it has one, is read beside them (every minute while the AirPods are on this PC, at
 // each connect, and when asked) and held apart: it fills in only when no bud has a fresh broadcast value.
 //
@@ -33,6 +35,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly IHandsFreeBatterySource? _handsFree;
     private readonly Action<Action> _runInBackground;
 
+    // Where the owner's pair's last readings and learned rates are kept between runs, or null to keep them in memory only.
+    private readonly ILastReadingStore? _lastReadingStore;
+
     // The decode table is the documented one. Only a test hands in another, to exercise bits the documented table
     // does not set (in-ear, the lid).
     private readonly ProximityDecodeTable _table;
@@ -40,6 +45,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
     private readonly BroadcastSelector _selector = new();
+    private readonly ChargeRateLearner _learner = new();
 
     // Rebuilding the shapes list is skipped unless _unknownForms actually changed since the last build: most
     // adverts never touch it at all, so re-allocating it on every one of them would be pointless churn, and
@@ -102,6 +108,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private string? _watcherErrorName;
     private WidgetSnapshot? _lastPublished;
 
+    // The owner's pair's last readings and learned rates (read from the store at construction), what was last written of
+    // them and when, and the latest time anything was worked out at (the estimate's clock, which never goes back).
+    private LastReadingBook _book;
+    private LastReadingBook _savedBook;
+    private DateTimeOffset? _lastSavedAt;
+    private DateTimeOffset? _estimateClock;
+
     // The pinned device the paired model was last read for, so a settings change that leaves it alone reads nothing.
     private (Guid Container, string Address)? _pairedModelFor;
 
@@ -126,8 +139,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         Action<Action> uiPost,
         TimeProvider timeProvider,
         IPairedModelSource pairedModel,
-        IHandsFreeBatterySource? handsFree = null)
-        : this(sourceFactory, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, pairedModel, handsFree, ProximityDecodeTable.Documented)
+        IHandsFreeBatterySource? handsFree = null,
+        ILastReadingStore? lastReadings = null)
+        : this(sourceFactory, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, pairedModel, handsFree, ProximityDecodeTable.Documented,
+            lastReadings: lastReadings)
     {
     }
 
@@ -144,7 +159,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         IPairedModelSource pairedModel,
         IHandsFreeBatterySource? handsFree,
         ProximityDecodeTable table,
-        Action<Action>? runInBackground = null)
+        Action<Action>? runInBackground = null,
+        ILastReadingStore? lastReadings = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFactory);
         ArgumentNullException.ThrowIfNull(settings);
@@ -167,6 +183,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _handsFree = handsFree;
         _runInBackground = runInBackground ?? (static work => _ = Task.Run(work));
         _table = table;
+
+        // The last readings are read once, at start, and shown from then on until newer ones are heard.
+        _lastReadingStore = lastReadings;
+        _book = lastReadings?.Load() ?? LastReadingBook.Empty;
+        _savedBook = _book;
     }
 
     public event EventHandler? Changed;
@@ -317,6 +338,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     public void Close()
     {
         IAdvertisementSource? sourceToStop;
+        LastReadingBook? bookToSave = null;
         lock (_gate)
         {
             if (_closed)
@@ -341,6 +363,18 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
+
+            // A read time not yet written is written now, so the next start shows the reading as old as it is.
+            if (_lastReadingStore is not null && !ReferenceEquals(_book, _savedBook))
+            {
+                bookToSave = _book;
+                _savedBook = _book;
+            }
+        }
+
+        if (bookToSave is not null)
+        {
+            _lastReadingStore!.Save(bookToSave);
         }
 
         if (sourceToStop is not null)
@@ -1101,6 +1135,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         DecodedReading? applied = null;
         long generation = 0;
         RefreshState? heard = null;
+        LastReadingBook? toSave = null;
 
         lock (_gate)
         {
@@ -1184,6 +1219,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             DecodedReading reading = ProximityDecoder.Decode(message, _table, at);
             CheckBudOrderLocked(reading, tag, at);
             caseOpenedEdge = ApplyDecodedReadingLocked(reading, _table, at);
+            toSave = RecordLastReadingLocked(reading, message.Model, at);
             applied = reading;
             generation = _selectionGeneration;
 
@@ -1192,6 +1228,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             {
                 heard = waiting;
             }
+        }
+
+        if (toSave is not null)
+        {
+            _lastReadingStore?.Save(toSave);
         }
 
         if (heard is not null)
@@ -1274,11 +1315,52 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
+    // A fresh reading of the linked set, and of no other, goes into the owner's last readings, and the parts' charge runs
+    // learn from it. Returns the book to write when it is due (a value, a flag, a model or a rate changed at once; a read
+    // time alone at most every LastReadingStore.ReadTimeWriteInterval), or null. Must be called holding _gate; the write
+    // itself happens outside it.
+    private LastReadingBook? RecordLastReadingLocked(DecodedReading reading, ushort model, DateTimeOffset at)
+    {
+        LastReadingBook book = _book.WithReading(reading, model, at);
+        foreach ((ChargeComponent component, PartReading part) in new[]
+        {
+            (ChargeComponent.Left, reading.Left), (ChargeComponent.Right, reading.Right), (ChargeComponent.Case, reading.Case),
+        })
+        {
+            if (part.Percent is int percent && _learner.Observe(component, model, percent, part.Charging == true, at) is { } rate)
+            {
+                book = book.WithRate(rate);
+                _log.Info("Widget: a charge rate was learned for the " + (rate.Part == ChargePart.Case ? "case" : "buds") + ": " +
+                    Math.Round(rate.PercentPerHour).ToString(System.Globalization.CultureInfo.InvariantCulture) + " points an hour over " +
+                    Math.Round(rate.Span.TotalMinutes).ToString(System.Globalization.CultureInfo.InvariantCulture) + " min.");
+            }
+        }
+
+        _book = book;
+        if (_lastReadingStore is null || ReferenceEquals(book, _savedBook))
+        {
+            return null;
+        }
+
+        bool due = LastReadingBook.DiffersBeyondReadTimes(book, _savedBook) ||
+            _lastSavedAt is not DateTimeOffset last || (at - last).Duration() >= LastReadingStore.ReadTimeWriteInterval;
+        if (!due)
+        {
+            return null;
+        }
+
+        _savedBook = book;
+        _lastSavedAt = at;
+        return book;
+    }
+
     // Whatever the linked set held is dropped: after a link that is another set, or a new paired model, nothing
-    // of the old values may be shown against the new pair.
+    // of the old values may be shown against the new pair. The saved last readings stay: they are the owner's pair's, and
+    // a newer fresh reading of the linked set replaces them part by part. The charge runs start over.
     private void ResetReadingsLocked()
     {
         _selectionGeneration++;
+        _learner.Reset();
         _left = PartReading.Unknown;
         _right = PartReading.Unknown;
         _case = PartReading.Unknown;
@@ -1603,6 +1685,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             previous.WatcherErrorName != current.WatcherErrorName ||
             previous.Headset != current.Headset ||
             previous.Selection != current.Selection ||
+            !ReferenceEquals(previous.LastReadings, current.LastReadings) ||
+            previous.PairedModel != current.PairedModel ||
             previous.AutoPauseAvailable != current.AutoPauseAvailable;
     }
 
@@ -1639,6 +1723,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         // bud as in or out of the ear.
         PartReading left = fresh ? _left : _left with { InEar = null };
         PartReading right = fresh ? _right : _right with { InEar = null };
+        if (_estimateClock is null || now > _estimateClock)
+        {
+            _estimateClock = now;
+        }
 
         return new WidgetSnapshot(
             where, left, right, _case, batteryReadAt, earReadAt, _lidOpenBitSeen ? _lastLidOpenState : null,
@@ -1647,6 +1735,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             Headset = _headset,
             Selection = _selector.StateAt(now),
+            LastReadings = _book,
+            PairedModel = _selector.PairedModel,
+            EstimateClock = _estimateClock,
         };
     }
 

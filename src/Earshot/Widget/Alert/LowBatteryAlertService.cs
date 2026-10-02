@@ -66,8 +66,16 @@ internal sealed class LowBatteryAlertService : IDisposable
 
     private void OnStatusChanged(object? sender, EventArgs e)
     {
-        ShownBattery shown = BatteryFreshness.Shown(_status.Current, _time.GetUtcNow());
+        WidgetSnapshot snapshot = _status.Current;
+        ShownBattery shown = BatteryFreshness.Shown(snapshot, _time.GetUtcNow());
         bool alertOn = _settings.Current.Widget.LowBatteryAlert;
+
+        // The card and the gauge show the owner's pair wherever it is; the alert stays for AirPods on this PC, as it was:
+        // a live value of a pair that is not here is not one the person is listening on.
+        if (snapshot.Where != AirPodsWhere.ThisPc)
+        {
+            shown = ShownBattery.None;
+        }
 
         if (_latch.ApplyLeft(FreshPercent(shown.Left)) && alertOn && shown.Left.Percent is int left)
         {
