@@ -18,7 +18,7 @@ public sealed class WidgetCardAccessibilityTests
     private static readonly string[] FullNames = ["Connect", "Pause when a bud comes out", "Update", "Settings", "Refresh battery"];
     private static readonly bool[] OnOff = [false, true];
 
-    // The settings page as the design groups it (round 3): Taskbar, Behaviour, Audio, Shortcuts and About, then More opened. The order's
+    // The settings page as the design groups it: Taskbar, Behaviour, Audio, Shortcuts and About, then More opened. The order's
     // pictures are named separately (PictureNames). Repair and Check for updates automatically are on the Updates page.
     private static readonly string[] SettingsNames =
     [

@@ -38,7 +38,7 @@ public sealed class GaugeOrderPickerTests
                 SettingsItem row = OrderRow(card);
                 IReadOnlyList<Rectangle> tiles = row.Tiles;
                 Assert.AreEqual(6, tiles.Count);
-                // The design (round 3, Settings rows): the pictures are a 3 by 2 grid of tiles 52 high, a gap of 8 and a padding of 12 inside the
+                // The design: the pictures are a 3 by 2 grid of tiles 52 high, a gap of 8 and a padding of 12 inside the
                 // surface, which is itself 12 in from each side of the 360 wide card.
                 int gap = CardPlacement.Scale(8, dpi);
                 int surfaceLeft = CardPlacement.Scale(12, dpi);

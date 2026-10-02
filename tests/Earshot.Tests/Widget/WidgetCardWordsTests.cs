@@ -26,7 +26,7 @@ public sealed class WidgetCardWordsTests
                 // AirPods leave"), which keep those words.
                 int most = row.Row is SettingsRowId.PauseBud or SettingsRowId.PauseLeave ? 6 : 3;
                 Assert.IsTrue(words >= 1 && words <= most, row.Row + " says \"" + row.Label + "\", " + words + " words (at most " + most + ").");
-                // The design (round 3) gives two rows a caption of their own: Hand back, "Shut down, sleep, Exit", and Updates, with the version.
+                // The design gives two rows a caption of their own: Hand back, "Shut down, sleep, Exit", and Updates, with the version.
                 // Any other row says nothing under its label unless something is wrong.
                 string? caption = row.Row switch
                 {

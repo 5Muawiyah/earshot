@@ -225,7 +225,7 @@ public sealed class WidgetCardTextScaleTests
                 }
                 else if (card.HasTranslucentBackdrop)
                 {
-                    // The design (round 3, Acrylic): with a system backdrop the card paints the tint over it, and the backdrop shows through
+                    // The design (Acrylic): with a system backdrop the card paints the tint over it, and the backdrop shows through
                     // by the tint's own alpha, so the pixel is the tint's, not clear. (White ink tells the card the theme is dark.)
                     // GDI+ stores 210 for the 209 (82%) the dark tint asks for, so the allowance is the one level its conversion adds.
                     int tint = DesignTokens.For(dark: true, highContrast: false).AcrylicTint.A;
