@@ -909,32 +909,42 @@ public sealed class WidgetCardTests
         });
     }
 
-    // A card for AirPods that are not on this PC shows no battery part at all: the columns are drawn exactly as when
-    // nothing was ever read, and the read line does not give the age of a reading that is not shown.
+    // The owner's decision of 2 October 2026 (the away rules): only the linked pair is ever shown, and it is shown wherever it is, so
+    // a card for AirPods that are not on this PC draws the pair's readings. A pair that is not linked, which may be a stranger's, is
+    // never drawn, whatever was heard: its columns are drawn exactly as when nothing was read. (This replaces the rule that a card
+    // for AirPods that are not on this PC draws no figure.)
     [TestMethod]
-    public void ACardForAirPodsNotOnThisPcDrawsNoFigureWhateverWasRead()
+    public void ACardDrawsTheLinkedPairWhereverItIsAndNeverAPairThatIsNotLinked()
     {
         Phase5.CardSta.Run(() =>
         {
-            foreach (AirPodsWhere where in new[] { AirPodsWhere.Unknown, AirPodsWhere.Elsewhere, AirPodsWhere.NotInUse })
+            foreach (AirPodsWhere where in new[] { AirPodsWhere.Unknown, AirPodsWhere.Elsewhere, AirPodsWhere.NotInUse, AirPodsWhere.ThisPc })
             {
                 PartReading Charging(int percent) => new(percent, true, null) { ReadAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(2) };
+                WidgetSnapshot heard = Snapshot(where: where, left: Charging(70), right: Charging(60), box: Charging(90), readAt: DateTimeOffset.UtcNow);
 
                 using var empty = new WidgetCard(new CapturingLog());
                 empty.SetTheme(Color.Black, highContrast: false);
                 empty.Render(Model(Snapshot(where: where)), 96);
                 using Bitmap emptyBitmap = Render(empty);
 
-                using var read = new WidgetCard(new CapturingLog());
-                read.SetTheme(Color.Black, highContrast: false);
-                read.Render(Model(Snapshot(where: where, left: Charging(70), right: Charging(60), box: Charging(90), readAt: DateTimeOffset.UtcNow)), 96);
-                using Bitmap readBitmap = Render(read);
+                using var linked = new WidgetCard(new CapturingLog());
+                linked.SetTheme(Color.Black, highContrast: false);
+                linked.Render(Model(heard), 96);
+                using Bitmap linkedBitmap = Render(linked);
 
-                WidgetCardLayout.Layout layout = read.CurrentMainLayout;
+                using var stranger = new WidgetCard(new CapturingLog());
+                stranger.SetTheme(Color.Black, highContrast: false);
+                stranger.Render(Model(heard with { Selection = BroadcastSelectionState.Listening }), 96);
+                using Bitmap strangerBitmap = Render(stranger);
+
+                WidgetCardLayout.Layout layout = linked.CurrentMainLayout;
                 var columns = Rectangle.Union(layout.Left.Label, layout.Case.Percent);
-                Assert.AreEqual(0, CountDifferingPixels(emptyBitmap, readBitmap, columns), where + ": the columns are drawn as if nothing was read.");
-                Assert.AreEqual(empty.ReadLineText, read.ReadLineText, where + ": the read line does not date a reading that is not shown.");
-                StringAssert.DoesNotMatch(read.ReadLineText, new System.Text.RegularExpressions.Regex("ago"));
+                Assert.IsGreaterThan(0, CountDifferingPixels(emptyBitmap, linkedBitmap, columns), where + ": the linked pair's figures are drawn.");
+                Assert.AreEqual(70, linked.Model.ShownParts.Left.Percent, where + ": the left bud is shown.");
+                Assert.AreEqual(90, linked.Model.ShownParts.Case.Percent, where + ": and the case.");
+                Assert.AreEqual(0, CountDifferingPixels(emptyBitmap, strangerBitmap, columns), where + ": a pair that is not linked is drawn as if nothing was read.");
+                Assert.IsNull(stranger.Model.ShownParts.Left.Percent, where + ": none of it is shown.");
             }
         });
     }
@@ -1013,9 +1023,8 @@ public sealed class WidgetCardTests
             old.Render(Model(Snapshot(left: Charging(TimeSpan.FromMinutes(4)))), 96);
             using Bitmap oldBitmap = Render(old);
 
-            Rectangle bar = fresh.CurrentMainLayout.Left.Bar;
-            float h = bar.Height * 2.2f;
-            var bolt = new Rectangle(bar.Right + 2, (int)(bar.Y + (bar.Height / 2f) - (h / 2f)), (int)(h * 0.6f) + 1, (int)h + 1);
+            // The bolt has a slot of its own right of the value (the design), where the layout puts it.
+            Rectangle bolt = fresh.CurrentMainLayout.Left.BoltSlot;
             Color background = freshBitmap.GetPixel(0, 0);
 
             Assert.IsTrue(HasInk(freshBitmap, bolt, background), "The bolt is drawn when charging.");
@@ -1092,7 +1101,9 @@ public sealed class WidgetCardTests
 
             card.Render(Model(snapshot with { Left = Read(70, TimeSpan.FromSeconds(3)), BatteryReadAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(3) }), 96);
 
-            Assert.IsTrue(card.ReadLineText.StartsWith("Battery read", StringComparison.Ordinal), "A fresh bud value is shown, so Windows' figure is not.");
+            // A live bud value is shown, so Windows' figure is not; and a live value carries no age (the design: the read-time line of a
+            // fresh value is empty and its place kept), where it used to say "Battery read" with a few seconds.
+            Assert.AreEqual(string.Empty, card.ReadLineText, "A fresh bud value is shown, so Windows' figure is not.");
         });
     }
 

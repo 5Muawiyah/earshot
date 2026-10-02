@@ -321,7 +321,8 @@ public sealed class WidgetCardPresenterTests
     private static WidgetSnapshot Snapshot(AirPodsWhere where = AirPodsWhere.Unknown, bool autoPauseAvailable = false, DateTimeOffset? readAt = null) =>
         new(
             where,
-            PartReading.Unknown,
+            // The card shows and dates only a part that carries its read time (BatteryFreshness), so a snapshot read at a time has a bud read then.
+            readAt is { } at ? new PartReading(70, false, null) { ReadAt = at } : PartReading.Unknown,
             PartReading.Unknown,
             PartReading.Unknown,
             BatteryReadAt: readAt,
