@@ -33,15 +33,17 @@ public sealed class CompositionRootWidgetConstructorTests
             "BuildWidget must call WidgetStatusService's public constructor, not the internal, test-only " +
             "overload that takes the decode table directly.");
         ParameterInfo[] parameters = calls[0].GetParameters();
-        Assert.HasCount(10, parameters,
-            "The public constructor takes exactly 10 parameters, the last the last reading store; a call with more " +
+        Assert.HasCount(11, parameters,
+            "The public constructor takes exactly 11 parameters, the last the battery history store; a call with more " +
             "is the internal overload.");
-        Assert.AreEqual(typeof(IPairedModelSource), parameters[^3].ParameterType,
+        Assert.AreEqual(typeof(IPairedModelSource), parameters[^4].ParameterType,
             "The candidates come from the paired AirPods' model.");
-        Assert.AreEqual(typeof(IHandsFreeBatterySource), parameters[^2].ParameterType,
+        Assert.AreEqual(typeof(IHandsFreeBatterySource), parameters[^3].ParameterType,
             "Windows' own figure comes from its own source.");
-        Assert.AreEqual(typeof(ILastReadingStore), parameters[^1].ParameterType,
+        Assert.AreEqual(typeof(ILastReadingStore), parameters[^2].ParameterType,
             "The owner's pair's last readings are kept in their own store.");
+        Assert.AreEqual(typeof(IHistoryStore), parameters[^1].ParameterType,
+            "The battery history is kept in its own store.");
     }
 
     // Mirrors WidgetAtRestTests' own IL walker (a full operand-size table is needed to skip variable-length
