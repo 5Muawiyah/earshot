@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Collections.Concurrent;
 using Earshot.Contracts;
 using Earshot.Widget;
@@ -110,6 +111,76 @@ public sealed class VBlankFrameClockTests
         }
     }
 
+    // A display that is off: WaitForVBlank returns at once (Delay zero), or lasts Delay (a display that is on), or does not return until
+    // released (Block). Every wait is counted.
+    private sealed class DisplayOutputs : IVBlankOutputs
+    {
+        private volatile bool _released;
+        private int _waits;
+
+        public TimeSpan Delay { get; set; }
+
+        public bool Block { get; set; }
+
+        public int Waits => Volatile.Read(ref _waits);
+
+        public void ReleaseTheBlockedWait() => _released = true;
+
+        public void ConfigureThread(Thread thread)
+        {
+        }
+
+        public nint MonitorFor(nint window) => 1;
+
+        public bool Has(nint monitor) => true;
+
+        public int ListOutputs() => 0;
+
+        public int WaitForVBlank(nint monitor)
+        {
+            Interlocked.Increment(ref _waits);
+            if (Block)
+            {
+                for (int i = 0; i < 20_000 && !_released; i++)
+                {
+                    Thread.Sleep(1);
+                }
+
+                return 0;
+            }
+
+            if (Delay > TimeSpan.Zero)
+            {
+                // A wait that lasts a refresh: slept on a timer, so it is never shorter than asked.
+                long end = Stopwatch.GetTimestamp() + (long)(Delay.TotalSeconds * Stopwatch.Frequency);
+                while (Stopwatch.GetTimestamp() < end)
+                {
+                    Thread.Sleep(1);
+                }
+            }
+
+            return 0;
+        }
+
+        public void Release()
+        {
+        }
+    }
+
+    // Runs the UI thread until n frames have been delivered or a few seconds have passed, and says how many arrived. A frame is
+    // recorded with how far ahead of the clock it was stamped.
+    private static int Drive(VBlankFrameClock clock, FakeUi ui, List<(TimeSpan Stamp, TimeSpan Ahead)> frames, int n)
+    {
+        DateTime end = DateTime.UtcNow.AddSeconds(5);
+        while (frames.Count < n && DateTime.UtcNow < end)
+        {
+            ui.Run();
+            Thread.Sleep(1);
+        }
+
+        return frames.Count;
+    }
+
     // The UI thread: what the clock posts is kept until the test runs it.
     private sealed class FakeUi
     {
@@ -141,7 +212,10 @@ public sealed class VBlankFrameClockTests
     private readonly CapturingLog _log = new();
     private readonly List<TimeSpan> _frames = [];
 
-    private VBlankFrameClock NewClock(Func<nint>? window = null) => new(window ?? (() => 7), _ui.Post, _log, _outputs);
+    // The rest of the clock's tests release each blank by hand, so a wait can end the moment they say: the check for waits too short to
+    // be a blank and the watchdog for a wait that never ends are off for them (the tests of those two follow, with their own outputs).
+    private VBlankFrameClock NewClock(Func<nint>? window = null) =>
+        new(window ?? (() => 7), _ui.Post, _log, _outputs, minRealWait: TimeSpan.Zero, watchdogAfter: TimeSpan.Zero);
 
     private static void WaitUntil(Func<bool> condition)
     {
@@ -250,6 +324,108 @@ public sealed class VBlankFrameClockTests
         Assert.AreEqual(2, _ui.Posted, "The next frame is posted and waits.");
         _ui.Run();
         Assert.HasCount(2, _frames, "And the next run delivers it.");
+    }
+
+    // ---- A display that is off
+
+    [TestMethod]
+    public void AWaitThatReturnsAtOnceIsNoBlankSoFramesAreUnpacedAndTheClockSaysWhyOnce()
+    {
+        var display = new DisplayOutputs();
+        var frames = new List<(TimeSpan Stamp, TimeSpan Ahead)>();
+        using var clock = new VBlankFrameClock(() => 7, _ui.Post, _log, display);
+        using IDisposable sub = clock.Subscribe(at => frames.Add((at, at - clock.Now)));
+
+        Drive(clock, _ui, frames, 12);
+
+        Assert.IsGreaterThanOrEqualTo(12, frames.Count, "Frames arrive.");
+        // The first two short waits are still frames; from the third in a row the display counts as off, and every frame is stamped an hour ahead.
+        foreach ((TimeSpan _, TimeSpan ahead) in frames.Skip(4))
+        {
+            Assert.IsGreaterThan(TimeSpan.FromMinutes(59), ahead, "Once the display counts as off, a frame ends every motion in one step.");
+        }
+
+        Assert.AreEqual(1, _log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("WaitForVBlank returned", StringComparison.Ordinal)), "Logged once.");
+        Assert.IsLessThanOrEqualTo(frames.Count + 8, display.Waits, "No more waits than frames the UI thread took: the thread waits for each frame it posted instead of spinning.");
+    }
+
+    [TestMethod]
+    public void AClockThatTookTheDisplayForOffIsPacedAgainWhenItsWaitsLastARefreshAgain()
+    {
+        var display = new DisplayOutputs();
+        var frames = new List<(TimeSpan Stamp, TimeSpan Ahead)>();
+        using var clock = new VBlankFrameClock(() => 7, _ui.Post, _log, display);
+        using IDisposable sub = clock.Subscribe(at => frames.Add((at, at - clock.Now)));
+        Drive(clock, _ui, frames, 8);
+        Assert.IsGreaterThan(TimeSpan.FromMinutes(59), frames[^1].Ahead, "Sanity: it counts the display as off.");
+
+        display.Delay = TimeSpan.FromMilliseconds(4);
+        int before = frames.Count;
+        Drive(clock, _ui, frames, before + 12);
+
+        Assert.IsLessThan(TimeSpan.FromSeconds(1), frames[^1].Ahead, "Paced again: the last frame is stamped when its blank returned, not an hour ahead.");
+        Assert.IsTrue(_log.Has(LogLevel.Debug, "paced to the display again"), "And it says so.");
+    }
+
+    [TestMethod]
+    public void AWaitThatLastsARefreshIsABlankAndNothingIsLogged()
+    {
+        var display = new DisplayOutputs { Delay = TimeSpan.FromMilliseconds(4) };
+        var frames = new List<(TimeSpan Stamp, TimeSpan Ahead)>();
+        using var clock = new VBlankFrameClock(() => 7, _ui.Post, _log, display);
+        using IDisposable sub = clock.Subscribe(at => frames.Add((at, at - clock.Now)));
+
+        Drive(clock, _ui, frames, 10);
+
+        Assert.IsGreaterThanOrEqualTo(10, frames.Count);
+        Assert.IsTrue(frames.All(f => f.Ahead < TimeSpan.FromSeconds(1)), "Every frame is paced.");
+        Assert.IsEmpty(_log.Entries.Where(e => e.Level >= LogLevel.Warn), "Nothing is logged for a display that is on.");
+    }
+
+    // A wait that does not return: the watchdog delivers the frames, the stuck thread holds up neither the motion nor Dispose, and when
+    // the wait returns the clock is paced again.
+    [TestMethod]
+    public void AWaitThatNeverReturnsDoesNotStopTheMotionOrHoldUpDisposeAndTheClockIsPacedWhenItReturns()
+    {
+        var display = new DisplayOutputs { Block = true };
+        var frames = new List<(TimeSpan Stamp, TimeSpan Ahead)>();
+        var clock = new VBlankFrameClock(() => 7, _ui.Post, _log, display, watchdogAfter: TimeSpan.FromMilliseconds(40));
+        IDisposable sub = clock.Subscribe(at => frames.Add((at, at - clock.Now)));
+        WaitUntil(() => display.Waits >= 1);
+
+        Drive(clock, _ui, frames, 3);
+
+        Assert.IsGreaterThanOrEqualTo(3, frames.Count, "Frames arrive though the wait never returns.");
+        Assert.IsTrue(frames.All(f => f.Ahead > TimeSpan.FromMinutes(59)), "Each is unpaced, so a motion ends in one.");
+        Assert.AreEqual(1, _log.Entries.Count(e => e.Level == LogLevel.Warn && e.Message.Contains("has not returned", StringComparison.Ordinal)), "Logged once.");
+
+        // Unsubscribing and disposing while the thread is stuck in its wait are at once.
+        var watch = Stopwatch.StartNew();
+        sub.Dispose();
+        clock.Dispose();
+        Assert.IsLessThan(TimeSpan.FromSeconds(1), watch.Elapsed, "A stuck wait holds nothing up.");
+
+        display.ReleaseTheBlockedWait();
+    }
+
+    [TestMethod]
+    public void WhenAStuckWaitReturnsTheClockDeliversPacedFramesAgain()
+    {
+        var display = new DisplayOutputs { Block = true };
+        var frames = new List<(TimeSpan Stamp, TimeSpan Ahead)>();
+        using var clock = new VBlankFrameClock(() => 7, _ui.Post, _log, display, watchdogAfter: TimeSpan.FromMilliseconds(40));
+        using IDisposable sub = clock.Subscribe(at => frames.Add((at, at - clock.Now)));
+        WaitUntil(() => display.Waits >= 1);
+        Drive(clock, _ui, frames, 2);
+        Assert.IsGreaterThan(TimeSpan.FromMinutes(59), frames[^1].Ahead, "Sanity: the watchdog was delivering.");
+
+        display.Block = false;
+        display.Delay = TimeSpan.FromMilliseconds(4);
+        display.ReleaseTheBlockedWait();
+        int before = frames.Count;
+        Drive(clock, _ui, frames, before + 10);
+
+        Assert.IsLessThan(TimeSpan.FromSeconds(1), frames[^1].Ahead, "The wait returned: frames are paced again.");
     }
 
     [TestMethod]

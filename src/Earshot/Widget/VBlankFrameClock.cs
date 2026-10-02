@@ -24,11 +24,32 @@ namespace Earshot.Widget;
 // monitor is on no output, as in some remote sessions) the raw HRESULT is logged once and frames are stamped an hour ahead,
 // so every motion reaches its end in one frame, as with animation effects off: nothing is paced to a guessed rate.
 //
+// A display that is off breaks WaitForVBlank in two ways, both seen on the owner's PC and a reviewer's: the wait returns at once with
+// success (tens of thousands a second), or it does not return at all. Neither may drive the animation:
+//   - A wait that returns in under MinRealWait (half a millisecond: the period of a display at 2000 Hz, so no real refresh is that
+//     short, and a wait chained straight after the last one lasts about one period; the instant return measured on the sleeping
+//     display took about 27 microseconds) three times running is not a blank. The clock logs it once, says it is probably off, and
+//     draws unpaced (frames stamped an hour ahead: each motion ends in one frame, and no more frames are posted than the UI thread
+//     delivers). It listens for the display's return by chaining three waits at the start of each run: when all three last a real
+//     period it is paced again.
+//   - A wait that has not returned within WatchdogAfter (100 ms: several refresh periods of any display that could be asked to
+//     animate) is stuck. A watchdog timer then delivers unpaced frames itself, logged once, and the stuck thread is left where it is:
+//     it holds up nothing, not a subscriber, not Dispose. Paced frames resume when its wait returns.
 // At rest the thread waits on an event and wakes for nothing: the event is set only while someone is subscribed. A frame is
 // not posted while the last one has not reached the UI thread yet, so a busy UI thread is never handed a queue of them.
 internal sealed class VBlankFrameClock : IFrameClock, IDisposable
 {
     private static readonly TimeSpan Unpaced = TimeSpan.FromHours(1);
+
+    // A wait shorter than this is not a vertical blank (see the notes above).
+    internal static readonly TimeSpan DefaultMinRealWait = TimeSpan.FromMilliseconds(0.5);
+
+    // A wait longer than this is stuck.
+    internal static readonly TimeSpan DefaultWatchdogAfter = TimeSpan.FromMilliseconds(100);
+
+    // Instant waits in a row before the display is taken to be off, and real waits in a row before it is taken to be back.
+    private const int FastWaitsToGiveUp = 3;
+    private const int RealWaitsToRecover = 3;
 
     private readonly Func<nint> _window;
     private readonly Action<Action> _uiPost;
@@ -37,16 +58,34 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
     private readonly ManualResetEventSlim _wanted = new(false);
     private readonly AutoResetEvent _delivered = new(false);
     private readonly IVBlankOutputs _outputs;
+    private readonly TimeSpan _minRealWait;
+    private readonly TimeSpan _watchdogAfter;
+    private System.Threading.Timer? _watchdog;
     private Thread? _thread;
     private int _posted;
     private volatile bool _disposed;
     private bool _failing;
 
+    // Thread state: instant waits in a row, and whether they have made the display count as off.
+    private int _fastWaits;
+    private bool _displayOff;
+
+    // Stopwatch ticks at which the wait now under way began, or 0 when the thread is not inside one. Read by the watchdog.
+    private long _waitStarted;
+
+    // Whether the watchdog has delivered frames since a paced one last arrived, so it logs once per run of them.
+    private int _watchdogFired;
+
     // window: the window whose display paces the frames, read on the clock's thread before every wait (0 while it has no
     // handle: the primary display's nearest output is used).
     // outputs: the display system (DXGI's, composed at the tray; a fake in tests).
-    public VBlankFrameClock(Func<nint> window, Action<Action> uiPost, ILog log, IVBlankOutputs outputs)
+    // minRealWait and watchdogAfter: how short a wait is no blank and how long a wait is stuck (the defaults; a test of the rest of the
+    // clock turns the first off with TimeSpan.Zero, since its fake waits end the moment the test says).
+    public VBlankFrameClock(
+        Func<nint> window, Action<Action> uiPost, ILog log, IVBlankOutputs outputs, TimeSpan? minRealWait = null, TimeSpan? watchdogAfter = null)
     {
+        _minRealWait = minRealWait ?? DefaultMinRealWait;
+        _watchdogAfter = watchdogAfter ?? DefaultWatchdogAfter;
         ArgumentNullException.ThrowIfNull(outputs);
         _outputs = outputs;
         ArgumentNullException.ThrowIfNull(window);
@@ -73,6 +112,7 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
             }
 
             _wanted.Set();
+            StartWatchdog();
         }
 
         return new Subscription(this, onFrame);
@@ -89,6 +129,8 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
 
         _disposed = true;
         _subscribers.Clear();
+        StopWatchdog();
+        _watchdog?.Dispose();
         if (_thread is null)
         {
             _wanted.Dispose();
@@ -105,6 +147,7 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
         if (_subscribers.Remove(onFrame) && _subscribers.Count == 0 && !_disposed)
         {
             _wanted.Reset();
+            StopWatchdog();
         }
     }
 
@@ -121,7 +164,12 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
                 return;
             }
 
-            bool paced = WaitForBlank();
+            bool paced = PacedWait();
+            if (paced)
+            {
+                Interlocked.Exchange(ref _watchdogFired, 0);
+            }
+
             TimeSpan at = paced ? Now : Now + Unpaced;
             bool posted = false;
             if (_wanted.IsSet && !_disposed && Interlocked.CompareExchange(ref _posted, 1, 0) == 0)
@@ -130,11 +178,13 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
                 _uiPost(() => Deliver(at));
             }
 
-            // With nothing to wait on, the thread waits for the frame it posted to arrive instead, which ends every motion.
-            // Nothing posted (a frame still in flight, or nobody wanting one) means nothing will arrive to wait for.
-            if (!paced && posted)
+            // With nothing to wait on, the thread waits for the frame to arrive instead of asking again, which ends every motion: the
+            // frame it posted, or one still in flight from before (asking again at once would spin while the UI thread is busy). Nobody
+            // wanting a frame means none will arrive, and it does not wait. The wait is bounded, so a frame that goes missing cannot
+            // stick the thread.
+            if (!paced && (posted || (_wanted.IsSet && Volatile.Read(ref _posted) == 1)))
             {
-                _delivered.WaitOne();
+                _ = _delivered.WaitOne(TimeSpan.FromMilliseconds(100));
             }
         }
     }
@@ -159,8 +209,110 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
         }
     }
 
-    // Waits for the next blank of the window's display. False when there was nothing to wait on.
-    private bool WaitForBlank()
+    // One wait for a blank, judged: true only when a real blank came. A display that is off returns at once (see the notes at the top).
+    private bool PacedWait()
+    {
+        if (_displayOff)
+        {
+            return DisplayHasReturned();
+        }
+
+        TimeSpan took = TimeSpan.Zero;
+        if (!TimedWaitForBlank(ref took))
+        {
+            return false;
+        }
+
+        if (_minRealWait <= TimeSpan.Zero || took >= _minRealWait)
+        {
+            _fastWaits = 0;
+            return true;
+        }
+
+        // A stray short wait is still a frame; the third in a row is a display that is off.
+        if (++_fastWaits < FastWaitsToGiveUp)
+        {
+            return true;
+        }
+
+        _displayOff = true;
+        _log.Warn("Motion: IDXGIOutput::WaitForVBlank returned in " + (took.TotalMilliseconds * 1000).ToString("F0", CultureInfo.InvariantCulture)
+            + " microseconds, " + FastWaitsToGiveUp + " times running, so the display is probably off; this motion ends in one frame until its waits last a refresh again.");
+        return false;
+    }
+
+    // The display was taken to be off: three waits chained one after the other. A display that is off returns from the first at once;
+    // one that is back takes about a refresh for each.
+    private bool DisplayHasReturned()
+    {
+        for (int i = 0; i < RealWaitsToRecover; i++)
+        {
+            TimeSpan took = TimeSpan.Zero;
+            if (!TimedWaitForBlank(ref took) || took < _minRealWait)
+            {
+                return false;
+            }
+        }
+
+        _displayOff = false;
+        _fastWaits = 0;
+        _log.Write(LogLevel.Debug, "Motion: IDXGIOutput::WaitForVBlank lasts a refresh again, so motion is paced to the display again.");
+        return true;
+    }
+
+    // WaitForBlank, with how long the wait itself took, and the moment it began on record for the watchdog while it lasts.
+    private bool TimedWaitForBlank(ref TimeSpan took)
+    {
+        long before = Stopwatch.GetTimestamp();
+        bool waited = WaitForBlank(() => Volatile.Write(ref _waitStarted, before));
+        Volatile.Write(ref _waitStarted, 0);
+        took = Stopwatch.GetElapsedTime(before);
+        return waited;
+    }
+
+    // The watchdog: while someone is subscribed, a timer looks every half bound at whether the thread has been inside one wait for
+    // longer than the bound. A wait that long is stuck (the display is off and the call does not return), so the timer delivers an
+    // unpaced frame itself, which ends the motion, and logs it once per run of such frames. It never touches the stuck thread.
+    private void StartWatchdog()
+    {
+        if (_watchdogAfter <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        TimeSpan period = _watchdogAfter / 2;
+        _watchdog ??= new System.Threading.Timer(_ => OnWatchdog(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _watchdog.Change(period, period);
+    }
+
+    private void StopWatchdog() => _watchdog?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+    private void OnWatchdog()
+    {
+        long started = Volatile.Read(ref _waitStarted);
+        if (_disposed || !_wanted.IsSet || started == 0 || Stopwatch.GetElapsedTime(started) < _watchdogAfter)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _posted, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _watchdogFired, 1) == 0)
+        {
+            _log.Warn("Motion: IDXGIOutput::WaitForVBlank has not returned in " + _watchdogAfter.TotalMilliseconds.ToString("F0", CultureInfo.InvariantCulture)
+                + " ms, so the display is probably off; this motion ends in one frame, and is paced again when the wait returns.");
+        }
+
+        TimeSpan at = Now + Unpaced;
+        _uiPost(() => Deliver(at));
+    }
+
+    // Waits for the next blank of the window's display. False when there was nothing to wait on. beginWait is called just before the
+    // wait itself (not before the listing of outputs), for the watchdog.
+    private bool WaitForBlank(Action beginWait)
     {
         nint monitor = _outputs.MonitorFor(_window());
         if (!_outputs.Has(monitor))
@@ -174,6 +326,7 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
             }
         }
 
+        beginWait();
         int hr = _outputs.WaitForVBlank(monitor);
         if (hr < 0)
         {
