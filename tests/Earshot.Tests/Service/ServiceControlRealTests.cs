@@ -134,6 +134,20 @@ public sealed class ServiceControlRealTests
         TestContext?.WriteLine(name + ": " + read.ImagePath + " | " + read.DisplayName + " | " + read.Account);
     }
 
+    // The description is read the same way, through a pointer into the buffer the control manager fills: the text of a real query
+    // must be the one the system's own tool prints. Read-only; nothing is changed.
+    [TestMethod]
+    [DataRow("Schedule")]
+    [DataRow("DoSvc")]
+    public void TheDescriptionOfARealQueryEqualsWhatScQdescriptionPrints(string name)
+    {
+        ServiceQuery read = new WindowsServiceControl().Query(name);
+        string qdescription = Sc("qdescription", name);
+
+        Assert.IsNotNull(read.Description, "The description was read.");
+        Assert.AreEqual(ScField(qdescription, "DESCRIPTION"), read.Description);
+    }
+
     [TestMethod]
     public void TheOptionalSettingsOfARealQueryEqualWhatTheScQueriesPrint()
     {

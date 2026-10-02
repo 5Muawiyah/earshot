@@ -48,6 +48,9 @@ internal sealed record ServiceQuery(
     public IReadOnlyList<string>? RequiredPrivileges { get; init; }
 
     public uint? ServiceSidType { get; init; }
+
+    // The description the control manager holds: empty when none is set, null when it could not be read.
+    public string? Description { get; init; }
 }
 
 // The service control manager, behind one interface so install, uninstall, the tray's status read and the probe
@@ -261,6 +264,16 @@ internal sealed unsafe class WindowsServiceControl : IServiceControl
             }
         }
 
+        // The description is a pointer to a string the control manager keeps in the buffer it fills, so it is read before the buffer goes.
+        string? description = null;
+        using (NativeBuffer? text = ReadConfig2("service-description", steps, service, AdvApi32.SERVICE_CONFIG_DESCRIPTION, (uint)sizeof(SERVICE_DESCRIPTIONW)))
+        {
+            if (text is not null)
+            {
+                description = Marshal.PtrToStringUni(((SERVICE_DESCRIPTIONW*)text.Pointer)->lpDescription) ?? string.Empty;
+            }
+        }
+
         uint? failureActionCount = null, sidType = null, triggerCount = null;
         string? failureCommand = null;
         bool? delayed = null;
@@ -325,6 +338,7 @@ internal sealed unsafe class WindowsServiceControl : IServiceControl
             TriggerCount = triggerCount,
             RequiredPrivileges = privileges,
             ServiceSidType = sidType,
+            Description = description,
         };
     }
 
