@@ -40,10 +40,12 @@ internal readonly record struct DisplayOffTimeoutReading(TimeSpan? Timeout, uint
 // PowerReadACValueIndex or PowerReadDCValueIndex for the power source in use (GetSystemPowerStatus: ACLineStatus 1 is online, 0 offline,
 // 255 unknown), in the display subgroup (GUID_VIDEO_SUBGROUP 7516b95f-f776-4464-8c53-06167f40cc99, listed on
 // https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nf-powrprof-powerreadacvalueindex). The setting is
-// 3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e (VIDEOIDLE), in seconds. No Microsoft page found lists that GUID, so it and the unit are from
-// `powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE` on this machine ("Possible Settings units: Seconds", AC index 0x00000e10). The
-// scheme's GUID is freed with LocalFree
-// (https://learn.microsoft.com/en-us/windows/win32/api/powersetting/nf-powersetting-powergetactivescheme). A value of 0 is taken as never.
+// GUID_VIDEO_POWERDOWN_TIMEOUT {3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e}: winnt.h in the Windows SDK (um\winnt.h, 10.0.26100.0) says it
+// "Specifies (in seconds) how long we wait after the last user input has been received before we power off the video". No Microsoft web
+// page found lists the GUID. That 0 means never is not in winnt.h; it is taken from powercfg and Settings (not checked in a header)
+// (`powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE` here: alias VIDEOIDLE, units seconds, AC index 0x00000e10). The scheme's GUID is freed
+// with LocalFree
+// (https://learn.microsoft.com/en-us/windows/win32/api/powersetting/nf-powersetting-powergetactivescheme).
 internal static class DisplayOffTimeout
 {
     private static readonly Guid VideoSubgroup = new("7516b95f-f776-4464-8c53-06167f40cc99");
@@ -121,17 +123,84 @@ internal static class DisplayOffTimeout
     }
 }
 
+// What reading the session's lock state gave. Locked is null when it could not be read or the session says it does not know. Flags is
+// the raw SessionFlags, Code the raw Win32 error when the call failed (0 when it did not), Step what failed.
+internal readonly record struct SessionLockReading(bool? Locked, uint Flags, uint Code, string Step);
+
+// Whether this session is locked, read only: WTSQuerySessionInformation with WTSSessionInfoEx for the current session returns a WTSINFOEXW
+// (a DWORD Level, then the level 1 data: SessionId, SessionState, SessionFlags, so SessionFlags is at offset 12), freed with WTSFreeMemory.
+// SessionFlags is WTS_SESSIONSTATE_LOCK 0, WTS_SESSIONSTATE_UNLOCK 1 or WTS_SESSIONSTATE_UNKNOWN 0xFFFFFFFF; on Windows 7 and Server 2008 R2
+// alone Microsoft documents the first two as reversed, and this reads them as documented for every later Windows, which is all the
+// project's target framework runs on.
+// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
+// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfoex_level1_w
+// A locked console has a display-off timeout of its own (GUID_VIDEO_CONSOLE_LOCK_TIMEOUT in winnt.h), so a locked PC says nothing
+// about the timeout read above.
+internal static class SessionLock
+{
+    private const uint CurrentSession = 0xFFFFFFFF;
+    private const int SessionInfoEx = 25;
+    private const int LevelOffset = 0;
+    private const int SessionFlagsOffset = 12;
+    private const uint SessionStateUnknown = 0xFFFFFFFF;
+
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WTSQuerySessionInformationW(nint server, uint sessionId, int infoClass, out nint buffer, out uint bytesReturned);
+
+    [DllImport("wtsapi32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern void WTSFreeMemory(nint memory);
+
+    internal static SessionLockReading Read()
+    {
+        if (!WTSQuerySessionInformationW(0, CurrentSession, SessionInfoEx, out nint buffer, out uint bytes))
+        {
+            return new SessionLockReading(null, 0, (uint)Marshal.GetLastWin32Error(), "WTSQuerySessionInformation");
+        }
+
+        try
+        {
+            if (bytes < SessionFlagsOffset + sizeof(uint))
+            {
+                return new SessionLockReading(null, 0, bytes, "WTSQuerySessionInformation returned too few bytes (the count is the code)");
+            }
+
+            int level = Marshal.ReadInt32(buffer, LevelOffset);
+            if (level != 1)
+            {
+                return new SessionLockReading(null, 0, (uint)level, "WTSINFOEXW level (the code is the level, 1 expected)");
+            }
+
+            uint flags = unchecked((uint)Marshal.ReadInt32(buffer, SessionFlagsOffset));
+            return flags switch
+            {
+                0 => new SessionLockReading(true, flags, 0, ""),
+                1 => new SessionLockReading(false, flags, 0, ""),
+                SessionStateUnknown => new SessionLockReading(null, flags, 0, "SessionFlags is WTS_SESSIONSTATE_UNKNOWN"),
+                _ => new SessionLockReading(null, flags, 0, "SessionFlags is not a documented value"),
+            };
+        }
+        finally
+        {
+            WTSFreeMemory(buffer);
+        }
+    }
+}
+
 internal sealed record DisplayVerdict(bool KnownOn, string Branch, string Reason);
 
 // Whether the display is known to be on, from the display-off timeout and the time since input, both read without the clock under
 // test. Known on means the timeout has not run out since the last input, with a margin so a run ending near the boundary is not
-// misjudged; a timeout of never is always on. Anything else (a timeout that has run out, or one that could not be read) is unknown,
-// and only then may the clock's own account of an unpaced run be believed.
+// misjudged; a timeout of never is always on. Anything else (a locked session, whose console has a timeout of its own, or a lock
+// state or timeout that could not be read, or a timeout that has run out) is unknown, and only then may the clock's own account of
+// an unpaced run be believed.
 internal static class DisplayState
 {
     internal static readonly TimeSpan Margin = TimeSpan.FromSeconds(5);
 
-    internal static DisplayVerdict Decide(bool localSession, DisplayOffTimeoutReading timeout, TimeSpan? idleBefore, TimeSpan? idleAfter)
+    internal static DisplayVerdict Decide(bool localSession, SessionLockReading sessionLock, DisplayOffTimeoutReading timeout, TimeSpan? idleBefore, TimeSpan? idleAfter)
     {
         string setting = timeout.Timeout is null
             ? "display-off timeout unreadable (" + timeout.Step + ", Win32 code " + timeout.Code + ")"
@@ -139,6 +208,20 @@ internal static class DisplayState
         if (!localSession)
         {
             return new DisplayVerdict(false, "not a local session", "not a local session, so no display to check");
+        }
+
+        string lockText = sessionLock.Locked is { } isLocked
+            ? (isLocked ? "session locked" : "session unlocked") + " (SessionFlags 0x" + sessionLock.Flags.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ")"
+            : "session lock state unreadable (" + sessionLock.Step + ", Win32 code " + sessionLock.Code + ", SessionFlags 0x" + sessionLock.Flags.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ")";
+        if (sessionLock.Locked is null)
+        {
+            return new DisplayVerdict(false, "lock state unreadable", lockText + "; " + setting);
+        }
+
+        if (sessionLock.Locked == true)
+        {
+            // A locked console has a display-off timeout of its own, which this does not read, so the scheme's timeout says nothing.
+            return new DisplayVerdict(false, "session locked", lockText + "; the locked console has its own display-off timeout; " + setting);
         }
 
         if (timeout.Timeout is not { } limit)

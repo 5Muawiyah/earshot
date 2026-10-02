@@ -367,7 +367,9 @@ public sealed class InstallerScriptStopTests
             run = world.Run(shell);
 
             CollectionAssert.AreEqual(ClosedFirst, run.CallsNamed("ExitTray"), run.Describe());
-            int standIn = int.Parse(run.CallsNamed("StandIn").Single().Split('|')[1], System.Globalization.CultureInfo.InvariantCulture);
+            string[] standIns = run.CallsNamed("StandIn");
+            Assert.HasCount(1, standIns, "The stand-in for the elevated program was started and recorded once." + Environment.NewLine + run.Describe());
+            int standIn = int.Parse(standIns[0].Split('|')[1], System.Globalization.CultureInfo.InvariantCulture);
             Assert.IsTrue(IsRunning(standIn), "The stop came while the elevated program was still working." + Environment.NewLine + run.Describe());
             Assert.IsEmpty(run.CallsNamed("StartTray"), "A program started now could be half replaced." + Environment.NewLine + run.Describe());
             // What a console shows of a line is what follows its last carriage return (the spinner is drawn over itself).
@@ -385,6 +387,50 @@ public sealed class InstallerScriptStopTests
                 EndStandIn(run);
             }
         }
+    }
+
+    // The calls log is written by the hooks and read by the poll that decides when to stop the run, at the same time. A poll that
+    // locked the log made a write fail ("being used by another process"), the hook threw, and the run stopped before the call it
+    // was waiting for was recorded: the test above then found no stand-in, only when the machine was busy. Both sides run here, as
+    // the harness defines them, against each other as fast as they can go; neither may fail, every call must be recorded, and the
+    // poll must have run while the writes were going on.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void TheCallsLogCanBeWrittenAndPolledAtTheSameTimeWithNeitherFailing(ShellKind shell)
+    {
+        const int writes = 1500;
+        using var world = new InstallerWorld();
+        string log = world.LogFile;
+        string writerScript = "$ErrorActionPreference = 'Stop'; $global:NoteFile = " + InstallerWorld.Q(log) + "; " + InstallerWorld.NoteFunction
+            + "; for ($i = 0; $i -lt " + writes + "; $i++) { Note ('N|' + $i) }";
+        world.Spec.Raw = true;
+        world.Spec.RawScript =
+            "$ErrorActionPreference = 'Stop'\r\n" +
+            InstallerWorld.LogHasLineFunction + "\r\n" +
+            "$writer = [powershell]::Create()\r\n" +
+            "[void]$writer.AddScript(" + InstallerWorld.Q(writerScript) + ")\r\n" +
+            "$async = $writer.BeginInvoke()\r\n" +
+            "$polls = 0; $pollErrors = 0; $firstPollError = ''\r\n" +
+            "while (-not $async.IsCompleted) {\r\n" +
+            "  if (Test-Path -LiteralPath " + InstallerWorld.Q(log) + ") {\r\n" +
+            "    try { [void](LogHasLine " + InstallerWorld.Q(log) + " 'no such call') } catch { $pollErrors++; if (-not $firstPollError) { $firstPollError = $_.Exception.Message } }\r\n" +
+            "    $polls++\r\n" +
+            "  }\r\n" +
+            "}\r\n" +
+            "$writerError = ''\r\n" +
+            "try { [void]$writer.EndInvoke($async) } catch { $writerError = $_.Exception.Message }\r\n" +
+            "Write-Output ('POLLS=' + $polls)\r\n" +
+            "Write-Output ('POLLERRORS=' + $pollErrors)\r\n" +
+            "Write-Output ('FIRSTPOLLERROR=' + $firstPollError)\r\n" +
+            "Write-Output ('WRITERERROR=' + $writerError)\r\n";
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("0", run.Value("POLLERRORS"), "No poll failed: " + run.Value("FIRSTPOLLERROR") + Environment.NewLine + run.Describe());
+        Assert.AreEqual(string.Empty, run.Value("WRITERERROR"), "No write failed." + Environment.NewLine + run.Describe());
+        Assert.HasCount(writes, run.Calls, "Every call was recorded.");
+        Assert.IsGreaterThan(10, int.Parse(run.Value("POLLS"), System.Globalization.CultureInfo.InvariantCulture), "The poll ran while the writes were going on, or the test proves nothing." + Environment.NewLine + run.Describe());
     }
 
     // The prompt for administrator approval is open: the call that shows it has been made and has not returned. Approving it

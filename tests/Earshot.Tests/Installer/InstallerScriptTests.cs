@@ -1517,6 +1517,19 @@ internal sealed class InstallerWorld : IDisposable
     public string FetchAndCallScript(string arguments) =>
         "& ([scriptblock]::Create((irm " + Q(Feed.FeedAddress + "earshot.ps1") + "))) " + arguments + "\r\n";
 
+    // The hook that records a call, and the poll that waits for one. They share the calls log while the script runs, so each must
+    // open it so as to leave the other able to. (The first version of each used Add-Content and Get-Content: a poll that landed
+    // while a call was being written made the write fail with "being used by another process", the hook then threw, and the run
+    // stopped before the call it was waiting for was recorded.)
+    // Both open the file with every share mode (read, write and delete), the one way two openers at once always agree.
+    internal const string NoteFunction =
+        "function Note([string]$t) { $fs = [IO.File]::Open($global:NoteFile, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete); "
+        + "try { $b = [Text.Encoding]::ASCII.GetBytes($t + \"`r`n\"); $fs.Write($b, 0, $b.Length) } finally { $fs.Dispose() } }";
+
+    internal const string LogHasLineFunction =
+        "function LogHasLine([string]$path, [string]$prefix) { $fs = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete); "
+        + "try { $r = New-Object IO.StreamReader($fs, [Text.Encoding]::ASCII); while ($null -ne ($l = $r.ReadLine())) { if ($l.StartsWith($prefix)) { return $true } }; return $false } finally { $fs.Dispose() } }";
+
     public InstallerRun Run(ShellKind shell)
     {
         string driver = Spec.Raw ? RawDriver() : BuildDriver();
@@ -1524,6 +1537,7 @@ internal sealed class InstallerWorld : IDisposable
         {
             string inner = WriteFile("driver-inner.ps1", driver);
             driver =
+                LogHasLineFunction + "\r\n" +
                 "$rs = [runspacefactory]::CreateRunspace($Host)\r\n" +
                 "$rs.Open()\r\n" +
                 "$ps = [powershell]::Create()\r\n" +
@@ -1532,7 +1546,7 @@ internal sealed class InstallerWorld : IDisposable
                 "$async = $ps.BeginInvoke()\r\n" +
                 "$limit = [DateTime]::UtcNow.AddSeconds(90)\r\n" +
                 "while (-not $async.IsCompleted -and [DateTime]::UtcNow -lt $limit) {\r\n" +
-                "  if ((Test-Path -LiteralPath " + Q(LogFile) + ") -and (@(Get-Content -LiteralPath " + Q(LogFile) + ") | Where-Object { $_.StartsWith(" + Q(stopAfter) + ") }).Count -gt 0) { break }\r\n" +
+                "  if ((Test-Path -LiteralPath " + Q(LogFile) + ") -and (LogHasLine " + Q(LogFile) + " " + Q(stopAfter) + ")) { break }\r\n" +
                 "  Start-Sleep -Milliseconds 100\r\n" +
                 "}\r\n" +
                 "Start-Sleep -Milliseconds " + (int)(Spec.StopDelaySeconds * 1000) + "\r\n" +
@@ -1576,7 +1590,7 @@ internal sealed class InstallerWorld : IDisposable
         var d = new StringBuilder();
         d.AppendLine("$ErrorActionPreference = 'Stop'");
         d.AppendLine("$global:NoteFile = " + Q(LogFile));
-        d.AppendLine("function Note([string]$t) { Add-Content -LiteralPath $global:NoteFile -Value $t -Encoding ASCII }");
+        d.AppendLine(NoteFunction);
         d.AppendLine("function Write-Outcome([string]$Kind, [string]$Reason = '', [string]$Code = '') {");
         d.AppendLine("  [void](New-Item -ItemType Directory -Force -Path " + Q(Machine) + ")");
         d.AppendLine("  $o = [ordered]@{ SchemaVersion = 1; Id = ([Guid]::NewGuid().ToString('N')); WrittenUtc = [DateTime]::UtcNow.ToString('o'); Kind = $Kind; Version = ''; Reason = $Reason; Code = $Code }");

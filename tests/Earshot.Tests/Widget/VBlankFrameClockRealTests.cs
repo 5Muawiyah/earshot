@@ -50,6 +50,7 @@ public sealed class VBlankFrameClockRealTests
         // Whether the display is on, decided without the clock under test and read-only: the active power scheme's display-off timeout
         // against the time since the last keyboard or mouse input in this session (DisplayState). Input more recent than the timeout
         // means the display has not been turned off by it. Input is read again after the run, so input stopping during it does not count.
+        SessionLockReading sessionLock = localSession ? SessionLock.Read() : default;
         DisplayOffTimeoutReading timeout = localSession ? DisplayOffTimeout.Read() : default;
         TimeSpan? idleBefore = localSession ? InputIdle.Read() : null;
 
@@ -127,7 +128,7 @@ public sealed class VBlankFrameClockRealTests
             }
 
             TimeSpan? idleAfter = localSession ? InputIdle.Read() : null;
-            DisplayVerdict display = DisplayState.Decide(localSession, timeout, idleBefore, idleAfter);
+            DisplayVerdict display = DisplayState.Decide(localSession, sessionLock, timeout, idleBefore, idleAfter);
             bool displayKnownOn = display.KnownOn;
             string displayCheck = display.Reason;
             var seen = new Seen(
@@ -145,6 +146,8 @@ public sealed class VBlankFrameClockRealTests
                 + stamps.Count + " frames in " + timer.Elapsed.TotalMilliseconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
                 + " ms; DXGI lists an output: " + outputListed + "; local session: " + localSession + "; hosted runner: " + hostedRunner
                 + "; power read: timeout " + (timeout.Timeout is { } t ? t.TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " s " + timeout.Source : "unreadable") + ", Win32 code " + timeout.Code + (timeout.Step.Length > 0 ? " from " + timeout.Step : "")
+                + "; session lock: " + (sessionLock.Locked is { } locked ? (locked ? "locked" : "unlocked") : "unreadable") + ", SessionFlags 0x" + sessionLock.Flags.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)
+                + ", Win32 code " + sessionLock.Code + (sessionLock.Step.Length > 0 ? " from " + sessionLock.Step : "")
                 + "; display check: " + displayCheck + "; branch: " + (displayKnownOn ? "display known on (" + display.Branch + "), so the clock must be paced with an empty log" : "display not known on (" + display.Branch + "), so the clock's own account is accepted")
                 + "; log: " + held;
             RecordOutcome(outcome);
@@ -306,35 +309,37 @@ public sealed class VBlankFrameClockRealJudgeTests
 
     private static TimeSpan Seconds(double value) => TimeSpan.FromSeconds(value);
 
+    private static readonly SessionLockReading Unlocked = new(false, 1, 0, "");
+
     [TestMethod]
     public void ANeverTimeoutMeansTheDisplayIsAlwaysKnownOn()
     {
         // Zero is "never turn off", so even a long idle leaves the display on (and input need not be readable).
-        Assert.IsTrue(DisplayState.Decide(true, Timeout(0), Seconds(100000), Seconds(100010)).KnownOn);
-        Assert.IsTrue(DisplayState.Decide(true, Timeout(0), null, null).KnownOn);
+        Assert.IsTrue(DisplayState.Decide(true, Unlocked, Timeout(0), Seconds(100000), Seconds(100010)).KnownOn);
+        Assert.IsTrue(DisplayState.Decide(true, Unlocked, Timeout(0), null, null).KnownOn);
     }
 
     [TestMethod]
     public void IdleUnderTheTimeoutMeansTheDisplayIsKnownOn()
     {
         // The reviewer's case: the owner idle 220 s, this PC's display-off timeout 3600 s. The display is on.
-        DisplayVerdict verdict = DisplayState.Decide(true, Timeout(3600), Seconds(220), Seconds(230));
+        DisplayVerdict verdict = DisplayState.Decide(true, Unlocked, Timeout(3600), Seconds(220), Seconds(230));
         Assert.IsTrue(verdict.KnownOn, verdict.Reason);
-        Assert.IsTrue(DisplayState.Decide(true, Timeout(3600), Seconds(3594), Seconds(3594.5)).KnownOn, "Just inside the margin.");
+        Assert.IsTrue(DisplayState.Decide(true, Unlocked, Timeout(3600), Seconds(3594), Seconds(3594.5)).KnownOn, "Just inside the margin.");
     }
 
     [TestMethod]
     public void IdleOverTheTimeoutLeavesTheDisplayUnknown()
     {
-        Assert.IsFalse(DisplayState.Decide(true, Timeout(300), Seconds(400), Seconds(410)).KnownOn, "The timeout has run out.");
-        Assert.IsFalse(DisplayState.Decide(true, Timeout(300), Seconds(200), Seconds(301)).KnownOn, "It ran out during the run.");
-        Assert.IsFalse(DisplayState.Decide(true, Timeout(300), Seconds(296), Seconds(297)).KnownOn, "Inside the margin of running out.");
+        Assert.IsFalse(DisplayState.Decide(true, Unlocked, Timeout(300), Seconds(400), Seconds(410)).KnownOn, "The timeout has run out.");
+        Assert.IsFalse(DisplayState.Decide(true, Unlocked, Timeout(300), Seconds(200), Seconds(301)).KnownOn, "It ran out during the run.");
+        Assert.IsFalse(DisplayState.Decide(true, Unlocked, Timeout(300), Seconds(296), Seconds(297)).KnownOn, "Inside the margin of running out.");
     }
 
     [TestMethod]
     public void AnUnreadableTimeoutLeavesTheDisplayUnknownAndSaysWhy()
     {
-        DisplayVerdict verdict = DisplayState.Decide(true, Timeout(null), Seconds(1), Seconds(2));
+        DisplayVerdict verdict = DisplayState.Decide(true, Unlocked, Timeout(null), Seconds(1), Seconds(2));
         Assert.IsFalse(verdict.KnownOn, "Even with input a second ago, nothing says what the timeout is.");
         StringAssert.Contains(verdict.Reason, "PowerReadACValueIndex", "The call that failed is named.");
         StringAssert.Contains(verdict.Reason, "5", "With its raw code.");
@@ -343,14 +348,14 @@ public sealed class VBlankFrameClockRealJudgeTests
     [TestMethod]
     public void UnreadableInputTimeLeavesTheDisplayUnknownUnlessTheTimeoutIsNever()
     {
-        Assert.IsFalse(DisplayState.Decide(true, Timeout(3600), null, Seconds(1)).KnownOn);
-        Assert.IsFalse(DisplayState.Decide(true, Timeout(3600), Seconds(1), null).KnownOn);
+        Assert.IsFalse(DisplayState.Decide(true, Unlocked, Timeout(3600), null, Seconds(1)).KnownOn);
+        Assert.IsFalse(DisplayState.Decide(true, Unlocked, Timeout(3600), Seconds(1), null).KnownOn);
     }
 
     [TestMethod]
     public void ARemoteOrHostedSessionIsNeverKnownOn()
     {
-        Assert.IsFalse(DisplayState.Decide(false, Timeout(0), Seconds(1), Seconds(1)).KnownOn);
+        Assert.IsFalse(DisplayState.Decide(false, Unlocked, Timeout(0), Seconds(1), Seconds(1)).KnownOn);
     }
 
     [TestMethod]
@@ -371,6 +376,55 @@ public sealed class VBlankFrameClockRealJudgeTests
             Assert.AreEqual(0u, reading.Code);
             Assert.IsTrue(reading.Source is "AC" or "DC");
             Assert.IsGreaterThanOrEqualTo(TimeSpan.Zero, reading.Timeout.Value);
+        }
+    }
+
+    [TestMethod]
+    public void ALockedSessionLeavesTheDisplayUnknownWhateverTheTimeoutAndInputSay()
+    {
+        // A locked console turns the display off by a timeout of its own, so the scheme's timeout and recent input prove nothing.
+        var locked = new SessionLockReading(true, 0, 0, "");
+        foreach (double timeout in new[] { 0, 3600 })
+        {
+            DisplayVerdict verdict = DisplayState.Decide(true, locked, Timeout(timeout), Seconds(1), Seconds(2));
+            Assert.IsFalse(verdict.KnownOn, "Timeout " + timeout + " s: " + verdict.Reason);
+            StringAssert.Contains(verdict.Reason, "locked", "The reason names the lock.");
+            StringAssert.Contains(verdict.Branch, "locked");
+        }
+    }
+
+    [TestMethod]
+    public void AnUnlockedSessionIsJudgedByTheTimeoutAsBefore()
+    {
+        Assert.IsTrue(DisplayState.Decide(true, new SessionLockReading(false, 1, 0, ""), Timeout(3600), Seconds(220), Seconds(230)).KnownOn);
+    }
+
+    [TestMethod]
+    public void AnUnreadableLockStateLeavesTheDisplayUnknownAndSaysWhy()
+    {
+        var unreadable = new SessionLockReading(null, 0, 5, "WTSQuerySessionInformation");
+        DisplayVerdict verdict = DisplayState.Decide(true, unreadable, Timeout(3600), Seconds(1), Seconds(2));
+        Assert.IsFalse(verdict.KnownOn, "A session that may be locked is not known to have its display on.");
+        StringAssert.Contains(verdict.Reason, "WTSQuerySessionInformation", "The call that failed is named.");
+        StringAssert.Contains(verdict.Reason, "5", "With its raw code.");
+    }
+
+    [TestMethod]
+    public void TheLockStateIsReadFromTheRealSession()
+    {
+        // One execution of the real call. Locked or not is whatever this session is; what is held is that the answer is one of the
+        // documented values, or that a failure names its call and carries its raw code.
+        SessionLockReading reading = SessionLock.Read();
+        Console.WriteLine("Real session lock: " + (reading.Locked is { } l ? (l ? "locked" : "unlocked") : "unreadable") + ", flags 0x"
+            + reading.Flags.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ", step '" + reading.Step + "', code " + reading.Code);
+        if (reading.Locked is { } locked)
+        {
+            Assert.AreEqual(locked ? 0u : 1u, reading.Flags, "A lock state comes from the documented flag values.");
+            Assert.AreEqual(0u, reading.Code);
+        }
+        else
+        {
+            Assert.AreNotEqual(string.Empty, reading.Step, "An unreadable lock state names why.");
         }
     }
 }
