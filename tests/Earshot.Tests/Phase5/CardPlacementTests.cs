@@ -373,13 +373,16 @@ public sealed class CardPlacementTests
     [TestMethod]
     public void TheManagedPopupMatchesTheRealCalculationForEveryTaskbarEdge()
     {
-        if (Screen.PrimaryScreen is not { } screen)
+        // The work area as the system has it now, which is what the shell's own calculation uses. Not Screen.PrimaryScreen.WorkingArea:
+        // that reads a list of screens the framework keeps until it hears of a change of display settings, so it can still hold the
+        // work area from before a window on this desktop reserved or gave back an edge (an application bar), and the calculation
+        // under test would then be given a work area the shell has already moved on from.
+        if (LiveWorkArea() is not { } work)
         {
             Assert.Inconclusive("This session has no display to read a work area from.");
             return;
         }
 
-        Rectangle work = screen.WorkingArea;
         const int Thickness = 48;
         foreach (TaskbarEdge edge in new[] { TaskbarEdge.Bottom, TaskbarEdge.Top, TaskbarEdge.Left, TaskbarEdge.Right })
         {
@@ -399,14 +402,24 @@ public sealed class CardPlacementTests
                 // Both sides read the machine's live display layout, the managed one through the work area read at the start and the
                 // shell's own through its monitor now. A layout that changed in between (a display going to sleep or waking can add or
                 // drop a monitor) makes them disagree about the machine and not about the calculation, so that is no failure.
-                if (real != managed && Screen.PrimaryScreen?.WorkingArea != work)
+                if (real != managed && LiveWorkArea() != work)
                 {
-                    Assert.Inconclusive("The display layout changed while the test ran (work area " + work + ", now " + Screen.PrimaryScreen?.WorkingArea + ").");
+                    Assert.Inconclusive("The display layout changed while the test ran (work area " + work + ", now " + LiveWorkArea() + ").");
                 }
 
                 Assert.AreEqual(real, managed, edge + " at " + anchor);
             }
         }
+    }
+
+    // The primary monitor's work area, read from the system now; null when there is no monitor.
+    private static Rectangle? LiveWorkArea()
+    {
+        nint monitor = Shell.MonitorFromWindow(0, Shell.MONITOR_DEFAULTTOPRIMARY);
+        var info = new MONITORINFO { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+        return monitor != 0 && Shell.GetMonitorInfo(monitor, ref info)
+            ? Rectangle.FromLTRB(info.rcWork.left, info.rcWork.top, info.rcWork.right, info.rcWork.bottom)
+            : null;
     }
 
     private static IEnumerable<Point> Anchors(Rectangle work, Rectangle band)
