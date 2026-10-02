@@ -287,6 +287,10 @@ internal static class CardKit
     public static WidgetCardModel SettingsModel(CardSettingsValues values) =>
         new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, WidgetCardView.Settings, Settings: values);
 
+    public static WidgetCardModel HistoryModel(HistoryView view) =>
+        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, WidgetCardView.History,
+            new SetupViewModel(WidgetCopy.HistoryTitle, null, null, null, SetupIcon.None, null, null, Array.Empty<SetupButton>(), 0) { History = view });
+
     public static WidgetCardModel UpdateModel(UpdateViewModel view) =>
         new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, WidgetCardView.Update, WidgetCardUpdatePage.From(view));
 

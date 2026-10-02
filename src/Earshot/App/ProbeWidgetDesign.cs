@@ -238,11 +238,11 @@ internal static partial class Program
             ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now);
     }
 
-    // The battery history page: its frame, with a body that is supplied later.
+    // The battery history page, with no samples (the probe keeps no history).
     private static WidgetCardModel DesignHistoryModel(DateTimeOffset now)
     {
         WidgetSnapshot snapshot = ProbeWidgetDesignGaugeStates(now)[0].Snapshot;
-        var page = new SetupViewModel(WidgetCopy.HistoryTitle, null, null, null, SetupIcon.None, null, null, Array.Empty<SetupButton>(), 0) { MinBodyAt96 = 160 };
+        var page = new SetupViewModel(WidgetCopy.HistoryTitle, null, null, null, SetupIcon.None, null, null, Array.Empty<SetupButton>(), 0) { History = HistoryDays.View(0, now, TimeZoneInfo.Local, null) };
         return new WidgetCardModel(snapshot, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
             ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now, View: WidgetCardView.History, Setup: page);
     }

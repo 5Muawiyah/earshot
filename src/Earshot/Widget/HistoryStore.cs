@@ -18,6 +18,9 @@ internal interface IHistoryStore
 {
     // Keeps what a live reading of the linked set says of each part it gives a level for. Never throws for a file problem.
     void Record(DecodedReading reading, DateTimeOffset at);
+
+    // The samples and gaps of the 24 hours ending at end, for the history page.
+    HistoryWindow Query(DateTimeOffset end);
 }
 
 // The battery history as one small JSON file, battery-history.json in the widget folder (Paths.BatteryHistoryFile, under

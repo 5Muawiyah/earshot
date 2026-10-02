@@ -826,10 +826,39 @@ public sealed class WidgetCardSettingsTests
             Assert.AreEqual(WidgetCardView.History, page.Presenter.ViewForTest);
             Assert.AreEqual(WidgetCopy.HistoryTitle, page.Card.Model.Setup!.Title);
             Assert.AreEqual("Battery history", page.Card.Model.Setup.Title);
-            Assert.IsEmpty(page.Card.Model.Setup.Buttons, "A frame and a back button; nothing else yet.");
+            Assert.IsEmpty(page.Card.Model.Setup.Buttons, "A back button and the chart; no footer buttons.");
+            Assert.IsNotNull(page.Card.Model.Setup.History, "With no history kept the chart is empty, for today.");
+            Assert.AreEqual("Today", page.Card.Model.Setup.History.DayLabel);
 
             CardKit.Click(page.Card, page.Card.CurrentSetupLayout!.Frame.Back);
             Assert.AreEqual(WidgetCardView.Settings, page.Presenter.ViewForTest, "Back goes to the settings page.");
+        });
+    }
+
+    [TestMethod]
+    public void TheHistoryPageStepsBackADayAndForwardAgainAndForwardDoesNothingOnToday()
+    {
+        RunSettings(page =>
+        {
+            CardKit.ClickPart(page.Card, SettingsRowId.History, SettingsPart.Button);
+            Assert.AreEqual("Today", page.Card.Model.Setup!.History!.DayLabel);
+
+            CardKit.Click(page.Card, page.Card.CurrentSetupLayout!.History!.DayForward);
+            Assert.AreEqual("Today", page.Card.Model.Setup!.History!.DayLabel, "Forward is off on today.");
+
+            CardKit.Click(page.Card, page.Card.CurrentSetupLayout!.History!.DayBack);
+            Assert.AreEqual("Yesterday", page.Card.Model.Setup!.History!.DayLabel);
+            Assert.IsTrue(page.Card.Model.Setup.History.CanForward);
+
+            CardKit.Click(page.Card, page.Card.CurrentSetupLayout!.History!.DayForward);
+            Assert.AreEqual("Today", page.Card.Model.Setup!.History!.DayLabel);
+
+            for (int i = 0; i < HistoryDays.MaxDaysBack + 3; i++)
+            {
+                CardKit.Click(page.Card, page.Card.CurrentSetupLayout!.History!.DayBack);
+            }
+
+            Assert.IsFalse(page.Card.Model.Setup!.History!.CanBack, "Back stops at the oldest kept day.");
         });
     }
 

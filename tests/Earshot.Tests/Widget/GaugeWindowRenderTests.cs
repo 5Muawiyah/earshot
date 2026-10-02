@@ -119,6 +119,28 @@ public sealed class GaugeWindowRenderTests
         });
     }
 
+    // A screen reader gets a fixed name and the battery as the value, with the tooltip's words as the description.
+    [TestMethod]
+    public void TheGaugeIsNamedAirPodsBatteryAndItsValueIsTheSpokenReading()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            using var gauge = new GaugeWindow(new CapturingLog(), new FakeAccent());
+            WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.GaugeWindow);
+            Assert.IsTrue(gauge.ShowAt(Bounds).Ok);
+
+            gauge.Render(Reading(), Now, GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
+
+            Assert.AreEqual("AirPods battery", gauge.AccessibilityObject.Name);
+            Assert.AreEqual(GaugeSpeech.Value(Reading(), Now, GaugeDisplaySettings.Default), gauge.AccessibilityObject.Value);
+            Assert.AreEqual(gauge.AccessibleDescription, gauge.AccessibilityObject.Description);
+
+            gauge.Render(Reading() with { Where = AirPodsWhere.NotInUse }, Now, GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
+
+            Assert.AreEqual("Not on this PC", gauge.AccessibilityObject.Value);
+        });
+    }
+
     // Time passing changes what the gauge says with no snapshot change at all: a reading turns an hour old.
     [TestMethod]
     public void AReadingThatTurnsAnHourOldIsDrawnAsNoReadingOnTheNextRender()

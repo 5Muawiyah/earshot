@@ -26,6 +26,7 @@ internal static class FluentGlyphs
     public const char BluetoothOff = '\uE702';
     public const char WhatsNew = '\uE946';
     public const char OpenExternal = '\uE8A7';
+    public const char ChevronLeft = '\uE76B';
     public const char ChevronRight = '\uE76C';
 
     // The chevrons are 12 epx glyphs.

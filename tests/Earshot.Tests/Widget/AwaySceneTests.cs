@@ -452,6 +452,8 @@ public sealed class AwaySceneTests : IDisposable
         public List<(DecodedReading Reading, DateTimeOffset At)> Recorded { get; } = [];
 
         public void Record(DecodedReading reading, DateTimeOffset at) => Recorded.Add((reading, at));
+
+        public HistoryWindow Query(DateTimeOffset end) => HistoryStore.Window([], end);
     }
 
     // Only a live message of the linked pair reaches the history: a stranger's, however strong, and the owner's pair before

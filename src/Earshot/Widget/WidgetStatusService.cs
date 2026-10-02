@@ -42,6 +42,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // never write over each other. Null when the readings are kept in memory only.
     internal ISpentStore? SpentStore => _lastReadingStore as ISpentStore;
 
+    // The history page's query: the 24 hours of live readings ending at end, or null when no history is kept.
+    internal HistoryWindow? QueryHistory(DateTimeOffset end) => _history?.Query(end);
+
     // Where the live readings of the linked pair are kept for the history page, or null to keep none.
     private readonly IHistoryStore? _history;
 

@@ -48,7 +48,7 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         StartPosition = FormStartPosition.Manual;
         ControlBox = false;
         SetStyle(ControlStyles.Selectable, false);
-        AccessibleName = "Earshot";
+        AccessibleName = GaugeSpeech.Name;
         AccessibleRole = AccessibleRole.PushButton;
     }
 
@@ -146,6 +146,7 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         bool light = r.Ink.GetBrightness() < 0.5f;
         GaugePalette palette = GaugePalette.Create(light, _accent.AccentFor(light), SystemInformation.HighContrast, r.Ink);
         GaugeContent content = GaugeContent.From(r.Snapshot, r.Now, r.Settings);
+        SetSpokenValue(GaugeSpeech.Value(r.Snapshot, r.Now, r.Settings));
         GaugeLayout layout = GaugeLayout.For(r.Dpi, _order());
         _motion.Show(content, _shown);
 
@@ -174,6 +175,44 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
                 _tip.SetToolTip(this, content.Tooltip);
                 _lastTooltip = content.Tooltip;
             }
+        }
+    }
+
+    // What a screen reader reads as the gauge's value (GaugeSpeech): "Left 70%, Right 80%, charging". A change tells it so.
+    private string _spokenValue = "";
+
+    internal string SpokenValue => _spokenValue;
+
+    private void SetSpokenValue(string value)
+    {
+        if (string.Equals(value, _spokenValue, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _spokenValue = value;
+        if (IsHandleCreated)
+        {
+            AccessibilityNotifyClients(AccessibleEvents.ValueChange, -1);
+        }
+    }
+
+    protected override AccessibleObject CreateAccessibilityInstance() => new GaugeAccessibleObject(this);
+
+    // The gauge as a screen reader sees it: a button named "AirPods battery" whose value is the spoken reading, so the name stays put
+    // while the value follows the battery. Its description is the tooltip's words.
+    private sealed class GaugeAccessibleObject(GaugeWindow gauge) : ControlAccessibleObject(gauge)
+    {
+        public override string? Name
+        {
+            get => GaugeSpeech.Name;
+            set { }
+        }
+
+        public override string? Value
+        {
+            get => gauge._spokenValue;
+            set { }
         }
     }
 

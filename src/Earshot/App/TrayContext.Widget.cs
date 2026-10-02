@@ -151,7 +151,8 @@ internal sealed partial class TrayContext
                 SetAutoPause: (on, place) => TryUpdateSettingsFromWidget(
                     "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place),
                 GaugePosition: () => _registry.Settings.Current.Widget.GaugePosition,
-                RefreshBattery: RefreshBatteryForCard);
+                RefreshBattery: RefreshBatteryForCard,
+                QueryHistory: end => _widgetStatus?.QueryHistory(end) ?? HistoryStore.Window([], end));
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCardOn,

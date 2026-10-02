@@ -68,7 +68,8 @@ public sealed class WidgetCardAccessibilityTests
             {
                 using WidgetCard card = ShownMain(model);
                 List<AccessibleObject> children = Children(card);
-                CollectionAssert.AreEqual(names, children.Select(c => c.Name).ToArray(), "Children in the keyboard's order.");
+                CollectionAssert.AreEqual(
+                    names, children.Where(c => c.Role != AccessibleRole.StaticText).Select(c => c.Name).ToArray(), "Controls in the keyboard's order, the columns' words after them.");
                 Assert.IsTrue(children.All(c => !string.IsNullOrWhiteSpace(c.Name)), "Every child has a name.");
                 Assert.AreEqual("Earshot: AirPods", card.AccessibilityObject.Name, "The card keeps its own name.");
             }
@@ -205,10 +206,114 @@ public sealed class WidgetCardAccessibilityTests
             using WidgetCard notice = CardKit.NewCard(dark: false, notice: true);
             notice.Render(CardKit.MainModel(), 96);
             IReadOnlyList<CardControl> controls = notice.CurrentControls();
-            Assert.HasCount(2, controls);
-            Assert.AreEqual(WidgetCopy.TipCloseCard, controls[1].Name);
-            Assert.IsTrue(controls[1].IconOnly);
+            CardControl[] pressable = controls.Where(c => c.Role != CardControlRole.StaticText).ToArray();
+            Assert.HasCount(2, pressable);
+            Assert.AreEqual(WidgetCopy.TipCloseCard, pressable[1].Name);
+            Assert.IsTrue(controls.All(c => !string.IsNullOrWhiteSpace(c.Name)), "Every child of the case-open card has a name.");
+            Assert.IsTrue(pressable[1].IconOnly);
             Assert.IsTrue(controls.All(c => !c.Focused));
+        });
+    }
+
+    [TestMethod]
+    public void TheBatteryColumnsAreReadAsWordsWithTheirValuesAndAreNotPressable()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            WidgetSnapshot snapshot = CardKit.Snapshot(new PartReading(70, true, null) { ReadAt = now - TimeSpan.FromSeconds(2) }, new PartReading(80, false, null) { ReadAt = now - TimeSpan.FromSeconds(2) });
+            using WidgetCard card = ShownMain(CardKit.MainModel(snapshot) with { Now = now });
+
+            List<AccessibleObject> words = Children(card).Where(c => c.Role == AccessibleRole.StaticText).ToList();
+
+            Assert.AreEqual("Left 70%, charging|Right 80%|Case, no reading", string.Join("|", words.Select(c => c.Name)));
+            Assert.IsTrue(words.All(c => !c.State.HasFlag(AccessibleStates.Focusable)));
+            Assert.IsTrue(words.All(c => c.DefaultAction is null), "Words have nothing to press.");
+        });
+    }
+
+    [TestMethod]
+    public void TheCaseOpenCardsColumnsAreNamedToo()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using WidgetCard notice = CardKit.NewCard(dark: false, notice: true);
+            notice.Render(CardKit.MainModel(), 96);
+
+            string[] names = notice.CurrentControls().Where(c => c.Role == CardControlRole.StaticText).Select(c => c.Name).ToArray();
+
+            Assert.HasCount(3, names);
+            Assert.IsTrue(names.All(n => n.StartsWith("Left", StringComparison.Ordinal) || n.StartsWith("Right", StringComparison.Ordinal) || n.StartsWith("Case", StringComparison.Ordinal)));
+        });
+    }
+
+    [TestMethod]
+    public void AnExpanderSaysWhetherItIsExpandedOrCollapsed()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            foreach (bool open in OnOff)
+            {
+                CardSettingsValues values = FakeCardHost.Defaults() with { MoreExpanded = open };
+                using WidgetCard card = ShownMain(CardKit.SettingsModel(values));
+
+                AccessibleObject more = Children(card).Single(c => c.Name == "More settings");
+
+                Assert.AreEqual(open, more.State.HasFlag(AccessibleStates.Expanded));
+                Assert.AreEqual(!open, more.State.HasFlag(AccessibleStates.Collapsed));
+            }
+        });
+    }
+
+    [TestMethod]
+    public void TheHistoryPageNamesItsStepButtonsTheDayAndDescribesTheChart()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            DateTimeOffset now = new(2026, 10, 2, 15, 0, 0, TimeSpan.Zero);
+            HistoryView view = HistoryDays.View(
+                0, now, TimeZoneInfo.Utc,
+                end => HistoryStore.Window([new HistorySample(ChargeComponent.Left, 70, true, end - TimeSpan.FromMinutes(5))], end));
+            using WidgetCard card = ShownMain(CardKit.HistoryModel(view));
+            List<AccessibleObject> children = Children(card);
+
+            Assert.AreEqual("Back|Previous day|Today|Next day|Battery history, Today", string.Join("|", children.Select(c => c.Name)));
+            Assert.IsFalse(children[1].State.HasFlag(AccessibleStates.Unavailable), "Back a day works from today.");
+            Assert.IsTrue(children[3].State.HasFlag(AccessibleStates.Unavailable), "Forward is off on today.");
+            Assert.AreEqual(AccessibleRole.Chart, children[4].Role);
+            StringAssert.Contains(children[4].Description, "Left 70%, charging at 14:55");
+        });
+    }
+
+    [TestMethod]
+    public void TheOldestDayHasItsBackButtonOff()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            DateTimeOffset now = new(2026, 10, 2, 15, 0, 0, TimeSpan.Zero);
+            using WidgetCard card = ShownMain(CardKit.HistoryModel(HistoryDays.View(HistoryDays.MaxDaysBack, now, TimeZoneInfo.Utc, null)));
+            List<AccessibleObject> children = Children(card);
+
+            Assert.IsTrue(children.Single(c => c.Name == "Previous day").State.HasFlag(AccessibleStates.Unavailable));
+            Assert.IsFalse(children.Single(c => c.Name == "Next day").State.HasFlag(AccessibleStates.Unavailable));
+            Assert.AreEqual("Saturday", children[2].Name);
+        });
+    }
+
+    [TestMethod]
+    public void ThePageStepButtonsAskForTheEarlierAndLaterDay()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            DateTimeOffset now = new(2026, 10, 2, 15, 0, 0, TimeSpan.Zero);
+            using WidgetCard card = ShownMain(CardKit.HistoryModel(HistoryDays.View(2, now, TimeZoneInfo.Utc, null)));
+            var asked = new List<SetupAction>();
+            card.SetupActionRequested += (_, action) => asked.Add(action);
+
+            Children(card).Single(c => c.Name == "Previous day").DoDefaultAction();
+            Children(card).Single(c => c.Name == "Next day").DoDefaultAction();
+
+            Assert.AreEqual("HistoryEarlier HistoryLater", string.Join(" ", asked));
         });
     }
 

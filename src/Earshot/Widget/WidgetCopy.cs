@@ -143,6 +143,52 @@ internal static class WidgetCopy
     public const string WhatsNewNotOpened = "Couldn't open the release notes.";
     public const string SoundSettingsNotOpened = "Couldn't open sound settings.";
 
+    // The battery history page: the two step buttons' names, the day names and the chart's accessible words.
+    public const string HistoryEarlier = "Previous day";
+    public const string HistoryLater = "Next day";
+    public const string HistoryToday = "Today";
+    public const string HistoryYesterday = "Yesterday";
+    public const string HistoryChartName = "Battery history";
+    public const string HistoryNothingHeard = "Nothing heard";
+
+    // "Nothing heard in 2 stretches": how many gaps the chart marks.
+    public static string HistoryGaps(int count) =>
+        HistoryNothingHeard + " in " + count.ToString(CultureInfo.InvariantCulture) + (count == 1 ? " stretch." : " stretches.");
+
+    // What a screen reader says for a battery value. It cannot read "≈" as "about", so the spoken form says it in words:
+    // "80%", or "about 80%" for an estimate.
+    public static string SpokenPercent(int percent, bool estimated) =>
+        (estimated ? "about " : "") + percent.ToString(CultureInfo.InvariantCulture) + "%";
+
+    // One part as it is said: "Left 70%, charging" for a live value, "Left about 90%, estimated, read 2 h ago" for an estimate (the
+    // age of the reading it grew from), "Left 70%, last read 2 h ago" for an old reading, "Left, no reading" for none. The charging
+    // flag is left out when withCharging is false (the gauge says it once for the pair).
+    public static string SpokenReading(string label, ShownPart part, DateTimeOffset now, bool withCharging = true)
+    {
+        if (part.Percent is not int percent)
+        {
+            return label + ", " + NoReading.ToLowerInvariant();
+        }
+
+        string text = label + " " + SpokenPercent(percent, part.Estimated);
+        if (withCharging && part.Charging == true)
+        {
+            text += ", charging";
+        }
+
+        if (part.Estimated)
+        {
+            text += ", estimated";
+        }
+
+        if (!part.Fresh && part.ReadAt is DateTimeOffset at)
+        {
+            text += (part.Estimated ? ", read " : ", last read ") + StaleAgeAmount(now - at) + " ago";
+        }
+
+        return text;
+    }
+
     // The case-open card's row on the settings page, the choices in its expander, and its close button.
     public const string SettingsCaseCard = "Case-open card";
     public const string SettingsCaseCardClose = "Close";

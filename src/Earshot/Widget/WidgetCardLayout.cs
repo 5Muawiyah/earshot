@@ -234,6 +234,9 @@ internal static class WidgetCardLayout
         public Rectangle Action { get; init; }
 
         public IReadOnlyList<UpdatesRowLayout> UpdateRows { get; init; } = [];
+
+        // The battery history page's parts, or null on every other page.
+        public HistoryPageLayout? History { get; init; }
     }
 
     // One row of the updates page: Index 0 is Check automatically (a toggle), 1 What's new (an external link glyph) and 2 Repair (a
@@ -249,6 +252,12 @@ internal static class WidgetCardLayout
         if (view.Rows is not null)
         {
             return UpdatesPage(view, dpi, captionLines, subLines, textScale, actionWidth);
+        }
+
+        if (view.History is not null)
+        {
+            HistoryPageLayout page = HistoryPageLayout.Compute(dpi, textScale);
+            return new SetupLayout(page.Frame, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty) { History = page };
         }
 
         int side = CardPlacement.Scale(BodySideAt96, dpi);

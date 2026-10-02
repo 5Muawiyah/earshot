@@ -6,15 +6,26 @@ namespace Earshot.Widget;
 // What a screen reader, a tooltip and the keyboard see on the card: the controls the current view has, in the order the
 // keyboard walks them. The card is one owner-painted window with no child controls, so each control is described here
 // rather than found.
-internal enum CardControlRole { PushButton, CheckButton, RadioButton, Text }
+// StaticText is words a screen reader reads and nothing presses (a battery column, the day on the history page); Chart is the
+// history chart, whose description says what it shows.
+internal enum CardControlRole { PushButton, CheckButton, RadioButton, Text, StaticText, Chart }
 
 // One control: what it is called, what it is, where it is (client pixels, where it is drawn now, scrolled or not), the
 // tooltip that explains it when its icon or picture does not, whether it is only an icon or a picture, whether it is on,
 // whether it has the focus, and what pressing it does. Offscreen: a page that scrolls has moved it wholly out of the part
 // of the card that shows it.
+//
+// Expanded is null for a control that does not expand; true or false for an expander's chevron, which a screen reader says as
+// expanded or collapsed. Description is what a screen reader reads after the name when the tooltip is not the right words (the
+// history chart's summary).
 internal sealed record CardControl(
     string Name, CardControlRole Role, Rectangle Bounds, string? Tip, bool IconOnly, bool Checked, bool Focused, bool Enabled, Action Activate,
-    bool Offscreen = false);
+    bool Offscreen = false)
+{
+    public bool? Expanded { get; init; }
+
+    public string? Description { get; init; }
+}
 
 internal sealed partial class WidgetCard
 {
@@ -85,7 +96,29 @@ internal sealed partial class WidgetCard
                 focus && _focus == WidgetCardFocus.Status, true, () => Press(WidgetCardFocus.Status)));
         }
 
+        AddColumns(list, layout);
         return list;
+    }
+
+    // The three battery columns as words a screen reader reads, after the controls (so the keyboard's order and the controls' places
+    // in the list do not move): "Left 70%, charging", "Right about 90%, estimated, read 2 h ago", "Case, no reading".
+    private void AddColumns(List<CardControl> list, WidgetCardLayout.Layout layout)
+    {
+        if (!layout.ShowColumns)
+        {
+            return;
+        }
+
+        ShownBattery shown = _model.ShownParts;
+        foreach ((WidgetCardLayout.ColumnLayout column, string label, ShownPart part) in new[]
+        {
+            (layout.Left, WidgetCopy.LeftWord, shown.Left), (layout.Right, WidgetCopy.RightWord, shown.Right), (layout.Case, WidgetCopy.CaseLabel, shown.Case),
+        })
+        {
+            list.Add(new CardControl(
+                WidgetCopy.SpokenReading(label, part, _model.Now), CardControlRole.StaticText, Rectangle.Union(column.Label, column.ReadTime), null, false, false,
+                false, true, static () => { }));
+        }
     }
 
     // The case-open card's two buttons, for a screen reader. Never focused: the card is never activated (WS_EX_NOACTIVATE)
@@ -106,6 +139,7 @@ internal sealed partial class WidgetCard
                 () => Press(WidgetCardFocus.Gear)));
         }
 
+        AddColumns(list, layout);
         return list;
     }
 
@@ -141,6 +175,25 @@ internal sealed partial class WidgetCard
                 () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Button, 0))));
         }
 
+        if (setup.History is { } history && layout.History is { } page)
+        {
+            // The step buttons around the day, the day in words, then the chart with a description of what it shows.
+            list.Add(new CardControl(
+                WidgetCopy.HistoryEarlier, CardControlRole.PushButton, page.DayBack, WidgetCopy.HistoryEarlier, true, false,
+                focus && _setupFocus == new SetupTarget(SetupTargetKind.Day, 0), history.CanBack,
+                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Day, 0))));
+            list.Add(new CardControl(history.DayLabel, CardControlRole.StaticText, page.DayLabel, null, false, false, false, true, static () => { }));
+            list.Add(new CardControl(
+                WidgetCopy.HistoryLater, CardControlRole.PushButton, page.DayForward, WidgetCopy.HistoryLater, true, false,
+                focus && _setupFocus == new SetupTarget(SetupTargetKind.Day, 1), history.CanForward,
+                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Day, 1))));
+            list.Add(new CardControl(
+                WidgetCopy.HistoryChartName + ", " + history.DayLabel, CardControlRole.Chart, page.Surface, null, false, false, false, true, static () => { })
+            {
+                Description = history.Summary,
+            });
+        }
+
         foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
         {
             int index = row.Index;
@@ -172,7 +225,10 @@ internal sealed partial class WidgetCard
             bool offscreen = stop.Part != SettingsPart.Back && !drawn.IntersectsWith(viewport);
             list.Add(new CardControl(
                 name ?? SettingsRows.NameOf(stop.Row, stop.Part, stop.Index), role, drawn, SettingsRows.TipOf(stop.Row, stop.Part, stop.Index), iconOnly, isChecked,
-                focus && focused, true, () => ActivateSettingsTarget(stop), offscreen));
+                focus && focused, true, () => ActivateSettingsTarget(stop), offscreen)
+            {
+                Expanded = stop.Part == SettingsPart.Expand ? ExpandedOf(values, stop.Row) : null,
+            });
         }
 
         foreach (SettingsTarget stop in layout.Targets)
@@ -219,6 +275,15 @@ internal sealed partial class WidgetCard
 
         return list;
     }
+
+    // Whether the row an expander belongs to is open, for a screen reader's expanded or collapsed.
+    private static bool ExpandedOf(CardSettingsValues values, SettingsRowId row) => row switch
+    {
+        SettingsRowId.More => values.MoreExpanded,
+        SettingsRowId.GaugeOrder => values.GaugeOrderExpanded,
+        SettingsRowId.CaseCard => values.CaseOpenCardExpanded,
+        _ => false,
+    };
 
     // ---- Tooltips
 
@@ -513,13 +578,15 @@ internal sealed partial class WidgetCard
             set { }
         }
 
-        public override string? Description => Target?.Tip;
+        public override string? Description => Target?.Description ?? Target?.Tip;
 
         public override AccessibleRole Role => Target?.Role switch
         {
             CardControlRole.CheckButton => AccessibleRole.CheckButton,
             CardControlRole.RadioButton => AccessibleRole.RadioButton,
             CardControlRole.Text => AccessibleRole.Text,
+            CardControlRole.StaticText => AccessibleRole.StaticText,
+            CardControlRole.Chart => AccessibleRole.Chart,
             _ => AccessibleRole.PushButton,
         };
 
@@ -532,7 +599,9 @@ internal sealed partial class WidgetCard
                     return AccessibleStates.Invisible;
                 }
 
-                AccessibleStates state = AccessibleStates.Focusable;
+                // Words and the chart are read, not pressed or tabbed to.
+                bool pressable = target.Role is not (CardControlRole.StaticText or CardControlRole.Chart);
+                AccessibleStates state = pressable ? AccessibleStates.Focusable : AccessibleStates.ReadOnly;
                 if (target.Focused)
                 {
                     state |= AccessibleStates.Focused;
@@ -541,6 +610,11 @@ internal sealed partial class WidgetCard
                 if (target.Checked)
                 {
                     state |= AccessibleStates.Checked;
+                }
+
+                if (target.Expanded is { } expanded)
+                {
+                    state |= expanded ? AccessibleStates.Expanded : AccessibleStates.Collapsed;
                 }
 
                 if (!target.Enabled)
@@ -564,6 +638,7 @@ internal sealed partial class WidgetCard
             CardControlRole.CheckButton => "Toggle",
             CardControlRole.RadioButton => "Select",
             CardControlRole.Text => "Edit",
+            CardControlRole.StaticText or CardControlRole.Chart => null,
             _ => "Press",
         };
 

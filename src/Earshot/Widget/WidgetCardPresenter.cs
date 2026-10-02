@@ -24,7 +24,8 @@ internal sealed record WidgetCardPresenterCallbacks(
     Action<CardPlace> RequestToggle,
     Action<bool, CardPlace> SetAutoPause,
     Func<GaugePosition>? GaugePosition = null,   // where the gauge sits, so the card follows it; the right end when null
-    Func<CancellationToken, Task<BatteryRefreshOutcome>>? RefreshBattery = null)   // reads the battery again; no refresh icon works when null
+    Func<CancellationToken, Task<BatteryRefreshOutcome>>? RefreshBattery = null,   // reads the battery again; no refresh icon works when null
+    Func<DateTimeOffset, HistoryWindow>? QueryHistory = null)   // the 24 hours of live readings ending then; the history page is empty when null
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }
@@ -377,11 +378,15 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         return UpdatePage() with { Rows = new UpdatesRows(values.CheckAutomatically, values.InstallExists, values.InstalledVersion) };
     }
 
-    // The battery history page: its frame, with a body that is supplied later.
-    private static SetupViewModel HistoryPage() =>
-        new(WidgetCopy.HistoryTitle, null, null, null, SetupIcon.None, null, null, Array.Empty<SetupButton>(), 0) { MinBodyAt96 = HistoryBodyAt96 };
+    // The battery history page: the chart of the day the person has stepped to, from the store through the host's query.
+    private SetupViewModel HistoryPage() =>
+        new(WidgetCopy.HistoryTitle, null, null, null, SetupIcon.None, null, null, Array.Empty<SetupButton>(), 0)
+        {
+            History = HistoryDays.View(_historyDay, _time.GetUtcNow(), TimeZoneInfo.Local, _callbacks.QueryHistory),
+        };
 
-    private const int HistoryBodyAt96 = 160;
+    // Which day the history page shows: 0 is today, up to HistoryDays.MaxDaysBack. Back to today each time the page opens.
+    private int _historyDay;
 
     private CardSettingsValues ReadSettings()
     {
@@ -560,6 +565,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 _host.CopyDiagnostics(place);
                 break;
             case OpenHistoryRequest:
+                _historyDay = 0;
                 _view = WidgetCardView.History;
                 break;
             case OpenUpdatesRequest:
@@ -625,10 +631,20 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
         if (_view == WidgetCardView.History)
         {
-            if (action == SetupAction.Back)
+            switch (action)
             {
-                _view = WidgetCardView.Settings;
-                RenderKeepingBottom();
+                case SetupAction.Back:
+                    _view = WidgetCardView.Settings;
+                    RenderKeepingBottom();
+                    break;
+                case SetupAction.HistoryEarlier:
+                    _historyDay = HistoryDays.Clamp(_historyDay + 1);
+                    RenderKeepingBottom();
+                    break;
+                case SetupAction.HistoryLater:
+                    _historyDay = HistoryDays.Clamp(_historyDay - 1);
+                    RenderKeepingBottom();
+                    break;
             }
 
             return;

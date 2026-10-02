@@ -12,7 +12,7 @@ namespace Earshot.Widget;
 internal enum WidgetCardFocus { Button, Switch, Gear, UpdateButton, Refresh, Status }
 
 // Which control of a sub-page has the keyboard focus: the back button, or a footer button (Index is the button).
-internal enum SetupTargetKind { Back, Button, Row }
+internal enum SetupTargetKind { Back, Button, Row, Day }
 
 internal readonly record struct SetupTarget(SetupTargetKind Kind, int Index);
 
@@ -334,6 +334,12 @@ internal sealed partial class WidgetCard : Form
                 }
 
                 _setupFocus = setup.Buttons.Count == 0 ? new SetupTarget(SetupTargetKind.Back, 0) : new SetupTarget(SetupTargetKind.Button, primary);
+            }
+
+            if (_setupFocus.Kind == SetupTargetKind.Day && !SetupTargets().Contains(_setupFocus))
+            {
+                // The step button the focus was on cannot step now (the oldest day, or today): the focus goes back to Back.
+                _setupFocus = new SetupTarget(SetupTargetKind.Back, 0);
             }
 
             _shownView = model.View;
@@ -1444,6 +1450,20 @@ internal sealed partial class WidgetCard : Form
                     targets.Add(new SetupTarget(SetupTargetKind.Row, row.Index));
                 }
             }
+
+            // A step button that cannot step is not a stop.
+            if (setup.History is { } history)
+            {
+                if (history.CanBack)
+                {
+                    targets.Add(new SetupTarget(SetupTargetKind.Day, 0));
+                }
+
+                if (history.CanForward)
+                {
+                    targets.Add(new SetupTarget(SetupTargetKind.Day, 1));
+                }
+            }
         }
 
         return targets;
@@ -1472,6 +1492,19 @@ internal sealed partial class WidgetCard : Form
         if (!layout.Action.IsEmpty && layout.Action.Contains(point))
         {
             return new SetupTarget(SetupTargetKind.Button, 0);
+        }
+
+        if (layout.History is { } page && setup.History is { } view)
+        {
+            if (view.CanBack && page.DayBack.Contains(point))
+            {
+                return new SetupTarget(SetupTargetKind.Day, 0);
+            }
+
+            if (view.CanForward && page.DayForward.Contains(point))
+            {
+                return new SetupTarget(SetupTargetKind.Day, 1);
+            }
         }
 
         foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
@@ -1552,6 +1585,13 @@ internal sealed partial class WidgetCard : Form
                 }
 
                 break;
+            case SetupTargetKind.Day:
+                if (setup.History is { } view && (target.Index == 0 ? view.CanBack : view.CanForward))
+                {
+                    SetupActionRequested?.Invoke(this, target.Index == 0 ? SetupAction.HistoryEarlier : SetupAction.HistoryLater);
+                }
+
+                break;
             case SetupTargetKind.Row:
                 SetupActionRequested?.Invoke(this, target.Index switch
                 {
@@ -1574,6 +1614,12 @@ internal sealed partial class WidgetCard : Form
         if (setup.Rows is { } updateRows)
         {
             DrawUpdatesPage(g, setup, updateRows, layout, colours, focusVisible, focus);
+            return;
+        }
+
+        if (setup.History is { } history && layout.History is { } historyLayout)
+        {
+            DrawHistoryPage(g, history, historyLayout, colours, focusVisible, focus);
             return;
         }
 
