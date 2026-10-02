@@ -1681,11 +1681,7 @@ internal sealed partial class WidgetCard : Form
 
         void Surface(Rectangle rect)
         {
-            using GraphicsPath path = CardPaint.RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
-            using var fill = new SolidBrush(colours.RowFill);
-            g.FillPath(fill, path);
-            using var pen = new Pen(colours.RowStroke, 1f);
-            g.DrawPath(pen, path);
+            CardPaint.Surface(g, rect, radius, colours.RowFill, colours.RowStroke);
         }
 
         Surface(layout.StatusSurface);

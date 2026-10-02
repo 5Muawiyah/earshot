@@ -171,6 +171,22 @@ internal static partial class CardPaint
         return Math.Max(1, (int)Math.Ceiling(size.Height / Math.Max(1, lineHeight) - 0.01));
     }
 
+    // A settings-style surface: the fill over the whole box and the 1 px stroke inside its edge, the fill showing under the stroke as a
+    // CSS background does under its border (the design's rows are `background` and `border: 1px solid`). The stroke is drawn on the
+    // half pixel inside the edge (the card draws with PixelOffsetMode.Half), at the radius less half the stroke.
+    public static void Surface(Graphics g, Rectangle rect, int radius, Color fill, Color stroke)
+    {
+        using (GraphicsPath body = RoundedRectangle(new RectangleF(rect.X, rect.Y, rect.Width, rect.Height), radius))
+        using (var brush = new SolidBrush(fill))
+        {
+            g.FillPath(brush, body);
+        }
+
+        using GraphicsPath edge = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), Math.Max(0f, radius - 0.5f));
+        using var pen = new Pen(stroke, 1f);
+        g.DrawPath(pen, edge);
+    }
+
     public static GraphicsPath RoundedRectangle(RectangleF rect, float radius)
     {
         var path = new GraphicsPath();

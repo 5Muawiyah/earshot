@@ -20,14 +20,7 @@ internal sealed partial class WidgetCard
         CardPaint.Text(
             g, view.DayLabel, page.DayLabel, _type, CardPlacement.Scale(14, _dpi), bold: true, colours.Text, StringAlignment.Center, StringAlignment.Center);
 
-        using (GraphicsPath path = CardPaint.RoundedRectangle(
-            new RectangleF(page.Surface.X + 0.5f, page.Surface.Y + 0.5f, page.Surface.Width - 1, page.Surface.Height - 1), radius))
-        {
-            using var fill = new SolidBrush(colours.RowFill);
-            g.FillPath(fill, path);
-            using var pen = new Pen(colours.RowStroke, 1f);
-            g.DrawPath(pen, path);
-        }
+        CardPaint.Surface(g, page.Surface, radius, colours.RowFill, colours.RowStroke);
 
         HistoryChartGeometry chart = HistoryChartLayout.Compute(page.Plot, view.Window, view.Zone);
         int lineHeight = page.XLabels.Height;

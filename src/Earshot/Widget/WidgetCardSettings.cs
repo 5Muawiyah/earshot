@@ -536,7 +536,11 @@ internal static class SettingsPageLayout
                     }
                 }
 
-                int labelTop = top + ((height - (subFullWidth ? subHeight : 0) - labelBlock) / 2);
+                // A row with a full-width line under it is the control line, 8 below the row's top (the design: 8 above, the 32 row, the line, 10
+                // below), and the line starts where it ends. Centring the control in all of the row but the line put it a pixel low, into the line.
+                int labelTop = subFullWidth
+                    ? top + rowPad + ((lineHeight - labelBlock) / 2)
+                    : top + ((height - labelBlock) / 2);
                 labelRect = new Rectangle(labelLeft, labelTop, labelWidth, textHeight);
                 if (sub is not null)
                 {
@@ -545,7 +549,9 @@ internal static class SettingsPageLayout
                         : new Rectangle(labelLeft, labelRect.Bottom, labelWidth, subHeight);
                 }
 
-                int controlTop = top + ((height - (subFullWidth ? subHeight : 0) - control) / 2);
+                int controlTop = subFullWidth
+                    ? top + rowPad + ((lineHeight - control) / 2)
+                    : top + ((height - control) / 2);
                 (a, b, value) = place(controlTop, controlTop + (control / 2));
             }
 

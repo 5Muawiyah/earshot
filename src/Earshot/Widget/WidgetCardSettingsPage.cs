@@ -818,11 +818,7 @@ internal sealed partial class WidgetCard
         // The surfaces first: each a fill and a 1 px stroke at the row radius.
         foreach (Rectangle surface in layout.Surfaces)
         {
-            using GraphicsPath path = CardPaint.RoundedRectangle(new RectangleF(surface.X + 0.5f, surface.Y + 0.5f, surface.Width - 1, surface.Height - 1), radius);
-            using var fill = new SolidBrush(colours.RowFill);
-            g.FillPath(fill, path);
-            using var pen = new Pen(colours.RowStroke, 1f);
-            g.DrawPath(pen, path);
+            CardPaint.Surface(g, surface, radius, colours.RowFill, colours.RowStroke);
         }
 
         foreach (SettingsItem item in layout.Items)
