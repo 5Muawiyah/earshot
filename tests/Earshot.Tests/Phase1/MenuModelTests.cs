@@ -110,6 +110,7 @@ public sealed class MenuModelTests
             ShowOnTaskbar = false,
             LeftClickConnects = true,
             CaseOpenCard = false,
+            CaseOpenCardOn = false,
             LowBatteryAlert = false,
             LowBatteryThresholdPercent = 30,
         });

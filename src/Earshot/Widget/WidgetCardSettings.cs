@@ -58,6 +58,28 @@ internal sealed record CardSettingsValues(
 
     public MicrophoneRowState MicrophoneState { get; init; } = MicrophoneRowState.OpenSettings;
 
+    // The case-open card as saved: on or off, its close choice (CaseOpenCardClose) and its stored displays
+    // (CaseOpenCardDisplayChoice). Init-only for the same reason as the members above.
+    public bool CaseOpenCardOn { get; init; } = true;
+
+    public int CaseOpenCardCloseSeconds { get; init; } = CaseOpenCardClose.UntilCaseCloses;
+
+    public IReadOnlyList<string> CaseOpenCardDisplays { get; init; } = [];
+
+    // The connected displays, each with its box on the case-open card's row, and the Ids of the displays the card goes on
+    // now (the boxes that are ticked). The boxes are offered only with more than one display.
+    public IReadOnlyList<DisplayOption> CaseOpenCardDisplayOptions { get; init; } = [];
+
+    public IReadOnlyList<string> CaseOpenCardShownOn { get; init; } = [];
+
+    // Whether the case-open card's row is expanded to show its choices. Not a setting: the card holds it while the page is
+    // open and hands it in here for the layout.
+    public bool CaseOpenCardExpanded { get; init; }
+
+    public bool CaseOpenCardShownOnDisplay(int index) =>
+        index >= 0 && index < CaseOpenCardDisplayOptions.Count &&
+        CaseOpenCardShownOn.Contains(CaseOpenCardDisplayOptions[index].Id, StringComparer.OrdinalIgnoreCase);
+
     // Why Check for updates and Repair do nothing now (a setup, repair or update is running), or null. The rows say it in place
     // of their usual line, and the tray refuses the buttons with the same words.
     public string? ElevatedRunNote { get; init; }
@@ -113,6 +135,16 @@ internal interface IWidgetCardHost
     void OpenSoundSettings(CardPlace place);
 
     void SetCheckAutomatically(bool on, CardPlace place);
+
+    // The case-open card: on or off, when it closes by itself (CaseOpenCardClose), which displays show it (the stored value,
+    // CaseOpenCardDisplayChoice), and one display's box ticked or cleared.
+    void SetCaseOpenCard(bool on, CardPlace place);
+
+    void SetCaseOpenCardClose(int seconds, CardPlace place);
+
+    void SetCaseOpenCardDisplays(IReadOnlyList<string> stored, CardPlace place);
+
+    void SetCaseOpenCardDisplay(string id, bool on, CardPlace place);
 
     // The keys pressed for a shortcut. The chord is stored when this build would register it; otherwise nothing is
     // stored and the reason is returned.
@@ -171,17 +203,22 @@ internal enum SettingsRowId
     CheckAutomatically,
     MicrophoneOff,
     SoundSettings,
+    CaseCard,          // the case-open card's switch and the chevron that expands its row
+    CaseCardClose,     // in the expander: when it closes
+    CaseCardDisplays,  // in the expander: where the gauge is, or all displays
+    CaseCardDisplay,   // in the expander, with more than one display: one box per display, Index the display's place
 }
 
-internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button, Choice, Tile }
+// Expand is the chevron of a row with an expander; Check a box, one per item of a list (Index says which).
+internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button, Choice, Tile, Expand, Check }
 
 // One control of the settings page, for the keyboard order, the mouse and the focus visual. Index is which picture of a
 // group of pictures (the gauge orders), 0 for everything else.
 internal readonly record struct SettingsTarget(SettingsRowId Row, SettingsPart Part, int Index = 0)
 {
     // True when both are the same stop in the keyboard order: the pictures of a group are one stop, and the arrow keys
-    // move among them.
-    public bool SameStop(SettingsTarget other) => Row == other.Row && Part == other.Part;
+    // move among them. Each box of a list is a stop of its own.
+    public bool SameStop(SettingsTarget other) => Row == other.Row && Part == other.Part && (Part != SettingsPart.Check || Index == other.Index);
 }
 
 // A change the person made on the settings page, raised by the card and applied by the presenter.
@@ -197,6 +234,12 @@ internal sealed record ToggleChange(SettingsRowId Row, bool On) : SettingChange;
 internal sealed record PositionChange(GaugePosition Value) : SettingChange;
 
 internal sealed record DisplayChange(string Id) : SettingChange;
+
+internal sealed record CaseCardCloseChange(int Seconds) : SettingChange;
+
+internal sealed record CaseCardDisplaysChange(IReadOnlyList<string> Stored) : SettingChange;
+
+internal sealed record CaseCardDisplayChange(string Id, bool On) : SettingChange;
 
 internal sealed record OrderChange(GaugeOrder Value) : SettingChange;
 
@@ -264,6 +307,12 @@ internal sealed record SettingsItem(
     public string? AccessibleName { get; init; }
 
     public IReadOnlyList<Rectangle> Tiles { get; init; } = [];
+
+    // Which item of a list this row is (the case-open card's display boxes), 0 for every other row.
+    public int Index { get; init; }
+
+    // A row inside another row's expander: indented to the parent's label, with no icon of its own.
+    public bool Nested { get; init; }
 }
 
 internal sealed record SettingsLayout(SubPageFrame.FrameLayout Frame, IReadOnlyList<SettingsItem> Items, IReadOnlyList<SettingsTarget> Targets);
@@ -295,6 +344,7 @@ internal static class SettingsPageLayout
     public const int OrderTileGapAt96 = 8;
     public const int OrderTileHeightAt96 = 52;
     public const int StackGapAt96 = 4;
+    public const int CheckBoxAt96 = 20;
 
     public static SettingsLayout Compute(CardSettingsValues values, int dpi, ICardTextMeasure measure, double textScale = 1.0)
     {
@@ -471,6 +521,49 @@ internal static class SettingsPageLayout
                 new Rectangle(right - control, top, control, control),
                 new Rectangle(right - stepperW + control + stepGap, top, valueW, control)),
             SettingsPart.Minus, SettingsPart.Plus);
+
+        // The case-open card: a switch and a chevron; expanded, its close and display choices under it, and a box per display
+        // when there is more than one.
+        int chevronW = control;
+        Row(
+            SettingsRowId.CaseCard, WidgetCopy.SettingsCaseCard, null, false, false, toggleW + segGap + chevronW,
+            (top, mid) => (
+                new Rectangle(right - chevronW - segGap - toggleW, mid - (toggleH / 2), toggleW, toggleH),
+                new Rectangle(right - chevronW, top, chevronW, control),
+                Rectangle.Empty),
+            SettingsPart.Toggle, SettingsPart.Expand);
+        if (values.CaseOpenCardExpanded)
+        {
+            void Nested() => items[^1] = items[^1] with { Glyph = '\0', Nested = true };
+
+            int closeW = CaseOpenCardClose.Choices.Max(c => measure.Width(CaseOpenCardClose.Label(c), twelve)) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+            Row(
+                SettingsRowId.CaseCardClose, WidgetCopy.SettingsCaseCardClose, null, false, false, closeW,
+                (top, _) => (new Rectangle(right - closeW, top, closeW, control), Rectangle.Empty, Rectangle.Empty),
+                SettingsPart.Choice);
+            Nested();
+
+            int placesW = new[] { WidgetCopy.CaseCardWhereTheGaugeIs, WidgetCopy.CaseCardAllDisplays, WidgetCopy.CaseCardChosenDisplays }
+                .Max(t => measure.Width(t, twelve)) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+            Row(
+                SettingsRowId.CaseCardDisplays, WidgetCopy.SettingsCaseCardDisplays, null, false, false, placesW,
+                (top, _) => (new Rectangle(right - placesW, top, placesW, control), Rectangle.Empty, Rectangle.Empty),
+                SettingsPart.Choice);
+            Nested();
+
+            if (values.CaseOpenCardDisplayOptions.Count > 1)
+            {
+                int box = CardPlacement.Scale(CheckBoxAt96, dpi);
+                for (int i = 0; i < values.CaseOpenCardDisplayOptions.Count; i++)
+                {
+                    Row(
+                        SettingsRowId.CaseCardDisplay, values.CaseOpenCardDisplayOptions[i].Label, null, false, false, box,
+                        (_, mid) => (new Rectangle(right - box, mid - (box / 2), box, box), Rectangle.Empty, Rectangle.Empty));
+                    items[^1] = items[^1] with { Glyph = '\0', Nested = true, Index = i };
+                    targets.Add(new SettingsTarget(SettingsRowId.CaseCardDisplay, SettingsPart.Check, i));
+                }
+            }
+        }
 
         ToggleRow(SettingsRowId.LeftClick, WidgetCopy.SettingsLeftClick, null);
         ToggleRow(SettingsRowId.HandBack, WidgetCopy.SettingsHandBack, null);

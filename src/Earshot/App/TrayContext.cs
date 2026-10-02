@@ -2327,9 +2327,9 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         CardPlace place = ClickPlace();
-        bool caseOpenCard = !_registry.Settings.Current.Widget.CaseOpenCard;
+        bool caseOpenCard = !_registry.Settings.Current.Widget.CaseOpenCardOn;
         TryUpdateSettings("card when the case opens",
-            s => s.Widget = (s.Widget with { CaseOpenCard = caseOpenCard }).WithWatcherRecomputed(), place);
+            s => s.Widget = (s.Widget with { CaseOpenCardOn = caseOpenCard }).WithWatcherRecomputed(), place);
     }
 
     private void OnLowBatteryAlertClicked()

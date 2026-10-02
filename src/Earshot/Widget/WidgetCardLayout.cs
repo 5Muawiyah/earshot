@@ -87,7 +87,8 @@ internal static class WidgetCardLayout
         Rectangle UpdateButton = default,
         Rectangle Refresh = default);
 
-    // showGear: the view has a settings button (the case-open notice does not). showRefresh: the view has the battery
+    // showGear: the view has a button at the title row's end, the settings gear (the case-open card has its close button
+    // there instead, in the same place). showRefresh: the view has the battery
     // refresh icon, a button the size of the gear's, left of it (never without the gear). showUpdateLine: a check found a
     // newer version; updateButtonWidth is the "Update" button's own width (its text and padding), or 0 for the
     // least width the design gives it.

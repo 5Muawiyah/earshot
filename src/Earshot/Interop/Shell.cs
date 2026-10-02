@@ -25,11 +25,6 @@ internal static unsafe partial class Shell
     internal const int ABN_FULLSCREENAPP = 2;
     internal const int ABN_WINDOWARRANGE = 3;
 
-    // SystemParametersInfo actions used by the widget. SPI_GETMESSAGEDURATION's pvParam is a ULONG*
-    // receiving the notification pop-up duration in seconds.
-    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
-    internal const uint SPI_GETMESSAGEDURATION = 0x2016;
-
     // SPI_GETCLIENTAREAANIMATION: pvParam is a BOOL* that is TRUE while animation effects are on (Settings >
     // Accessibility > Visual effects > Animation effects).
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
@@ -141,13 +136,6 @@ internal static unsafe partial class Shell
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerwindowmessagew
     [LibraryImport(User32, EntryPoint = "RegisterWindowMessageW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     internal static partial uint RegisterWindowMessage(string lpString);
-
-    // With uiAction = SPI_GETMESSAGEDURATION, pvParam is a ULONG* receiving the duration in seconds;
-    // uiParam and fWinIni are both 0 for this action.
-    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow
-    [LibraryImport(User32, EntryPoint = "SystemParametersInfoW", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static partial bool SystemParametersInfoForMessageDuration(uint uiAction, uint uiParam, out uint pvParam, uint fWinIni);
 
     // The same call for an action whose pvParam is a BOOL*.
     [LibraryImport(User32, EntryPoint = "SystemParametersInfoW", SetLastError = true)]

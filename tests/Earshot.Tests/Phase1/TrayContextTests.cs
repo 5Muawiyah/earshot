@@ -1456,7 +1456,7 @@ internal sealed class TrayHarness : IDisposable
             // UI Automation taskbar reader and (once a layout places it) a real topmost gauge window. A
             // harness-built TrayContext is not a named live test, so every one of the four consumers Enabled
             // is the OR of (WidgetSettings.WithWatcherRecomputed: ShowOnTaskbar, LowBatteryAlert,
-            // CaseOpenCard, AutoPause) stays off here, unlike WidgetSettings.Default where all four default
+            // CaseOpenCardOn, AutoPause) stays off here, unlike WidgetSettings.Default where all four default
             // to true, unless a test asks for one through the settings callback below - otherwise a test
             // that only meant to turn the gauge on, say, would find the watcher already running (and
             // Enabled already true) because the low battery alert or auto-pause was still on by default,
@@ -1472,6 +1472,7 @@ internal sealed class TrayHarness : IDisposable
                 ShowOnTaskbar = false,
                 LowBatteryAlert = false,
                 CaseOpenCard = false,
+                CaseOpenCardOn = false,
                 AutoPause = false,
                 LeftClickConnects = true,
             };

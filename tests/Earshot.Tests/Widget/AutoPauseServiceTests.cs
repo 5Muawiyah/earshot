@@ -26,6 +26,8 @@ public sealed class AutoPauseServiceTests : IDisposable
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
+        public event EventHandler<CaseClosedEventArgs>? CaseClosed { add { } remove { } }
+
         public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
 

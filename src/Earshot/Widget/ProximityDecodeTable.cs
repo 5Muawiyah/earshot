@@ -33,7 +33,13 @@ public sealed record ProximityDecodeTable(
     // Privacy", PETS 2020, petsymposium.org/popets/2020/popets-2020-0003.pdf, Fig. 5, bit positions read from
     // the figure's labels).
     //
-    // In-ear and the lid: in neither source and in no saved record, so not decoded.
+    // The lid: the furiousMAC notes (same page) list a one-byte "Lid Open Counter" right after the charging and case byte,
+    // "Counter for opening lid": byte 6 of the value, ProximityMessage.Lid. The whole byte is the counter, as the notes give
+    // it; nothing narrower is documented. A change of it is read as the lid having been opened again (CaseOpenTracker).
+    // No source documents a bit that says the lid is open or shut, so LidOpenBit stays null and the card closes by the
+    // messages stopping instead.
+    //
+    // In-ear: in neither source and in no saved record, so not decoded.
     public static ProximityDecodeTable Documented { get; } = new(
         HighNibbleIsRight: true,
         FlipBit: 5,
@@ -45,6 +51,6 @@ public sealed record ProximityDecodeTable(
         RightInEarBit: null,
         InEarWhenSet: false,
         LidOpenBit: null,
-        LidCounterMask: null,
+        LidCounterMask: 0xFF,
         CaseNibbleReadsOnlyWithLidOpen: null);
 }

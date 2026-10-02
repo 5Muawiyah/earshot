@@ -123,6 +123,7 @@ internal sealed partial class TrayContext
 
             _widgetStatus.Changed += OnWidgetStatusChanged;
             _widgetStatus.CaseOpened += OnCaseOpened;
+            _widgetStatus.CaseClosed += OnCaseClosed;
             _widgetSnapshotCache = _widgetStatus.Current;
             _widgetStatus.Start();
             _lowBatteryAlertService = CompositionRoot.BuildLowBatteryAlertService(_registry, _widgetStatus, _time);
@@ -152,14 +153,16 @@ internal sealed partial class TrayContext
                 RefreshBattery: RefreshBatteryForCard);
 
             var caseOpenGate = new CaseOpenCardGate(
-                Enabled: () => _registry.Settings.Current.Widget.CaseOpenCard,
+                Enabled: () => _registry.Settings.Current.Widget.CaseOpenCardOn,
                 Closing: () => _closing,
                 HandBackInProgress: () => _coordinator.HandBackInProgress,
                 SessionEndInProgress: () => _coordinator.SessionEndInProgress,
-                OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false);
+                OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false,
+                Options: () => CaseOpenCardOptions.From(_registry.Settings.Current.Widget));
             _caseOpenCardPresenter = new CaseOpenCardPresenter(
                 () => CreateWidgetCard(notice: true), _widgetCardCallbacks, caseOpenGate,
                 _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log,
+                new SystemCaseOpenCardScene(_displaySource, ShownGaugeBounds),
                 animationsEnabled: CardAnimationsEnabled());
         }
 
@@ -243,6 +246,9 @@ internal sealed partial class TrayContext
     {
         _gaugeController?.OnForegroundChanged(e.RootClassName);
         _secondaryGauges?.OnForegroundChanged(e.RootClassName);
+
+        // A full-screen application coming to the front on a display the case-open card is on closes that display's card.
+        _caseOpenCardPresenter?.RecheckFullScreen();
     }
 
     private void OnShellWindowChanged(object? sender, ShellWindowChangedEventArgs e)
@@ -324,7 +330,11 @@ internal sealed partial class TrayContext
                 bool opening = e.LParam != 0;
                 _gaugeController?.NotifyFullScreenApp(opening);
                 _secondaryGauges?.NotifyFullScreenApp(opening);
-                if (!opening)
+                if (opening)
+                {
+                    _caseOpenCardPresenter?.RecheckFullScreen();
+                }
+                else
                 {
                     _taskbarWatcher?.Poke();
                     PokeSecondaryGauges(resetBackoff: false);
@@ -555,6 +565,9 @@ internal sealed partial class TrayContext
         _widgetSnapshotCache = _widgetStatus.Current;
         RenderGaugeIfShown();
         _widgetCardPresenter?.Refresh();
+
+        // The case-open card shows the same live figures, so it follows them while it is open.
+        _caseOpenCardPresenter?.Refresh();
     }
 
     private void RenderGaugeIfShown()
@@ -623,9 +636,42 @@ internal sealed partial class TrayContext
     // every gate (the setting, closing, the owner's own card already open, the notification state,
     // hand-back or a session end) before it shows anything; this only supplies where the gauge is, the same
     // rectangle OnWidgetCardRequested already uses for "above the gauge".
+    //
+    // The snapshot is read again first: CaseOpened is posted from the message that opened the case, ahead of the Changed
+    // that message also raises, and the card must show (and say) the figures that message brought.
     private void OnCaseOpened(object? sender, CaseOpenedEventArgs e)
     {
+        if (_widgetStatus is { } status)
+        {
+            _widgetSnapshotCache = status.Current;
+        }
+
         _caseOpenCardPresenter?.RequestShow(GaugeBoundsIfShown());
+    }
+
+    // IWidgetStatus.CaseClosed, on the UI thread: the linked pair's case-known messages stopped, so the case-open card
+    // closes on every display, whatever its own close time says.
+    private void OnCaseClosed(object? sender, CaseClosedEventArgs e) => _caseOpenCardPresenter?.CaseClosed();
+
+    // Every gauge on screen now: the main one and those on other displays, for placing the case-open card above the gauge
+    // on its display.
+    private List<Rectangle> ShownGaugeBounds()
+    {
+        var list = new List<Rectangle>();
+        if (GaugeBoundsIfShown() is { } main)
+        {
+            list.Add(main);
+        }
+
+        foreach (SecondaryGauge gauge in _secondaryGauges?.Gauges ?? [])
+        {
+            if (gauge.ShownBounds is { } bounds)
+            {
+                list.Add(bounds);
+            }
+        }
+
+        return list;
     }
 
     // The gauge's own bounds when it is actually on screen with a handle, or null (the case-open card falls
@@ -744,6 +790,7 @@ internal sealed partial class TrayContext
         {
             status.Changed -= OnWidgetStatusChanged;
             status.CaseOpened -= OnCaseOpened;
+            status.CaseClosed -= OnCaseClosed;
             try
             {
                 status.Close();

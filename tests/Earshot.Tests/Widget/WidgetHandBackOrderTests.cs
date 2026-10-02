@@ -124,7 +124,7 @@ public sealed class WidgetHandBackOrderTests
                 settings: s =>
                 {
                     s.HandBackOnShutdownAndSleep = true;
-                    s.Widget = s.Widget with { CaseOpenCard = true, Enabled = true };
+                    s.Widget = s.Widget with { CaseOpenCardOn = true, Enabled = true };
                 },
                 time: TimeProvider.System,
                 handBackBudget: TimeSpan.FromSeconds(2),

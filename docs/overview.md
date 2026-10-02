@@ -531,10 +531,15 @@ The gear on the card opens it. Rows, top to bottom:
 
 The low battery alert's own on and off is a tick in the right-click menu.
 
-**The case-open card.** The card was designed to appear by itself near the
-taskbar when the AirPods' case is opened near the PC. It never would have
-connected the AirPods by itself. It is off: Earshot does not decode the lid, so
-nothing can show it, and it has no menu item or settings row.
+**The case-open card.** When you open your AirPods' case near the PC, a card
+with the left, right and case figures and the Connect or Disconnect button
+appears by itself, where the gauge is, without taking the focus. It never
+connects the AirPods by itself. It closes when you shut the case (about eight
+seconds after the case stops sending), or after 5, 10, 30 or 60 seconds if you
+choose one, or on its close button. The Case-open card row in the settings
+turns it off, and its expander holds the close time and the displays it shows
+on (where the gauge is, all displays, or the displays you tick). It is never
+shown over a full-screen application, and a screen reader says it once.
 
 **The low battery alert.** A Windows notification, or the card if a
 notification cannot be shown, the moment a shown value first reads at or below
@@ -591,8 +596,9 @@ address, so it does not depend on the mode.
   documents the bit that swaps the two buds. If it is read the wrong way round,
   the left and right figures are swapped. The lower bud's number on the gauge
   is not affected by that.
-- **Ear detection and the lid are not read.** No documented source gives
-  either, so ear detection and the case-open card stay off.
+- **Ear detection and whether the lid is shut are not read.** No documented
+  source gives either, so ear detection stays off and the case-open card
+  closes when the case stops sending rather than on a lid bit.
 - **Windows' own figure is usually empty.** Earshot reads the Hands-Free
   battery property from the AirPods' device nodes only. With Hands-Free off, the
   default, it was seen empty on this PC.

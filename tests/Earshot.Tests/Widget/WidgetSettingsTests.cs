@@ -29,25 +29,29 @@ public sealed class WidgetSettingsTests : IDisposable
         Assert.IsTrue(defaults.LowBatteryAlert);
         Assert.AreEqual(20, defaults.LowBatteryThresholdPercent);
         Assert.IsTrue(defaults.CaseOpenCard);
+        Assert.IsTrue(defaults.CaseOpenCardOn, "The case-open card is on by default (owner's decision, 2 October 2026).");
+        Assert.AreEqual(CaseOpenCardClose.UntilCaseCloses, defaults.CaseOpenCardCloseSeconds, "It closes when the case closes by default.");
+        Assert.IsEmpty(defaults.CaseOpenCardDisplays, "It shows where the gauge is by default.");
         Assert.IsFalse(defaults.LeftClickConnects);
         Assert.AreEqual(WidgetSettings.Default, new EarshotSettings().Widget);
     }
 
     // Enabled - the flag WidgetStatusService itself reads to start or stop the BLE
-    // watcher - is the OR of the three consumers, so turning the gauge off alone never stops the watcher
+    // watcher - is the OR of the four consumers, so turning the gauge off alone never stops the watcher
     // another consumer still wants.
     [TestMethod]
-    public void WithWatcherRecomputedIsTheOrOfTheThreeConsumers()
+    public void WithWatcherRecomputedIsTheOrOfTheFourConsumers()
     {
         WidgetSettings allOff = WidgetSettings.Default with
         {
-            ShowOnTaskbar = false, LowBatteryAlert = false, CaseOpenCard = false, AutoPause = false,
+            ShowOnTaskbar = false, LowBatteryAlert = false, CaseOpenCard = false, CaseOpenCardOn = false, AutoPause = false,
         };
         Assert.IsFalse(allOff.WithWatcherRecomputed().Enabled, "Nothing wants the watcher.");
 
         Assert.IsTrue((allOff with { ShowOnTaskbar = true }).WithWatcherRecomputed().Enabled);
         Assert.IsTrue((allOff with { LowBatteryAlert = true }).WithWatcherRecomputed().Enabled);
-        Assert.IsFalse((allOff with { CaseOpenCard = true }).WithWatcherRecomputed().Enabled, "The lid is not read, so the case-open card is no consumer.");
+        Assert.IsTrue((allOff with { CaseOpenCardOn = true }).WithWatcherRecomputed().Enabled, "The case-open card listens for the case opening.");
+        Assert.IsFalse((allOff with { CaseOpenCard = true }).WithWatcherRecomputed().Enabled, "The old member is read by nothing.");
         Assert.IsTrue((allOff with { AutoPause = true }).WithWatcherRecomputed().Enabled);
 
         // The gauge going off while another consumer is still on must not turn the watcher off with it.
@@ -297,6 +301,44 @@ public sealed class WidgetSettingsTests : IDisposable
     // (Assert.IsTrue(json.Contains(...))), so it could not have failed had the Widget block also carried
     // some other, unwanted member (an address, a tag, anything device-derived) alongside the expected ones.
     // Parses the file and compares the Widget object's own property names as a set, not a substring search.
+    // A close time that is not one of the five choices closes the card when the case closes, and is recorded.
+    [TestMethod]
+    [DataRow(0, 0)]
+    [DataRow(5, 5)]
+    [DataRow(10, 10)]
+    [DataRow(30, 30)]
+    [DataRow(60, 60)]
+    [DataRow(7, 0)]
+    [DataRow(-5, 0)]
+    [DataRow(3600, 0)]
+    public void TheCaseOpenCardCloseTimeIsOneOfItsChoices(int stored, int expected)
+    {
+        WidgetSettings clamped = (WidgetSettings.Default with { CaseOpenCardCloseSeconds = stored }).Clamped(out IReadOnlyList<StepOutcome> notes);
+
+        Assert.AreEqual(expected, clamped.CaseOpenCardCloseSeconds);
+        Assert.AreEqual(stored != expected, notes.Any(n => n.Step == "clamp:CaseOpenCardCloseSeconds"));
+    }
+
+    // The stored displays keep only what can be a display identity: no empty, control-character or overlong entry, no
+    // duplicate, and All displays alone when it is there.
+    [TestMethod]
+    public void TheCaseOpenCardDisplaysKeepOnlyDisplayIdentities()
+    {
+        string a = @"\\?\DISPLAY#AAA0001#5&1a2b3c4d&0&UID100#{monitor-interface}";
+        string b = @"\\?\DISPLAY#BBB0002#5&1a2b3c4d&0&UID104#{monitor-interface}";
+        WidgetSettings clean = (WidgetSettings.Default with { CaseOpenCardDisplays = [a, b] }).Clamped(out IReadOnlyList<StepOutcome> none);
+        CollectionAssert.AreEqual(new[] { a, b }, clean.CaseOpenCardDisplays);
+        Assert.IsFalse(none.Any(n => n.Step == "clamp:CaseOpenCardDisplays"), "A clean set is not reported.");
+
+        WidgetSettings dirty = (WidgetSettings.Default with { CaseOpenCardDisplays = [a, "", "x\u0001y", a.ToUpperInvariant(), new string('d', 600), b] })
+            .Clamped(out IReadOnlyList<StepOutcome> notes);
+        CollectionAssert.AreEqual(new[] { a, b }, dirty.CaseOpenCardDisplays);
+        Assert.IsTrue(notes.Any(n => n.Step == "clamp:CaseOpenCardDisplays"));
+
+        WidgetSettings all = (WidgetSettings.Default with { CaseOpenCardDisplays = [a, CaseOpenCardDisplayChoice.All] }).Clamped(out _);
+        CollectionAssert.AreEqual(new[] { CaseOpenCardDisplayChoice.All }, all.CaseOpenCardDisplays);
+    }
+
     [TestMethod]
     public void TheMemberNamesAreExactlyThese()
     {
@@ -312,6 +354,7 @@ public sealed class WidgetSettingsTests : IDisposable
         {
             "Enabled", "ShowOnTaskbar", "OtherDeviceLabel", "AutoPause", "LowBatteryAlert",
             "LowBatteryThresholdPercent", "CaseOpenCard", "LeftClickConnects", "GaugePosition", "GaugeOrder", "GaugeDisplay",
+            "CaseOpenCardOn", "CaseOpenCardCloseSeconds", "CaseOpenCardDisplays",
         };
 
         CollectionAssert.AreEquivalent(

@@ -466,6 +466,37 @@ internal static partial class CardPaint
         }
     }
 
+    // A box of a list: the accent with a check mark when ticked, the standard control with an outline when not. The check is
+    // the CheckMark glyph, or two strokes without the font.
+    public static void CheckBox(Graphics g, Rectangle rect, bool on, CardColours colours, int dpi, bool focused)
+    {
+        ArgumentNullException.ThrowIfNull(colours);
+        int radius = Scale(4, dpi);
+        using GraphicsPath path = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
+        using (var fill = new SolidBrush(on ? colours.Accent : colours.ControlFill))
+        {
+            g.FillPath(fill, path);
+        }
+
+        using (var pen = new Pen(on ? colours.Accent : colours.TextSecondary, 1f))
+        {
+            g.DrawPath(pen, path);
+        }
+
+        if (on && !TryGlyph(g, FluentGlyphs.CheckMark, rect, colours.OnAccent, dpi))
+        {
+            float s = dpi / 96f;
+            PointF P(float x, float y) => new(rect.X + (x * s), rect.Y + (y * s));
+            using var tick = RoundPen(colours.OnAccent, 1.4f * s);
+            g.DrawLines(tick, new[] { P(5.5f, 10.2f), P(8.6f, 13.2f), P(14.5f, 7f) });
+        }
+
+        if (focused)
+        {
+            Focus(g, rect, radius, colours, dpi);
+        }
+    }
+
     // A one pixel line across, in the divider colour.
     public static void Divider(Graphics g, int x1, int x2, int y, CardColours colours)
     {

@@ -116,6 +116,46 @@ internal static class WidgetCopy
     public const string MicOffInWindows = "Microphone is off in Windows";
     public const string SoundSettingsNotOpened = "Couldn't open sound settings.";
 
+    // The case-open card's row on the settings page, the choices in its expander, and its close button.
+    public const string SettingsCaseCard = "Case-open card";
+    public const string SettingsCaseCardClose = "Close";
+    public const string SettingsCaseCardDisplays = "Displays";
+    public const string CaseCardUntilCaseCloses = "Until the case closes";
+    public const string CaseCardWhereTheGaugeIs = "Where the gauge is";
+    public const string CaseCardAllDisplays = "All displays";
+    public const string CaseCardChosenDisplays = "Chosen displays";
+    public const string TipCaseCard = "Show the battery when you open the case near this PC";
+    public const string TipCaseCardClose = "When the card closes by itself. It also closes when the case closes.";
+    public const string TipCaseCardDisplays = "Which displays show the card";
+    public const string TipCaseCardDisplay = "Show the card on this display";
+    public const string NameCaseCard = "Case-open card";
+    public const string NameCaseCardClose = "When the case-open card closes";
+    public const string NameCaseCardDisplays = "Displays for the case-open card";
+    public const string NameCaseCardMore = "More case-open card settings";
+    public const string TipCaseCardMore = "Close and display choices";
+    public const string TipCloseCard = "Close";
+
+    // What a screen reader says once when the case-open card shows: "AirPods case open. Left 70%, Right 70%, Case 50%." A
+    // part that is not live says what kind of value it is and how old, as its column's tooltip does, and one with no value
+    // says so.
+    public static string CaseOpenAnnouncement(ShownBattery shown, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(shown);
+        return "AirPods case open. " +
+            SpokenPart("Left", shown.Left, now) + ", " + SpokenPart("Right", shown.Right, now) + ", " + SpokenPart(CaseLabel, shown.Case, now) + ".";
+    }
+
+    private static string SpokenPart(string label, ShownPart part, DateTimeOffset now)
+    {
+        if (part.Percent is not int percent)
+        {
+            return label + " " + NoReading.ToLowerInvariant();
+        }
+
+        string value = label + " " + PercentText(percent, part.Estimated);
+        return PartTip(part, now) is { } kind ? value + " (" + kind.ToLowerInvariant() + ")" : value;
+    }
+
     private const string LeftAirPodLabel = "Left AirPod";
     private const string RightAirPodLabel = "Right AirPod";
 

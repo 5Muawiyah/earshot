@@ -107,6 +107,36 @@ internal sealed class FakeCardHost : IWidgetCardHost
 
     public void OpenSoundSettings(CardPlace place) => Calls.Add("openSound");
 
+    public void SetCaseOpenCard(bool on, CardPlace place)
+    {
+        Calls.Add("caseCard:" + on);
+        Values = Values with { CaseOpenCardOn = on };
+    }
+
+    public void SetCaseOpenCardClose(int seconds, CardPlace place)
+    {
+        Calls.Add("caseCardClose:" + seconds);
+        Values = Values with { CaseOpenCardCloseSeconds = seconds };
+    }
+
+    public void SetCaseOpenCardDisplays(IReadOnlyList<string> stored, CardPlace place)
+    {
+        Calls.Add("caseCardDisplays:" + string.Join(",", stored));
+        Values = Values with { CaseOpenCardDisplays = stored, CaseOpenCardShownOn = CaseOpenCardDisplayChoice.IsAll(stored) ? Values.CaseOpenCardDisplayOptions.Select(o => o.Id).ToList() : Values.CaseOpenCardShownOn };
+    }
+
+    public void SetCaseOpenCardDisplay(string id, bool on, CardPlace place)
+    {
+        Calls.Add("caseCardDisplay:" + id + ":" + on);
+        List<string> shown = Values.CaseOpenCardShownOn.Where(x => x != id).ToList();
+        if (on)
+        {
+            shown.Add(id);
+        }
+
+        Values = Values with { CaseOpenCardDisplays = shown, CaseOpenCardShownOn = shown };
+    }
+
     public void SetCheckAutomatically(bool on, CardPlace place)
     {
         Calls.Add("checkAuto:" + on);
@@ -306,7 +336,7 @@ internal static class CardKit
     public static Rectangle Part(WidgetCard card, SettingsRowId row, SettingsPart part)
     {
         SettingsItem item = Row(card, row);
-        return part is SettingsPart.SegmentSecond or SettingsPart.Plus or SettingsPart.Clear ? item.B : item.A;
+        return part is SettingsPart.SegmentSecond or SettingsPart.Plus or SettingsPart.Clear or SettingsPart.Expand ? item.B : item.A;
     }
 
     // Presses a part of a row the way a person would on a card that is shorter than the page: the rows are scrolled until the

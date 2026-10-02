@@ -330,6 +330,39 @@ the next case open makes one. What is written is the last reading of each part
 and nothing else about it is recorded. The log says that a link was made, followed
 or dropped, with counts only.
 
+**Opening and closing the case.** `CaseOpenTracker` works out from the linked
+pair's own messages, and no other pair's, when its case opens and closes; the
+case-open card (below) is shown and closed from it. An open is either the
+linked pair's case-known messages starting after silence (a case-known message
+with none before it for the close time, or none since the link was made, so
+the case open that links a pair is an open too), or its lid open counter
+changing while those messages never stopped (the lid was shut and opened again
+inside the close time). The counter is the one-byte "Lid Open Counter" the
+furiousMAC notes list right after the charging and case byte, "Counter for
+opening lid" (github.com/furiousMAC/continuity,
+messages/proximity_pairing.md); the whole byte is read, as the notes give it.
+Each sender's counter is compared only with that sender's own last value,
+since nothing says the two buds carry the same value, and the first value from
+a sender is only a baseline; a change from the other bud within two seconds of
+an open is the same open. A case-unknown message (0xF, buds in use) never opens
+anything, and a closed case sends nothing, so worn buds and a shut case never
+show the card.
+
+A close is the linked pair's case-known messages stopping for eight seconds.
+No source documents a bit that says the lid is shut, only the counter of opens,
+and the in-ear bits have one note only, so the cadence closes it; a timer due at
+that time notices the silence. Eight seconds is a design choice from the
+cadence the saved records show: with the lid open the set sends about four
+case-known messages a second between its two buds, the longest gap in a merged
+set's messages in any record is 3.11 s, and the longest from one sender 6.14 s.
+With one bud in the case only that bud may give the case level, so the
+single-sender gap is the one to clear: eight seconds is about 30% over it and
+over two and a half times the set's longest gap, while a shut case closes the
+card eight seconds after its last message. Buds taken out of an open case close
+it the same way, since their messages then say the case level is unknown.
+`IWidgetStatus` raises `CaseOpened` for every open and `CaseClosed` once for
+each open whose case has closed, including when the link is dropped or moves.
+
 **The accepted risk.** A same-model pair that opens its case next to the PC more
 strongly than the owner's can be linked instead, and a same-model pair whose
 fields equal the linked set's last, heard within 30 seconds of it going quiet, can
@@ -397,8 +430,9 @@ a published description of the message and partly on one local capture. No
 permitted source documents the status bit that swaps the two, so the
 capture's reading of it is unproved, and with it which physical side a figure
 belongs to. The charging bits come from the labels of a published figure and
-are not proved here either. In-ear and the lid are in neither source and in no
-saved capture, so they are not decoded.
+are not proved here either. In-ear and a lid open or shut bit are in neither
+source and in no saved capture, so they are not decoded; the lid open counter
+is, from the furiousMAC notes (see Opening and closing the case).
 
 **Windows' own Hands-Free figure.** When no bud has a current broadcast value
 and the AirPods are on this PC (linked or not), Earshot also reads the Hands-Free battery
@@ -534,8 +568,9 @@ If the chosen display is not connected, or is connected but its taskbar is not
 shown, the reader returns the main display's taskbar and says why in the
 layout; the controller writes one line when the reason changes, and another
 when the display returns. `WM_DISPLAYCHANGE` and `TaskbarCreated` already ask
-for an immediate read, so the return is seen at once. The card and the
-case-open card take the work area of the display the gauge is on.
+for an immediate read, so the return is seen at once. The card takes the work
+area of the display the gauge is on; the case-open card takes the work area of
+each display it is shown on.
 
 The two full-screen signals, `ABN_FULLSCREENAPP`
 (https://learn.microsoft.com/en-us/windows/win32/shell/abn-fullscreenapp) and
@@ -594,14 +629,46 @@ finished pixels to the window in one step, never a clear followed by drawing on 
 show the backdrop alone for a moment; a repaint that was asked for is compared with what the window
 shows, and only the pixels that differ are invalidated, so most status updates touch nothing. It
 opens above the gauge, closes
-when it loses focus, and works from the keyboard. The case-open card is the
-same window in a separate, unfocused instance. Nothing shows it, because that
-needs the lid state and Earshot does not decode it, so it stays off and its
-menu item and settings row are hidden. It reads its own dismiss time from
-[`SystemParametersInfoW(SPI_GETMESSAGEDURATION)`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow)
-so it follows the owner's own accessibility setting, and its Connect or
-Disconnect button only ever fires on a genuine click on that button; nothing
-else in its code path can press it.
+when it loses focus, and works from the keyboard.
+
+The case-open card (`CaseOpenCardPresenter`) is the same window in separate,
+never-activated instances, one per display it is shown on. It is shown when the
+linked pair's case opens (Opening and closing the case, above) and is on by
+default, for a new install and an existing one alike: the setting is a member
+v1.4 added, `CaseOpenCardOn`, so a file written before it reads as on, and the
+old `CaseOpenCard` member is no longer read (the card could never show before
+v1.4 and its switch was hidden, so whatever that member held was never the
+owner's choice of this card). It is the main card: live L, R and Case, the
+Where line reading "Case open", and the Connect or Disconnect button, with a
+close button (the Cancel glyph) where the gear is. It closes when the case
+closes, after its own close time when one is chosen (5, 10, 30 or 60 seconds;
+the default is when the case closes), on its close button, on a click on it
+that misses its buttons, and after a press of Connect or Disconnect; one close
+closes every display's card. The close time replaces the dismiss time it used to
+read from `SPI_GETMESSAGEDURATION`, which is no longer read. It goes where the
+gauge is by default (the display Gauge display names; with All displays, the
+main display), or on all displays, or on a chosen set of displays, stored as
+the monitors' device interface names as Gauge display stores one; a set none of
+whose displays is connected falls back to where the gauge is. On a display with
+a gauge it sits above the gauge, elsewhere in the corner of the work area by
+the taskbar's end, drawn at that display's scale. It is never shown on a
+display a full-screen application is on, by the gauge's own rule:
+`SHQueryUserNotificationState` saying a full-screen application runs is global,
+so the foreground window must cover that display's bounds; with one display the
+state alone says it, and presentation settings, quiet time and a locked or
+switched session keep it off every display. It is still shown on the other
+chosen displays, and a full-screen application that comes to the front later
+(the foreground hook, `ABN_FULLSCREENAPP`) closes that display's card only. It
+never takes the focus: `WS_EX_NOACTIVATE`, shown without activation
+(`Form.ShowWithoutActivation`), and `MA_NOACTIVATE` for a mouse press. A screen
+reader is told of each open once, from one card, through a UI Automation
+notification
+([`AccessibleObject.RaiseAutomationNotification`](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.accessibleobject.raiseautomationnotification)),
+for example "AirPods case open. Left 70%, Right 70%, Case 50%.", a part that is
+not live saying what kind of value it is and how old; its two buttons are
+described to a screen reader and never focused. Its Connect or Disconnect button
+only ever fires on a genuine click on that button; nothing else in its code
+path can press it.
 
 **Type and text size.** Text is Segoe UI Variable in the Windows 11 type ramp
 (https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography):
@@ -683,7 +750,11 @@ for. Every change goes through the same path the tray menu's own item uses.
 The rows are, in order: Position, Display (a button that steps through
 Main display and the connected displays), Order (six pictures of the gauge),
 Other device, Pause on removal, Pause on leave, Low battery (the
-threshold), Click connects, Hand back, Microphone off (with a Sound settings
+threshold), Case-open card (a switch and a chevron that expands the row to its
+Close choice, a button that steps through Until the case closes, 5 s, 10 s,
+30 s and 60 s, and its Displays choice, a button that steps between Where the
+gauge is and All displays, with a box for each display when there is more than
+one), Click connects, Hand back, Microphone off (with a Sound settings
 button while it is on); then the shortcuts for Connect and
 Disconnect; then the installed version with Check, Repair when an install
 exists, and Auto check. Each is an icon and its words; what each row does is
@@ -921,9 +992,11 @@ Not built, and not close to being built, on Windows without one:
 - Personalised volume.
 - Renaming the AirPods.
 - The hearing features.
-- Real-time in-ear detection and the lid state. No documented source gives
-  either in the advertisement, so they stay off; whether the advertisement can
-  give them at all is still an open question.
+- Real-time in-ear detection and whether the lid is open or shut. No
+  documented source gives either in the advertisement, so ear detection stays
+  off and the case-open card closes by the messages stopping rather than by a
+  lid bit; whether the advertisement gives them at all is still an open
+  question. The lid open counter is documented and is read.
 
 **Why.** These all go through Apple's own accessory protocol, carried over a
 Bluetooth L2CAP channel, not through anything in the

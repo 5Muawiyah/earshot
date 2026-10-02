@@ -34,7 +34,7 @@ public sealed class TrayCardWiringTests
     }
 
     private static Action<EarshotSettings> WidgetOn(bool leftClickConnects = true) =>
-        s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true, CaseOpenCard = true, LeftClickConnects = leftClickConnects };
+        s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true, CaseOpenCardOn = true, LeftClickConnects = leftClickConnects };
 
     private static void OpenCard(TrayHarness tray)
     {

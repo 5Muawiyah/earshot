@@ -25,6 +25,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
     private int _posts;
     private List<EventArgs> _changedEvents = null!;
     private List<CaseOpenedEventArgs> _caseOpenedEvents = null!;
+    private List<CaseClosedEventArgs> _caseClosedEvents = null!;
     private List<ReadingAppliedEventArgs> _readingEvents = null!;
 
     [TestInitialize]
@@ -41,6 +42,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _posts = 0;
         _changedEvents = new List<EventArgs>();
         _caseOpenedEvents = new List<CaseOpenedEventArgs>();
+        _caseClosedEvents = new List<CaseClosedEventArgs>();
         _readingEvents = new List<ReadingAppliedEventArgs>();
     }
 
@@ -55,6 +57,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
             runInBackground: runInBackground ?? (work => work()));
         service.Changed += (sender, e) => { lock (_changedEvents) { _changedEvents.Add(e); } };
         service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
+        service.CaseClosed += (sender, e) => { lock (_caseClosedEvents) { _caseClosedEvents.Add(e); } };
         service.ReadingApplied += (sender, e) => { lock (_readingEvents) { _readingEvents.Add(e); } };
         return service;
     }
@@ -1005,40 +1008,150 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(changedAfterFirst, _changedEvents.Count, "A counter-only change must not raise Changed again.");
     }
 
+    // ---- The case opening and closing (CaseOpenTracker), through the real selection and link code
+
+    // The case opening next to the PC is what links a pair (Prime: five case-known messages over two seconds), and the
+    // message that makes the link is the first open: not one before it, while nothing is linked.
     [TestMethod]
-    public void CaseOpenedIsRaisedOncePerEdgeOrCounterChange()
+    public void AnOpenThatLinksThePairIsAnOpenAndNothingOpensBeforeTheLink()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Documented with { LidOpenBit = 0 };
-        using WidgetStatusService service = NewService(table);
+        using WidgetStatusService service = NewService();
+        service.Start();
+
+        for (int i = 0; i < 4; i++)
+        {
+            _source.Raise(Owned(batteryB: 0x05));
+            Tick(0.5);
+        }
+
+        Assert.AreEqual(0, _caseOpenedEvents.Count, "Four case-known messages do not link, so nothing has opened yet.");
+
+        _source.Raise(Owned(batteryB: 0x05));
+
+        Assert.AreEqual(1, _caseOpenedEvents.Count, "The message that links the pair is its case opening.");
+        Assert.AreEqual(_clock.GetUtcNow(), _caseOpenedEvents[0].At);
+    }
+
+    [TestMethod]
+    public void TheLinkedPairsCaseKnownMessagesStartingAfterSilenceAreAnOpen()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        Tick(CaseOpenTracker.CloseAfter.TotalSeconds);
+        Assert.AreEqual(1, _caseClosedEvents.Count, "Silence closed the first open.");
+
+        _source.Raise(Owned(batteryB: 0x05));
+
+        Assert.AreEqual(2, _caseOpenedEvents.Count, "The case opened again.");
+    }
+
+    // A closed case sends nothing, so nothing can open from it, however long it stays shut.
+    [TestMethod]
+    public void AClosedCaseNeverOpens()
+    {
+        using WidgetStatusService service = NewService();
         service.Start();
         Prime();
 
-        _source.Raise(Owned(lid: 0x01));
-        _source.Raise(Owned(lid: 0x01)); // still open: not a new edge
-        _source.Raise(Owned(lid: 0x00)); // closes
-        _source.Raise(Owned(lid: 0x01)); // opens again: a second edge
-
-        Assert.AreEqual(2, _caseOpenedEvents.Count);
-    }
-
-    // The lid-counter path (unlike the lid-bit path, where the assumed-false baseline making a true first
-    // reading a rising edge is deliberate) has no real "previous" value on the very first owned reading: it
-    // must only record a baseline, not treat "nothing to compare yet" as a change.
-    [TestMethod]
-    public void CaseOpenedIsNotRaisedByTheFirstReadingWithTheLidCounterBaseline()
-    {
-        ProximityDecodeTable table = ProximityDecodeTable.Documented with { LidCounterMask = 0xFF };
-        using WidgetStatusService service = NewService(table);
-        service.Start();
-        Prime(lid: 0x03); // the chosen set's first reading carries the baseline
-
-        _source.Raise(Owned(lid: 0x03)); // the same counter again: nothing changed
-
-        Assert.AreEqual(0, _caseOpenedEvents.Count, "The first reading must only establish the lid counter baseline.");
-
-        _source.Raise(Owned(lid: 0x04)); // a genuine change from the baseline
+        for (int i = 0; i < 30; i++)
+        {
+            Tick(10);
+        }
 
         Assert.AreEqual(1, _caseOpenedEvents.Count);
+        Assert.AreEqual(1, _caseClosedEvents.Count, "Closed once, and only once.");
+    }
+
+    // Buds in use send the case level as unknown (0xF): the linked pair's own worn buds never open anything, and a pair worn
+    // nearby is never linked, so it never opens anything either.
+    [TestMethod]
+    public void WornBudsNeverOpen()
+    {
+        using (WidgetStatusService service = NewService())
+        {
+            service.Start();
+            for (int i = 0; i < 20; i++)
+            {
+                _source.Raise(Owned(batteryA: 0x88, batteryB: 0x0F, tag: 7));
+                Tick(1);
+            }
+
+            Assert.AreEqual(0, _caseOpenedEvents.Count, "A worn pair is never linked and never opens.");
+        }
+
+        _caseOpenedEvents.Clear();
+        _caseClosedEvents.Clear();
+        using WidgetStatusService linked = NewService();
+        linked.Start();
+        Prime();
+        for (int i = 0; i < 30; i++)
+        {
+            _source.Raise(Owned(batteryB: 0x0F));
+            Tick(1);
+        }
+
+        Assert.AreEqual(1, _caseOpenedEvents.Count, "The linked pair's buds taken out and worn open nothing.");
+        Assert.AreEqual(1, _caseClosedEvents.Count, "And the case counts as closed once its case-known messages stopped.");
+    }
+
+    // The lid shut and opened again inside the close time: the case-known messages never stopped, but the lid open counter
+    // moved. The pair's other bud carries the change a moment later; that is the same open, not a second.
+    [TestMethod]
+    public void TheLidCounterChangingWhileTheCaseStaysOpenIsANewOpen()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime(lid: 0x03);
+        for (int i = 0; i < 12; i++)
+        {
+            _source.Raise(Owned(batteryB: 0x05, lid: 0x03, tag: 1));
+            Tick(0.125);
+            _source.Raise(Owned(batteryB: 0x05, lid: 0x03, tag: 2));
+            Tick(0.125);
+        }
+
+        Assert.AreEqual(1, _caseOpenedEvents.Count, "The same counter is the same open.");
+
+        _source.Raise(Owned(batteryB: 0x05, lid: 0x04, tag: 1));
+        Assert.AreEqual(2, _caseOpenedEvents.Count, "A moved counter is a new open.");
+
+        Tick(0.25);
+        _source.Raise(Owned(batteryB: 0x05, lid: 0x04, tag: 2));
+        Assert.AreEqual(2, _caseOpenedEvents.Count, "The other bud's copy of the change is the same open.");
+        Assert.AreEqual(0, _caseClosedEvents.Count, "The case never closed in between.");
+    }
+
+    // The close time is CaseOpenTracker.CloseAfter after the last case-known message, to the tick.
+    [TestMethod]
+    public void TheCaseClosesWhenItsCaseKnownMessagesStopForTheCloseTime()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime(); // the last case-known message was half a second ago
+
+        Tick(CaseOpenTracker.CloseAfter.TotalSeconds - 0.6);
+        Assert.AreEqual(0, _caseClosedEvents.Count, "Not yet.");
+
+        Tick(0.1);
+        Assert.AreEqual(1, _caseClosedEvents.Count, "Closed at the close time.");
+    }
+
+    // One sender's longest gap in the saved records is 6.14 s: a case with one bud in it, sending that slowly, stays open.
+    [TestMethod]
+    public void ASenderAsSlowAsTheSlowestRecordedKeepsTheCaseOpen()
+    {
+        using WidgetStatusService service = NewService();
+        service.Start();
+        Prime();
+        for (int i = 0; i < 6; i++)
+        {
+            Tick(6.14);
+            _source.Raise(Owned(batteryB: 0x05));
+        }
+
+        Assert.AreEqual(1, _caseOpenedEvents.Count);
+        Assert.AreEqual(0, _caseClosedEvents.Count);
     }
 
     // A boolean "are we currently inside some uiPost action" cannot tell a genuine post apart from code
@@ -1052,7 +1165,6 @@ public sealed class WidgetStatusServiceTests : IDisposable
     [TestMethod]
     public void ChangedAndCaseOpenedAreRaisedThroughUiPost()
     {
-        ProximityDecodeTable table = ProximityDecodeTable.Documented with { LidOpenBit = 0 };
         var queue = new Queue<Action>();
         int itemsCompleted = 0;
         var changedCompletedCountAtFire = new List<int>();
@@ -1065,14 +1177,14 @@ public sealed class WidgetStatusServiceTests : IDisposable
                 Interlocked.Increment(ref _posts);
                 queue.Enqueue(action);
             },
-            _clock, _paired, null, table);
+            _clock, _paired, null, ProximityDecodeTable.Documented);
         service.Changed += (sender, e) => changedCompletedCountAtFire.Add(itemsCompleted);
         service.CaseOpened += (sender, e) => caseOpenedCompletedCountAtFire.Add(itemsCompleted);
         service.Start();
-        Prime();
         int postsBefore = _posts;
 
-        _source.Raise(Owned(lid: 0x01));
+        // The case opening links the pair: the fifth message's handling posts CaseOpened.
+        Prime();
 
         while (queue.Count > 0)
         {

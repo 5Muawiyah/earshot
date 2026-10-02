@@ -486,7 +486,7 @@ public sealed class TrayHotkeyTests
             using var tray = new TrayHarness(
                 snapshot: Target(ConnectionState.Disconnected),
                 taskbarWatcherPollIntervalMs: 30,
-                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true, CaseOpenCard = true, LeftClickConnects = true });
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true, CaseOpenCardOn = true, LeftClickConnects = true });
             tray.PumpUntilIdle();
             Assert.IsFalse(tray.Context.WidgetCardIsShownForTest);
 

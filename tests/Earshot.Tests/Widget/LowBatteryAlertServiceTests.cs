@@ -20,6 +20,8 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
+        public event EventHandler<CaseClosedEventArgs>? CaseClosed { add { } remove { } }
+
         public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
         public Task RefreshAsync() => Task.CompletedTask;

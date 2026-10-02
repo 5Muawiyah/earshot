@@ -90,16 +90,18 @@ public sealed class WidgetRuntimeToggleTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, Enabled = true });
+                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = false, CaseOpenCardOn = true, Enabled = true });
             tray.PumpUntilIdle();
             Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "Sanity: the case-open card must be wired first.");
-            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Case-open card"), "Sanity: nothing has raised CaseOpened yet.");
+            Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.StartsWith("Case-open card", StringComparison.Ordinal)), "Sanity: nothing has raised CaseOpened yet.");
 
             tray.Context.RaiseCaseOpenedForTest();
             tray.PumpUntilIdle();
 
+            // QUNS_BUSY is now refused display by display (a full-screen application keeps the card off its own display only),
+            // so the gate's line is the per-display one at Debug, or the notification-state one at Info for any other state.
             Assert.IsTrue(
-                tray.Log.Has(LogLevel.Info, "Case-open card"),
+                tray.Log.Entries.Any(e => e.Message.StartsWith("Case-open card", StringComparison.Ordinal)),
                 "OnCaseOpened must actually reach the presenter's own gate, not merely a wired but inert " +
                 "presenter. Log: " + string.Join(" | ", tray.Log.Entries.Select(e => e.Level + ":" + e.Message)));
         });
@@ -117,7 +119,7 @@ public sealed class WidgetRuntimeToggleTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = true, CaseOpenCard = true, LeftClickConnects = false, Enabled = true },
+                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = true, CaseOpenCardOn = true, LeftClickConnects = false, Enabled = true },
                 cardEnvironmentFactory: () => new Phase5.FakeCardEnvironment());
             tray.PumpUntilIdle();
 
@@ -147,7 +149,7 @@ public sealed class WidgetRuntimeToggleTests
         {
             var connect = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, LeftClickConnects = true, Enabled = true },
+                settings: s => s.Widget = s.Widget with { ShowOnTaskbar = false, CaseOpenCardOn = true, LeftClickConnects = true, Enabled = true },
                 cardEnvironmentFactory: () => new Phase5.FakeCardEnvironment());
             tray.Connection.OnConnect = _ => connect.Task;
             tray.PumpUntilIdle();
@@ -184,7 +186,7 @@ public sealed class WidgetRuntimeToggleTests
         Phase5.CardDesktop.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCard = true, LowBatteryAlert = true }).WithWatcherRecomputed());
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCardOn = true, LowBatteryAlert = true }).WithWatcherRecomputed());
             tray.PumpUntilIdle();
 
             Assert.IsTrue(tray.Settings.Current.Widget.Enabled, "Sanity: the low battery alert alone must still want the watcher.");

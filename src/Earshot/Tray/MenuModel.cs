@@ -148,8 +148,9 @@ internal static class MenuModel
                 Visible: true),
             ShowOnTaskbar: new MenuItemState(WidgetCopy.ShowOnTaskbar, Checked: settings.Widget.ShowOnTaskbar, Enabled: !busy, Visible: true),
             LeftClickConnectsItem: new MenuItemState(WidgetCopy.LeftClickConnects, Checked: settings.Widget.LeftClickConnects, Enabled: !busy, Visible: true),
-            // The lid is not read, so the case-open card never shows and a switch for it would do nothing: hidden.
-            CaseOpenCardItem: new MenuItemState(WidgetCopy.CardWhenCaseOpens, Checked: settings.Widget.CaseOpenCard, Enabled: !busy, Visible: false),
+            // The case-open card's switch, with its close and display choices, is on the card's settings page; the menu keeps
+            // no second copy of it, so this item stays hidden.
+            CaseOpenCardItem: new MenuItemState(WidgetCopy.CardWhenCaseOpens, Checked: settings.Widget.CaseOpenCardOn, Enabled: !busy, Visible: false),
             LowBatteryAlert: new MenuItemState(WidgetCopy.LowBatteryAlert, Checked: settings.Widget.LowBatteryAlert, Enabled: !busy, Visible: true),
             // A plain submenu opener, never checkable itself: the alert's own on/off state lives on
             // LowBatteryAlert above, not here, so one menu row is never both a toggle and a dropdown parent.

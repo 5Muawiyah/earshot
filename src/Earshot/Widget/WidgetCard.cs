@@ -23,7 +23,9 @@ internal readonly record struct SetupTarget(SetupTargetKind Kind, int Index);
 // ClickOutside is notice mode only: a click that landed on the card but missed both the button and the
 // switch. A notice-mode card is never activated (WS_EX_NOACTIVATE), so it never deactivates either; this
 // is its only way to notice "the owner clicked past it".
-internal enum WidgetCardCloseReason { Deactivated, Escape, Action, ClickOutside }
+//
+// CloseButton is notice mode only too: the close button that stands where the gear is on the gauge's card.
+internal enum WidgetCardCloseReason { Deactivated, Escape, Action, ClickOutside, CloseButton }
 
 // Everything the card draws, handed in by WidgetCardPresenter on every show and every refresh. Immutable,
 // so a paint never races a concurrent update.
@@ -79,9 +81,9 @@ internal sealed record WidgetCardModel(
 // toggled at run time, so the two modes cannot be the same live window. Everything notice mode needs beyond
 // CreateParams/WndProc/ShowWithoutActivation (already wired for it before this) is guarded on the _notice
 // field directly, in place: the Where line reads "Case open" always (OnPaint), Enter/Escape/Tab do nothing
-// (OnKeyDown), no focus rectangle is ever painted (DrawButton/DrawSwitch), and a click that misses both the
-// button and the switch closes it (OnMouseUp) since a notice-mode card is never activated and so never
-// deactivates either.
+// (OnKeyDown), no focus rectangle is ever painted (DrawButton/DrawSwitch), a close button (the Cancel glyph) stands
+// where the gear is and closes it, and a click that misses the controls closes it too (OnMouseUp), since a
+// notice-mode card is never activated and so never deactivates either.
 internal sealed partial class WidgetCard : Form
 {
     // The accent used until something supplies the system's own (AccentSource): the Windows default blue,
@@ -158,7 +160,13 @@ internal sealed partial class WidgetCard : Form
     // is observed: the card hides itself first, see RequestClose) and does its own bookkeeping.
     public event EventHandler<WidgetCardCloseReason>? CloseRequested;
 
+    // A notice-mode card is shown without being activated: the property says whether a form is activated when it is shown,
+    // so even the show itself takes no focus (and WS_EX_NOACTIVATE and MA_NOACTIVATE keep it so afterwards).
+    // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.form.showwithoutactivation
     protected override bool ShowWithoutActivation => _notice;
+
+    // For tests.
+    internal bool ShowsWithoutActivationForTest => ShowWithoutActivation;
 
     protected override CreateParams CreateParams
     {
@@ -375,7 +383,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         return WidgetCardLayout.Compute(
-            _dpi, model.ShowSwitch, showGear: !_notice, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, showRefresh: !_notice,
+            _dpi, model.ShowSwitch, showGear: true, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, showRefresh: !_notice,
             textScale: _look.TextScale);
     }
 
@@ -741,6 +749,17 @@ internal sealed partial class WidgetCard : Form
         }
 
         DrawRefreshIcon(g, layout);
+        if (_notice)
+        {
+            // The case-open card's close button: the Cancel glyph, or the clear button's own cross without the font.
+            if (!CardPaint.TryGlyph(g, FluentGlyphs.Cancel, layout.Gear, colours.Text, _dpi))
+            {
+                CardPaint.IconButton(g, layout.Gear, GlyphKind.Cross, enabled: true, colours, _dpi, focused: false, bordered: false);
+            }
+
+            return;
+        }
+
         if (!CardPaint.TryGlyph(g, FluentGlyphs.Settings, layout.Gear, colours.Text, _dpi))
         {
             CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
@@ -815,7 +834,12 @@ internal sealed partial class WidgetCard : Form
         }
         else if (_focus == WidgetCardFocus.Gear)
         {
-            if (!_mainLayout.Gear.IsEmpty)
+            if (_notice)
+            {
+                // The notice's close button, in the gear's place.
+                RequestClose(WidgetCardCloseReason.CloseButton);
+            }
+            else if (!_mainLayout.Gear.IsEmpty)
             {
                 SettingsRequested?.Invoke(this, EventArgs.Empty);
             }

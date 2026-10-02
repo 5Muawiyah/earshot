@@ -41,6 +41,10 @@ internal static class FluentGlyphs
     public const char Repair = '\uE90F';
     public const char UpdateRestore = '\uE777';
     public const char Warning = '\uE7BA';
+    public const char Preview = '\uE8A0';
+    public const char ChevronDown = '\uE70D';
+    public const char ChevronUp = '\uE70E';
+    public const char CheckMark = '\uE73E';
 
     // The family to draw icons with, from the names the system lists: Segoe Fluent Icons, else Segoe MDL2 Assets,
     // else null (no icon). Names are compared whole and ignoring case; GDI+ cuts long family names at 31

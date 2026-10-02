@@ -46,6 +46,11 @@ public sealed class SettingsMigrationTests : IDisposable
         widget["LowBatteryThresholdPercent"] = 40;
         widget["CaseOpenCard"] = false;
         widget["LeftClickConnects"] = true;
+
+        // The members v1.4 added were not in the last release's file.
+        widget.Remove("CaseOpenCardOn");
+        widget.Remove("CaseOpenCardCloseSeconds");
+        widget.Remove("CaseOpenCardDisplays");
         File.WriteAllText(SettingsPath, root.ToJsonString());
 
         var store = new JsonSettingsStore(SettingsPath, _log);
@@ -63,6 +68,7 @@ public sealed class SettingsMigrationTests : IDisposable
         Assert.IsFalse(loaded.Widget.LowBatteryAlert);
         Assert.AreEqual(40, loaded.Widget.LowBatteryThresholdPercent);
         Assert.IsFalse(loaded.Widget.CaseOpenCard, "A member the widget no longer reads is still kept, as the file wrote it.");
+        Assert.IsTrue(loaded.Widget.CaseOpenCardOn, "The file has no CaseOpenCardOn, so the case-open card is on.");
         Assert.IsTrue(loaded.Widget.LeftClickConnects);
     }
 
@@ -84,6 +90,49 @@ public sealed class SettingsMigrationTests : IDisposable
         Assert.AreEqual(defaults.LowBatteryThresholdPercent, loaded.Widget.LowBatteryThresholdPercent);
         Assert.IsTrue(loaded.PauseWhenAirPodsLeave);
         Assert.IsFalse(loaded.CheckForUpdatesAutomatically);
+    }
+
+    // Up to v1.3 the case-open card could never show and its switch was hidden, so an old file's CaseOpenCard, on or off, was
+    // never the owner's choice of this card: a file without the v1.4 member has the card on (the owner's decision for
+    // existing installs), with its close and display choices at their defaults. The old member is kept as written.
+    [TestMethod]
+    public void AnOlderFileHasTheCaseOpenCardOnWhateverItsOldMemberSaid()
+    {
+        foreach (bool old in new[] { false, true })
+        {
+            new JsonSettingsStore(SettingsPath, _log).Update(s => s.Widget = s.Widget with { Enabled = true });
+            JsonNode root = JsonNode.Parse(File.ReadAllText(SettingsPath))!;
+            JsonObject widget = root["Widget"]!.AsObject();
+            widget.Remove("CaseOpenCardOn");
+            widget.Remove("CaseOpenCardCloseSeconds");
+            widget.Remove("CaseOpenCardDisplays");
+            widget["CaseOpenCard"] = old;
+            File.WriteAllText(SettingsPath, root.ToJsonString());
+
+            WidgetSettings loaded = new JsonSettingsStore(SettingsPath, _log).Current.Widget;
+
+            Assert.IsTrue(loaded.CaseOpenCardOn, "On, with the old member " + old + ".");
+            Assert.AreEqual(old, loaded.CaseOpenCard, "The old member is kept as the file wrote it.");
+            Assert.AreEqual(CaseOpenCardClose.UntilCaseCloses, loaded.CaseOpenCardCloseSeconds);
+            Assert.IsEmpty(loaded.CaseOpenCardDisplays);
+        }
+    }
+
+    // Once v1.4 has saved the owner's own choice, it stands: off stays off, and the close and display choices load as saved.
+    [TestMethod]
+    public void TheCaseOpenCardAsSavedByThisBuildLoadsAsSaved()
+    {
+        string id = @"\\?\DISPLAY#AAA0001#5&1a2b3c4d&0&UID100#{monitor-interface}";
+        new JsonSettingsStore(SettingsPath, _log).Update(s => s.Widget = s.Widget with
+        {
+            CaseOpenCardOn = false, CaseOpenCardCloseSeconds = 30, CaseOpenCardDisplays = [id],
+        });
+
+        WidgetSettings loaded = new JsonSettingsStore(SettingsPath, _log).Current.Widget;
+
+        Assert.IsFalse(loaded.CaseOpenCardOn);
+        Assert.AreEqual(30, loaded.CaseOpenCardCloseSeconds);
+        CollectionAssert.AreEqual(new[] { id }, loaded.CaseOpenCardDisplays);
     }
 
     // A member this build never heard of (an earlier build's, or a later one's) is skipped, not an error.

@@ -74,7 +74,7 @@ internal sealed class UpdateTrayHarness : IDisposable
                 s.PinnedAddress = AirPodsAddress;
             }
 
-            s.Widget = s.Widget with { Enabled = false, ShowOnTaskbar = false, LowBatteryAlert = false, CaseOpenCard = false, AutoPause = false };
+            s.Widget = s.Widget with { Enabled = false, ShowOnTaskbar = false, LowBatteryAlert = false, CaseOpenCard = false, CaseOpenCardOn = false, AutoPause = false };
             settings?.Invoke(s);
         });
 

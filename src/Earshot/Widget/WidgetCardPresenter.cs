@@ -481,6 +481,15 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             case DisplayChange display:
                 _host.SetGaugeDisplay(display.Id, place);
                 break;
+            case CaseCardCloseChange close:
+                _host.SetCaseOpenCardClose(close.Seconds, place);
+                break;
+            case CaseCardDisplaysChange displays:
+                _host.SetCaseOpenCardDisplays(displays.Stored, place);
+                break;
+            case CaseCardDisplayChange box:
+                _host.SetCaseOpenCardDisplay(box.Id, box.On, place);
+                break;
             case OrderChange order:
                 _host.SetGaugeOrder(order.Value, place);
                 break;
@@ -545,6 +554,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 break;
             case SettingsRowId.MicrophoneOff:
                 _host!.SetHandsFreeMicrophoneOff(toggle.On, place);
+                break;
+            case SettingsRowId.CaseCard:
+                _host!.SetCaseOpenCard(toggle.On, place);
                 break;
         }
     }

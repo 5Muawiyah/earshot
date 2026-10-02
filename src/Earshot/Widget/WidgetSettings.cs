@@ -47,9 +47,34 @@ public sealed record WidgetSettings
 
     public int LowBatteryThresholdPercent { get; set; } = DefaultLowBatteryThresholdPercent; // 10 to 90 in steps of 10
 
-    // No longer read: the lid is not used and the case-open card stays off. Kept as a member so an older settings
-    // file still loads and what it held is written back unchanged.
+    // No longer read. Up to v1.3 the case-open card could never show (nothing raised it) and its menu item and settings row
+    // were hidden, so a value saved here, on or off, was never the owner's choice of the card that v1.4 shows. Kept as a
+    // member so an older settings file still loads and what it held is written back unchanged; CaseOpenCardOn below is
+    // what is read now.
     public bool CaseOpenCard { get; set; } = true;
+
+    // The case-open card (CaseOpenCardPresenter): on by default, for a new install and an existing one alike (the owner's
+    // decision of 2 October 2026). A new member rather than the old one above, so a file that never held it, which is every
+    // file written before v1.4, reads as on, whatever the old member says.
+    public bool CaseOpenCardOn { get; set; } = true;
+
+    // When the case-open card closes by itself: 0 for when the case closes (the default), or after 5, 10, 30 or 60
+    // seconds. The case closing, the card's close button and a click on its Connect button close it whatever this says.
+    public int CaseOpenCardCloseSeconds { get; set; } = CaseOpenCardClose.UntilCaseCloses;
+
+    // Which displays show the case-open card: empty for where the gauge is (the default), CaseOpenCardDisplays.All alone
+    // for every display, or the stored identities of the chosen displays (DisplayInfo.Id, the monitor's device interface
+    // path, as GaugeDisplay stores one).
+    //
+    // An empty list is always the one shared empty array, however it was made (a file read gives a new one): a record
+    // compares an array by reference, so this keeps a setting read back at its default equal to the default.
+    public string[] CaseOpenCardDisplays
+    {
+        get => _caseOpenCardDisplays;
+        set => _caseOpenCardDisplays = value is { Length: 0 } ? [] : value;
+    }
+
+    private string[] _caseOpenCardDisplays = [];
 
     public bool LeftClickConnects { get; set; }                // false: a left click opens the card
 
@@ -71,11 +96,11 @@ public sealed record WidgetSettings
 
     public static WidgetSettings Default => new();
 
-    // Recomputes Enabled from the three consumers (ShowOnTaskbar, LowBatteryAlert, AutoPause):
+    // Recomputes Enabled from the four consumers (ShowOnTaskbar, LowBatteryAlert, AutoPause, CaseOpenCardOn):
     // called after any write to one of them, so Enabled - the flag the watcher itself reads - always tells
     // the truth about whether something still needs it, never just mirroring whichever one was last touched.
     public WidgetSettings WithWatcherRecomputed() =>
-        this with { Enabled = ShowOnTaskbar || LowBatteryAlert || AutoPause };
+        this with { Enabled = ShowOnTaskbar || LowBatteryAlert || AutoPause || CaseOpenCardOn };
 
     // A threshold that is not a multiple of 10 or is outside 10 to 90 (the same list the menu itself
     // offers) becomes the default and is recorded; the label has its control, format and separator
@@ -138,7 +163,34 @@ public sealed record WidgetSettings
             display = "";
         }
 
-        WidgetSettings result = this with { LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label, GaugePosition = position, GaugeOrder = order, GaugeDisplay = display };
+        int closeSeconds = CaseOpenCardCloseSeconds;
+        if (!CaseOpenCardClose.IsChoice(closeSeconds))
+        {
+            list.Add(new StepOutcome(
+                "clamp:CaseOpenCardCloseSeconds",
+                Ok: true,
+                Code: 0,
+                CodeName: "S_OK",
+                Detail: closeSeconds.ToString(CultureInfo.InvariantCulture) + " is not one of the case-open card's close choices, so it closes when the case closes."));
+            closeSeconds = CaseOpenCardClose.UntilCaseCloses;
+        }
+
+        string[] cardDisplays = CaseOpenCardDisplayChoice.Cleaned(CaseOpenCardDisplays, out bool displaysChanged);
+        if (displaysChanged)
+        {
+            list.Add(new StepOutcome(
+                "clamp:CaseOpenCardDisplays",
+                Ok: true,
+                Code: 0,
+                CodeName: "S_OK",
+                Detail: "the case-open card's displays held a value that is not a display identity, so it was left out."));
+        }
+
+        WidgetSettings result = this with
+        {
+            LowBatteryThresholdPercent = threshold, OtherDeviceLabel = label, GaugePosition = position, GaugeOrder = order, GaugeDisplay = display,
+            CaseOpenCardCloseSeconds = closeSeconds, CaseOpenCardDisplays = cardDisplays,
+        };
         notes = list;
         return result;
     }

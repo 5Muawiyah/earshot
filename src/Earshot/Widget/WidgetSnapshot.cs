@@ -47,6 +47,11 @@ public sealed class CaseOpenedEventArgs(DateTimeOffset at) : EventArgs
     public DateTimeOffset At { get; } = at;
 }
 
+public sealed class CaseClosedEventArgs(DateTimeOffset at) : EventArgs
+{
+    public DateTimeOffset At { get; } = at;
+}
+
 // Every reading of the chosen set, decoded, as WidgetStatusService applied it to its own state.
 public sealed class ReadingAppliedEventArgs(DecodedReading reading, DateTimeOffset at, long selectionGeneration = 0) : EventArgs
 {

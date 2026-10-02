@@ -16,7 +16,7 @@ public sealed class WidgetCardSettingsTests
     private static readonly SettingsRowId[] RowOrder =
     [
         SettingsRowId.GaugePosition, SettingsRowId.GaugeDisplay, SettingsRowId.GaugeOrder, SettingsRowId.OtherDevice, SettingsRowId.PauseBud, SettingsRowId.PauseLeave,
-        SettingsRowId.LowBattery, SettingsRowId.LeftClick, SettingsRowId.HandBack, SettingsRowId.MicrophoneOff, SettingsRowId.Connect, SettingsRowId.Disconnect, SettingsRowId.OpenCard,
+        SettingsRowId.LowBattery, SettingsRowId.CaseCard, SettingsRowId.LeftClick, SettingsRowId.HandBack, SettingsRowId.MicrophoneOff, SettingsRowId.Connect, SettingsRowId.Disconnect, SettingsRowId.OpenCard,
         SettingsRowId.CheckForUpdates, SettingsRowId.CheckAutomatically,
     ];
 
@@ -36,7 +36,7 @@ public sealed class WidgetCardSettingsTests
 
             string[] expectedShape =
             [
-                "GaugePosition", "GaugeDisplay", "GaugeOrder", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "LeftClick", "HandBack",
+                "GaugePosition", "GaugeDisplay", "GaugeOrder", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "CaseCard", "LeftClick", "HandBack",
                 "MicrophoneOff", "Divider", "Head:Shortcuts", "Connect", "Disconnect", "OpenCard", "Divider", "Head:Updates", "CheckForUpdates", "CheckAutomatically",
             ];
             CollectionAssert.AreEqual(expectedShape, shape);
@@ -44,7 +44,7 @@ public sealed class WidgetCardSettingsTests
             string[] expectedLabels =
             [
                 "Position", "Display", "Order", "Other device", "Pause on removal", "Pause on leave",
-                "Low battery", "Click connects", "Hand back", "Microphone off", "Connect", "Disconnect", "Card",
+                "Low battery", "Case-open card", "Click connects", "Hand back", "Microphone off", "Connect", "Disconnect", "Card",
                 "Version 1.1.0", "Auto check",
             ];
             CollectionAssert.AreEqual(expectedLabels, labels);
@@ -398,6 +398,7 @@ public sealed class WidgetCardSettingsTests
     [DataRow("LeftClick", "leftClick:True")]
     [DataRow("HandBack", "handBack:False")]
     [DataRow("CheckAutomatically", "checkAuto:True")]
+    [DataRow("CaseCard", "caseCard:False")]
     public void EachToggleFlipsItsOwnSettingAndNothingElse(string rowName, string expected)
     {
         RunSettings(page =>
@@ -413,6 +414,40 @@ public sealed class WidgetCardSettingsTests
             CardKit.Click(page.Card, CardKit.Part(page.Card, row, SettingsPart.Toggle));
             Assert.AreEqual(before, page.Host.Values, "A second click puts it back.");
         });
+    }
+
+    // The case-open card's row: its chevron opens the expander, whose close choice steps through the five times, whose displays
+    // choice steps between where the gauge is and all displays, and whose boxes (one per display, with more than one) tick a
+    // display in or out. Each press saves through the host; the chevron only changes the page.
+    [TestMethod]
+    public void TheCaseOpenCardRowExpandsToItsCloseAndDisplayChoices()
+    {
+        const string one = @"\\?\DISPLAY#AAA0001#5&1a2b3c4d&0&UID100#{monitor-interface}";
+        const string two = @"\\?\DISPLAY#BBB0002#5&1a2b3c4d&0&UID104#{monitor-interface}";
+        RunSettings(
+            page =>
+            {
+                Assert.IsFalse(page.Card.CurrentSettingsLayout!.Items.Any(i => i.Row == SettingsRowId.CaseCardClose), "Collapsed at first.");
+
+                CardKit.ClickPart(page.Card, SettingsRowId.CaseCard, SettingsPart.Expand);
+                Assert.IsTrue(page.Card.CaseCardExpanded);
+                Assert.IsEmpty(page.Host.Calls, "Opening the expander saves nothing.");
+
+                CardKit.ClickPart(page.Card, SettingsRowId.CaseCardClose, SettingsPart.Choice);
+                CardKit.ClickPart(page.Card, SettingsRowId.CaseCardDisplays, SettingsPart.Choice);
+                CardKit.AssertCalls(page.Host, "caseCardClose:5", "caseCardDisplays:" + CaseOpenCardDisplayChoice.All);
+
+                page.Host.Calls.Clear();
+                SettingsItem box = page.Card.CurrentSettingsLayout!.Items.Single(i => i.Row == SettingsRowId.CaseCardDisplay && i.Index == 1);
+                page.Card.ScrollSettingsToForTest(box.Bounds.Top - page.Card.CurrentSettingsLayout.Frame.Body.Y);
+                CardKit.Click(page.Card, new Rectangle(box.A.X, box.A.Y - page.Card.SettingsScrollOffset, box.A.Width, box.A.Height));
+                CardKit.AssertCalls(page.Host, "caseCardDisplay:" + two + ":False");
+            },
+            host => host.Values = host.Values with
+            {
+                CaseOpenCardDisplayOptions = [new DisplayOption(one, "Display 1 (1920 x 1080)"), new DisplayOption(two, "Display 2 (1920 x 1080)")],
+                CaseOpenCardShownOn = [one, two],
+            });
     }
 
     [TestMethod]

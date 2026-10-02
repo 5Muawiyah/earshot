@@ -58,6 +58,8 @@ public sealed class CompositionRootAutoPauseTests
 
         public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
+        public event EventHandler<CaseClosedEventArgs>? CaseClosed { add { } remove { } }
+
         public event EventHandler<ReadingAppliedEventArgs>? ReadingApplied;
 
 

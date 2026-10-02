@@ -24,7 +24,7 @@ internal sealed partial class WidgetCard
     {
         if (_notice)
         {
-            return [];
+            return NoticeControls();
         }
 
         if (OnSettingsPage)
@@ -81,6 +81,27 @@ internal sealed partial class WidgetCard
         return list;
     }
 
+    // The case-open card's two buttons, for a screen reader. Never focused: the card is never activated (WS_EX_NOACTIVATE)
+    // and takes no keys, so a screen reader reaches them by its own navigation and presses them through DoDefaultAction.
+    private List<CardControl> NoticeControls()
+    {
+        WidgetCardLayout.Layout layout = _mainLayout;
+        var list = new List<CardControl>
+        {
+            new(
+                _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, CardControlRole.PushButton, layout.Button, null, false, false,
+                false, _model.ButtonEnabled, () => Press(WidgetCardFocus.Button)),
+        };
+        if (!layout.Gear.IsEmpty)
+        {
+            list.Add(new CardControl(
+                WidgetCopy.TipCloseCard, CardControlRole.PushButton, layout.Gear, WidgetCopy.TipCloseCard, true, false, false, true,
+                () => Press(WidgetCardFocus.Gear)));
+        }
+
+        return list;
+    }
+
     private void Press(WidgetCardFocus target)
     {
         _focus = target;
@@ -118,13 +139,13 @@ internal sealed partial class WidgetCard
         // Bounds come in the page's own positions; the back button is in the header and stays, every other control is where the
         // scroll has put it. One that is wholly outside the body is off screen.
         Rectangle viewport = SettingsViewport;
-        void Add(SettingsTarget stop, Rectangle bounds, CardControlRole role, bool isChecked, bool focused)
+        void Add(SettingsTarget stop, Rectangle bounds, CardControlRole role, bool isChecked, bool focused, string? name = null)
         {
-            bool iconOnly = stop.Part is SettingsPart.Back or SettingsPart.Clear or SettingsPart.Tile;
+            bool iconOnly = stop.Part is SettingsPart.Back or SettingsPart.Clear or SettingsPart.Tile or SettingsPart.Expand;
             Rectangle drawn = stop.Part == SettingsPart.Back ? bounds : Scrolled(bounds);
             bool offscreen = stop.Part != SettingsPart.Back && !drawn.IntersectsWith(viewport);
             list.Add(new CardControl(
-                SettingsRows.NameOf(stop.Row, stop.Part, stop.Index), role, drawn, SettingsRows.TipOf(stop.Row, stop.Part, stop.Index), iconOnly, isChecked,
+                name ?? SettingsRows.NameOf(stop.Row, stop.Part, stop.Index), role, drawn, SettingsRows.TipOf(stop.Row, stop.Part, stop.Index), iconOnly, isChecked,
                 focus && focused, true, () => ActivateSettingsTarget(stop), offscreen));
         }
 
@@ -136,7 +157,7 @@ internal sealed partial class WidgetCard
                 continue;
             }
 
-            SettingsItem item = layout.Items.First(i => i.Kind == SettingsItemKind.Row && i.Row == stop.Row);
+            SettingsItem item = layout.Items.First(i => IsItemOf(i, stop));
             if (stop.Part == SettingsPart.Tile)
             {
                 for (int i = 0; i < item.Tiles.Count; i++)
@@ -145,6 +166,14 @@ internal sealed partial class WidgetCard
                     Add(tile, item.Tiles[i], CardControlRole.RadioButton, i == (int)GaugeOrders.FromStored(values.GaugeOrder), _settingsFocus.SameStop(tile) && _settingsFocus.Index == i);
                 }
 
+                continue;
+            }
+
+            if (stop.Part == SettingsPart.Check)
+            {
+                // A display's box says which display it is.
+                Add(stop, PartRectangle(item, stop.Part), CardControlRole.CheckButton, values.CaseOpenCardShownOnDisplay(stop.Index),
+                    _settingsFocus.SameStop(stop), WidgetCopy.SettingsCaseCard + ": " + item.Label);
                 continue;
             }
 
@@ -361,6 +390,27 @@ internal sealed partial class WidgetCard
     }
 
     // ---- Accessibility
+
+    private readonly List<string> _announced = [];
+
+    // What the card has announced, in order, for tests.
+    internal IReadOnlyList<string> AnnouncedForTest => _announced;
+
+    // The case-open card's announcement: a UI Automation notification raised from the card's own element, so a screen reader
+    // says it once without the card taking the focus (it never takes it). The presenter calls this once per open. False when
+    // there is no window yet or UI Automation did not take it; the text is recorded either way.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.accessibleobject.raiseautomationnotification
+    // https://learn.microsoft.com/en-us/windows/win32/api/uiautomationcoreapi/nf-uiautomationcoreapi-uiaraisenotificationevent
+    internal bool Announce(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        _announced.Add(text);
+        return IsHandleCreated &&
+            AccessibilityObject.RaiseAutomationNotification(
+                System.Windows.Forms.Automation.AutomationNotificationKind.Other,
+                System.Windows.Forms.Automation.AutomationNotificationProcessing.ImportantMostRecent,
+                text);
+    }
 
     protected override AccessibleObject CreateAccessibilityInstance() => new CardAccessibleObject(this);
 

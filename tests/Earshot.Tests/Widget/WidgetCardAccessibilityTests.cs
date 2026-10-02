@@ -196,13 +196,19 @@ public sealed class WidgetCardAccessibilityTests
     }
 
     [TestMethod]
-    public void ANoticeCardHasNoControlsToReach()
+    // The case-open card describes its two buttons to a screen reader, which presses them by its own navigation; neither is
+    // ever focused, since the card never takes the focus.
+    public void ANoticeCardDescribesItsButtonAndItsCloseButtonAndFocusesNeither()
     {
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard notice = CardKit.NewCard(dark: false, notice: true);
             notice.Render(CardKit.MainModel(), 96);
-            Assert.AreEqual(0, notice.CurrentControls().Count);
+            IReadOnlyList<CardControl> controls = notice.CurrentControls();
+            Assert.HasCount(2, controls);
+            Assert.AreEqual(WidgetCopy.TipCloseCard, controls[1].Name);
+            Assert.IsTrue(controls[1].IconOnly);
+            Assert.IsTrue(controls.All(c => !c.Focused));
         });
     }
 

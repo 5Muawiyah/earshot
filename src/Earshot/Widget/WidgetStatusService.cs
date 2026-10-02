@@ -74,6 +74,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private ITimer? _countersLogTimer;
     private ITimer? _headsetTimer;
     private ITimer? _linkTimer;
+
+    // Due when the linked pair's case counts as closed if no case-known message comes first (CaseOpenTracker.CloseDueAt).
+    private ITimer? _caseCloseTimer;
     private WidgetCounters? _lastLoggedCounters;
     private WidgetWatcherState? _lastLoggedWatcherState;
 
@@ -101,7 +104,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private DateTimeOffset? _lastChosenAt;
     private bool _lidOpenBitSeen;
     private bool _lastLidOpenState;
-    private int? _lastLidCounter;
+
+    // Whether the linked pair's case is open, and whether CaseOpened has been raised for an open that has not yet been
+    // followed by CaseClosed. Read and written only under _gate.
+    private readonly CaseOpenTracker _caseOpen = new();
+    private bool _caseOpenRaised;
     private bool _thisPcActive;
     private WidgetWatcherState _watcherState = WidgetWatcherState.NotStarted;
     private int? _watcherErrorCode;
@@ -192,9 +199,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     public event EventHandler? Changed;
 
-    // Raised when the lid opens, which needs a lid bit or counter in the decode table. The documented table has
-    // neither, so nothing raises it today.
+    // Raised when the linked pair's case opens (CaseOpenTracker: its case-known messages starting after silence, a link
+    // made by a case open, or its lid open counter changing while it stays open), and once more for every further open.
     public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
+
+    // Raised once after a CaseOpened when the linked pair's case-known messages have stopped for CaseOpenTracker.CloseAfter,
+    // or the link that was open was dropped or replaced by nothing.
+    public event EventHandler<CaseClosedEventArgs>? CaseClosed;
 
     // Raised for every reading of the linked set, and of no other: the seam auto-pause is fed from. Auto-pause itself acts
     // only while the AirPods are this PC's output.
@@ -360,6 +371,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _headsetTimer = null;
             _linkTimer?.Dispose();
             _linkTimer = null;
+            _caseCloseTimer?.Dispose();
+            _caseCloseTimer = null;
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
@@ -1218,7 +1231,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             DecodedReading reading = ProximityDecoder.Decode(message, _table, at);
             CheckBudOrderLocked(reading, tag, at);
-            caseOpenedEdge = ApplyDecodedReadingLocked(reading, _table, at);
+            ApplyDecodedReadingLocked(reading, _table, at);
+            caseOpenedEdge = ObserveCaseLocked(tag, message, reading, at);
             toSave = RecordLastReadingLocked(reading, message.Model, at);
             applied = reading;
             generation = _selectionGeneration;
@@ -1370,12 +1384,89 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _lastChosenAt = null;
         _lidOpenBitSeen = false;
         _lastLidOpenState = false;
-        _lastLidCounter = null;
+
+        // A case that was open was another pair's, or a pair no longer linked: PublishAndNotify raises CaseClosed for it
+        // unless the message that made the new link opens it again.
+        _caseOpen.Reset();
     }
 
-    // Must be called holding _gate. Returns true when this reading raised the lid's rising edge or a new
-    // counter value, for CaseOpened.
-    private bool ApplyDecodedReadingLocked(DecodedReading reading, ProximityDecodeTable table, DateTimeOffset at)
+    // Must be called holding _gate. Feeds the case-open tracker one message of the linked set, keeps the close timer due
+    // at the tracker's close time, and returns true when this message is an open, for CaseOpened.
+    private bool ObserveCaseLocked(uint tag, ProximityMessage message, DecodedReading reading, DateTimeOffset at)
+    {
+        CaseOpenStep step = _caseOpen.Observe(tag, BroadcastSenderSets.CaseKnown(message), reading.LidCounter, at);
+        if (step == CaseOpenStep.Opened)
+        {
+            _caseOpenRaised = true;
+        }
+
+        ScheduleCaseCloseLocked();
+        return step == CaseOpenStep.Opened;
+    }
+
+    // Must be called holding _gate. Silence brings no message, so a timer due at the tracker's close time notices it.
+    private void ScheduleCaseCloseLocked()
+    {
+        if (_closed || _caseOpen.CloseDueAt is not { } due)
+        {
+            return;
+        }
+
+        TimeSpan wait = due - _timeProvider.GetUtcNow();
+        if (wait < TimeSpan.Zero)
+        {
+            wait = TimeSpan.Zero;
+        }
+
+        _caseCloseTimer ??= _timeProvider.CreateTimer(
+            static state => ((WidgetStatusService)state!).OnCaseCloseDue(), this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _caseCloseTimer.Change(wait, Timeout.InfiniteTimeSpan);
+    }
+
+    // Runs on a real timer thread, so like the other timers it catches what nothing else would, logs it with its code and
+    // never lets it end the process.
+    private void OnCaseCloseDue()
+    {
+        try
+        {
+            lock (_gate)
+            {
+                if (_closed)
+                {
+                    return;
+                }
+
+                if (!_caseOpen.Expire(_timeProvider.GetUtcNow()))
+                {
+                    // A message came after the timer was set and moved the close time on.
+                    ScheduleCaseCloseLocked();
+                    return;
+                }
+            }
+
+            PublishAndNotify();
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Widget case close check failed with an unexpected error (0x" + ex.HResult.ToString("X8") + ").", ex);
+        }
+    }
+
+    // Must be called holding _gate. True once for every CaseOpened whose case has since closed (by the cadence, or a link
+    // that was dropped or replaced), and never twice for one.
+    private bool TakeCaseClosedLocked()
+    {
+        if (_caseOpenRaised && !_caseOpen.IsOpen)
+        {
+            _caseOpenRaised = false;
+            return true;
+        }
+
+        return false;
+    }
+
+    // Must be called holding _gate. Merges one decoded reading of the linked set into what is shown.
+    private void ApplyDecodedReadingLocked(DecodedReading reading, ProximityDecodeTable table, DateTimeOffset at)
     {
         _left = MergePart(_left, reading.Left);
         _right = MergePart(_right, reading.Right);
@@ -1397,23 +1488,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _earReadAt = at;
         }
 
-        bool caseOpenedEdge = false;
+        // A lid bit is only ever in a test's table (none is documented): it is shown in the snapshot and nothing acts on it.
+        // Opens come from CaseOpenTracker alone.
         if (table.LidOpenBit is not null && reading.LidOpen is bool lidOpen)
         {
             _lidOpenBitSeen = true;
-            caseOpenedEdge = lidOpen && !_lastLidOpenState;
             _lastLidOpenState = lidOpen;
         }
-        else if (table.LidCounterMask is not null && reading.LidCounter is int counter)
-        {
-            // Unlike the lid-bit path (an assumed-false baseline, so a true first reading is a genuine rising
-            // edge), there is no "previous" counter value to compare on the very first reading of the chosen set: it only
-            // establishes the baseline, and never raises CaseOpened by itself.
-            caseOpenedEdge = _lastLidCounter is int last && last != counter;
-            _lastLidCounter = counter;
-        }
-
-        return caseOpenedEdge;
     }
 
     private static PartReading MergePart(PartReading previous, PartReading incoming) =>
@@ -1642,6 +1723,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         WidgetSnapshot snapshot;
         bool changed;
+        bool caseClosed;
+        DateTimeOffset now;
         lock (_gate)
         {
             if (_closed)
@@ -1649,14 +1732,21 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 return; // nothing after Close raises Changed, whatever called this
             }
 
-            snapshot = BuildSnapshotLocked(_timeProvider.GetUtcNow());
+            now = _timeProvider.GetUtcNow();
+            snapshot = BuildSnapshotLocked(now);
             changed = SnapshotChangedIgnoringCounters(_lastPublished, snapshot);
             _lastPublished = snapshot;
+            caseClosed = TakeCaseClosedLocked();
         }
 
         if (changed)
         {
             _uiPost(() => Changed?.Invoke(this, EventArgs.Empty));
+        }
+
+        if (caseClosed)
+        {
+            _uiPost(() => CaseClosed?.Invoke(this, new CaseClosedEventArgs(now)));
         }
     }
 

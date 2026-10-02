@@ -26,6 +26,10 @@ internal static class SettingsRows
         SettingsRowId.CheckAutomatically => new(FluentGlyphs.UpdateRestore, WidgetCopy.TipAutoCheck, WidgetCopy.NameAutoCheck),
         SettingsRowId.MicrophoneOff => new(FluentGlyphs.MicOff, WidgetCopy.TipMicOff, WidgetCopy.NameMicOff),
         SettingsRowId.SoundSettings => new(FluentGlyphs.Settings, WidgetCopy.TipSoundSettings, WidgetCopy.NameSoundSettings),
+        SettingsRowId.CaseCard => new(FluentGlyphs.Preview, WidgetCopy.TipCaseCard, WidgetCopy.NameCaseCard),
+        SettingsRowId.CaseCardClose => new('\0', WidgetCopy.TipCaseCardClose, WidgetCopy.NameCaseCardClose),
+        SettingsRowId.CaseCardDisplays => new('\0', WidgetCopy.TipCaseCardDisplays, WidgetCopy.NameCaseCardDisplays),
+        SettingsRowId.CaseCardDisplay => new('\0', WidgetCopy.TipCaseCardDisplay, null),
         _ => new('\0', null, null),
     };
 
@@ -41,6 +45,7 @@ internal static class SettingsRows
         (SettingsRowId.Connect, SettingsPart.Clear) => WidgetCopy.NameClearConnectShortcut,
         (SettingsRowId.Disconnect, SettingsPart.Clear) => WidgetCopy.NameClearDisconnectShortcut,
         (SettingsRowId.OpenCard, SettingsPart.Clear) => ShortcutCopy.NameClearCardShortcut,
+        (SettingsRowId.CaseCard, SettingsPart.Expand) => WidgetCopy.NameCaseCardMore,
         (SettingsRowId.GaugeOrder, SettingsPart.Tile) => GaugeOrders.AccessibleName(GaugeOrders.FromStored((GaugeOrder)index)),
         _ => For(row).Name ?? string.Empty,
     };
@@ -52,6 +57,7 @@ internal static class SettingsRows
         (SettingsRowId.None, SettingsPart.Back) => WidgetCopy.TipBack,
         (SettingsRowId.Connect, SettingsPart.Clear) or (SettingsRowId.Disconnect, SettingsPart.Clear) or (SettingsRowId.OpenCard, SettingsPart.Clear) => WidgetCopy.TipClear,
         (SettingsRowId.GaugeOrder, SettingsPart.Tile) => GaugeOrders.AccessibleName(GaugeOrders.FromStored((GaugeOrder)index)),
+        (SettingsRowId.CaseCard, SettingsPart.Expand) => WidgetCopy.TipCaseCardMore,
         _ => For(row).Tip,
     };
 }

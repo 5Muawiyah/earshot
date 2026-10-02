@@ -93,6 +93,13 @@ internal sealed partial class TrayContext
                 GaugeDisplayNote = displayNote,
                 GaugeOrder = widget.GaugeOrder,
                 GaugePreview = GaugeContent.From(snapshot, _tray._time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel)),
+                CaseOpenCardOn = widget.CaseOpenCardOn,
+                CaseOpenCardCloseSeconds = widget.CaseOpenCardCloseSeconds,
+                CaseOpenCardDisplays = widget.CaseOpenCardDisplays,
+                CaseOpenCardDisplayOptions = displays.Displays
+                    .OrderBy(d => DisplayNames.Number(d, displays.Displays))
+                    .Select(d => new DisplayOption(d.Id, DisplayNames.Long(d, displays.Displays))).ToList(),
+                CaseOpenCardShownOn = CaseOpenCardDisplayChoice.Targets(widget.CaseOpenCardDisplays, widget.GaugeDisplay, displays.Displays).Select(d => d.Id).ToList(),
                 ElevatedRunNote = _tray._elevatedRun is { } run ? FinishingMessage(run) : null,
             };
         }
@@ -115,6 +122,42 @@ internal sealed partial class TrayContext
             }
 
             Write("gauge display (card)", s => s.Widget = s.Widget with { GaugeDisplay = id }, place);
+        }
+
+        // The case-open card's switch is the watcher's fourth consumer, so the watcher flag is recomputed with it.
+        public void SetCaseOpenCard(bool on, CardPlace place)
+        {
+            Write("case-open card (card)", s => s.Widget = (s.Widget with { CaseOpenCardOn = on }).WithWatcherRecomputed(), place);
+            if (!on)
+            {
+                _tray._caseOpenCardPresenter?.Hide();
+            }
+        }
+
+        public void SetCaseOpenCardClose(int seconds, CardPlace place) =>
+            Write("case-open card close (card)", s => s.Widget = s.Widget with { CaseOpenCardCloseSeconds = seconds }, place);
+
+        public void SetCaseOpenCardDisplays(IReadOnlyList<string> stored, CardPlace place)
+        {
+            string[] value = stored.ToArray();
+            Write("case-open card displays (card)", s => s.Widget = s.Widget with { CaseOpenCardDisplays = value }, place);
+        }
+
+        // A box ticked or cleared: the set is worked out from the displays the card goes on now, so ticking a second display
+        // keeps the first. A display that has gone since the page was drawn is not added.
+        public void SetCaseOpenCardDisplay(string id, bool on, CardPlace place)
+        {
+            IReadOnlyList<DisplayInfo> displays = _tray._displaySource.Read().Displays;
+            if (on && !displays.Any(d => string.Equals(d.Id, id, StringComparison.OrdinalIgnoreCase)))
+            {
+                _tray._log.Info("Case-open card: the display ticked on the settings page is no longer connected, so it was not added.");
+                _tray._widgetCardPresenter?.Refresh();
+                return;
+            }
+
+            WidgetSettings widget = _tray._registry.Settings.Current.Widget;
+            string[] value = CaseOpenCardDisplayChoice.WithDisplay(widget.CaseOpenCardDisplays, id, on, widget.GaugeDisplay, displays);
+            Write("case-open card displays (card)", s => s.Widget = s.Widget with { CaseOpenCardDisplays = value }, place);
         }
 
         public void SetOtherDeviceLabel(string value, CardPlace place)

@@ -138,15 +138,15 @@ public sealed class ProximityDecoderTests
     }
 
     [TestMethod]
-    public void InEarAndTheLidAreNotDecodedByTheDocumentedTable()
+    public void InEarAndALidBitAreNotDecodedByTheDocumentedTableButTheLidOpenCounterIs()
     {
-        DecodedReading reading = Decode(Message(status: 0xFF, lid: 0xFF));
+        DecodedReading reading = Decode(Message(status: 0xFF, lid: 0xA7));
 
         Assert.IsNull(reading.Left.InEar);
         Assert.IsNull(reading.Right.InEar);
         Assert.IsNull(reading.Case.InEar);
-        Assert.IsNull(reading.LidOpen);
-        Assert.IsNull(reading.LidCounter);
+        Assert.IsNull(reading.LidOpen, "No source documents a bit that says the lid is open.");
+        Assert.AreEqual(0xA7, reading.LidCounter, "The whole byte after the charging and case byte is the lid open counter.");
     }
 
     [TestMethod]
@@ -186,6 +186,6 @@ public sealed class ProximityDecoderTests
         Assert.IsNull(t.LeftInEarBit);
         Assert.IsNull(t.RightInEarBit);
         Assert.IsNull(t.LidOpenBit);
-        Assert.IsNull(t.LidCounterMask);
+        Assert.AreEqual((byte)0xFF, t.LidCounterMask);
     }
 }
