@@ -254,7 +254,7 @@ public sealed class AwaySceneTests : IDisposable
         Assert.IsFalse(text.Contains("AirPods", StringComparison.OrdinalIgnoreCase), "No name.");
 
         // Every member is one the file's shape allows, and none of them can hold an address or a name.
-        string[] allowed = ["SchemaVersion", "Left", "Right", "Case", "Rates", "Percent", "Charging", "ReadAt", "Model", "Part", "PercentPerHour", "MeasuredAt", "SpanMinutes", "Marks", "ReadPercent"];
+        string[] allowed = ["SchemaVersion", "Left", "Right", "Case", "Rates", "Percent", "Charging", "ReadAt", "Model", "Part", "PercentPerHour", "MeasuredAt", "SpanMinutes", "Marks", "ReadPercent", "Spent"];
         using var json = System.Text.Json.JsonDocument.Parse(text);
         var names = new List<string>();
         void Walk(System.Text.Json.JsonElement e)
