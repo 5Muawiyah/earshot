@@ -25,6 +25,9 @@ internal sealed record CardControl(
     public bool? Expanded { get; init; }
 
     public string? Description { get; init; }
+
+    // What a choice button currently says, which a screen reader reads as the control's value (the gauge position, the display).
+    public string? Value { get; init; }
 }
 
 internal sealed partial class WidgetCard
@@ -218,7 +221,7 @@ internal sealed partial class WidgetCard
         // Bounds come in the page's own positions; the back button is in the header and stays, every other control is where the
         // scroll has put it. One that is wholly outside the body is off screen.
         Rectangle viewport = SettingsViewport;
-        void Add(SettingsTarget stop, Rectangle bounds, CardControlRole role, bool isChecked, bool focused, string? name = null)
+        void Add(SettingsTarget stop, Rectangle bounds, CardControlRole role, bool isChecked, bool focused, string? name = null, string? value = null)
         {
             bool iconOnly = stop.Part is SettingsPart.Back or SettingsPart.Clear or SettingsPart.Tile or SettingsPart.Expand;
             Rectangle drawn = stop.Part == SettingsPart.Back ? bounds : Scrolled(bounds);
@@ -228,6 +231,7 @@ internal sealed partial class WidgetCard
                 focus && focused, true, () => ActivateSettingsTarget(stop), offscreen)
             {
                 Expanded = stop.Part == SettingsPart.Expand ? ExpandedOf(values, stop.Row) : null,
+                Value = value,
             });
         }
 
@@ -270,11 +274,20 @@ internal sealed partial class WidgetCard
                 SettingsPart.Toggle => ToggleValue(values, stop.Row),
                 _ => false,
             };
-            Add(stop, PartRectangle(item, stop.Part), role, isChecked, _settingsFocus.SameStop(stop));
+            string? value = stop.Part == SettingsPart.Choice ? ChoiceValue(values, stop.Row) : null;
+            Add(stop, PartRectangle(item, stop.Part), role, isChecked, _settingsFocus.SameStop(stop), value: value);
         }
 
         return list;
     }
+
+    // What a choice button on the page says now: the place of the gauge, the display it is on. A screen reader reads it as the value.
+    private static string? ChoiceValue(CardSettingsValues values, SettingsRowId row) => row switch
+    {
+        SettingsRowId.GaugePosition => values.GaugePosition == GaugePosition.RightEnd ? WidgetCopy.PositionRightEnd : WidgetCopy.PositionNextToApps,
+        SettingsRowId.GaugeDisplay => GaugeDisplayOptions.LabelFor(values.GaugeDisplayOptions, values.GaugeDisplayId),
+        _ => null,
+    };
 
     // Whether the row an expander belongs to is open, for a screen reader's expanded or collapsed.
     private static bool ExpandedOf(CardSettingsValues values, SettingsRowId row) => row switch
@@ -579,6 +592,12 @@ internal sealed partial class WidgetCard
         }
 
         public override string? Description => Target?.Description ?? Target?.Tip;
+
+        public override string? Value
+        {
+            get => Target?.Value;
+            set { }
+        }
 
         public override AccessibleRole Role => Target?.Role switch
         {

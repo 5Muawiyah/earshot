@@ -166,7 +166,10 @@ public sealed class WidgetCardAccessibilityTests
                 Assert.AreEqual(1, children.Count(c => c.Name == name), "One child called \"" + name + "\".");
             }
 
-            Assert.AreEqual(AccessibleRole.PushButton, children.Single(c => c.Name == "Gauge position").Role, "The position is a choice button, as the display is.");
+            AccessibleObject position = children.Single(c => c.Name == "Gauge position");
+            Assert.AreEqual(AccessibleRole.PushButton, position.Role, "The position is a choice button, as the display is.");
+            Assert.AreEqual(WidgetCopy.PositionRightEnd, position.Value, "Its value is the place the gauge is at, as the old radio's checked segment said.");
+            Assert.AreEqual(GaugeDisplayOptions.LabelFor(values.GaugeDisplayOptions, values.GaugeDisplayId), children.Single(c => c.Name == "Gauge display").Value, "And the display's is what its button says.");
             Assert.AreEqual(AccessibleRole.CheckButton, children.Single(c => c.Name == "Left click connects").Role);
             Assert.AreEqual(AccessibleRole.Text, children.Single(c => c.Name == "Other device name").Role);
         });

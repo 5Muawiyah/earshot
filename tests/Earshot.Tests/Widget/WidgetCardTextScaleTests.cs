@@ -167,7 +167,7 @@ public sealed class WidgetCardTextScaleTests
         SettingsLayout layout = SettingsPageLayout.Compute(FakeCardHost.Defaults() with { MoreExpanded = true }, 96, measure, 2.25);
         SettingsItem position = layout.Items.Single(i => i.Row == SettingsRowId.GaugePosition);
         Assert.IsGreaterThanOrEqualTo(position.LabelRect.Bottom, position.A.Top, "The choice sits under the label at 225% text.");
-        Assert.IsTrue(position.B.Right <= layout.Frame.Width);
+        Assert.IsLessThanOrEqualTo(layout.Frame.Width, position.A.Right, "The choice is inside the page.");
     }
 
     [TestMethod]
