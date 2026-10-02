@@ -175,6 +175,29 @@ public sealed class WidgetCardAccessibilityTests
         });
     }
 
+    // The value is what is chosen, not a fixed word: a position or a display other than the default reads as itself.
+    [TestMethod]
+    public void TheGaugePositionAndDisplayValuesFollowTheChoiceMade()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            const string first = @"\?\DISPLAY#AAA0001#5&1a2b3c4d&0&UID100#{monitor-interface}";
+            const string second = @"\?\DISPLAY#BBB0002#5&1a2b3c4d&0&UID104#{monitor-interface}";
+            CardSettingsValues values = FakeCardHost.Defaults() with
+            {
+                GaugePosition = GaugePosition.NextToApps,
+                GaugeDisplayOptions = [new DisplayOption(first, "Display 1 (1920 x 1080)"), new DisplayOption(second, "Display 2 (2560 x 1440)")],
+                GaugeDisplayId = second,
+            };
+            using WidgetCard card = ShownMain(CardKit.SettingsModel(values));
+            CardKit.OpenExpanders(card, more: true, order: false);
+            List<AccessibleObject> children = Children(card);
+
+            Assert.AreEqual(WidgetCopy.PositionNextToApps, children.Single(c => c.Name == "Gauge position").Value, "Next to the apps, not the right end.");
+            Assert.AreEqual("Display 2 (2560 x 1440)", children.Single(c => c.Name == "Gauge display").Value, "The second display, not the first or the main one.");
+        });
+    }
+
     [TestMethod]
     public void ChoosingAPictureThroughTheAccessibleObjectChoosesIt()
     {

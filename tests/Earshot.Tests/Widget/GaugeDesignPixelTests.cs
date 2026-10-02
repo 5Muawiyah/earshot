@@ -251,10 +251,10 @@ public sealed class GaugeDesignPixelTests
 
     // GDI+ anti-aliases an edge a little past the geometry it is given: probed on this machine (Windows 11, GDI+ with
     // SmoothingMode.AntiAlias and PixelOffsetMode.HighQuality), the ring's outer edge, which sits exactly on its box's edge, writes alpha
-    // 0x14 to 0x1D (8 to 11%) into the one pixel column to the right of the box in light and dark, and up to 0x2F (18%) under high
-    // contrast (a reviewer measured 0x20 there; this probe, run over every theme, scale and order, is the figure kept), and at most 1
-    // into the second column or into the column to its left. So that one column may hold alpha up to a little over the measured top
-    // (0x24, and 0x34 under high contrast) and every other pixel of a gap or padding must be clear.
+    // 0x14 to 0x1D (8 to 11%) into the one pixel column to the right of the box in light and dark, and 0x2F (18%) under high contrast
+    // (a second probe over every theme, scale and order read the same 0x1D, 0x1D and 0x2F), and at most 0x01 into the second column or
+    // into the column to its left. So that one column may hold alpha up to a little over the measured top (0x24, and 0x34 under high
+    // contrast) and every other pixel of a gap or padding must be clear.
     internal static int FringeAlphaCap(bool highContrast) => highContrast ? 0x34 : 0x24;
 
     // All six orders at the three scales: the ring's track, the value and the bolt are each where the layout puts them, and the gaps
