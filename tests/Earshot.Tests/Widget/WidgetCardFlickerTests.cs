@@ -313,6 +313,7 @@ public sealed class WidgetCardFlickerTests
             }
 
             Assert.IsFalse(card.Visible, "Sanity: the card closed.");
+            Assert.IsTrue(faded, "Sanity: the card faded on the way out (an alpha under 255 was set), so the check below is about a close that had a fade to get wrong.");
             Assert.IsEmpty(opaqueWhileVisible, "The card was set to full opacity while still on screen, which is a frame of the whole card at the end of every close. Calls: " + string.Join(", ", calls.TakeLast(5)));
         });
     }
