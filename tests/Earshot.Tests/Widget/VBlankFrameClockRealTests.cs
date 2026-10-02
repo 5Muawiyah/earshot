@@ -39,11 +39,14 @@ public sealed class VBlankFrameClockRealTests
     [TestMethod]
     public void TheRealClockDeliversFramesToTheUiThreadOrLogsWhyItCannotAndStillDoes()
     {
-        // A local session with a display must be paced by it; only a machine with no output to wait on (a hosted runner, a remote
-        // session) may answer with the unpaced fallback. Either way the outcome is recorded below.
+        // A local session with a screen must be paced by it; only a machine without one (a hosted runner, a remote session) may answer
+        // with the unpaced fallback. Either way the outcome is recorded below.
         bool hostedRunner = Environment.GetEnvironmentVariable("GITHUB_ACTIONS") is not null || Environment.GetEnvironmentVariable("CI") is not null;
         bool outputListed = DxgiListsAnOutput();
-        bool mustBePaced = !hostedRunner && outputListed;
+        // Decided without the component under test: DXGI's own listing is only recorded. A local session is one that is not a hosted
+        // runner, not a remote (terminal server) session, and has a screen.
+        bool localSession = !hostedRunner && !SystemInformation.TerminalServerSession && Screen.AllScreens.Length > 0;
+        bool mustBePaced = localSession;
 
         StaThread.Run(() =>
         {
@@ -113,7 +116,7 @@ public sealed class VBlankFrameClockRealTests
             RecordOutcome(outcome);
             if (mustBePaced)
             {
-                Assert.AreEqual(stamps.Count, pacedFrames, "A local session with a DXGI output is paced by it. " + outcome);
+                Assert.AreEqual(stamps.Count, pacedFrames, "A local session with a screen is paced by it. " + outcome);
                 Assert.IsFalse(warned, "And logs nothing. " + outcome);
             }
 

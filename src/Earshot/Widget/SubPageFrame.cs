@@ -178,7 +178,7 @@ internal static partial class CardPaint
     }
 
     // How many lines text takes when wrapped to width, at the given size, measured as Wrapped draws it; at least 1.
-    public static int Lines(Graphics g, string text, int width, CardType type, int pixelSize, bool bold, int lineHeight)
+    public static int Lines(Graphics g, string text, int width, CardType type, int pixelSize, bool bold)
     {
         TextRenderingHint before = g.TextRenderingHint;
         g.TextRenderingHint = CardTextHint;
@@ -190,7 +190,6 @@ internal static partial class CardPaint
             // The lines the format wraps it to, counted by GDI+ itself with room for as many as it needs. (Dividing the measured height
             // by a line height does not do: the drawing format's height has leading the line height of the layout does not, which
             // counted a one-line label as two.)
-            _ = lineHeight;
             _ = g.MeasureString(text, font, new SizeF(Math.Max(1, width), 100_000f), format, out _, out int lines);
             return Math.Max(1, lines);
         }

@@ -297,7 +297,7 @@ internal sealed class GraphicsTextMeasure(Graphics graphics, CardType type) : IC
     public int Width(string text, int pixelSize) => CardPaint.LineWidth(graphics, text, type, pixelSize, bold: false);
 
     public int Lines(string text, int width, int pixelSize, int lineHeight) =>
-        CardPaint.Lines(graphics, text, width, type, pixelSize, bold: false, lineHeight);
+        CardPaint.Lines(graphics, text, width, type, pixelSize, bold: false);
 }
 
 internal enum SettingsItemKind { Row, Divider, Head }

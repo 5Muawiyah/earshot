@@ -414,9 +414,9 @@ internal sealed partial class WidgetCard : Form
         int side = CardPlacement.Scale(WidgetCardLayout.BodySideAt96, _dpi);
         int contentWidth = CardPlacement.Scale(SubPageFrame.WidthAt96, _dpi) - (2 * side);
         int textWidth = contentWidth - CardPlacement.Scale(WidgetCardLayout.StatusIconAt96 + WidgetCardLayout.StatusIconGapAt96, _dpi);
-        int promptLines = setup.Prompt is null ? 1 : CardPaint.Lines(measure, setup.Prompt, contentWidth, _type, CardPlacement.Scale(14, _dpi), bold: true, CardPlacement.Scale(WidgetCardLayout.PromptLineAt96, _dpi));
-        int captionLines = setup.Caption is null ? 1 : CardPaint.Lines(measure, setup.Caption, contentWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
-        int subLines = setup.StatusSub is null ? 1 : CardPaint.Lines(measure, setup.StatusSub, textWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
+        int promptLines = setup.Prompt is null ? 1 : CardPaint.Lines(measure, setup.Prompt, contentWidth, _type, CardPlacement.Scale(14, _dpi), bold: true);
+        int captionLines = setup.Caption is null ? 1 : CardPaint.Lines(measure, setup.Caption, contentWidth, _type, CardPlacement.Scale(12, _dpi), bold: false);
+        int subLines = setup.StatusSub is null ? 1 : CardPaint.Lines(measure, setup.StatusSub, textWidth, _type, CardPlacement.Scale(12, _dpi), bold: false);
         int actionWidth = 0;
         if (setup.Rows is not null)
         {
@@ -430,7 +430,7 @@ internal sealed partial class WidgetCard : Form
             }
 
             int captionWidth = Math.Max(1, surfaceWidth - padding - CardPlacement.Scale(WidgetCardLayout.UpdatesTileAt96, _dpi) - (3 * gap) - actionWidth);
-            subLines = CardPaint.Lines(measure, UpdatesCaptionText(setup), captionWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
+            subLines = CardPaint.Lines(measure, UpdatesCaptionText(setup), captionWidth, _type, CardPlacement.Scale(12, _dpi), bold: false);
         }
 
         return WidgetCardLayout.Setup(setup, _dpi, promptLines, captionLines, subLines, _look.TextScale, actionWidth);
