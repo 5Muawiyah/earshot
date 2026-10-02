@@ -924,8 +924,9 @@ public sealed class InstallActionsTests
         Assert.AreEqual(AdvApi32.SERVICE_RUNNING, h.Service.State);
     }
 
-    // The owner's Task Manager showed the service by its raw name. A registration from an earlier install, with the raw name as its
-    // display name and an old description, is brought to the plan by the same install an update or a repair runs, and read back.
+    // A registration whose display name is the raw service name and whose description is an old one (an earlier or edited registration;
+    // the plan has carried the display name "Earshot hand-back" since the service was first added) is brought to the plan by the same
+    // install an update or a repair runs, and read back.
     [TestMethod]
     public void AnEarlierRegistrationWithTheRawNameAndAnOldDescriptionIsGivenTheDisplayNameAndDescriptionOfThePlan()
     {

@@ -156,8 +156,10 @@ internal static partial class CardPaint
     [ThreadStatic]
     internal static List<DrawnText>? DrawnTextLog;
 
-    internal static void NoteDrawn(string text, Rectangle bounds, Font font, StringFormat format) =>
-        DrawnTextLog?.Add(new DrawnText(text, bounds, font.FontFamily.Name, font.Size, font.Style, font.Unit, format.FormatFlags, format.Alignment, format.LineAlignment, format.Trimming));
+    // requestedPixels is the size the text was asked for: what it is drawn at is smaller when it was fitted to a narrow rectangle.
+    internal static void NoteDrawn(string text, Rectangle bounds, Font font, StringFormat format, int requestedPixels) =>
+        DrawnTextLog?.Add(new DrawnText(
+            text, bounds, font.FontFamily.Name, font.Size, font.Style, font.Unit, format.FormatFlags, format.Alignment, format.LineAlignment, format.Trimming, requestedPixels));
 
     // A line of text placed in bounds, cut with an ellipsis at a character when it is too long.
     internal static StringFormat SingleLineFormat(StringAlignment horizontal, StringAlignment vertical) =>
@@ -178,7 +180,7 @@ internal static partial class CardPaint
         using Font font = FittingFont(g, text, bounds, type, pixelSize, bold, format);
         using var brush = new SolidBrush(colour);
         g.DrawString(text, font, brush, bounds, format);
-        NoteDrawn(text, bounds, font, format);
+        NoteDrawn(text, bounds, font, format, pixelSize);
     }
 
     // The font at the asked size, or the largest smaller one (down to 55% of it) with which the whole text fits the rectangle.
@@ -227,7 +229,7 @@ internal static partial class CardPaint
         using var brush = new SolidBrush(colour);
         using StringFormat format = WrappedFormat();
         g.DrawString(text, font, brush, bounds, format);
-        NoteDrawn(text, bounds, font, format);
+        NoteDrawn(text, bounds, font, format, pixelSize);
     }
 
     // How many lines text takes when wrapped to width, at the given size, measured as Wrapped draws it; at least 1.
@@ -633,4 +635,4 @@ internal static partial class CardPaint
 // One piece of text as it was drawn: what, where, in which font and with which format.
 internal readonly record struct DrawnText(
     string Text, Rectangle Bounds, string FontFamily, float FontSize, FontStyle FontStyle, GraphicsUnit FontUnit,
-    StringFormatFlags Flags, StringAlignment Horizontal, StringAlignment Vertical, StringTrimming Trimming);
+    StringFormatFlags Flags, StringAlignment Horizontal, StringAlignment Vertical, StringTrimming Trimming, int RequestedPixels);

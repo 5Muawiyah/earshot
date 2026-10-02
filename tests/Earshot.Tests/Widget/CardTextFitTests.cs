@@ -6,11 +6,14 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// Every piece of text any page of the card draws is drawn whole: not cut short with an ellipsis because the rectangle it was given
-// was sized without looking at the words. The card records each piece of text as it draws it (CardPaint.DrawnTextLog: the words, the
-// rectangle, the font and the format), and each is measured here with GDI+'s own count of how many characters fit that rectangle, in
-// that font, with that format and the card's text hint. So the check is of what is drawn, not of the layout's opinion of it, and it
-// covers every page and every text, including one nobody thought to name. Text sizes 100% to 225% at display scales 100% to 200%.
+// Every piece of text a page of the card draws through CardPaint.Text, CardPaint.Wrapped and the card's own text helpers is drawn
+// whole: not cut short with an ellipsis because the rectangle it was given was sized without looking at the words. The card records
+// each piece as it draws it (CardPaint.DrawnTextLog: the words, the rectangle, the font, the format and the size asked for), and each
+// is measured here with GDI+'s own count of how many characters fit that rectangle, in that font, with that format and the card's text
+// hint. So the check is of what is drawn, not of the layout's opinion of it, and it covers the texts nobody thought to name. Not
+// recorded: the history chart's per-character figures (DrawTabular), the gauge's number, and glyphs. Text sizes 100% to 225% at display
+// scales 100% to 200%. A text that does not fit is drawn smaller, but only at the larger sizes: at 100% and 125% none may be, and at
+// no size may a text be smaller than the same text is at 100%.
 [TestClass]
 public sealed class CardTextFitTests
 {
@@ -71,6 +74,8 @@ public sealed class CardTextFitTests
         Phase5.CardSta.Run(() =>
         {
             var cut = new List<string>();
+            var shrunk = new List<string>();
+            var atOneHundred = new Dictionary<(string Page, int Dpi, string Text), float>();
             int checkedTexts = 0;
             using var probe = new Bitmap(1, 1);
             using Graphics measure = Graphics.FromImage(probe);
@@ -95,6 +100,24 @@ public sealed class CardTextFitTests
                                 }
 
                                 checkedTexts++;
+
+                                // Drawn at the size asked for at 100% and 125% text, and never smaller than at 100%.
+                                string where = name + " (dpi " + dpi + ", text " + scale + "): \"" + drawn.Text + "\"";
+                                if (scale <= 1.25 && drawn.FontSize < drawn.RequestedPixels - 0.5f)
+                                {
+                                    shrunk.Add(where + " drawn at " + drawn.FontSize + " px, asked for " + drawn.RequestedPixels);
+                                }
+
+                                var key = (name, dpi, drawn.Text);
+                                if (scale == 1.0)
+                                {
+                                    atOneHundred[key] = drawn.FontSize;
+                                }
+                                else if (atOneHundred.TryGetValue(key, out float baseline) && drawn.FontSize < baseline - 0.5f)
+                                {
+                                    shrunk.Add(where + " drawn at " + drawn.FontSize + " px, under " + baseline + " px at 100% text");
+                                }
+
                                 using var font = new Font(drawn.FontFamily, drawn.FontSize, drawn.FontStyle, drawn.FontUnit);
                                 using var format = new StringFormat(drawn.Flags) { Alignment = drawn.Horizontal, LineAlignment = drawn.Vertical, Trimming = drawn.Trimming };
                                 _ = measure.MeasureString(drawn.Text, font, new SizeF(drawn.Bounds.Width, drawn.Bounds.Height), format, out int fitted, out _);
@@ -113,6 +136,8 @@ public sealed class CardTextFitTests
             }
 
             Assert.IsGreaterThan(500, checkedTexts, "Sanity: the card recorded the text it drew.");
+            string[] smaller = shrunk.Distinct().ToArray();
+            Assert.IsEmpty(smaller, smaller.Length + " texts are drawn smaller than they should be:\n" + string.Join("\n", smaller.Take(60)));
             string[] distinct = cut.Distinct().ToArray();
             Assert.IsEmpty(distinct, distinct.Length + " texts are cut short:\n" + string.Join("\n", distinct.Take(2000)));
         });

@@ -1153,7 +1153,7 @@ internal sealed partial class WidgetCard : Form
         using var brush = new SolidBrush(Colours.TextSecondary);
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         g.DrawString(text, font, brush, bounds, format);
-        CardPaint.NoteDrawn(text, bounds, font, format);
+        CardPaint.NoteDrawn(text, bounds, font, format, (int)Math.Round(font.Size));
     }
 
     // The mark is a filled shape in the primary text colour, never the accent: the earbud in a square of the mark's height.
@@ -1373,7 +1373,7 @@ internal sealed partial class WidgetCard : Form
         using Font font = FittingRoleFont(g, text, bounds, role, format);
         using var brush = new SolidBrush(colour);
         g.DrawString(text, font, brush, bounds, format);
-        CardPaint.NoteDrawn(text, bounds, font, format);
+        CardPaint.NoteDrawn(text, bounds, font, format, TypeRamp.SizePx(role, _dpi, _look.TextScale));
     }
 
     // The role's font, or the largest smaller one (down to 55% of its size) with which the whole text fits the rectangle.
