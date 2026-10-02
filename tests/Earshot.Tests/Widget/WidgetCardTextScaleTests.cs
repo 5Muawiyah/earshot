@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Drawing.Text;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
 using Earshot.Popup;
@@ -13,8 +14,8 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class WidgetCardTextScaleTests
 {
-    private static readonly int[] Dpis = [96, 120, 144, 168];
-    private static readonly double[] Scales = [1.0, 1.5, 2.25];
+    private static readonly int[] Dpis = [96, 120, 144, 168, 192];
+    private static readonly double[] Scales = [1.0, 1.25, 1.5, 2.0, 2.25];
 
     private static IEnumerable<Rectangle> MainRectangles(WidgetCardLayout.Layout layout)
     {
@@ -145,16 +146,40 @@ public sealed class WidgetCardTextScaleTests
                         Assert.IsFalse(item.Preview.IntersectsWith(item.Chevron), item.Row + " preview clear of its chevron" + where);
                     }
 
-                    // The label's words fit the rectangle it is given, wrapped in it: the rectangle is what stays clear of the controls,
-                    // so text that needed more room than it would be drawn under them.
+                    // The label's words fit the rectangle it is given, as they are drawn: measured with the format and the text hint the card
+                    // draws them with (Graphics.MeasureString says how many characters fit the rectangle, wrapped), not with the measure the
+                    // layout sized the rectangle by, which would agree with itself whatever it drew.
                     int fourteen = CardPlacement.Scale(14, dpi);
-                    int labelLine = TextFit.Grow(SettingsPageLayout.LabelLineAt96, dpi, scale);
-                    int lines = measure.Lines(item.Label, item.LabelRect.Width, fourteen, labelLine);
-                    Assert.IsLessThanOrEqualTo(item.LabelRect.Height, lines * labelLine, item.Row + " label fits its rectangle" + where);
+                    int twelve = CardPlacement.Scale(12, dpi);
+                    AssertDrawnWhole(graphics, item.Label, item.LabelRect, new CardType(dpi, scale), fourteen, item.Row + " label" + where);
+                    if (item.Sub is { Length: > 0 } sub && !item.SubRect.IsEmpty)
+                    {
+                        AssertDrawnWhole(graphics, sub, item.SubRect, new CardType(dpi, scale), twelve, item.Row + " note" + where);
+                    }
+
                     Assert.IsTrue(page.Contains(item.LabelRect), item.Row + " label inside the page" + where);
                     Assert.IsGreaterThan(CardPlacement.Scale(40, dpi) - 1, item.LabelRect.Width - 1, item.Row + " label has room to be read" + where);
                 }
             }
+        }
+    }
+
+    // How many characters of text the card's own drawing of it (a wrapped label: the drawing format, the card's text hint, the same font)
+    // puts inside a rectangle: all of them, or the label is cut short with an ellipsis.
+    private static void AssertDrawnWhole(Graphics graphics, string text, Rectangle rect, CardType type, int pixelSize, string what)
+    {
+        TextRenderingHint before = graphics.TextRenderingHint;
+        graphics.TextRenderingHint = CardPaint.CardTextHint;
+        try
+        {
+            using Font font = type.Font(pixelSize, bold: false);
+            using StringFormat format = CardPaint.WrappedFormat();
+            _ = graphics.MeasureString(text, font, new SizeF(rect.Width, rect.Height), format, out int fitted, out _);
+            Assert.AreEqual(text.Length, fitted, what + " is drawn whole in " + rect + ": " + fitted + " of " + text.Length + " characters fit (\"" + text + "\").");
+        }
+        finally
+        {
+            graphics.TextRenderingHint = before;
         }
     }
 

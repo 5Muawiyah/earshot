@@ -294,11 +294,7 @@ internal interface ICardTextMeasure
 
 internal sealed class GraphicsTextMeasure(Graphics graphics, CardType type) : ICardTextMeasure
 {
-    public int Width(string text, int pixelSize)
-    {
-        using Font font = type.Font(pixelSize, bold: false);
-        return (int)Math.Ceiling(graphics.MeasureString(text, font, int.MaxValue, StringFormat.GenericTypographic).Width);
-    }
+    public int Width(string text, int pixelSize) => CardPaint.LineWidth(graphics, text, type, pixelSize, bold: false);
 
     public int Lines(string text, int width, int pixelSize, int lineHeight) =>
         CardPaint.Lines(graphics, text, width, type, pixelSize, bold: false, lineHeight);

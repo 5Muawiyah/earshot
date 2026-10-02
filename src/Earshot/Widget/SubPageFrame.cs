@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using Earshot.Popup;
 
 namespace Earshot.Widget;
@@ -145,12 +146,25 @@ internal enum GlyphKind { Minus, Plus, Cross }
 
 internal static partial class CardPaint
 {
+    // What the card draws its words with, and what it measures them with: one format and one text hint, so a rectangle sized from a
+    // measurement holds what is drawn in it. (Measuring with StringFormat.GenericTypographic, which does not pad, and drawing with the
+    // default format, which does, let the layout size a label to a width the drawing then wrapped inside and cut short.)
+    internal const TextRenderingHint CardTextHint = TextRenderingHint.AntiAliasGridFit;
+
+    // A line of text placed in bounds, cut with an ellipsis at a character when it is too long.
+    internal static StringFormat SingleLineFormat(StringAlignment horizontal, StringAlignment vertical) =>
+        new() { Alignment = horizontal, LineAlignment = vertical, Trimming = StringTrimming.EllipsisCharacter };
+
+    // Text that wraps inside bounds, top-aligned, cut with an ellipsis at a word when it runs out of lines.
+    internal static StringFormat WrappedFormat() =>
+        new() { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisWord };
+
     public static void Text(
         Graphics g, string text, Rectangle bounds, CardType type, int pixelSize, bool bold, Color colour, StringAlignment horizontal, StringAlignment vertical)
     {
         using Font font = type.Font(pixelSize, bold);
         using var brush = new SolidBrush(colour);
-        using var format = new StringFormat { Alignment = horizontal, LineAlignment = vertical, Trimming = StringTrimming.EllipsisCharacter };
+        using StringFormat format = SingleLineFormat(horizontal, vertical);
         g.DrawString(text, font, brush, bounds, format);
     }
 
@@ -159,16 +173,48 @@ internal static partial class CardPaint
     {
         using Font font = type.Font(pixelSize, bold);
         using var brush = new SolidBrush(colour);
-        using var format = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisWord };
+        using StringFormat format = WrappedFormat();
         g.DrawString(text, font, brush, bounds, format);
     }
 
-    // How many lines text takes when wrapped to width, at the given size; at least 1.
+    // How many lines text takes when wrapped to width, at the given size, measured as Wrapped draws it; at least 1.
     public static int Lines(Graphics g, string text, int width, CardType type, int pixelSize, bool bold, int lineHeight)
     {
-        using Font font = type.Font(pixelSize, bold);
-        SizeF size = g.MeasureString(text, font, Math.Max(1, width), StringFormat.GenericTypographic);
-        return Math.Max(1, (int)Math.Ceiling(size.Height / Math.Max(1, lineHeight) - 0.01));
+        TextRenderingHint before = g.TextRenderingHint;
+        g.TextRenderingHint = CardTextHint;
+        try
+        {
+            using Font font = type.Font(pixelSize, bold);
+            using StringFormat format = WrappedFormat();
+
+            // The lines the format wraps it to, counted by GDI+ itself with room for as many as it needs. (Dividing the measured height
+            // by a line height does not do: the drawing format's height has leading the line height of the layout does not, which
+            // counted a one-line label as two.)
+            _ = lineHeight;
+            _ = g.MeasureString(text, font, new SizeF(Math.Max(1, width), 100_000f), format, out _, out int lines);
+            return Math.Max(1, lines);
+        }
+        finally
+        {
+            g.TextRenderingHint = before;
+        }
+    }
+
+    // How wide a line of text is as Text draws it, with the padding the drawing format adds.
+    public static int LineWidth(Graphics g, string text, CardType type, int pixelSize, bool bold)
+    {
+        TextRenderingHint before = g.TextRenderingHint;
+        g.TextRenderingHint = CardTextHint;
+        try
+        {
+            using Font font = type.Font(pixelSize, bold);
+            using StringFormat format = SingleLineFormat(StringAlignment.Near, StringAlignment.Near);
+            return (int)Math.Ceiling(g.MeasureString(text, font, int.MaxValue, format).Width);
+        }
+        finally
+        {
+            g.TextRenderingHint = before;
+        }
     }
 
     // A settings-style surface: the fill over the whole box and the 1 px stroke inside its edge, the fill showing under the stroke as a

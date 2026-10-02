@@ -752,7 +752,7 @@ internal sealed partial class WidgetCard : Form
         // (x + 0.5) so a one pixel outline is one crisp row; under the default offset the same stroke fell across
         // two rows at half strength, which is what made a thin outline look faint on a dark card.
         g.PixelOffsetMode = PixelOffsetMode.Half;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        g.TextRenderingHint = CardPaint.CardTextHint;
         // The surface is the design's: the acrylic tint over the backdrop DWM blurs, or the solid surface when there is no backdrop
         // (transparency effects off, or high contrast, where it is the window colour).
         g.Clear(OverrideBackgroundForCaptureOnly ?? (PaintsOpaqueBackground ? Colours.Tokens.SolidSurface : Colours.Tokens.AcrylicTint));
