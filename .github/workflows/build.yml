@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: ['**']   # every branch, so work is tested before it reaches main
   pull_request:
     branches: [main]
 
@@ -59,3 +59,43 @@ jobs:
             ${{ runner.temp }}\earshot-check\test.log
           if-no-files-found: warn
           retention-days: 14
+      # A push whose commit message starts with "Release " also builds the release files from this same
+      # checkout, once every step above has passed, and keeps them as a download for whoever publishes
+      # the release. Pull requests and other commits skip both steps.
+      - name: Release files
+        if: success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release ')
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 -LogDir "${{ runner.temp }}\earshot-release"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release ')
+        with:
+          name: earshot-release
+          path: |
+            artifacts/Earshot-*-win-x64.zip
+            artifacts/Earshot-*-win-x64.zip.sha256
+            artifacts/earshot.ps1
+          if-no-files-found: error
+          retention-days: 30
+      # The same release build draws the widget's design pictures from synthetic snapshots (safe mode, a
+      # temporary data root, the device called "AirPods"), so the designer sees exactly what ships. A
+      # failure here is reported but does not fail the build.
+      - name: Design pictures
+        if: success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release ')
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:EARSHOT_SAFE_MODE = '1'
+          $env:EARSHOT_DATA_ROOT = Join-Path $env:RUNNER_TEMP 'earshot-design-data'
+          $out = Join-Path $env:RUNNER_TEMP 'earshot-design'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $p = Start-Process -FilePath 'publish\Earshot\Earshot.exe' -ArgumentList @('probe', 'widget', '--out', $out, '--set', 'design') -Wait -PassThru
+          "exit $($p.ExitCode), pictures $(@(Get-ChildItem $out -Filter *.png).Count)"
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release ')
+        continue-on-error: true
+        with:
+          name: earshot-design
+          path: ${{ runner.temp }}\earshot-design
+          if-no-files-found: warn
+          retention-days: 30
