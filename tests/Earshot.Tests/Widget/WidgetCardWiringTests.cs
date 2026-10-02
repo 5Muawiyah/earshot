@@ -277,7 +277,9 @@ public sealed class WidgetCardWiringTests
             presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
             Application.DoEvents();
             CardKit.Click(card!, card!.CurrentMainLayout.Gear);
+            CardKit.ClickPart(card, SettingsRowId.More, SettingsPart.Expand);
             Rectangle toggle = CardKit.Part(card, SettingsRowId.LeftClick, SettingsPart.Toggle);
+            toggle = new Rectangle(toggle.X, toggle.Y - card.SettingsScrollOffset, toggle.Width, toggle.Height);
             nint lParam = (nint)((((toggle.Y + (toggle.Height / 2)) & 0xFFFF) << 16) | ((toggle.X + (toggle.Width / 2)) & 0xFFFF));
 
             Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONDOWN, 0, lParam);
@@ -285,6 +287,11 @@ public sealed class WidgetCardWiringTests
             Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, lParam);
 
             Assert.IsEmpty(host.Calls);
+
+            // And the same press, left alone, does change it, so the test is not passing because the press lands on nothing.
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONDOWN, 0, lParam);
+            Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, lParam);
+            CardKit.AssertCalls(host, "leftClick:True");
         });
     }
 
@@ -367,12 +374,15 @@ public sealed class WidgetCardWiringTests
             using Bitmap bitmap = CardKit.Render(card);
             Rectangle row = card.CurrentMainLayout.Switch;
             Color background = bitmap.GetPixel(0, 0);
-            Color secondary = Color.FromArgb(0xC8, 0xC8, 0xC8);
+            // Text secondary on the dark card is the design's white at 78.6%, which over the card's surface is 209 or 210 (the old figure,
+            // 0xC8, was its alpha, from when the colour was one opaque grey).
+            DesignTokens dark = DesignTokens.DarkTheme;
+            Color secondary = DesignPixels.Over(dark.TextSecondary, dark.SolidSurface);
             var track = new Rectangle(row.Right - 40, row.Y + ((row.Height - 20) / 2), 40, 20);
 
             Assert.AreEqual(background, bitmap.GetPixel(track.X + 20, track.Y + 10), "Off: no fill inside the track.");
-            Assert.AreEqual(secondary, bitmap.GetPixel(track.X + 20, track.Y), "Off: a text.secondary outline, which shows on the dark card.");
-            Assert.AreEqual(secondary, bitmap.GetPixel(track.X + 9, track.Y + 10), "Off: the knob at the left is text.secondary.");
+            Assert.IsLessThanOrEqualTo(2, DesignPixels.Distance(secondary, bitmap.GetPixel(track.X + 20, track.Y)), "Off: a text.secondary outline, which shows on the dark card: " + bitmap.GetPixel(track.X + 20, track.Y));
+            Assert.IsLessThanOrEqualTo(2, DesignPixels.Distance(secondary, bitmap.GetPixel(track.X + 9, track.Y + 10)), "Off: the knob at the left is text.secondary: " + bitmap.GetPixel(track.X + 9, track.Y + 10));
 
             card.Render(model with { AutoPauseOn = true }, 96);
             using Bitmap on = CardKit.Render(card);
