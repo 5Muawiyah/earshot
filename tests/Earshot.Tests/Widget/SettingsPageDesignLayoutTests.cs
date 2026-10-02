@@ -195,7 +195,8 @@ public sealed class SettingsPageDesignLayoutTests
         Assert.AreEqual(12 + 42, mic.SubRect.X, "Left padding 42 from the surface.");
         Assert.AreEqual(348 - 12, mic.SubRect.Right, "Right padding 12.");
         Assert.AreEqual(16, mic.SubRect.Height, "A 16 high line.");
-        Assert.AreEqual(8 + 32 + 16 + 10, mic.Bounds.Height, "Under the control row: 8 above, the 32 row, the line and 10 below.");
+        Assert.AreEqual(48 + 16 + 10, mic.Bounds.Height, "The design: the control row is 48 (8 above, the 32 control, 8 below), then the 16 line, then 10 below it.");
+        Assert.AreEqual(mic.Bounds.Top + 48, mic.SubRect.Top, "The line starts where the 48 row ends.");
 
         SettingsItem sound = Row(l, SettingsRowId.SoundSettings);
         Assert.IsTrue(sound.DividerAbove);

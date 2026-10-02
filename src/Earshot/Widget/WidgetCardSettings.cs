@@ -524,8 +524,9 @@ internal static class SettingsPageLayout
                 int labelBlock = textHeight + (subFullWidth ? 0 : subHeight);
                 if (subFullWidth)
                 {
-                    int bottomPad = sub is null ? rowPad : CardPlacement.Scale(GuidanceBottomAt96, dpi);
-                    height = rowPad + lineHeight + subHeight + bottomPad;
+                    // The design: the control row is 48 (8 above, the 32 control, 8 below), then the line, then 10 below the line.
+                    int bottomPad = sub is null ? 0 : CardPlacement.Scale(GuidanceBottomAt96, dpi);
+                    height = (2 * rowPad) + lineHeight + subHeight + bottomPad;
                 }
                 else
                 {
@@ -536,8 +537,8 @@ internal static class SettingsPageLayout
                     }
                 }
 
-                // A row with a full-width line under it is the control line, 8 below the row's top (the design: 8 above, the 32 row, the line, 10
-                // below), and the line starts where it ends. Centring the control in all of the row but the line put it a pixel low, into the line.
+                // A row with a full-width line under it has its control row first (8 above it, the 32 control, 8 below, so 48 at 100%), and
+                // the line starts where that row ends. Centring the control in all of the row but the line put it a pixel low, into the line.
                 int labelTop = subFullWidth
                     ? top + rowPad + ((lineHeight - labelBlock) / 2)
                     : top + ((height - labelBlock) / 2);
@@ -545,7 +546,7 @@ internal static class SettingsPageLayout
                 if (sub is not null)
                 {
                     subRect = subFullWidth
-                        ? new Rectangle(labelLeft, top + rowPad + lineHeight, labelArea, subHeight)
+                        ? new Rectangle(labelLeft, top + (2 * rowPad) + lineHeight, labelArea, subHeight)
                         : new Rectangle(labelLeft, labelRect.Bottom, labelWidth, subHeight);
                 }
 
