@@ -1473,6 +1473,7 @@ internal sealed class TrayHarness : IDisposable
                 LowBatteryAlert = false,
                 CaseOpenCard = false,
                 CaseOpenCardOn = false,
+                FullyChargedNotice = false,
                 AutoPause = false,
                 LeftClickConnects = true,
             };

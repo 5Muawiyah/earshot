@@ -374,7 +374,7 @@ public sealed class TraySwitchTests
     // --- registration at start-up and the "taken" card ---
 
     [TestMethod]
-    public void TheTwoDefaultShortcutsAreRegisteredAtStartUp()
+    public void TheThreeDefaultShortcutsAreRegisteredAtStartUp()
     {
         StaThread.Run(() =>
         {
@@ -382,12 +382,16 @@ public sealed class TraySwitchTests
             tray.PumpUntilIdle();
 
             List<NativeCall> registered = tray.NativeHotkeys.Calls.Where(c => c.Method == "RegisterHotKey").ToList();
-            Assert.HasCount(2, registered);
+            // Connect (A) and Disconnect (D), and, since the owner's decision of 2 October 2026, the card shortcut (E): all three on by default.
+            Assert.HasCount(3, registered);
             Assert.AreEqual(ToPcId, registered[0].Id);
             Assert.AreEqual(0x41u, registered[0].VirtualKey);
             Assert.AreEqual(0x4007u, registered[0].Modifiers, "Ctrl, Alt and Shift, with no repeat.");
             Assert.AreEqual(ToPhoneId, registered[1].Id);
             Assert.AreEqual(0x44u, registered[1].VirtualKey);
+            Assert.AreEqual(HotkeyManager.HotkeyIdBase + (int)HotkeyAction.OpenCard, registered[2].Id);
+            Assert.AreEqual(0x45u, registered[2].VirtualKey);
+            Assert.AreEqual(0x4007u, registered[2].Modifiers, "Ctrl, Alt and Shift, with no repeat.");
             Assert.IsEmpty(tray.Cards.Shown, "Nothing failed, so no card.");
         });
     }
