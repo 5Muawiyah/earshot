@@ -19,11 +19,22 @@ public sealed class WidgetCardWordsTests
             using WidgetCard card = CardKit.NewCard(dark: false);
             CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96);
 
-            foreach (SettingsItem row in card.CurrentSettingsLayout!.Items.Where(i => i.Kind == SettingsItemKind.Row))
+            foreach (SettingsItem row in card.CurrentSettingsLayout!.Items.Where(i => i.Kind == SettingsItemKind.Row && i.Tiles.Count == 0))
             {
                 int words = row.Label.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
-                Assert.IsTrue(words is >= 1 and <= 3, row.Row + " says \"" + row.Label + "\", " + words + " words.");
-                Assert.IsNull(row.Sub, row.Row + ": nothing under the label unless something is wrong.");
+                // One to three words, except the two rows the owner named in full on 2 October 2026 ("Pause when a bud comes out", "Pause when
+                // AirPods leave"), which keep those words.
+                int most = row.Row is SettingsRowId.PauseBud or SettingsRowId.PauseLeave ? 6 : 3;
+                Assert.IsTrue(words >= 1 && words <= most, row.Row + " says \"" + row.Label + "\", " + words + " words (at most " + most + ").");
+                // The design (round 3) gives two rows a caption of their own: Hand back, "Shut down, sleep, Exit", and Updates, with the version.
+                // Any other row says nothing under its label unless something is wrong.
+                string? caption = row.Row switch
+                {
+                    SettingsRowId.HandBack => WidgetCopy.SettingsHandBackCaption,
+                    SettingsRowId.About => "Version 1.1.0",
+                    _ => null,
+                };
+                Assert.AreEqual(caption, row.Sub, row.Row + ": nothing under the label unless it is the design's caption or something is wrong.");
                 Assert.AreNotEqual('\0', row.Glyph, row.Row + " has an icon.");
                 Assert.IsFalse(row.IconRect.IsEmpty, row.Row + " has a place for it.");
                 Assert.IsTrue(row.Bounds.Contains(row.IconRect), row.Row + ": the icon is inside its row.");
