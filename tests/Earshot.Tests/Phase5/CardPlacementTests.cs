@@ -394,7 +394,17 @@ public sealed class CardPlacementTests
             foreach (Point anchor in Anchors(work, band))
             {
                 Rectangle managed = CardPlacement.CalculatePopup(anchor, Card, flags, band, work);
-                Assert.AreEqual(Real(anchor, Card, flags, band), managed, edge + " at " + anchor);
+                Rectangle real = Real(anchor, Card, flags, band);
+
+                // Both sides read the machine's live display layout, the managed one through the work area read at the start and the
+                // shell's own through its monitor now. A layout that changed in between (a display going to sleep or waking can add or
+                // drop a monitor) makes them disagree about the machine and not about the calculation, so that is no failure.
+                if (real != managed && Screen.PrimaryScreen?.WorkingArea != work)
+                {
+                    Assert.Inconclusive("The display layout changed while the test ran (work area " + work + ", now " + Screen.PrimaryScreen?.WorkingArea + ").");
+                }
+
+                Assert.AreEqual(real, managed, edge + " at " + anchor);
             }
         }
     }

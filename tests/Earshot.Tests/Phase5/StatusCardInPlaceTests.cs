@@ -26,6 +26,29 @@ public sealed class StatusCardInPlaceTests
         }
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool GetUpdateRect(nint window, nint rect, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)] bool erase);
+
+    // Settle for a test that counts what a card is sent afterwards: not a fixed time but until the card has painted its text and has
+    // nothing left to paint, for a quiet stretch (eight looks 10 ms apart), within a bound of five seconds. A fixed 150 ms let a first
+    // paint that a slow moment (a display waking, the compositor) delivered later count as a paint of the second show.
+    private static void SettleUntilQuiet(ConnectCard card, string text)
+    {
+        PumpUntilPainted(card, text);
+        var until = DateTime.UtcNow.AddSeconds(5);
+        int quiet = 0;
+        while (quiet < 8 && DateTime.UtcNow < until)
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+            quiet = GetUpdateRect(card.Handle, 0, false) ? 0 : quiet + 1;
+        }
+
+        Assert.IsGreaterThanOrEqualTo(8, quiet, "Sanity: the card went quiet.");
+    }
+
     // Pumps until the card has painted the given text, or two seconds have passed: a slower machine
     // delivers the paint after more than one pass of the message loop.
     private static void PumpUntilPainted(ConnectCard card, string text)
@@ -129,11 +152,11 @@ public sealed class StatusCardInPlaceTests
             using CardPresenter presenter = RealCardPresenter(card, log);
             Point click = Click;
             presenter.Show(new CardContent(Device, "Connected"), CardAnchor.NearCursor, click);
-            Settle();
+            SettleUntilQuiet(card, "Connected");
             using var counter = new WindowMessageCounter(card.Handle);
 
             presenter.Show(new CardContent(Device, "Connected"), CardAnchor.NearCursor, click);
-            Settle();
+            SettleUntilQuiet(card, "Connected");
 
             Assert.AreEqual(0, counter.Count(WindowMessageCounter.WmPaint), "Nothing changed, so nothing was drawn.");
             Assert.AreEqual(0, counter.Count(WindowMessageCounter.WmWindowPosChanging));
