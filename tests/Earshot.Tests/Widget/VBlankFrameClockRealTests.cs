@@ -70,23 +70,31 @@ public sealed class VBlankFrameClockRealTests
                 arrivals.Add(clock.Now);
             });
 
+            // The wait is bounded, and not by the message pump returning: a clock that floods the UI thread with posts (a display that is
+            // asleep makes WaitForVBlank return at once) would keep DoEvents from ever returning, so a timer thread stops the clock after
+            // eight seconds, which ends the flood and lets the assertions below say what happened.
+            using var stopper = new System.Threading.Timer(_ => clock.Dispose(), null, TimeSpan.FromSeconds(8), Timeout.InfiniteTimeSpan);
             var timer = Stopwatch.StartNew();
-            while (stamps.Count < 5 && timer.Elapsed < TimeSpan.FromSeconds(10))
+            while (stamps.Count < 5 && timer.Elapsed < TimeSpan.FromSeconds(6))
             {
                 Application.DoEvents();
                 Thread.Sleep(1);
             }
 
             subscription.Dispose();
+            string held = log.Entries.Count == 0 ? "empty" : string.Join(" | ", log.Entries.Select(e => e.Message));
 
             Assert.IsEmpty(wrongThread, "Every frame is delivered on the UI thread.");
-            Assert.IsGreaterThanOrEqualTo(5, stamps.Count, "Frames arrive: " + stamps.Count + " in " + timer.Elapsed + ". The log held: " + string.Join(" | ", log.Entries.Select(e => e.Message)));
+            Assert.IsGreaterThanOrEqualTo(5, stamps.Count, "Frames arrive: " + stamps.Count + " in " + timer.Elapsed + ". The log held: " + held);
 
-            // Each frame is one of two things. Paced: stamped with the time its blank returned, which is before it arrived and not long
-            // before. Unpaced (no output to wait on, or a wait that failed): stamped an hour ahead of its arrival so a motion ends in one.
-            // A machine can give either, or paced frames and then a failure (a display going away), so each frame is classified on its own.
+            // Each frame is paced (stamped with the time its blank returned: before it arrived and not long before) or unpaced (stamped an
+            // hour ahead of its arrival so a motion ends in one: no output to wait on, a wait that failed, a display that is off). A machine
+            // can give either, or paced and then not (a display going to sleep), so each frame is classified on its own. A blank is
+            // at least a refresh after the last: two milliseconds is under the period of any display there is (500 Hz), so paced frames
+            // closer than that were not blanks, which is what a sleeping display gives.
             int pacedFrames = 0;
             int unpacedFrames = 0;
+            int tooClose = 0;
             TimeSpan? lastPaced = null;
             for (int i = 0; i < stamps.Count; i++)
             {
@@ -103,31 +111,45 @@ public sealed class VBlankFrameClockRealTests
                 if (lastPaced is { } previous)
                 {
                     Assert.IsGreaterThan(previous, stamps[i], "The paced stamps move forward, one blank at a time.");
+                    if (stamps[i] - previous < TimeSpan.FromMilliseconds(2))
+                    {
+                        tooClose++;
+                    }
                 }
 
                 lastPaced = stamps[i];
             }
 
             bool warned = log.Has(LogLevel.Warn, "Motion:");
-            string outcome = "Real display clock: " + (pacedFrames == stamps.Count ? "paced by the display" : unpacedFrames == stamps.Count ? "unpaced (no output to wait on)" : "mixed")
-                + ", " + pacedFrames + " paced and " + unpacedFrames + " unpaced of " + stamps.Count + " frames in " + timer.Elapsed.TotalMilliseconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
-                + " ms; DXGI lists an output: " + outputListed + "; hosted runner: " + hostedRunner + "; log: "
-                + (log.Entries.Count == 0 ? "empty" : string.Join(" | ", log.Entries.Select(e => e.Message)));
+            bool displayOff = log.Has(LogLevel.Warn, "probably off");
+            string kind = unpacedFrames == 0 && tooClose == 0
+                ? "paced by the display"
+                : displayOff ? "unpaced because the display is off (the clock said so)" : unpacedFrames == stamps.Count ? "unpaced (no output to wait on)" : "mixed";
+            string outcome = "Real display clock: " + kind + ", " + pacedFrames + " paced (" + tooClose + " closer than 2 ms) and " + unpacedFrames + " unpaced of "
+                + stamps.Count + " frames in " + timer.Elapsed.TotalMilliseconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
+                + " ms; DXGI lists an output: " + outputListed + "; local session: " + localSession + "; hosted runner: " + hostedRunner + "; log: " + held;
             RecordOutcome(outcome);
-            if (mustBePaced)
+
+            // No more than the two short waits the clock lets through before it calls the display off count as paced.
+            Assert.IsLessThanOrEqualTo(2, tooClose, "Paced frames closer together than a refresh are waits that returned at once, and the clock must not call them blanks. " + outcome);
+            if (tooClose > 0 || unpacedFrames > 0 && mustBePaced)
             {
-                Assert.AreEqual(stamps.Count, pacedFrames, "A local session with a screen is paced by it. " + outcome);
-                Assert.IsFalse(warned, "And logs nothing. " + outcome);
+                Assert.IsTrue(displayOff || !mustBePaced, "A local session is paced by its display unless the clock said the display is off. " + outcome);
+            }
+
+            if (tooClose > 0)
+            {
+                Assert.IsTrue(displayOff, "Short waits come with the clock saying the display is probably off. " + outcome);
             }
 
             if (unpacedFrames > 0)
             {
-                Assert.IsTrue(warned, "An unpaced frame comes with the clock saying why in the log (" + pacedFrames + " paced, " + unpacedFrames + " not).");
+                Assert.IsTrue(warned, "An unpaced frame comes with the clock saying why in the log (" + pacedFrames + " paced, " + unpacedFrames + " not). " + outcome);
             }
 
-            if (warned)
+            if (warned && !displayOff && !log.Has(LogLevel.Warn, "has not returned"))
             {
-                Assert.IsTrue(log.Has(LogLevel.Warn, "HRESULT 0x"), "The failure is logged with its raw code.");
+                Assert.IsTrue(log.Has(LogLevel.Warn, "HRESULT 0x"), "A failure to wait is logged with its raw code. " + outcome);
             }
 
             // At rest nothing is posted: a frame in flight when the last subscriber left may still arrive, and then no more.
